@@ -1,7 +1,12 @@
 import Head from 'next/head'
 import styles from '@/styles/Home.module.css'
+import Link from 'next/link';
+import useAuth from '../hooks/useAuth';
 
 export default function Home() {
+  const user = useAuth();
+  console.log(user);
+
   return (
     <>
       <Head>
@@ -11,7 +16,17 @@ export default function Home() {
         <link rel="icon" href="/favicon.ico" />
       </Head>
       <main className={styles.main}>
-        <div>Materialize</div>
+        <div>
+        {user ? (
+          <Link href="/profile">
+            <a>Go to Profile</a>
+          </Link>
+        ) : (
+          <Link href="/login">
+            <a>Login</a>
+          </Link>
+        )}
+        </div>
       </main>
     </>
   )
