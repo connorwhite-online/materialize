@@ -22,6 +22,12 @@ export default function AppLayout({
                 Browse
               </Link>
               <Link
+                href="/materials"
+                className="text-foreground/60 transition-colors hover:text-foreground"
+              >
+                Materials
+              </Link>
+              <Link
                 href="/dashboard"
                 className="text-foreground/60 transition-colors hover:text-foreground"
               >

@@ -8,6 +8,7 @@ import {
   timestamp,
   jsonb,
   pgEnum,
+  index,
 } from "drizzle-orm/pg-core";
 
 // Enums
@@ -36,6 +37,8 @@ export const purchaseStatusEnum = pgEnum("purchase_status", [
   "completed",
   "refunded",
 ]);
+
+export const visibilityEnum = pgEnum("visibility", ["public", "private"]);
 
 export const printOrderStatusEnum = pgEnum("print_order_status", [
   "quoting",
@@ -84,6 +87,10 @@ export const files = pgTable("files", {
   license: licenseEnum("license").notNull().default("free"),
   status: fileStatusEnum("status").notNull().default("draft"),
   tags: text("tags").array(),
+  recommendedMaterialId: text("recommended_material_id"), // from our materials metadata
+  designTags: text("design_tags").array(), // ["strong", "flexible", "heat-resistant", "watertight", "detailed"]
+  minWallThickness: integer("min_wall_thickness"), // in 0.1mm units (e.g., 10 = 1.0mm)
+  visibility: visibilityEnum("visibility").notNull().default("public"),
   downloadCount: integer("download_count").notNull().default(0),
   viewCount: integer("view_count").notNull().default(0),
   thumbnailUrl: text("thumbnail_url"),
@@ -94,13 +101,15 @@ export const files = pgTable("files", {
     .notNull()
     .defaultNow()
     .$onUpdate(() => new Date()),
-});
+}, (table) => [
+  index("files_user_id_idx").on(table.userId),
+  index("files_status_idx").on(table.status),
+  index("files_slug_idx").on(table.slug),
+]);
 
 export const fileAssets = pgTable("file_assets", {
   id: uuid("id").primaryKey().defaultRandom(),
-  fileId: uuid("file_id")
-    .notNull()
-    .references(() => files.id, { onDelete: "cascade" }),
+  fileId: uuid("file_id").references(() => files.id, { onDelete: "cascade" }), // nullable until linked to a listing
   storageKey: text("storage_key").notNull(),
   originalFilename: text("original_filename").notNull(),
   format: fileFormatEnum("format").notNull(),
@@ -111,10 +120,14 @@ export const fileAssets = pgTable("file_assets", {
     triangleCount?: number;
   }>(),
   craftCloudModelId: text("craft_cloud_model_id"),
+  contentHash: text("content_hash"), // SHA-256 of file content for anti-piracy
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
-});
+}, (table) => [
+  index("file_assets_file_id_idx").on(table.fileId),
+  index("file_assets_content_hash_idx").on(table.contentHash),
+]);
 
 export const purchases = pgTable("purchases", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -132,7 +145,10 @@ export const purchases = pgTable("purchases", {
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
-});
+}, (table) => [
+  index("purchases_buyer_id_idx").on(table.buyerId),
+  index("purchases_file_id_idx").on(table.fileId),
+]);
 
 export const printOrders = pgTable("print_orders", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -144,11 +160,39 @@ export const printOrders = pgTable("print_orders", {
     .references(() => fileAssets.id, { onDelete: "cascade" }),
   craftCloudOrderId: text("craft_cloud_order_id"),
   craftCloudCartId: text("craft_cloud_cart_id"),
+  stripeSessionId: text("stripe_session_id"),
   totalPrice: integer("total_price").notNull(), // cents
   serviceFee: integer("service_fee").notNull(), // cents
   material: text("material"),
   vendor: text("vendor"),
   status: printOrderStatusEnum("status").notNull().default("quoting"),
+  shippingAddress: jsonb("shipping_address").$type<{
+    email: string;
+    shipping: {
+      firstName: string;
+      lastName: string;
+      address: string;
+      addressLine2?: string;
+      city: string;
+      zipCode: string;
+      stateCode?: string;
+      countryCode: string;
+      phoneNumber?: string;
+    };
+    billing: {
+      firstName: string;
+      lastName: string;
+      address: string;
+      addressLine2?: string;
+      city: string;
+      zipCode: string;
+      stateCode?: string;
+      countryCode: string;
+      phoneNumber?: string;
+      isCompany: boolean;
+      vatId?: string;
+    };
+  }>(),
   trackingInfo: jsonb("tracking_info").$type<{
     trackingUrl?: string;
     trackingNumber?: string;
@@ -161,4 +205,67 @@ export const printOrders = pgTable("print_orders", {
     .notNull()
     .defaultNow()
     .$onUpdate(() => new Date()),
-});
+}, (table) => [
+  index("print_orders_user_id_idx").on(table.userId),
+]);
+
+// Collections
+
+export const collections = pgTable("collections", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  slug: text("slug").notNull().unique(),
+  description: text("description"),
+  tags: text("tags").array(),
+  visibility: visibilityEnum("visibility").notNull().default("public"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+}, (table) => [
+  index("collections_user_id_idx").on(table.userId),
+  index("collections_slug_idx").on(table.slug),
+]);
+
+export const collectionFiles = pgTable("collection_files", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  collectionId: uuid("collection_id")
+    .notNull()
+    .references(() => collections.id, { onDelete: "cascade" }),
+  fileId: uuid("file_id")
+    .notNull()
+    .references(() => files.id, { onDelete: "cascade" }),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+}, (table) => [
+  index("collection_files_collection_id_idx").on(table.collectionId),
+  index("collection_files_file_id_idx").on(table.fileId),
+]);
+
+// Part photos — real-world images of printed parts
+
+export const filePhotos = pgTable("file_photos", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  fileId: uuid("file_id")
+    .notNull()
+    .references(() => files.id, { onDelete: "cascade" }),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  storageKey: text("storage_key").notNull(),
+  caption: text("caption"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+}, (table) => [
+  index("file_photos_file_id_idx").on(table.fileId),
+]);

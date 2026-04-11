@@ -1,8 +1,10 @@
 "use client";
 
+import { useMemo } from "react";
 import { useLoader } from "@react-three/fiber";
 import { ThreeMFLoader } from "three/examples/jsm/loaders/3MFLoader.js";
 import * as THREE from "three";
+import { MaterializeMaterial } from "../materialize-material";
 
 interface ThreeMfModelProps {
   url: string;
@@ -12,21 +14,23 @@ interface ThreeMfModelProps {
 export function ThreeMfModel({ url, color = "#a0a0a0" }: ThreeMfModelProps) {
   const group = useLoader(ThreeMFLoader, url);
 
-  // Apply color as fallback if no materials are embedded
-  group.traverse((child) => {
-    if (child instanceof THREE.Mesh) {
-      if (
-        !child.material ||
-        (child.material instanceof THREE.MeshPhongMaterial &&
-          child.material.color.getHex() === 0xffffff)
-      ) {
-        child.material = new THREE.MeshStandardMaterial({
-          color,
-          flatShading: true,
-        });
+  const geometries = useMemo(() => {
+    const geos: THREE.BufferGeometry[] = [];
+    group.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        geos.push(child.geometry);
       }
-    }
-  });
+    });
+    return geos;
+  }, [group]);
 
-  return <primitive object={group.clone()} />;
+  return (
+    <group>
+      {geometries.map((geo, i) => (
+        <mesh key={i} geometry={geo}>
+          <MaterializeMaterial baseColor={color} />
+        </mesh>
+      ))}
+    </group>
+  );
 }

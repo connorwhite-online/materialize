@@ -27,6 +27,15 @@ export const fileExtensionToFormat = (filename: string) => {
   return null;
 };
 
+export const DESIGN_TAG_OPTIONS = [
+  "strong",
+  "flexible",
+  "heat-resistant",
+  "watertight",
+  "detailed",
+  "lightweight",
+] as const;
+
 export const createListingSchema = z.object({
   name: z.string().min(1, "Name is required").max(200),
   description: z.string().max(5000).optional(),
@@ -46,6 +55,14 @@ export const createListingSchema = z.object({
             .filter(Boolean)
         : []
     ),
+  recommendedMaterialId: z.string().optional(),
+  designTags: z.array(z.enum(DESIGN_TAG_OPTIONS)).optional(),
+  minWallThickness: z.coerce
+    .number()
+    .min(0)
+    .max(100)
+    .optional()
+    .transform((val) => (val ? Math.round(val * 10) : undefined)), // mm to 0.1mm units
 });
 
 export const updateListingSchema = createListingSchema.partial();

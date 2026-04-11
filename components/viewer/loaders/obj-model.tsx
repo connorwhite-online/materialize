@@ -1,8 +1,10 @@
 "use client";
 
+import { useMemo } from "react";
 import { useLoader } from "@react-three/fiber";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import * as THREE from "three";
+import { MaterializeMaterial } from "../materialize-material";
 
 interface ObjModelProps {
   url: string;
@@ -12,15 +14,24 @@ interface ObjModelProps {
 export function ObjModel({ url, color = "#a0a0a0" }: ObjModelProps) {
   const obj = useLoader(OBJLoader, url);
 
-  // Apply color to all meshes in the group
-  obj.traverse((child) => {
-    if (child instanceof THREE.Mesh) {
-      child.material = new THREE.MeshStandardMaterial({
-        color,
-        flatShading: true,
-      });
-    }
-  });
+  // Extract all geometries from the OBJ group
+  const geometries = useMemo(() => {
+    const geos: THREE.BufferGeometry[] = [];
+    obj.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        geos.push(child.geometry);
+      }
+    });
+    return geos;
+  }, [obj]);
 
-  return <primitive object={obj.clone()} />;
+  return (
+    <group>
+      {geometries.map((geo, i) => (
+        <mesh key={i} geometry={geo}>
+          <MaterializeMaterial baseColor={color} />
+        </mesh>
+      ))}
+    </group>
+  );
 }

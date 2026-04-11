@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-import { files } from "@/lib/db/schema";
-import { eq, count } from "drizzle-orm";
+import { files, purchases } from "@/lib/db/schema";
+import { eq, and, count } from "drizzle-orm";
 
 export default async function DashboardPage() {
   const { userId } = await auth();
@@ -12,6 +12,11 @@ export default async function DashboardPage() {
     .select({ count: count() })
     .from(files)
     .where(eq(files.userId, userId));
+
+  const [libraryCount] = await db
+    .select({ count: count() })
+    .from(purchases)
+    .where(and(eq(purchases.buyerId, userId), eq(purchases.status, "completed")));
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
@@ -27,6 +32,18 @@ export default async function DashboardPage() {
             className="mt-3 inline-block text-sm underline"
           >
             Manage uploads
+          </Link>
+        </div>
+        <div className="rounded-lg border border-foreground/10 p-6">
+          <p className="text-sm text-foreground/60">My Library</p>
+          <p className="mt-1 text-3xl font-semibold">
+            {libraryCount?.count ?? 0}
+          </p>
+          <Link
+            href="/dashboard/library"
+            className="mt-3 inline-block text-sm underline"
+          >
+            View library
           </Link>
         </div>
         <div className="rounded-lg border border-foreground/10 p-6">

@@ -11,6 +11,10 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "**.r2.cloudflarestorage.com",
       },
+      {
+        protocol: "https",
+        hostname: "staticmap.openstreetmap.de",
+      },
     ],
   },
   serverExternalPackages: ["@neondatabase/serverless"],

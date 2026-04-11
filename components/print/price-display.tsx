@@ -1,6 +1,12 @@
 "use client";
 
-const SERVICE_FEE_RATE = 0.08; // 8%
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+
+const SERVICE_FEE_RATE = 0.08;
 
 interface Quote {
   quoteId: string;
@@ -25,7 +31,8 @@ interface PriceDisplayProps {
   selectedShipping: ShippingOption | null;
   onSelectShipping: (option: ShippingOption) => void;
   quantity: number;
-  fileAssetId: string;
+  onCheckout: () => void;
+  isCheckingOut: boolean;
 }
 
 export function PriceDisplay({
@@ -34,17 +41,21 @@ export function PriceDisplay({
   selectedShipping,
   onSelectShipping,
   quantity,
-  fileAssetId,
+  onCheckout,
+  isCheckingOut,
 }: PriceDisplayProps) {
   if (!selectedQuote) {
     return (
-      <div className="rounded-lg border border-foreground/10 p-6">
-        <p className="text-foreground/60">Select a material to see pricing.</p>
-      </div>
+      <Card>
+        <CardContent className="py-8">
+          <p className="text-muted-foreground text-center">
+            Select a material to see pricing.
+          </p>
+        </CardContent>
+      </Card>
     );
   }
 
-  // Filter shipping options for the selected vendor
   const vendorShipping = shipping.filter(
     (s) => s.vendorId === selectedQuote.vendorId
   );
@@ -56,69 +67,76 @@ export function PriceDisplay({
   const total = subtotal + serviceFee;
 
   return (
-    <div className="rounded-lg border border-foreground/10 p-6">
-      <h2 className="font-semibold">Order Summary</h2>
-
-      <div className="mt-4 space-y-2 text-sm">
-        <div className="flex justify-between">
-          <span className="text-foreground/60">
-            Material ({quantity}x)
-          </span>
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Order Summary</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex justify-between text-sm">
+          <span className="text-muted-foreground">Material ({quantity}x)</span>
           <span>${materialCost.toFixed(2)}</span>
         </div>
 
-        <div className="mt-3">
-          <p className="text-xs font-medium text-foreground/60 mb-2">
+        <div className="pt-1">
+          <p className="text-xs font-medium text-muted-foreground mb-2">
             Shipping
           </p>
-          {vendorShipping.map((option) => (
-            <label
-              key={option.shippingId}
-              className={`flex cursor-pointer items-center justify-between rounded-md border p-2 mb-1 ${
-                selectedShipping?.shippingId === option.shippingId
-                  ? "border-foreground"
-                  : "border-foreground/10"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="shipping"
-                  checked={
-                    selectedShipping?.shippingId === option.shippingId
-                  }
-                  onChange={() => onSelectShipping(option)}
-                  className="accent-foreground"
-                />
-                <div>
-                  <span className="text-sm">{option.name}</span>
-                  <span className="ml-1 text-xs text-foreground/50">
-                    ({option.deliveryTime} days)
-                  </span>
+          <RadioGroup
+            value={selectedShipping?.shippingId}
+            onValueChange={(value) => {
+              const option = vendorShipping.find((s) => s.shippingId === value);
+              if (option) onSelectShipping(option);
+            }}
+          >
+            {vendorShipping.map((option) => (
+              <Label
+                key={option.shippingId}
+                htmlFor={option.shippingId}
+                className="flex cursor-pointer items-center justify-between rounded-lg border border-border p-3 transition-colors has-[[data-state=checked]]:border-primary"
+              >
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem
+                    value={option.shippingId}
+                    id={option.shippingId}
+                  />
+                  <div>
+                    <span className="text-sm">{option.name}</span>
+                    <span className="ml-1 text-xs text-muted-foreground">
+                      ({option.deliveryTime} days)
+                    </span>
+                  </div>
                 </div>
-              </div>
-              <span className="text-sm">${option.price.toFixed(2)}</span>
-            </label>
-          ))}
+                <span className="text-sm font-medium">
+                  ${option.price.toFixed(2)}
+                </span>
+              </Label>
+            ))}
+          </RadioGroup>
         </div>
 
-        <div className="flex justify-between border-t border-foreground/10 pt-2">
-          <span className="text-foreground/60">Service fee (8%)</span>
+        <Separator />
+
+        <div className="flex justify-between text-sm">
+          <span className="text-muted-foreground">Service fee (8%)</span>
           <span>${serviceFee.toFixed(2)}</span>
         </div>
 
-        <div className="flex justify-between border-t border-foreground/10 pt-2 font-semibold">
+        <Separator />
+
+        <div className="flex justify-between font-semibold">
           <span>Total</span>
           <span>${total.toFixed(2)}</span>
         </div>
-      </div>
 
-      <button
-        disabled={!selectedShipping}
-        className="mt-4 w-full rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-foreground/90 disabled:opacity-50"
-      >
-        Proceed to checkout
-      </button>
-    </div>
+        <Button
+          onClick={onCheckout}
+          disabled={!selectedShipping || isCheckingOut}
+          className="w-full mt-2"
+          size="lg"
+        >
+          {isCheckingOut ? "Processing..." : "Proceed to checkout"}
+        </Button>
+      </CardContent>
+    </Card>
   );
 }

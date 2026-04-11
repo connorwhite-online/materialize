@@ -1,8 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { MaterialSelector } from "./material-selector";
 import { PriceDisplay } from "./price-display";
+import { ShippingAddressForm } from "./shipping-address-form";
+import { createPrintOrder, completePrintOrder } from "@/app/actions/print";
+import { uploadToCraftCloud } from "@/lib/craftcloud/upload-client";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Alert } from "@/components/ui/alert";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface Quote {
   quoteId: string;
@@ -29,6 +36,7 @@ interface QuoteConfiguratorProps {
   fileAssetId: string;
   filename: string;
   format: string;
+  hasCachedModel: boolean;
   geometryData: {
     dimensions?: { x: number; y: number; z: number };
     volume?: number;
@@ -36,13 +44,19 @@ interface QuoteConfiguratorProps {
   } | null;
 }
 
+type CheckoutStep = "configure" | "address" | "processing";
+type LoadingPhase = "uploading" | "quoting" | "done";
+
 export function QuoteConfigurator({
   fileAssetId,
   filename,
   format,
+  hasCachedModel,
   geometryData,
 }: QuoteConfiguratorProps) {
-  const [loading, setLoading] = useState(true);
+  const [loadingPhase, setLoadingPhase] = useState<LoadingPhase | null>(
+    "uploading"
+  );
   const [error, setError] = useState<string | null>(null);
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [shipping, setShipping] = useState<ShippingOption[]>([]);
@@ -51,39 +65,94 @@ export function QuoteConfigurator({
     useState<ShippingOption | null>(null);
   const [quantity, setQuantity] = useState(1);
 
+  // Checkout state
+  const [step, setStep] = useState<CheckoutStep>("configure");
+  const [printOrderId, setPrintOrderId] = useState<string | null>(null);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+
+  const ensureModelUploaded = useCallback(async () => {
+    if (hasCachedModel) return;
+
+    setLoadingPhase("uploading");
+
+    // Get download URL from our server
+    const urlRes = await fetch("/api/craftcloud/download-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileAssetId }),
+    });
+
+    if (!urlRes.ok) throw new Error("Failed to get download URL");
+    const { downloadUrl, filename: fname } = await urlRes.json();
+
+    // Upload directly from browser → CraftCloud (no server middleman)
+    const model = await uploadToCraftCloud(downloadUrl, fname);
+
+    // Cache the modelId on our server
+    await fetch("/api/craftcloud/cache-model", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fileAssetId,
+        modelId: model.modelId,
+        geometry: model.dimensions
+          ? {
+              dimensions: model.dimensions,
+              volume: model.volume,
+            }
+          : undefined,
+      }),
+    });
+  }, [fileAssetId, hasCachedModel]);
+
+  const fetchQuotes = useCallback(async () => {
+    setLoadingPhase("quoting");
+    setError(null);
+
+    const res = await fetch("/api/craftcloud/quotes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fileAssetId,
+        currency: "USD",
+        countryCode: "US",
+        quantity,
+      }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || "Failed to fetch quotes");
+    }
+
+    const data = await res.json();
+    setQuotes(data.quotes || []);
+    setShipping(data.shipping || []);
+    setLoadingPhase("done");
+  }, [fileAssetId, quantity]);
+
   useEffect(() => {
-    async function fetchQuotes() {
+    let cancelled = false;
+
+    async function init() {
       try {
-        setLoading(true);
-        const res = await fetch(`/api/craftcloud/quotes`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            fileAssetId,
-            currency: "USD",
-            countryCode: "US",
-            quantity,
-          }),
-        });
-
-        if (!res.ok) {
-          throw new Error("Failed to fetch quotes");
-        }
-
-        const data = await res.json();
-        setQuotes(data.quotes || []);
-        setShipping(data.shipping || []);
+        await ensureModelUploaded();
+        if (cancelled) return;
+        await fetchQuotes();
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load quotes");
-      } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Something went wrong");
+          setLoadingPhase("done");
+        }
       }
     }
 
-    fetchQuotes();
-  }, [fileAssetId, quantity]);
+    init();
+    return () => {
+      cancelled = true;
+    };
+  }, [ensureModelUploaded, fetchQuotes]);
 
-  // Group quotes by material
   const materialGroups = quotes.reduce(
     (acc, quote) => {
       if (!acc[quote.materialConfigId]) {
@@ -95,12 +164,103 @@ export function QuoteConfigurator({
     {} as Record<string, Quote[]>
   );
 
-  if (loading) {
+  const handleCheckout = async () => {
+    if (!selectedQuote || !selectedShipping) return;
+    setCheckoutError(null);
+
+    const result = await createPrintOrder({
+      fileAssetId,
+      quoteId: selectedQuote.quoteId,
+      vendorId: selectedQuote.vendorId,
+      materialConfigId: selectedQuote.materialConfigId,
+      shippingId: selectedShipping.shippingId,
+      quantity,
+      materialPrice: selectedQuote.price,
+      shippingPrice: selectedShipping.price,
+      currency: selectedQuote.currency as "USD",
+    });
+
+    if ("error" in result) {
+      setCheckoutError(result.error);
+      return;
+    }
+
+    setPrintOrderId(result.orderId);
+    setStep("address");
+  };
+
+  const handleAddressSubmit = async (addressData: {
+    email: string;
+    shipping: {
+      firstName: string;
+      lastName: string;
+      address: string;
+      addressLine2?: string;
+      city: string;
+      zipCode: string;
+      stateCode?: string;
+      countryCode: string;
+      companyName?: string;
+      phoneNumber?: string;
+    };
+    billing: {
+      firstName: string;
+      lastName: string;
+      address: string;
+      addressLine2?: string;
+      city: string;
+      zipCode: string;
+      stateCode?: string;
+      countryCode: string;
+      companyName?: string;
+      phoneNumber?: string;
+      isCompany: boolean;
+      vatId?: string;
+    };
+  }) => {
+    if (!printOrderId) return;
+    setStep("processing");
+    setCheckoutError(null);
+
+    const result = await completePrintOrder({
+      orderId: printOrderId,
+      email: addressData.email,
+      shipping: addressData.shipping,
+      billing: addressData.billing,
+    });
+
+    if ("error" in result) {
+      setCheckoutError(result.error);
+      setStep("address");
+      return;
+    }
+
+    window.location.href = result.checkoutUrl;
+  };
+
+  // Loading states
+  if (loadingPhase === "uploading") {
     return (
       <div className="flex items-center justify-center py-12">
         <div className="text-center">
-          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-foreground/20 border-t-foreground" />
-          <p className="mt-3 text-sm text-foreground/60">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-muted border-t-foreground" />
+          <p className="mt-3 text-sm text-muted-foreground">
+            Preparing your file for manufacturing...
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground/60">
+            This may take a moment for large files
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (loadingPhase === "quoting") {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="text-center">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-muted border-t-foreground" />
+          <p className="mt-3 text-sm text-muted-foreground">
             Getting quotes from manufacturers...
           </p>
         </div>
@@ -110,51 +270,81 @@ export function QuoteConfigurator({
 
   if (error) {
     return (
-      <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-4">
-        <p className="text-sm text-red-600">{error}</p>
+      <Alert variant="destructive">
+        <p className="text-sm">{error}</p>
+      </Alert>
+    );
+  }
+
+  if (step === "address" || step === "processing") {
+    return (
+      <div className="max-w-lg mx-auto">
+        {checkoutError && (
+          <Alert variant="destructive" className="mb-4">
+            <p className="text-sm">{checkoutError}</p>
+          </Alert>
+        )}
+        <ShippingAddressForm
+          onSubmit={handleAddressSubmit}
+          onBack={() => setStep("configure")}
+          isSubmitting={step === "processing"}
+        />
       </div>
     );
   }
 
   return (
-    <div className="grid gap-8 lg:grid-cols-3">
-      <div className="lg:col-span-2">
-        <div className="flex items-center gap-4 mb-4">
-          <label className="text-sm font-medium">Quantity:</label>
-          <input
-            type="number"
-            min={1}
-            max={100}
-            value={quantity}
-            onChange={(e) => setQuantity(Math.max(1, Number(e.target.value)))}
-            className="w-20 rounded-md border border-foreground/20 bg-background px-3 py-1.5 text-sm"
+    <div>
+      {checkoutError && (
+        <Alert variant="destructive" className="mb-4">
+          <p className="text-sm">{checkoutError}</p>
+        </Alert>
+      )}
+
+      <div className="grid gap-8 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <div className="flex items-center gap-4 mb-4">
+            <Label htmlFor="quantity" className="text-sm font-medium">
+              Quantity:
+            </Label>
+            <Input
+              id="quantity"
+              type="number"
+              min={1}
+              max={100}
+              value={quantity}
+              onChange={(e) => setQuantity(Math.max(1, Number(e.target.value)))}
+              className="w-20"
+            />
+          </div>
+
+          {geometryData?.dimensions && (
+            <div className="mb-4 text-sm text-muted-foreground">
+              Dimensions: {geometryData.dimensions.x.toFixed(1)} x{" "}
+              {geometryData.dimensions.y.toFixed(1)} x{" "}
+              {geometryData.dimensions.z.toFixed(1)} mm
+            </div>
+          )}
+
+          <MaterialSelector
+            materialGroups={materialGroups}
+            selectedQuote={selectedQuote}
+            onSelectQuote={setSelectedQuote}
+            modelDimensions={geometryData?.dimensions}
           />
         </div>
 
-        {geometryData?.dimensions && (
-          <div className="mb-4 text-sm text-foreground/60">
-            Dimensions: {geometryData.dimensions.x.toFixed(1)} x{" "}
-            {geometryData.dimensions.y.toFixed(1)} x{" "}
-            {geometryData.dimensions.z.toFixed(1)} mm
-          </div>
-        )}
-
-        <MaterialSelector
-          materialGroups={materialGroups}
-          selectedQuote={selectedQuote}
-          onSelectQuote={setSelectedQuote}
-        />
-      </div>
-
-      <div>
-        <PriceDisplay
-          selectedQuote={selectedQuote}
-          shipping={shipping}
-          selectedShipping={selectedShipping}
-          onSelectShipping={setSelectedShipping}
-          quantity={quantity}
-          fileAssetId={fileAssetId}
-        />
+        <div>
+          <PriceDisplay
+            selectedQuote={selectedQuote}
+            shipping={shipping}
+            selectedShipping={selectedShipping}
+            onSelectShipping={setSelectedShipping}
+            quantity={quantity}
+            onCheckout={handleCheckout}
+            isCheckingOut={false}
+          />
+        </div>
       </div>
     </div>
   );

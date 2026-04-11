@@ -59,6 +59,9 @@ async function realUploadModel(
   }
 
   const models = await res.json();
+  if (!Array.isArray(models) || models.length === 0) {
+    throw new Error("CraftCloud returned no models after upload");
+  }
   return models[0];
 }
 
