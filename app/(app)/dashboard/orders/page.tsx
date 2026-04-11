@@ -16,6 +16,8 @@ const STATUS_LABELS: Record<string, string> = {
   in_production: "In Production",
   shipped: "Shipped",
   received: "Delivered",
+  blocked: "Needs Attention",
+  refunded: "Refunded",
   cancelled: "Cancelled",
 };
 
@@ -26,6 +28,8 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "
   in_production: "secondary",
   shipped: "default",
   received: "default",
+  blocked: "destructive",
+  refunded: "secondary",
   cancelled: "destructive",
 };
 

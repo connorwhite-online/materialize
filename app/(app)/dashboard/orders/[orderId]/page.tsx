@@ -20,6 +20,8 @@ const STATUS_LABELS: Record<string, string> = {
   in_production: "In Production",
   shipped: "Shipped",
   received: "Delivered",
+  blocked: "Needs Attention",
+  refunded: "Refunded",
   cancelled: "Cancelled",
 };
 
@@ -89,7 +91,13 @@ export default async function OrderDetailPage(props: {
           </p>
         </div>
         <Badge
-          variant={order.status === "cancelled" ? "destructive" : "outline"}
+          variant={
+            order.status === "cancelled" || order.status === "blocked"
+              ? "destructive"
+              : order.status === "refunded"
+                ? "secondary"
+                : "outline"
+          }
         >
           {statusLabel}
         </Badge>
@@ -98,6 +106,7 @@ export default async function OrderDetailPage(props: {
       {/* Status tracker */}
       <div className="mt-8">
         <OrderStatusTracker
+          orderId={order.id}
           currentStatus={order.status}
           trackingInfo={order.trackingInfo}
         />

@@ -137,7 +137,7 @@ describe("checkOrderStatus", () => {
     );
   });
 
-  it("maps blocked status to cancelled", async () => {
+  it("maps blocked status to blocked (not cancelled)", async () => {
     mockGetOrderStatus.mockResolvedValueOnce({
       orderId: "order-123",
       vendorStatuses: [{ vendorId: "v1", status: "blocked" }],
@@ -145,7 +145,7 @@ describe("checkOrderStatus", () => {
     const result = await checkOrderStatus("order-id-1");
     expect(result).toEqual({ status: "blocked" });
     expect(mockDbUpdateSet).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "cancelled" })
+      expect.objectContaining({ status: "blocked" })
     );
   });
 });

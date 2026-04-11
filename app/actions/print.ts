@@ -101,7 +101,7 @@ export async function checkOrderStatus(
       in_production: "in_production",
       shipped: "shipped",
       received: "received",
-      blocked: "cancelled",
+      blocked: "blocked",
       cancelled: "cancelled",
     };
 
@@ -235,5 +235,61 @@ export async function completePrintOrder(params: {
   } catch (error) {
     logError("completePrintOrder", error);
     return { error: "Failed to create checkout. Please try again." };
+  }
+}
+
+export async function requestOrderRefund(
+  orderId: string
+): Promise<{ success: true } | { error: string }> {
+  try {
+    const { userId } = await auth();
+    if (!userId) return { error: "Unauthorized" };
+
+    const [order] = await db
+      .select()
+      .from(printOrders)
+      .where(and(eq(printOrders.id, orderId), eq(printOrders.userId, userId)));
+
+    if (!order) return { error: "Order not found" };
+
+    // Only allow refunds for blocked or ordered status
+    if (order.status !== "blocked" && order.status !== "ordered") {
+      return { error: "This order cannot be refunded at this stage" };
+    }
+
+    if (!order.stripeSessionId) {
+      return { error: "No payment found for this order" };
+    }
+
+    // Get the payment intent from the Stripe session
+    const stripe = getStripe();
+    const session = await stripe.checkout.sessions.retrieve(order.stripeSessionId);
+
+    if (!session.payment_intent) {
+      return { error: "No payment intent found" };
+    }
+
+    const paymentIntentId =
+      typeof session.payment_intent === "string"
+        ? session.payment_intent
+        : session.payment_intent.id;
+
+    // Issue full refund
+    await stripe.refunds.create({
+      payment_intent: paymentIntentId,
+    });
+
+    // Update order status
+    await db
+      .update(printOrders)
+      .set({ status: "refunded" })
+      .where(eq(printOrders.id, orderId));
+
+    revalidatePath(`/dashboard/orders/${orderId}`);
+    revalidatePath("/dashboard/orders");
+    return { success: true };
+  } catch (error) {
+    logError("requestOrderRefund", error);
+    return { error: "Failed to process refund. Please contact support." };
   }
 }

@@ -47,6 +47,8 @@ export const printOrderStatusEnum = pgEnum("print_order_status", [
   "in_production",
   "shipped",
   "received",
+  "blocked",    // factory rejected — geometry issue, needs user action
+  "refunded",   // refund issued after block or cancellation
   "cancelled",
 ]);
 

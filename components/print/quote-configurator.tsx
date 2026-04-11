@@ -6,6 +6,7 @@ import { PriceDisplay } from "./price-display";
 import { ShippingAddressForm } from "./shipping-address-form";
 import { createPrintOrder, completePrintOrder } from "@/app/actions/print";
 import { uploadToCraftCloud } from "@/lib/craftcloud/upload-client";
+import { checkGeometry } from "@/lib/geometry-checks";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert } from "@/components/ui/alert";
@@ -325,6 +326,29 @@ export function QuoteConfigurator({
               {geometryData.dimensions.z.toFixed(1)} mm
             </div>
           )}
+
+          {/* Geometry hints — soft warnings, never blocking */}
+          {(() => {
+            const hints = checkGeometry(geometryData);
+            if (hints.length === 0) return null;
+            return (
+              <div className="mb-4 space-y-2">
+                {hints.map((hint, i) => (
+                  <div
+                    key={i}
+                    className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-800 dark:bg-amber-950"
+                  >
+                    <p className="text-xs font-medium text-amber-800 dark:text-amber-200">
+                      {hint.message}
+                    </p>
+                    <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
+                      {hint.detail}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
 
           <MaterialSelector
             materialGroups={materialGroups}

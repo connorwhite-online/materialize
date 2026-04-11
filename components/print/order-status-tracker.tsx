@@ -1,13 +1,20 @@
 "use client";
 
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Alert } from "@/components/ui/alert";
+import { requestOrderRefund } from "@/app/actions/print";
+
 const STEPS = [
-  { key: "ordered", label: "Ordered" },
+  { key: "ordered", label: "Confirmed" },
   { key: "in_production", label: "In Production" },
   { key: "shipped", label: "Shipped" },
-  { key: "received", label: "Received" },
+  { key: "received", label: "Delivered" },
 ] as const;
 
 interface OrderStatusTrackerProps {
+  orderId: string;
   currentStatus: string;
   trackingInfo?: {
     trackingUrl?: string;
@@ -17,18 +24,31 @@ interface OrderStatusTrackerProps {
 }
 
 export function OrderStatusTracker({
+  orderId,
   currentStatus,
   trackingInfo,
 }: OrderStatusTrackerProps) {
   const currentIndex = STEPS.findIndex((s) => s.key === currentStatus);
+  const isBlocked = currentStatus === "blocked";
   const isCancelled = currentStatus === "cancelled";
+  const isRefunded = currentStatus === "refunded";
+  const isTerminal = isCancelled || isRefunded;
 
   return (
     <div>
-      {isCancelled ? (
-        <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-4">
-          <p className="font-medium text-red-600">Order Cancelled</p>
-        </div>
+      {isBlocked ? (
+        <BlockedOrderCard orderId={orderId} />
+      ) : isRefunded ? (
+        <Alert className="border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200">
+          <p className="text-sm font-medium">Order Refunded</p>
+          <p className="text-xs mt-1">
+            A full refund has been issued to your original payment method. It may take 5-10 business days to appear.
+          </p>
+        </Alert>
+      ) : isCancelled ? (
+        <Alert variant="destructive">
+          <p className="text-sm font-medium">Order Cancelled</p>
+        </Alert>
       ) : (
         <div className="flex items-center gap-2">
           {STEPS.map((step, index) => {
@@ -66,7 +86,7 @@ export function OrderStatusTracker({
                 </div>
                 <span
                   className={`mt-2 text-xs ${
-                    isCompleted ? "font-medium" : "text-foreground/40"
+                    isCompleted ? "font-medium" : "text-muted-foreground"
                   }`}
                 >
                   {step.label}
@@ -77,25 +97,85 @@ export function OrderStatusTracker({
         </div>
       )}
 
-      {trackingInfo?.trackingNumber && (
-        <div className="mt-4 rounded-md bg-foreground/5 p-3 text-sm">
-          <p>
-            Tracking: {trackingInfo.carrier && `${trackingInfo.carrier} — `}
-            {trackingInfo.trackingUrl ? (
-              <a
-                href={trackingInfo.trackingUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline"
-              >
-                {trackingInfo.trackingNumber}
-              </a>
-            ) : (
-              <span>{trackingInfo.trackingNumber}</span>
-            )}
-          </p>
-        </div>
+      {trackingInfo?.trackingNumber && !isTerminal && (
+        <Card className="mt-4">
+          <CardContent className="p-3 text-sm">
+            <p>
+              Tracking: {trackingInfo.carrier && `${trackingInfo.carrier} — `}
+              {trackingInfo.trackingUrl ? (
+                <a
+                  href={trackingInfo.trackingUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline"
+                >
+                  {trackingInfo.trackingNumber}
+                </a>
+              ) : (
+                <span>{trackingInfo.trackingNumber}</span>
+              )}
+            </p>
+          </CardContent>
+        </Card>
       )}
     </div>
+  );
+}
+
+function BlockedOrderCard({ orderId }: { orderId: string }) {
+  const [refunding, setRefunding] = useState(false);
+  const [refundResult, setRefundResult] = useState<string | null>(null);
+
+  const handleRefund = async () => {
+    setRefunding(true);
+    const result = await requestOrderRefund(orderId);
+    if ("error" in result) {
+      setRefundResult(result.error);
+    } else {
+      setRefundResult("Refund issued successfully.");
+    }
+    setRefunding(false);
+  };
+
+  return (
+    <Alert className="border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950">
+      <div>
+        <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+          Print Rejected by Manufacturer
+        </p>
+        <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+          The manufacturing facility identified a geometry issue with your model
+          that prevents it from being printed. This can happen with thin walls,
+          non-watertight meshes, or features too small for the chosen material.
+        </p>
+
+        <div className="mt-3 space-y-2">
+          <p className="text-xs font-medium text-amber-800 dark:text-amber-200">
+            Your options:
+          </p>
+          <ul className="text-xs text-amber-700 dark:text-amber-300 space-y-1 list-disc list-inside">
+            <li>Fix the model geometry and resubmit with a new print order</li>
+            <li>Try a different material that may support your geometry</li>
+            <li>Request a full refund below</li>
+          </ul>
+        </div>
+
+        {refundResult ? (
+          <p className="mt-3 text-xs font-medium text-amber-800 dark:text-amber-200">
+            {refundResult}
+          </p>
+        ) : (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefund}
+            disabled={refunding}
+            className="mt-3"
+          >
+            {refunding ? "Processing refund..." : "Request Full Refund"}
+          </Button>
+        )}
+      </div>
+    </Alert>
   );
 }
