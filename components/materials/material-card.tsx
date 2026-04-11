@@ -58,7 +58,7 @@ export function MaterialCard({ material }: MaterialCardProps) {
                         className={`h-1.5 flex-1 rounded-full ${
                           i < material.properties[key]
                             ? "bg-foreground/60"
-                            : "bg-foreground/10"
+                            : "bg-muted"
                         }`}
                       />
                     ))}

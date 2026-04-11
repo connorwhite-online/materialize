@@ -45,7 +45,7 @@ export function ModelCardPreview({
     return (
       <div
         ref={ref}
-        className="aspect-square rounded-md bg-foreground/5 overflow-hidden cursor-pointer"
+        className="aspect-square rounded-md bg-muted overflow-hidden cursor-pointer"
         onMouseEnter={() => {
           if (isVisible && modelUrl && format) setShowViewer(true);
         }}
@@ -64,7 +64,7 @@ export function ModelCardPreview({
     return (
       <div
         ref={ref}
-        className="aspect-square rounded-md bg-foreground/5 overflow-hidden"
+        className="aspect-square rounded-md bg-muted overflow-hidden"
         onMouseLeave={() => {
           if (thumbnailUrl) setShowViewer(false);
         }}
@@ -72,7 +72,7 @@ export function ModelCardPreview({
         <Suspense
           fallback={
             <div className="flex h-full items-center justify-center">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-foreground/20 border-t-foreground" />
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-border border-t-foreground" />
             </div>
           }
         >
@@ -89,6 +89,6 @@ export function ModelCardPreview({
 
   // Placeholder
   return (
-    <div ref={ref} className="aspect-square rounded-md bg-foreground/5" />
+    <div ref={ref} className="aspect-square rounded-md bg-muted" />
   );
 }

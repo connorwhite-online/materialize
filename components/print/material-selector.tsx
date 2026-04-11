@@ -148,7 +148,7 @@ export function MaterialSelector({
                                 className={`h-1 w-1 rounded-full ${
                                   i < metadata.properties[prop]
                                     ? "bg-foreground/50"
-                                    : "bg-foreground/10"
+                                    : "bg-muted"
                                 }`}
                               />
                             ))}

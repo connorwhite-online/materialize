@@ -126,25 +126,25 @@ export function FileUploader({ onUploadComplete }: FileUploaderProps) {
       <div
         onDrop={handleDrop}
         onDragOver={(e) => e.preventDefault()}
-        className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-foreground/20 p-12 text-center transition-colors hover:border-foreground/40"
+        className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border p-12 text-center transition-colors hover:border-primary/40 hover:bg-muted/50"
       >
         {uploading ? (
           <div className="w-full max-w-xs">
-            <p className="text-sm text-foreground/60">Uploading...</p>
-            <div className="mt-2 h-2 w-full rounded-full bg-foreground/10">
+            <p className="text-sm text-muted-foreground">Uploading...</p>
+            <div className="mt-2 h-2 w-full rounded-full bg-muted">
               <div
-                className="h-full rounded-full bg-foreground transition-all"
+                className="h-full rounded-full bg-primary transition-all"
                 style={{ width: `${progress}%` }}
               />
             </div>
-            <p className="mt-1 text-xs text-foreground/40">{progress}%</p>
+            <p className="mt-1 text-xs text-muted-foreground">{progress}%</p>
           </div>
         ) : (
           <>
-            <p className="text-foreground/60">
+            <p className="text-muted-foreground">
               Drag and drop your 3D file here, or
             </p>
-            <label className="mt-2 cursor-pointer rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-foreground/90">
+            <label className="mt-2 cursor-pointer rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90">
               Choose file
               <input
                 type="file"
@@ -153,7 +153,7 @@ export function FileUploader({ onUploadComplete }: FileUploaderProps) {
                 onChange={handleChange}
               />
             </label>
-            <p className="mt-2 text-xs text-foreground/40">
+            <p className="mt-2 text-xs text-muted-foreground">
               STL, OBJ, 3MF, STEP, AMF — Max 200MB
             </p>
           </>

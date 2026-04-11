@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-import { files, purchases } from "@/lib/db/schema";
+import { files, purchases, printOrders } from "@/lib/db/schema";
 import { eq, and, count } from "drizzle-orm";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 
 export default async function DashboardPage() {
   const { userId } = await auth();
@@ -18,62 +20,43 @@ export default async function DashboardPage() {
     .from(purchases)
     .where(and(eq(purchases.buyerId, userId), eq(purchases.status, "completed")));
 
+  const [orderCount] = await db
+    .select({ count: count() })
+    .from(printOrders)
+    .where(eq(printOrders.userId, userId));
+
+  const stats = [
+    { label: "Your Uploads", value: uploadCount?.count ?? 0, href: "/dashboard/uploads", action: "Manage" },
+    { label: "My Library", value: libraryCount?.count ?? 0, href: "/dashboard/library", action: "View" },
+    { label: "Print Orders", value: orderCount?.count ?? 0, href: "/dashboard/orders", action: "View" },
+  ];
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
       <h1 className="text-2xl font-bold">Dashboard</h1>
+
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <div className="rounded-lg border border-foreground/10 p-6">
-          <p className="text-sm text-foreground/60">Your Uploads</p>
-          <p className="mt-1 text-3xl font-semibold">
-            {uploadCount?.count ?? 0}
-          </p>
-          <Link
-            href="/dashboard/uploads"
-            className="mt-3 inline-block text-sm underline"
-          >
-            Manage uploads
+        {stats.map((stat) => (
+          <Link key={stat.href} href={stat.href}>
+            <Card className="transition-colors hover:border-primary/30">
+              <CardContent className="p-6">
+                <p className="text-sm text-muted-foreground">{stat.label}</p>
+                <p className="mt-1 text-3xl font-semibold tabular-nums">
+                  {stat.value}
+                </p>
+                <p className="mt-3 text-sm text-muted-foreground">
+                  {stat.action} &rarr;
+                </p>
+              </CardContent>
+            </Card>
           </Link>
-        </div>
-        <div className="rounded-lg border border-foreground/10 p-6">
-          <p className="text-sm text-foreground/60">My Library</p>
-          <p className="mt-1 text-3xl font-semibold">
-            {libraryCount?.count ?? 0}
-          </p>
-          <Link
-            href="/dashboard/library"
-            className="mt-3 inline-block text-sm underline"
-          >
-            View library
-          </Link>
-        </div>
-        <div className="rounded-lg border border-foreground/10 p-6">
-          <p className="text-sm text-foreground/60">Print Orders</p>
-          <p className="mt-1 text-3xl font-semibold">0</p>
-          <Link
-            href="/dashboard/orders"
-            className="mt-3 inline-block text-sm underline"
-          >
-            View orders
-          </Link>
-        </div>
-        <div className="rounded-lg border border-foreground/10 p-6">
-          <p className="text-sm text-foreground/60">Earnings</p>
-          <p className="mt-1 text-3xl font-semibold">$0.00</p>
-          <Link
-            href="/dashboard/earnings"
-            className="mt-3 inline-block text-sm underline"
-          >
-            View earnings
-          </Link>
-        </div>
+        ))}
       </div>
+
       <div className="mt-8">
-        <Link
-          href="/dashboard/uploads/new"
-          className="inline-flex items-center rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-foreground/90"
-        >
+        <Button render={<Link href="/dashboard/uploads/new" />}>
           Upload a file
-        </Link>
+        </Button>
       </div>
     </div>
   );

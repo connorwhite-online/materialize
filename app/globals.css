@@ -122,9 +122,18 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
+    -webkit-tap-highlight-color: transparent;
+    text-rendering: optimizeLegibility;
   }
   html {
     @apply font-sans;
+    -webkit-text-size-adjust: 100%;
+  }
+  ::selection {
+    background: oklch(0.205 0 0 / 0.12);
+  }
+  .dark ::selection {
+    background: oklch(0.922 0 0 / 0.15);
   }
 }

@@ -96,7 +96,7 @@ export default async function MaterialDetailPage(props: {
                         className={`h-2 flex-1 rounded-full ${
                           i < material.properties[key]
                             ? "bg-foreground/60"
-                            : "bg-foreground/10"
+                            : "bg-muted"
                         }`}
                       />
                     ))}

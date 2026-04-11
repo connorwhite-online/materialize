@@ -2,6 +2,10 @@ import { db } from "@/lib/db";
 import { files, users } from "@/lib/db/schema";
 import { eq, desc, ilike, and } from "drizzle-orm";
 import Link from "next/link";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export default async function BrowsePage(props: {
   searchParams: Promise<{ q?: string; page?: string }>;
@@ -11,7 +15,7 @@ export default async function BrowsePage(props: {
   const page = Number(searchParams.page) || 1;
   const perPage = 24;
 
-  const conditions = [eq(files.status, "published")];
+  const conditions = [eq(files.status, "published"), eq(files.visibility, "public")];
   if (query) {
     conditions.push(ilike(files.name, `%${query}%`));
   }
@@ -37,57 +41,59 @@ export default async function BrowsePage(props: {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">Browse Files</h1>
         <form className="flex gap-2">
-          <input
+          <Input
             type="search"
             name="q"
             defaultValue={query}
             placeholder="Search files..."
-            className="rounded-md border border-foreground/20 bg-background px-3 py-1.5 text-sm"
+            className="w-48 sm:w-64"
           />
-          <button
-            type="submit"
-            className="rounded-md bg-foreground px-3 py-1.5 text-sm text-background"
-          >
+          <Button type="submit" variant="secondary" size="default">
             Search
-          </button>
+          </Button>
         </form>
       </div>
+
       {publishedFiles.length === 0 ? (
         <div className="mt-12 text-center">
-          <p className="text-foreground/60">
-            {query ? `No files found for "${query}"` : "No files published yet"}
+          <p className="text-muted-foreground">
+            {query
+              ? `No files found for "${query}"`
+              : "No files published yet"}
           </p>
         </div>
       ) : (
         <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {publishedFiles.map((file) => (
-            <Link
-              key={file.id}
-              href={`/files/${file.slug}`}
-              className="group rounded-lg border border-foreground/10 p-4 transition-colors hover:border-foreground/20"
-            >
-              <div className="aspect-square rounded-md bg-foreground/5" />
-              <h3 className="mt-3 font-medium group-hover:underline">
-                {file.name}
-              </h3>
-              <p className="mt-0.5 text-sm text-foreground/60">
-                by {file.displayName || file.username || "Unknown"}
-              </p>
-              <div className="mt-1 flex items-center justify-between text-sm">
-                {file.price > 0 ? (
-                  <span className="font-medium">
-                    ${(file.price / 100).toFixed(2)}
-                  </span>
-                ) : (
-                  <span className="text-foreground/60">Free</span>
-                )}
-                <span className="text-foreground/40">
-                  {file.downloadCount} downloads
-                </span>
-              </div>
+            <Link key={file.id} href={`/files/${file.slug}`}>
+              <Card className="overflow-hidden group transition-colors hover:border-primary/30">
+                <div className="aspect-square bg-gradient-to-br from-muted to-muted/50" />
+                <CardContent className="p-4">
+                  <h3 className="font-medium text-sm group-hover:text-primary transition-colors">
+                    {file.name}
+                  </h3>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {file.displayName || file.username || "Unknown"}
+                  </p>
+                  <div className="mt-2 flex items-center justify-between">
+                    {file.price > 0 ? (
+                      <span className="text-sm font-medium tabular-nums">
+                        ${(file.price / 100).toFixed(2)}
+                      </span>
+                    ) : (
+                      <Badge variant="secondary" className="text-[10px]">
+                        Free
+                      </Badge>
+                    )}
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {file.downloadCount} downloads
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
             </Link>
           ))}
         </div>
