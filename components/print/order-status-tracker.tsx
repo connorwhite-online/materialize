@@ -118,6 +118,63 @@ export function OrderStatusTracker({
           </CardContent>
         </Card>
       )}
+
+      {/* Cancel option — only for orders not yet in production */}
+      {currentStatus === "ordered" && (
+        <CancelOrderOption orderId={orderId} />
+      )}
+
+      {/* In production or shipped — contact support for changes */}
+      {(currentStatus === "in_production" || currentStatus === "shipped") && (
+        <p className="mt-4 text-xs text-muted-foreground">
+          Need to make a change? Contact support — your order is already being manufactured.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function CancelOrderOption({ orderId }: { orderId: string }) {
+  const [confirming, setConfirming] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+
+  const handleCancel = async () => {
+    setProcessing(true);
+    const res = await requestOrderRefund(orderId);
+    if ("error" in res) {
+      setResult(res.error);
+    } else {
+      setResult("Order cancelled and refund issued.");
+    }
+    setProcessing(false);
+    setConfirming(false);
+  };
+
+  if (result) {
+    return <p className="mt-4 text-xs text-muted-foreground">{result}</p>;
+  }
+
+  if (!confirming) {
+    return (
+      <button
+        onClick={() => setConfirming(true)}
+        className="mt-4 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        Cancel order
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-4 flex items-center gap-2">
+      <p className="text-xs text-muted-foreground">Are you sure?</p>
+      <Button size="xs" variant="destructive" onClick={handleCancel} disabled={processing}>
+        {processing ? "Cancelling..." : "Yes, cancel and refund"}
+      </Button>
+      <Button size="xs" variant="ghost" onClick={() => setConfirming(false)}>
+        No
+      </Button>
     </div>
   );
 }
@@ -141,12 +198,13 @@ function BlockedOrderCard({ orderId }: { orderId: string }) {
     <Alert className="border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950">
       <div>
         <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-          Print Rejected by Manufacturer
+          Order Could Not Be Completed
         </p>
         <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
-          The manufacturing facility identified a geometry issue with your model
-          that prevents it from being printed. This can happen with thin walls,
-          non-watertight meshes, or features too small for the chosen material.
+          The manufacturing facility was unable to fulfill this order. This can
+          happen for a number of reasons — geometry that doesn&apos;t suit the
+          material, temporary stock or capacity issues, or the file needing
+          adjustments for production.
         </p>
 
         <div className="mt-3 space-y-2">
@@ -154,8 +212,8 @@ function BlockedOrderCard({ orderId }: { orderId: string }) {
             Your options:
           </p>
           <ul className="text-xs text-amber-700 dark:text-amber-300 space-y-1 list-disc list-inside">
-            <li>Fix the model geometry and resubmit with a new print order</li>
-            <li>Try a different material that may support your geometry</li>
+            <li>Try again with a different material or manufacturer</li>
+            <li>Adjust your model and resubmit a new print order</li>
             <li>Request a full refund below</li>
           </ul>
         </div>

@@ -252,9 +252,39 @@ export async function requestOrderRefund(
 
     if (!order) return { error: "Order not found" };
 
-    // Only allow refunds for blocked or ordered status
-    if (order.status !== "blocked" && order.status !== "ordered") {
-      return { error: "This order cannot be refunded at this stage" };
+    // Blocked = factory rejected, safe to refund immediately
+    // Ordered = placed but not yet in production — check live status first
+    // Anything else = too late for self-service refund
+    if (order.status === "blocked") {
+      // Factory rejected — refund is straightforward
+    } else if (order.status === "ordered" && order.craftCloudOrderId) {
+      // Check live status before allowing refund — it may have moved to production
+      const liveStatus = await getOrderStatus(order.craftCloudOrderId);
+      const vendorStatus = liveStatus.vendorStatuses[0];
+      if (vendorStatus && vendorStatus.status !== "ordered") {
+        // Already in production or beyond — can't refund self-service
+        // Update our DB to reflect the real status
+        const STATUS_MAP: Record<string, string> = {
+          in_production: "in_production",
+          shipped: "shipped",
+          received: "received",
+          blocked: "blocked",
+          cancelled: "cancelled",
+        };
+        const mapped = STATUS_MAP[vendorStatus.status];
+        if (mapped) {
+          await db
+            .update(printOrders)
+            .set({ status: mapped as typeof order.status })
+            .where(eq(printOrders.id, orderId));
+          revalidatePath(`/dashboard/orders/${orderId}`);
+        }
+        return {
+          error: "This order is already in production and can't be refunded automatically. Please contact support.",
+        };
+      }
+    } else {
+      return { error: "This order can't be refunded at this stage" };
     }
 
     if (!order.stripeSessionId) {
