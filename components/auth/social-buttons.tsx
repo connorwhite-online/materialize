@@ -28,6 +28,7 @@ export function SocialButtons({ mode }: SocialButtonsProps) {
       <Button
         type="button"
         variant="outline"
+        size="xl"
         className="w-full"
         onClick={() => handleOAuth("oauth_apple")}
       >
@@ -37,6 +38,7 @@ export function SocialButtons({ mode }: SocialButtonsProps) {
       <Button
         type="button"
         variant="outline"
+        size="xl"
         className="w-full"
         onClick={() => handleOAuth("oauth_google")}
       >

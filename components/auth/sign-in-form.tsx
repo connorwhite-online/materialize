@@ -162,15 +162,6 @@ export function SignInForm({ onSuccess, redirectUrl = "/dashboard" }: SignInForm
 
   return (
     <div className="space-y-4">
-      <SocialButtons mode="sign-in" />
-
-      <div className="relative">
-        <Separator />
-        <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs text-muted-foreground">
-          or
-        </span>
-      </div>
-
       <form onSubmit={handleSendCode} className="space-y-5">
         <div>
           <Label htmlFor="identifier">Email, phone, or username</Label>
@@ -189,12 +180,22 @@ export function SignInForm({ onSuccess, redirectUrl = "/dashboard" }: SignInForm
 
         <Button
           type="submit"
+          size="xl"
           className="w-full"
           disabled={loading || !identifier}
         >
           {loading ? "Sending code..." : "Continue"}
         </Button>
       </form>
+
+      <div className="relative">
+        <Separator />
+        <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs text-muted-foreground">
+          or
+        </span>
+      </div>
+
+      <SocialButtons mode="sign-in" />
     </div>
   );
 }

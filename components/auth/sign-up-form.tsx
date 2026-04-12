@@ -151,6 +151,7 @@ export function SignUpForm({
 
         <Button
           type="submit"
+          size="xl"
           className="w-full"
           disabled={loading || username.length < 3}
         >
@@ -215,15 +216,6 @@ export function SignUpForm({
   // Step 1: Email/phone input
   return (
     <div className="space-y-4">
-      <SocialButtons mode="sign-up" />
-
-      <div className="relative">
-        <Separator />
-        <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs text-muted-foreground">
-          or
-        </span>
-      </div>
-
       <form onSubmit={handleSendCode} className="space-y-5">
         <div>
           <div className="flex items-center justify-between mb-2">
@@ -257,10 +249,24 @@ export function SignUpForm({
 
         {error && <p className="text-xs text-destructive">{error}</p>}
 
-        <Button type="submit" className="w-full" disabled={loading || !value}>
+        <Button
+          type="submit"
+          size="xl"
+          className="w-full"
+          disabled={loading || !value}
+        >
           {loading ? "Sending code..." : "Continue"}
         </Button>
       </form>
+
+      <div className="relative">
+        <Separator />
+        <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs text-muted-foreground">
+          or
+        </span>
+      </div>
+
+      <SocialButtons mode="sign-up" />
     </div>
   );
 }
