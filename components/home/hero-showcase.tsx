@@ -222,7 +222,8 @@ export function HeroShowcase() {
 
       state.accumulated += delta;
 
-      const WHEEL_THRESHOLD = 60;
+      // Low threshold — trackpad scrolls are often short bursts
+      const WHEEL_THRESHOLD = 20;
       if (Math.abs(state.accumulated) > WHEEL_THRESHOLD) {
         const direction = state.accumulated > 0 ? 1 : -1;
         const currentIndex = selectedIndexRef.current;
