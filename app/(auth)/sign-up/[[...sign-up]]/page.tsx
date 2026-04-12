@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useSignUp } from "@clerk/nextjs/legacy";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +20,7 @@ type Method = "email" | "phone";
 
 export default function SignUpPage() {
   const { isLoaded, signUp, setActive } = useSignUp();
+  const router = useRouter();
 
   const [method, setMethod] = useState<Method>("email");
   const [value, setValue] = useState("");
@@ -64,33 +66,22 @@ export default function SignUpPage() {
           ? await signUp.attemptEmailAddressVerification({ code: codeValue })
           : await signUp.attemptPhoneNumberVerification({ code: codeValue });
 
-      // Debug: log everything Clerk returned
-      console.log("[sign-up] verify result:", {
-        status: result.status,
-        missingFields: result.missingFields,
-        unverifiedFields: result.unverifiedFields,
-        requiredFields: result.requiredFields,
-        createdSessionId: result.createdSessionId,
-        createdUserId: result.createdUserId,
-      });
-
       if (result.status === "complete" && result.createdSessionId) {
         await setActive({ session: result.createdSessionId });
-        window.location.href = "/onboarding";
+        router.push("/onboarding");
+        router.refresh();
         return;
       }
 
-      // Show the user what Clerk is asking for
+      // Sign-up incomplete — show what Clerk is still asking for
       const details = [
-        `Status: ${result.status}`,
         result.missingFields?.length && `Missing: ${result.missingFields.join(", ")}`,
         result.unverifiedFields?.length && `Unverified: ${result.unverifiedFields.join(", ")}`,
       ]
         .filter(Boolean)
         .join(" · ");
-      setError(`Sign-up incomplete. ${details}`);
+      setError(details || `Sign-up incomplete (${result.status})`);
     } catch (err: unknown) {
-      console.error("[sign-up] verify error:", err);
       const clerkErr = err as { errors?: Array<{ longMessage?: string }> };
       setError(
         clerkErr.errors?.[0]?.longMessage ||
