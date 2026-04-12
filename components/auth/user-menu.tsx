@@ -6,7 +6,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -46,14 +45,14 @@ export function UserMenu() {
         </Avatar>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuLabel className="font-normal">
-          <div className="flex flex-col gap-0.5">
-            <p className="text-sm font-medium truncate">{displayName}</p>
-            {email && email !== displayName && (
-              <p className="text-xs text-muted-foreground truncate">{email}</p>
-            )}
-          </div>
-        </DropdownMenuLabel>
+        <div className="px-2 py-1.5">
+          <p className="text-sm font-medium truncate">{displayName}</p>
+          {email && email !== displayName && (
+            <p className="text-xs text-muted-foreground truncate mt-0.5">
+              {email}
+            </p>
+          )}
+        </div>
         <DropdownMenuSeparator />
         {user.username && (
           <DropdownMenuItem onClick={() => router.push(`/u/${user.username}`)}>
