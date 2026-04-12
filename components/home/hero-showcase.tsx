@@ -185,19 +185,25 @@ export function HeroShowcase() {
           dpr={[1, 2]}
           gl={{ antialias: true, alpha: true }}
         >
+          {/* Lights render immediately — no Suspense */}
+          <ambientLight intensity={0.5} />
+          <directionalLight position={[5, 5, 5]} intensity={1.2} />
+          <directionalLight position={[-5, -3, -5]} intensity={0.5} />
+          <directionalLight position={[0, -5, 2]} intensity={0.3} />
+
+          {/* Environment isolated in its own Suspense so it doesn't block the mesh */}
           <Suspense fallback={null}>
-            <ambientLight intensity={0.4} />
-            <directionalLight position={[5, 5, 5]} intensity={0.8} />
-            <directionalLight position={[-5, -3, -5]} intensity={0.3} />
             <Environment preset="studio" />
-            <ShowcaseMesh target={target} dragVelocityRef={dragVelocityRef} />
-            <ShowcaseParticles
-              burstKey={burstKey}
-              direction={burstDirection}
-              intensity={burstIntensity}
-              color={particleColor}
-            />
           </Suspense>
+
+          {/* Mesh + particles render immediately */}
+          <ShowcaseMesh target={target} dragVelocityRef={dragVelocityRef} />
+          <ShowcaseParticles
+            burstKey={burstKey}
+            direction={burstDirection}
+            intensity={burstIntensity}
+            color={particleColor}
+          />
         </Canvas>
       </div>
 
