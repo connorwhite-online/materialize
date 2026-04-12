@@ -12,21 +12,7 @@ export default async function HomePage() {
           <span className="text-lg font-semibold tracking-tight">
             Materialize
           </span>
-          <nav className="flex items-center gap-4 text-sm">
-            <Link
-              href="/materials"
-              className="text-muted-foreground transition-colors hover:text-foreground hidden sm:inline"
-            >
-              Materials
-            </Link>
-            <Link
-              href="/files"
-              className="text-muted-foreground transition-colors hover:text-foreground hidden sm:inline"
-            >
-              Browse
-            </Link>
-            <AuthNav />
-          </nav>
+          <AuthNav />
         </div>
       </header>
 

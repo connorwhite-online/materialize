@@ -18,17 +18,8 @@ export function AuthNav() {
   }
 
   return (
-    <div className="flex items-center gap-2">
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => openAuth("sign-in")}
-      >
-        Sign in
-      </Button>
-      <Button size="sm" onClick={() => openAuth("sign-up")}>
-        Get started
-      </Button>
-    </div>
+    <Button size="sm" onClick={() => openAuth("sign-in")}>
+      Sign in
+    </Button>
   );
 }
