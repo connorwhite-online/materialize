@@ -29,11 +29,14 @@ export function ShowcaseMesh({ target, dragVelocityRef }: ShowcaseMeshProps) {
     meshRef.current.rotation.x += delta * 0.05;
 
     // Drag velocity → stretch horizontally in swipe direction, flatten height
+    // Apply a curve (pow 1.8) so small gestures barely distort and only
+    // strong flicks show full squash/stretch.
     const dragVel = dragVelocityRef.current;
-    const absVel = Math.abs(dragVel);
-    const stretchX = 1 + absVel * 0.22; // always elongates horizontally
-    const squashY = 1 - absVel * 0.18; // flattens more aggressively
-    const squashZ = 1 - absVel * 0.05;
+    const signedCurved = Math.sign(dragVel) * Math.pow(Math.abs(dragVel), 1.8);
+    const absCurved = Math.abs(signedCurved);
+    const stretchX = 1 + absCurved * 0.22;
+    const squashY = 1 - absCurved * 0.18;
+    const squashZ = 1 - absCurved * 0.05;
 
     // Smooth toward target scale
     const scaleLerp = 1 - Math.exp(-delta * 12);
@@ -53,16 +56,16 @@ export function ShowcaseMesh({ target, dragVelocityRef }: ShowcaseMeshProps) {
       scaleLerp
     );
 
-    // Slight tilt in drag direction
-    const tiltTarget = dragVel * 0.15;
+    // Slight tilt in drag direction (also curved for less sensitivity)
+    const tiltTarget = signedCurved * 0.15;
     groupRef.current.rotation.z = THREE.MathUtils.lerp(
       groupRef.current.rotation.z,
       tiltTarget,
       scaleLerp
     );
 
-    // Sway in the drag direction (position offset) — more pronounced
-    const swayTarget = dragVel * 0.55;
+    // Sway in the drag direction (curved)
+    const swayTarget = signedCurved * 0.55;
     groupRef.current.position.x = THREE.MathUtils.lerp(
       groupRef.current.position.x,
       swayTarget,
