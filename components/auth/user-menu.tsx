@@ -26,7 +26,7 @@ export function UserMenu() {
     >
       <UserAvatar
         seed={user.username || user.id}
-        imageUrl={user.imageUrl}
+        imageUrl={user.hasImage ? user.imageUrl : null}
         displayName={displayName}
       />
     </Link>

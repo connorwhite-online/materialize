@@ -37,8 +37,11 @@ export async function POST(req: Request) {
   }
 
   if (event.type === "user.created" || event.type === "user.updated") {
-    const { id, username, first_name, last_name, image_url } = event.data;
+    const { id, username, first_name, last_name, image_url, has_image } =
+      event.data;
     const displayName = [first_name, last_name].filter(Boolean).join(" ");
+    // Only store a real uploaded avatar — ignore Clerk's auto-generated placeholder
+    const avatarUrl = has_image ? image_url : null;
 
     await db
       .insert(users)
@@ -46,14 +49,14 @@ export async function POST(req: Request) {
         id,
         username: username ?? null,
         displayName: displayName || null,
-        avatarUrl: image_url ?? null,
+        avatarUrl,
       })
       .onConflictDoUpdate({
         target: users.id,
         set: {
           username: username ?? undefined,
           displayName: displayName || undefined,
-          avatarUrl: image_url ?? undefined,
+          avatarUrl,
           updatedAt: new Date(),
         },
       });
