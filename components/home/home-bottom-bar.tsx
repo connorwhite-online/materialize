@@ -156,7 +156,7 @@ export function HomeBottomBar() {
         {/* Main row — always visible */}
         <form
           onSubmit={handleSearchSubmit}
-          className="flex items-center gap-1 p-1"
+          className="flex items-center gap-1 py-1 pl-1 pr-4"
         >
           <input
             ref={searchInputRef}
@@ -165,7 +165,7 @@ export function HomeBottomBar() {
             onChange={handleSearchChange}
             onFocus={handleSearchFocus}
             placeholder="Search files, materials, creators..."
-            className="flex-1 bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground/60 focus:outline-none"
+            className="flex-1 bg-transparent px-3 py-2 text-base md:text-sm placeholder:text-muted-foreground/60 focus:outline-none"
           />
           <Button
             type="button"

@@ -31,12 +31,14 @@ export function UserAvatar({
           style={{ background: gradient }}
         />
       </Avatar>
-      {/* Inner shadow overlay — sits above the avatar content */}
+      {/* Inner shadow overlay — sits above the avatar content.
+          Uses only blurred shadows (no spread) so edges read as a soft
+          vignette rather than a hard stroke. */}
       <div
         className="pointer-events-none absolute inset-0 rounded-full"
         style={{
           boxShadow:
-            "inset 0 0 0 1px rgba(0,0,0,0.12), inset 0 2px 5px rgba(0,0,0,0.18), inset 0 -1px 3px rgba(255,255,255,0.25)",
+            "inset 0 3px 6px rgba(0,0,0,0.22), inset 0 -2px 5px rgba(255,255,255,0.22), inset 0 0 8px rgba(0,0,0,0.10)",
         }}
       />
     </div>

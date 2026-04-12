@@ -43,7 +43,22 @@ export function AuthModalProvider({ children }: { children: React.ReactNode }) {
   return (
     <AuthModalContext.Provider value={{ openAuth, closeAuth }}>
       {children}
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog
+        open={open}
+        onOpenChange={(nextOpen, details) => {
+          // Only allow closing via the X button or programmatic close.
+          // Block outside-press and escape-key so users can't accidentally
+          // abandon a half-filled sign-in.
+          const reason = details?.reason;
+          if (
+            !nextOpen &&
+            (reason === "outside-press" || reason === "escape-key")
+          ) {
+            return;
+          }
+          setOpen(nextOpen);
+        }}
+      >
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle className="text-center">
