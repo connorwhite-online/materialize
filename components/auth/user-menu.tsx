@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useUser, useClerk } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import {
@@ -39,7 +38,7 @@ export function UserMenu() {
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label="User menu"
-        className="rounded-full outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        className="rounded-full outline-none transition-opacity hover:opacity-80"
       >
         <Avatar className="h-8 w-8">
           <AvatarImage src={user.imageUrl} alt={displayName || ""} />
@@ -57,14 +56,14 @@ export function UserMenu() {
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         {user.username && (
-          <DropdownMenuItem render={<Link href={`/u/${user.username}`} />}>
+          <DropdownMenuItem onClick={() => router.push(`/u/${user.username}`)}>
             View profile
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem render={<Link href="/dashboard" />}>
+        <DropdownMenuItem onClick={() => router.push("/dashboard")}>
           Dashboard
         </DropdownMenuItem>
-        <DropdownMenuItem render={<Link href="/dashboard/settings" />}>
+        <DropdownMenuItem onClick={() => router.push("/dashboard/settings")}>
           Settings
         </DropdownMenuItem>
         <DropdownMenuSeparator />
