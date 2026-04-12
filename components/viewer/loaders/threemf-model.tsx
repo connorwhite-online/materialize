@@ -32,7 +32,13 @@ export function ThreeMfModel({ url, color = "#a0a0a0", useCustomShader = true }:
           {useCustomShader ? (
             <MaterializeMaterial baseColor={color} />
           ) : (
-            <meshStandardMaterial color={color} metalness={0.15} roughness={0.55} />
+            <meshPhysicalMaterial
+              color={color}
+              metalness={0.35}
+              roughness={0.38}
+              clearcoat={0.4}
+              clearcoatRoughness={0.25}
+            />
           )}
         </mesh>
       ))}

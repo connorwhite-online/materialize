@@ -18,7 +18,13 @@ export function StlModel({ url, color = "#a0a0a0", useCustomShader = true }: Stl
       {useCustomShader ? (
         <MaterializeMaterial baseColor={color} />
       ) : (
-        <meshStandardMaterial color={color} flatShading />
+        <meshPhysicalMaterial
+          color={color}
+          metalness={0.35}
+          roughness={0.38}
+          clearcoat={0.4}
+          clearcoatRoughness={0.25}
+        />
       )}
     </mesh>
   );
