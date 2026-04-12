@@ -6,7 +6,7 @@ import * as THREE from "three";
 
 const MAX_PARTICLES = 800;
 const MIN_PARTICLES = 60;
-const PARTICLE_LIFETIME = 0.5; // faster dissolve
+const PARTICLE_LIFETIME = 0.55;
 const BASE_RADIUS = 1.2;
 
 interface ShowcaseParticlesProps {
@@ -56,7 +56,7 @@ export function ShowcaseParticles({
     );
 
     // Directional push strength scales with intensity
-    const directionalPush = 1.8 + intensity * 2.2;
+    const directionalPush = 0.55 + intensity * 0.8;
 
     for (let i = 0; i < MAX_PARTICLES; i++) {
       const p = particles[i];
@@ -82,7 +82,7 @@ export function ShowcaseParticles({
       const outX = Math.sin(phi) * Math.cos(theta);
       const outY = Math.sin(phi) * Math.sin(theta);
       const outZ = Math.cos(phi);
-      const baseSpeed = 1.6 + Math.random() * 1.4;
+      const baseSpeed = 0.5 + Math.random() * 0.55;
 
       // Directional push in the swipe direction.
       const directionalWeight = Math.random() * Math.random();
@@ -128,16 +128,16 @@ export function ShowcaseParticles({
 
       p.age += delta;
       p.position.addScaledVector(p.velocity, delta);
-      // Very light drag so particles keep traveling while they fade
-      p.velocity.multiplyScalar(0.985);
+      // Stronger drag so particles decelerate quickly after the burst
+      p.velocity.multiplyScalar(0.94);
 
       p.rotation.x += p.rotationSpeed.x * delta;
       p.rotation.y += p.rotationSpeed.y * delta;
       p.rotation.z += p.rotationSpeed.z * delta;
 
       const lifeT = p.age / PARTICLE_LIFETIME;
-      // Aggressive fadeout — shrinks fast after 40% of lifetime
-      const fade = lifeT < 0.4 ? 1 : 1 - Math.pow((lifeT - 0.4) / 0.6, 1.5);
+      // Hold full size until 40%, then ease out across the rest of the life
+      const fade = lifeT < 0.4 ? 1 : 1 - Math.pow((lifeT - 0.4) / 0.6, 1.4);
       const scale = p.scale * fade;
 
       dummy.position.copy(p.position);

@@ -17,7 +17,7 @@ export default async function HomePage() {
 
       <main className="flex-1 flex flex-col pb-40">
         <div className="flex-1 flex items-center justify-center px-4 py-8">
-          <div className="w-full max-w-2xl flex flex-col items-center">
+          <div className="w-full max-w-5xl flex flex-col items-center">
             <HeroShowcase />
           </div>
         </div>

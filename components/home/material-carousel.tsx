@@ -38,7 +38,7 @@ export const MaterialCarousel = forwardRef<HTMLDivElement, MaterialCarouselProps
     }, [selectedIndex]);
 
     return (
-      <div className="relative w-full max-w-[320px] mx-auto">
+      <div className="relative w-full max-w-[420px] mx-auto">
         {/* Edge fades */}
         <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-20 bg-gradient-to-r from-background to-transparent" />
         <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-20 bg-gradient-to-l from-background to-transparent" />

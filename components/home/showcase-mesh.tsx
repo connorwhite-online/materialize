@@ -34,12 +34,15 @@ export function ShowcaseMesh({ target, dragVelocityRef }: ShowcaseMeshProps) {
     const dragVel = dragVelocityRef.current;
     const signedCurved = Math.sign(dragVel) * Math.pow(Math.abs(dragVel), 1.8);
     const absCurved = Math.abs(signedCurved);
-    const stretchX = 1 + absCurved * 0.22;
-    const squashY = 1 - absCurved * 0.18;
-    const squashZ = 1 - absCurved * 0.05;
+    const stretchX = 1 + absCurved * 0.08;
+    const squashY = 1 - absCurved * 0.06;
+    const squashZ = 1 - absCurved * 0.02;
 
-    // Smooth toward target scale
-    const scaleLerp = 1 - Math.exp(-delta * 12);
+    // Smooth toward target scale. High coefficient so the mesh catches
+    // up to brief high-velocity bursts before the velocity decays away —
+    // with a slower lerp, fast scrolls would only half-deform before
+    // recovering, which reads as a sluggish swell instead of a snap.
+    const scaleLerp = 1 - Math.exp(-delta * 28);
     groupRef.current.scale.x = THREE.MathUtils.lerp(
       groupRef.current.scale.x,
       stretchX,
@@ -57,7 +60,7 @@ export function ShowcaseMesh({ target, dragVelocityRef }: ShowcaseMeshProps) {
     );
 
     // Slight tilt in drag direction (also curved for less sensitivity)
-    const tiltTarget = signedCurved * 0.15;
+    const tiltTarget = signedCurved * 0.06;
     groupRef.current.rotation.z = THREE.MathUtils.lerp(
       groupRef.current.rotation.z,
       tiltTarget,
@@ -65,7 +68,7 @@ export function ShowcaseMesh({ target, dragVelocityRef }: ShowcaseMeshProps) {
     );
 
     // Sway in the drag direction (curved)
-    const swayTarget = signedCurved * 0.55;
+    const swayTarget = signedCurved * 0.2;
     groupRef.current.position.x = THREE.MathUtils.lerp(
       groupRef.current.position.x,
       swayTarget,

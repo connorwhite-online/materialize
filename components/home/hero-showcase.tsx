@@ -54,8 +54,8 @@ export function HeroShowcase() {
   const handleSelect = useCallback(
     (index: number, direction: number, intensity: number = 1) => {
       setSelectedIndex(index);
-      // Particles fly with the finger (invert the index-direction)
-      setBurstDirection(-direction);
+      // Particles fly against the finger — dramatic spray trails the gesture
+      setBurstDirection(direction);
       setBurstIntensity(intensity);
       setBurstKey((k) => k + 1);
     },
@@ -165,7 +165,7 @@ export function HeroShowcase() {
     if (dragStateRef.current.active) return;
     if (Math.abs(dragVelocityRef.current) < 0.01) return;
     const id = requestAnimationFrame(() => {
-      dragVelocityRef.current *= 0.88;
+      dragVelocityRef.current *= 0.75;
       if (Math.abs(dragVelocityRef.current) < 0.01) {
         dragVelocityRef.current = 0;
       }
@@ -198,6 +198,9 @@ export function HeroShowcase() {
 
     // Native non-passive wheel listener so preventDefault actually works
     // for horizontal trackpad scrolling. React's onWheel is passive.
+    const QUIET_MS = 120;
+    const WHEEL_THRESHOLD = 18;
+
     const handleWheelNative = (e: WheelEvent) => {
       const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : 0;
       if (delta === 0) return;
@@ -207,23 +210,35 @@ export function HeroShowcase() {
 
       const state = wheelStateRef.current;
       const now = performance.now();
+      const timeSinceLast = now - state.lastEventTime;
+      state.lastEventTime = now;
 
-      if (now - state.lastTime > 200) {
+      // A quiet gap means the previous wheel stream (including any
+      // momentum tail) has ended — start a fresh stream.
+      if (timeSinceLast > QUIET_MS) {
+        state.hasFiredInStream = false;
         state.accumulated = 0;
-        state.hasFiredThisGesture = false;
       }
-      state.lastTime = now;
 
-      const vel = Math.max(-1, Math.min(1, -delta / 50));
-      dragVelocityRef.current = vel;
-      forceUpdate({});
+      // Trackpad deltas are small (4–15 per event), so divide
+      // aggressively so the signal is visible after the pow(1.8)
+      // sensitivity curve.
+      const vel = Math.max(-1, Math.min(1, -delta / 12));
 
-      if (state.hasFiredThisGesture) return;
+      // Only drive mesh distortion from pre-fire wheel events (the
+      // user's actual gesture, ~1–3 events). Once we've fired, stop
+      // pinning dragVelocityRef so the decay loop can snap the mesh
+      // back — otherwise the momentum tail holds the deform for the
+      // next ~700ms which reads as a sluggish swell.
+      if (!state.hasFiredInStream) {
+        dragVelocityRef.current = vel;
+        forceUpdate({});
+      }
+
+      if (state.hasFiredInStream) return;
 
       state.accumulated += delta;
 
-      // Low threshold — trackpad scrolls are often short bursts
-      const WHEEL_THRESHOLD = 20;
       if (Math.abs(state.accumulated) > WHEEL_THRESHOLD) {
         const direction = state.accumulated > 0 ? 1 : -1;
         const currentIndex = selectedIndexRef.current;
@@ -235,7 +250,8 @@ export function HeroShowcase() {
           const intensity = 0.5 + Math.min(1, Math.abs(vel)) * 0.8;
           handleSelect(newIndex, direction, intensity);
         }
-        state.hasFiredThisGesture = true;
+        state.hasFiredInStream = true;
+        state.accumulated = 0;
       }
     };
 
@@ -250,31 +266,32 @@ export function HeroShowcase() {
   }, [handleSelect]);
 
   // --- Wheel / trackpad horizontal scroll ---
-  // One step per "gesture". A gesture is a series of wheel events < 200ms
-  // apart. Once we fire within a gesture, we don't fire again until the
-  // gesture ends (including trackpad momentum).
+  // Fire once per "wheel stream". A stream is a continuous run of wheel
+  // events with gaps smaller than QUIET_MS. Trackpad momentum keeps the
+  // event interval at ~16ms so it can't break out of a stream; only a
+  // real pause by the user ends one.
   const wheelStateRef = useRef<{
     accumulated: number;
-    lastTime: number;
-    hasFiredThisGesture: boolean;
+    lastEventTime: number;
+    hasFiredInStream: boolean;
   }>({
     accumulated: 0,
-    lastTime: 0,
-    hasFiredThisGesture: false,
+    lastEventTime: 0,
+    hasFiredInStream: false,
   });
 
   return (
     <div
       ref={containerRef}
-      className="flex flex-col items-center gap-4 cursor-grab active:cursor-grabbing"
+      className="flex w-full flex-col items-center gap-4 cursor-grab active:cursor-grabbing"
       style={{ overscrollBehaviorX: "contain", touchAction: "pan-y" }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
     >
-      {/* 3D viewport */}
-      <div className="relative w-full h-[320px] sm:h-[400px]">
+      {/* 3D viewport — full-bleed on mobile so particles can fly off-screen */}
+      <div className="relative -mx-4 w-[100vw] h-[420px] sm:mx-0 sm:w-full sm:h-[520px]">
         <Canvas
           camera={{ position: [0, 0, 4.5], fov: 45 }}
           dpr={[1, 2]}
