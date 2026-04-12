@@ -170,6 +170,64 @@ export function HeroShowcase() {
     return () => cancelAnimationFrame(id);
   });
 
+  // --- Wheel / trackpad horizontal scroll ---
+  const wheelStateRef = useRef<{
+    accumulated: number;
+    lastTime: number;
+    cooldown: boolean;
+  }>({
+    accumulated: 0,
+    lastTime: 0,
+    cooldown: false,
+  });
+
+  const handleWheel = (e: React.WheelEvent) => {
+    // Use deltaX for horizontal trackpad/wheel, fall back to deltaY if shift-held
+    const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : 0;
+    if (delta === 0) return;
+
+    e.preventDefault();
+
+    const state = wheelStateRef.current;
+    const now = performance.now();
+
+    // Reset accumulation if it's been a while since last wheel event
+    if (now - state.lastTime > 200) {
+      state.accumulated = 0;
+      state.cooldown = false;
+    }
+    state.lastTime = now;
+
+    // Show mesh distortion in real-time
+    const vel = Math.max(-1, Math.min(1, -delta / 50));
+    dragVelocityRef.current = vel;
+    forceUpdate({});
+
+    if (state.cooldown) return;
+
+    state.accumulated += delta;
+
+    // Threshold: once accumulated enough in one direction, advance one step
+    const WHEEL_THRESHOLD = 80;
+    if (Math.abs(state.accumulated) > WHEEL_THRESHOLD) {
+      const direction = state.accumulated > 0 ? 1 : -1;
+      const newIndex = Math.max(
+        0,
+        Math.min(FEATURED_MATERIALS.length - 1, selectedIndex + direction)
+      );
+      if (newIndex !== selectedIndex) {
+        const intensity = 0.5 + Math.min(1, Math.abs(vel)) * 0.8;
+        handleSelect(newIndex, direction, intensity);
+      }
+      state.accumulated = 0;
+      state.cooldown = true;
+      // Brief cooldown so a continuous scroll doesn't fly through everything
+      setTimeout(() => {
+        state.cooldown = false;
+      }, 300);
+    }
+  };
+
   return (
     <div
       className="flex flex-col items-center gap-4 touch-pan-y cursor-grab active:cursor-grabbing"
@@ -177,6 +235,7 @@ export function HeroShowcase() {
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
+      onWheel={handleWheel}
     >
       {/* 3D viewport */}
       <div className="relative w-full h-[320px] sm:h-[400px]">

@@ -6,7 +6,7 @@ import * as THREE from "three";
 
 const MAX_PARTICLES = 800;
 const MIN_PARTICLES = 60;
-const PARTICLE_LIFETIME = 0.85;
+const PARTICLE_LIFETIME = 0.5; // faster dissolve
 const BASE_RADIUS = 1.2;
 
 interface ShowcaseParticlesProps {
@@ -98,7 +98,8 @@ export function ShowcaseParticles({
       );
 
       p.age = 0;
-      p.scale = 0.01 + Math.random() * 0.015;
+      // Tiny particles — 0.004 to 0.013
+      p.scale = 0.004 + Math.random() * 0.009;
 
       p.rotation.set(
         Math.random() * Math.PI * 2,
@@ -136,7 +137,9 @@ export function ShowcaseParticles({
       p.rotation.z += p.rotationSpeed.z * delta;
 
       const lifeT = p.age / PARTICLE_LIFETIME;
-      const scale = p.scale * (1 - Math.pow(lifeT, 2));
+      // Aggressive fadeout — shrinks fast after 40% of lifetime
+      const fade = lifeT < 0.4 ? 1 : 1 - Math.pow((lifeT - 0.4) / 0.6, 1.5);
+      const scale = p.scale * fade;
 
       dummy.position.copy(p.position);
       dummy.rotation.set(p.rotation.x, p.rotation.y, p.rotation.z);
