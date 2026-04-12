@@ -82,7 +82,7 @@ export function PriceDisplay({
             Shipping
           </p>
           <RadioGroup
-            value={selectedShipping?.shippingId}
+            value={selectedShipping?.shippingId ?? ""}
             onValueChange={(value) => {
               const option = vendorShipping.find((s) => s.shippingId === value);
               if (option) onSelectShipping(option);

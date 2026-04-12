@@ -351,19 +351,19 @@ export function QuoteConfigurator({
         </Alert>
       )}
 
-      {previewModelUrl && previewableFormat && (
-        <div className="mb-6 aspect-square w-full max-w-xs overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
-          <MaterialPreview
-            modelUrl={previewModelUrl}
-            format={format as "stl" | "obj" | "3mf"}
-            materialColor={previewColor}
-            className="h-full w-full"
-          />
-        </div>
-      )}
-
       <div className="grid gap-8 lg:grid-cols-3">
         <div className="lg:col-span-2">
+          {previewModelUrl && previewableFormat && (
+            <div className="mb-6 aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
+              <MaterialPreview
+                modelUrl={previewModelUrl}
+                format={format as "stl" | "obj" | "3mf"}
+                materialColor={previewColor}
+                className="h-full w-full"
+              />
+            </div>
+          )}
+
           <div className="flex items-center gap-4 mb-4">
             <Label htmlFor="quantity" className="text-sm font-medium">
               Quantity:

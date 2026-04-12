@@ -18,22 +18,17 @@ const MaterializeShaderMaterial = shaderMaterial(
     uFresnelPower: 2.5,
     uFresnelIntensity: 0.4,
   },
-  // Vertex shader
+  // Vertex shader — pass the raw view-space normal and viewDir through;
+  // do all the lighting math in the fragment shader so interpolation
+  // doesn't smear it.
   /* glsl */ `
     varying vec3 vNormal;
     varying vec3 vViewDir;
-    varying float vFresnel;
 
     void main() {
       vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-      vec3 viewDir = normalize(-mvPosition.xyz);
-      vec3 normal = normalize(normalMatrix * normal);
-
-      // Fresnel — brighter at glancing angles
-      vFresnel = pow(1.0 - max(dot(viewDir, normal), 0.0), 2.5);
-      vNormal = normal;
-      vViewDir = viewDir;
-
+      vViewDir = normalize(-mvPosition.xyz);
+      vNormal = normalize(normalMatrix * normal);
       gl_Position = projectionMatrix * mvPosition;
     }
   `,
@@ -47,20 +42,26 @@ const MaterializeShaderMaterial = shaderMaterial(
 
     varying vec3 vNormal;
     varying vec3 vViewDir;
-    varying float vFresnel;
 
     void main() {
-      // Simple hemisphere lighting — warm top, cool bottom
-      float hemisphere = dot(vNormal, vec3(0.0, 1.0, 0.0)) * 0.5 + 0.5;
+      // Re-normalize after interpolation — the interpolated normal is
+      // not unit length except at the vertices.
+      vec3 N = normalize(vNormal);
+      vec3 V = normalize(vViewDir);
+
+      // Hemisphere lighting — warm top, cool bottom
+      float hemisphere = N.y * 0.5 + 0.5;
       vec3 baseLight = mix(uAccentColor, uBaseColor, hemisphere);
 
       // Subtle directional light from upper-right
       vec3 lightDir = normalize(vec3(0.5, 0.8, 0.6));
-      float diffuse = max(dot(vNormal, lightDir), 0.0);
-      baseLight += vec3(0.12) * diffuse;
+      float diffuse = max(dot(N, lightDir), 0.0);
+      baseLight += vec3(0.18) * diffuse;
 
-      // Fresnel edge glow
-      float fresnel = pow(vFresnel, uFresnelPower) * uFresnelIntensity;
+      // Fresnel edge glow — single pow, computed in the fragment so the
+      // falloff is correct across the surface.
+      float fresnel =
+          pow(1.0 - max(dot(N, V), 0.0), uFresnelPower) * uFresnelIntensity;
       vec3 color = mix(baseLight, uFresnelColor, fresnel);
 
       gl_FragColor = vec4(color, 1.0);

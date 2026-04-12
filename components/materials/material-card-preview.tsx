@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
+import { ConvexGeometry } from "three/examples/jsm/geometries/ConvexGeometry.js";
 import { MaterializeMaterial } from "@/components/viewer/materialize-material";
 
 interface MaterialCardPreviewProps {
@@ -18,7 +19,8 @@ interface MaterialCardPreviewProps {
 //     detail hero then upscaled into mush.
 // v3: capture happens in a fixed 512px offscreen canvas, so display
 //     consumers can be any size and share the same crisp asset.
-const THUMBNAIL_VERSION = 3;
+// v4: chamfered pyramid geometry, single-pow fresnel, normalized varyings.
+const THUMBNAIL_VERSION = 4;
 const STORAGE_PREFIX = "materialTile:v";
 const CAPTURE_SIZE = 512;
 
@@ -53,51 +55,65 @@ function adjustBrightness(hex: string, percent: number): string {
 }
 
 /**
- * A beveled rounded rectangle — the canonical "material chip" shape.
- * Generous bevel so the fresnel + hemisphere lighting in MaterializeMaterial
- * has surface curvature to play against (a flat extrude looks identical to
- * a CSS rect, defeating the point of running a shader). Built with arcs
- * (not quadratic curves) so the corners are exactly circular and don't
- * leave the spurious vertex sliver that quadratic approximations were
- * producing in the bottom-left of the chip.
+ * A truncated square pyramid (frustum) with chamfered edges. Built as
+ * the convex hull of points clustered around each ideal corner — three
+ * offset points per corner, one along each adjacent edge — so the hull
+ * algorithm produces small triangular chamfer faces at every vertex
+ * and rectangular bevel strips along every edge automatically. No need
+ * to author the topology by hand or worry about smoothing groups.
  */
-function RoundedRectMesh({ color }: { color: string }) {
+function ChamferedPyramidMesh({ color }: { color: string }) {
   const geometry = useMemo(() => {
-    const shape = new THREE.Shape();
-    const w = 1.55;
-    const h = 1.05;
-    const r = 0.2;
-    const x = -w / 2;
-    const y = -h / 2;
-    shape.moveTo(x + r, y);
-    shape.lineTo(x + w - r, y);
-    shape.absarc(x + w - r, y + r, r, -Math.PI / 2, 0, false);
-    shape.lineTo(x + w, y + h - r);
-    shape.absarc(x + w - r, y + h - r, r, 0, Math.PI / 2, false);
-    shape.lineTo(x + r, y + h);
-    shape.absarc(x + r, y + h - r, r, Math.PI / 2, Math.PI, false);
-    shape.lineTo(x, y + r);
-    shape.absarc(x + r, y + r, r, Math.PI, (3 * Math.PI) / 2, false);
+    const baseHalf = 0.95;
+    const topHalf = 0.32;
+    const height = 1.55;
+    const chamfer = 0.07;
 
-    const geo = new THREE.ExtrudeGeometry(shape, {
-      depth: 0.22,
-      bevelEnabled: true,
-      bevelSize: 0.08,
-      bevelThickness: 0.08,
-      bevelSegments: 10,
-      curveSegments: 28,
-    });
+    // Eight ideal corners — base square at y=0, top square at y=height.
+    const corners: [number, number, number][] = [
+      [-baseHalf, 0, -baseHalf], // 0
+      [baseHalf, 0, -baseHalf], // 1
+      [baseHalf, 0, baseHalf], // 2
+      [-baseHalf, 0, baseHalf], // 3
+      [-topHalf, height, -topHalf], // 4
+      [topHalf, height, -topHalf], // 5
+      [topHalf, height, topHalf], // 6
+      [-topHalf, height, topHalf], // 7
+    ];
+
+    // Each vertex is incident to exactly three edges (two within its
+    // square ring, one going to the opposite ring).
+    const adjacency: number[][] = [
+      [1, 3, 4],
+      [0, 2, 5],
+      [1, 3, 6],
+      [0, 2, 7],
+      [5, 7, 0],
+      [4, 6, 1],
+      [5, 7, 2],
+      [4, 6, 3],
+    ];
+
+    const points: THREE.Vector3[] = [];
+    for (let i = 0; i < corners.length; i++) {
+      const v = new THREE.Vector3(...corners[i]);
+      for (const j of adjacency[i]) {
+        const dir = new THREE.Vector3(...corners[j]).sub(v).normalize();
+        points.push(v.clone().add(dir.multiplyScalar(chamfer)));
+      }
+    }
+
+    const geo = new ConvexGeometry(points);
     geo.center();
-    geo.computeVertexNormals();
     return geo;
   }, []);
 
   return (
-    <mesh geometry={geometry} rotation={[-0.22, 0.42, 0]}>
+    <mesh geometry={geometry} rotation={[-0.18, 0.5, 0]}>
       <MaterializeMaterial
         baseColor={color}
-        accentColor={adjustBrightness(color, -28)}
-        fresnelColor={adjustBrightness(color, 55)}
+        accentColor={adjustBrightness(color, -32)}
+        fresnelColor={adjustBrightness(color, 60)}
       />
     </mesh>
   );
@@ -106,21 +122,24 @@ function RoundedRectMesh({ color }: { color: string }) {
 function CaptureOnce({ onReady }: { onReady: (dataUrl: string) => void }) {
   const { gl, scene, camera } = useThree();
   const captured = useRef(false);
+  const framesSeen = useRef(0);
 
   useFrame(() => {
     if (captured.current) return;
+    // Skip the first couple of frames so geometry buffers are uploaded
+    // and the shader uniforms are bound — capturing on frame 0 sometimes
+    // produced a blank or untextured snapshot.
+    if (framesSeen.current++ < 2) return;
     captured.current = true;
-    requestAnimationFrame(() => {
-      gl.render(scene, camera);
-      onReady(gl.domElement.toDataURL("image/webp", 0.9));
-    });
+    gl.render(scene, camera);
+    onReady(gl.domElement.toDataURL("image/webp", 0.92));
   });
 
   return null;
 }
 
 /**
- * A material "chip" — a rounded extruded rectangle rendered with the
+ * A material "chip" — a chamfered truncated pyramid rendered with the
  * Materialize shader, tinted from the material's color. Renders once
  * per unique color, captures a thumbnail, caches in localStorage, and
  * then never mounts a canvas again for that color. Same component is
@@ -198,11 +217,11 @@ export function MaterialCardPreview({
           style={{ width: CAPTURE_SIZE, height: CAPTURE_SIZE }}
         >
           <Canvas
-            camera={{ position: [0, 0, 3.1], fov: 32 }}
-            dpr={1}
+            camera={{ position: [0, 0.15, 4.1], fov: 32 }}
+            dpr={2}
             gl={{ antialias: true, alpha: true, preserveDrawingBuffer: true }}
           >
-            <RoundedRectMesh color={color} />
+            <ChamferedPyramidMesh color={color} />
             <CaptureOnce onReady={handleCaptured} />
           </Canvas>
         </div>
