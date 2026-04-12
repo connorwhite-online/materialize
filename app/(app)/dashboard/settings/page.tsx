@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { ProfileForm } from "./profile-form";
+import { ThemeSwitcher } from "@/components/theme-switcher";
 
 export default async function SettingsPage() {
   const { userId } = await auth();
@@ -14,18 +15,19 @@ export default async function SettingsPage() {
     .where(eq(users.id, userId));
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8">
-      <h1 className="text-2xl font-bold">Profile Settings</h1>
-      <div className="mt-6">
-        <ProfileForm
-          initialData={{
-            username: user?.username ?? "",
-            displayName: user?.displayName ?? "",
-            bio: user?.bio ?? "",
-            socialLinks: user?.socialLinks ?? [],
-          }}
-        />
-      </div>
+    <div className="mx-auto max-w-2xl px-4 py-8 space-y-8">
+      <h1 className="text-2xl font-bold">Settings</h1>
+
+      <ProfileForm
+        initialData={{
+          username: user?.username ?? "",
+          displayName: user?.displayName ?? "",
+          bio: user?.bio ?? "",
+          socialLinks: user?.socialLinks ?? [],
+        }}
+      />
+
+      <ThemeSwitcher />
     </div>
   );
 }

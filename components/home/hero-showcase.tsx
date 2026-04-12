@@ -59,11 +59,13 @@ export function HeroShowcase() {
     lastX: number;
     lastTime: number;
     totalDelta: number;
+    peakVelocity: number;
   }>({
     active: false,
     lastX: 0,
     lastTime: 0,
     totalDelta: 0,
+    peakVelocity: 0,
   });
 
   const handlePointerDown = (e: React.PointerEvent) => {
@@ -72,6 +74,7 @@ export function HeroShowcase() {
       lastX: e.clientX,
       lastTime: performance.now(),
       totalDelta: 0,
+      peakVelocity: 0,
     };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
@@ -94,7 +97,14 @@ export function HeroShowcase() {
     }
 
     // Velocity for mesh distortion (normalized -1..1, positive = finger right)
-    dragVelocityRef.current = Math.max(-1, Math.min(1, (dx / dt) * 20));
+    const vel = Math.max(-1, Math.min(1, (dx / dt) * 20));
+    dragVelocityRef.current = vel;
+
+    // Track peak velocity during this drag
+    if (Math.abs(vel) > state.peakVelocity) {
+      state.peakVelocity = Math.abs(vel);
+    }
+
     forceUpdate({});
   };
 
@@ -125,8 +135,9 @@ export function HeroShowcase() {
 
       if (closestIndex !== selectedIndex) {
         const direction = closestIndex > selectedIndex ? 1 : -1;
-        // Intensity based on velocity at release (0.5 - 1.5)
-        const intensity = 0.5 + Math.min(1, Math.abs(dragVelocityRef.current)) * 1.0;
+        // Use peak velocity from the drag — not the instantaneous velocity
+        // at release (which is often near 0 as the finger slows down)
+        const intensity = 0.3 + state.peakVelocity * 1.2;
         handleSelect(closestIndex, direction, intensity);
       } else {
         // Snap back to current if no change

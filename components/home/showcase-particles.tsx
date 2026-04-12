@@ -4,8 +4,8 @@ import { useRef, useMemo, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 
-const MAX_PARTICLES = 700;
-const MIN_PARTICLES = 200;
+const MAX_PARTICLES = 800;
+const MIN_PARTICLES = 60;
 const PARTICLE_LIFETIME = 0.85;
 const BASE_RADIUS = 1.2;
 
@@ -46,9 +46,13 @@ export function ShowcaseParticles({
   useEffect(() => {
     if (burstKey === 0) return;
 
-    // Scale count with intensity: 200 (slow) -> 700 (fast)
+    // Scale count with intensity using a sqrt curve so low velocities
+    // produce noticeably fewer particles than fast flicks.
+    // intensity 0.3 (slow) → ~260, 0.8 (medium) → ~560, 1.5 (fast) → 800
+    const normalized = Math.min(1, intensity / 1.5);
+    const curved = Math.sqrt(normalized); // easing for more dynamic range
     const count = Math.round(
-      MIN_PARTICLES + (MAX_PARTICLES - MIN_PARTICLES) * Math.min(1, intensity)
+      MIN_PARTICLES + (MAX_PARTICLES - MIN_PARTICLES) * curved
     );
 
     // Back-spray ratio — randomize slightly (20-30% of main spray)
