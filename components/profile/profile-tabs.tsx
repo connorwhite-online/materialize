@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
 
 type Tab = "files" | "library" | "orders" | "earnings";
@@ -23,7 +24,7 @@ export function ProfileTabs({ username, activeTab, isOwner }: ProfileTabsProps) 
 
   return (
     <div className="border-b border-border">
-      <nav className="flex gap-6 -mb-px">
+      <nav className="flex gap-1 -mb-px">
         {visibleTabs.map((tab) => {
           const href =
             tab.key === "files" ? `/u/${username}` : `/u/${username}?tab=${tab.key}`;
@@ -34,13 +35,25 @@ export function ProfileTabs({ username, activeTab, isOwner }: ProfileTabsProps) 
               href={href}
               scroll={false}
               className={cn(
-                "py-2 text-sm font-medium transition-colors border-b-2",
+                "relative px-4 py-2.5 text-sm font-medium transition-colors",
                 active
-                  ? "text-foreground border-foreground"
-                  : "text-muted-foreground border-transparent hover:text-foreground"
+                  ? "text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
               )}
             >
               {tab.label}
+              {active && (
+                <motion.div
+                  layoutId="profile-tab-underline"
+                  className="absolute left-0 right-0 bottom-0 h-0.5 bg-foreground"
+                  transition={{
+                    type: "spring",
+                    stiffness: 400,
+                    damping: 32,
+                    mass: 0.8,
+                  }}
+                />
+              )}
             </Link>
           );
         })}
