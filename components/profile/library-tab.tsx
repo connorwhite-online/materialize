@@ -2,34 +2,26 @@ import Link from "next/link";
 import { db } from "@/lib/db";
 import {
   files,
+  fileAssets,
   collections,
   collectionFiles,
   purchases,
   users,
 } from "@/lib/db/schema";
 import { eq, and, desc, inArray } from "drizzle-orm";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CollectionSection } from "./collection-section";
+import {
+  LibraryFileCard,
+  type LibraryFileCardItem,
+} from "./library-file-card";
 
 interface LibraryTabProps {
   userId: string;
   isOwner: boolean;
 }
 
-type LibraryItem = {
-  id: string;
-  name: string;
-  slug: string;
-  price: number;
-  status: string;
-  visibility: string;
-  thumbnailUrl: string | null;
-  source: "owned" | "purchased";
-  creatorUsername?: string | null;
-  creatorDisplayName?: string | null;
-};
+type LibraryItem = LibraryFileCardItem;
 
 export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
   // Owned files (creator content)
@@ -45,17 +37,24 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
     .orderBy(desc(files.createdAt));
 
   // Purchased files (buyer content) — owner only, since purchases are private
-  let purchasedItems: LibraryItem[] = [];
+  type PurchasedRow = {
+    id: string;
+    name: string;
+    slug: string;
+    price: number;
+    visibility: string;
+    creatorUsername: string | null;
+    creatorDisplayName: string | null;
+  };
+  let purchasedRows: PurchasedRow[] = [];
   if (isOwner) {
-    const rows = await db
+    purchasedRows = await db
       .select({
         id: files.id,
         name: files.name,
         slug: files.slug,
         price: files.price,
-        status: files.status,
         visibility: files.visibility,
-        thumbnailUrl: files.thumbnailUrl,
         creatorUsername: users.username,
         creatorDisplayName: users.displayName,
       })
@@ -68,12 +67,56 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
           eq(purchases.status, "completed")
         )
       );
-
-    purchasedItems = rows.map((r) => ({
-      ...r,
-      source: "purchased" as const,
-    }));
   }
+
+  // Fetch primary asset (id + format) for every file we'll render so the
+  // cards can render a 3D preview without N+1 queries.
+  const allFileIds = [
+    ...ownedFiles.map((f) => f.id),
+    ...purchasedRows.map((r) => r.id),
+  ];
+  const primaryAssetByFileId = new Map<
+    string,
+    { id: string; format: string }
+  >();
+  if (allFileIds.length > 0) {
+    const assetRows = await db
+      .select({
+        id: fileAssets.id,
+        fileId: fileAssets.fileId,
+        format: fileAssets.format,
+        createdAt: fileAssets.createdAt,
+      })
+      .from(fileAssets)
+      .where(inArray(fileAssets.fileId, allFileIds))
+      .orderBy(fileAssets.createdAt);
+    for (const asset of assetRows) {
+      if (!asset.fileId) continue;
+      // First (oldest) asset wins as the "primary" preview source.
+      if (!primaryAssetByFileId.has(asset.fileId)) {
+        primaryAssetByFileId.set(asset.fileId, {
+          id: asset.id,
+          format: asset.format,
+        });
+      }
+    }
+  }
+
+  const purchasedItems: LibraryItem[] = purchasedRows.map((r) => {
+    const asset = primaryAssetByFileId.get(r.id);
+    return {
+      id: r.id,
+      name: r.name,
+      slug: r.slug,
+      price: r.price,
+      visibility: r.visibility,
+      source: "purchased" as const,
+      primaryAssetId: asset?.id ?? null,
+      primaryFormat: asset?.format ?? null,
+      creatorUsername: r.creatorUsername,
+      creatorDisplayName: r.creatorDisplayName,
+    };
+  });
 
   // Collections (only owned files live in them)
   const collectionConditions = [eq(collections.userId, userId)];
@@ -105,16 +148,19 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
           )
       : [];
 
-  const ownedItems: LibraryItem[] = ownedFiles.map((f) => ({
-    id: f.id,
-    name: f.name,
-    slug: f.slug,
-    price: f.price,
-    status: f.status,
-    visibility: f.visibility,
-    thumbnailUrl: f.thumbnailUrl,
-    source: "owned" as const,
-  }));
+  const ownedItems: LibraryItem[] = ownedFiles.map((f) => {
+    const asset = primaryAssetByFileId.get(f.id);
+    return {
+      id: f.id,
+      name: f.name,
+      slug: f.slug,
+      price: f.price,
+      visibility: f.visibility,
+      source: "owned" as const,
+      primaryAssetId: asset?.id ?? null,
+      primaryFormat: asset?.format ?? null,
+    };
+  });
 
   const itemMap = new Map(ownedItems.map((f) => [f.id, f]));
   const itemsInCollection = new Map<string, LibraryItem[]>();
@@ -220,57 +266,9 @@ function FileGrid({
   isOwner: boolean;
 }) {
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+    <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
       {items.map((item) => (
-        <Link key={item.id} href={`/files/${item.slug}`}>
-          <Card className="group overflow-hidden transition-colors hover:border-primary/30">
-            <div className="aspect-square bg-gradient-to-br from-muted to-muted/50" />
-            <CardContent className="p-4">
-              <h3 className="truncate text-sm font-medium transition-colors group-hover:text-primary">
-                {item.name}
-              </h3>
-              {item.source === "purchased" && item.creatorUsername && (
-                <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                  by {item.creatorDisplayName || item.creatorUsername}
-                </p>
-              )}
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                {item.source === "purchased" && (
-                  <Badge variant="secondary" className="text-[10px]">
-                    Purchased
-                  </Badge>
-                )}
-                {item.source === "owned" &&
-                  isOwner &&
-                  item.status !== "published" && (
-                    <Badge
-                      variant="outline"
-                      className="text-[10px] capitalize"
-                    >
-                      {item.status}
-                    </Badge>
-                  )}
-                {item.source === "owned" &&
-                  isOwner &&
-                  item.visibility === "private" && (
-                    <Badge variant="outline" className="text-[10px]">
-                      Hidden
-                    </Badge>
-                  )}
-                {item.source === "owned" &&
-                  (item.price > 0 ? (
-                    <span className="text-sm font-medium tabular-nums">
-                      ${(item.price / 100).toFixed(2)}
-                    </span>
-                  ) : (
-                    <Badge variant="secondary" className="text-[10px]">
-                      Free
-                    </Badge>
-                  ))}
-              </div>
-            </CardContent>
-          </Card>
-        </Link>
+        <LibraryFileCard key={item.id} item={item} isOwner={isOwner} />
       ))}
     </div>
   );

@@ -66,16 +66,13 @@ export default function ProfileLoading() {
             </div>
             <Skeleton className="h-6 w-16 rounded-full" />
           </div>
-          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, i) => (
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+            {Array.from({ length: 6 }).map((_, i) => (
               <Card key={i} className="overflow-hidden">
                 <Skeleton className="aspect-square w-full rounded-none" />
-                <CardContent className="p-4">
+                <CardContent className="p-3">
                   <Skeleton className="h-4 w-3/4" />
-                  <div className="mt-3 flex items-center gap-2">
-                    <Skeleton className="h-5 w-10 rounded-full" />
-                    <Skeleton className="h-4 w-12" />
-                  </div>
+                  <Skeleton className="mt-1 h-3 w-1/2" />
                 </CardContent>
               </Card>
             ))}
@@ -84,16 +81,13 @@ export default function ProfileLoading() {
 
         {/* Uncollected grid panel */}
         <div className="rounded-2xl bg-muted/50 p-5">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, i) => (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+            {Array.from({ length: 6 }).map((_, i) => (
               <Card key={i} className="overflow-hidden">
                 <Skeleton className="aspect-square w-full rounded-none" />
-                <CardContent className="p-4">
+                <CardContent className="p-3">
                   <Skeleton className="h-4 w-3/4" />
-                  <div className="mt-3 flex items-center gap-2">
-                    <Skeleton className="h-5 w-10 rounded-full" />
-                    <Skeleton className="h-4 w-12" />
-                  </div>
+                  <Skeleton className="mt-1 h-3 w-1/2" />
                 </CardContent>
               </Card>
             ))}

@@ -26,10 +26,13 @@ export default async function FileDetailPage(props: {
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await props.params;
+  const { userId } = await auth();
 
+  // Look up by slug only — we filter by published status (or owner) below.
   const [file] = await db
     .select({
       id: files.id,
+      status: files.status,
       name: files.name,
       description: files.description,
       slug: files.slug,
@@ -49,9 +52,12 @@ export default async function FileDetailPage(props: {
     })
     .from(files)
     .innerJoin(users, eq(files.userId, users.id))
-    .where(and(eq(files.slug, slug), eq(files.status, "published")));
+    .where(eq(files.slug, slug));
 
+  // Visible to anyone if published; visible to owner regardless of status.
   if (!file) notFound();
+  const viewerIsOwner = userId === file.userId;
+  if (file.status !== "published" && !viewerIsOwner) notFound();
 
   const assets = await db
     .select()
@@ -75,8 +81,7 @@ export default async function FileDetailPage(props: {
     }))
   );
 
-  const { userId } = await auth();
-  const isOwner = userId === file.userId;
+  const isOwner = viewerIsOwner;
 
   let hasPurchased = false;
   if (userId && !isOwner && file.price > 0) {
