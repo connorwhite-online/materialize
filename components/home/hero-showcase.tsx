@@ -13,11 +13,15 @@ export function HeroShowcase() {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [burstKey, setBurstKey] = useState(0);
   const [burstDirection, setBurstDirection] = useState(0);
+  const [burstIntensity, setBurstIntensity] = useState(1);
 
-  // Shared drag state — controls both carousel and mesh distortion
-  // dragVelocity: -1..1 (negative = left, positive = right)
+  // Shared drag velocity — drives both mesh distortion and carousel scroll
+  // Positive = swiping right (finger moves right, content moves right too)
   const dragVelocityRef = useRef(0);
   const [, forceUpdate] = useState({});
+
+  // Ref to the carousel's scrollable track
+  const carouselTrackRef = useRef<HTMLDivElement>(null);
 
   const material = MATERIALS[selectedIndex];
 
@@ -36,46 +40,46 @@ export function HeroShowcase() {
     [material]
   );
 
-  const handleSelect = useCallback((index: number, direction: number) => {
-    setSelectedIndex(index);
-    setBurstDirection(direction);
-    setBurstKey((k) => k + 1);
-  }, []);
+  const handleSelect = useCallback(
+    (index: number, direction: number, intensity: number = 1) => {
+      setSelectedIndex(index);
+      // Particles fly in the direction the finger moved.
+      // direction: +1 = next item (finger moved left), -1 = prev item (finger moved right)
+      // Invert so particles fly with the finger.
+      setBurstDirection(-direction);
+      setBurstIntensity(intensity);
+      setBurstKey((k) => k + 1);
+    },
+    []
+  );
 
-  // Canvas drag-to-scroll handlers
+  // --- Unified pointer capture ---
   const dragStateRef = useRef<{
     active: boolean;
-    startX: number;
-    startY: number;
     lastX: number;
     lastTime: number;
     totalDelta: number;
   }>({
     active: false,
-    startX: 0,
-    startY: 0,
     lastX: 0,
     lastTime: 0,
     totalDelta: 0,
   });
 
-  const handleCanvasPointerDown = (e: React.PointerEvent) => {
+  const handlePointerDown = (e: React.PointerEvent) => {
     dragStateRef.current = {
       active: true,
-      startX: e.clientX,
-      startY: e.clientY,
       lastX: e.clientX,
       lastTime: performance.now(),
       totalDelta: 0,
     };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
 
-  const handleCanvasPointerMove = (e: React.PointerEvent) => {
+  const handlePointerMove = (e: React.PointerEvent) => {
     const state = dragStateRef.current;
     if (!state.active) return;
 
-    // Combine horizontal and vertical drag — both scroll the carousel
     const dx = e.clientX - state.lastX;
     const now = performance.now();
     const dt = Math.max(1, now - state.lastTime);
@@ -84,30 +88,54 @@ export function HeroShowcase() {
     state.lastX = e.clientX;
     state.lastTime = now;
 
-    // Instantaneous velocity for mesh distortion (-1 to 1)
+    // Drive carousel scroll — scroll opposite to finger direction
+    if (carouselTrackRef.current) {
+      carouselTrackRef.current.scrollLeft -= dx;
+    }
+
+    // Velocity for mesh distortion (normalized -1..1, positive = finger right)
     dragVelocityRef.current = Math.max(-1, Math.min(1, (dx / dt) * 20));
     forceUpdate({});
   };
 
-  const handleCanvasPointerUp = (e: React.PointerEvent) => {
+  const handlePointerUp = (e: React.PointerEvent) => {
     const state = dragStateRef.current;
     if (!state.active) return;
     state.active = false;
 
     try {
-      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     } catch {}
 
-    // Snap to next/prev based on drag distance
-    const threshold = 40;
-    if (Math.abs(state.totalDelta) > threshold) {
-      const direction = state.totalDelta < 0 ? 1 : -1;
-      const newIndex = Math.max(
-        0,
-        Math.min(MATERIALS.length - 1, selectedIndex + direction)
-      );
-      if (newIndex !== selectedIndex) {
-        handleSelect(newIndex, direction);
+    // Determine target index from current scroll position and snap
+    if (carouselTrackRef.current) {
+      const track = carouselTrackRef.current;
+      const trackCenter = track.scrollLeft + track.offsetWidth / 2;
+      let closestIndex = 0;
+      let closestDistance = Infinity;
+      for (let i = 0; i < track.children.length; i++) {
+        const item = track.children[i] as HTMLElement;
+        const itemCenter = item.offsetLeft + item.offsetWidth / 2;
+        const distance = Math.abs(trackCenter - itemCenter);
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestIndex = i;
+        }
+      }
+
+      if (closestIndex !== selectedIndex) {
+        const direction = closestIndex > selectedIndex ? 1 : -1;
+        // Intensity based on velocity at release (0.5 - 1.5)
+        const intensity = 0.5 + Math.min(1, Math.abs(dragVelocityRef.current)) * 1.0;
+        handleSelect(closestIndex, direction, intensity);
+      } else {
+        // Snap back to current if no change
+        const item = track.children[selectedIndex] as HTMLElement | undefined;
+        if (item) {
+          const targetScroll =
+            item.offsetLeft + item.offsetWidth / 2 - track.offsetWidth / 2;
+          track.scrollTo({ left: targetScroll, behavior: "smooth" });
+        }
       }
     }
 
@@ -116,7 +144,7 @@ export function HeroShowcase() {
     forceUpdate({});
   };
 
-  // Smooth velocity decay when not dragging
+  // Smooth velocity decay after release
   useEffect(() => {
     if (dragStateRef.current.active) return;
     if (Math.abs(dragVelocityRef.current) < 0.01) return;
@@ -131,15 +159,15 @@ export function HeroShowcase() {
   });
 
   return (
-    <div className="flex flex-col items-center gap-4">
-      {/* 3D viewport — drag to scroll */}
-      <div
-        className="relative w-full h-[320px] sm:h-[400px] touch-none cursor-grab active:cursor-grabbing"
-        onPointerDown={handleCanvasPointerDown}
-        onPointerMove={handleCanvasPointerMove}
-        onPointerUp={handleCanvasPointerUp}
-        onPointerCancel={handleCanvasPointerUp}
-      >
+    <div
+      className="flex flex-col items-center gap-4 touch-none cursor-grab active:cursor-grabbing"
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+    >
+      {/* 3D viewport */}
+      <div className="relative w-full h-[320px] sm:h-[400px]">
         <Canvas
           camera={{ position: [0, 0, 4.5], fov: 45 }}
           dpr={[1, 2]}
@@ -154,14 +182,16 @@ export function HeroShowcase() {
             <ShowcaseParticles
               burstKey={burstKey}
               direction={burstDirection}
+              intensity={burstIntensity}
               color={particleColor}
             />
           </Suspense>
         </Canvas>
       </div>
 
-      {/* Material carousel */}
+      {/* Material carousel — ref forwarded so parent can drive scroll */}
       <MaterialCarousel
+        ref={carouselTrackRef}
         materials={MATERIALS}
         selectedIndex={selectedIndex}
         onSelect={handleSelect}

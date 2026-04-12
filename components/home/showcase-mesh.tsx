@@ -28,11 +28,12 @@ export function ShowcaseMesh({ target, dragVelocityRef }: ShowcaseMeshProps) {
     meshRef.current.rotation.y += delta * 0.15;
     meshRef.current.rotation.x += delta * 0.05;
 
-    // Drag velocity → squash/stretch distortion
+    // Drag velocity → stretch horizontally in swipe direction, flatten height
     const dragVel = dragVelocityRef.current;
-    const stretchX = 1 + dragVel * 0.12;
-    const squashY = 1 - Math.abs(dragVel) * 0.08;
-    const squashZ = 1 - Math.abs(dragVel) * 0.04;
+    const absVel = Math.abs(dragVel);
+    const stretchX = 1 + absVel * 0.22; // always elongates horizontally
+    const squashY = 1 - absVel * 0.18; // flattens more aggressively
+    const squashZ = 1 - absVel * 0.05;
 
     // Smooth toward target scale
     const scaleLerp = 1 - Math.exp(-delta * 12);
@@ -60,8 +61,8 @@ export function ShowcaseMesh({ target, dragVelocityRef }: ShowcaseMeshProps) {
       scaleLerp
     );
 
-    // Sway in the drag direction (position offset)
-    const swayTarget = dragVel * 0.35;
+    // Sway in the drag direction (position offset) — more pronounced
+    const swayTarget = dragVel * 0.55;
     groupRef.current.position.x = THREE.MathUtils.lerp(
       groupRef.current.position.x,
       swayTarget,

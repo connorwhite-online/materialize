@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import type { MaterialMetadata } from "@/lib/materials/data";
 import { cn } from "@/lib/utils";
 
@@ -11,106 +11,66 @@ interface MaterialCarouselProps {
 }
 
 /**
- * Horizontal snap-scroll carousel of material names.
- * Native CSS scroll-snap provides the magnetic snap feel.
- * Scroll end → detect which item is centered and update selection.
+ * Display-only carousel of material names.
+ * Scroll is driven by the parent HeroShowcase via the forwarded ref.
+ * No native scroll — overflow is hidden and parent imperatively sets scrollLeft.
  */
-export function MaterialCarousel({
-  materials,
-  selectedIndex,
-  onSelect,
-}: MaterialCarouselProps) {
-  const trackRef = useRef<HTMLDivElement>(null);
-  const isProgrammaticScroll = useRef(false);
-  const scrollEndTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+export const MaterialCarousel = forwardRef<HTMLDivElement, MaterialCarouselProps>(
+  function MaterialCarousel({ materials, selectedIndex, onSelect }, ref) {
+    const trackRef = useRef<HTMLDivElement>(null);
 
-  // Scroll to keep selected item centered (smooth)
-  useEffect(() => {
-    const track = trackRef.current;
-    if (!track) return;
-    const item = track.children[selectedIndex] as HTMLElement | undefined;
-    if (!item) return;
+    // Forward the internal ref to the parent
+    useImperativeHandle(ref, () => trackRef.current as HTMLDivElement);
 
-    const trackCenter = track.offsetWidth / 2;
-    const itemCenter = item.offsetLeft + item.offsetWidth / 2;
-    const targetScroll = itemCenter - trackCenter;
+    // Scroll to keep selected item centered when selectedIndex changes
+    useEffect(() => {
+      const track = trackRef.current;
+      if (!track) return;
+      const item = track.children[selectedIndex] as HTMLElement | undefined;
+      if (!item) return;
 
-    if (Math.abs(track.scrollLeft - targetScroll) < 1) return;
+      const trackCenter = track.offsetWidth / 2;
+      const itemCenter = item.offsetLeft + item.offsetWidth / 2;
+      const targetScroll = itemCenter - trackCenter;
 
-    isProgrammaticScroll.current = true;
-    track.scrollTo({ left: targetScroll, behavior: "smooth" });
+      if (Math.abs(track.scrollLeft - targetScroll) < 1) return;
+      track.scrollTo({ left: targetScroll, behavior: "smooth" });
+    }, [selectedIndex]);
 
-    setTimeout(() => {
-      isProgrammaticScroll.current = false;
-    }, 500);
-  }, [selectedIndex]);
+    return (
+      <div className="relative w-full">
+        {/* Edge fades */}
+        <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-16 bg-gradient-to-r from-background to-transparent" />
+        <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-16 bg-gradient-to-l from-background to-transparent" />
 
-  const handleScroll = () => {
-    if (isProgrammaticScroll.current) return;
-    const track = trackRef.current;
-    if (!track) return;
-
-    if (scrollEndTimer.current) clearTimeout(scrollEndTimer.current);
-    scrollEndTimer.current = setTimeout(() => {
-      const trackCenter = track.scrollLeft + track.offsetWidth / 2;
-      let closestIndex = 0;
-      let closestDistance = Infinity;
-      for (let i = 0; i < track.children.length; i++) {
-        const item = track.children[i] as HTMLElement;
-        const itemCenter = item.offsetLeft + item.offsetWidth / 2;
-        const distance = Math.abs(trackCenter - itemCenter);
-        if (distance < closestDistance) {
-          closestDistance = distance;
-          closestIndex = i;
-        }
-      }
-
-      if (closestIndex !== selectedIndex) {
-        const direction = closestIndex > selectedIndex ? 1 : -1;
-        onSelect(closestIndex, direction);
-      }
-    }, 100);
-  };
-
-  return (
-    <div className="relative w-full">
-      {/* Edge fades */}
-      <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-16 bg-gradient-to-r from-background to-transparent" />
-      <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-16 bg-gradient-to-l from-background to-transparent" />
-
-      <div
-        ref={trackRef}
-        onScroll={handleScroll}
-        className="flex items-center gap-6 overflow-x-auto px-[50%] py-2 select-none snap-x snap-mandatory"
-        style={{
-          scrollbarWidth: "none",
-          msOverflowStyle: "none",
-          WebkitOverflowScrolling: "touch",
-        }}
-      >
-        {materials.map((material, i) => {
-          const isActive = i === selectedIndex;
-          return (
-            <button
-              key={material.id}
-              type="button"
-              onClick={() => {
-                if (i !== selectedIndex) {
-                  onSelect(i, i > selectedIndex ? 1 : -1);
-                }
-              }}
-              className={cn(
-                "shrink-0 snap-center whitespace-nowrap text-sm transition-all duration-200",
-                isActive
-                  ? "text-foreground font-medium text-base"
-                  : "text-muted-foreground/60 hover:text-muted-foreground"
-              )}
-            >
-              {material.name}
-            </button>
-          );
-        })}
+        <div
+          ref={trackRef}
+          className="flex items-center gap-6 overflow-x-hidden px-[50%] py-2 select-none"
+        >
+          {materials.map((material, i) => {
+            const isActive = i === selectedIndex;
+            return (
+              <button
+                key={material.id}
+                type="button"
+                onClick={() => {
+                  if (i !== selectedIndex) {
+                    onSelect(i, i > selectedIndex ? 1 : -1);
+                  }
+                }}
+                className={cn(
+                  "shrink-0 whitespace-nowrap text-sm transition-all duration-200",
+                  isActive
+                    ? "text-foreground font-medium text-base"
+                    : "text-muted-foreground/60 hover:text-muted-foreground"
+                )}
+              >
+                {material.name}
+              </button>
+            );
+          })}
+        </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
+);

@@ -4,36 +4,40 @@ import { useRef, useMemo, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 
-const PARTICLE_COUNT = 450;
-const PARTICLE_LIFETIME = 0.8;
+const MAX_PARTICLES = 700;
+const MIN_PARTICLES = 200;
+const PARTICLE_LIFETIME = 0.85;
 const BASE_RADIUS = 1.2;
 
 interface ShowcaseParticlesProps {
   burstKey: number;
   direction: number; // -1 (left) or 1 (right)
+  intensity: number; // 0.5 - 1.5, scales count and velocity
   color: THREE.Color;
 }
 
 /**
  * Instanced particle burst — spawns on burstKey change.
- * Particles scatter along the canonical X axis (swipe direction),
- * not toward the camera. Small and numerous for a fine dust effect.
+ * Scatter along X axis in swipe direction with slight angular variance.
+ * Particle count and velocity scale with intensity (scroll velocity).
  */
 export function ShowcaseParticles({
   burstKey,
   direction,
+  intensity,
   color,
 }: ShowcaseParticlesProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
 
   const particles = useMemo(() => {
-    return Array.from({ length: PARTICLE_COUNT }, () => ({
+    return Array.from({ length: MAX_PARTICLES }, () => ({
       position: new THREE.Vector3(),
       velocity: new THREE.Vector3(),
       age: PARTICLE_LIFETIME + 1,
       scale: 0,
       rotation: new THREE.Vector3(),
       rotationSpeed: new THREE.Vector3(),
+      active: false,
     }));
   }, []);
 
@@ -42,10 +46,28 @@ export function ShowcaseParticles({
   useEffect(() => {
     if (burstKey === 0) return;
 
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
+    // Scale count with intensity: 200 (slow) -> 700 (fast)
+    const count = Math.round(
+      MIN_PARTICLES + (MAX_PARTICLES - MIN_PARTICLES) * Math.min(1, intensity)
+    );
+
+    // Randomize base angle slightly for unique spray each burst (±12°)
+    const baseAngleJitter = (Math.random() - 0.5) * 0.4;
+    // Slight vertical bias — sometimes up, sometimes down
+    const verticalBias = (Math.random() - 0.5) * 0.6;
+    // Random spread angle (narrower for slow, wider for fast)
+    const spread = 0.3 + intensity * 0.4;
+
+    for (let i = 0; i < MAX_PARTICLES; i++) {
       const p = particles[i];
 
-      // Sample a point on a sphere (approximate icosahedron surface)
+      if (i >= count) {
+        p.active = false;
+        continue;
+      }
+      p.active = true;
+
+      // Sample a point on a sphere approximating the mesh surface
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
       const r = BASE_RADIUS + (Math.random() - 0.5) * 0.1;
@@ -55,19 +77,22 @@ export function ShowcaseParticles({
         r * Math.cos(phi)
       );
 
-      // Velocity primarily along X axis in the swipe direction
-      // Small Y variance for natural dispersal, minimal Z
+      // Random angle within spray cone, centered on swipe direction
+      const particleAngle =
+        baseAngleJitter + (Math.random() - 0.5) * spread;
+      const speedBase = 2.0 + intensity * 2.5;
+      const speed = speedBase * (0.7 + Math.random() * 0.6);
+
       p.velocity.set(
-        direction * (2.0 + Math.random() * 2.5),
-        (Math.random() - 0.5) * 0.8,
-        (Math.random() - 0.5) * 0.3
+        direction * speed * Math.cos(particleAngle),
+        verticalBias + direction * speed * Math.sin(particleAngle) +
+          (Math.random() - 0.5) * 0.8,
+        (Math.random() - 0.5) * 0.4
       );
 
       p.age = 0;
-      // Tiny particles — 0.01 to 0.025
       p.scale = 0.01 + Math.random() * 0.015;
 
-      // Random rotation for tumbling
       p.rotation.set(
         Math.random() * Math.PI * 2,
         Math.random() * Math.PI * 2,
@@ -79,16 +104,15 @@ export function ShowcaseParticles({
         (Math.random() - 0.5) * 8
       );
     }
-  }, [burstKey, direction, particles]);
+  }, [burstKey, direction, intensity, particles]);
 
   useFrame((_, delta) => {
     if (!meshRef.current) return;
 
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
+    for (let i = 0; i < MAX_PARTICLES; i++) {
       const p = particles[i];
-      p.age += delta;
 
-      if (p.age >= PARTICLE_LIFETIME) {
+      if (!p.active || p.age >= PARTICLE_LIFETIME) {
         dummy.position.set(0, 0, 0);
         dummy.scale.set(0, 0, 0);
         dummy.updateMatrix();
@@ -96,6 +120,7 @@ export function ShowcaseParticles({
         continue;
       }
 
+      p.age += delta;
       p.position.addScaledVector(p.velocity, delta);
       p.velocity.multiplyScalar(0.94);
 
@@ -119,7 +144,7 @@ export function ShowcaseParticles({
   return (
     <instancedMesh
       ref={meshRef}
-      args={[undefined, undefined, PARTICLE_COUNT]}
+      args={[undefined, undefined, MAX_PARTICLES]}
       frustumCulled={false}
     >
       <boxGeometry args={[1, 1, 1]} />
