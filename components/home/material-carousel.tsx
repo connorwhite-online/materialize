@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useEffect } from "react";
+import { useRef, useEffect } from "react";
 import type { MaterialMetadata } from "@/lib/materials/data";
 import { cn } from "@/lib/utils";
 
@@ -12,7 +12,8 @@ interface MaterialCarouselProps {
 
 /**
  * Horizontal snap-scroll carousel of material names.
- * Active material is centered and larger; others fade to the sides.
+ * Native CSS scroll-snap provides the magnetic snap feel.
+ * Scroll end → detect which item is centered and update selection.
  */
 export function MaterialCarousel({
   materials,
@@ -20,10 +21,10 @@ export function MaterialCarousel({
   onSelect,
 }: MaterialCarouselProps) {
   const trackRef = useRef<HTMLDivElement>(null);
-  const [dragging, setDragging] = useState(false);
-  const dragStart = useRef({ x: 0, scrollLeft: 0 });
+  const isProgrammaticScroll = useRef(false);
+  const scrollEndTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Scroll to keep selected item centered
+  // Scroll to keep selected item centered (smooth)
   useEffect(() => {
     const track = trackRef.current;
     if (!track) return;
@@ -32,53 +33,43 @@ export function MaterialCarousel({
 
     const trackCenter = track.offsetWidth / 2;
     const itemCenter = item.offsetLeft + item.offsetWidth / 2;
-    track.scrollTo({
-      left: itemCenter - trackCenter,
-      behavior: "smooth",
-    });
+    const targetScroll = itemCenter - trackCenter;
+
+    if (Math.abs(track.scrollLeft - targetScroll) < 1) return;
+
+    isProgrammaticScroll.current = true;
+    track.scrollTo({ left: targetScroll, behavior: "smooth" });
+
+    setTimeout(() => {
+      isProgrammaticScroll.current = false;
+    }, 500);
   }, [selectedIndex]);
 
-  const handlePointerDown = (e: React.PointerEvent) => {
+  const handleScroll = () => {
+    if (isProgrammaticScroll.current) return;
     const track = trackRef.current;
     if (!track) return;
-    setDragging(true);
-    dragStart.current = { x: e.clientX, scrollLeft: track.scrollLeft };
-    track.setPointerCapture(e.pointerId);
-  };
 
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (!dragging) return;
-    const track = trackRef.current;
-    if (!track) return;
-    const delta = e.clientX - dragStart.current.x;
-    track.scrollLeft = dragStart.current.scrollLeft - delta;
-  };
-
-  const handlePointerUp = (e: React.PointerEvent) => {
-    if (!dragging) return;
-    const track = trackRef.current;
-    if (!track) return;
-    setDragging(false);
-    track.releasePointerCapture(e.pointerId);
-
-    // Find the item closest to the track center and select it
-    const trackCenter = track.scrollLeft + track.offsetWidth / 2;
-    let closestIndex = 0;
-    let closestDistance = Infinity;
-    for (let i = 0; i < track.children.length; i++) {
-      const item = track.children[i] as HTMLElement;
-      const itemCenter = item.offsetLeft + item.offsetWidth / 2;
-      const distance = Math.abs(trackCenter - itemCenter);
-      if (distance < closestDistance) {
-        closestDistance = distance;
-        closestIndex = i;
+    if (scrollEndTimer.current) clearTimeout(scrollEndTimer.current);
+    scrollEndTimer.current = setTimeout(() => {
+      const trackCenter = track.scrollLeft + track.offsetWidth / 2;
+      let closestIndex = 0;
+      let closestDistance = Infinity;
+      for (let i = 0; i < track.children.length; i++) {
+        const item = track.children[i] as HTMLElement;
+        const itemCenter = item.offsetLeft + item.offsetWidth / 2;
+        const distance = Math.abs(trackCenter - itemCenter);
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestIndex = i;
+        }
       }
-    }
 
-    if (closestIndex !== selectedIndex) {
-      const direction = closestIndex > selectedIndex ? 1 : -1;
-      onSelect(closestIndex, direction);
-    }
+      if (closestIndex !== selectedIndex) {
+        const direction = closestIndex > selectedIndex ? 1 : -1;
+        onSelect(closestIndex, direction);
+      }
+    }, 100);
   };
 
   return (
@@ -89,15 +80,13 @@ export function MaterialCarousel({
 
       <div
         ref={trackRef}
-        className={cn(
-          "flex items-center gap-6 overflow-x-auto px-[50%] py-2 scrollbar-none select-none",
-          dragging ? "cursor-grabbing" : "cursor-grab"
-        )}
-        style={{ scrollbarWidth: "none" }}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
+        onScroll={handleScroll}
+        className="flex items-center gap-6 overflow-x-auto px-[50%] py-2 select-none snap-x snap-mandatory"
+        style={{
+          scrollbarWidth: "none",
+          msOverflowStyle: "none",
+          WebkitOverflowScrolling: "touch",
+        }}
       >
         {materials.map((material, i) => {
           const isActive = i === selectedIndex;
@@ -111,7 +100,7 @@ export function MaterialCarousel({
                 }
               }}
               className={cn(
-                "shrink-0 whitespace-nowrap text-sm transition-all duration-200",
+                "shrink-0 snap-center whitespace-nowrap text-sm transition-all duration-200",
                 isActive
                   ? "text-foreground font-medium text-base"
                   : "text-muted-foreground/60 hover:text-muted-foreground"

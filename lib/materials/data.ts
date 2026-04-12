@@ -276,6 +276,452 @@ export const MATERIALS: MaterialMetadata[] = [
     priceRange: "premium",
     pbr: { metalness: 1, roughness: 0.3 },
   },
+
+  // --- MORE PLASTICS (FDM) ---
+  {
+    id: "petg",
+    name: "PETG",
+    slug: "petg",
+    category: "plastic",
+    method: "FDM",
+    color: "#c8d4d8",
+    description:
+      "Tough and durable with excellent chemical resistance. Combines PLA's ease of printing with ABS-level strength. Food-safe grades available.",
+    properties: { strength: 3, flexibility: 2, detail: 3, heatResistance: 2 },
+    constraints: {
+      maxDimensions: { x: 300, y: 300, z: 400 },
+      minWallThickness: 1.0,
+      minDetail: 0.6,
+    },
+    priceRange: "budget",
+    pbr: { metalness: 0, roughness: 0.35, clearcoat: 0.3 },
+  },
+  {
+    id: "asa",
+    name: "ASA",
+    slug: "asa",
+    category: "plastic",
+    method: "FDM",
+    color: "#dad5cc",
+    description:
+      "UV-resistant engineering plastic. Like ABS but holds up outdoors without yellowing. Ideal for automotive exterior and signage.",
+    properties: { strength: 3, flexibility: 2, detail: 2, heatResistance: 3 },
+    constraints: {
+      maxDimensions: { x: 250, y: 250, z: 300 },
+      minWallThickness: 1.2,
+      minDetail: 0.8,
+    },
+    priceRange: "mid",
+    pbr: { metalness: 0, roughness: 0.55 },
+  },
+  {
+    id: "polycarbonate",
+    name: "Polycarbonate",
+    slug: "polycarbonate",
+    category: "plastic",
+    method: "FDM",
+    color: "#d8dce0",
+    description:
+      "High-strength engineering plastic. Excellent impact resistance and heat tolerance. Used in safety equipment, lenses, and structural parts.",
+    properties: { strength: 5, flexibility: 2, detail: 2, heatResistance: 5 },
+    constraints: {
+      maxDimensions: { x: 250, y: 250, z: 300 },
+      minWallThickness: 1.2,
+      minDetail: 0.8,
+    },
+    priceRange: "mid",
+    pbr: { metalness: 0, roughness: 0.25, clearcoat: 0.5 },
+  },
+  {
+    id: "pc-abs",
+    name: "PC-ABS",
+    slug: "pc-abs",
+    category: "plastic",
+    method: "FDM",
+    color: "#c8ccd0",
+    description:
+      "Blend of polycarbonate and ABS. Good balance of strength, heat resistance, and printability. Common in automotive and electronics.",
+    properties: { strength: 4, flexibility: 2, detail: 2, heatResistance: 4 },
+    constraints: {
+      maxDimensions: { x: 250, y: 250, z: 300 },
+      minWallThickness: 1.2,
+      minDetail: 0.8,
+    },
+    priceRange: "mid",
+    pbr: { metalness: 0, roughness: 0.5 },
+  },
+  {
+    id: "peek",
+    name: "PEEK",
+    slug: "peek",
+    category: "plastic",
+    method: "FDM",
+    color: "#c9b788",
+    description:
+      "Ultra-high-performance thermoplastic. Aerospace and medical grade. Incredible strength-to-weight ratio, chemical resistance, and heat tolerance up to 250°C.",
+    properties: { strength: 5, flexibility: 2, detail: 3, heatResistance: 5 },
+    constraints: {
+      maxDimensions: { x: 200, y: 200, z: 200 },
+      minWallThickness: 1.5,
+      minDetail: 1.0,
+    },
+    priceRange: "premium",
+    pbr: { metalness: 0, roughness: 0.45 },
+  },
+
+  // --- CARBON FIBER COMPOSITES ---
+  {
+    id: "petg-cf",
+    name: "PETG Carbon Fiber",
+    slug: "petg-cf",
+    category: "composite",
+    method: "FDM",
+    color: "#1a1a1a",
+    description:
+      "PETG reinforced with chopped carbon fiber. Rigid, lightweight, and dimensionally stable. Great for functional prototypes and jigs.",
+    properties: { strength: 4, flexibility: 1, detail: 3, heatResistance: 3 },
+    constraints: {
+      maxDimensions: { x: 250, y: 250, z: 300 },
+      minWallThickness: 1.2,
+      minDetail: 0.8,
+    },
+    priceRange: "mid",
+    pbr: { metalness: 0, roughness: 0.7 },
+  },
+  {
+    id: "nylon-cf",
+    name: "Nylon Carbon Fiber",
+    slug: "nylon-cf",
+    category: "composite",
+    method: "SLS",
+    color: "#2a2a2a",
+    description:
+      "Carbon-filled nylon with exceptional stiffness and strength. Used for end-use mechanical parts, drone frames, and tooling.",
+    properties: { strength: 5, flexibility: 1, detail: 3, heatResistance: 4 },
+    constraints: {
+      maxDimensions: { x: 340, y: 340, z: 600 },
+      minWallThickness: 1.0,
+      minDetail: 0.5,
+    },
+    priceRange: "premium",
+    pbr: { metalness: 0.1, roughness: 0.6 },
+  },
+  {
+    id: "nylon-gf",
+    name: "Nylon Glass Fiber",
+    slug: "nylon-gf",
+    category: "composite",
+    method: "SLS",
+    color: "#e0dccc",
+    description:
+      "Glass-filled nylon with increased rigidity and thermal stability compared to pure nylon. Durable and cost-effective for functional parts.",
+    properties: { strength: 4, flexibility: 2, detail: 3, heatResistance: 4 },
+    constraints: {
+      maxDimensions: { x: 340, y: 340, z: 600 },
+      minWallThickness: 1.0,
+      minDetail: 0.5,
+    },
+    priceRange: "mid",
+    pbr: { metalness: 0, roughness: 0.75 },
+  },
+
+  // --- MORE RESINS (SLA/DLP) ---
+  {
+    id: "resin-clear",
+    name: "Clear Resin",
+    slug: "resin-clear",
+    category: "resin",
+    method: "SLA",
+    color: "#e8e8e8",
+    description:
+      "Transparent photopolymer. After post-processing, produces optically clear parts ideal for fluidics, lenses, and translucent enclosures.",
+    properties: { strength: 2, flexibility: 1, detail: 5, heatResistance: 1 },
+    constraints: {
+      maxDimensions: { x: 145, y: 145, z: 185 },
+      minWallThickness: 0.5,
+      minDetail: 0.1,
+    },
+    priceRange: "mid",
+    pbr: { metalness: 0, roughness: 0.05, clearcoat: 1.0 },
+  },
+  {
+    id: "resin-high-temp",
+    name: "High Temp Resin",
+    slug: "resin-high-temp",
+    category: "resin",
+    method: "SLA",
+    color: "#e8dcc0",
+    description:
+      "Heat-resistant resin withstanding up to 238°C. Used for molds, thermal forming tools, and hot air/fluid testing.",
+    properties: { strength: 2, flexibility: 1, detail: 5, heatResistance: 5 },
+    constraints: {
+      maxDimensions: { x: 145, y: 145, z: 185 },
+      minWallThickness: 0.5,
+      minDetail: 0.1,
+    },
+    priceRange: "premium",
+    pbr: { metalness: 0, roughness: 0.2, clearcoat: 0.7 },
+  },
+  {
+    id: "resin-castable",
+    name: "Castable Resin",
+    slug: "resin-castable",
+    category: "resin",
+    method: "SLA",
+    color: "#9d3a70",
+    description:
+      "Burns out cleanly for investment casting. The gold standard for jewelry prototyping and small metal parts via lost-wax casting.",
+    properties: { strength: 1, flexibility: 1, detail: 5, heatResistance: 1 },
+    constraints: {
+      maxDimensions: { x: 145, y: 145, z: 185 },
+      minWallThickness: 0.4,
+      minDetail: 0.1,
+    },
+    priceRange: "premium",
+    pbr: { metalness: 0, roughness: 0.2, clearcoat: 0.8 },
+  },
+  {
+    id: "resin-flexible",
+    name: "Flexible Resin",
+    slug: "resin-flexible",
+    category: "flexible",
+    method: "SLA",
+    color: "#3c3c3c",
+    description:
+      "Soft, rubber-like photopolymer. Flexes and returns to shape. Great for grippers, gaskets, and ergonomic handles with high detail.",
+    properties: { strength: 2, flexibility: 5, detail: 4, heatResistance: 1 },
+    constraints: {
+      maxDimensions: { x: 145, y: 145, z: 185 },
+      minWallThickness: 0.7,
+      minDetail: 0.2,
+    },
+    priceRange: "mid",
+    pbr: { metalness: 0, roughness: 0.5 },
+  },
+
+  // --- MJF NYLONS ---
+  {
+    id: "mjf-pa12",
+    name: "MJF PA12",
+    slug: "mjf-pa12",
+    category: "plastic",
+    method: "MJF",
+    color: "#3a3a3a",
+    description:
+      "HP Multi Jet Fusion nylon. Tighter tolerances than SLS, smoother surfaces, faster production. Excellent for short-run manufacturing.",
+    properties: { strength: 4, flexibility: 3, detail: 4, heatResistance: 3 },
+    constraints: {
+      maxDimensions: { x: 380, y: 284, z: 380 },
+      minWallThickness: 0.7,
+      minDetail: 0.3,
+    },
+    priceRange: "mid",
+    pbr: { metalness: 0, roughness: 0.78 },
+  },
+  {
+    id: "mjf-tpu",
+    name: "MJF TPU",
+    slug: "mjf-tpu",
+    category: "flexible",
+    method: "MJF",
+    color: "#2e2e2e",
+    description:
+      "Flexible thermoplastic polyurethane via MJF. Good mechanical properties with consistent elasticity. Used for midsoles, wearables, and seals.",
+    properties: { strength: 3, flexibility: 5, detail: 4, heatResistance: 2 },
+    constraints: {
+      maxDimensions: { x: 380, y: 284, z: 380 },
+      minWallThickness: 1.2,
+      minDetail: 0.5,
+    },
+    priceRange: "mid",
+    pbr: { metalness: 0, roughness: 0.55 },
+  },
+
+  // --- MORE METALS ---
+  {
+    id: "steel-17-4ph",
+    name: "Stainless Steel 17-4 PH",
+    slug: "stainless-steel-17-4ph",
+    category: "metal",
+    method: "DMLS",
+    color: "#959595",
+    description:
+      "Precipitation-hardened stainless steel with excellent strength. Used in oil & gas, chemical processing, and marine applications.",
+    properties: { strength: 5, flexibility: 1, detail: 3, heatResistance: 5 },
+    constraints: {
+      maxDimensions: { x: 250, y: 250, z: 325 },
+      minWallThickness: 0.5,
+      minDetail: 0.2,
+    },
+    priceRange: "premium",
+    pbr: { metalness: 1, roughness: 0.38 },
+  },
+  {
+    id: "inconel-625",
+    name: "Inconel 625",
+    slug: "inconel-625",
+    category: "metal",
+    method: "DMLS",
+    color: "#7a7570",
+    description:
+      "Nickel-chromium superalloy. Exceptional performance in extreme environments: jet engines, chemical plants, nuclear applications.",
+    properties: { strength: 5, flexibility: 1, detail: 3, heatResistance: 5 },
+    constraints: {
+      maxDimensions: { x: 250, y: 250, z: 325 },
+      minWallThickness: 0.5,
+      minDetail: 0.2,
+    },
+    priceRange: "premium",
+    pbr: { metalness: 1, roughness: 0.5 },
+  },
+  {
+    id: "cobalt-chrome",
+    name: "Cobalt Chrome",
+    slug: "cobalt-chrome",
+    category: "metal",
+    method: "DMLS",
+    color: "#a8a8ad",
+    description:
+      "Biocompatible alloy with high wear resistance. Standard for dental and medical implants, and high-stress aerospace components.",
+    properties: { strength: 5, flexibility: 1, detail: 4, heatResistance: 5 },
+    constraints: {
+      maxDimensions: { x: 200, y: 200, z: 250 },
+      minWallThickness: 0.5,
+      minDetail: 0.2,
+    },
+    priceRange: "premium",
+    pbr: { metalness: 1, roughness: 0.28 },
+  },
+  {
+    id: "copper",
+    name: "Copper",
+    slug: "copper",
+    category: "metal",
+    method: "DMLS",
+    color: "#b8734a",
+    description:
+      "Pure copper for heat exchangers, RF antennas, and electrical applications. Excellent thermal and electrical conductivity.",
+    properties: { strength: 3, flexibility: 2, detail: 3, heatResistance: 5 },
+    constraints: {
+      maxDimensions: { x: 200, y: 200, z: 200 },
+      minWallThickness: 0.6,
+      minDetail: 0.3,
+    },
+    priceRange: "premium",
+    pbr: { metalness: 1, roughness: 0.25 },
+  },
+  {
+    id: "bronze",
+    name: "Bronze",
+    slug: "bronze",
+    category: "metal",
+    method: "Binder Jetting",
+    color: "#a57a38",
+    description:
+      "Infiltrated bronze composite. Warm metallic finish ideal for sculptures, jewelry, and decorative parts. Affordable metal option.",
+    properties: { strength: 3, flexibility: 1, detail: 4, heatResistance: 4 },
+    constraints: {
+      maxDimensions: { x: 200, y: 200, z: 180 },
+      minWallThickness: 2.0,
+      minDetail: 0.5,
+    },
+    priceRange: "premium",
+    pbr: { metalness: 0.95, roughness: 0.45 },
+  },
+  {
+    id: "silver",
+    name: "Silver",
+    slug: "silver",
+    category: "metal",
+    method: "DMLS",
+    color: "#d8d8dd",
+    description:
+      "925 sterling silver for fine jewelry and decorative objects. High detail and natural luster after polishing.",
+    properties: { strength: 2, flexibility: 2, detail: 5, heatResistance: 4 },
+    constraints: {
+      maxDimensions: { x: 80, y: 80, z: 80 },
+      minWallThickness: 0.6,
+      minDetail: 0.3,
+    },
+    priceRange: "premium",
+    pbr: { metalness: 1, roughness: 0.18 },
+  },
+
+  // --- CERAMIC / BINDER JETTING ---
+  {
+    id: "sandstone-color",
+    name: "Full-Color Sandstone",
+    slug: "full-color-sandstone",
+    category: "ceramic",
+    method: "Binder Jetting",
+    color: "#e8d4a8",
+    description:
+      "Gypsum-based composite supporting full CMYK color printing. Unique for photorealistic figurines, architectural models, and art pieces.",
+    properties: { strength: 1, flexibility: 1, detail: 4, heatResistance: 3 },
+    constraints: {
+      maxDimensions: { x: 380, y: 250, z: 200 },
+      minWallThickness: 2.0,
+      minDetail: 0.4,
+    },
+    priceRange: "mid",
+    pbr: { metalness: 0, roughness: 0.9 },
+  },
+  {
+    id: "ceramic-porcelain",
+    name: "Porcelain",
+    slug: "porcelain",
+    category: "ceramic",
+    method: "Binder Jetting",
+    color: "#f0ede5",
+    description:
+      "Glazed porcelain. Food-safe, dishwasher safe. Perfect for functional tableware, planters, and decorative ceramics.",
+    properties: { strength: 2, flexibility: 1, detail: 4, heatResistance: 5 },
+    constraints: {
+      maxDimensions: { x: 250, y: 250, z: 180 },
+      minWallThickness: 3.0,
+      minDetail: 0.8,
+    },
+    priceRange: "mid",
+    pbr: { metalness: 0, roughness: 0.3, clearcoat: 0.9 },
+  },
+
+  // --- POLYJET / MULTI-JET ---
+  {
+    id: "vero-white",
+    name: "VeroWhite",
+    slug: "vero-white",
+    category: "resin",
+    method: "DLP",
+    color: "#f8f8f8",
+    description:
+      "PolyJet photopolymer. High-resolution rigid plastic with smooth surfaces. Ideal for realistic prototypes and presentation models.",
+    properties: { strength: 2, flexibility: 1, detail: 5, heatResistance: 1 },
+    constraints: {
+      maxDimensions: { x: 290, y: 190, z: 200 },
+      minWallThickness: 0.6,
+      minDetail: 0.1,
+    },
+    priceRange: "premium",
+    pbr: { metalness: 0, roughness: 0.15, clearcoat: 0.8 },
+  },
+  {
+    id: "agilus-black",
+    name: "Agilus Black",
+    slug: "agilus-black",
+    category: "flexible",
+    method: "DLP",
+    color: "#1a1a1a",
+    description:
+      "PolyJet rubber-like material. Wide range of shore hardness options. Used in overmolding simulations and ergonomic grips.",
+    properties: { strength: 2, flexibility: 5, detail: 5, heatResistance: 1 },
+    constraints: {
+      maxDimensions: { x: 290, y: 190, z: 200 },
+      minWallThickness: 0.8,
+      minDetail: 0.2,
+    },
+    priceRange: "premium",
+    pbr: { metalness: 0, roughness: 0.6 },
+  },
 ];
 
 export const CATEGORY_LABELS: Record<MaterialCategory, string> = {
