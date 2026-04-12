@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
 import { AuthNav } from "@/components/auth/auth-nav";
 import { HeroShowcase } from "@/components/home/hero-showcase";
+import { HomeBottomBar } from "@/components/home/home-bottom-bar";
 
 export default async function HomePage() {
   return (
@@ -30,51 +30,23 @@ export default async function HomePage() {
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col">
-        {/* Hero: 3D mesh + material carousel */}
+      <main className="flex-1 flex flex-col pb-32">
+        {/* Hero: 3D mesh + material carousel + explore link */}
         <div className="flex-1 flex items-center justify-center px-4 py-8">
-          <div className="w-full max-w-2xl">
+          <div className="w-full max-w-2xl flex flex-col items-center gap-3">
             <HeroShowcase />
-          </div>
-        </div>
-
-        {/* Search + CTAs at bottom */}
-        <div className="mx-auto w-full max-w-2xl px-4 pb-12">
-          <form action="/files" method="GET">
-            <div className="relative">
-              <input
-                name="q"
-                type="text"
-                placeholder="Search files, materials, creators..."
-                className="w-full rounded-xl border border-border bg-background px-5 py-3.5 text-sm shadow-xs placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-ring/50"
-              />
-              <button
-                type="submit"
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-              >
-                Search
-              </button>
-            </div>
-          </form>
-
-          <div className="mt-3 flex gap-2">
-            <Button
-              variant="outline"
-              className="flex-1"
-              render={<Link href="/materials" />}
+            <Link
+              href="/materials"
+              className="text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
-              Explore materials
-            </Button>
-            <Button
-              variant="outline"
-              className="flex-1"
-              render={<Link href="/dashboard/uploads/new" />}
-            >
-              Upload file
-            </Button>
+              Explore materials &rarr;
+            </Link>
           </div>
         </div>
       </main>
+
+      {/* Fixed bottom search + upload */}
+      <HomeBottomBar />
     </div>
   );
 }

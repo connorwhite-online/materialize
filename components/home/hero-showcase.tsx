@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useRef, Suspense, useCallback, useEffect } from "react";
+import Link from "next/link";
 import { Canvas } from "@react-three/fiber";
 import { Environment } from "@react-three/drei";
 import * as THREE from "three";
@@ -231,6 +232,7 @@ export function HeroShowcase() {
   return (
     <div
       className="flex flex-col items-center gap-4 touch-pan-y cursor-grab active:cursor-grabbing"
+      style={{ overscrollBehaviorX: "contain" }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
