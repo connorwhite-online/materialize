@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { PhotoGallery } from "@/components/photos/photo-gallery";
 import { PhotoUploader } from "@/components/photos/photo-uploader";
+import { DeleteFileButton } from "@/components/files/delete-file-button";
 import { getMaterialById } from "@/lib/materials";
 import { generateDownloadUrl } from "@/lib/storage";
 
@@ -96,6 +97,20 @@ export default async function FileDetailPage(props: {
         )
       );
     hasPurchased = !!purchase;
+  }
+
+  // Owner needs the buyer count to know whether deleting will hard-
+  // delete or soft-archive — gate the query on isOwner so we don't pay
+  // for it on every public view.
+  let ownerBuyerCount = 0;
+  if (isOwner) {
+    const buyerRows = await db
+      .select({ id: purchases.id })
+      .from(purchases)
+      .where(
+        and(eq(purchases.fileId, file.id), eq(purchases.status, "completed"))
+      );
+    ownerBuyerCount = buyerRows.length;
   }
 
   const canDownload = isOwner || file.price === 0 || hasPurchased;
@@ -288,6 +303,19 @@ export default async function FileDetailPage(props: {
                 <p className="capitalize">License: {file.license}</p>
                 <p>{file.downloadCount} downloads</p>
               </div>
+
+              {isOwner && (
+                <>
+                  <Separator className="my-4" />
+                  <DeleteFileButton
+                    fileId={file.id}
+                    fileName={file.name}
+                    hasBuyers={ownerBuyerCount > 0}
+                    buyerCount={ownerBuyerCount}
+                    redirectTo={`/u/${file.username}`}
+                  />
+                </>
+              )}
             </CardContent>
           </Card>
         </div>

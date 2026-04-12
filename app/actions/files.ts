@@ -2,14 +2,21 @@
 
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-import { files, fileAssets, collections, collectionFiles } from "@/lib/db/schema";
+import {
+  files,
+  fileAssets,
+  collections,
+  collectionFiles,
+  filePhotos,
+  purchases,
+} from "@/lib/db/schema";
 import { eq, and, ne, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { nanoid } from "nanoid";
 import { createListingSchema } from "@/lib/validations/file";
 import { logError } from "@/lib/logger";
-import { generateDownloadUrl } from "@/lib/storage";
+import { generateDownloadUrl, deleteObject } from "@/lib/storage";
 
 type IncomingAsset = {
   storageKey: string;
@@ -280,6 +287,102 @@ export async function archiveFileListing(fileId: string) {
     revalidatePath("/files");
   } catch (error) {
     logError("archiveFileListing", error);
+  }
+}
+
+/**
+ * Delete a file the owner controls.
+ *
+ * If anyone has purchased the file we soft-delete instead of hard-delete:
+ * the file row stays, status flips to `archived`, visibility flips to
+ * `private`, and storage is preserved so buyers retain access. Hard
+ * delete (DB row + R2 objects) only happens when there are no buyers,
+ * since cascade rules would otherwise revoke purchased downloads.
+ *
+ * Caller is expected to confirm intent twice — this action does no
+ * additional confirmation of its own.
+ */
+export async function deleteFileListing(
+  fileId: string
+): Promise<
+  | { archived: true; reason: "has-buyers"; buyerCount: number }
+  | { deleted: true }
+  | { error: string }
+> {
+  try {
+    const { userId } = await auth();
+    if (!userId) return { error: "Unauthorized" };
+
+    const [file] = await db
+      .select({
+        id: files.id,
+        slug: files.slug,
+        userId: files.userId,
+      })
+      .from(files)
+      .where(and(eq(files.id, fileId), eq(files.userId, userId)));
+
+    if (!file) return { error: "File not found" };
+
+    const buyerRows = await db
+      .select({ id: purchases.id })
+      .from(purchases)
+      .where(
+        and(
+          eq(purchases.fileId, fileId),
+          eq(purchases.status, "completed")
+        )
+      );
+
+    if (buyerRows.length > 0) {
+      await db
+        .update(files)
+        .set({ status: "archived", visibility: "private" })
+        .where(eq(files.id, fileId));
+      revalidatePath(`/files/${file.slug}`);
+      revalidatePath("/files");
+      revalidatePath("/dashboard/uploads");
+      return {
+        archived: true,
+        reason: "has-buyers",
+        buyerCount: buyerRows.length,
+      };
+    }
+
+    // No buyers — safe to hard-delete. Collect every storage key first
+    // so we can scrub R2 even after the DB rows are gone.
+    const assets = await db
+      .select({ storageKey: fileAssets.storageKey })
+      .from(fileAssets)
+      .where(eq(fileAssets.fileId, fileId));
+    const photos = await db
+      .select({ storageKey: filePhotos.storageKey })
+      .from(filePhotos)
+      .where(eq(filePhotos.fileId, fileId));
+
+    const keys = [
+      ...assets.map((a) => a.storageKey),
+      ...photos.map((p) => p.storageKey),
+      // Thumbnail key is derived from the file id at upload time, see
+      // app/api/thumbnails/route.ts.
+      `thumbnails/${fileId}.webp`,
+    ];
+
+    // R2 deletes are best-effort — a stale object is better than a
+    // failed delete leaving a half-gone file row.
+    await Promise.allSettled(keys.map((k) => deleteObject(k)));
+
+    // Cascade rules clean up file_assets, file_photos, collection_files,
+    // and print_orders for us.
+    await db.delete(files).where(eq(files.id, fileId));
+
+    revalidatePath(`/files/${file.slug}`);
+    revalidatePath("/files");
+    revalidatePath("/dashboard/uploads");
+    return { deleted: true };
+  } catch (error) {
+    logError("deleteFileListing", error);
+    return { error: "Failed to delete file" };
   }
 }
 
