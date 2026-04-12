@@ -38,12 +38,8 @@ export function UserMenu() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={
-          <button
-            className="rounded-full outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            aria-label="User menu"
-          />
-        }
+        aria-label="User menu"
+        className="rounded-full outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       >
         <Avatar className="h-8 w-8">
           <AvatarImage src={user.imageUrl} alt={displayName || ""} />
