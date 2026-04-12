@@ -42,6 +42,12 @@ export interface MaterialMetadata {
     minDetail: number;
   };
   priceRange: "budget" | "mid" | "premium";
+  // PBR properties for 3D rendering
+  pbr: {
+    metalness: number; // 0 = dielectric, 1 = metal
+    roughness: number; // 0 = mirror, 1 = matte
+    clearcoat?: number; // 0-1, adds a shiny lacquer layer
+  };
 }
 
 export const MATERIALS: MaterialMetadata[] = [
@@ -62,6 +68,7 @@ export const MATERIALS: MaterialMetadata[] = [
       minDetail: 0.5,
     },
     priceRange: "budget",
+    pbr: { metalness: 0, roughness: 0.55 },
   },
   {
     id: "pla-black",
@@ -79,6 +86,7 @@ export const MATERIALS: MaterialMetadata[] = [
       minDetail: 0.5,
     },
     priceRange: "budget",
+    pbr: { metalness: 0, roughness: 0.5 },
   },
   {
     id: "abs-white",
@@ -96,6 +104,7 @@ export const MATERIALS: MaterialMetadata[] = [
       minDetail: 0.8,
     },
     priceRange: "budget",
+    pbr: { metalness: 0, roughness: 0.45 },
   },
 
   // --- NYLON (SLS) ---
@@ -115,6 +124,7 @@ export const MATERIALS: MaterialMetadata[] = [
       minDetail: 0.3,
     },
     priceRange: "mid",
+    pbr: { metalness: 0, roughness: 0.8 },
   },
   {
     id: "nylon-pa12-black",
@@ -132,6 +142,7 @@ export const MATERIALS: MaterialMetadata[] = [
       minDetail: 0.3,
     },
     priceRange: "mid",
+    pbr: { metalness: 0, roughness: 0.82 },
   },
 
   // --- RESIN (SLA) ---
@@ -151,6 +162,7 @@ export const MATERIALS: MaterialMetadata[] = [
       minDetail: 0.1,
     },
     priceRange: "mid",
+    pbr: { metalness: 0, roughness: 0.15, clearcoat: 0.8 },
   },
   {
     id: "resin-tough",
@@ -168,6 +180,7 @@ export const MATERIALS: MaterialMetadata[] = [
       minDetail: 0.1,
     },
     priceRange: "mid",
+    pbr: { metalness: 0, roughness: 0.2, clearcoat: 0.6 },
   },
 
   // --- FLEXIBLE ---
@@ -187,6 +200,7 @@ export const MATERIALS: MaterialMetadata[] = [
       minDetail: 1.0,
     },
     priceRange: "mid",
+    pbr: { metalness: 0, roughness: 0.65 },
   },
   {
     id: "nylon-pa11",
@@ -204,6 +218,7 @@ export const MATERIALS: MaterialMetadata[] = [
       minDetail: 0.3,
     },
     priceRange: "mid",
+    pbr: { metalness: 0, roughness: 0.75 },
   },
 
   // --- METALS (DMLS) ---
@@ -223,6 +238,7 @@ export const MATERIALS: MaterialMetadata[] = [
       minDetail: 0.2,
     },
     priceRange: "premium",
+    pbr: { metalness: 1, roughness: 0.35 },
   },
   {
     id: "aluminum",
@@ -240,6 +256,7 @@ export const MATERIALS: MaterialMetadata[] = [
       minDetail: 0.2,
     },
     priceRange: "premium",
+    pbr: { metalness: 1, roughness: 0.42 },
   },
   {
     id: "titanium",
@@ -257,6 +274,7 @@ export const MATERIALS: MaterialMetadata[] = [
       minDetail: 0.2,
     },
     priceRange: "premium",
+    pbr: { metalness: 1, roughness: 0.3 },
   },
 ];
 
