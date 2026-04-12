@@ -12,9 +12,9 @@ interface UserAvatarProps {
 }
 
 /**
- * User avatar with gradient fallback.
- * Shows uploaded image if available, otherwise shows a deterministic
- * gradient based on the user's seed (id/username) with their initial.
+ * User avatar with gradient fallback and subtle inner shadow.
+ * Shows uploaded image if available, otherwise a deterministic gradient
+ * based on the user's seed (id/username) with their initial.
  */
 export function UserAvatar({
   seed,
@@ -26,14 +26,23 @@ export function UserAvatar({
   const gradient = getAvatarGradient(seed);
 
   return (
-    <Avatar className={cn("h-8 w-8", className)}>
-      {imageUrl && <AvatarImage src={imageUrl} alt={displayName || ""} />}
-      <AvatarFallback
-        className="text-foreground/70 font-medium"
-        style={{ background: gradient }}
-      >
-        {initial}
-      </AvatarFallback>
-    </Avatar>
+    <div className={cn("relative inline-block", className)}>
+      <Avatar className="h-full w-full">
+        {imageUrl && <AvatarImage src={imageUrl} alt={displayName || ""} />}
+        <AvatarFallback
+          className="text-foreground/70 font-medium"
+          style={{ background: gradient }}
+        >
+          {initial}
+        </AvatarFallback>
+      </Avatar>
+      {/* Inner shadow overlay — sits on top of image/gradient */}
+      <div
+        className="pointer-events-none absolute inset-0 rounded-full"
+        style={{
+          boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.06), inset 0 2px 4px rgba(0,0,0,0.08), inset 0 -1px 2px rgba(255,255,255,0.15)",
+        }}
+      />
+    </div>
   );
 }
