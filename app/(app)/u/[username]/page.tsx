@@ -8,7 +8,6 @@ import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { ProfileTabs } from "@/components/profile/profile-tabs";
-import { FilesTab } from "@/components/profile/files-tab";
 import { LibraryTab } from "@/components/profile/library-tab";
 import { OrdersTab } from "@/components/profile/orders-tab";
 import { EarningsTab } from "@/components/profile/earnings-tab";
@@ -22,7 +21,7 @@ const PLATFORM_LABELS: Record<string, string> = {
   website: "Website",
 };
 
-type Tab = "files" | "library" | "orders" | "earnings";
+type Tab = "library" | "orders" | "earnings";
 
 export default async function ProfilePage(props: {
   params: Promise<{ username: string }>;
@@ -40,10 +39,13 @@ export default async function ProfilePage(props: {
   if (!user) notFound();
 
   const isOwner = userId === user.id;
-  const activeTab: Tab = (searchParams.tab as Tab) || "files";
+  // Accept the legacy "files" key as an alias for the merged library view.
+  const rawTab = searchParams.tab;
+  const activeTab: Tab =
+    rawTab === "orders" || rawTab === "earnings" ? rawTab : "library";
 
   // Guard owner-only tabs
-  if (!isOwner && (activeTab === "library" || activeTab === "orders" || activeTab === "earnings")) {
+  if (!isOwner && (activeTab === "orders" || activeTab === "earnings")) {
     redirect(`/u/${username}`);
   }
 
@@ -104,10 +106,9 @@ export default async function ProfilePage(props: {
       <ProfileTabs username={username} activeTab={activeTab} isOwner={isOwner} />
 
       <div className="mt-6">
-        {activeTab === "files" && (
-          <FilesTab userId={user.id} isOwner={isOwner} />
+        {activeTab === "library" && (
+          <LibraryTab userId={user.id} isOwner={isOwner} />
         )}
-        {activeTab === "library" && isOwner && <LibraryTab userId={user.id} />}
         {activeTab === "orders" && isOwner && <OrdersTab userId={user.id} />}
         {activeTab === "earnings" && isOwner && <EarningsTab userId={user.id} />}
       </div>

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
 
-type Tab = "files" | "library" | "orders" | "earnings";
+type Tab = "library" | "orders" | "earnings";
 
 interface ProfileTabsProps {
   username: string;
@@ -20,8 +20,7 @@ export function ProfileTabs({ username, activeTab, isOwner }: ProfileTabsProps) 
   const [localTab, setLocalTab] = useState<Tab>(activeTab);
 
   const tabs: Array<{ key: Tab; label: string; ownerOnly?: boolean }> = [
-    { key: "files", label: "Files" },
-    { key: "library", label: "Library", ownerOnly: true },
+    { key: "library", label: "Library" },
     { key: "orders", label: "Orders", ownerOnly: true },
     { key: "earnings", label: "Earnings", ownerOnly: true },
   ];
@@ -34,7 +33,8 @@ export function ProfileTabs({ username, activeTab, isOwner }: ProfileTabsProps) 
     setLocalTab(tab);
     // Navigate in a transition so the page content updates without
     // blocking the underline animation
-    const href = tab === "files" ? `/u/${username}` : `/u/${username}?tab=${tab}`;
+    const href =
+      tab === "library" ? `/u/${username}` : `/u/${username}?tab=${tab}`;
     startTransition(() => {
       router.push(href, { scroll: false });
     });
