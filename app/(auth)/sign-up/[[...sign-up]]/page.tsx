@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import { useSignUp } from "@clerk/nextjs/legacy";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -23,13 +23,6 @@ export default function SignUpPage() {
   const [step, setStep] = useState<"email" | "code">("email");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const emailInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (step === "email") {
-      emailInputRef.current?.focus();
-    }
-  }, [step]);
 
   const handleSendCode = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -108,13 +101,13 @@ export default function SignUpPage() {
               <div>
                 <Label htmlFor="email">Email</Label>
                 <Input
-                  ref={emailInputRef}
                   id="email"
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@example.com"
                   required
+                  autoFocus
                 />
               </div>
 
