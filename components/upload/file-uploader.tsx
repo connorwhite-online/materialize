@@ -123,11 +123,18 @@ export function FileUploader({ onUploadComplete }: FileUploaderProps) {
 
   return (
     <div>
-      <div
+      <label
         onDrop={handleDrop}
         onDragOver={(e) => e.preventDefault()}
-        className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border p-12 text-center transition-colors hover:border-primary/40 hover:bg-muted/50"
+        className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-border p-12 text-center transition-colors hover:border-primary/40 hover:bg-muted/50"
       >
+        <input
+          type="file"
+          className="hidden"
+          accept={acceptExtensions}
+          onChange={handleChange}
+          disabled={uploading}
+        />
         {uploading ? (
           <div className="w-full max-w-xs">
             <p className="text-sm text-muted-foreground">Uploading...</p>
@@ -141,27 +148,16 @@ export function FileUploader({ onUploadComplete }: FileUploaderProps) {
           </div>
         ) : (
           <>
-            <p className="text-muted-foreground">
-              Drag and drop your 3D file here, or
+            <p className="text-sm font-medium">
+              Drag and drop or click to upload
             </p>
-            <label className="mt-2 cursor-pointer rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90">
-              Choose file
-              <input
-                type="file"
-                className="hidden"
-                accept={acceptExtensions}
-                onChange={handleChange}
-              />
-            </label>
-            <p className="mt-2 text-xs text-muted-foreground">
+            <p className="mt-1 text-xs text-muted-foreground">
               STL, OBJ, 3MF, STEP, AMF — Max 200MB
             </p>
           </>
         )}
-      </div>
-      {error && (
-        <p className="mt-2 text-sm text-red-500">{error}</p>
-      )}
+      </label>
+      {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
     </div>
   );
 }
