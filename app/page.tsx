@@ -19,11 +19,11 @@ export default async function HomePage() {
       <main className="flex-1 flex flex-col pb-32">
         {/* Hero: 3D mesh + material carousel + explore link */}
         <div className="flex-1 flex items-center justify-center px-4 py-8">
-          <div className="w-full max-w-2xl flex flex-col items-center gap-3">
+          <div className="w-full max-w-2xl flex flex-col items-center">
             <HeroShowcase />
             <Link
               href="/materials"
-              className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+              className="mt-10 inline-flex items-center rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
             >
               Explore materials &rarr;
             </Link>
