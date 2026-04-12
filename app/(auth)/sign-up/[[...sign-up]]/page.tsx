@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useSignUp } from "@clerk/nextjs/legacy";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +19,6 @@ type Method = "email" | "phone";
 
 export default function SignUpPage() {
   const { isLoaded, signUp, setActive } = useSignUp();
-  const router = useRouter();
 
   const [method, setMethod] = useState<Method>("email");
   const [value, setValue] = useState("");
@@ -68,7 +66,7 @@ export default function SignUpPage() {
 
       if (result.status === "complete" && result.createdSessionId) {
         await setActive({ session: result.createdSessionId });
-        router.push("/onboarding");
+        window.location.href = "/onboarding";
       }
     } catch (err: unknown) {
       const clerkErr = err as { errors?: Array<{ longMessage?: string }> };

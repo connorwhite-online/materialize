@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useSignIn } from "@clerk/nextjs/legacy";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +19,6 @@ type CodeStrategy = "email_code" | "phone_code";
 
 export default function SignInPage() {
   const { isLoaded, signIn, setActive } = useSignIn();
-  const router = useRouter();
 
   const [identifier, setIdentifier] = useState("");
   const [code, setCode] = useState("");
@@ -90,7 +88,8 @@ export default function SignInPage() {
 
       if (result.status === "complete" && result.createdSessionId) {
         await setActive({ session: result.createdSessionId });
-        router.push("/dashboard");
+        // Hard redirect ensures session is picked up by middleware/layout
+        window.location.href = "/dashboard";
       }
     } catch (err: unknown) {
       const clerkErr = err as { errors?: Array<{ longMessage?: string }> };
