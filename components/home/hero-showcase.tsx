@@ -4,10 +4,15 @@ import { useState, useMemo, useRef, Suspense, useCallback, useEffect } from "rea
 import { Canvas } from "@react-three/fiber";
 import { Environment } from "@react-three/drei";
 import * as THREE from "three";
-import { MATERIALS } from "@/lib/materials";
+import { FEATURED_MATERIALS } from "@/lib/materials";
 import { ShowcaseMesh } from "./showcase-mesh";
 import { ShowcaseParticles } from "./showcase-particles";
 import { MaterialCarousel } from "./material-carousel";
+
+// Minimum horizontal drag distance (px) to register as a swipe
+const SWIPE_THRESHOLD = 30;
+// Vertical drag tolerance — cancel if vertical movement exceeds this
+const VERTICAL_CANCEL = 40;
 
 export function HeroShowcase() {
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -16,14 +21,12 @@ export function HeroShowcase() {
   const [burstIntensity, setBurstIntensity] = useState(1);
 
   // Shared drag velocity — drives both mesh distortion and carousel scroll
-  // Positive = swiping right (finger moves right, content moves right too)
   const dragVelocityRef = useRef(0);
   const [, forceUpdate] = useState({});
 
-  // Ref to the carousel's scrollable track
   const carouselTrackRef = useRef<HTMLDivElement>(null);
 
-  const material = MATERIALS[selectedIndex];
+  const material = FEATURED_MATERIALS[selectedIndex];
 
   const target = useMemo(
     () => ({
@@ -43,9 +46,7 @@ export function HeroShowcase() {
   const handleSelect = useCallback(
     (index: number, direction: number, intensity: number = 1) => {
       setSelectedIndex(index);
-      // Particles fly in the direction the finger moved.
-      // direction: +1 = next item (finger moved left), -1 = prev item (finger moved right)
-      // Invert so particles fly with the finger.
+      // Particles fly with the finger (invert the index-direction)
       setBurstDirection(-direction);
       setBurstIntensity(intensity);
       setBurstKey((k) => k + 1);
@@ -56,51 +57,62 @@ export function HeroShowcase() {
   // --- Unified pointer capture ---
   const dragStateRef = useRef<{
     active: boolean;
+    startX: number;
+    startY: number;
     lastX: number;
     lastTime: number;
-    totalDelta: number;
     peakVelocity: number;
+    cancelled: boolean;
   }>({
     active: false,
+    startX: 0,
+    startY: 0,
     lastX: 0,
     lastTime: 0,
-    totalDelta: 0,
     peakVelocity: 0,
+    cancelled: false,
   });
 
   const handlePointerDown = (e: React.PointerEvent) => {
     dragStateRef.current = {
       active: true,
+      startX: e.clientX,
+      startY: e.clientY,
       lastX: e.clientX,
       lastTime: performance.now(),
-      totalDelta: 0,
       peakVelocity: 0,
+      cancelled: false,
     };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
     const state = dragStateRef.current;
-    if (!state.active) return;
+    if (!state.active || state.cancelled) return;
+
+    const totalDx = e.clientX - state.startX;
+    const totalDy = e.clientY - state.startY;
+
+    // Cancel if movement is mostly vertical
+    if (Math.abs(totalDy) > VERTICAL_CANCEL && Math.abs(totalDy) > Math.abs(totalDx)) {
+      state.cancelled = true;
+      dragVelocityRef.current = 0;
+      forceUpdate({});
+      return;
+    }
 
     const dx = e.clientX - state.lastX;
     const now = performance.now();
     const dt = Math.max(1, now - state.lastTime);
 
-    state.totalDelta += dx;
     state.lastX = e.clientX;
     state.lastTime = now;
-
-    // Drive carousel scroll — scroll opposite to finger direction
-    if (carouselTrackRef.current) {
-      carouselTrackRef.current.scrollLeft -= dx;
-    }
 
     // Velocity for mesh distortion (normalized -1..1, positive = finger right)
     const vel = Math.max(-1, Math.min(1, (dx / dt) * 20));
     dragVelocityRef.current = vel;
 
-    // Track peak velocity during this drag
+    // Track peak velocity
     if (Math.abs(vel) > state.peakVelocity) {
       state.peakVelocity = Math.abs(vel);
     }
@@ -117,36 +129,25 @@ export function HeroShowcase() {
       (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     } catch {}
 
-    // Determine target index from current scroll position and snap
-    if (carouselTrackRef.current) {
-      const track = carouselTrackRef.current;
-      const trackCenter = track.scrollLeft + track.offsetWidth / 2;
-      let closestIndex = 0;
-      let closestDistance = Infinity;
-      for (let i = 0; i < track.children.length; i++) {
-        const item = track.children[i] as HTMLElement;
-        const itemCenter = item.offsetLeft + item.offsetWidth / 2;
-        const distance = Math.abs(trackCenter - itemCenter);
-        if (distance < closestDistance) {
-          closestDistance = distance;
-          closestIndex = i;
-        }
-      }
+    if (state.cancelled) {
+      dragVelocityRef.current = 0;
+      forceUpdate({});
+      return;
+    }
 
-      if (closestIndex !== selectedIndex) {
-        const direction = closestIndex > selectedIndex ? 1 : -1;
-        // Use peak velocity from the drag — not the instantaneous velocity
-        // at release (which is often near 0 as the finger slows down)
+    // One-step gesture: if horizontal distance > threshold, move ±1 index
+    const totalDx = e.clientX - state.startX;
+    if (Math.abs(totalDx) > SWIPE_THRESHOLD) {
+      // Finger right (positive dx) → previous item (direction -1)
+      // Finger left (negative dx) → next item (direction +1)
+      const direction = totalDx > 0 ? -1 : 1;
+      const newIndex = Math.max(
+        0,
+        Math.min(FEATURED_MATERIALS.length - 1, selectedIndex + direction)
+      );
+      if (newIndex !== selectedIndex) {
         const intensity = 0.3 + state.peakVelocity * 1.2;
-        handleSelect(closestIndex, direction, intensity);
-      } else {
-        // Snap back to current if no change
-        const item = track.children[selectedIndex] as HTMLElement | undefined;
-        if (item) {
-          const targetScroll =
-            item.offsetLeft + item.offsetWidth / 2 - track.offsetWidth / 2;
-          track.scrollTo({ left: targetScroll, behavior: "smooth" });
-        }
+        handleSelect(newIndex, direction, intensity);
       }
     }
 
@@ -171,7 +172,7 @@ export function HeroShowcase() {
 
   return (
     <div
-      className="flex flex-col items-center gap-4 touch-none cursor-grab active:cursor-grabbing"
+      className="flex flex-col items-center gap-4 touch-pan-y cursor-grab active:cursor-grabbing"
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -200,10 +201,10 @@ export function HeroShowcase() {
         </Canvas>
       </div>
 
-      {/* Material carousel — ref forwarded so parent can drive scroll */}
+      {/* Material carousel — display-only, driven by parent state */}
       <MaterialCarousel
         ref={carouselTrackRef}
-        materials={MATERIALS}
+        materials={FEATURED_MATERIALS}
         selectedIndex={selectedIndex}
         onSelect={handleSelect}
       />

@@ -1,13 +1,22 @@
 import {
   MATERIALS,
   CATEGORY_LABELS,
+  FEATURED_MATERIAL_IDS,
   type MaterialMetadata,
   type MaterialCategory,
   type QuickFilter,
 } from "./data";
 
-export { MATERIALS, CATEGORY_LABELS };
+export { MATERIALS, CATEGORY_LABELS, FEATURED_MATERIAL_IDS };
 export type { MaterialMetadata, MaterialCategory, QuickFilter };
+
+/**
+ * Featured materials in the order specified by FEATURED_MATERIAL_IDS.
+ * Filters out any IDs that don't exist (guard against typos).
+ */
+export const FEATURED_MATERIALS: MaterialMetadata[] = FEATURED_MATERIAL_IDS
+  .map((id) => MATERIALS.find((m) => m.id === id))
+  .filter((m): m is MaterialMetadata => Boolean(m));
 
 export function getMaterialById(id: string): MaterialMetadata | undefined {
   return MATERIALS.find((m) => m.id === id);

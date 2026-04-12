@@ -724,6 +724,26 @@ export const MATERIALS: MaterialMetadata[] = [
   },
 ];
 
+/**
+ * Curated list of featured materials for the home hero.
+ * The most recognizable/iconic material from each category —
+ * showcases breadth without overwhelming first-time users.
+ */
+export const FEATURED_MATERIAL_IDS = [
+  "pla-white",       // Plastic — universal starter
+  "petg",            // Plastic — modern favorite
+  "polycarbonate",   // Engineering plastic
+  "nylon-pa12",      // SLS nylon — functional parts
+  "resin-standard",  // SLA resin — high detail
+  "resin-clear",     // SLA resin — showpiece
+  "tpu-flexible",    // Flexible standout
+  "nylon-cf",        // Composite — carbon fiber
+  "steel-316l",      // Metal — iconic stainless
+  "aluminum",        // Metal — lightweight
+  "titanium",        // Metal — premium
+  "sandstone-color", // Unique — full color
+] as const;
+
 export const CATEGORY_LABELS: Record<MaterialCategory, string> = {
   plastic: "Plastic",
   metal: "Metal",
