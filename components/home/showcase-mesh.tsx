@@ -60,6 +60,14 @@ export function ShowcaseMesh({ target, dragVelocityRef }: ShowcaseMeshProps) {
       scaleLerp
     );
 
+    // Sway in the drag direction (position offset)
+    const swayTarget = dragVel * 0.35;
+    groupRef.current.position.x = THREE.MathUtils.lerp(
+      groupRef.current.position.x,
+      swayTarget,
+      scaleLerp
+    );
+
     // Interpolate material properties toward target (smooth ~600ms)
     const matLerp = 1 - Math.exp(-delta * 4);
     materialRef.current.color.lerp(target.color, matLerp);
