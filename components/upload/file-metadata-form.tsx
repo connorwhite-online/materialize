@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import { useActionState } from "react";
+import { useState, useActionState } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import Link from "next/link";
 import { createFileListing } from "@/app/actions/files";
 import { MATERIALS } from "@/lib/materials";
 import { DESIGN_TAG_OPTIONS } from "@/lib/validations/file";
@@ -9,13 +10,21 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
+import { UploadPreview } from "./upload-preview";
 
 interface UploadedAsset {
   id: string;
+  storageKey: string;
   originalFilename: string;
   format: string;
   fileSize: number;
@@ -36,7 +45,11 @@ const DESIGN_TAG_LABELS: Record<string, string> = {
 
 export function FileMetadataForm({ assets }: FileMetadataFormProps) {
   const [selectedDesignTags, setSelectedDesignTags] = useState<string[]>([]);
-  const [selectedMaterial, setSelectedMaterial] = useState("");
+  const [recommendedMaterial, setRecommendedMaterial] = useState("");
+  const [license, setLicense] = useState("free");
+  const [sellEnabled, setSellEnabled] = useState(false);
+
+  const primaryAsset = assets[0];
 
   const [state, formAction, pending] = useActionState(
     async (_prev: unknown, formData: FormData) => {
@@ -45,6 +58,16 @@ export function FileMetadataForm({ assets }: FileMetadataFormProps) {
       }
       for (const tag of selectedDesignTags) {
         formData.append("designTags", tag);
+      }
+      // If not selling, force price=0 and license=free
+      if (!sellEnabled) {
+        formData.set("price", "0");
+        formData.set("license", "free");
+      } else {
+        formData.set("license", license);
+      }
+      if (recommendedMaterial) {
+        formData.set("recommendedMaterialId", recommendedMaterial);
       }
       return createFileListing(formData);
     },
@@ -61,10 +84,37 @@ export function FileMetadataForm({ assets }: FileMetadataFormProps) {
 
   return (
     <form action={formAction} className="space-y-6">
+      {/* 3D Preview at the top */}
+      <Card className="overflow-hidden">
+        <div className="aspect-[4/3] w-full bg-gradient-to-br from-muted/40 to-muted/10">
+          {primaryAsset && (
+            <UploadPreview
+              storageKey={primaryAsset.storageKey}
+              format={
+                primaryAsset.format as "stl" | "obj" | "3mf" | "step" | "amf"
+              }
+            />
+          )}
+        </div>
+        <div className="flex items-center gap-2 border-t border-border px-4 py-2.5 text-sm">
+          <span className="font-medium truncate">
+            {primaryAsset?.originalFilename}
+          </span>
+          <Badge variant="outline" className="text-[10px] uppercase">
+            {primaryAsset?.format}
+          </Badge>
+          <span className="text-muted-foreground text-xs ml-auto">
+            {primaryAsset
+              ? `${(primaryAsset.fileSize / 1024 / 1024).toFixed(1)} MB`
+              : ""}
+          </span>
+        </div>
+      </Card>
+
       {/* Basic info */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">File Details</CardTitle>
+          <CardTitle className="text-base">Details</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
@@ -85,37 +135,6 @@ export function FileMetadataForm({ assets }: FileMetadataFormProps) {
             />
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <Label htmlFor="price">Price (USD)</Label>
-              <Input
-                id="price"
-                name="price"
-                type="number"
-                min="0"
-                step="0.01"
-                defaultValue="0"
-              />
-              <p className="mt-1 text-xs text-muted-foreground">
-                Set to 0 for free download
-              </p>
-            </div>
-
-            <div>
-              <Label htmlFor="license">License</Label>
-              <select
-                id="license"
-                name="license"
-                defaultValue="free"
-                className="flex h-9 w-full rounded-lg border border-input bg-background px-3 py-1 text-sm shadow-xs"
-              >
-                <option value="free">Free</option>
-                <option value="personal">Personal Use</option>
-                <option value="commercial">Commercial Use</option>
-              </select>
-            </div>
-          </div>
-
           <div>
             <Label htmlFor="tags">Tags</Label>
             <Input
@@ -123,7 +142,75 @@ export function FileMetadataForm({ assets }: FileMetadataFormProps) {
               name="tags"
               placeholder="miniature, tabletop, gaming (comma separated)"
             />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Help people find this file in search.
+            </p>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Sell toggle — the big decision */}
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium">List for sale</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Make this file available to purchase or download publicly.
+              </p>
+            </div>
+            <Switch
+              checked={sellEnabled}
+              onCheckedChange={setSellEnabled}
+            />
+          </div>
+
+          <AnimatePresence initial={false}>
+            {sellEnabled && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
+                className="overflow-hidden"
+              >
+                <div className="grid gap-4 sm:grid-cols-2 pt-4 mt-4 border-t border-border">
+                  <div>
+                    <Label htmlFor="price">Price (USD)</Label>
+                    <Input
+                      id="price"
+                      name="price"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      defaultValue="0"
+                    />
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Set to 0 for free download
+                    </p>
+                  </div>
+                  <div>
+                    <Label htmlFor="license-trigger">License</Label>
+                    <Select
+                      value={license}
+                      onValueChange={(v) => v && setLicense(v)}
+                    >
+                      <SelectTrigger id="license-trigger" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="free">Free</SelectItem>
+                        <SelectItem value="personal">Personal Use</SelectItem>
+                        <SelectItem value="commercial">
+                          Commercial Use
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </CardContent>
       </Card>
 
@@ -132,26 +219,27 @@ export function FileMetadataForm({ assets }: FileMetadataFormProps) {
         <CardHeader>
           <CardTitle className="text-base">Print Recommendations</CardTitle>
           <p className="text-xs text-muted-foreground">
-            Optional. Help buyers choose the right material for your design.
+            Optional. Help printers choose the right material.
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
-            <Label htmlFor="recommendedMaterialId">Recommended Material</Label>
-            <select
-              id="recommendedMaterialId"
-              name="recommendedMaterialId"
-              value={selectedMaterial}
-              onChange={(e) => setSelectedMaterial(e.target.value)}
-              className="flex h-9 w-full rounded-lg border border-input bg-background px-3 py-1 text-sm shadow-xs"
+            <Label htmlFor="material-trigger">Recommended Material</Label>
+            <Select
+              value={recommendedMaterial}
+              onValueChange={(v) => setRecommendedMaterial(v ?? "")}
             >
-              <option value="">None — let the buyer decide</option>
-              {MATERIALS.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name} ({m.method})
-                </option>
-              ))}
-            </select>
+              <SelectTrigger id="material-trigger" className="w-full">
+                <SelectValue placeholder="None — let the buyer decide" />
+              </SelectTrigger>
+              <SelectContent>
+                {MATERIALS.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.name} ({m.method})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div>
@@ -162,7 +250,7 @@ export function FileMetadataForm({ assets }: FileMetadataFormProps) {
                   key={tag}
                   type="button"
                   onClick={() => toggleDesignTag(tag)}
-                  className={`inline-flex items-center rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  className={`inline-flex cursor-pointer items-center rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
                     selectedDesignTags.includes(tag)
                       ? "border-primary bg-primary/10 text-primary"
                       : "border-border text-muted-foreground hover:border-primary/30"
@@ -188,40 +276,33 @@ export function FileMetadataForm({ assets }: FileMetadataFormProps) {
               placeholder="e.g. 1.0"
             />
             <p className="mt-1 text-xs text-muted-foreground">
-              We&apos;ll warn buyers if their chosen material can&apos;t support this
+              We&apos;ll warn printers if their chosen material can&apos;t
+              support this
             </p>
           </div>
         </CardContent>
       </Card>
 
-      {/* Uploaded files */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Uploaded Files</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-1">
-            {assets.map((asset) => (
-              <div
-                key={asset.id}
-                className="flex items-center gap-2 rounded-md bg-muted px-3 py-2 text-sm"
-              >
-                <span className="font-medium">{asset.originalFilename}</span>
-                <Badge variant="outline" className="text-[10px] uppercase">
-                  {asset.format}
-                </Badge>
-                <span className="text-muted-foreground text-xs">
-                  {(asset.fileSize / 1024 / 1024).toFixed(1)} MB
-                </span>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Button type="submit" disabled={pending || assets.length === 0} size="lg" className="w-full">
-        {pending ? "Creating..." : "Create Listing"}
-      </Button>
+      {/* Actions */}
+      <div className="flex gap-3">
+        <Button
+          type="button"
+          variant="outline"
+          size="lg"
+          className="flex-1"
+          render={<Link href="/" />}
+        >
+          Cancel
+        </Button>
+        <Button
+          type="submit"
+          disabled={pending || assets.length === 0}
+          size="lg"
+          className="flex-1"
+        >
+          {pending ? "Saving..." : sellEnabled ? "Create listing" : "Save to library"}
+        </Button>
+      </div>
     </form>
   );
 }

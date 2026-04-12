@@ -9,12 +9,33 @@ export async function POST(request: Request) {
   try {
     const { userId } = await auth();
 
-    const { fileAssetId } = (await request.json()) as { fileAssetId: string };
-    if (!fileAssetId) {
-      return Response.json({ error: "Missing fileAssetId" }, { status: 400 });
+    const body = (await request.json()) as {
+      fileAssetId?: string;
+      storageKey?: string;
+    };
+
+    // Two lookup modes:
+    // - fileAssetId: looks up the asset in DB and checks ownership/published
+    // - storageKey: direct lookup, only allowed for the owner of that key
+    //   (verified via the uploads/{userId}/ prefix)
+    if (body.storageKey) {
+      if (!userId) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      if (!body.storageKey.startsWith(`uploads/${userId}/`)) {
+        return Response.json({ error: "Forbidden" }, { status: 403 });
+      }
+      const downloadUrl = await generateDownloadUrl(body.storageKey, 300);
+      return Response.json({ downloadUrl });
     }
 
-    // Get asset with access check
+    if (!body.fileAssetId) {
+      return Response.json(
+        { error: "Missing fileAssetId or storageKey" },
+        { status: 400 }
+      );
+    }
+
     const [assetRow] = await db
       .select({
         storageKey: fileAssets.storageKey,
@@ -24,7 +45,7 @@ export async function POST(request: Request) {
       })
       .from(fileAssets)
       .leftJoin(files, eq(fileAssets.fileId, files.id))
-      .where(eq(fileAssets.id, fileAssetId));
+      .where(eq(fileAssets.id, body.fileAssetId));
 
     if (!assetRow) {
       return Response.json({ error: "Not found" }, { status: 404 });
