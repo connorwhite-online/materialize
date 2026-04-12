@@ -6,6 +6,7 @@ import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { FileUploader } from "@/components/upload/file-uploader";
+import { ChevronRight } from "@/components/icons/chevron-right";
 import { cn } from "@/lib/utils";
 
 interface UploadedAsset {
@@ -99,9 +100,10 @@ export function HomeBottomBar() {
           >
             <Link
               href="/materials"
-              className="inline-flex items-center rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+              className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
             >
-              Explore materials &rarr;
+              Explore materials
+              <ChevronRight size={14} />
             </Link>
           </motion.div>
         )}
