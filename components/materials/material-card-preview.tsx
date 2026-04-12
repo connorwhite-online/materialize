@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
-import { ConvexGeometry } from "three/examples/jsm/geometries/ConvexGeometry.js";
 import { MaterializeMaterial } from "@/components/viewer/materialize-material";
 
 interface MaterialCardPreviewProps {
@@ -31,7 +30,9 @@ interface MaterialCardPreviewProps {
 //     points generates the bevel strips along every edge automatically.
 // v8: more padding around the pyramid in the captured frame — v7 was
 //     clipping the apex on tall aspect ratios.
-const THUMBNAIL_VERSION = 8;
+// v9: smooth sphere instead of the pyramid — same convention every
+//     other shader-preview ships with (Blender, Substance, etc.).
+const THUMBNAIL_VERSION = 9;
 const STORAGE_PREFIX = "materialTile:v";
 const CAPTURE_SIZE = 512;
 
@@ -66,93 +67,18 @@ function adjustBrightness(hex: string, percent: number): string {
 }
 
 /**
- * A square pyramid with beveled / chamfered edges.
- *
- * Build approach:
- *   1. Define the ideal pyramid as five flat polygonal faces — the
- *      square base and four triangular sides meeting at the apex.
- *   2. For every face, inset each vertex inward (toward the face
- *      centroid, along the face plane) by `bevel`. Each ideal vertex
- *      that was shared between multiple faces now becomes one inset
- *      point per incident face.
- *   3. Take the convex hull of all the inset points. The hull algorithm
- *      produces:
- *        - the inset face polygons (the original faces, slightly smaller)
- *        - a small rectangular strip along every edge (the chamfer)
- *        - a small triangle at every corner (apex + 4 base corners)
- *      automatically, with correct flat-shaded normals.
- *
- * The apex inset gets four points clustered around y = height − bevel
- * which still reads as a sharp top.
+ * A smooth sphere — the universal shader-preview shape (Blender,
+ * Substance, etc. all use a sphere for the same reason: it shows the
+ * full hemisphere of normals so the lighting + fresnel response is
+ * legible without the viewer having to interpret silhouette geometry).
  */
-function BeveledPyramidMesh({ color }: { color: string }) {
+function SphereMesh({ color }: { color: string }) {
   const geometry = useMemo(() => {
-    const baseHalf = 0.95;
-    const height = 1.6;
-    const bevel = 0.08;
-
-    const baseCorners = [
-      new THREE.Vector3(-baseHalf, 0, -baseHalf),
-      new THREE.Vector3(baseHalf, 0, -baseHalf),
-      new THREE.Vector3(baseHalf, 0, baseHalf),
-      new THREE.Vector3(-baseHalf, 0, baseHalf),
-    ];
-    const apex = new THREE.Vector3(0, height, 0);
-
-    type Face = {
-      vertices: THREE.Vector3[];
-      centroid: THREE.Vector3;
-    };
-
-    const faces: Face[] = [];
-
-    // Square base — winding doesn't matter since the convex hull will
-    // assign its own normals. We only need the centroid + the 4
-    // vertices to inset.
-    faces.push({
-      vertices: baseCorners,
-      centroid: new THREE.Vector3(0, 0, 0),
-    });
-
-    // Four triangular side faces.
-    for (let i = 0; i < 4; i++) {
-      const a = baseCorners[i];
-      const b = baseCorners[(i + 1) % 4];
-      const verts = [a, b, apex];
-      const centroid = a
-        .clone()
-        .add(b)
-        .add(apex)
-        .multiplyScalar(1 / 3);
-      faces.push({ vertices: verts, centroid });
-    }
-
-    // Inset every face's vertices toward its centroid by `bevel`. The
-    // direction is automatically along the face plane because both v
-    // and the centroid lie on the face.
-    const insetPoints: THREE.Vector3[] = [];
-    for (const face of faces) {
-      for (const v of face.vertices) {
-        const toCenter = face.centroid.clone().sub(v);
-        const dist = toCenter.length();
-        if (dist === 0) continue;
-        // Clamp the inset so we never overshoot the centroid on small
-        // faces (the side triangles can be shorter than `bevel` along
-        // some directions).
-        const amount = Math.min(bevel, dist * 0.45);
-        insetPoints.push(
-          v.clone().add(toCenter.multiplyScalar(amount / dist))
-        );
-      }
-    }
-
-    const geo = new ConvexGeometry(insetPoints);
-    geo.center();
-    return geo;
+    return new THREE.SphereGeometry(1, 96, 64);
   }, []);
 
   return (
-    <mesh geometry={geometry} rotation={[0.28, 0.55, 0]}>
+    <mesh geometry={geometry}>
       <MaterializeMaterial
         baseColor={color}
         accentColor={adjustBrightness(color, -38)}
@@ -233,7 +159,10 @@ export function MaterialCardPreview({
 
   return (
     <>
-      <div ref={containerRef} className={className ?? "absolute inset-0"}>
+      <div
+        ref={containerRef}
+        className={`${className ?? "absolute inset-0"} bg-gradient-to-br from-muted/40 via-transparent to-muted/20`}
+      >
         {thumbnail && (
           <img
             src={thumbnail}
@@ -254,11 +183,11 @@ export function MaterialCardPreview({
           style={{ width: CAPTURE_SIZE, height: CAPTURE_SIZE }}
         >
           <Canvas
-            camera={{ position: [0, 0.45, 5.4], fov: 32 }}
+            camera={{ position: [0, 0, 4.6], fov: 32 }}
             dpr={2}
             gl={{ antialias: true, alpha: true, preserveDrawingBuffer: true }}
           >
-            <BeveledPyramidMesh color={color} />
+            <SphereMesh color={color} />
             <CaptureOnce onReady={handleCaptured} />
           </Canvas>
         </div>
