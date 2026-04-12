@@ -82,18 +82,16 @@ export function ShowcaseParticles({
       const outX = Math.sin(phi) * Math.cos(theta);
       const outY = Math.sin(phi) * Math.sin(theta);
       const outZ = Math.cos(phi);
-      const baseSpeed = 0.8 + Math.random() * 0.8;
+      const baseSpeed = 1.6 + Math.random() * 1.4;
 
-      // Add a directional push in the swipe direction.
-      // Weight varies per particle — some get a strong push, others barely any.
-      // This gives the "sprays in every direction, but mostly one" look.
-      const directionalWeight = Math.random() * Math.random(); // bias toward low values
+      // Directional push in the swipe direction.
+      const directionalWeight = Math.random() * Math.random();
       const directionalComponent =
-        direction * directionalPush * (0.3 + directionalWeight);
+        direction * directionalPush * (0.5 + directionalWeight);
 
       p.velocity.set(
         outX * baseSpeed + directionalComponent,
-        outY * baseSpeed + (Math.random() - 0.5) * 0.6,
+        outY * baseSpeed + (Math.random() - 0.5) * 0.8,
         outZ * baseSpeed * 0.4
       );
 
@@ -130,7 +128,8 @@ export function ShowcaseParticles({
 
       p.age += delta;
       p.position.addScaledVector(p.velocity, delta);
-      p.velocity.multiplyScalar(0.94);
+      // Very light drag so particles keep traveling while they fade
+      p.velocity.multiplyScalar(0.985);
 
       p.rotation.x += p.rotationSpeed.x * delta;
       p.rotation.y += p.rotationSpeed.y * delta;
