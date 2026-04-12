@@ -1,6 +1,7 @@
 "use client";
 
-import Link from "next/link";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
 
@@ -13,6 +14,11 @@ interface ProfileTabsProps {
 }
 
 export function ProfileTabs({ username, activeTab, isOwner }: ProfileTabsProps) {
+  const router = useRouter();
+  const [, startTransition] = useTransition();
+  // Local state for instant UI updates; URL syncs in the background
+  const [localTab, setLocalTab] = useState<Tab>(activeTab);
+
   const tabs: Array<{ key: Tab; label: string; ownerOnly?: boolean }> = [
     { key: "files", label: "Files" },
     { key: "library", label: "Library", ownerOnly: true },
@@ -22,20 +28,30 @@ export function ProfileTabs({ username, activeTab, isOwner }: ProfileTabsProps) 
 
   const visibleTabs = tabs.filter((t) => !t.ownerOnly || isOwner);
 
+  const handleClick = (tab: Tab) => {
+    if (tab === localTab) return;
+    // Update UI immediately
+    setLocalTab(tab);
+    // Navigate in a transition so the page content updates without
+    // blocking the underline animation
+    const href = tab === "files" ? `/u/${username}` : `/u/${username}?tab=${tab}`;
+    startTransition(() => {
+      router.push(href, { scroll: false });
+    });
+  };
+
   return (
     <div className="border-b border-border">
       <nav className="flex gap-1 -mb-px">
         {visibleTabs.map((tab) => {
-          const href =
-            tab.key === "files" ? `/u/${username}` : `/u/${username}?tab=${tab.key}`;
-          const active = activeTab === tab.key;
+          const active = localTab === tab.key;
           return (
-            <Link
+            <button
               key={tab.key}
-              href={href}
-              scroll={false}
+              type="button"
+              onClick={() => handleClick(tab.key)}
               className={cn(
-                "relative px-4 py-2.5 text-sm font-medium transition-colors",
+                "relative px-4 py-2.5 text-sm font-medium cursor-pointer transition-colors",
                 active
                   ? "text-foreground"
                   : "text-muted-foreground hover:text-foreground"
@@ -47,14 +63,12 @@ export function ProfileTabs({ username, activeTab, isOwner }: ProfileTabsProps) 
                   layoutId="profile-tab-underline"
                   className="absolute left-0 right-0 bottom-0 h-0.5 bg-foreground"
                   transition={{
-                    type: "spring",
-                    stiffness: 400,
-                    damping: 32,
-                    mass: 0.8,
+                    duration: 0.22,
+                    ease: [0.2, 0.8, 0.2, 1],
                   }}
                 />
               )}
-            </Link>
+            </button>
           );
         })}
       </nav>
