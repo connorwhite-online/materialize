@@ -1,9 +1,11 @@
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { Separator } from "@/components/ui/separator";
+import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { ProfileTabs } from "@/components/profile/profile-tabs";
 import { FilesTab } from "@/components/profile/files-tab";
@@ -56,12 +58,25 @@ export default async function ProfilePage(props: {
           className="h-20 w-20 text-2xl"
         />
         <div className="flex-1 min-w-0">
-          <h1 className="text-2xl font-bold">
-            {user.displayName || user.username}
-          </h1>
-          {user.username && (
-            <p className="text-muted-foreground">@{user.username}</p>
-          )}
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-bold">
+                {user.displayName || user.username}
+              </h1>
+              {user.username && (
+                <p className="text-muted-foreground">@{user.username}</p>
+              )}
+            </div>
+            {isOwner && (
+              <Button
+                variant="outline"
+                size="sm"
+                render={<Link href="/dashboard/settings" />}
+              >
+                Settings
+              </Button>
+            )}
+          </div>
           {user.bio && (
             <p className="mt-2 max-w-xl text-sm leading-relaxed">{user.bio}</p>
           )}
