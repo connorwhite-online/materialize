@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { FileUploader } from "@/components/upload/file-uploader";
@@ -84,7 +85,28 @@ export function HomeBottomBar() {
   };
 
   return (
-    <div className="fixed inset-x-0 bottom-4 z-40 flex justify-center px-4 pointer-events-none">
+    <div className="fixed inset-x-0 bottom-4 z-40 flex flex-col items-center px-4 pointer-events-none">
+      {/* Explore materials — visible only when bottom bar is idle */}
+      <AnimatePresence initial={false}>
+        {mode === "idle" && (
+          <motion.div
+            key="explore"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
+            className="pointer-events-auto mb-6"
+          >
+            <Link
+              href="/materials"
+              className="inline-flex items-center rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+            >
+              Explore materials &rarr;
+            </Link>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <motion.div
         ref={containerRef}
         layout
