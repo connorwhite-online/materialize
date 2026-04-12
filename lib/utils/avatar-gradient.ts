@@ -1,27 +1,14 @@
 /**
  * Deterministic gradient generator for empty-state avatars.
- * Same seed always produces the same gradient — feels like identity, not noise.
- * Uses neutral palette to fit our design system.
+ * Same seed always produces the same gradient — feels like identity.
+ *
+ * Uses oklch for perceptually uniform colors. Each user gets a unique
+ * hue across the full spectrum, but chroma stays low so colors are
+ * muted and fit the neutral design system.
  */
 
-// Pre-picked pairs of neutral shades from our oklch palette
-// Each pair creates a subtle gradient that works in both light and dark
-const GRADIENT_PAIRS: Array<[string, string]> = [
-  ["oklch(0.97 0 0)", "oklch(0.82 0 0)"], // light silver
-  ["oklch(0.92 0 0)", "oklch(0.75 0 0)"], // warm grey
-  ["oklch(0.88 0 0)", "oklch(0.68 0 0)"], // mid grey
-  ["oklch(0.85 0.01 60)", "oklch(0.65 0.01 60)"], // warm stone
-  ["oklch(0.87 0.005 240)", "oklch(0.68 0.005 240)"], // cool slate
-  ["oklch(0.9 0.008 100)", "oklch(0.72 0.008 100)"], // sand
-  ["oklch(0.84 0.01 30)", "oklch(0.62 0.01 30)"], // terracotta neutral
-  ["oklch(0.89 0.006 200)", "oklch(0.7 0.006 200)"], // ice
-];
-
-const GRADIENT_ANGLES = [135, 145, 155, 165, 175, 185, 195, 205];
-
 /**
- * Hash a string to a positive integer.
- * djb2 — simple, fast, good distribution.
+ * djb2 hash — fast, good distribution.
  */
 function hashString(str: string): number {
   let hash = 5381;
@@ -33,11 +20,25 @@ function hashString(str: string): number {
 
 /**
  * Get a deterministic gradient for a user.
- * Returns a CSS `linear-gradient(...)` string.
+ * Returns a CSS `linear-gradient(...)` string using oklch.
+ *
+ * - Hue: 0-359° (main source of variation between users)
+ * - Chroma: 0.04-0.08 (subtle tint, never loud)
+ * - Two lightness stops create visible but soft gradient
  */
 export function getAvatarGradient(seed: string): string {
   const hash = hashString(seed);
-  const pair = GRADIENT_PAIRS[hash % GRADIENT_PAIRS.length];
-  const angle = GRADIENT_ANGLES[(hash >> 3) % GRADIENT_ANGLES.length];
-  return `linear-gradient(${angle}deg, ${pair[0]}, ${pair[1]})`;
+
+  const hue = hash % 360;
+  const chroma = 0.04 + ((hash >> 3) % 5) * 0.01; // 0.04 – 0.08
+  const lightStart = 0.82 + ((hash >> 6) % 9) * 0.01; // 0.82 – 0.90
+  const lightEnd = 0.62 + ((hash >> 10) % 11) * 0.01; // 0.62 – 0.72
+
+  const angles = [135, 145, 155, 165, 175, 185, 195, 205];
+  const angle = angles[(hash >> 14) % angles.length];
+
+  const start = `oklch(${lightStart.toFixed(3)} ${chroma.toFixed(3)} ${hue})`;
+  const end = `oklch(${lightEnd.toFixed(3)} ${chroma.toFixed(3)} ${hue})`;
+
+  return `linear-gradient(${angle}deg, ${start}, ${end})`;
 }
