@@ -13,14 +13,19 @@ import {
   InputOTPGroup,
   InputOTPSlot,
 } from "@/components/ui/input-otp";
+import { Separator } from "@/components/ui/separator";
+import { SocialButtons } from "@/components/auth/social-buttons";
+
+type Method = "email" | "phone";
 
 export default function SignUpPage() {
   const { isLoaded, signUp, setActive } = useSignUp();
   const router = useRouter();
 
-  const [email, setEmail] = useState("");
+  const [method, setMethod] = useState<Method>("email");
+  const [value, setValue] = useState("");
   const [code, setCode] = useState("");
-  const [step, setStep] = useState<"email" | "code">("email");
+  const [step, setStep] = useState<"identifier" | "code">("identifier");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -31,14 +36,13 @@ export default function SignUpPage() {
     setError("");
 
     try {
-      await signUp.create({
-        emailAddress: email,
-      });
-
-      await signUp.prepareEmailAddressVerification({
-        strategy: "email_code",
-      });
-
+      if (method === "email") {
+        await signUp.create({ emailAddress: value });
+        await signUp.prepareEmailAddressVerification({ strategy: "email_code" });
+      } else {
+        await signUp.create({ phoneNumber: value });
+        await signUp.preparePhoneNumberVerification({ strategy: "phone_code" });
+      }
       setStep("code");
     } catch (err: unknown) {
       const clerkErr = err as { errors?: Array<{ longMessage?: string }> };
@@ -51,19 +55,19 @@ export default function SignUpPage() {
     }
   };
 
-  const handleVerifyCode = async (value: string) => {
-    if (!isLoaded || !signUp || value.length < 6) return;
+  const handleVerifyCode = async (codeValue: string) => {
+    if (!isLoaded || !signUp || codeValue.length < 6) return;
     setLoading(true);
     setError("");
 
     try {
-      const result = await signUp.attemptEmailAddressVerification({
-        code: value,
-      });
+      const result =
+        method === "email"
+          ? await signUp.attemptEmailAddressVerification({ code: codeValue })
+          : await signUp.attemptPhoneNumberVerification({ code: codeValue });
 
       if (result.status === "complete" && result.createdSessionId) {
         await setActive({ session: result.createdSessionId });
-        // New users land on onboarding to pick a username
         router.push("/onboarding");
       }
     } catch (err: unknown) {
@@ -87,40 +91,68 @@ export default function SignUpPage() {
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
           <CardTitle className="text-xl">
-            {step === "email" ? "Create an account" : "Verify your email"}
+            {step === "identifier" ? "Create an account" : "Enter code"}
           </CardTitle>
           {step === "code" && (
             <p className="text-sm text-muted-foreground mt-1">
-              We sent a code to {email}
+              We sent a code to {value}
             </p>
           )}
         </CardHeader>
         <CardContent>
-          {step === "email" ? (
-            <form onSubmit={handleSendCode} className="space-y-5">
-              <div>
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  required
-                  autoFocus
-                />
+          {step === "identifier" ? (
+            <div className="space-y-4">
+              <SocialButtons mode="sign-up" />
+
+              <div className="relative">
+                <Separator />
+                <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs text-muted-foreground">
+                  or
+                </span>
               </div>
 
-              {error && <p className="text-xs text-destructive">{error}</p>}
+              <form onSubmit={handleSendCode} className="space-y-5">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <Label htmlFor="value" className="mb-0">
+                      {method === "email" ? "Email" : "Phone"}
+                    </Label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMethod(method === "email" ? "phone" : "email");
+                        setValue("");
+                        setError("");
+                      }}
+                      className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      Use {method === "email" ? "phone" : "email"} instead
+                    </button>
+                  </div>
+                  <Input
+                    id="value"
+                    type={method === "email" ? "email" : "tel"}
+                    value={value}
+                    onChange={(e) => setValue(e.target.value)}
+                    placeholder={
+                      method === "email" ? "you@example.com" : "+1 555 123 4567"
+                    }
+                    required
+                    autoFocus
+                  />
+                </div>
 
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={loading || !email}
-              >
-                {loading ? "Sending code..." : "Continue with email"}
-              </Button>
-            </form>
+                {error && <p className="text-xs text-destructive">{error}</p>}
+
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={loading || !value}
+                >
+                  {loading ? "Sending code..." : "Continue"}
+                </Button>
+              </form>
+            </div>
           ) : (
             <div className="space-y-4">
               <div className="flex justify-center">
@@ -156,13 +188,13 @@ export default function SignUpPage() {
               <button
                 type="button"
                 onClick={() => {
-                  setStep("email");
+                  setStep("identifier");
                   setCode("");
                   setError("");
                 }}
                 className="block w-full text-center text-xs text-muted-foreground transition-colors hover:text-foreground"
               >
-                Use a different email
+                Go back
               </button>
             </div>
           )}

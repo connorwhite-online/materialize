@@ -13,14 +13,20 @@ import {
   InputOTPGroup,
   InputOTPSlot,
 } from "@/components/ui/input-otp";
+import { Separator } from "@/components/ui/separator";
+import { SocialButtons } from "@/components/auth/social-buttons";
+
+type CodeStrategy = "email_code" | "phone_code";
 
 export default function SignInPage() {
   const { isLoaded, signIn, setActive } = useSignIn();
   const router = useRouter();
 
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [code, setCode] = useState("");
-  const [step, setStep] = useState<"email" | "code">("email");
+  const [step, setStep] = useState<"identifier" | "code">("identifier");
+  const [strategy, setStrategy] = useState<CodeStrategy>("email_code");
+  const [factorId, setFactorId] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -31,12 +37,14 @@ export default function SignInPage() {
     setError("");
 
     try {
-      const { supportedFirstFactors } = await signIn.create({
-        identifier: email,
-      });
+      const { supportedFirstFactors } = await signIn.create({ identifier });
 
+      // Prefer email_code, fall back to phone_code
       const emailFactor = supportedFirstFactors?.find(
         (f) => f.strategy === "email_code"
+      );
+      const phoneFactor = supportedFirstFactors?.find(
+        (f) => f.strategy === "phone_code"
       );
 
       if (emailFactor && "emailAddressId" in emailFactor) {
@@ -44,9 +52,19 @@ export default function SignInPage() {
           strategy: "email_code",
           emailAddressId: emailFactor.emailAddressId,
         });
+        setStrategy("email_code");
+        setFactorId(emailFactor.emailAddressId);
+        setStep("code");
+      } else if (phoneFactor && "phoneNumberId" in phoneFactor) {
+        await signIn.prepareFirstFactor({
+          strategy: "phone_code",
+          phoneNumberId: phoneFactor.phoneNumberId,
+        });
+        setStrategy("phone_code");
+        setFactorId(phoneFactor.phoneNumberId);
         setStep("code");
       } else {
-        setError("Email sign-in is not available for this account.");
+        setError("No verification method available for this account.");
       }
     } catch (err: unknown) {
       const clerkErr = err as { errors?: Array<{ longMessage?: string }> };
@@ -66,7 +84,7 @@ export default function SignInPage() {
 
     try {
       const result = await signIn.attemptFirstFactor({
-        strategy: "email_code",
+        strategy,
         code: value,
       });
 
@@ -95,40 +113,53 @@ export default function SignInPage() {
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
           <CardTitle className="text-xl">
-            {step === "email" ? "Sign in" : "Check your email"}
+            {step === "identifier" ? "Sign in" : "Enter code"}
           </CardTitle>
           {step === "code" && (
             <p className="text-sm text-muted-foreground mt-1">
-              We sent a code to {email}
+              We sent a code to {identifier}
             </p>
           )}
         </CardHeader>
         <CardContent>
-          {step === "email" ? (
-            <form onSubmit={handleSendCode} className="space-y-5">
-              <div>
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  required
-                  autoFocus
-                />
+          {step === "identifier" ? (
+            <div className="space-y-4">
+              <SocialButtons mode="sign-in" />
+
+              <div className="relative">
+                <Separator />
+                <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs text-muted-foreground">
+                  or
+                </span>
               </div>
 
-              {error && <p className="text-xs text-destructive">{error}</p>}
+              <form onSubmit={handleSendCode} className="space-y-5">
+                <div>
+                  <Label htmlFor="identifier">
+                    Email, phone, or username
+                  </Label>
+                  <Input
+                    id="identifier"
+                    type="text"
+                    value={identifier}
+                    onChange={(e) => setIdentifier(e.target.value)}
+                    placeholder="you@example.com"
+                    required
+                    autoFocus
+                  />
+                </div>
 
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={loading || !email}
-              >
-                {loading ? "Sending code..." : "Continue with email"}
-              </Button>
-            </form>
+                {error && <p className="text-xs text-destructive">{error}</p>}
+
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={loading || !identifier}
+                >
+                  {loading ? "Sending code..." : "Continue"}
+                </Button>
+              </form>
+            </div>
           ) : (
             <div className="space-y-4">
               <div className="flex justify-center">
@@ -164,13 +195,13 @@ export default function SignInPage() {
               <button
                 type="button"
                 onClick={() => {
-                  setStep("email");
+                  setStep("identifier");
                   setCode("");
                   setError("");
                 }}
                 className="block w-full text-center text-xs text-muted-foreground transition-colors hover:text-foreground"
               >
-                Use a different email
+                Use a different account
               </button>
             </div>
           )}
