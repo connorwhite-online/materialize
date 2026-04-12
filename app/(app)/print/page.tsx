@@ -3,9 +3,9 @@ import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { files, fileAssets, purchases } from "@/lib/db/schema";
 import { eq, and, desc, inArray } from "drizzle-orm";
-import { Card, CardContent } from "@/components/ui/card";
 import { getMaterialById } from "@/lib/materials";
 import { Badge } from "@/components/ui/badge";
+import { InlineUploadDropzone } from "@/components/upload/inline-upload-dropzone";
 
 interface LibraryTile {
   fileAssetId: string;
@@ -157,33 +157,21 @@ export default async function PrintPage(props: {
         </div>
       )}
 
-      <div className="mt-10 grid gap-4 sm:grid-cols-2">
-        <Link href="/dashboard/uploads/new">
-          <Card className="h-full transition-colors hover:border-primary/30">
-            <CardContent className="flex flex-col items-center p-8 text-center">
-              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
-                <span className="text-xl text-muted-foreground">+</span>
-              </div>
-              <h2 className="mt-4 font-semibold">Upload a new file</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Upload your STL, OBJ, 3MF, STEP, or AMF file
-              </p>
-            </CardContent>
-          </Card>
-        </Link>
+      <div className="mt-10">
+        <h2 className="text-sm font-medium text-muted-foreground">
+          Or upload a new file
+        </h2>
+        <div className="mt-3">
+          <InlineUploadDropzone />
+        </div>
+      </div>
 
-        <Link href="/files">
-          <Card className="h-full transition-colors hover:border-primary/30">
-            <CardContent className="flex flex-col items-center p-8 text-center">
-              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
-                <span className="text-xl text-muted-foreground">&#x2315;</span>
-              </div>
-              <h2 className="mt-4 font-semibold">Browse marketplace</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Find a file to print from the community
-              </p>
-            </CardContent>
-          </Card>
+      <div className="mt-8">
+        <Link
+          href="/files"
+          className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        >
+          Or browse the marketplace →
         </Link>
       </div>
     </div>

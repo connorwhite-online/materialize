@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { db } from "@/lib/db";
 import {
   files,
@@ -15,6 +14,8 @@ import {
   LibraryFileCard,
   type LibraryFileCardItem,
 } from "./library-file-card";
+import { NewCollectionButton } from "./new-collection-button";
+import { UploadDialog } from "@/components/upload/upload-dialog";
 
 interface LibraryTabProps {
   userId: string;
@@ -215,12 +216,11 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
           {isOwner ? "Your library is empty." : "Nothing to show."}
         </p>
         {isOwner && (
-          <Button
-            className="mt-4"
-            render={<Link href="/dashboard/uploads/new" />}
-          >
-            Upload your first file
-          </Button>
+          <div className="mt-4">
+            <UploadDialog
+              trigger={<Button>Upload your first file</Button>}
+            />
+          </div>
         )}
       </div>
     );
@@ -235,13 +235,16 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
             {userCollections.length > 0 &&
               ` · ${userCollections.length} ${userCollections.length === 1 ? "collection" : "collections"}`}
           </p>
-          <Button
-            variant="outline"
-            size="sm"
-            render={<Link href="/dashboard/uploads/new" />}
-          >
-            Upload file
-          </Button>
+          <div className="flex items-center gap-2">
+            <NewCollectionButton />
+            <UploadDialog
+              trigger={
+                <Button variant="outline" size="sm">
+                  Upload file
+                </Button>
+              }
+            />
+          </div>
         </div>
       )}
 

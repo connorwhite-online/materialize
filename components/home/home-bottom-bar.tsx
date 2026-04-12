@@ -6,6 +6,7 @@ import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { ChevronRight } from "@/components/icons/chevron-right";
+import { UploadDialog } from "@/components/upload/upload-dialog";
 import { cn } from "@/lib/utils";
 
 type Mode = "idle" | "searching";
@@ -59,9 +60,6 @@ export function HomeBottomBar() {
     }
   };
 
-  const handleUploadClick = () => {
-    router.push("/dashboard/uploads/new");
-  };
 
   return (
     <div className="fixed inset-x-0 bottom-4 z-40 flex flex-col items-center px-4 pointer-events-none">
@@ -130,9 +128,13 @@ export function HomeBottomBar() {
             placeholder="Search files, materials, creators..."
             className="flex-1 bg-transparent px-3 py-2 text-base md:text-sm placeholder:text-muted-foreground/60 focus:outline-none"
           />
-          <Button type="button" size="sm" onClick={handleUploadClick}>
-            Upload
-          </Button>
+          <UploadDialog
+            trigger={
+              <Button type="button" size="sm">
+                Upload
+              </Button>
+            }
+          />
         </form>
       </motion.div>
     </div>

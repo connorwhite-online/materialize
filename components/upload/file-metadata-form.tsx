@@ -32,6 +32,12 @@ interface FileMetadataFormProps {
   file: File;
   /** Format derived from the file extension. */
   format: "stl" | "obj" | "3mf" | "step" | "amf";
+  /**
+   * If provided, the cancel button calls this instead of linking
+   * back to the home page. Used when the form is mounted inside a
+   * dialog so cancel just closes the modal.
+   */
+  onCancel?: () => void;
 }
 
 const DESIGN_TAG_LABELS: Record<string, string> = {
@@ -68,7 +74,11 @@ function ChevronDownIcon({ className }: { className?: string }) {
 
 type SubmitPhase = "idle" | "uploading" | "saving";
 
-export function FileMetadataForm({ file, format }: FileMetadataFormProps) {
+export function FileMetadataForm({
+  file,
+  format,
+  onCancel,
+}: FileMetadataFormProps) {
   const [selectedDesignTags, setSelectedDesignTags] = useState<string[]>([]);
   const [recommendedMaterial, setRecommendedMaterial] = useState("");
   const [license, setLicense] = useState("free");
@@ -504,15 +514,28 @@ export function FileMetadataForm({ file, format }: FileMetadataFormProps) {
 
       {/* Actions */}
       <div className="flex gap-3">
-        <Button
-          type="button"
-          variant="outline"
-          size="lg"
-          className="flex-1"
-          render={<Link href="/" />}
-        >
-          Cancel
-        </Button>
+        {onCancel ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="lg"
+            className="flex-1"
+            onClick={onCancel}
+            disabled={isSubmitting}
+          >
+            Cancel
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            size="lg"
+            className="flex-1"
+            render={<Link href="/" />}
+          >
+            Cancel
+          </Button>
+        )}
         <Button
           type="submit"
           disabled={isSubmitting}

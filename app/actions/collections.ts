@@ -12,6 +12,7 @@ import { logError } from "@/lib/logger";
 const collectionSchema = z.object({
   name: z.string().min(1, "Name is required").max(100),
   description: z.string().max(500).optional(),
+  visibility: z.enum(["public", "private"]).optional(),
   tags: z
     .string()
     .optional()
@@ -47,6 +48,7 @@ export async function createCollection(formData: FormData) {
   const parsed = collectionSchema.safeParse({
     name: formData.get("name"),
     description: formData.get("description"),
+    visibility: formData.get("visibility") || undefined,
     tags: formData.get("tags"),
   });
 
@@ -66,6 +68,7 @@ export async function createCollection(formData: FormData) {
         userId,
         name: parsed.data.name,
         description: parsed.data.description,
+        visibility: parsed.data.visibility ?? "public",
         tags: parsed.data.tags,
         slug,
       })

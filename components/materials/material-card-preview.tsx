@@ -29,7 +29,9 @@ interface MaterialCardPreviewProps {
 // v7: square pyramid with beveled / chamfered edges. Each ideal face
 //     is inset along its plane, then the convex hull of all inset
 //     points generates the bevel strips along every edge automatically.
-const THUMBNAIL_VERSION = 7;
+// v8: more padding around the pyramid in the captured frame — v7 was
+//     clipping the apex on tall aspect ratios.
+const THUMBNAIL_VERSION = 8;
 const STORAGE_PREFIX = "materialTile:v";
 const CAPTURE_SIZE = 512;
 
@@ -252,7 +254,7 @@ export function MaterialCardPreview({
           style={{ width: CAPTURE_SIZE, height: CAPTURE_SIZE }}
         >
           <Canvas
-            camera={{ position: [0, 0.4, 4.2], fov: 32 }}
+            camera={{ position: [0, 0.45, 5.4], fov: 32 }}
             dpr={2}
             gl={{ antialias: true, alpha: true, preserveDrawingBuffer: true }}
           >
