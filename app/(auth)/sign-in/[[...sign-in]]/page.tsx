@@ -105,7 +105,7 @@ export default function SignInPage() {
         </CardHeader>
         <CardContent>
           {step === "email" ? (
-            <form onSubmit={handleSendCode} className="space-y-4">
+            <form onSubmit={handleSendCode} className="space-y-5">
               <div>
                 <Label htmlFor="email">Email</Label>
                 <Input

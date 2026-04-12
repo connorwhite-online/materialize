@@ -19,9 +19,8 @@ export default function SignUpPage() {
   const router = useRouter();
 
   const [email, setEmail] = useState("");
-  const [username, setUsername] = useState("");
   const [code, setCode] = useState("");
-  const [step, setStep] = useState<"details" | "code">("details");
+  const [step, setStep] = useState<"email" | "code">("email");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -34,7 +33,6 @@ export default function SignUpPage() {
     try {
       await signUp.create({
         emailAddress: email,
-        username,
       });
 
       await signUp.prepareEmailAddressVerification({
@@ -65,7 +63,8 @@ export default function SignUpPage() {
 
       if (result.status === "complete" && result.createdSessionId) {
         await setActive({ session: result.createdSessionId });
-        router.push("/dashboard");
+        // New users land on onboarding to pick a username
+        router.push("/onboarding");
       }
     } catch (err: unknown) {
       const clerkErr = err as { errors?: Array<{ longMessage?: string }> };
@@ -88,7 +87,7 @@ export default function SignUpPage() {
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
           <CardTitle className="text-xl">
-            {step === "details" ? "Create an account" : "Verify your email"}
+            {step === "email" ? "Create an account" : "Verify your email"}
           </CardTitle>
           {step === "code" && (
             <p className="text-sm text-muted-foreground mt-1">
@@ -97,8 +96,8 @@ export default function SignUpPage() {
           )}
         </CardHeader>
         <CardContent>
-          {step === "details" ? (
-            <form onSubmit={handleSendCode} className="space-y-4">
+          {step === "email" ? (
+            <form onSubmit={handleSendCode} className="space-y-5">
               <div>
                 <Label htmlFor="email">Email</Label>
                 <Input
@@ -112,34 +111,14 @@ export default function SignUpPage() {
                 />
               </div>
 
-              <div>
-                <Label htmlFor="username">Username</Label>
-                <Input
-                  id="username"
-                  value={username}
-                  onChange={(e) =>
-                    setUsername(
-                      e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, "")
-                    )
-                  }
-                  placeholder="yourname"
-                  required
-                  minLength={3}
-                  maxLength={30}
-                />
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Letters, numbers, underscores, hyphens
-                </p>
-              </div>
-
               {error && <p className="text-xs text-destructive">{error}</p>}
 
               <Button
                 type="submit"
                 className="w-full"
-                disabled={loading || !email || !username}
+                disabled={loading || !email}
               >
-                {loading ? "Creating account..." : "Continue"}
+                {loading ? "Sending code..." : "Continue with email"}
               </Button>
             </form>
           ) : (
@@ -177,13 +156,13 @@ export default function SignUpPage() {
               <button
                 type="button"
                 onClick={() => {
-                  setStep("details");
+                  setStep("email");
                   setCode("");
                   setError("");
                 }}
                 className="block w-full text-center text-xs text-muted-foreground transition-colors hover:text-foreground"
               >
-                Go back
+                Use a different email
               </button>
             </div>
           )}

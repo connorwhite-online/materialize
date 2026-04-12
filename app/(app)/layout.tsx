@@ -1,11 +1,19 @@
 import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
+import { currentUser } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
 
-export default function AppLayout({
+export default async function AppLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // If the user is signed in but hasn't picked a username yet, send them to onboarding
+  const user = await currentUser();
+  if (user && !user.username) {
+    redirect("/onboarding");
+  }
+
   return (
     <div className="flex min-h-screen flex-col">
       <header className="border-b border-border bg-background">
