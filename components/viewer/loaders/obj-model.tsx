@@ -9,9 +9,10 @@ import { MaterializeMaterial } from "../materialize-material";
 interface ObjModelProps {
   url: string;
   color?: string;
+  useCustomShader?: boolean;
 }
 
-export function ObjModel({ url, color = "#a0a0a0" }: ObjModelProps) {
+export function ObjModel({ url, color = "#a0a0a0", useCustomShader = true }: ObjModelProps) {
   const obj = useLoader(OBJLoader, url);
 
   // Extract all geometries from the OBJ group
@@ -29,7 +30,11 @@ export function ObjModel({ url, color = "#a0a0a0" }: ObjModelProps) {
     <group>
       {geometries.map((geo, i) => (
         <mesh key={i} geometry={geo}>
-          <MaterializeMaterial baseColor={color} />
+          {useCustomShader ? (
+            <MaterializeMaterial baseColor={color} />
+          ) : (
+            <meshStandardMaterial color={color} metalness={0.15} roughness={0.55} />
+          )}
         </mesh>
       ))}
     </group>

@@ -1,8 +1,9 @@
 "use client";
 
-import { Suspense, useState, useEffect } from "react";
+import { Suspense, useState, useEffect, useRef } from "react";
 import { Canvas } from "@react-three/fiber";
-import { Center, OrbitControls } from "@react-three/drei";
+import { OrbitControls, Environment } from "@react-three/drei";
+import * as THREE from "three";
 import { StlModel } from "@/components/viewer/loaders/stl-model";
 import { ObjModel } from "@/components/viewer/loaders/obj-model";
 import { ThreeMfModel } from "@/components/viewer/loaders/threemf-model";
@@ -11,14 +12,109 @@ import { LoadingPreview } from "@/components/viewer/loading-preview";
 interface UploadPreviewProps {
   storageKey: string;
   format: "stl" | "obj" | "3mf" | "step" | "amf";
+  onDimensionsComputed?: (dims: [number, number, number]) => void;
 }
 
 /**
- * Shows the uploaded model rendered with our Materialize shader.
- * Fetches a presigned download URL on mount, then loads the model.
- * Shows the LoadingPreview while fetching/parsing.
+ * Measures the union bounding box of all loaded mesh geometries and
+ * applies a center offset + uniform scale so every model fills roughly
+ * the same volume in world space, regardless of the file's native units
+ * (mm, inches, arbitrary). Also reports raw dimensions upward.
+ *
+ * TARGET_WORLD_SIZE is the world-space length that the model's largest
+ * dimension maps to. Paired with the camera (Z=4.5, fov=40) it puts the
+ * model at a comfortable framing with a little breathing room.
  */
-export function UploadPreview({ storageKey, format }: UploadPreviewProps) {
+const TARGET_WORLD_SIZE = 2.4;
+
+function NormalizedModel({
+  onDimensions,
+  children,
+}: {
+  onDimensions?: (dims: [number, number, number]) => void;
+  children: React.ReactNode;
+}) {
+  const innerRef = useRef<THREE.Group>(null);
+  const [transform, setTransform] = useState<{
+    scale: number;
+    offset: [number, number, number];
+    ready: boolean;
+  }>({ scale: 1, offset: [0, 0, 0], ready: false });
+
+  useEffect(() => {
+    if (!innerRef.current) return;
+
+    let rafId = 0;
+    let attempts = 0;
+
+    // Retry across a few frames in case the loader's geometries haven't
+    // been fully attached to the three.js tree yet when the effect fires.
+    const measure = () => {
+      const group = innerRef.current;
+      if (!group) return;
+
+      const box = new THREE.Box3();
+      let hasGeom = false;
+      group.traverse((child) => {
+        const mesh = child as THREE.Mesh;
+        if (mesh.isMesh && mesh.geometry) {
+          if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+          const bb = mesh.geometry.boundingBox;
+          if (bb && bb.isEmpty() === false) {
+            box.union(bb);
+            hasGeom = true;
+          }
+        }
+      });
+
+      if (!hasGeom || box.isEmpty()) {
+        if (attempts++ < 10) {
+          rafId = requestAnimationFrame(measure);
+        }
+        return;
+      }
+
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      const center = new THREE.Vector3();
+      box.getCenter(center);
+      const maxDim = Math.max(size.x, size.y, size.z);
+      const scale = maxDim > 0 ? TARGET_WORLD_SIZE / maxDim : 1;
+
+      setTransform({
+        scale,
+        offset: [-center.x, -center.y, -center.z],
+        ready: true,
+      });
+
+      if (onDimensions) {
+        onDimensions([size.x, size.y, size.z]);
+      }
+    };
+
+    measure();
+
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+    // Runs once per mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <group scale={transform.scale} visible={transform.ready}>
+      <group position={transform.offset} ref={innerRef}>
+        {children}
+      </group>
+    </group>
+  );
+}
+
+export function UploadPreview({
+  storageKey,
+  format,
+  onDimensionsComputed,
+}: UploadPreviewProps) {
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState(false);
 
@@ -67,21 +163,48 @@ export function UploadPreview({ storageKey, format }: UploadPreviewProps) {
     );
   }
 
+  const modelColor = "#cbd5e1";
+
   return (
     <Canvas
-      camera={{ position: [0, 0, 4.5], fov: 45 }}
+      camera={{ position: [0, 0, 4.5], fov: 40 }}
       dpr={[1, 2]}
       gl={{ antialias: true, alpha: true }}
     >
-      <ambientLight intensity={0.6} />
-      <directionalLight position={[5, 5, 5]} intensity={1.0} />
-      <directionalLight position={[-5, -3, -5]} intensity={0.4} />
+      {/* Soft key + fill so the model reads well even before env lights load */}
+      <ambientLight intensity={0.35} />
+      <directionalLight position={[5, 6, 6]} intensity={1.1} />
+      <directionalLight position={[-5, -2, -4]} intensity={0.35} />
+
+      {/* Studio IBL isolated in its own Suspense so it doesn't block the mesh */}
       <Suspense fallback={null}>
-        <Center>
-          {format === "stl" && <StlModel url={downloadUrl} />}
-          {format === "obj" && <ObjModel url={downloadUrl} />}
-          {format === "3mf" && <ThreeMfModel url={downloadUrl} />}
-        </Center>
+        <Environment preset="studio" />
+      </Suspense>
+
+      <Suspense fallback={null}>
+        <NormalizedModel onDimensions={onDimensionsComputed}>
+          {format === "stl" && (
+            <StlModel
+              url={downloadUrl}
+              color={modelColor}
+              useCustomShader={false}
+            />
+          )}
+          {format === "obj" && (
+            <ObjModel
+              url={downloadUrl}
+              color={modelColor}
+              useCustomShader={false}
+            />
+          )}
+          {format === "3mf" && (
+            <ThreeMfModel
+              url={downloadUrl}
+              color={modelColor}
+              useCustomShader={false}
+            />
+          )}
+        </NormalizedModel>
       </Suspense>
       <OrbitControls
         enableZoom={false}

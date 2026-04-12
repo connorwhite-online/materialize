@@ -9,9 +9,10 @@ import { MaterializeMaterial } from "../materialize-material";
 interface ThreeMfModelProps {
   url: string;
   color?: string;
+  useCustomShader?: boolean;
 }
 
-export function ThreeMfModel({ url, color = "#a0a0a0" }: ThreeMfModelProps) {
+export function ThreeMfModel({ url, color = "#a0a0a0", useCustomShader = true }: ThreeMfModelProps) {
   const group = useLoader(ThreeMFLoader, url);
 
   const geometries = useMemo(() => {
@@ -28,7 +29,11 @@ export function ThreeMfModel({ url, color = "#a0a0a0" }: ThreeMfModelProps) {
     <group>
       {geometries.map((geo, i) => (
         <mesh key={i} geometry={geo}>
-          <MaterializeMaterial baseColor={color} />
+          {useCustomShader ? (
+            <MaterializeMaterial baseColor={color} />
+          ) : (
+            <meshStandardMaterial color={color} metalness={0.15} roughness={0.55} />
+          )}
         </mesh>
       ))}
     </group>

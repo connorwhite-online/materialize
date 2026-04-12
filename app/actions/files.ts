@@ -2,7 +2,7 @@
 
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-import { files, fileAssets } from "@/lib/db/schema";
+import { files, fileAssets, collections, collectionFiles } from "@/lib/db/schema";
 import { eq, and, ne, inArray, isNotNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -102,6 +102,40 @@ export async function createFileListing(formData: FormData) {
           .set({ fileId: file.id })
           .where(eq(fileAssets.id, assetId));
       }
+    }
+
+    // Optional: add to an existing collection or create a new one
+    const rawCollectionId = (formData.get("collectionId") as string | null) || "";
+    const newCollectionName = (
+      (formData.get("newCollectionName") as string | null) || ""
+    ).trim();
+
+    let targetCollectionId: string | null = null;
+    if (rawCollectionId === "__new__" && newCollectionName) {
+      const slug = `${newCollectionName
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")}-${nanoid(6)}`;
+      const [created] = await db
+        .insert(collections)
+        .values({ userId, name: newCollectionName, slug })
+        .returning({ id: collections.id });
+      targetCollectionId = created.id;
+    } else if (rawCollectionId && rawCollectionId !== "none") {
+      // Verify ownership before linking
+      const [owned] = await db
+        .select({ id: collections.id })
+        .from(collections)
+        .where(and(eq(collections.id, rawCollectionId), eq(collections.userId, userId)));
+      if (owned) targetCollectionId = owned.id;
+    }
+
+    if (targetCollectionId) {
+      await db.insert(collectionFiles).values({
+        collectionId: targetCollectionId,
+        fileId: file.id,
+        sortOrder: 0,
+      });
     }
 
     revalidatePath("/dashboard/uploads");

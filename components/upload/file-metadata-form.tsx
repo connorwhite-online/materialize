@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useActionState } from "react";
+import { useState, useEffect, useActionState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { createFileListing } from "@/app/actions/files";
+import { listMyCollections } from "@/app/actions/collections";
 import { MATERIALS } from "@/lib/materials";
 import { DESIGN_TAG_OPTIONS } from "@/lib/validations/file";
 import { Button } from "@/components/ui/button";
@@ -18,8 +19,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { UploadPreview } from "./upload-preview";
 
 interface UploadedAsset {
@@ -43,11 +48,56 @@ const DESIGN_TAG_LABELS: Record<string, string> = {
   lightweight: "Lightweight",
 };
 
+function formatDim(n: number) {
+  // STL/OBJ/3MF units are typically millimeters. Show 1 decimal place.
+  return n.toFixed(1);
+}
+
+function ChevronDownIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      width={16}
+      height={16}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  );
+}
+
 export function FileMetadataForm({ assets }: FileMetadataFormProps) {
   const [selectedDesignTags, setSelectedDesignTags] = useState<string[]>([]);
   const [recommendedMaterial, setRecommendedMaterial] = useState("");
   const [license, setLicense] = useState("free");
   const [sellEnabled, setSellEnabled] = useState(false);
+  const [printRecOpen, setPrintRecOpen] = useState(false);
+  const [dimensions, setDimensions] = useState<
+    [number, number, number] | null
+  >(null);
+
+  // Collections
+  const [userCollections, setUserCollections] = useState<
+    Array<{ id: string; name: string }>
+  >([]);
+  const [collectionChoice, setCollectionChoice] = useState<string>("none");
+  const [newCollectionName, setNewCollectionName] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    listMyCollections().then((rows) => {
+      if (!cancelled) setUserCollections(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const primaryAsset = assets[0];
 
@@ -69,6 +119,10 @@ export function FileMetadataForm({ assets }: FileMetadataFormProps) {
       if (recommendedMaterial) {
         formData.set("recommendedMaterialId", recommendedMaterial);
       }
+      formData.set("collectionId", collectionChoice);
+      if (collectionChoice === "__new__") {
+        formData.set("newCollectionName", newCollectionName);
+      }
       return createFileListing(formData);
     },
     null
@@ -82,10 +136,15 @@ export function FileMetadataForm({ assets }: FileMetadataFormProps) {
     );
   };
 
+  const expandTransition = {
+    duration: 0.22,
+    ease: [0.2, 0.8, 0.2, 1] as [number, number, number, number],
+  };
+
   return (
     <form action={formAction} className="space-y-6">
       {/* 3D Preview at the top */}
-      <Card className="overflow-hidden">
+      <Card className="overflow-hidden py-0">
         <div className="aspect-[4/3] w-full bg-gradient-to-br from-muted/40 to-muted/10">
           {primaryAsset && (
             <UploadPreview
@@ -93,17 +152,24 @@ export function FileMetadataForm({ assets }: FileMetadataFormProps) {
               format={
                 primaryAsset.format as "stl" | "obj" | "3mf" | "step" | "amf"
               }
+              onDimensionsComputed={setDimensions}
             />
           )}
         </div>
-        <div className="flex items-center gap-2 border-t border-border px-4 py-2.5 text-sm">
-          <span className="font-medium truncate">
-            {primaryAsset?.originalFilename}
-          </span>
-          <Badge variant="outline" className="text-[10px] uppercase">
-            {primaryAsset?.format}
-          </Badge>
-          <span className="text-muted-foreground text-xs ml-auto">
+        <div className="flex items-center gap-3 border-t border-border px-4 py-2.5 text-sm">
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-medium">
+              {primaryAsset?.originalFilename}
+            </div>
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              {dimensions
+                ? `${formatDim(dimensions[0])} × ${formatDim(dimensions[1])} × ${formatDim(dimensions[2])} mm`
+                : primaryAsset
+                ? "Measuring..."
+                : ""}
+            </div>
+          </div>
+          <span className="shrink-0 text-xs text-muted-foreground">
             {primaryAsset
               ? `${(primaryAsset.fileSize / 1024 / 1024).toFixed(1)} MB`
               : ""}
@@ -146,15 +212,56 @@ export function FileMetadataForm({ assets }: FileMetadataFormProps) {
               Help people find this file in search.
             </p>
           </div>
+
+          <div>
+            <Label htmlFor="collection-trigger">Collection</Label>
+            <Select
+              value={collectionChoice}
+              onValueChange={(v) => v && setCollectionChoice(v)}
+            >
+              <SelectTrigger id="collection-trigger" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No collection</SelectItem>
+                {userCollections.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name}
+                  </SelectItem>
+                ))}
+                <SelectItem value="__new__">+ Create new collection</SelectItem>
+              </SelectContent>
+            </Select>
+            <AnimatePresence initial={false}>
+              {collectionChoice === "__new__" && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={expandTransition}
+                  className="overflow-hidden"
+                >
+                  <div className="pt-3">
+                    <Input
+                      value={newCollectionName}
+                      onChange={(e) => setNewCollectionName(e.target.value)}
+                      placeholder="Collection name"
+                      autoFocus
+                    />
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </CardContent>
       </Card>
 
       {/* Sell toggle — the big decision */}
       <Card>
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium">List for sale</p>
+        <CardHeader>
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
+              <CardTitle className="text-base">List for sale</CardTitle>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 Make this file available to purchase or download publicly.
               </p>
@@ -164,17 +271,18 @@ export function FileMetadataForm({ assets }: FileMetadataFormProps) {
               onCheckedChange={setSellEnabled}
             />
           </div>
-
-          <AnimatePresence initial={false}>
-            {sellEnabled && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
-                className="overflow-hidden"
-              >
-                <div className="grid gap-4 sm:grid-cols-2 pt-4 mt-4 border-t border-border">
+        </CardHeader>
+        <AnimatePresence initial={false}>
+          {sellEnabled && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={expandTransition}
+              className="overflow-hidden"
+            >
+              <CardContent>
+                <div className="grid gap-4 sm:grid-cols-2">
                   <div>
                     <Label htmlFor="price">Price (USD)</Label>
                     <Input
@@ -208,79 +316,91 @@ export function FileMetadataForm({ assets }: FileMetadataFormProps) {
                     </Select>
                   </div>
                 </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </CardContent>
+              </CardContent>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </Card>
 
-      {/* Material intent — optional */}
+      {/* Print recommendations — optional, collapsed by default */}
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Print Recommendations</CardTitle>
-          <p className="text-xs text-muted-foreground">
-            Optional. Help printers choose the right material.
-          </p>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <Label htmlFor="material-trigger">Recommended Material</Label>
-            <Select
-              value={recommendedMaterial}
-              onValueChange={(v) => setRecommendedMaterial(v ?? "")}
-            >
-              <SelectTrigger id="material-trigger" className="w-full">
-                <SelectValue placeholder="None — let the buyer decide" />
-              </SelectTrigger>
-              <SelectContent>
-                {MATERIALS.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.name} ({m.method})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div>
-            <Label>This part needs to be...</Label>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {DESIGN_TAG_OPTIONS.map((tag) => (
-                <button
-                  key={tag}
-                  type="button"
-                  onClick={() => toggleDesignTag(tag)}
-                  className={`inline-flex cursor-pointer items-center rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
-                    selectedDesignTags.includes(tag)
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border text-muted-foreground hover:border-primary/30"
-                  }`}
-                >
-                  {DESIGN_TAG_LABELS[tag]}
-                </button>
-              ))}
+        <button
+          type="button"
+          onClick={() => setPrintRecOpen((v) => !v)}
+          className="cursor-pointer text-left"
+        >
+          <CardHeader>
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <CardTitle className="text-base">
+                  Print Recommendations
+                </CardTitle>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Optional. Help printers choose the right material.
+                </p>
+              </div>
+              <motion.div
+                animate={{ rotate: printRecOpen ? 180 : 0 }}
+                transition={expandTransition}
+                className="text-muted-foreground"
+              >
+                <ChevronDownIcon />
+              </motion.div>
             </div>
-          </div>
+          </CardHeader>
+        </button>
+        <AnimatePresence initial={false}>
+          {printRecOpen && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={expandTransition}
+              className="overflow-hidden"
+            >
+              <CardContent className="space-y-4">
+                <div>
+                  <Label htmlFor="material-trigger">Recommended Material</Label>
+                  <Select
+                    value={recommendedMaterial}
+                    onValueChange={(v) => setRecommendedMaterial(v ?? "")}
+                  >
+                    <SelectTrigger id="material-trigger" className="w-full">
+                      <SelectValue placeholder="None — let the buyer decide" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MATERIALS.map((m) => (
+                        <SelectItem key={m.id} value={m.id}>
+                          {m.name} ({m.method})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-          <div>
-            <Label htmlFor="minWallThickness">
-              Minimum Wall Thickness (mm)
-            </Label>
-            <Input
-              id="minWallThickness"
-              name="minWallThickness"
-              type="number"
-              min="0"
-              max="100"
-              step="0.1"
-              placeholder="e.g. 1.0"
-            />
-            <p className="mt-1 text-xs text-muted-foreground">
-              We&apos;ll warn printers if their chosen material can&apos;t
-              support this
-            </p>
-          </div>
-        </CardContent>
+                <div>
+                  <Label>This part needs to be...</Label>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {DESIGN_TAG_OPTIONS.map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => toggleDesignTag(tag)}
+                        className={`inline-flex cursor-pointer items-center rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                          selectedDesignTags.includes(tag)
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border text-muted-foreground hover:border-primary/30"
+                        }`}
+                      >
+                        {DESIGN_TAG_LABELS[tag]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </CardContent>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </Card>
 
       {/* Actions */}
@@ -300,7 +420,11 @@ export function FileMetadataForm({ assets }: FileMetadataFormProps) {
           size="lg"
           className="flex-1"
         >
-          {pending ? "Saving..." : sellEnabled ? "Create listing" : "Save to library"}
+          {pending
+            ? "Saving..."
+            : sellEnabled
+            ? "Create listing"
+            : "Save to library"}
         </Button>
       </div>
     </form>

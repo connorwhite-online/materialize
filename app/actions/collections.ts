@@ -3,7 +3,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { collections, collectionFiles } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -21,6 +21,24 @@ const collectionSchema = z.object({
         : []
     ),
 });
+
+export async function listMyCollections(): Promise<
+  Array<{ id: string; name: string }>
+> {
+  try {
+    const { userId } = await auth();
+    if (!userId) return [];
+    const rows = await db
+      .select({ id: collections.id, name: collections.name })
+      .from(collections)
+      .where(eq(collections.userId, userId))
+      .orderBy(desc(collections.updatedAt));
+    return rows;
+  } catch (error) {
+    logError("listMyCollections", error);
+    return [];
+  }
+}
 
 export async function createCollection(formData: FormData) {
   const { userId } = await auth();
