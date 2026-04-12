@@ -99,10 +99,19 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
       if (!asset.fileId) continue;
       if (!primaryAssetByFileId.has(asset.fileId)) {
         const dims = asset.geometryData?.dimensions;
+        // Older CraftCloud responses sometimes returned partial shapes
+        // (e.g. {x: null, y: null, z: null}) that we persisted before
+        // the normalize at the cache boundary; treat anything missing
+        // a numeric axis as no dimensions at all.
+        const dimsOk =
+          dims &&
+          typeof dims.x === "number" &&
+          typeof dims.y === "number" &&
+          typeof dims.z === "number";
         primaryAssetByFileId.set(asset.fileId, {
           id: asset.id,
           format: asset.format,
-          dimensions: dims ? [dims.x, dims.y, dims.z] : null,
+          dimensions: dimsOk ? [dims.x, dims.y, dims.z] : null,
         });
       }
     }
