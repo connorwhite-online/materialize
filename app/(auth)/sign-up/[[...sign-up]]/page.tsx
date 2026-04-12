@@ -64,11 +64,33 @@ export default function SignUpPage() {
           ? await signUp.attemptEmailAddressVerification({ code: codeValue })
           : await signUp.attemptPhoneNumberVerification({ code: codeValue });
 
+      // Debug: log everything Clerk returned
+      console.log("[sign-up] verify result:", {
+        status: result.status,
+        missingFields: result.missingFields,
+        unverifiedFields: result.unverifiedFields,
+        requiredFields: result.requiredFields,
+        createdSessionId: result.createdSessionId,
+        createdUserId: result.createdUserId,
+      });
+
       if (result.status === "complete" && result.createdSessionId) {
         await setActive({ session: result.createdSessionId });
         window.location.href = "/onboarding";
+        return;
       }
+
+      // Show the user what Clerk is asking for
+      const details = [
+        `Status: ${result.status}`,
+        result.missingFields?.length && `Missing: ${result.missingFields.join(", ")}`,
+        result.unverifiedFields?.length && `Unverified: ${result.unverifiedFields.join(", ")}`,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      setError(`Sign-up incomplete. ${details}`);
     } catch (err: unknown) {
+      console.error("[sign-up] verify error:", err);
       const clerkErr = err as { errors?: Array<{ longMessage?: string }> };
       setError(
         clerkErr.errors?.[0]?.longMessage ||
