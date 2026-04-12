@@ -5,19 +5,10 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
 import { Button } from "@/components/ui/button";
-import { FileUploader } from "@/components/upload/file-uploader";
 import { ChevronRight } from "@/components/icons/chevron-right";
 import { cn } from "@/lib/utils";
 
-interface UploadedAsset {
-  id: string;
-  storageKey: string;
-  originalFilename: string;
-  format: string;
-  fileSize: number;
-}
-
-type Mode = "idle" | "searching" | "uploading";
+type Mode = "idle" | "searching";
 
 export function HomeBottomBar() {
   const router = useRouter();
@@ -26,7 +17,7 @@ export function HomeBottomBar() {
   const containerRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  const isExpanded = mode === "searching" || mode === "uploading";
+  const isExpanded = mode === "searching";
 
   // Close on outside click
   useEffect(() => {
@@ -53,8 +44,7 @@ export function HomeBottomBar() {
   }, [isExpanded]);
 
   const handleSearchFocus = () => {
-    if (mode === "uploading") setMode("searching");
-    else if (mode === "idle") setMode("searching");
+    if (mode === "idle") setMode("searching");
   };
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -70,19 +60,7 @@ export function HomeBottomBar() {
   };
 
   const handleUploadClick = () => {
-    if (mode === "uploading") {
-      setMode("idle");
-      setQuery("");
-    } else {
-      setMode("uploading");
-      setQuery("");
-    }
-  };
-
-  const handleUploadComplete = (asset: UploadedAsset) => {
-    // Encode the asset data and navigate to the full upload page for metadata
-    const encoded = encodeURIComponent(JSON.stringify(asset));
-    router.push(`/dashboard/uploads/new?asset=${encoded}`);
+    router.push("/dashboard/uploads/new");
   };
 
   return (
@@ -120,21 +98,6 @@ export function HomeBottomBar() {
         )}
       >
         <AnimatePresence initial={false}>
-          {mode === "uploading" && (
-            <motion.div
-              key="dropbox"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.25, ease: [0.2, 0.8, 0.2, 1] }}
-              className="overflow-hidden"
-            >
-              <div className="px-2 pt-2 pb-1">
-                <FileUploader onUploadComplete={handleUploadComplete} />
-              </div>
-            </motion.div>
-          )}
-
           {mode === "searching" && query.length > 0 && (
             <motion.div
               key="suggestions"
@@ -167,12 +130,8 @@ export function HomeBottomBar() {
             placeholder="Search files, materials, creators..."
             className="flex-1 bg-transparent px-3 py-2 text-base md:text-sm placeholder:text-muted-foreground/60 focus:outline-none"
           />
-          <Button
-            type="button"
-            size="sm"
-            onClick={handleUploadClick}
-          >
-            {mode === "uploading" ? "Cancel" : "Upload"}
+          <Button type="button" size="sm" onClick={handleUploadClick}>
+            Upload
           </Button>
         </form>
       </motion.div>

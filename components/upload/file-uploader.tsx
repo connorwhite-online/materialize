@@ -1,136 +1,67 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { ACCEPTED_FORMATS, MAX_FILE_SIZE } from "@/lib/validations/file";
-
-interface UploadedAsset {
-  id: string;
-  storageKey: string;
-  originalFilename: string;
-  format: string;
-  fileSize: number;
-}
+import { useCallback, useState } from "react";
+import {
+  ACCEPTED_FORMATS,
+  MAX_FILE_SIZE,
+  fileExtensionToFormat,
+} from "@/lib/validations/file";
 
 interface FileUploaderProps {
-  onUploadComplete: (asset: UploadedAsset) => void;
+  /**
+   * Called when the user picks a valid file. The file stays in client
+   * memory — it isn't uploaded to R2 until the metadata form is saved.
+   */
+  onFileSelected: (
+    file: File,
+    format: "stl" | "obj" | "3mf" | "step" | "amf"
+  ) => void;
 }
 
-export function FileUploader({ onUploadComplete }: FileUploaderProps) {
-  const [uploading, setUploading] = useState(false);
-  const [progress, setProgress] = useState(0);
+/**
+ * Drag-and-drop / click file picker. Validates size + extension and
+ * hands the raw File object back to the parent. No network calls
+ * happen here — uploads are deferred until form submit so abandoned
+ * sessions don't leave orphaned blobs in R2.
+ */
+export function FileUploader({ onFileSelected }: FileUploaderProps) {
   const [error, setError] = useState<string | null>(null);
 
-  const handleUpload = useCallback(
-    async (file: File) => {
+  const handleFile = useCallback(
+    (file: File) => {
       setError(null);
-      setUploading(true);
-      setProgress(0);
 
-      try {
-        // Validate file size
-        if (file.size > MAX_FILE_SIZE) {
-          throw new Error("File exceeds 200MB limit");
-        }
-
-        // Always use octet-stream for 3D files — browsers don't have a MIME
-        // type for STL/OBJ/3MF/STEP/AMF, and an empty string causes the
-        // presigned URL content-type to mismatch at upload time.
-        const contentType = "application/octet-stream";
-
-        // Get presigned URL
-        const presignRes = await fetch("/api/upload/presign", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            filename: file.name,
-            contentType,
-            fileSize: file.size,
-          }),
-        });
-
-        if (!presignRes.ok) {
-          const data = await presignRes.json().catch(() => ({}));
-          throw new Error(data.error || `Presign failed (${presignRes.status})`);
-        }
-
-        const { uploadUrl, storageKey, format } = await presignRes.json();
-
-        // Upload directly to R2
-        const xhr = new XMLHttpRequest();
-        xhr.upload.addEventListener("progress", (e) => {
-          if (e.lengthComputable) {
-            setProgress(Math.round((e.loaded / e.total) * 100));
-          }
-        });
-
-        await new Promise<void>((resolve, reject) => {
-          xhr.addEventListener("load", () => {
-            if (xhr.status >= 200 && xhr.status < 300) {
-              resolve();
-            } else {
-              console.error("R2 upload failed:", xhr.status, xhr.responseText);
-              reject(
-                new Error(
-                  `R2 upload failed (${xhr.status}). Check R2 CORS settings.`
-                )
-              );
-            }
-          });
-          xhr.addEventListener("error", () => {
-            console.error("R2 upload network error — likely CORS");
-            reject(
-              new Error(
-                "Network error uploading to R2. Check CORS configuration."
-              )
-            );
-          });
-          xhr.open("PUT", uploadUrl);
-          xhr.setRequestHeader("Content-Type", contentType);
-          xhr.send(file);
-        });
-
-        // Record the upload
-        const completeRes = await fetch("/api/upload/complete", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            storageKey,
-            originalFilename: file.name,
-            format,
-            fileSize: file.size,
-          }),
-        });
-
-        if (!completeRes.ok) {
-          throw new Error("Failed to record upload");
-        }
-
-        const { asset } = await completeRes.json();
-        onUploadComplete(asset);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Upload failed");
-      } finally {
-        setUploading(false);
+      if (file.size > MAX_FILE_SIZE) {
+        setError("File exceeds 200MB limit");
+        return;
       }
+
+      const format = fileExtensionToFormat(file.name);
+      if (!format) {
+        setError("Unsupported file format. Accepted: STL, OBJ, 3MF, STEP, AMF");
+        return;
+      }
+
+      onFileSelected(file, format);
     },
-    [onUploadComplete]
+    [onFileSelected]
   );
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
       const file = e.dataTransfer.files[0];
-      if (file) handleUpload(file);
+      if (file) handleFile(file);
     },
-    [handleUpload]
+    [handleFile]
   );
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      if (file) handleUpload(file);
+      if (file) handleFile(file);
     },
-    [handleUpload]
+    [handleFile]
   );
 
   const acceptExtensions = ACCEPTED_FORMATS.map((f) => `.${f}`).join(",");
@@ -147,29 +78,13 @@ export function FileUploader({ onUploadComplete }: FileUploaderProps) {
           className="hidden"
           accept={acceptExtensions}
           onChange={handleChange}
-          disabled={uploading}
         />
-        {uploading ? (
-          <div className="w-full max-w-xs">
-            <p className="text-sm text-muted-foreground">Uploading...</p>
-            <div className="mt-2 h-2 w-full rounded-full bg-muted">
-              <div
-                className="h-full rounded-full bg-primary transition-all"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-            <p className="mt-1 text-xs text-muted-foreground">{progress}%</p>
-          </div>
-        ) : (
-          <>
-            <p className="text-sm font-medium">
-              Drag and drop or click to upload
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              STL, OBJ, 3MF, STEP, AMF — Max 200MB
-            </p>
-          </>
-        )}
+        <p className="text-sm font-medium">
+          Drag and drop or click to upload
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          STL, OBJ, 3MF, STEP, AMF — Max 200MB
+        </p>
       </label>
       {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
     </div>

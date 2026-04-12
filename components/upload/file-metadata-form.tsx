@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useActionState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { createFileListing } from "@/app/actions/files";
@@ -27,16 +27,11 @@ import {
 } from "@/components/ui/card";
 import { UploadPreview } from "./upload-preview";
 
-interface UploadedAsset {
-  id: string;
-  storageKey: string;
-  originalFilename: string;
-  format: string;
-  fileSize: number;
-}
-
 interface FileMetadataFormProps {
-  assets: UploadedAsset[];
+  /** In-memory file picked by the user — uploaded to R2 on form submit. */
+  file: File;
+  /** Format derived from the file extension. */
+  format: "stl" | "obj" | "3mf" | "step" | "amf";
 }
 
 const DESIGN_TAG_LABELS: Record<string, string> = {
@@ -49,7 +44,6 @@ const DESIGN_TAG_LABELS: Record<string, string> = {
 };
 
 function formatDim(n: number) {
-  // STL/OBJ/3MF units are typically millimeters. Show 1 decimal place.
   return n.toFixed(1);
 }
 
@@ -72,7 +66,9 @@ function ChevronDownIcon({ className }: { className?: string }) {
   );
 }
 
-export function FileMetadataForm({ assets }: FileMetadataFormProps) {
+type SubmitPhase = "idle" | "uploading" | "saving";
+
+export function FileMetadataForm({ file, format }: FileMetadataFormProps) {
   const [selectedDesignTags, setSelectedDesignTags] = useState<string[]>([]);
   const [recommendedMaterial, setRecommendedMaterial] = useState("");
   const [license, setLicense] = useState("free");
@@ -89,6 +85,15 @@ export function FileMetadataForm({ assets }: FileMetadataFormProps) {
   const [collectionChoice, setCollectionChoice] = useState<string>("none");
   const [newCollectionName, setNewCollectionName] = useState("");
 
+  // Submit state
+  const [phase, setPhase] = useState<SubmitPhase>("idle");
+  const [progress, setProgress] = useState(0);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<Record<string, string[] | undefined> | null>(
+    null
+  );
+  const isSubmitting = phase !== "idle";
+
   useEffect(() => {
     let cancelled = false;
     listMyCollections().then((rows) => {
@@ -99,17 +104,96 @@ export function FileMetadataForm({ assets }: FileMetadataFormProps) {
     };
   }, []);
 
-  const primaryAsset = assets[0];
+  const toggleDesignTag = (tag: string) => {
+    setSelectedDesignTags((prev) =>
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+    );
+  };
 
-  const [state, formAction, pending] = useActionState(
-    async (_prev: unknown, formData: FormData) => {
-      for (const asset of assets) {
-        formData.append("assetIds", asset.id);
+  const expandTransition = {
+    duration: 0.22,
+    ease: [0.2, 0.8, 0.2, 1] as [number, number, number, number],
+  };
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (isSubmitting) return;
+
+    // Snapshot FormData synchronously — React pools form events and
+    // nulls currentTarget by the time our awaits resolve.
+    const formData = new FormData(e.currentTarget);
+
+    setSubmitError(null);
+    setErrors(null);
+
+    try {
+      // 1. Get a presigned URL for R2.
+      setPhase("uploading");
+      setProgress(0);
+      const presignRes = await fetch("/api/upload/presign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: file.name,
+          contentType: "application/octet-stream",
+          fileSize: file.size,
+        }),
+      });
+      if (!presignRes.ok) {
+        const data = await presignRes.json().catch(() => ({}));
+        throw new Error(data.error || `Presign failed (${presignRes.status})`);
       }
+      const { uploadUrl, storageKey, format: serverFormat } =
+        (await presignRes.json()) as {
+          uploadUrl: string;
+          storageKey: string;
+          format: typeof format;
+        };
+
+      // 2. PUT the file to R2 with progress.
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.upload.addEventListener("progress", (ev) => {
+          if (ev.lengthComputable) {
+            setProgress(Math.round((ev.loaded / ev.total) * 100));
+          }
+        });
+        xhr.addEventListener("load", () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve();
+          } else {
+            reject(
+              new Error(
+                `R2 upload failed (${xhr.status}). Check R2 CORS settings.`
+              )
+            );
+          }
+        });
+        xhr.addEventListener("error", () =>
+          reject(new Error("Network error uploading to R2."))
+        );
+        xhr.open("PUT", uploadUrl);
+        xhr.setRequestHeader("Content-Type", "application/octet-stream");
+        xhr.send(file);
+      });
+
+      // 3. Hand off to the server action to create the file row + asset
+      //    row + optional collection link, then redirect to the new file.
+      setPhase("saving");
+      formData.set(
+        "assetsJson",
+        JSON.stringify([
+          {
+            storageKey,
+            originalFilename: file.name,
+            format: serverFormat,
+            fileSize: file.size,
+          },
+        ])
+      );
       for (const tag of selectedDesignTags) {
         formData.append("designTags", tag);
       }
-      // If not selling, force price=0 and license=free
       if (!sellEnabled) {
         formData.set("price", "0");
         formData.set("license", "free");
@@ -123,56 +207,50 @@ export function FileMetadataForm({ assets }: FileMetadataFormProps) {
       if (collectionChoice === "__new__") {
         formData.set("newCollectionName", newCollectionName);
       }
-      return createFileListing(formData);
-    },
-    null
-  );
 
-  const errors = state && "error" in state ? state.error : null;
-
-  const toggleDesignTag = (tag: string) => {
-    setSelectedDesignTags((prev) =>
-      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
-    );
+      const result = await createFileListing(formData);
+      // On success the action calls redirect() and we never reach here.
+      if (result && "error" in result && result.error) {
+        setErrors(
+          result.error as Record<string, string[] | undefined>
+        );
+        setPhase("idle");
+        return;
+      }
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Save failed");
+      setPhase("idle");
+    }
   };
 
-  const expandTransition = {
-    duration: 0.22,
-    ease: [0.2, 0.8, 0.2, 1] as [number, number, number, number],
-  };
+  const submitLabel = (() => {
+    if (phase === "uploading") return `Uploading… ${progress}%`;
+    if (phase === "saving") return "Saving…";
+    return sellEnabled ? "Create listing" : "Save to library";
+  })();
 
   return (
-    <form action={formAction} className="space-y-6">
+    <form onSubmit={handleSubmit} className="space-y-6">
       {/* 3D Preview at the top */}
       <Card className="overflow-hidden py-0">
         <div className="aspect-[4/3] w-full bg-gradient-to-br from-muted/40 to-muted/10">
-          {primaryAsset && (
-            <UploadPreview
-              storageKey={primaryAsset.storageKey}
-              format={
-                primaryAsset.format as "stl" | "obj" | "3mf" | "step" | "amf"
-              }
-              onDimensionsComputed={setDimensions}
-            />
-          )}
+          <UploadPreview
+            file={file}
+            format={format}
+            onDimensionsComputed={setDimensions}
+          />
         </div>
         <div className="flex items-center gap-3 border-t border-border px-4 py-2.5 text-sm">
           <div className="min-w-0 flex-1">
-            <div className="truncate font-medium">
-              {primaryAsset?.originalFilename}
-            </div>
+            <div className="truncate font-medium">{file.name}</div>
             <div className="mt-0.5 text-xs text-muted-foreground">
               {dimensions
                 ? `${formatDim(dimensions[0])} × ${formatDim(dimensions[1])} × ${formatDim(dimensions[2])} mm`
-                : primaryAsset
-                ? "Measuring..."
-                : ""}
+                : "Measuring..."}
             </div>
           </div>
           <span className="shrink-0 text-xs text-muted-foreground">
-            {primaryAsset
-              ? `${(primaryAsset.fileSize / 1024 / 1024).toFixed(1)} MB`
-              : ""}
+            {(file.size / 1024 / 1024).toFixed(1)} MB
           </span>
         </div>
       </Card>
@@ -186,7 +264,7 @@ export function FileMetadataForm({ assets }: FileMetadataFormProps) {
           <div>
             <Label htmlFor="name">Name</Label>
             <Input id="name" name="name" required placeholder="My 3D Model" />
-            {errors?.name && (
+            {errors?.name && errors.name[0] && (
               <p className="mt-1 text-xs text-destructive">{errors.name[0]}</p>
             )}
           </div>
@@ -273,10 +351,7 @@ export function FileMetadataForm({ assets }: FileMetadataFormProps) {
                 Make this file available to purchase or download publicly.
               </p>
             </div>
-            <Switch
-              checked={sellEnabled}
-              onCheckedChange={setSellEnabled}
-            />
+            <Switch checked={sellEnabled} onCheckedChange={setSellEnabled} />
           </div>
         </CardHeader>
         <AnimatePresence initial={false}>
@@ -422,6 +497,11 @@ export function FileMetadataForm({ assets }: FileMetadataFormProps) {
         </AnimatePresence>
       </Card>
 
+      {/* Inline error */}
+      {submitError && (
+        <p className="text-sm text-destructive">{submitError}</p>
+      )}
+
       {/* Actions */}
       <div className="flex gap-3">
         <Button
@@ -435,15 +515,11 @@ export function FileMetadataForm({ assets }: FileMetadataFormProps) {
         </Button>
         <Button
           type="submit"
-          disabled={pending || assets.length === 0}
+          disabled={isSubmitting}
           size="lg"
           className="flex-1"
         >
-          {pending
-            ? "Saving..."
-            : sellEnabled
-            ? "Create listing"
-            : "Save to library"}
+          {submitLabel}
         </Button>
       </div>
     </form>

@@ -10,7 +10,20 @@ import { ThreeMfModel } from "@/components/viewer/loaders/threemf-model";
 import { LoadingPreview } from "@/components/viewer/loading-preview";
 
 interface UploadPreviewProps {
-  storageKey: string;
+  /**
+   * Three ways to source the model, checked in order:
+   *
+   * - `file`: an in-memory File object. Used during the upload flow
+   *   before the file has been pushed to R2 — we render straight from
+   *   a blob URL.
+   * - `fileAssetId`: looks up the storage key server-side. Works for
+   *   owners and any viewer of a published file.
+   * - `storageKey`: direct R2 lookup. Only works for the owner of the
+   *   key (verified via the `uploads/{userId}/` prefix).
+   */
+  file?: File | null;
+  storageKey?: string;
+  fileAssetId?: string;
   format: "stl" | "obj" | "3mf" | "step" | "amf";
   onDimensionsComputed?: (dims: [number, number, number]) => void;
 }
@@ -111,7 +124,9 @@ function NormalizedModel({
 }
 
 export function UploadPreview({
+  file,
   storageKey,
+  fileAssetId,
   format,
   onDimensionsComputed,
 }: UploadPreviewProps) {
@@ -119,13 +134,29 @@ export function UploadPreview({
   const [error, setError] = useState(false);
 
   useEffect(() => {
+    // In-memory File path: build a blob URL synchronously and revoke
+    // it on unmount. No network round trip.
+    if (file) {
+      const url = URL.createObjectURL(file);
+      setDownloadUrl(url);
+      return () => URL.revokeObjectURL(url);
+    }
+
     let cancelled = false;
     (async () => {
       try {
+        // Prefer fileAssetId — works for owners and viewers of published
+        // files. Fall back to storageKey for owner-only contexts.
+        const body = fileAssetId
+          ? { fileAssetId }
+          : storageKey
+            ? { storageKey }
+            : null;
+        if (!body) throw new Error("no source");
         const res = await fetch("/api/craftcloud/download-url", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ storageKey }),
+          body: JSON.stringify(body),
         });
         if (!res.ok) throw new Error("failed");
         const data = await res.json();
@@ -137,7 +168,7 @@ export function UploadPreview({
     return () => {
       cancelled = true;
     };
-  }, [storageKey]);
+  }, [file, storageKey, fileAssetId]);
 
   if (error) {
     return (

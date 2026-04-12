@@ -3,12 +3,40 @@
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { files, fileAssets, collections, collectionFiles } from "@/lib/db/schema";
-import { eq, and, ne, inArray, isNotNull } from "drizzle-orm";
+import { eq, and, ne, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { nanoid } from "nanoid";
 import { createListingSchema } from "@/lib/validations/file";
 import { logError } from "@/lib/logger";
+import { generateDownloadUrl } from "@/lib/storage";
+
+type IncomingAsset = {
+  storageKey: string;
+  originalFilename: string;
+  format: "stl" | "obj" | "3mf" | "step" | "amf";
+  fileSize: number;
+};
+
+async function computeContentHash(storageKey: string): Promise<string | null> {
+  try {
+    const { createHash } = await import("crypto");
+    const downloadUrl = await generateDownloadUrl(storageKey, 300);
+    const res = await fetch(downloadUrl);
+    if (!res.ok || !res.body) return null;
+    const hash = createHash("sha256");
+    const reader = res.body.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      hash.update(value);
+    }
+    return hash.digest("hex");
+  } catch (err) {
+    logError("computeContentHash", err);
+    return null;
+  }
+}
 
 export async function createFileListing(formData: FormData) {
   const { userId } = await auth();
@@ -32,44 +60,59 @@ export async function createFileListing(formData: FormData) {
     return { error: parsed.error.flatten().fieldErrors };
   }
 
+  // Decode the uploaded assets payload (assets are uploaded to R2 by the
+  // client immediately before this action runs, so the storageKeys exist
+  // but no DB rows do yet).
+  let incomingAssets: IncomingAsset[] = [];
   try {
-    // Anti-piracy: check if any of the uploaded assets match files from other users
-    const assetIds = formData.getAll("assetIds") as string[];
-    if (assetIds.length > 0) {
-      const uploadedAssets = await db
-        .select({ contentHash: fileAssets.contentHash })
+    const assetsRaw = formData.get("assetsJson");
+    if (typeof assetsRaw === "string" && assetsRaw.length > 0) {
+      incomingAssets = JSON.parse(assetsRaw) as IncomingAsset[];
+    }
+  } catch (err) {
+    logError("createFileListing.parseAssets", err);
+    return { error: { name: ["Invalid asset payload."] } };
+  }
+
+  if (incomingAssets.length === 0) {
+    return { error: { name: ["No file attached. Please re-upload."] } };
+  }
+
+  // Verify each storageKey belongs to this user before we touch R2.
+  for (const asset of incomingAssets) {
+    if (!asset.storageKey.startsWith(`uploads/${userId}/`)) {
+      return { error: { name: ["Invalid storage key."] } };
+    }
+  }
+
+  try {
+    // Compute content hashes by streaming the freshly-uploaded R2 objects.
+    const hashes = await Promise.all(
+      incomingAssets.map((a) => computeContentHash(a.storageKey))
+    );
+
+    // Anti-piracy: any hash collision with a file owned by someone else
+    // means this user is re-uploading work that isn't theirs.
+    const definedHashes = hashes.filter((h): h is string => h !== null);
+    if (definedHashes.length > 0) {
+      const duplicates = await db
+        .select({ id: fileAssets.id })
         .from(fileAssets)
-        .where(and(inArray(fileAssets.id, assetIds), isNotNull(fileAssets.contentHash)));
-
-      const hashes = uploadedAssets
-        .map((a) => a.contentHash)
-        .filter((h): h is string => h !== null);
-
-      if (hashes.length > 0) {
-        const duplicates = await db
-          .select({
-            id: fileAssets.id,
-            fileId: fileAssets.fileId,
-            contentHash: fileAssets.contentHash,
-          })
-          .from(fileAssets)
-          .innerJoin(files, eq(fileAssets.fileId, files.id))
-          .where(
-            and(
-              inArray(fileAssets.contentHash, hashes),
-              ne(files.userId, userId)
-            )
-          );
-
-        if (duplicates.length > 0) {
-          return {
-            error: {
-              name: [
-                "This file has already been listed by another creator. Re-uploading others' files is not permitted.",
-              ],
-            },
-          };
-        }
+        .innerJoin(files, eq(fileAssets.fileId, files.id))
+        .where(
+          and(
+            inArray(fileAssets.contentHash, definedHashes),
+            ne(files.userId, userId)
+          )
+        );
+      if (duplicates.length > 0) {
+        return {
+          error: {
+            name: [
+              "This file has already been listed by another creator. Re-uploading others' files is not permitted.",
+            ],
+          },
+        };
       }
     }
 
@@ -77,6 +120,15 @@ export async function createFileListing(formData: FormData) {
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "")}-${nanoid(6)}`;
+
+    // The form captures everything we need; the file is "done" the moment
+    // it's created. There's no draft state to babysit.
+    // - sell off (price 0 + free license) → published + private (only the
+    //   owner sees it in their library)
+    // - sell on → published + public (appears in browse/search)
+    const willBeListed =
+      parsed.data.price > 0 || parsed.data.license !== "free";
+    const visibility: "public" | "private" = willBeListed ? "public" : "private";
 
     const [file] = await db
       .insert(files)
@@ -91,18 +143,22 @@ export async function createFileListing(formData: FormData) {
         recommendedMaterialId: parsed.data.recommendedMaterialId,
         designTags: parsed.data.designTags,
         minWallThickness: parsed.data.minWallThickness,
+        status: "published",
+        visibility,
       })
       .returning();
 
-    // Link uploaded assets
-    if (assetIds.length > 0) {
-      for (const assetId of assetIds) {
-        await db
-          .update(fileAssets)
-          .set({ fileId: file.id })
-          .where(eq(fileAssets.id, assetId));
-      }
-    }
+    // Insert the file asset rows now that we have a fileId to link them to.
+    await db.insert(fileAssets).values(
+      incomingAssets.map((asset, i) => ({
+        fileId: file.id,
+        storageKey: asset.storageKey,
+        originalFilename: asset.originalFilename,
+        format: asset.format,
+        fileSize: asset.fileSize,
+        contentHash: hashes[i],
+      }))
+    );
 
     // Optional: add to an existing collection or create a new one
     const rawCollectionId = (formData.get("collectionId") as string | null) || "";
@@ -138,8 +194,8 @@ export async function createFileListing(formData: FormData) {
       });
     }
 
-    revalidatePath("/dashboard/uploads");
-    redirect("/dashboard/uploads");
+    revalidatePath("/dashboard");
+    redirect(`/files/${file.slug}`);
   } catch (error) {
     // Re-throw redirect/notFound errors (Next.js uses throw for navigation)
     if (error instanceof Error && (error.message.includes("NEXT_REDIRECT") || error.message.includes("REDIRECT"))) {
