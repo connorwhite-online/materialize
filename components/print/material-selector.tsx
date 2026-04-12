@@ -135,28 +135,32 @@ export function MaterialSelector({
                   </p>
                 )}
                 {metadata && !tooLarge && (
-                  <div className="flex gap-2 mt-1.5">
-                    {(["strength", "flexibility", "detail"] as const).map(
-                      (prop) => (
-                        <div key={prop} className="flex items-center gap-0.5">
-                          <span className="text-[9px] text-muted-foreground capitalize">
-                            {prop.slice(0, 3)}
-                          </span>
-                          <div className="flex gap-px">
-                            {Array.from({ length: 5 }).map((_, i) => (
-                              <div
-                                key={i}
-                                className={`h-1 w-1 rounded-full ${
-                                  i < metadata.properties[prop]
-                                    ? "bg-foreground/50"
-                                    : "bg-muted"
-                                }`}
-                              />
-                            ))}
-                          </div>
+                  <div className="mt-2 flex flex-col gap-1">
+                    {(
+                      [
+                        ["strength", "Strength"],
+                        ["flexibility", "Flexibility"],
+                        ["detail", "Detail"],
+                      ] as const
+                    ).map(([prop, label]) => (
+                      <div key={prop} className="flex items-center gap-1.5">
+                        <span className="text-xs text-muted-foreground">
+                          {label}
+                        </span>
+                        <div className="flex gap-0.5">
+                          {Array.from({ length: 5 }).map((_, i) => (
+                            <div
+                              key={i}
+                              className={`h-1.5 w-1.5 rounded-full ${
+                                i < metadata.properties[prop]
+                                  ? "bg-foreground/60"
+                                  : "bg-muted"
+                              }`}
+                            />
+                          ))}
                         </div>
-                      )
-                    )}
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>

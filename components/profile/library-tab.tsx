@@ -252,10 +252,12 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
         return (
           <CollectionSection
             key={collection.id}
+            collectionId={collection.id}
             name={collection.name}
             description={collection.description}
             visibility={collection.visibility}
             showVisibilityBadge={isOwner}
+            isOwner={isOwner}
             fileCount={colFiles.length}
           >
             {colFiles.length > 0 ? (

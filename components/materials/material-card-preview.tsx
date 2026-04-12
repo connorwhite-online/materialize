@@ -20,7 +20,16 @@ interface MaterialCardPreviewProps {
 // v3: capture happens in a fixed 512px offscreen canvas, so display
 //     consumers can be any size and share the same crisp asset.
 // v4: chamfered pyramid geometry, single-pow fresnel, normalized varyings.
-const THUMBNAIL_VERSION = 4;
+// v5: clean square frustum (the chamfered convex hull was producing
+//     degenerate corner triangles → muddy shading); transparent
+//     backdrop instead of the radial gradient that was washing out
+//     the silhouette.
+// v6: actual square pyramid with a pointed apex (v5 was a truncated
+//     pyramid / frustum, not what we wanted).
+// v7: square pyramid with beveled / chamfered edges. Each ideal face
+//     is inset along its plane, then the convex hull of all inset
+//     points generates the bevel strips along every edge automatically.
+const THUMBNAIL_VERSION = 7;
 const STORAGE_PREFIX = "materialTile:v";
 const CAPTURE_SIZE = 512;
 
@@ -55,65 +64,97 @@ function adjustBrightness(hex: string, percent: number): string {
 }
 
 /**
- * A truncated square pyramid (frustum) with chamfered edges. Built as
- * the convex hull of points clustered around each ideal corner — three
- * offset points per corner, one along each adjacent edge — so the hull
- * algorithm produces small triangular chamfer faces at every vertex
- * and rectangular bevel strips along every edge automatically. No need
- * to author the topology by hand or worry about smoothing groups.
+ * A square pyramid with beveled / chamfered edges.
+ *
+ * Build approach:
+ *   1. Define the ideal pyramid as five flat polygonal faces — the
+ *      square base and four triangular sides meeting at the apex.
+ *   2. For every face, inset each vertex inward (toward the face
+ *      centroid, along the face plane) by `bevel`. Each ideal vertex
+ *      that was shared between multiple faces now becomes one inset
+ *      point per incident face.
+ *   3. Take the convex hull of all the inset points. The hull algorithm
+ *      produces:
+ *        - the inset face polygons (the original faces, slightly smaller)
+ *        - a small rectangular strip along every edge (the chamfer)
+ *        - a small triangle at every corner (apex + 4 base corners)
+ *      automatically, with correct flat-shaded normals.
+ *
+ * The apex inset gets four points clustered around y = height − bevel
+ * which still reads as a sharp top.
  */
-function ChamferedPyramidMesh({ color }: { color: string }) {
+function BeveledPyramidMesh({ color }: { color: string }) {
   const geometry = useMemo(() => {
     const baseHalf = 0.95;
-    const topHalf = 0.32;
-    const height = 1.55;
-    const chamfer = 0.07;
+    const height = 1.6;
+    const bevel = 0.08;
 
-    // Eight ideal corners — base square at y=0, top square at y=height.
-    const corners: [number, number, number][] = [
-      [-baseHalf, 0, -baseHalf], // 0
-      [baseHalf, 0, -baseHalf], // 1
-      [baseHalf, 0, baseHalf], // 2
-      [-baseHalf, 0, baseHalf], // 3
-      [-topHalf, height, -topHalf], // 4
-      [topHalf, height, -topHalf], // 5
-      [topHalf, height, topHalf], // 6
-      [-topHalf, height, topHalf], // 7
+    const baseCorners = [
+      new THREE.Vector3(-baseHalf, 0, -baseHalf),
+      new THREE.Vector3(baseHalf, 0, -baseHalf),
+      new THREE.Vector3(baseHalf, 0, baseHalf),
+      new THREE.Vector3(-baseHalf, 0, baseHalf),
     ];
+    const apex = new THREE.Vector3(0, height, 0);
 
-    // Each vertex is incident to exactly three edges (two within its
-    // square ring, one going to the opposite ring).
-    const adjacency: number[][] = [
-      [1, 3, 4],
-      [0, 2, 5],
-      [1, 3, 6],
-      [0, 2, 7],
-      [5, 7, 0],
-      [4, 6, 1],
-      [5, 7, 2],
-      [4, 6, 3],
-    ];
+    type Face = {
+      vertices: THREE.Vector3[];
+      centroid: THREE.Vector3;
+    };
 
-    const points: THREE.Vector3[] = [];
-    for (let i = 0; i < corners.length; i++) {
-      const v = new THREE.Vector3(...corners[i]);
-      for (const j of adjacency[i]) {
-        const dir = new THREE.Vector3(...corners[j]).sub(v).normalize();
-        points.push(v.clone().add(dir.multiplyScalar(chamfer)));
+    const faces: Face[] = [];
+
+    // Square base — winding doesn't matter since the convex hull will
+    // assign its own normals. We only need the centroid + the 4
+    // vertices to inset.
+    faces.push({
+      vertices: baseCorners,
+      centroid: new THREE.Vector3(0, 0, 0),
+    });
+
+    // Four triangular side faces.
+    for (let i = 0; i < 4; i++) {
+      const a = baseCorners[i];
+      const b = baseCorners[(i + 1) % 4];
+      const verts = [a, b, apex];
+      const centroid = a
+        .clone()
+        .add(b)
+        .add(apex)
+        .multiplyScalar(1 / 3);
+      faces.push({ vertices: verts, centroid });
+    }
+
+    // Inset every face's vertices toward its centroid by `bevel`. The
+    // direction is automatically along the face plane because both v
+    // and the centroid lie on the face.
+    const insetPoints: THREE.Vector3[] = [];
+    for (const face of faces) {
+      for (const v of face.vertices) {
+        const toCenter = face.centroid.clone().sub(v);
+        const dist = toCenter.length();
+        if (dist === 0) continue;
+        // Clamp the inset so we never overshoot the centroid on small
+        // faces (the side triangles can be shorter than `bevel` along
+        // some directions).
+        const amount = Math.min(bevel, dist * 0.45);
+        insetPoints.push(
+          v.clone().add(toCenter.multiplyScalar(amount / dist))
+        );
       }
     }
 
-    const geo = new ConvexGeometry(points);
+    const geo = new ConvexGeometry(insetPoints);
     geo.center();
     return geo;
   }, []);
 
   return (
-    <mesh geometry={geometry} rotation={[-0.18, 0.5, 0]}>
+    <mesh geometry={geometry} rotation={[0.28, 0.55, 0]}>
       <MaterializeMaterial
         baseColor={color}
-        accentColor={adjustBrightness(color, -32)}
-        fresnelColor={adjustBrightness(color, 60)}
+        accentColor={adjustBrightness(color, -38)}
+        fresnelColor={adjustBrightness(color, 65)}
       />
     </mesh>
   );
@@ -190,13 +231,7 @@ export function MaterialCardPreview({
 
   return (
     <>
-      <div
-        ref={containerRef}
-        className={className ?? "absolute inset-0"}
-        style={{
-          background: `radial-gradient(circle at 30% 25%, ${adjustBrightness(color, 22)}, ${adjustBrightness(color, -32)} 80%)`,
-        }}
-      >
+      <div ref={containerRef} className={className ?? "absolute inset-0"}>
         {thumbnail && (
           <img
             src={thumbnail}
@@ -217,11 +252,11 @@ export function MaterialCardPreview({
           style={{ width: CAPTURE_SIZE, height: CAPTURE_SIZE }}
         >
           <Canvas
-            camera={{ position: [0, 0.15, 4.1], fov: 32 }}
+            camera={{ position: [0, 0.4, 4.2], fov: 32 }}
             dpr={2}
             gl={{ antialias: true, alpha: true, preserveDrawingBuffer: true }}
           >
-            <ChamferedPyramidMesh color={color} />
+            <BeveledPyramidMesh color={color} />
             <CaptureOnce onReady={handleCaptured} />
           </Canvas>
         </div>

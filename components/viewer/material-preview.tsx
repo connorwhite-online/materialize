@@ -7,6 +7,8 @@ interface MaterialPreviewProps {
   format: "stl" | "obj" | "3mf" | "step" | "amf";
   materialColor: string;
   className?: string;
+  enableWheelZoom?: boolean;
+  showZoomControls?: boolean;
 }
 
 export function MaterialPreview({
@@ -14,6 +16,8 @@ export function MaterialPreview({
   format,
   materialColor,
   className,
+  enableWheelZoom,
+  showZoomControls,
 }: MaterialPreviewProps) {
   return (
     <ModelViewer
@@ -22,6 +26,8 @@ export function MaterialPreview({
       mode="material"
       materialColor={materialColor}
       className={className}
+      enableWheelZoom={enableWheelZoom}
+      showZoomControls={showZoomControls}
     />
   );
 }

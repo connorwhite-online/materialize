@@ -144,6 +144,55 @@ export async function removeFileFromCollection(collectionId: string, fileId: str
   }
 }
 
+const updateCollectionSchema = z.object({
+  name: z.string().min(1, "Name is required").max(100),
+  description: z.string().max(500).optional(),
+  visibility: z.enum(["public", "private"]),
+});
+
+export async function updateCollection(
+  collectionId: string,
+  formData: FormData
+) {
+  try {
+    const { userId } = await auth();
+    if (!userId) return { error: "Unauthorized" };
+
+    const [collection] = await db
+      .select({ id: collections.id, slug: collections.slug })
+      .from(collections)
+      .where(
+        and(eq(collections.id, collectionId), eq(collections.userId, userId))
+      );
+    if (!collection) return { error: "Collection not found" };
+
+    const parsed = updateCollectionSchema.safeParse({
+      name: formData.get("name"),
+      description: formData.get("description") || undefined,
+      visibility: formData.get("visibility"),
+    });
+    if (!parsed.success) {
+      return { error: parsed.error.flatten().fieldErrors };
+    }
+
+    await db
+      .update(collections)
+      .set({
+        name: parsed.data.name,
+        description: parsed.data.description,
+        visibility: parsed.data.visibility,
+      })
+      .where(eq(collections.id, collectionId));
+
+    revalidatePath("/dashboard/uploads");
+    revalidatePath(`/collections/${collection.slug}`);
+    return { success: true };
+  } catch (error) {
+    logError("updateCollection", error);
+    return { error: "Failed to update collection" };
+  }
+}
+
 export async function toggleCollectionVisibility(collectionId: string) {
   try {
     const { userId } = await auth();

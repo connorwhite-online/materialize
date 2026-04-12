@@ -4,12 +4,15 @@ import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { ChevronRight } from "@/components/icons/chevron-right";
 import { Badge } from "@/components/ui/badge";
+import { CollectionSettingsMenu } from "./collection-settings-menu";
 
 interface CollectionSectionProps {
+  collectionId: string;
   name: string;
   description?: string | null;
   visibility: "public" | "private" | string;
   showVisibilityBadge: boolean;
+  isOwner: boolean;
   fileCount: number;
   defaultOpen?: boolean;
   children: React.ReactNode;
@@ -22,10 +25,12 @@ interface CollectionSectionProps {
  * grid elsewhere.
  */
 export function CollectionSection({
+  collectionId,
   name,
   description,
   visibility,
   showVisibilityBadge,
+  isOwner,
   fileCount,
   defaultOpen = true,
   children,
@@ -61,14 +66,25 @@ export function CollectionSection({
             {countLabel}
           </Badge>
         </button>
-        {showVisibilityBadge && (
-          <Badge
-            variant="outline"
-            className="h-6 shrink-0 px-2.5 capitalize"
-          >
-            {visibility}
-          </Badge>
-        )}
+        <div className="flex shrink-0 items-center gap-2">
+          {showVisibilityBadge && (
+            <Badge variant="outline" className="h-6 px-2.5 capitalize">
+              {visibility}
+            </Badge>
+          )}
+          {isOwner && (
+            <CollectionSettingsMenu
+              collectionId={collectionId}
+              name={name}
+              description={description ?? null}
+              visibility={
+                visibility === "public" || visibility === "private"
+                  ? visibility
+                  : "private"
+              }
+            />
+          )}
+        </div>
       </div>
 
       <AnimatePresence initial={false}>

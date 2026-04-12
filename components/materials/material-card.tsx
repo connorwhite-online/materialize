@@ -18,10 +18,9 @@ const PROPERTY_LABELS = {
 export function MaterialCard({ material }: MaterialCardProps) {
   return (
     <Link href={`/materials/${material.slug}`}>
-      <Card className="group overflow-hidden transition-colors hover:border-primary/30">
+      <Card className="group gap-0 py-0 overflow-hidden transition-colors hover:border-primary/30">
         <div className="h-32 w-full relative overflow-hidden">
           <MaterialCardPreview color={material.color} />
-          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/25 to-transparent" />
           <Badge
             variant="secondary"
             className="absolute top-2 right-2 text-[10px]"

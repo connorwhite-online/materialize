@@ -351,7 +351,7 @@ export function QuoteConfigurator({
         </Alert>
       )}
 
-      <div className="grid gap-8 lg:grid-cols-3">
+      <div className="grid items-start gap-8 lg:grid-cols-3">
         <div className="lg:col-span-2">
           {previewModelUrl && previewableFormat && (
             <div className="mb-6 aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
@@ -360,6 +360,8 @@ export function QuoteConfigurator({
                 format={format as "stl" | "obj" | "3mf"}
                 materialColor={previewColor}
                 className="h-full w-full"
+                enableWheelZoom={false}
+                showZoomControls
               />
             </div>
           )}
@@ -421,7 +423,7 @@ export function QuoteConfigurator({
           />
         </div>
 
-        <div>
+        <div className="lg:sticky lg:top-6">
           <PriceDisplay
             selectedQuote={selectedQuote}
             shipping={shipping}

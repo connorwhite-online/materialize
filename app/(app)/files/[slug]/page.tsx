@@ -11,8 +11,16 @@ import { Separator } from "@/components/ui/separator";
 import { PhotoGallery } from "@/components/photos/photo-gallery";
 import { PhotoUploader } from "@/components/photos/photo-uploader";
 import { DeleteFileButton } from "@/components/files/delete-file-button";
+import { OrderModelPreview } from "@/components/print/order-model-preview";
 import { getMaterialById } from "@/lib/materials";
 import { generateDownloadUrl } from "@/lib/storage";
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  return `${(kb / 1024).toFixed(1)} MB`;
+}
 
 const DESIGN_TAG_LABELS: Record<string, string> = {
   strong: "Strong",
@@ -118,14 +126,129 @@ export default async function FileDetailPage(props: {
     ? getMaterialById(file.recommendedMaterialId)
     : null;
 
+  // Primary asset drives the filename / size / preview / bounding box.
+  const primaryAsset = assets[0] ?? null;
+  const PREVIEWABLE = new Set(["stl", "obj", "3mf"]);
+  const previewable =
+    !!primaryAsset && PREVIEWABLE.has(primaryAsset.format);
+  const rawDims = primaryAsset?.geometryData?.dimensions;
+  const dims =
+    rawDims &&
+    typeof rawDims.x === "number" &&
+    typeof rawDims.y === "number" &&
+    typeof rawDims.z === "number"
+      ? rawDims
+      : null;
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
       <div className="grid gap-8 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-6">
-          {/* 3D Viewer placeholder */}
-          <div className="aspect-[4/3] rounded-lg bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center">
-            <span className="text-muted-foreground/40">3D Preview</span>
+          {/* Title + filename · size */}
+          <div>
+            <h1 className="text-2xl font-bold">{file.name}</h1>
+            {primaryAsset && (
+              <p className="mt-1 text-sm text-muted-foreground">
+                {primaryAsset.originalFilename}
+                <span className="mx-1.5">·</span>
+                {formatBytes(primaryAsset.fileSize)}
+                <span className="mx-1.5">·</span>
+                <span className="uppercase">{primaryAsset.format}</span>
+              </p>
+            )}
           </div>
+
+          {/* 3D preview */}
+          {previewable && primaryAsset ? (
+            <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
+              <OrderModelPreview
+                fileAssetId={primaryAsset.id}
+                format={primaryAsset.format}
+                materialColor={recommendedMaterial?.color ?? "#a1a1aa"}
+              />
+            </div>
+          ) : (
+            <div className="aspect-[4/3] rounded-2xl bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center">
+              <span className="text-xs text-muted-foreground/50">
+                {primaryAsset
+                  ? `Preview not supported for .${primaryAsset.format}`
+                  : "No preview"}
+              </span>
+            </div>
+          )}
+
+          {/* Bounding box */}
+          {dims && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">Bounding box</span>
+              <span className="font-mono">
+                {dims.x.toFixed(1)} × {dims.y.toFixed(1)} × {dims.z.toFixed(1)} mm
+              </span>
+            </div>
+          )}
+
+          {/* Description */}
+          {file.description && (
+            <p className="text-muted-foreground leading-relaxed">
+              {file.description}
+            </p>
+          )}
+
+          {/* Tags */}
+          {file.tags && file.tags.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {file.tags.map((tag) => (
+                <Badge key={tag} variant="secondary" className="text-xs">
+                  {tag}
+                </Badge>
+              ))}
+            </div>
+          )}
+
+          {/* Print recommendations */}
+          {(recommendedMaterial ||
+            (file.designTags && file.designTags.length > 0)) && (
+            <Card>
+              <CardContent className="p-4">
+                <p className="text-xs font-medium text-muted-foreground mb-2">
+                  Print Recommendations from Creator
+                </p>
+                {recommendedMaterial && (
+                  <div className="flex items-center gap-2 mb-2">
+                    <div
+                      className="h-6 w-6 rounded border border-border shrink-0"
+                      style={{ backgroundColor: recommendedMaterial.color }}
+                    />
+                    <span className="text-sm font-medium">
+                      {recommendedMaterial.name}
+                    </span>
+                    <Badge variant="outline" className="text-[10px]">
+                      {recommendedMaterial.method}
+                    </Badge>
+                  </div>
+                )}
+                {file.designTags && file.designTags.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {file.designTags.map((tag) => (
+                      <Badge
+                        key={tag}
+                        variant="outline"
+                        className="text-[10px]"
+                      >
+                        {DESIGN_TAG_LABELS[tag] || tag}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+                {file.minWallThickness && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Min. wall thickness:{" "}
+                    {(file.minWallThickness / 10).toFixed(1)}mm
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {/* Part photos */}
           {(photosWithUrls.length > 0 || isOwner) && (
@@ -134,103 +257,6 @@ export default async function FileDetailPage(props: {
               {isOwner && <PhotoUploader fileId={file.id} />}
             </div>
           )}
-
-          {/* File info */}
-          <div>
-            <h1 className="text-2xl font-bold">{file.name}</h1>
-            {file.description && (
-              <p className="mt-2 text-muted-foreground">{file.description}</p>
-            )}
-
-            {/* Tags */}
-            {file.tags && file.tags.length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-1">
-                {file.tags.map((tag) => (
-                  <Badge key={tag} variant="secondary" className="text-xs">
-                    {tag}
-                  </Badge>
-                ))}
-              </div>
-            )}
-
-            {/* Material recommendation */}
-            {(recommendedMaterial || (file.designTags && file.designTags.length > 0)) && (
-              <Card className="mt-4">
-                <CardContent className="p-4">
-                  <p className="text-xs font-medium text-muted-foreground mb-2">
-                    Print Recommendations from Creator
-                  </p>
-                  {recommendedMaterial && (
-                    <div className="flex items-center gap-2 mb-2">
-                      <div
-                        className="h-6 w-6 rounded border border-border shrink-0"
-                        style={{ backgroundColor: recommendedMaterial.color }}
-                      />
-                      <span className="text-sm font-medium">
-                        {recommendedMaterial.name}
-                      </span>
-                      <Badge variant="outline" className="text-[10px]">
-                        {recommendedMaterial.method}
-                      </Badge>
-                    </div>
-                  )}
-                  {file.designTags && file.designTags.length > 0 && (
-                    <div className="flex flex-wrap gap-1">
-                      {file.designTags.map((tag) => (
-                        <Badge key={tag} variant="outline" className="text-[10px]">
-                          {DESIGN_TAG_LABELS[tag] || tag}
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
-                  {file.minWallThickness && (
-                    <p className="text-xs text-muted-foreground mt-2">
-                      Min. wall thickness: {(file.minWallThickness / 10).toFixed(1)}mm
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-          </div>
-
-          {/* File assets */}
-          <div>
-            <h2 className="font-semibold">Files</h2>
-            <div className="mt-2 space-y-2">
-              {assets.map((asset) => (
-                <div
-                  key={asset.id}
-                  className="flex items-center justify-between rounded-lg border border-border px-4 py-3 text-sm"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">
-                      {asset.originalFilename}
-                    </span>
-                    <Badge variant="outline" className="text-[10px] uppercase">
-                      {asset.format}
-                    </Badge>
-                    <span className="text-muted-foreground text-xs">
-                      {(asset.fileSize / 1024 / 1024).toFixed(1)} MB
-                    </span>
-                  </div>
-                  <div className="flex gap-2">
-                    {canDownload && (
-                      <Button variant="ghost" size="xs" render={
-                        <a href={`/files/${slug}/download?asset=${asset.id}`} />
-                      }>
-                        Download
-                      </Button>
-                    )}
-                    <Button variant="ghost" size="xs" render={
-                      <Link href={`/print/${asset.id}`} />
-                    }>
-                      Print
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
 
         {/* Sidebar */}
