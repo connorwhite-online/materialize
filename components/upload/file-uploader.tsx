@@ -32,20 +32,25 @@ export function FileUploader({ onUploadComplete }: FileUploaderProps) {
           throw new Error("File exceeds 200MB limit");
         }
 
+        // Always use octet-stream for 3D files — browsers don't have a MIME
+        // type for STL/OBJ/3MF/STEP/AMF, and an empty string causes the
+        // presigned URL content-type to mismatch at upload time.
+        const contentType = "application/octet-stream";
+
         // Get presigned URL
         const presignRes = await fetch("/api/upload/presign", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             filename: file.name,
-            contentType: file.type || "application/octet-stream",
+            contentType,
             fileSize: file.size,
           }),
         });
 
         if (!presignRes.ok) {
-          const data = await presignRes.json();
-          throw new Error(data.error || "Failed to get upload URL");
+          const data = await presignRes.json().catch(() => ({}));
+          throw new Error(data.error || `Presign failed (${presignRes.status})`);
         }
 
         const { uploadUrl, storageKey, format } = await presignRes.json();
@@ -63,15 +68,24 @@ export function FileUploader({ onUploadComplete }: FileUploaderProps) {
             if (xhr.status >= 200 && xhr.status < 300) {
               resolve();
             } else {
-              reject(new Error("Upload failed"));
+              console.error("R2 upload failed:", xhr.status, xhr.responseText);
+              reject(
+                new Error(
+                  `R2 upload failed (${xhr.status}). Check R2 CORS settings.`
+                )
+              );
             }
           });
-          xhr.addEventListener("error", () => reject(new Error("Upload failed")));
+          xhr.addEventListener("error", () => {
+            console.error("R2 upload network error — likely CORS");
+            reject(
+              new Error(
+                "Network error uploading to R2. Check CORS configuration."
+              )
+            );
+          });
           xhr.open("PUT", uploadUrl);
-          xhr.setRequestHeader(
-            "Content-Type",
-            file.type || "application/octet-stream"
-          );
+          xhr.setRequestHeader("Content-Type", contentType);
           xhr.send(file);
         });
 

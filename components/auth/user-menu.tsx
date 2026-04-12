@@ -21,7 +21,7 @@ export function UserMenu() {
   return (
     <Link
       href={profileHref}
-      className="rounded-full outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      className="rounded-full outline-none transition-transform duration-150 hover:opacity-80 active:scale-[0.96] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       aria-label="Your profile"
     >
       <UserAvatar

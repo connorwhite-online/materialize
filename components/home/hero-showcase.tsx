@@ -91,7 +91,8 @@ export function HeroShowcase() {
       peakVelocity: 0,
       cancelled: false,
     };
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    // Intentionally NOT calling setPointerCapture — that would intercept
+    // click events on child buttons (the carousel items).
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
@@ -132,10 +133,6 @@ export function HeroShowcase() {
     const state = dragStateRef.current;
     if (!state.active) return;
     state.active = false;
-
-    try {
-      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-    } catch {}
 
     if (state.cancelled) {
       dragVelocityRef.current = 0;
@@ -194,77 +191,76 @@ export function HeroShowcase() {
       const touch = e.touches[0];
       const dx = touch.clientX - dragStateRef.current.startX;
       const dy = touch.clientY - dragStateRef.current.startY;
-      // If the gesture is primarily horizontal, prevent the browser from
-      // turning it into a back-navigation swipe.
       if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 5) {
         e.preventDefault();
       }
     };
 
+    // Native non-passive wheel listener so preventDefault actually works
+    // for horizontal trackpad scrolling. React's onWheel is passive.
+    const handleWheelNative = (e: WheelEvent) => {
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : 0;
+      if (delta === 0) return;
+
+      // Prevent the page from scrolling horizontally
+      e.preventDefault();
+
+      const state = wheelStateRef.current;
+      const now = performance.now();
+
+      if (now - state.lastTime > 200) {
+        state.accumulated = 0;
+        state.hasFiredThisGesture = false;
+      }
+      state.lastTime = now;
+
+      const vel = Math.max(-1, Math.min(1, -delta / 50));
+      dragVelocityRef.current = vel;
+      forceUpdate({});
+
+      if (state.hasFiredThisGesture) return;
+
+      state.accumulated += delta;
+
+      const WHEEL_THRESHOLD = 60;
+      if (Math.abs(state.accumulated) > WHEEL_THRESHOLD) {
+        const direction = state.accumulated > 0 ? 1 : -1;
+        const currentIndex = selectedIndexRef.current;
+        const newIndex = Math.max(
+          0,
+          Math.min(FEATURED_MATERIALS.length - 1, currentIndex + direction)
+        );
+        if (newIndex !== currentIndex) {
+          const intensity = 0.5 + Math.min(1, Math.abs(vel)) * 0.8;
+          handleSelect(newIndex, direction, intensity);
+        }
+        state.hasFiredThisGesture = true;
+      }
+    };
+
     el.addEventListener("touchstart", handleTouchStart, { passive: true });
     el.addEventListener("touchmove", handleTouchMove, { passive: false });
+    el.addEventListener("wheel", handleWheelNative, { passive: false });
     return () => {
       el.removeEventListener("touchstart", handleTouchStart);
       el.removeEventListener("touchmove", handleTouchMove);
+      el.removeEventListener("wheel", handleWheelNative);
     };
-  }, []);
+  }, [handleSelect]);
 
   // --- Wheel / trackpad horizontal scroll ---
+  // One step per "gesture". A gesture is a series of wheel events < 200ms
+  // apart. Once we fire within a gesture, we don't fire again until the
+  // gesture ends (including trackpad momentum).
   const wheelStateRef = useRef<{
     accumulated: number;
     lastTime: number;
-    cooldown: boolean;
+    hasFiredThisGesture: boolean;
   }>({
     accumulated: 0,
     lastTime: 0,
-    cooldown: false,
+    hasFiredThisGesture: false,
   });
-
-  const handleWheel = (e: React.WheelEvent) => {
-    // Use deltaX for horizontal trackpad/wheel
-    const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : 0;
-    if (delta === 0) return;
-
-    const state = wheelStateRef.current;
-    const now = performance.now();
-
-    // Reset accumulation if it's been a while since last wheel event
-    if (now - state.lastTime > 200) {
-      state.accumulated = 0;
-      state.cooldown = false;
-    }
-    state.lastTime = now;
-
-    // Show mesh distortion in real-time
-    const vel = Math.max(-1, Math.min(1, -delta / 50));
-    dragVelocityRef.current = vel;
-    forceUpdate({});
-
-    if (state.cooldown) return;
-
-    state.accumulated += delta;
-
-    // Threshold: once accumulated enough in one direction, advance one step
-    const WHEEL_THRESHOLD = 100;
-    if (Math.abs(state.accumulated) > WHEEL_THRESHOLD) {
-      const direction = state.accumulated > 0 ? 1 : -1;
-      const currentIndex = selectedIndexRef.current;
-      const newIndex = Math.max(
-        0,
-        Math.min(FEATURED_MATERIALS.length - 1, currentIndex + direction)
-      );
-      if (newIndex !== currentIndex) {
-        const intensity = 0.5 + Math.min(1, Math.abs(vel)) * 0.8;
-        handleSelect(newIndex, direction, intensity);
-      }
-      state.accumulated = 0;
-      state.cooldown = true;
-      // Longer cooldown so a continuous trackpad scroll fires discrete steps
-      setTimeout(() => {
-        state.cooldown = false;
-      }, 500);
-    }
-  };
 
   return (
     <div
@@ -275,7 +271,6 @@ export function HeroShowcase() {
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
-      onWheel={handleWheel}
     >
       {/* 3D viewport */}
       <div className="relative w-full h-[320px] sm:h-[400px]">
