@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,11 @@ export default function OnboardingPage() {
   const [username, setUsernameValue] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const usernameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    usernameInputRef.current?.focus();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,6 +52,7 @@ export default function OnboardingPage() {
             <div>
               <Label htmlFor="username">Username</Label>
               <Input
+                ref={usernameInputRef}
                 id="username"
                 value={username}
                 onChange={(e) =>
@@ -58,7 +64,6 @@ export default function OnboardingPage() {
                 required
                 minLength={3}
                 maxLength={30}
-                autoFocus
               />
               <p className="mt-2 text-xs text-muted-foreground">
                 Letters, numbers, underscores, hyphens
