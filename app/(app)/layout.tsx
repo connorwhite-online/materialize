@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { UserButton } from "@clerk/nextjs";
 import { currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { AuthNav } from "@/components/auth/auth-nav";
 
 export default async function AppLayout({
   children,
@@ -49,7 +49,7 @@ export default async function AppLayout({
               </Link>
             </nav>
           </div>
-          <UserButton />
+          <AuthNav />
         </div>
       </header>
       <main className="flex-1">{children}</main>

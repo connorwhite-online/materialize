@@ -1,15 +1,13 @@
 import Link from "next/link";
-import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { files, users } from "@/lib/db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AuthNav } from "@/components/auth/auth-nav";
 
 export default async function HomePage() {
-  const { userId } = await auth();
-
   // Fetch recent published files for the gallery
   const recentFiles = await db
     .select({
@@ -43,23 +41,7 @@ export default async function HomePage() {
             >
               Materials
             </Link>
-            {userId ? (
-              <Button size="sm" render={<Link href="/dashboard" />}>
-                Dashboard
-              </Button>
-            ) : (
-              <>
-                <Link
-                  href="/sign-in"
-                  className="text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  Sign In
-                </Link>
-                <Button size="sm" render={<Link href="/sign-up" />}>
-                  Get Started
-                </Button>
-              </>
-            )}
+            <AuthNav />
           </nav>
         </div>
       </header>
