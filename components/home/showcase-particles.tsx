@@ -55,18 +55,8 @@ export function ShowcaseParticles({
       MIN_PARTICLES + (MAX_PARTICLES - MIN_PARTICLES) * curved
     );
 
-    // Back-spray ratio — randomize slightly (20-30% of main spray)
-    const backSprayRatio = 0.2 + Math.random() * 0.1;
-    const backSprayCount = Math.floor(count * backSprayRatio);
-
-    // Randomize base angle slightly for unique spray each burst (±12°)
-    const baseAngleJitter = (Math.random() - 0.5) * 0.4;
-    // Slight vertical bias — sometimes up, sometimes down
-    const verticalBias = (Math.random() - 0.5) * 0.6;
-    // Random spread angle (narrower for slow, wider for fast)
-    const spread = 0.3 + intensity * 0.4;
-    // Back spray gets a wider spread cone (more scattered)
-    const backSpread = 0.5 + intensity * 0.3;
+    // Directional push strength scales with intensity
+    const directionalPush = 1.8 + intensity * 2.2;
 
     for (let i = 0; i < MAX_PARTICLES; i++) {
       const p = particles[i];
@@ -76,13 +66,6 @@ export function ShowcaseParticles({
         continue;
       }
       p.active = true;
-
-      // Decide if this particle is main spray or back spray
-      const isBackSpray = i >= count - backSprayCount;
-      const particleDirection = isBackSpray ? -direction : direction;
-      const particleSpread = isBackSpray ? backSpread : spread;
-      // Back spray is slower (60-80% of main speed)
-      const speedMult = isBackSpray ? 0.6 + Math.random() * 0.2 : 1;
 
       // Sample a point on a sphere approximating the mesh surface
       const theta = Math.random() * Math.PI * 2;
@@ -94,23 +77,28 @@ export function ShowcaseParticles({
         r * Math.cos(phi)
       );
 
-      // Random angle within spray cone, centered on particle direction
-      const particleAngle =
-        baseAngleJitter + (Math.random() - 0.5) * particleSpread;
-      const speedBase = (2.0 + intensity * 2.5) * speedMult;
-      const speed = speedBase * (0.7 + Math.random() * 0.6);
+      // Omnidirectional base velocity — every particle flies outward
+      // from its surface position in a random direction
+      const outX = Math.sin(phi) * Math.cos(theta);
+      const outY = Math.sin(phi) * Math.sin(theta);
+      const outZ = Math.cos(phi);
+      const baseSpeed = 0.8 + Math.random() * 0.8;
+
+      // Add a directional push in the swipe direction.
+      // Weight varies per particle — some get a strong push, others barely any.
+      // This gives the "sprays in every direction, but mostly one" look.
+      const directionalWeight = Math.random() * Math.random(); // bias toward low values
+      const directionalComponent =
+        direction * directionalPush * (0.3 + directionalWeight);
 
       p.velocity.set(
-        particleDirection * speed * Math.cos(particleAngle),
-        verticalBias +
-          particleDirection * speed * Math.sin(particleAngle) +
-          (Math.random() - 0.5) * 0.8,
-        (Math.random() - 0.5) * 0.4
+        outX * baseSpeed + directionalComponent,
+        outY * baseSpeed + (Math.random() - 0.5) * 0.6,
+        outZ * baseSpeed * 0.4
       );
 
       p.age = 0;
-      // Back-spray particles slightly smaller
-      p.scale = (isBackSpray ? 0.008 : 0.01) + Math.random() * 0.013;
+      p.scale = 0.01 + Math.random() * 0.015;
 
       p.rotation.set(
         Math.random() * Math.PI * 2,
