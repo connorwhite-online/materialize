@@ -1,11 +1,11 @@
 import type { SVGProps } from "react";
 
 /**
- * Thick, slightly rounded chevron pointing right.
- * strokeLinecap + strokeLinejoin = "round" for soft corners.
+ * Thick, slightly rounded chevron pointing left.
+ * Mirrors `chevron-right.tsx` — same curved vertex, flipped path.
  * Uses currentColor so it inherits text color.
  */
-export function ChevronRight({
+export function ChevronLeft({
   size = 16,
   strokeWidth = 2.5,
   ...props
@@ -23,7 +23,7 @@ export function ChevronRight({
       aria-hidden="true"
       {...props}
     >
-      <path d="M9 6 L13 10 Q15 12 13 14 L9 18" />
+      <path d="M15 6 L11 10 Q9 12 11 14 L15 18" />
     </svg>
   );
 }

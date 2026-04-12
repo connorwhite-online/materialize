@@ -156,7 +156,7 @@ export function HomeBottomBar() {
         {/* Main row — always visible */}
         <form
           onSubmit={handleSearchSubmit}
-          className="flex items-center gap-1 py-1 pl-1 pr-4"
+          className="flex items-center gap-1 py-1 pl-1 pr-3"
         >
           <input
             ref={searchInputRef}
@@ -172,7 +172,7 @@ export function HomeBottomBar() {
             size="sm"
             onClick={handleUploadClick}
           >
-            {mode === "uploading" ? "Cancel" : "Upload file"}
+            {mode === "uploading" ? "Cancel" : "Upload"}
           </Button>
         </form>
       </motion.div>

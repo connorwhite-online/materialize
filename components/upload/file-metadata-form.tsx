@@ -220,7 +220,14 @@ export function FileMetadataForm({ assets }: FileMetadataFormProps) {
               onValueChange={(v) => v && setCollectionChoice(v)}
             >
               <SelectTrigger id="collection-trigger" className="w-full">
-                <SelectValue />
+                <SelectValue>
+                  {(value) => {
+                    if (!value || value === "none") return "No collection";
+                    if (value === "__new__") return "+ Create new collection";
+                    const found = userCollections.find((c) => c.id === value);
+                    return found?.name ?? "No collection";
+                  }}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">No collection</SelectItem>
@@ -304,7 +311,13 @@ export function FileMetadataForm({ assets }: FileMetadataFormProps) {
                       onValueChange={(v) => v && setLicense(v)}
                     >
                       <SelectTrigger id="license-trigger" className="w-full">
-                        <SelectValue />
+                        <SelectValue>
+                          {(value) => {
+                            if (value === "personal") return "Personal Use";
+                            if (value === "commercial") return "Commercial Use";
+                            return "Free";
+                          }}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="free">Free</SelectItem>
@@ -366,7 +379,13 @@ export function FileMetadataForm({ assets }: FileMetadataFormProps) {
                     onValueChange={(v) => setRecommendedMaterial(v ?? "")}
                   >
                     <SelectTrigger id="material-trigger" className="w-full">
-                      <SelectValue placeholder="None — let the buyer decide" />
+                      <SelectValue placeholder="None — let the buyer decide">
+                        {(value) => {
+                          if (!value) return "None — let the buyer decide";
+                          const mat = MATERIALS.find((m) => m.id === value);
+                          return mat ? `${mat.name} (${mat.method})` : value;
+                        }}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {MATERIALS.map((m) => (
