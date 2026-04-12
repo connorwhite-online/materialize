@@ -17,8 +17,10 @@ const DESIGN_TAG_LABELS: Record<string, string> = {
 
 export default async function PrintConfigPage(props: {
   params: Promise<{ fileAssetId: string }>;
+  searchParams: Promise<{ material?: string }>;
 }) {
   const { fileAssetId } = await props.params;
+  const { material: preselectMaterialId } = await props.searchParams;
 
   const [asset] = await db
     .select({
@@ -82,6 +84,7 @@ export default async function PrintConfigPage(props: {
           format={asset.format}
           hasCachedModel={!!asset.craftCloudModelId}
           geometryData={asset.geometryData}
+          preselectMaterialId={preselectMaterialId}
         />
       </div>
     </div>

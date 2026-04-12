@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { MaterialSelector } from "./material-selector";
 import { PriceDisplay } from "./price-display";
 import { ShippingAddressForm } from "./shipping-address-form";
 import { createPrintOrder, completePrintOrder } from "@/app/actions/print";
 import { uploadToCraftCloud } from "@/lib/craftcloud/upload-client";
 import { checkGeometry } from "@/lib/geometry-checks";
+import { getMaterialById } from "@/lib/materials";
+import { MaterialPreview } from "@/components/viewer/material-preview";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert } from "@/components/ui/alert";
@@ -43,6 +45,7 @@ interface QuoteConfiguratorProps {
     volume?: number;
     triangleCount?: number;
   } | null;
+  preselectMaterialId?: string;
 }
 
 type CheckoutStep = "configure" | "address" | "processing";
@@ -54,6 +57,7 @@ export function QuoteConfigurator({
   format,
   hasCachedModel,
   geometryData,
+  preselectMaterialId,
 }: QuoteConfiguratorProps) {
   const [loadingPhase, setLoadingPhase] = useState<LoadingPhase | null>(
     "uploading"
@@ -70,6 +74,40 @@ export function QuoteConfigurator({
   const [step, setStep] = useState<CheckoutStep>("configure");
   const [printOrderId, setPrintOrderId] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+
+  // Resolved download URL for the model preview viewer.
+  const [previewModelUrl, setPreviewModelUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/craftcloud/download-url", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileAssetId }),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setPreviewModelUrl(data.downloadUrl);
+      } catch {
+        // Preview is non-critical — fall back to silent skip.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [fileAssetId]);
+
+  const previewColor = useMemo(() => {
+    if (!selectedQuote) return "#a1a1aa";
+    return (
+      getMaterialById(selectedQuote.materialConfigId)?.color ?? "#a1a1aa"
+    );
+  }, [selectedQuote]);
+
+  const previewableFormat =
+    format === "stl" || format === "obj" || format === "3mf";
 
   const ensureModelUploaded = useCallback(async () => {
     if (hasCachedModel) return;
@@ -164,6 +202,17 @@ export function QuoteConfigurator({
     },
     {} as Record<string, Quote[]>
   );
+
+  // When the user came from a material detail page ("Print with PLA"),
+  // auto-pick the cheapest quote in that material group as soon as the
+  // quotes land. Skipped if the material has no quotes for this file.
+  useEffect(() => {
+    if (!preselectMaterialId || selectedQuote || quotes.length === 0) return;
+    const group = materialGroups[preselectMaterialId];
+    if (!group || group.length === 0) return;
+    const cheapest = group.reduce((min, q) => (q.price < min.price ? q : min));
+    setSelectedQuote(cheapest);
+  }, [preselectMaterialId, quotes, materialGroups, selectedQuote]);
 
   const handleCheckout = async () => {
     if (!selectedQuote || !selectedShipping) return;
@@ -302,6 +351,17 @@ export function QuoteConfigurator({
         </Alert>
       )}
 
+      {previewModelUrl && previewableFormat && (
+        <div className="mb-6 aspect-square w-full max-w-xs overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
+          <MaterialPreview
+            modelUrl={previewModelUrl}
+            format={format as "stl" | "obj" | "3mf"}
+            materialColor={previewColor}
+            className="h-full w-full"
+          />
+        </div>
+      )}
+
       <div className="grid gap-8 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <div className="flex items-center gap-4 mb-4">
@@ -319,13 +379,16 @@ export function QuoteConfigurator({
             />
           </div>
 
-          {geometryData?.dimensions && (
-            <div className="mb-4 text-sm text-muted-foreground">
-              Dimensions: {geometryData.dimensions.x.toFixed(1)} x{" "}
-              {geometryData.dimensions.y.toFixed(1)} x{" "}
-              {geometryData.dimensions.z.toFixed(1)} mm
-            </div>
-          )}
+          {geometryData?.dimensions &&
+            typeof geometryData.dimensions.x === "number" &&
+            typeof geometryData.dimensions.y === "number" &&
+            typeof geometryData.dimensions.z === "number" && (
+              <div className="mb-4 text-sm text-muted-foreground">
+                Dimensions: {geometryData.dimensions.x.toFixed(1)} x{" "}
+                {geometryData.dimensions.y.toFixed(1)} x{" "}
+                {geometryData.dimensions.z.toFixed(1)} mm
+              </div>
+            )}
 
           {/* Geometry hints — soft warnings, never blocking */}
           {(() => {

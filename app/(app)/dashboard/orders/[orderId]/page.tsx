@@ -5,6 +5,7 @@ import { printOrders, fileAssets } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { OrderStatusTracker } from "@/components/print/order-status-tracker";
 import { FacilityMap } from "@/components/print/facility-map";
+import { OrderModelPreview } from "@/components/print/order-model-preview";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -46,6 +47,8 @@ export default async function OrderDetailPage(props: {
       craftCloudOrderId: printOrders.craftCloudOrderId,
       createdAt: printOrders.createdAt,
       filename: fileAssets.originalFilename,
+      fileAssetId: printOrders.fileAssetId,
+      assetFormat: fileAssets.format,
     })
     .from(printOrders)
     .leftJoin(fileAssets, eq(printOrders.fileAssetId, fileAssets.id))
@@ -102,6 +105,17 @@ export default async function OrderDetailPage(props: {
           {statusLabel}
         </Badge>
       </div>
+
+      {/* Model preview rendered with the ordered material's color */}
+      {order.fileAssetId && order.assetFormat && (
+        <div className="mt-6 aspect-[16/9] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
+          <OrderModelPreview
+            fileAssetId={order.fileAssetId}
+            format={order.assetFormat}
+            materialColor={materialMeta?.color ?? "#a1a1aa"}
+          />
+        </div>
+      )}
 
       {/* Status tracker */}
       <div className="mt-8">

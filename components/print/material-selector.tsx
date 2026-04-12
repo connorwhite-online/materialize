@@ -5,7 +5,7 @@ import { getMaterialById, getMaterialsByQuickFilter } from "@/lib/materials";
 import { QUICK_FILTER_LABELS, type QuickFilter } from "@/lib/materials/data";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { MaterialCardPreview } from "@/components/materials/material-card-preview";
 
 interface Quote {
   quoteId: string;
@@ -84,13 +84,17 @@ export function MaterialSelector({
           const isSelected =
             selectedQuote?.materialConfigId === materialId;
 
-          // Check size compatibility
-          const tooLarge =
+          const hasDims =
             modelDimensions &&
+            typeof modelDimensions.x === "number" &&
+            typeof modelDimensions.y === "number" &&
+            typeof modelDimensions.z === "number";
+          const tooLarge =
+            hasDims &&
             metadata &&
-            (modelDimensions.x > metadata.constraints.maxDimensions.x ||
-              modelDimensions.y > metadata.constraints.maxDimensions.y ||
-              modelDimensions.z > metadata.constraints.maxDimensions.z);
+            (modelDimensions!.x > metadata.constraints.maxDimensions.x ||
+              modelDimensions!.y > metadata.constraints.maxDimensions.y ||
+              modelDimensions!.z > metadata.constraints.maxDimensions.z);
 
           return (
             <button
@@ -105,12 +109,9 @@ export function MaterialSelector({
                     : "border-border hover:border-primary/30"
               }`}
             >
-              <div
-                className="h-10 w-10 rounded-md border border-border shrink-0"
-                style={{
-                  background: `linear-gradient(135deg, ${color}, ${adjustBrightness(color, -15)})`,
-                }}
-              />
+              <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md border border-border">
+                <MaterialCardPreview color={color} />
+              </div>
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-sm">
                   {metadata?.name || materialId}
@@ -182,10 +183,3 @@ export function MaterialSelector({
   );
 }
 
-function adjustBrightness(hex: string, percent: number): string {
-  const num = parseInt(hex.replace("#", ""), 16);
-  const r = Math.min(255, Math.max(0, (num >> 16) + percent));
-  const g = Math.min(255, Math.max(0, ((num >> 8) & 0x00ff) + percent));
-  const b = Math.min(255, Math.max(0, (num & 0x0000ff) + percent));
-  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
-}

@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { MaterialCardPreview } from "@/components/materials/material-card-preview";
 
 export async function generateStaticParams() {
   return MATERIALS.map((m) => ({ slug: m.slug }));
@@ -16,14 +17,6 @@ const PROPERTY_LABELS = {
   detail: "Detail",
   heatResistance: "Heat Resistance",
 };
-
-function adjustBrightness(hex: string, percent: number): string {
-  const num = parseInt(hex.replace("#", ""), 16);
-  const r = Math.min(255, Math.max(0, (num >> 16) + percent));
-  const g = Math.min(255, Math.max(0, ((num >> 8) & 0x00ff) + percent));
-  const b = Math.min(255, Math.max(0, (num & 0x0000ff) + percent));
-  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
-}
 
 export default async function MaterialDetailPage(props: {
   params: Promise<{ slug: string }>;
@@ -37,13 +30,8 @@ export default async function MaterialDetailPage(props: {
     <div className="mx-auto max-w-4xl px-4 py-8">
       {/* Hero */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        <div
-          className="aspect-square rounded-xl flex items-center justify-center"
-          style={{
-            background: `linear-gradient(135deg, ${material.color}, ${adjustBrightness(material.color, -20)})`,
-          }}
-        >
-          <div className="w-24 h-24 rounded-xl bg-white/10 backdrop-blur-sm" />
+        <div className="relative aspect-square overflow-hidden rounded-xl border border-border">
+          <MaterialCardPreview color={material.color} />
         </div>
 
         <div>
@@ -66,7 +54,10 @@ export default async function MaterialDetailPage(props: {
           </p>
 
           <div className="mt-6">
-            <Button size="lg" render={<Link href="/print" />}>
+            <Button
+              size="lg"
+              render={<Link href={`/print?material=${material.id}`} />}
+            >
               Print with {material.name}
             </Button>
           </div>

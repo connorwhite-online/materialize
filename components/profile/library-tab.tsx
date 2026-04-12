@@ -43,6 +43,7 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
     slug: string;
     price: number;
     visibility: string;
+    thumbnailUrl: string | null;
     creatorUsername: string | null;
     creatorDisplayName: string | null;
   };
@@ -55,6 +56,7 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
         slug: files.slug,
         price: files.price,
         visibility: files.visibility,
+        thumbnailUrl: files.thumbnailUrl,
         creatorUsername: users.username,
         creatorDisplayName: users.displayName,
       })
@@ -69,15 +71,17 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
       );
   }
 
-  // Fetch primary asset (id + format) for every file we'll render so the
-  // cards can render a 3D preview without N+1 queries.
   const allFileIds = [
     ...ownedFiles.map((f) => f.id),
     ...purchasedRows.map((r) => r.id),
   ];
   const primaryAssetByFileId = new Map<
     string,
-    { id: string; format: string }
+    {
+      id: string;
+      format: string;
+      dimensions: [number, number, number] | null;
+    }
   >();
   if (allFileIds.length > 0) {
     const assetRows = await db
@@ -85,6 +89,7 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
         id: fileAssets.id,
         fileId: fileAssets.fileId,
         format: fileAssets.format,
+        geometryData: fileAssets.geometryData,
         createdAt: fileAssets.createdAt,
       })
       .from(fileAssets)
@@ -92,11 +97,12 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
       .orderBy(fileAssets.createdAt);
     for (const asset of assetRows) {
       if (!asset.fileId) continue;
-      // First (oldest) asset wins as the "primary" preview source.
       if (!primaryAssetByFileId.has(asset.fileId)) {
+        const dims = asset.geometryData?.dimensions;
         primaryAssetByFileId.set(asset.fileId, {
           id: asset.id,
           format: asset.format,
+          dimensions: dims ? [dims.x, dims.y, dims.z] : null,
         });
       }
     }
@@ -111,8 +117,10 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
       price: r.price,
       visibility: r.visibility,
       source: "purchased" as const,
+      thumbnailUrl: r.thumbnailUrl,
       primaryAssetId: asset?.id ?? null,
       primaryFormat: asset?.format ?? null,
+      dimensions: asset?.dimensions ?? null,
       creatorUsername: r.creatorUsername,
       creatorDisplayName: r.creatorDisplayName,
     };
@@ -157,8 +165,10 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
       price: f.price,
       visibility: f.visibility,
       source: "owned" as const,
+      thumbnailUrl: f.thumbnailUrl,
       primaryAssetId: asset?.id ?? null,
       primaryFormat: asset?.format ?? null,
+      dimensions: asset?.dimensions ?? null,
     };
   });
 

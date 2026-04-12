@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { shaderMaterial } from "@react-three/drei";
 import { extend } from "@react-three/fiber";
 import * as THREE from "three";
@@ -80,16 +81,20 @@ export function MaterializeMaterial({
   accentColor = "#a1a1aa",
   fresnelColor = "#e4e4e7",
 }: MaterializeMaterialProps) {
-  return (
-    <primitive
-      object={new MaterializeShaderMaterial({
-        uBaseColor: new THREE.Color(baseColor),
-        uAccentColor: new THREE.Color(accentColor),
-        uFresnelColor: new THREE.Color(fresnelColor),
-        uFresnelPower: 2.5,
-        uFresnelIntensity: 0.4,
-      })}
-      attach="material"
-    />
-  );
+  // drei's shaderMaterial factory makes a class whose constructor takes
+  // no arguments — uniforms are exposed as property setters on the
+  // instance. Passing them via constructor (the previous pattern) made
+  // ShaderMaterial warn and left every uniform at its default, which is
+  // why every shaded mesh rendered as flat grey.
+  const material = useMemo(() => {
+    const m = new MaterializeShaderMaterial();
+    m.uBaseColor = new THREE.Color(baseColor);
+    m.uAccentColor = new THREE.Color(accentColor);
+    m.uFresnelColor = new THREE.Color(fresnelColor);
+    m.uFresnelPower = 2.5;
+    m.uFresnelIntensity = 0.4;
+    return m;
+  }, [baseColor, accentColor, fresnelColor]);
+
+  return <primitive object={material} attach="material" />;
 }

@@ -43,11 +43,27 @@ export async function POST(request: Request) {
       return Response.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    // Drop dimensions if any axis is missing/non-numeric — CraftCloud
+    // occasionally returns partial shapes and the render path assumes
+    // all three axes are real numbers.
+    const rawDims = body.geometry?.dimensions;
+    const dimsOk =
+      rawDims &&
+      typeof rawDims.x === "number" &&
+      typeof rawDims.y === "number" &&
+      typeof rawDims.z === "number";
+    const cleanGeometry = body.geometry
+      ? {
+          ...body.geometry,
+          dimensions: dimsOk ? rawDims : undefined,
+        }
+      : undefined;
+
     await db
       .update(fileAssets)
       .set({
         craftCloudModelId: body.modelId,
-        geometryData: body.geometry || undefined,
+        geometryData: cleanGeometry,
       })
       .where(eq(fileAssets.id, body.fileAssetId));
 

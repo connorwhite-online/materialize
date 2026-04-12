@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import type { MaterialMetadata } from "@/lib/materials/data";
+import { MaterialCardPreview } from "./material-card-preview";
 
 interface MaterialCardProps {
   material: MaterialMetadata;
@@ -18,14 +19,9 @@ export function MaterialCard({ material }: MaterialCardProps) {
   return (
     <Link href={`/materials/${material.slug}`}>
       <Card className="group overflow-hidden transition-colors hover:border-primary/30">
-        {/* Material swatch */}
-        <div
-          className="h-32 w-full relative"
-          style={{
-            background: `linear-gradient(135deg, ${material.color}, ${adjustBrightness(material.color, -15)})`,
-          }}
-        >
-          <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
+        <div className="h-32 w-full relative overflow-hidden">
+          <MaterialCardPreview color={material.color} />
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/25 to-transparent" />
           <Badge
             variant="secondary"
             className="absolute top-2 right-2 text-[10px]"
@@ -83,10 +79,3 @@ export function MaterialCard({ material }: MaterialCardProps) {
   );
 }
 
-function adjustBrightness(hex: string, percent: number): string {
-  const num = parseInt(hex.replace("#", ""), 16);
-  const r = Math.min(255, Math.max(0, (num >> 16) + percent));
-  const g = Math.min(255, Math.max(0, ((num >> 8) & 0x00ff) + percent));
-  const b = Math.min(255, Math.max(0, (num & 0x0000ff) + percent));
-  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
-}
