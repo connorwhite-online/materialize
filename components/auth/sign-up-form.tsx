@@ -13,22 +13,28 @@ import {
 } from "@/components/ui/input-otp";
 import { Separator } from "@/components/ui/separator";
 import { SocialButtons } from "./social-buttons";
+import { setUsername } from "@/app/actions/onboarding";
 
 type Method = "email" | "phone";
+type Step = "identifier" | "code" | "username";
 
 interface SignUpFormProps {
   onSuccess?: () => void;
   redirectUrl?: string;
 }
 
-export function SignUpForm({ onSuccess, redirectUrl = "/onboarding" }: SignUpFormProps) {
+export function SignUpForm({
+  onSuccess,
+  redirectUrl = "/",
+}: SignUpFormProps) {
   const { isLoaded, signUp, setActive } = useSignUp();
   const router = useRouter();
 
   const [method, setMethod] = useState<Method>("email");
   const [value, setValue] = useState("");
   const [code, setCode] = useState("");
-  const [step, setStep] = useState<"identifier" | "code">("identifier");
+  const [username, setUsernameInput] = useState("");
+  const [step, setStep] = useState<Step>("identifier");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -71,13 +77,8 @@ export function SignUpForm({ onSuccess, redirectUrl = "/onboarding" }: SignUpFor
 
       if (result.status === "complete" && result.createdSessionId) {
         await setActive({ session: result.createdSessionId });
-        if (onSuccess) {
-          onSuccess();
-          router.refresh();
-        } else {
-          router.push(redirectUrl);
-          router.refresh();
-        }
+        // Continue to username step
+        setStep("username");
         return;
       }
 
@@ -100,6 +101,66 @@ export function SignUpForm({ onSuccess, redirectUrl = "/onboarding" }: SignUpFor
     }
   };
 
+  const handleSetUsername = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+
+    const result = await setUsername(username);
+    if ("error" in result) {
+      setError(result.error);
+      setLoading(false);
+      return;
+    }
+
+    if (onSuccess) {
+      onSuccess();
+      router.refresh();
+    } else {
+      router.push(redirectUrl);
+      router.refresh();
+    }
+  };
+
+  // Step 3: Username
+  if (step === "username") {
+    return (
+      <form onSubmit={handleSetUsername} className="space-y-5">
+        <div>
+          <Label htmlFor="username">Pick a username</Label>
+          <Input
+            id="username"
+            value={username}
+            onChange={(e) =>
+              setUsernameInput(
+                e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, "")
+              )
+            }
+            placeholder="yourname"
+            required
+            minLength={3}
+            maxLength={30}
+            autoFocus
+          />
+          <p className="mt-2 text-xs text-muted-foreground">
+            This is how others will find you
+          </p>
+        </div>
+
+        {error && <p className="text-xs text-destructive">{error}</p>}
+
+        <Button
+          type="submit"
+          className="w-full"
+          disabled={loading || username.length < 3}
+        >
+          {loading ? "Finishing up..." : "Complete sign-up"}
+        </Button>
+      </form>
+    );
+  }
+
+  // Step 2: OTP verification
   if (step === "code") {
     return (
       <div className="space-y-4">
@@ -151,6 +212,7 @@ export function SignUpForm({ onSuccess, redirectUrl = "/onboarding" }: SignUpFor
     );
   }
 
+  // Step 1: Email/phone input
   return (
     <div className="space-y-4">
       <SocialButtons mode="sign-up" />
@@ -195,11 +257,7 @@ export function SignUpForm({ onSuccess, redirectUrl = "/onboarding" }: SignUpFor
 
         {error && <p className="text-xs text-destructive">{error}</p>}
 
-        <Button
-          type="submit"
-          className="w-full"
-          disabled={loading || !value}
-        >
+        <Button type="submit" className="w-full" disabled={loading || !value}>
           {loading ? "Sending code..." : "Continue"}
         </Button>
       </form>

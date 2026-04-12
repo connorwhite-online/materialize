@@ -67,12 +67,30 @@ export default async function HomePage() {
               />
               <button
                 type="submit"
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
               >
                 Search
               </button>
             </div>
           </form>
+
+          {/* Secondary CTAs under search */}
+          <div className="mt-3 flex gap-2">
+            <Button
+              variant="outline"
+              className="flex-1"
+              render={<Link href="/materials" />}
+            >
+              Explore materials
+            </Button>
+            <Button
+              variant="outline"
+              className="flex-1"
+              render={<Link href="/dashboard/uploads/new" />}
+            >
+              Upload file
+            </Button>
+          </div>
         </div>
 
         {/* Community gallery */}
