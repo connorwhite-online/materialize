@@ -21,10 +21,17 @@ export function HeroShowcase() {
   const [burstDirection, setBurstDirection] = useState(0);
   const [burstIntensity, setBurstIntensity] = useState(1);
 
+  // Mirror state in a ref so event handlers always read the fresh value
+  const selectedIndexRef = useRef(0);
+  useEffect(() => {
+    selectedIndexRef.current = selectedIndex;
+  }, [selectedIndex]);
+
   // Shared drag velocity — drives both mesh distortion and carousel scroll
   const dragVelocityRef = useRef(0);
   const [, forceUpdate] = useState({});
 
+  const containerRef = useRef<HTMLDivElement>(null);
   const carouselTrackRef = useRef<HTMLDivElement>(null);
 
   const material = FEATURED_MATERIALS[selectedIndex];
@@ -139,14 +146,13 @@ export function HeroShowcase() {
     // One-step gesture: if horizontal distance > threshold, move ±1 index
     const totalDx = e.clientX - state.startX;
     if (Math.abs(totalDx) > SWIPE_THRESHOLD) {
-      // Finger right (positive dx) → previous item (direction -1)
-      // Finger left (negative dx) → next item (direction +1)
       const direction = totalDx > 0 ? -1 : 1;
+      const currentIndex = selectedIndexRef.current;
       const newIndex = Math.max(
         0,
-        Math.min(FEATURED_MATERIALS.length - 1, selectedIndex + direction)
+        Math.min(FEATURED_MATERIALS.length - 1, currentIndex + direction)
       );
-      if (newIndex !== selectedIndex) {
+      if (newIndex !== currentIndex) {
         const intensity = 0.3 + state.peakVelocity * 1.2;
         handleSelect(newIndex, direction, intensity);
       }
@@ -171,6 +177,38 @@ export function HeroShowcase() {
     return () => cancelAnimationFrame(id);
   });
 
+  // Native touchmove listener — prevents iOS edge swipe-back when dragging
+  // horizontally. React's onTouchMove is passive by default and can't
+  // preventDefault, so we attach a non-passive listener manually.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      const touch = e.touches[0];
+      dragStateRef.current.startX = touch.clientX;
+      dragStateRef.current.startY = touch.clientY;
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      const touch = e.touches[0];
+      const dx = touch.clientX - dragStateRef.current.startX;
+      const dy = touch.clientY - dragStateRef.current.startY;
+      // If the gesture is primarily horizontal, prevent the browser from
+      // turning it into a back-navigation swipe.
+      if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 5) {
+        e.preventDefault();
+      }
+    };
+
+    el.addEventListener("touchstart", handleTouchStart, { passive: true });
+    el.addEventListener("touchmove", handleTouchMove, { passive: false });
+    return () => {
+      el.removeEventListener("touchstart", handleTouchStart);
+      el.removeEventListener("touchmove", handleTouchMove);
+    };
+  }, []);
+
   // --- Wheel / trackpad horizontal scroll ---
   const wheelStateRef = useRef<{
     accumulated: number;
@@ -183,11 +221,9 @@ export function HeroShowcase() {
   });
 
   const handleWheel = (e: React.WheelEvent) => {
-    // Use deltaX for horizontal trackpad/wheel, fall back to deltaY if shift-held
+    // Use deltaX for horizontal trackpad/wheel
     const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : 0;
     if (delta === 0) return;
-
-    e.preventDefault();
 
     const state = wheelStateRef.current;
     const now = performance.now();
@@ -209,30 +245,32 @@ export function HeroShowcase() {
     state.accumulated += delta;
 
     // Threshold: once accumulated enough in one direction, advance one step
-    const WHEEL_THRESHOLD = 80;
+    const WHEEL_THRESHOLD = 100;
     if (Math.abs(state.accumulated) > WHEEL_THRESHOLD) {
       const direction = state.accumulated > 0 ? 1 : -1;
+      const currentIndex = selectedIndexRef.current;
       const newIndex = Math.max(
         0,
-        Math.min(FEATURED_MATERIALS.length - 1, selectedIndex + direction)
+        Math.min(FEATURED_MATERIALS.length - 1, currentIndex + direction)
       );
-      if (newIndex !== selectedIndex) {
+      if (newIndex !== currentIndex) {
         const intensity = 0.5 + Math.min(1, Math.abs(vel)) * 0.8;
         handleSelect(newIndex, direction, intensity);
       }
       state.accumulated = 0;
       state.cooldown = true;
-      // Brief cooldown so a continuous scroll doesn't fly through everything
+      // Longer cooldown so a continuous trackpad scroll fires discrete steps
       setTimeout(() => {
         state.cooldown = false;
-      }, 300);
+      }, 500);
     }
   };
 
   return (
     <div
-      className="flex flex-col items-center gap-4 touch-pan-y cursor-grab active:cursor-grabbing"
-      style={{ overscrollBehaviorX: "contain" }}
+      ref={containerRef}
+      className="flex flex-col items-center gap-4 cursor-grab active:cursor-grabbing"
+      style={{ overscrollBehaviorX: "contain", touchAction: "pan-y" }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
