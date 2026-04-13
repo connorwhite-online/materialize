@@ -6,19 +6,30 @@ import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { ChevronRight } from "@/components/icons/chevron-right";
-import { UploadDialog } from "@/components/upload/upload-dialog";
+import { FileUploader } from "@/components/upload/file-uploader";
+import { FileMetadataForm } from "@/components/upload/file-metadata-form";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
-type Mode = "idle" | "searching";
+type Mode = "idle" | "searching" | "uploading";
+type PickedFile = {
+  file: File;
+  format: "stl" | "obj" | "3mf" | "step" | "amf";
+};
 
 export function HomeBottomBar() {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("idle");
   const [query, setQuery] = useState("");
+  const [picked, setPicked] = useState<PickedFile | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  const isExpanded = mode === "searching";
+  const isExpanded = mode === "searching" || mode === "uploading";
 
   // Close on outside click
   useEffect(() => {
@@ -29,8 +40,11 @@ export function HomeBottomBar() {
         containerRef.current &&
         !containerRef.current.contains(e.target as Node)
       ) {
-        setMode("idle");
-        setQuery("");
+        if (mode === "uploading") setMode("idle");
+        else {
+          setMode("idle");
+          setQuery("");
+        }
       }
     };
 
@@ -42,10 +56,11 @@ export function HomeBottomBar() {
       clearTimeout(id);
       document.removeEventListener("pointerdown", handleClick);
     };
-  }, [isExpanded]);
+  }, [isExpanded, mode]);
 
   const handleSearchFocus = () => {
-    if (mode === "idle") setMode("searching");
+    if (mode === "uploading") setMode("searching");
+    else if (mode === "idle") setMode("searching");
   };
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -60,6 +75,26 @@ export function HomeBottomBar() {
     }
   };
 
+  const handleUploadClick = () => {
+    if (mode === "uploading") {
+      setMode("idle");
+    } else {
+      setMode("uploading");
+      setQuery("");
+    }
+  };
+
+  const handleFilePicked = (
+    file: File,
+    format: "stl" | "obj" | "3mf" | "step" | "amf"
+  ) => {
+    setPicked({ file, format });
+  };
+
+  const handleMetadataClose = () => {
+    setPicked(null);
+    setMode("idle");
+  };
 
   return (
     <div className="fixed inset-x-0 bottom-4 z-40 flex flex-col items-center px-4 pointer-events-none">
@@ -90,12 +125,27 @@ export function HomeBottomBar() {
         layout
         transition={{ type: "spring", stiffness: 400, damping: 34 }}
         className={cn(
-          "pointer-events-auto w-full max-w-2xl rounded-2xl border border-border/60 shadow-[0_8px_32px_rgba(0,0,0,0.08)]",
-          "bg-background-translucent backdrop-blur-xl",
+          "depth-sunken pointer-events-auto w-full max-w-2xl rounded-3xl border border-input",
+          "bg-muted/70 backdrop-blur-xl dark:bg-input/40",
           "p-1"
         )}
       >
         <AnimatePresence initial={false}>
+          {mode === "uploading" && (
+            <motion.div
+              key="dropbox"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.25, ease: [0.2, 0.8, 0.2, 1] }}
+              className="overflow-hidden"
+            >
+              <div className="px-2 pt-2 pb-1">
+                <FileUploader onFileSelected={handleFilePicked} />
+              </div>
+            </motion.div>
+          )}
+
           {mode === "searching" && query.length > 0 && (
             <motion.div
               key="suggestions"
@@ -114,10 +164,10 @@ export function HomeBottomBar() {
           )}
         </AnimatePresence>
 
-        {/* Main row — always visible */}
+        {/* Main row — always visible. h-10 + outer p-1 = 48px collapsed total. */}
         <form
           onSubmit={handleSearchSubmit}
-          className="flex items-center gap-1 py-1 pl-1 pr-3"
+          className="flex h-10 items-center gap-1 px-1"
         >
           <input
             ref={searchInputRef}
@@ -126,17 +176,35 @@ export function HomeBottomBar() {
             onChange={handleSearchChange}
             onFocus={handleSearchFocus}
             placeholder="Search files, materials, creators..."
-            className="flex-1 bg-transparent px-3 py-2 text-base md:text-sm placeholder:text-muted-foreground/60 focus:outline-none"
+            className="flex-1 bg-transparent px-3 py-1 text-base md:text-sm placeholder:text-muted-foreground/60 focus:outline-none"
           />
-          <UploadDialog
-            trigger={
-              <Button type="button" size="sm">
-                Upload
-              </Button>
-            }
-          />
+          <Button type="button" size="sm" onClick={handleUploadClick}>
+            {mode === "uploading" ? "Cancel" : "Upload"}
+          </Button>
         </form>
       </motion.div>
+
+      {/* Metadata form opens in a dialog after a file is picked. */}
+      <Dialog
+        open={picked !== null}
+        onOpenChange={(next) => {
+          if (!next) handleMetadataClose();
+        }}
+      >
+        <DialogContent
+          className="max-h-[90vh] w-full max-w-2xl overflow-y-auto sm:max-w-2xl"
+          showCloseButton
+        >
+          <DialogTitle>New file</DialogTitle>
+          {picked && (
+            <FileMetadataForm
+              file={picked.file}
+              format={picked.format}
+              onCancel={handleMetadataClose}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
