@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { ChevronRight } from "@/components/icons/chevron-right";
 import { FileUploader } from "@/components/upload/file-uploader";
 import { FileMetadataForm } from "@/components/upload/file-metadata-form";
+import { SearchResultsPanel } from "./search-results-panel";
+import type { SearchResponse } from "@/app/api/search/route";
 import {
   Dialog,
   DialogContent,
@@ -26,10 +28,51 @@ export function HomeBottomBar() {
   const [mode, setMode] = useState<Mode>("idle");
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<PickedFile | null>(null);
+  const [searchResults, setSearchResults] = useState<SearchResponse | null>(
+    null
+  );
+  const [searchLoading, setSearchLoading] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const isExpanded = mode === "searching" || mode === "uploading";
+
+  // Debounced search fetch. Clears results when the query empties
+  // so the panel collapses back to the upload-or-idle layout.
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setSearchResults(null);
+      setSearchLoading(false);
+      return;
+    }
+
+    setSearchLoading(true);
+    const controller = new AbortController();
+    const id = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `/api/search?q=${encodeURIComponent(trimmed)}`,
+          { signal: controller.signal }
+        );
+        if (!res.ok) throw new Error(`search failed ${res.status}`);
+        const data = (await res.json()) as SearchResponse;
+        setSearchResults(data);
+      } catch (err) {
+        if ((err as Error).name !== "AbortError") {
+          console.warn("[search] fetch failed", err);
+          setSearchResults({ files: [], users: [], materials: [] });
+        }
+      } finally {
+        setSearchLoading(false);
+      }
+    }, 180);
+
+    return () => {
+      clearTimeout(id);
+      controller.abort();
+    };
+  }, [query]);
 
   // Close on outside click
   useEffect(() => {
@@ -146,20 +189,24 @@ export function HomeBottomBar() {
             </motion.div>
           )}
 
-          {mode === "searching" && query.length > 0 && (
+          {mode === "searching" && query.trim().length > 0 && (
             <motion.div
-              key="suggestions"
+              key="search-results"
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
               exit={{ opacity: 0, height: 0 }}
               transition={{ duration: 0.25, ease: [0.2, 0.8, 0.2, 1] }}
               className="overflow-hidden"
             >
-              <div className="px-3 pt-2 pb-2">
-                <p className="text-xs text-muted-foreground">
-                  Press enter to search for &ldquo;{query}&rdquo;
-                </p>
-              </div>
+              <SearchResultsPanel
+                results={searchResults}
+                loading={searchLoading}
+                query={query}
+                onNavigate={() => {
+                  setMode("idle");
+                  setQuery("");
+                }}
+              />
             </motion.div>
           )}
         </AnimatePresence>
