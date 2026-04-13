@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
+import { UserAvatar } from "@/components/auth/user-avatar";
 import type {
   SearchHitFile,
   SearchHitMaterial,
@@ -161,9 +162,6 @@ function MaterialCard({
         <p className="truncate text-xs font-medium group-hover:text-primary">
           {hit.name}
         </p>
-        <p className="truncate text-[10px] text-muted-foreground">
-          {hit.groupName}
-        </p>
       </div>
     </Link>
   );
@@ -182,17 +180,12 @@ function UserCard({
       onClick={onNavigate}
       className="group flex w-28 shrink-0 flex-col items-center gap-1.5"
     >
-      <div className="h-16 w-16 overflow-hidden rounded-full border border-border bg-muted/60">
-        {hit.avatarUrl && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={hit.avatarUrl}
-            alt=""
-            loading="lazy"
-            className="h-full w-full object-cover transition-transform group-hover:scale-105"
-          />
-        )}
-      </div>
+      <UserAvatar
+        seed={hit.username}
+        imageUrl={hit.avatarUrl}
+        displayName={hit.displayName}
+        className="h-16 w-16"
+      />
       <div className="min-w-0 px-0.5 text-center">
         <p className="truncate text-xs font-medium group-hover:text-primary">
           {hit.displayName || hit.username}

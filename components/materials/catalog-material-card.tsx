@@ -25,7 +25,7 @@ export function CatalogMaterialCard({
   return (
     <Link href={`/materials/${material.slug}`}>
       <Card className="group gap-0 p-1 overflow-hidden transition-colors hover:border-primary/30">
-        <div className="relative aspect-[4/3] w-full overflow-hidden rounded-lg bg-gradient-to-br from-muted/40 to-muted/10">
+        <div className="relative aspect-[4/3] w-full overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted/40 to-muted/10">
           {material.featuredImage && (
             // eslint-disable-next-line @next/next/no-img-element
             <img

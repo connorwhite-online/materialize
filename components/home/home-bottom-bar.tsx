@@ -198,15 +198,23 @@ export function HomeBottomBar() {
               transition={{ duration: 0.25, ease: [0.2, 0.8, 0.2, 1] }}
               className="overflow-hidden"
             >
-              <SearchResultsPanel
-                results={searchResults}
-                loading={searchLoading}
-                query={query}
-                onNavigate={() => {
-                  setMode("idle");
-                  setQuery("");
-                }}
-              />
+              {/* Inner scroll container — caps the panel at roughly
+                  the available space above the bottom bar so it
+                  never bleeds off the top of the viewport. On tall
+                  screens content fits naturally; on phones the
+                  inner div scrolls vertically. 100dvh follows the
+                  iOS viewport as the URL bar hides/shows. */}
+              <div className="max-h-[calc(100dvh-140px)] overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <SearchResultsPanel
+                  results={searchResults}
+                  loading={searchLoading}
+                  query={query}
+                  onNavigate={() => {
+                    setMode("idle");
+                    setQuery("");
+                  }}
+                />
+              </div>
             </motion.div>
           )}
         </AnimatePresence>

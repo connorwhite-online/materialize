@@ -70,7 +70,7 @@ export default async function BrowsePage(props: {
           {publishedFiles.map((file) => (
             <Link key={file.id} href={`/files/${file.slug}`}>
               <Card className="group gap-0 p-1 overflow-hidden transition-colors hover:border-primary/30">
-                <div className="aspect-square overflow-hidden rounded-lg bg-gradient-to-br from-muted to-muted/50">
+                <div className="aspect-square overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted to-muted/50">
                   {file.thumbnailUrl && (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img

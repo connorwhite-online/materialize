@@ -159,7 +159,7 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
       <Card className="group gap-0 p-1 overflow-hidden transition-colors hover:border-primary/30">
         <div
           ref={containerRef}
-          className="relative aspect-square w-full overflow-hidden rounded-lg bg-gradient-to-br from-muted/60 to-muted/30"
+          className="relative aspect-square w-full overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted/60 to-muted/30"
         >
           {thumbnailUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
