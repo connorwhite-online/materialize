@@ -2,85 +2,79 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 
 /**
- * Mirrors app/(app)/materials/[slug]/page.tsx — max-w-4xl,
- * two-column hero (swatch square + metadata column), then a
- * two-card grid (Properties + Print Constraints), then a
- * "back to all materials" link.
+ * Mirrors app/(app)/materials/[slug]/page.tsx — hero with square
+ * image + badges/title/description/CTA, then two property cards,
+ * then an available-finishes grid, then a back link.
  */
 export default function MaterialDetailLoading() {
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8">
+    <div className="mx-auto max-w-5xl px-4 py-8">
       {/* Hero */}
       <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
-        {/* Swatch */}
         <Skeleton className="aspect-square w-full rounded-xl" />
 
-        {/* Metadata column */}
         <div>
-          <div className="mb-2 flex items-center gap-2">
+          <div className="mb-2 flex flex-wrap items-center gap-1.5">
             <Skeleton className="h-5 w-16 rounded-full" />
-            <Skeleton className="h-5 w-14 rounded-full" />
-            <Skeleton className="h-5 w-16 rounded-full" />
+            <Skeleton className="h-4 w-14 rounded-md" />
+            <Skeleton className="h-4 w-20 rounded-md" />
+            <Skeleton className="h-4 w-16 rounded-md" />
           </div>
           <Skeleton className="h-9 w-3/4" />
           <div className="mt-3 space-y-2">
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-5/6" />
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="h-3 w-5/6" />
+            <Skeleton className="h-3 w-4/5" />
           </div>
-          <Skeleton className="mt-6 h-10 w-48 rounded-lg" />
+          <Skeleton className="mt-6 h-10 w-52 rounded-full" />
         </div>
       </div>
 
-      {/* Properties + Constraints cards */}
+      {/* Property cards */}
       <div className="mt-12 grid grid-cols-1 gap-6 md:grid-cols-2">
-        {/* Properties */}
-        <Card>
-          <CardHeader>
-            <Skeleton className="h-5 w-24" />
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i}>
-                <div className="mb-1 flex justify-between">
+        {Array.from({ length: 2 }).map((_, i) => (
+          <Card key={i}>
+            <CardHeader>
+              <Skeleton className="h-4 w-32" />
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              {Array.from({ length: 5 }).map((_, j) => (
+                <div
+                  key={j}
+                  className="flex items-baseline justify-between gap-4"
+                >
+                  <Skeleton className="h-3 w-28" />
                   <Skeleton className="h-3 w-20" />
-                  <Skeleton className="h-3 w-8" />
                 </div>
-                <div className="flex gap-1">
-                  {Array.from({ length: 5 }).map((_, j) => (
-                    <Skeleton key={j} className="h-2 flex-1 rounded-full" />
-                  ))}
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-
-        {/* Constraints */}
-        <Card>
-          <CardHeader>
-            <Skeleton className="h-5 w-32" />
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <Skeleton className="mb-1 h-3 w-32" />
-              <Skeleton className="h-4 w-40" />
-            </div>
-            <div className="h-px w-full bg-border" />
-            <div>
-              <Skeleton className="mb-1 h-3 w-36" />
-              <Skeleton className="h-4 w-24" />
-            </div>
-            <div className="h-px w-full bg-border" />
-            <div>
-              <Skeleton className="mb-1 h-3 w-32" />
-              <Skeleton className="h-4 w-24" />
-            </div>
-          </CardContent>
-        </Card>
+              ))}
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
-      <div className="mt-8">
+      {/* Available finishes */}
+      <div className="mt-12">
+        <Skeleton className="h-5 w-40" />
+        <Skeleton className="mt-1 h-3 w-80 max-w-full" />
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Card key={i} className="gap-0 py-0 overflow-hidden">
+              <Skeleton className="aspect-[4/3] w-full rounded-none" />
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <Skeleton className="h-3.5 w-24" />
+                  <Skeleton className="h-3 w-12" />
+                </div>
+                <Skeleton className="mt-2 h-2.5 w-full" />
+                <Skeleton className="mt-1 h-2.5 w-3/4" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-10">
         <Skeleton className="h-8 w-32 rounded-lg" />
       </div>
     </div>
