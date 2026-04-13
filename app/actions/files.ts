@@ -128,14 +128,10 @@ export async function createFileListing(formData: FormData) {
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "")}-${nanoid(6)}`;
 
-    // The form captures everything we need; the file is "done" the moment
-    // it's created. There's no draft state to babysit.
-    // - sell off (price 0 + free license) → published + private (only the
-    //   owner sees it in their library)
-    // - sell on → published + public (appears in browse/search)
-    const willBeListed =
-      parsed.data.price > 0 || parsed.data.license !== "free";
-    const visibility: "public" | "private" = willBeListed ? "public" : "private";
+    // New files default to public so they land in browse / search. The
+    // owner can flip to private any time via the file settings dialog.
+    const visibility: "public" | "private" =
+      parsed.data.visibility ?? "public";
 
     const [file] = await db
       .insert(files)
@@ -225,12 +221,19 @@ export async function updateFileListing(fileId: string, formData: FormData) {
 
     if (!file) throw new Error("Not found");
 
+    const designTagValues = formData.getAll("designTags") as string[];
+
     const parsed = createListingSchema.safeParse({
       name: formData.get("name"),
-      description: formData.get("description"),
+      description: formData.get("description") || undefined,
       price: formData.get("price"),
       license: formData.get("license"),
-      tags: formData.get("tags"),
+      visibility: formData.get("visibility") || undefined,
+      tags: formData.get("tags") || undefined,
+      recommendedMaterialId:
+        formData.get("recommendedMaterialId") || undefined,
+      designTags: designTagValues.length > 0 ? designTagValues : undefined,
+      minWallThickness: formData.get("minWallThickness") || undefined,
     });
 
     if (!parsed.success) {
@@ -244,12 +247,18 @@ export async function updateFileListing(fileId: string, formData: FormData) {
         description: parsed.data.description,
         price: parsed.data.price,
         license: parsed.data.license,
+        visibility: parsed.data.visibility ?? file.visibility,
         tags: parsed.data.tags,
+        recommendedMaterialId: parsed.data.recommendedMaterialId,
+        designTags: parsed.data.designTags,
+        minWallThickness: parsed.data.minWallThickness,
       })
       .where(eq(files.id, fileId));
 
     revalidatePath("/dashboard/uploads");
+    revalidatePath("/files");
     revalidatePath(`/files/${file.slug}`);
+    return { success: true };
   } catch (error) {
     logError("updateFileListing", error);
     return { error: { name: ["Failed to update listing. Please try again."] } };

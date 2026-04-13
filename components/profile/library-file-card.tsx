@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ThumbnailCapture } from "@/components/viewer/thumbnail-capture";
@@ -43,6 +43,8 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
   const [thumbnailUrl, setThumbnailUrl] = useState(item.thumbnailUrl);
   const [captureModelUrl, setCaptureModelUrl] = useState<string | null>(null);
   const [capturing, setCapturing] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const autoCaptureStarted = useRef(false);
 
   const previewable =
     isOwner &&
@@ -51,42 +53,94 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
     !!item.primaryFormat &&
     PREVIEWABLE_FORMATS.has(item.primaryFormat);
 
-  const startCapture = useCallback(
-    async (e: React.MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (capturing || !item.primaryAssetId) return;
-      setCapturing(true);
-      try {
-        const res = await fetch("/api/craftcloud/download-url", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fileAssetId: item.primaryAssetId }),
-        });
-        if (!res.ok) throw new Error("download url failed");
-        const data = await res.json();
-        setCaptureModelUrl(data.downloadUrl);
-      } catch {
-        setCapturing(false);
+  const kickOffCapture = useCallback(async () => {
+    if (capturing || !item.primaryAssetId) return;
+    setCapturing(true);
+    try {
+      const res = await fetch("/api/craftcloud/download-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileAssetId: item.primaryAssetId }),
+      });
+      if (!res.ok) {
+        console.warn(
+          `[thumbnail] download-url failed for asset ${item.primaryAssetId}`,
+          res.status
+        );
+        throw new Error("download url failed");
       }
-    },
-    [capturing, item.primaryAssetId]
-  );
+      const data = await res.json();
+      console.log(
+        `[thumbnail] capture starting for "${item.name}"`,
+        data.downloadUrl
+      );
+      setCaptureModelUrl(data.downloadUrl);
+    } catch (err) {
+      console.error(`[thumbnail] kickOffCapture failed`, err);
+      setCapturing(false);
+    }
+  }, [capturing, item.primaryAssetId, item.name]);
+
+  // Safety net — if the offscreen capture hasn't produced a thumbnail
+  // after 20s (loader error, CORS block, infinite suspense, etc.), let
+  // go of the captureModelUrl so at least the spinner goes away.
+  useEffect(() => {
+    if (!captureModelUrl) return;
+    const id = setTimeout(() => {
+      console.warn(
+        `[thumbnail] capture timed out for "${item.name}" — giving up`
+      );
+      setCaptureModelUrl(null);
+      setCapturing(false);
+    }, 20000);
+    return () => clearTimeout(id);
+  }, [captureModelUrl, item.name]);
+
+  // Auto-generate the thumbnail when the card first scrolls into view
+  // for the owner. The capture runs offscreen and swaps to an <img>
+  // automatically when done — no click needed.
+  useEffect(() => {
+    if (!previewable || thumbnailUrl || autoCaptureStarted.current) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            autoCaptureStarted.current = true;
+            io.disconnect();
+            kickOffCapture();
+            return;
+          }
+        }
+      },
+      { rootMargin: "200px" }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [previewable, thumbnailUrl, kickOffCapture]);
 
   const onCaptured = useCallback(
     async (fileId: string, dataUrl: string) => {
       try {
+        console.log(
+          `[thumbnail] posting to /api/thumbnails for ${fileId}, body=${dataUrl.length} chars`
+        );
         const res = await fetch("/api/thumbnails", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ fileId, dataUrl }),
         });
-        if (res.ok) {
-          const { thumbnailUrl: newUrl } = await res.json();
-          setThumbnailUrl(newUrl);
+        if (!res.ok) {
+          const body = await res.text();
+          console.warn(`[thumbnail] POST failed ${res.status}: ${body}`);
+          return;
         }
-      } catch {
-        // nice-to-have
+        const { thumbnailUrl: newUrl } = await res.json();
+        console.log(`[thumbnail] stored thumbnail at ${newUrl}`);
+        setThumbnailUrl(newUrl);
+      } catch (err) {
+        console.error(`[thumbnail] onCaptured failed`, err);
       } finally {
         setCaptureModelUrl(null);
         setCapturing(false);
@@ -103,30 +157,22 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
   return (
     <Link href={`/files/${item.slug}`}>
       <Card className="group overflow-hidden transition-colors hover:border-primary/30">
-        <div className="relative aspect-square w-full bg-gradient-to-br from-muted/60 to-muted/30">
+        <div
+          ref={containerRef}
+          className="relative aspect-square w-full bg-gradient-to-br from-muted/60 to-muted/30"
+        >
           {thumbnailUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
             <img
               src={thumbnailUrl}
               alt=""
               loading="lazy"
               className="h-full w-full object-cover"
             />
-          ) : previewable ? (
-            <button
-              type="button"
-              onClick={startCapture}
-              disabled={capturing}
-              className="flex h-full w-full items-center justify-center text-[10px] text-muted-foreground/60 transition-colors hover:text-muted-foreground"
-            >
-              {capturing ? (
-                <span className="flex flex-col items-center gap-1">
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-muted-foreground" />
-                  Generating…
-                </span>
-              ) : (
-                "Generate preview"
-              )}
-            </button>
+          ) : capturing ? (
+            <div className="flex h-full w-full items-center justify-center">
+              <span className="h-5 w-5 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-muted-foreground/70" />
+            </div>
           ) : null}
         </div>
         <CardContent className="p-3">

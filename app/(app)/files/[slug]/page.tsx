@@ -11,6 +11,8 @@ import { Separator } from "@/components/ui/separator";
 import { PhotoGallery } from "@/components/photos/photo-gallery";
 import { PhotoUploader } from "@/components/photos/photo-uploader";
 import { DeleteFileButton } from "@/components/files/delete-file-button";
+import { EditFileButton } from "@/components/files/edit-file-button";
+import { FileThumbnailGenerator } from "@/components/files/file-thumbnail-generator";
 import { OrderModelPreview } from "@/components/print/order-model-preview";
 import { getMaterialById } from "@/lib/materials";
 import { generateDownloadUrl } from "@/lib/storage";
@@ -51,6 +53,8 @@ export default async function FileDetailPage(props: {
       designTags: files.designTags,
       recommendedMaterialId: files.recommendedMaterialId,
       minWallThickness: files.minWallThickness,
+      visibility: files.visibility,
+      thumbnailUrl: files.thumbnailUrl,
       downloadCount: files.downloadCount,
       viewCount: files.viewCount,
       createdAt: files.createdAt,
@@ -140,8 +144,21 @@ export default async function FileDetailPage(props: {
       ? rawDims
       : null;
 
+  const needsThumbnail =
+    isOwner &&
+    !file.thumbnailUrl &&
+    !!primaryAsset &&
+    previewable;
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
+      {needsThumbnail && primaryAsset && (
+        <FileThumbnailGenerator
+          fileId={file.id}
+          fileAssetId={primaryAsset.id}
+          format={primaryAsset.format}
+        />
+      )}
       <div className="grid gap-8 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-6">
           {/* Title + filename · size */}
@@ -333,13 +350,30 @@ export default async function FileDetailPage(props: {
               {isOwner && (
                 <>
                   <Separator className="my-4" />
-                  <DeleteFileButton
-                    fileId={file.id}
-                    fileName={file.name}
-                    hasBuyers={ownerBuyerCount > 0}
-                    buyerCount={ownerBuyerCount}
-                    redirectTo={`/u/${file.username}`}
-                  />
+                  <div className="space-y-2">
+                    <EditFileButton
+                      fileId={file.id}
+                      initial={{
+                        name: file.name,
+                        description: file.description,
+                        tags: file.tags,
+                        price: file.price,
+                        license: file.license,
+                        visibility: file.visibility ?? "public",
+                        recommendedMaterialId: file.recommendedMaterialId,
+                        designTags: file.designTags,
+                        minWallThickness: file.minWallThickness,
+                      }}
+                      hasBuyers={ownerBuyerCount > 0}
+                    />
+                    <DeleteFileButton
+                      fileId={file.id}
+                      fileName={file.name}
+                      hasBuyers={ownerBuyerCount > 0}
+                      buyerCount={ownerBuyerCount}
+                      redirectTo={`/u/${file.username}`}
+                    />
+                  </div>
                 </>
               )}
             </CardContent>

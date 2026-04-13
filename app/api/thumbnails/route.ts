@@ -1,10 +1,19 @@
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-import { files, fileAssets } from "@/lib/db/schema";
+import { files } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
-import { generateUploadUrl, generateDownloadUrl } from "@/lib/storage";
+import { generateUploadUrl } from "@/lib/storage";
 import { logError } from "@/lib/logger";
 
+/**
+ * Uploads a captured thumbnail to R2 and stores a stable relative
+ * URL (`/api/thumbnails/{fileId}`) in the files row.
+ *
+ * The GET handler in `app/api/thumbnails/[fileId]/route.ts` redirects
+ * each request to a freshly signed short-lived R2 URL, which works
+ * around S3 presigned URLs' 7-day maximum expiration. `<img>` tags
+ * follow the redirect transparently.
+ */
 export async function POST(request: Request) {
   try {
     const { userId } = await auth();
@@ -38,18 +47,22 @@ export async function POST(request: Request) {
     }
     const buffer = Buffer.from(base64, "base64");
 
-    // Upload thumbnail to R2
+    // Upload thumbnail to R2.
     const storageKey = `thumbnails/${fileId}.webp`;
     const uploadUrl = await generateUploadUrl(storageKey, "image/webp", 300);
 
-    await fetch(uploadUrl, {
+    const putRes = await fetch(uploadUrl, {
       method: "PUT",
       body: buffer,
       headers: { "Content-Type": "image/webp" },
     });
+    if (!putRes.ok) {
+      const body = await putRes.text().catch(() => "");
+      throw new Error(`R2 PUT failed ${putRes.status}: ${body}`);
+    }
 
-    // Get a long-lived public URL and store it
-    const thumbnailUrl = await generateDownloadUrl(storageKey, 60 * 60 * 24 * 365);
+    // Store the stable redirect URL, not a pre-signed download URL.
+    const thumbnailUrl = `/api/thumbnails/${fileId}`;
 
     await db
       .update(files)

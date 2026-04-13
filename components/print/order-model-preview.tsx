@@ -77,6 +77,8 @@ export function OrderModelPreview({
       format={format}
       materialColor={materialColor}
       className="h-full w-full"
+      enableWheelZoom={false}
+      showZoomControls
     />
   );
 }

@@ -44,6 +44,7 @@ export const createListingSchema = z.object({
     .min(0, "Price must be 0 or more")
     .transform((val) => Math.round(val * 100)), // dollars to cents
   license: z.enum(["free", "personal", "commercial"]),
+  visibility: z.enum(["public", "private"]).optional(),
   tags: z
     .string()
     .optional()
