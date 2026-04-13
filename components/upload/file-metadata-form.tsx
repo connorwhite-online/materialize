@@ -84,6 +84,7 @@ export function FileMetadataForm({
   const [license, setLicense] = useState("free");
   const [sellEnabled, setSellEnabled] = useState(false);
   const [printRecOpen, setPrintRecOpen] = useState(false);
+  const [fileUnit, setFileUnit] = useState<"mm" | "cm" | "in">("mm");
   const [dimensions, setDimensions] = useState<
     [number, number, number] | null
   >(null);
@@ -198,6 +199,7 @@ export function FileMetadataForm({
             originalFilename: file.name,
             format: serverFormat,
             fileSize: file.size,
+            fileUnit,
           },
         ])
       );
@@ -255,10 +257,31 @@ export function FileMetadataForm({
             <div className="truncate font-medium">{file.name}</div>
             <div className="mt-0.5 text-xs text-muted-foreground">
               {dimensions
-                ? `${formatDim(dimensions[0])} × ${formatDim(dimensions[1])} × ${formatDim(dimensions[2])} mm`
+                ? `${formatDim(dimensions[0])} × ${formatDim(dimensions[1])} × ${formatDim(dimensions[2])} ${fileUnit}`
                 : "Measuring..."}
             </div>
           </div>
+          <Select
+            value={fileUnit}
+            onValueChange={(v) =>
+              setFileUnit((v as "mm" | "cm" | "in") ?? "mm")
+            }
+          >
+            <SelectTrigger size="sm" className="shrink-0">
+              <SelectValue>
+                {(value) => {
+                  if (value === "cm") return "cm";
+                  if (value === "in") return "inches";
+                  return "mm";
+                }}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="mm">Millimeters</SelectItem>
+              <SelectItem value="cm">Centimeters</SelectItem>
+              <SelectItem value="in">Inches</SelectItem>
+            </SelectContent>
+          </Select>
           <span className="shrink-0 text-xs text-muted-foreground">
             {(file.size / 1024 / 1024).toFixed(1)} MB
           </span>

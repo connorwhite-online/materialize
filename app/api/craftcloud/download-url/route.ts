@@ -40,6 +40,7 @@ export async function POST(request: Request) {
       .select({
         storageKey: fileAssets.storageKey,
         filename: fileAssets.originalFilename,
+        fileUnit: fileAssets.fileUnit,
         fileUserId: files.userId,
         fileStatus: files.status,
       })
@@ -62,6 +63,7 @@ export async function POST(request: Request) {
     return Response.json({
       downloadUrl,
       filename: assetRow.filename,
+      fileUnit: assetRow.fileUnit,
     });
   } catch (error) {
     logError("api/craftcloud/download-url", error);

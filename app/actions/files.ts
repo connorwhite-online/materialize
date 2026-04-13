@@ -23,6 +23,7 @@ type IncomingAsset = {
   originalFilename: string;
   format: "stl" | "obj" | "3mf" | "step" | "amf";
   fileSize: number;
+  fileUnit?: "mm" | "cm" | "in";
 };
 
 async function computeContentHash(storageKey: string): Promise<string | null> {
@@ -158,6 +159,7 @@ export async function createFileListing(formData: FormData) {
         storageKey: asset.storageKey,
         originalFilename: asset.originalFilename,
         format: asset.format,
+        fileUnit: asset.fileUnit ?? "mm",
         fileSize: asset.fileSize,
         contentHash: hashes[i],
       }))

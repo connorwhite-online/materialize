@@ -32,6 +32,8 @@ export const fileFormatEnum = pgEnum("file_format", [
   "amf",
 ]);
 
+export const fileUnitEnum = pgEnum("file_unit", ["mm", "cm", "in"]);
+
 export const purchaseStatusEnum = pgEnum("purchase_status", [
   "pending",
   "completed",
@@ -115,6 +117,7 @@ export const fileAssets = pgTable("file_assets", {
   storageKey: text("storage_key").notNull(),
   originalFilename: text("original_filename").notNull(),
   format: fileFormatEnum("format").notNull(),
+  fileUnit: fileUnitEnum("file_unit").notNull().default("mm"),
   fileSize: bigint("file_size", { mode: "number" }).notNull(),
   geometryData: jsonb("geometry_data").$type<{
     dimensions?: { x: number; y: number; z: number };
