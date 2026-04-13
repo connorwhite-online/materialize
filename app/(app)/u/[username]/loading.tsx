@@ -68,11 +68,11 @@ export default function ProfileLoading() {
           </div>
           <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {Array.from({ length: 6 }).map((_, i) => (
-              <Card key={i} className="overflow-hidden">
-                <Skeleton className="aspect-square w-full rounded-none" />
-                <CardContent className="p-3">
-                  <Skeleton className="h-4 w-3/4" />
-                  <Skeleton className="mt-1 h-3 w-1/2" />
+              <Card key={i} className="gap-0 p-1 overflow-hidden">
+                <Skeleton className="aspect-square w-full rounded-lg" />
+                <CardContent className="px-2 py-2">
+                  <Skeleton className="h-3.5 w-3/4" />
+                  <Skeleton className="mt-1 h-2.5 w-1/2" />
                 </CardContent>
               </Card>
             ))}
@@ -83,11 +83,11 @@ export default function ProfileLoading() {
         <div className="rounded-2xl bg-muted/50 p-5">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {Array.from({ length: 6 }).map((_, i) => (
-              <Card key={i} className="overflow-hidden">
-                <Skeleton className="aspect-square w-full rounded-none" />
-                <CardContent className="p-3">
-                  <Skeleton className="h-4 w-3/4" />
-                  <Skeleton className="mt-1 h-3 w-1/2" />
+              <Card key={i} className="gap-0 p-1 overflow-hidden">
+                <Skeleton className="aspect-square w-full rounded-lg" />
+                <CardContent className="px-2 py-2">
+                  <Skeleton className="h-3.5 w-3/4" />
+                  <Skeleton className="mt-1 h-2.5 w-1/2" />
                 </CardContent>
               </Card>
             ))}

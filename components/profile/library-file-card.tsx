@@ -156,10 +156,10 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
 
   return (
     <Link href={`/files/${item.slug}`}>
-      <Card className="group overflow-hidden transition-colors hover:border-primary/30">
+      <Card className="group gap-0 p-1 overflow-hidden transition-colors hover:border-primary/30">
         <div
           ref={containerRef}
-          className="relative aspect-square w-full bg-gradient-to-br from-muted/60 to-muted/30"
+          className="relative aspect-square w-full overflow-hidden rounded-lg bg-gradient-to-br from-muted/60 to-muted/30"
         >
           {thumbnailUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -175,7 +175,7 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
             </div>
           ) : null}
         </div>
-        <CardContent className="p-3">
+        <CardContent className="px-2 py-2">
           <h3 className="truncate text-sm font-medium transition-colors group-hover:text-primary">
             {item.name}
           </h3>

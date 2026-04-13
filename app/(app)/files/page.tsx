@@ -69,8 +69,8 @@ export default async function BrowsePage(props: {
         <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {publishedFiles.map((file) => (
             <Link key={file.id} href={`/files/${file.slug}`}>
-              <Card className="gap-0 py-0 overflow-hidden group transition-colors hover:border-primary/30">
-                <div className="aspect-square bg-gradient-to-br from-muted to-muted/50">
+              <Card className="group gap-0 p-1 overflow-hidden transition-colors hover:border-primary/30">
+                <div className="aspect-square overflow-hidden rounded-lg bg-gradient-to-br from-muted to-muted/50">
                   {file.thumbnailUrl && (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
@@ -81,7 +81,7 @@ export default async function BrowsePage(props: {
                     />
                   )}
                 </div>
-                <CardContent className="p-4">
+                <CardContent className="p-3">
                   <h3 className="font-medium text-sm group-hover:text-primary transition-colors">
                     {file.name}
                   </h3>

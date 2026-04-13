@@ -19,13 +19,13 @@ export default function FilesLoading() {
 
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {Array.from({ length: 8 }).map((_, i) => (
-          <Card key={i} className="overflow-hidden">
-            <Skeleton className="aspect-square w-full rounded-none" />
-            <CardContent className="p-4">
-              <Skeleton className="h-4 w-3/4" />
-              <Skeleton className="mt-1.5 h-3 w-1/2" />
-              <div className="mt-3 flex items-center justify-between">
-                <Skeleton className="h-4 w-12" />
+          <Card key={i} className="gap-0 p-1 overflow-hidden">
+            <Skeleton className="aspect-square w-full rounded-lg" />
+            <CardContent className="p-3">
+              <Skeleton className="h-3.5 w-3/4" />
+              <Skeleton className="mt-1 h-2.5 w-1/2" />
+              <div className="mt-2 flex items-center justify-between">
+                <Skeleton className="h-3.5 w-12" />
                 <Skeleton className="h-3 w-16" />
               </div>
             </CardContent>
