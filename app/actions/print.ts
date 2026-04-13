@@ -12,7 +12,36 @@ import { checkoutAddressSchema } from "@/lib/validations/address";
 import { logError } from "@/lib/logger";
 import type { Currency } from "@/lib/craftcloud/types";
 
-const SERVICE_FEE_RATE = 0.08;
+const SERVICE_FEE_RATE = 0.03;
+
+export async function discardDraftOrder(
+  orderId: string
+): Promise<{ success: true } | { error: string }> {
+  try {
+    const { userId } = await auth();
+    if (!userId) return { error: "Unauthorized" };
+
+    const [order] = await db
+      .select({ id: printOrders.id, status: printOrders.status })
+      .from(printOrders)
+      .where(and(eq(printOrders.id, orderId), eq(printOrders.userId, userId)));
+
+    if (!order) return { error: "Order not found" };
+    // Only drafts can be discarded — anything past cart_created is a
+    // real order with a Stripe session / CraftCloud cart committed.
+    if (order.status !== "cart_created") {
+      return { error: "Cannot discard an order that has been placed" };
+    }
+
+    await db.delete(printOrders).where(eq(printOrders.id, orderId));
+
+    revalidatePath("/dashboard/orders");
+    return { success: true };
+  } catch (error) {
+    logError("discardDraftOrder", error);
+    return { error: "Failed to discard draft" };
+  }
+}
 
 export async function createPrintOrder(params: {
   fileAssetId: string;
@@ -41,19 +70,14 @@ export async function createPrintOrder(params: {
     );
     const serviceFee = Math.round(totalPrice * SERVICE_FEE_RATE);
 
-    // Create Craft Cloud cart
+    // Create Craft Cloud cart. The v5 API only wants { id: quoteId }
+    // in each entry — the quote already encodes vendor, material,
+    // model, and quantity by reference, so sending the full blob
+    // trips additionalProperties: false and 400s.
     const cart = await createCart({
       shippingIds: [data.shippingId],
       currency: data.currency,
-      quotes: [
-        {
-          quoteId: data.quoteId,
-          vendorId: data.vendorId,
-          modelId: "",
-          materialConfigId: data.materialConfigId,
-          quantity: data.quantity,
-        },
-      ],
+      quotes: [{ id: data.quoteId }],
     });
 
     // Create print order record
@@ -75,7 +99,11 @@ export async function createPrintOrder(params: {
     return { orderId: order.id, cartId: cart.cartId };
   } catch (error) {
     logError("createPrintOrder", error);
-    return { error: "Failed to create print order. Please try again." };
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to create print order. Please try again.";
+    return { error: message };
   }
 }
 

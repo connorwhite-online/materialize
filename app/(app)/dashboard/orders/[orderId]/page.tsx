@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { printOrders, fileAssets } from "@/lib/db/schema";
@@ -55,6 +55,17 @@ export default async function OrderDetailPage(props: {
     .where(and(eq(printOrders.id, orderId), eq(printOrders.userId, userId)));
 
   if (!order) notFound();
+
+  // `cart_created` = user picked a material but bailed before entering
+  // address / paying. Treat it as a draft cart and bounce them back
+  // into the quote configurator for the same file asset so they can
+  // pick up where they left off (material picker + configurator
+  // re-fetches fresh quotes). The draft row gets replaced on their
+  // next "Proceed to checkout" click.
+  if (order.status === "cart_created" && order.fileAssetId) {
+    const qs = order.material ? `?material=${order.material}` : "";
+    redirect(`/print/${order.fileAssetId}${qs}`);
+  }
 
   const materialMeta = order.material ? getMaterialById(order.material) : null;
   const shipmentOrigin = getShipmentOrigin(order.trackingInfo);

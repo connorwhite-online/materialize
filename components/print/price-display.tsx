@@ -6,7 +6,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 
-const SERVICE_FEE_RATE = 0.08;
+const SERVICE_FEE_RATE = 0.03;
 
 interface Quote {
   quoteId: string;
@@ -33,6 +33,7 @@ interface PriceDisplayProps {
   quantity: number;
   onCheckout: () => void;
   isCheckingOut: boolean;
+  checkoutError?: string | null;
 }
 
 export function PriceDisplay({
@@ -43,6 +44,7 @@ export function PriceDisplay({
   quantity,
   onCheckout,
   isCheckingOut,
+  checkoutError,
 }: PriceDisplayProps) {
   if (!selectedQuote) {
     return (
@@ -117,7 +119,7 @@ export function PriceDisplay({
         <Separator />
 
         <div className="flex justify-between text-sm">
-          <span className="text-muted-foreground">Service fee (8%)</span>
+          <span className="text-muted-foreground">Service fee (3%)</span>
           <span>${serviceFee.toFixed(2)}</span>
         </div>
 
@@ -127,6 +129,12 @@ export function PriceDisplay({
           <span>Total</span>
           <span>${total.toFixed(2)}</span>
         </div>
+
+        {checkoutError && (
+          <p className="mt-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+            {checkoutError}
+          </p>
+        )}
 
         <Button
           onClick={onCheckout}

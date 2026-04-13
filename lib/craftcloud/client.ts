@@ -17,6 +17,19 @@ import type {
 const BASE_URL = process.env.CRAFTCLOUD_API_BASE_URL || "https://api.craftcloud3d.com";
 const USE_MOCK = process.env.CRAFTCLOUD_USE_MOCK !== "false";
 
+/**
+ * Scoped flag for checkout. When true, only the bookable-side
+ * endpoints (`createCart`, `createOrder`, `createStripeCheckout`,
+ * `getOrderStatus`) short-circuit to the mock implementations.
+ * Quote fetching, model upload, and price polling all stay live,
+ * so prices and vendors you see in the configurator are real — but
+ * clicking "Proceed to checkout" will never actually place a real
+ * cart against CraftCloud. Falls back to `USE_MOCK` when the scoped
+ * flag isn't set, so the existing "everything mock" mode still works.
+ */
+const USE_MOCK_CHECKOUT =
+  USE_MOCK || process.env.CRAFTCLOUD_MOCK_CHECKOUT === "true";
+
 async function apiRequest<T>(
   method: string,
   path: string,
@@ -129,24 +142,24 @@ export async function getPrice(priceId: string): Promise<PriceResponse> {
 }
 
 export async function createCart(params: CartRequest): Promise<Cart> {
-  if (USE_MOCK) return getMockCart();
+  if (USE_MOCK_CHECKOUT) return getMockCart();
   return realCreateCart(params);
 }
 
 export async function createOrder(params: OrderRequest): Promise<Order> {
-  if (USE_MOCK) return getMockOrder();
+  if (USE_MOCK_CHECKOUT) return getMockOrder();
   return realCreateOrder(params);
 }
 
 export async function getOrderStatus(orderId: string): Promise<OrderStatusResponse> {
-  if (USE_MOCK) return getMockOrderStatus(orderId);
+  if (USE_MOCK_CHECKOUT) return getMockOrderStatus(orderId);
   return realGetOrderStatus(orderId);
 }
 
 export async function createStripeCheckout(
   params: StripeCheckoutRequest
 ): Promise<StripeCheckoutResponse> {
-  if (USE_MOCK) {
+  if (USE_MOCK_CHECKOUT) {
     return {
       sessionId: `mock-session-${Date.now()}`,
       sessionUrl: params.returnUrl,

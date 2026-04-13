@@ -83,7 +83,7 @@ export function getMockPriceResponse(priceId: string): PriceResponse {
 
   return {
     priceId,
-    status: "ready",
+    allComplete: true,
     quotes,
     shipping,
   };
@@ -92,8 +92,8 @@ export function getMockPriceResponse(priceId: string): PriceResponse {
 export function getMockCart(): Cart {
   return {
     cartId: `mock-cart-${Date.now()}`,
-    totalPrice: 29.99,
     currency: "USD",
+    countryCode: "US",
   };
 }
 

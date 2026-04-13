@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { printOrders } from "@/lib/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { printOrders, fileAssets, files } from "@/lib/db/schema";
+import { eq, desc, and, ne } from "drizzle-orm";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { getMaterialById } from "@/lib/materials";
 import { formatOrderNumber } from "@/lib/utils/order-number";
+import { DraftCartCard } from "./draft-cart-card";
 
 const STATUS_LABELS: Record<string, string> = {
   quoting: "Quoting",
@@ -36,13 +37,40 @@ const STATUS_VARIANT: Record<
 };
 
 export async function OrdersTab({ userId }: { userId: string }) {
+  // Drafts (`cart_created`) surface separately as a "Carts" section
+  // with Resume / Discard actions — they're not real orders yet.
+  const drafts = await db
+    .select({
+      id: printOrders.id,
+      material: printOrders.material,
+      totalPrice: printOrders.totalPrice,
+      serviceFee: printOrders.serviceFee,
+      fileAssetId: printOrders.fileAssetId,
+      fileName: files.name,
+    })
+    .from(printOrders)
+    .leftJoin(fileAssets, eq(printOrders.fileAssetId, fileAssets.id))
+    .leftJoin(files, eq(fileAssets.fileId, files.id))
+    .where(
+      and(
+        eq(printOrders.userId, userId),
+        eq(printOrders.status, "cart_created")
+      )
+    )
+    .orderBy(desc(printOrders.createdAt));
+
   const orders = await db
     .select()
     .from(printOrders)
-    .where(eq(printOrders.userId, userId))
+    .where(
+      and(
+        eq(printOrders.userId, userId),
+        ne(printOrders.status, "cart_created")
+      )
+    )
     .orderBy(desc(printOrders.createdAt));
 
-  if (orders.length === 0) {
+  if (orders.length === 0 && drafts.length === 0) {
     return (
       <div className="py-16 text-center">
         <p className="text-muted-foreground">No print orders yet.</p>
@@ -54,8 +82,45 @@ export async function OrdersTab({ userId }: { userId: string }) {
   }
 
   return (
-    <div className="space-y-3">
-      {orders.map((order) => {
+    <div className="space-y-6">
+      {drafts.length > 0 && (
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-medium">Carts</h3>
+            <p className="text-xs text-muted-foreground">
+              {drafts.length} in progress
+            </p>
+          </div>
+          <div className="space-y-2">
+            {drafts.map((draft) => {
+              const materialMeta = draft.material
+                ? getMaterialById(draft.material)
+                : null;
+              return (
+                <DraftCartCard
+                  key={draft.id}
+                  orderId={draft.id}
+                  fileAssetId={draft.fileAssetId}
+                  fileName={draft.fileName}
+                  materialId={draft.material}
+                  materialName={materialMeta?.name ?? null}
+                  materialMethod={materialMeta?.method ?? null}
+                  materialColor={materialMeta?.color ?? null}
+                  total={draft.totalPrice + draft.serviceFee}
+                />
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {orders.length > 0 && (
+        <section className="space-y-3">
+          {drafts.length > 0 && (
+            <h3 className="text-sm font-medium">Orders</h3>
+          )}
+          <div className="space-y-2">
+            {orders.map((order) => {
         const materialMeta = order.material
           ? getMaterialById(order.material)
           : null;
@@ -97,7 +162,10 @@ export async function OrdersTab({ userId }: { userId: string }) {
             </Card>
           </Link>
         );
-      })}
+            })}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { eq, and, desc, inArray } from "drizzle-orm";
 import { getMaterialById } from "@/lib/materials";
 import { Badge } from "@/components/ui/badge";
 import { InlineUploadDropzone } from "@/components/upload/inline-upload-dropzone";
+import { ChevronRight } from "@/components/icons/chevron-right";
 
 interface LibraryTile {
   fileAssetId: string;
@@ -169,9 +170,10 @@ export default async function PrintPage(props: {
       <div className="mt-8">
         <Link
           href="/files"
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
         >
-          Or browse the marketplace →
+          Or browse the marketplace
+          <ChevronRight size={14} />
         </Link>
       </div>
     </div>

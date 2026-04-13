@@ -32,9 +32,11 @@ export interface Quote {
   vendorId: string;
   modelId: string;
   materialConfigId: string;
-  printingMethodId: string;
+  printingMethodId: string | null;
   quantity: number;
   price: number;
+  priceInclVat?: number;
+  discount?: number;
   currency: Currency;
   productionTimeFast: number;
   productionTimeSlow: number;
@@ -54,29 +56,45 @@ export interface ShippingOption {
 
 export interface PriceResponse {
   priceId: string;
-  status: "pending" | "ready";
+  /**
+   * CraftCloud's progressive price response. `allComplete: false`
+   * while vendors are still returning prices — clients are meant to
+   * keep polling until it flips to true, though partial results in
+   * `quotes` are valid at every step.
+   */
+  allComplete: boolean;
+  expiresAt?: number;
   quotes: Quote[];
   shipping: ShippingOption[];
+  shippings?: ShippingOption[];
 }
 
 export interface CartRequest {
   shippingIds: string[];
   currency: Currency;
+  /**
+   * Cart quote entries — `id` is the quoteId from the price
+   * response. `types` is an optional list of option upgrades
+   * (expedited, infill, tolerance) that were priced into the quote.
+   */
   quotes: Array<{
-    quoteId: string;
-    vendorId: string;
-    modelId: string;
-    materialConfigId: string;
-    quantity: number;
+    id: string;
+    types?: string[];
+    note?: string;
   }>;
   note?: string;
   customerReference?: string;
+  voucherCode?: string;
 }
 
 export interface Cart {
   cartId: string;
-  totalPrice: number;
   currency: Currency;
+  countryCode?: string;
+  expiresAt?: number;
+  amounts?: {
+    total?: { net?: number; gross?: number };
+  };
 }
 
 export interface OrderRequest {
