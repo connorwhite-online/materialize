@@ -36,11 +36,6 @@ interface MaterialPickerProps {
    * quotes arrive, instead of waiting on the quote API.
    */
   catalog?: MaterialSummary[] | null;
-  /**
-   * File bounding box in mm. Used to hide materials whose max build
-   * volume can't fit the model.
-   */
-  fileDimensions?: { x: number; y: number; z: number } | null;
 }
 
 export function MaterialPicker({
@@ -51,7 +46,6 @@ export function MaterialPicker({
   onSelectQuote,
   preselectMaterialId,
   catalog,
-  fileDimensions,
 }: MaterialPickerProps) {
   const [step, setStep] = useState<PickerStep>("material");
   const [materialId, setMaterialId] = useState<string | null>(null);
@@ -72,7 +66,6 @@ export function MaterialPicker({
         quotes={quotes}
         quotesLoading={quotesLoading}
         catalog={catalog ?? null}
-        fileDimensions={fileDimensions ?? null}
         onPick={(id) => {
           setMaterialId(id);
           setFinishGroupId(null);

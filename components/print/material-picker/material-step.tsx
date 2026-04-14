@@ -12,7 +12,6 @@ interface MaterialStepProps {
   quotes: EnrichedQuote[];
   quotesLoading: boolean;
   catalog: MaterialSummary[] | null;
-  fileDimensions: { x: number; y: number; z: number } | null;
   onPick: (materialId: string) => void;
 }
 
@@ -34,21 +33,6 @@ interface MaterialCard {
 }
 
 /**
- * Does `file` (bounding box in mm) fit inside `build` allowing any
- * axis-aligned rotation? We sort both triples descending and check
- * each slot. Ignores non-axis-aligned rotations, which is fine for
- * a printability hint — the real check happens server-side later.
- */
-function fitsInBuildVolume(
-  file: { x: number; y: number; z: number },
-  build: { x: number; y: number; z: number }
-): boolean {
-  const f = [file.x, file.y, file.z].sort((a, b) => b - a);
-  const b = [build.x, build.y, build.z].sort((a, b) => b - a);
-  return f[0] <= b[0] && f[1] <= b[1] && f[2] <= b[2];
-}
-
-/**
  * Step 1 — pick a material. While quotes are still polling, we
  * render a skeleton version of the filter chips, section titles,
  * and cards so the layout doesn't reflow when the real data lands.
@@ -57,7 +41,6 @@ export function MaterialStep({
   quotes,
   quotesLoading,
   catalog,
-  fileDimensions,
   onPick,
 }: MaterialStepProps) {
   const { groups, cardsByGroup } = useMemo(() => {
@@ -91,17 +74,20 @@ export function MaterialStep({
     }
 
     // Prefer the full catalog as the source of truth for which
-    // cards to render. This means every compatible material is
-    // visible immediately, with price/eta as skeletons that swap
-    // in as quotes arrive.
+    // cards to render — every material shows up immediately, with
+    // price/eta as skeletons that swap in as quotes arrive.
+    //
+    // We intentionally do NOT pre-filter by bounding box. CraftCloud's
+    // /v5/price already encodes full printability (bbox, feature size,
+    // wall thickness, vendor coverage, etc.) and is the only trusted
+    // source of "is this material actually available for this file."
+    // A naive client-side bbox check drops the wrong materials because
+    // `maximumPrintingDimensions` at the material level doesn't map
+    // cleanly to per-vendor build volumes — see the 18-of-190 debug
+    // run that produced this comment.
     let cards: MaterialCard[];
     if (catalog && catalog.length > 0) {
-      const compat = catalog.filter((m) => {
-        if (!fileDimensions) return true;
-        if (!m.maxDimensions) return true;
-        return fitsInBuildVolume(fileDimensions, m.maxDimensions);
-      });
-      cards = compat.map((m) => {
+      cards = catalog.map((m) => {
         const q = quotesByMaterial.get(m.materialId);
         return {
           materialId: m.materialId,
@@ -177,20 +163,8 @@ export function MaterialStep({
       .map(([id, name]) => ({ id, name }))
       .sort((a, b) => a.name.localeCompare(b.name));
 
-    // eslint-disable-next-line no-console
-    console.log("[MaterialStep] derive", {
-      quotesLength: quotes.length,
-      catalogLength: catalog?.length ?? null,
-      fileDimensions,
-      cardsLength: cards.length,
-      groupsLength: groups.length,
-      pricedCount: cards.filter((c) => c.cheapest !== null).length,
-      sampleCatalogIds: catalog?.slice(0, 3).map((m) => m.materialId) ?? null,
-      sampleQuoteMaterialIds: quotes.slice(0, 3).map((q) => q.materialId),
-    });
-
     return { groups, cardsByGroup };
-  }, [quotes, catalog, fileDimensions]);
+  }, [quotes, catalog]);
 
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
 
