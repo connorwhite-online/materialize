@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useUser } from "@clerk/nextjs";
 import { Badge } from "@/components/ui/badge";
 import { ChevronRight } from "@/components/icons/chevron-right";
@@ -11,8 +11,16 @@ import { useStartPrintFlow } from "@/components/upload/use-start-print-flow";
 import { usePendingPrintFile } from "@/components/upload/pending-print-file";
 import { uploadFileToCraftCloud } from "@/lib/craftcloud/upload-client";
 import { QuoteConfigurator } from "@/components/print/quote-configurator";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 type Format = "stl" | "obj" | "3mf" | "step" | "amf";
+type Unit = "mm" | "cm" | "in";
 
 interface LibraryTile {
   fileAssetId: string;
@@ -32,15 +40,16 @@ interface PrintPageContentProps {
 type PickedFile = { file: File; format: Format };
 
 type DraftState =
-  | { status: "uploading"; file: PickedFile }
+  | { status: "uploading"; file: PickedFile; unit: Unit }
   | {
       status: "ready";
       file: PickedFile;
+      unit: Unit;
       modelId: string;
       dimensions: { x: number; y: number; z: number } | null;
       volume: number | null;
     }
-  | { status: "error"; file: PickedFile; message: string };
+  | { status: "error"; file: PickedFile; unit: Unit; message: string };
 
 /**
  * Client shell for the /print page. Switches between two layouts:
@@ -68,9 +77,14 @@ export function PrintPageContent({
   const { isSignedIn, isLoaded } = useUser();
   const pendingPrintFile = usePendingPrintFile();
   const [picked, setPicked] = useState<PickedFile | null>(null);
+  const [unit, setUnit] = useState<Unit>("mm");
   const [draft, setDraft] = useState<DraftState | null>(null);
   const { start, phase, progress, error } = useStartPrintFlow();
   const started = useRef(false);
+  // Generation counter so a stale upload promise (e.g., user
+  // changed units twice in a row) can't clobber the newer draft
+  // when it eventually resolves.
+  const uploadGenRef = useRef(0);
 
   // Consume a file stashed from the home bar's "Print this file" CTA.
   useEffect(() => {
@@ -78,6 +92,7 @@ export function PrintPageContent({
     if (!stashed) return;
     started.current = false;
     setDraft(null);
+    setUnit("mm");
     setPicked(stashed);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -85,17 +100,53 @@ export function PrintPageContent({
   const handleFilePicked = (file: File, format: Format) => {
     started.current = false;
     setDraft(null);
+    setUnit("mm");
     setPicked({ file, format });
   };
 
   const handleReset = () => {
     started.current = false;
+    uploadGenRef.current++;
     setPicked(null);
     setDraft(null);
+    setUnit("mm");
   };
 
+  // Core upload routine — posts the File to CraftCloud with the
+  // given unit and updates draft state. Used by both the initial
+  // auto-upload effect and the unit picker on the file-context bar.
+  const uploadWithUnit = useCallback(
+    async (pickedFile: PickedFile, nextUnit: Unit) => {
+      const gen = ++uploadGenRef.current;
+      setDraft({ status: "uploading", file: pickedFile, unit: nextUnit });
+      try {
+        const model = await uploadFileToCraftCloud(pickedFile.file, nextUnit);
+        if (gen !== uploadGenRef.current) return;
+        setDraft({
+          status: "ready",
+          file: pickedFile,
+          unit: nextUnit,
+          modelId: model.modelId,
+          dimensions: model.dimensions,
+          volume: model.volume,
+        });
+      } catch (err) {
+        if (gen !== uploadGenRef.current) return;
+        setDraft({
+          status: "error",
+          file: pickedFile,
+          unit: nextUnit,
+          message:
+            err instanceof Error ? err.message : "Failed to upload file.",
+        });
+      }
+    },
+    []
+  );
+
   // Authed: kick off R2-backed flow. Anon: upload straight to
-  // CraftCloud and render the configurator inline.
+  // CraftCloud with the current unit and render the configurator
+  // inline.
   useEffect(() => {
     if (!picked || !isLoaded) return;
     if (started.current) return;
@@ -106,33 +157,23 @@ export function PrintPageContent({
       return;
     }
 
-    let cancelled = false;
-    setDraft({ status: "uploading", file: picked });
-    (async () => {
-      try {
-        const model = await uploadFileToCraftCloud(picked.file, "mm");
-        if (cancelled) return;
-        setDraft({
-          status: "ready",
-          file: picked,
-          modelId: model.modelId,
-          dimensions: model.dimensions,
-          volume: model.volume,
-        });
-      } catch (err) {
-        if (cancelled) return;
-        setDraft({
-          status: "error",
-          file: picked,
-          message:
-            err instanceof Error ? err.message : "Failed to upload file.",
-        });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [picked, isSignedIn, isLoaded, start]);
+    uploadWithUnit(picked, unit);
+  }, [picked, isSignedIn, isLoaded, start, uploadWithUnit, unit]);
+
+  const handleUnitChange = (next: Unit) => {
+    if (next === unit) return;
+    if (!picked) return;
+    setUnit(next);
+    uploadWithUnit(picked, next);
+  };
+
+  // Memoize the draftMode object so QuoteConfigurator's useCallback
+  // deps stay referentially stable across unrelated parent renders.
+  // Only changes when the underlying draft.modelId does.
+  const draftConfig = useMemo(() => {
+    if (draft?.status !== "ready") return null;
+    return { modelId: draft.modelId, file: draft.file.file };
+  }, [draft]);
 
   // Active states — we're either uploading or rendering the
   // configurator. Either way, hide the idle chrome.
@@ -148,6 +189,19 @@ export function PrintPageContent({
         <FileContextBar
           file={picked.file}
           format={picked.format}
+          unit={unit}
+          // In draft mode we show the dimensions CraftCloud
+          // reported so the user can sanity-check them against
+          // their source file and change unit if they look wrong.
+          dimensions={
+            draft?.status === "ready" ? draft.dimensions : null
+          }
+          onUnitChange={handleUnitChange}
+          // Lock the unit picker while an upload is in flight —
+          // it's read-only during authed flows too, since those
+          // go through R2 instead of client-side CraftCloud.
+          unitPickerDisabled={!!authedActive || anonUploading}
+          showUnitPicker={!isSignedIn}
           onReset={handleReset}
           statusLabel={
             authedActive
@@ -160,10 +214,10 @@ export function PrintPageContent({
           }
         />
 
-        {anonReady && draft?.status === "ready" && (
+        {anonReady && draftConfig && draft?.status === "ready" && (
           <div className="mt-6">
             <QuoteConfigurator
-              draftMode={{ modelId: draft.modelId, file: draft.file.file }}
+              draftMode={draftConfig}
               filename={draft.file.file.name}
               format={draft.file.format}
               hasCachedModel
@@ -188,6 +242,10 @@ export function PrintPageContent({
                 : "Preparing quote configurator…"}
             </p>
           </div>
+        )}
+
+        {draft?.status === "error" && (
+          <p className="mt-4 text-xs text-destructive">{draft.message}</p>
         )}
       </div>
     );
@@ -271,14 +329,32 @@ export function PrintPageContent({
 function FileContextBar({
   file,
   format,
+  unit,
+  dimensions,
+  onUnitChange,
+  unitPickerDisabled,
+  showUnitPicker,
   onReset,
   statusLabel,
 }: {
   file: File;
   format: Format;
+  unit: Unit;
+  dimensions: { x: number; y: number; z: number } | null;
+  onUnitChange: (next: Unit) => void;
+  unitPickerDisabled?: boolean;
+  showUnitPicker?: boolean;
   onReset: () => void;
   statusLabel?: string | null;
 }) {
+  const metaLine = (() => {
+    if (statusLabel) return statusLabel;
+    if (dimensions) {
+      return `${dimensions.x.toFixed(1)} × ${dimensions.y.toFixed(1)} × ${dimensions.z.toFixed(1)} mm · ${formatSize(file.size)}`;
+    }
+    return `${formatSize(file.size)} · .${format}`;
+  })();
+
   return (
     <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-3">
       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted/60 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -286,10 +362,29 @@ function FileContextBar({
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{file.name}</p>
-        <p className="mt-0.5 text-[11px] text-muted-foreground">
-          {statusLabel ?? `${formatSize(file.size)} · .${format}`}
-        </p>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">{metaLine}</p>
       </div>
+      {showUnitPicker && (
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            Source units
+          </span>
+          <Select
+            value={unit}
+            onValueChange={(v) => onUnitChange(v as Unit)}
+            disabled={unitPickerDisabled}
+          >
+            <SelectTrigger className="h-8 w-[72px] text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="mm">mm</SelectItem>
+              <SelectItem value="cm">cm</SelectItem>
+              <SelectItem value="in">in</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       <button
         type="button"
         onClick={onReset}
