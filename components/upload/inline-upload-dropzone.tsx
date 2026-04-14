@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useUser } from "@clerk/nextjs";
 import { FileUploader } from "./file-uploader";
 import { useStartPrintFlow } from "./use-start-print-flow";
+import { usePendingPrintFile } from "./pending-print-file";
 import { uploadFileToCraftCloud } from "@/lib/craftcloud/upload-client";
 import { QuoteConfigurator } from "@/components/print/quote-configurator";
 
@@ -37,10 +38,24 @@ type DraftState =
  */
 export function InlineUploadDropzone() {
   const { isSignedIn, isLoaded } = useUser();
+  const pendingPrintFile = usePendingPrintFile();
   const [picked, setPicked] = useState<PickedFile | null>(null);
   const [draft, setDraft] = useState<DraftState | null>(null);
   const { start, phase, progress, error } = useStartPrintFlow();
   const started = useRef(false);
+
+  // Consume a file stashed from the home bottom bar's "Print this
+  // file" CTA. This runs once on mount — the context read-and-clears
+  // so a later navigation back to /print renders the dropzone fresh.
+  useEffect(() => {
+    const stashed = pendingPrintFile.consume();
+    if (!stashed) return;
+    started.current = false;
+    setDraft(null);
+    setPicked(stashed);
+    // Intentionally not a dependency: this is a mount-only hand-off.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleFilePicked = (
     file: File,

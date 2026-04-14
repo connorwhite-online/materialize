@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
 import { useAuthModal } from "@/components/auth/auth-modal";
 import { useStartPrintFlow } from "./use-start-print-flow";
+import { usePendingPrintFile } from "./pending-print-file";
 import { XIcon } from "lucide-react";
 
 export interface PickedFile {
@@ -42,6 +44,8 @@ export function PickedFileActions({
 }: PickedFileActionsProps) {
   const { isSignedIn, isLoaded } = useUser();
   const { openAuth } = useAuthModal();
+  const router = useRouter();
+  const pendingPrintFile = usePendingPrintFile();
   const { start, phase, progress, error, isPending } = useStartPrintFlow();
 
   // If the user clicks a CTA while signed out, remember which one
@@ -63,8 +67,13 @@ export function PickedFileActions({
   const handlePrint = () => {
     if (!isLoaded) return;
     if (!isSignedIn) {
-      setPendingIntent("print");
-      openAuth("sign-up");
+      // Anon users shouldn't be gated here — the whole point of the
+      // frictionless flow is to let them walk the quote flow before
+      // we ask for anything. Stash the picked file and navigate to
+      // /print, where InlineUploadDropzone will pick it up and run
+      // the draft (client-side CraftCloud) path.
+      pendingPrintFile.set({ file: picked.file, format: picked.format });
+      router.push("/print");
       return;
     }
     start(picked.file, picked.format);
