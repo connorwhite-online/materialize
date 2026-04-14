@@ -608,6 +608,17 @@ export function QuoteConfigurator({
     <div>
       <div className="grid items-start gap-8 lg:grid-cols-3">
         <div className="lg:col-span-2">
+          {geometryData?.dimensions &&
+            typeof geometryData.dimensions.x === "number" &&
+            typeof geometryData.dimensions.y === "number" &&
+            typeof geometryData.dimensions.z === "number" && (
+              <div className="mb-3 text-sm text-muted-foreground">
+                Dimensions: {geometryData.dimensions.x.toFixed(1)} ×{" "}
+                {geometryData.dimensions.y.toFixed(1)} ×{" "}
+                {geometryData.dimensions.z.toFixed(1)} mm
+              </div>
+            )}
+
           {previewModelUrl && previewableFormat && (
             <div className="mb-6 aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
               <MaterialPreview
@@ -621,9 +632,12 @@ export function QuoteConfigurator({
             </div>
           )}
 
-          <div className="mb-4 flex flex-wrap items-end gap-4">
+          <div className="mb-4 flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2">
-              <Label htmlFor="quantity" className="text-sm font-medium">
+              <Label
+                htmlFor="quantity"
+                className="text-sm font-medium leading-none"
+              >
                 Quantity
               </Label>
               <Input
@@ -639,7 +653,10 @@ export function QuoteConfigurator({
               />
             </div>
             <div className="flex items-center gap-2">
-              <Label htmlFor="region" className="text-sm font-medium">
+              <Label
+                htmlFor="region"
+                className="text-sm font-medium leading-none"
+              >
                 Ship to
               </Label>
               <Select
@@ -671,17 +688,6 @@ export function QuoteConfigurator({
               </Select>
             </div>
           </div>
-
-          {geometryData?.dimensions &&
-            typeof geometryData.dimensions.x === "number" &&
-            typeof geometryData.dimensions.y === "number" &&
-            typeof geometryData.dimensions.z === "number" && (
-              <div className="mb-4 text-sm text-muted-foreground">
-                Dimensions: {geometryData.dimensions.x.toFixed(1)} x{" "}
-                {geometryData.dimensions.y.toFixed(1)} x{" "}
-                {geometryData.dimensions.z.toFixed(1)} mm
-              </div>
-            )}
 
           {/* Geometry hints — soft warnings, never blocking */}
           {(() => {

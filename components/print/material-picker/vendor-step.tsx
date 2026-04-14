@@ -157,11 +157,13 @@ export function VendorStep({
           US-bound orders from most of CraftCloud's roster. Sits in
           the same column as the vendor cards so the width lines up. */}
       <div className="flex items-start gap-3 rounded-xl border border-border bg-muted/40 p-3 text-muted-foreground">
-        <Frown className="mt-0.5 size-5 shrink-0" />
+        <Frown className="mt-0.5 size-5 shrink-0 text-primary" />
         <p className="text-xs leading-snug">
-          Heads up — shipping prices from most vendors are higher than
-          usual due to new US import tariffs. We&apos;re surfacing every
-          quote as it comes in so you can still pick the best one.
+          <span className="font-medium text-primary">
+            Heads up — shipping prices from most vendors are higher than usual
+          </span>{" "}
+          due to new US import tariffs. We&apos;re surfacing every quote as it
+          comes in so you can still pick the best one.
         </p>
       </div>
 
