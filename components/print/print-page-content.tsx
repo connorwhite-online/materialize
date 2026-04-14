@@ -22,6 +22,9 @@ import {
 type Format = "stl" | "obj" | "3mf" | "step" | "amf";
 type Unit = "mm" | "cm" | "in";
 
+const UNIT_STORAGE_KEY = "print-source-unit";
+const UNIT_VALUES: ReadonlySet<Unit> = new Set(["mm", "cm", "in"]);
+
 interface LibraryTile {
   fileAssetId: string;
   name: string;
@@ -77,7 +80,22 @@ export function PrintPageContent({
   const { isSignedIn, isLoaded } = useUser();
   const pendingPrintFile = usePendingPrintFile();
   const [picked, setPicked] = useState<PickedFile | null>(null);
+  // Persisted to localStorage so the last-used source unit survives
+  // page reloads. SSR-safe: the initial value always renders as
+  // "mm", then a useEffect below hydrates from storage on mount.
+  // `unitHydrated` gates the auto-upload effect so we don't fire
+  // a CraftCloud upload with "mm" before localStorage has been read.
   const [unit, setUnit] = useState<Unit>("mm");
+  const [unitHydrated, setUnitHydrated] = useState(false);
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const stored = window.localStorage.getItem(UNIT_STORAGE_KEY);
+      if (stored && UNIT_VALUES.has(stored as Unit)) {
+        setUnit(stored as Unit);
+      }
+    }
+    setUnitHydrated(true);
+  }, []);
   const [draft, setDraft] = useState<DraftState | null>(null);
   const { start, phase, progress, error } = useStartPrintFlow();
   const started = useRef(false);
@@ -92,7 +110,6 @@ export function PrintPageContent({
     if (!stashed) return;
     started.current = false;
     setDraft(null);
-    setUnit("mm");
     setPicked(stashed);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -100,7 +117,6 @@ export function PrintPageContent({
   const handleFilePicked = (file: File, format: Format) => {
     started.current = false;
     setDraft(null);
-    setUnit("mm");
     setPicked({ file, format });
   };
 
@@ -109,7 +125,6 @@ export function PrintPageContent({
     uploadGenRef.current++;
     setPicked(null);
     setDraft(null);
-    setUnit("mm");
   };
 
   // Core upload routine — posts the File to CraftCloud with the
@@ -146,9 +161,11 @@ export function PrintPageContent({
 
   // Authed: kick off R2-backed flow. Anon: upload straight to
   // CraftCloud with the current unit and render the configurator
-  // inline.
+  // inline. Waits on unitHydrated so the first upload uses the
+  // persisted unit instead of the pre-hydration default.
   useEffect(() => {
     if (!picked || !isLoaded) return;
+    if (!unitHydrated) return;
     if (started.current) return;
     started.current = true;
 
@@ -158,12 +175,23 @@ export function PrintPageContent({
     }
 
     uploadWithUnit(picked, unit);
-  }, [picked, isSignedIn, isLoaded, start, uploadWithUnit, unit]);
+  }, [
+    picked,
+    isSignedIn,
+    isLoaded,
+    start,
+    uploadWithUnit,
+    unit,
+    unitHydrated,
+  ]);
 
   const handleUnitChange = (next: Unit) => {
     if (next === unit) return;
     if (!picked) return;
     setUnit(next);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(UNIT_STORAGE_KEY, next);
+    }
     uploadWithUnit(picked, next);
   };
 
