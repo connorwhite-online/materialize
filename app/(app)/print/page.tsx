@@ -108,6 +108,7 @@ export default async function PrintPage(props: {
       }
       tiles={tiles}
       linkSuffix={linkSuffix}
+      preselectMaterialName={material?.name}
     />
   );
 }

@@ -38,6 +38,12 @@ interface PrintPageContentProps {
   subheadline: string;
   tiles: LibraryTile[];
   linkSuffix: string;
+  /**
+   * Material-name hint from /materials/[slug] → "Print with X".
+   * Forwarded to QuoteConfigurator once a file is picked so the
+   * material step gets auto-advanced.
+   */
+  preselectMaterialName?: string;
 }
 
 type PickedFile = { file: File; format: Format };
@@ -76,6 +82,7 @@ export function PrintPageContent({
   subheadline,
   tiles,
   linkSuffix,
+  preselectMaterialName,
 }: PrintPageContentProps) {
   const { isSignedIn, isLoaded } = useUser();
   const pendingPrintFile = usePendingPrintFile();
@@ -257,6 +264,7 @@ export function PrintPageContent({
                     }
                   : null
               }
+              preselectMaterialName={preselectMaterialName}
             />
           </div>
         )}

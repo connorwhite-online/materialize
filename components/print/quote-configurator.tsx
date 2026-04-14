@@ -76,7 +76,13 @@ interface QuoteConfiguratorProps {
     volume?: number;
     triangleCount?: number;
   } | null;
-  preselectMaterialId?: string;
+  /**
+   * Material-name hint from /materials/[slug] → "Print with X".
+   * Passed straight through to MaterialPicker, which fuzzy-matches
+   * it against quotes to auto-advance the user past the material
+   * step. See MaterialPicker.findMaterialByNameHint.
+   */
+  preselectMaterialName?: string;
 }
 
 type CheckoutStep = "configure" | "address" | "processing";
@@ -89,7 +95,7 @@ export function QuoteConfigurator({
   format,
   hasCachedModel,
   geometryData,
-  preselectMaterialId,
+  preselectMaterialName,
 }: QuoteConfiguratorProps) {
   const isDraft = !!draftMode;
 
@@ -682,7 +688,7 @@ export function QuoteConfigurator({
             quotesLoading={loadingPhase === "quoting"}
             selectedQuote={selectedQuote}
             onSelectQuote={setSelectedQuote}
-            preselectMaterialId={preselectMaterialId}
+            preselectMaterialName={preselectMaterialName}
           />
         </div>
 

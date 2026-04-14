@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { ChevronRight } from "@/components/icons/chevron-right";
 import type { EnrichedQuote } from "./types";
 
@@ -69,6 +69,27 @@ export function FinishStep({
 
     return { materialName, cards };
   }, [quotes, materialId]);
+
+  // If the selected material only has one finish group, skip this
+  // step entirely — there's no decision for the user to make. We
+  // only fire once per mount/material change so the user can still
+  // "Back" out to the material step without rubber-banding right
+  // back into the vendor step.
+  const autoAdvancedRef = useRef(false);
+  useEffect(() => {
+    autoAdvancedRef.current = false;
+  }, [materialId]);
+  useEffect(() => {
+    if (autoAdvancedRef.current) return;
+    if (cards.length !== 1) return;
+    autoAdvancedRef.current = true;
+    onPick(cards[0].finishGroupId);
+  }, [cards, onPick]);
+
+  // During the single-finish auto-advance the picker is about to
+  // transition to the vendor step — render nothing in the flicker
+  // window rather than flashing a one-card list.
+  if (cards.length === 1) return null;
 
   return (
     <div className="space-y-6">

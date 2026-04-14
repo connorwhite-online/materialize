@@ -1,10 +1,39 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MaterialStep } from "./material-step";
 import { FinishStep } from "./finish-step";
 import { VendorStep } from "./vendor-step";
 import type { EnrichedQuote, PickerStep } from "./types";
+
+/**
+ * Find the best-matching material in a quote set given a loose
+ * name hint. Tries progressively shorter word prefixes of the
+ * normalized hint until something matches — "PLA White" first
+ * looks for a quote starting with "pla white", then "pla". Used
+ * by the "Print with X" flow since our local curated material
+ * ids don't line up with CraftCloud's internal ids.
+ */
+function findMaterialByNameHint(
+  quotes: EnrichedQuote[],
+  hint: string
+): EnrichedQuote | null {
+  const normalized = hint
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, "")
+    .split(/\s+/)
+    .filter(Boolean);
+  if (normalized.length === 0) return null;
+
+  for (let i = normalized.length; i > 0; i--) {
+    const prefix = normalized.slice(0, i).join(" ");
+    const hit = quotes.find((q) =>
+      q.materialName.toLowerCase().startsWith(prefix)
+    );
+    if (hit) return hit;
+  }
+  return null;
+}
 
 interface ShippingLite {
   vendorId: string;
@@ -24,11 +53,14 @@ interface MaterialPickerProps {
   selectedQuote: EnrichedQuote | null;
   onSelectQuote: (quote: EnrichedQuote) => void;
   /**
-   * When the configurator receives a `preselectMaterialId` from the
-   * "Print with X" flow we jump straight to the finish step for that
-   * material (if it exists in the returned quote set).
+   * Material-name hint from the "Print with X" flow. When provided,
+   * we try to find the best-matching material in the returned quote
+   * set and jump straight to the finish step. The hint is a name,
+   * not an id, because our local curated catalog (/materials/*)
+   * uses its own ids that don't correspond to CraftCloud's, and
+   * fuzzy-matching by name is robust to either side renaming.
    */
-  preselectMaterialId?: string;
+  preselectMaterialName?: string;
 }
 
 export function MaterialPicker({
@@ -37,20 +69,26 @@ export function MaterialPicker({
   quotesLoading,
   selectedQuote,
   onSelectQuote,
-  preselectMaterialId,
+  preselectMaterialName,
 }: MaterialPickerProps) {
   const [step, setStep] = useState<PickerStep>("material");
   const [materialId, setMaterialId] = useState<string | null>(null);
   const [finishGroupId, setFinishGroupId] = useState<string | null>(null);
+  // Tracks whether the preselect has already fired. Without this,
+  // a later user "Back" out of the finish step would get rubber-
+  // banded right back in by the effect re-running.
+  const preselectFiredRef = useRef(false);
 
   useEffect(() => {
-    if (!preselectMaterialId) return;
-    const hit = quotes.find((q) => q.materialId === preselectMaterialId);
-    if (hit) {
-      setMaterialId(preselectMaterialId);
-      setStep("finish");
-    }
-  }, [preselectMaterialId, quotes]);
+    if (!preselectMaterialName) return;
+    if (preselectFiredRef.current) return;
+    if (quotes.length === 0) return;
+    const hit = findMaterialByNameHint(quotes, preselectMaterialName);
+    if (!hit) return;
+    preselectFiredRef.current = true;
+    setMaterialId(hit.materialId);
+    setStep("finish");
+  }, [preselectMaterialName, quotes]);
 
   if (step === "material") {
     return (
