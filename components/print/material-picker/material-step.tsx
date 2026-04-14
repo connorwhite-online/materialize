@@ -177,6 +177,18 @@ export function MaterialStep({
       .map(([id, name]) => ({ id, name }))
       .sort((a, b) => a.name.localeCompare(b.name));
 
+    // eslint-disable-next-line no-console
+    console.log("[MaterialStep] derive", {
+      quotesLength: quotes.length,
+      catalogLength: catalog?.length ?? null,
+      fileDimensions,
+      cardsLength: cards.length,
+      groupsLength: groups.length,
+      pricedCount: cards.filter((c) => c.cheapest !== null).length,
+      sampleCatalogIds: catalog?.slice(0, 3).map((m) => m.materialId) ?? null,
+      sampleQuoteMaterialIds: quotes.slice(0, 3).map((q) => q.materialId),
+    });
+
     return { groups, cardsByGroup };
   }, [quotes, catalog, fileDimensions]);
 

@@ -132,9 +132,20 @@ export function QuoteConfigurator({
     (async () => {
       try {
         const list = await getPrintableMaterialSummaries();
-        if (!cancelled) setMaterialCatalog(list);
-      } catch {
-        // Fall back to the quotes-only rendering path — not fatal.
+        if (cancelled) return;
+        // eslint-disable-next-line no-console
+        console.log("[QuoteConfigurator] catalog loaded", {
+          length: list.length,
+          sample: list.slice(0, 3).map((m) => ({
+            id: m.materialId,
+            name: m.materialName,
+            maxDimensions: m.maxDimensions,
+          })),
+        });
+        setMaterialCatalog(list);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("[QuoteConfigurator] catalog load failed", err);
       }
     })();
     return () => {
@@ -259,6 +270,13 @@ export function QuoteConfigurator({
     }
 
     const data = await res.json();
+    // eslint-disable-next-line no-console
+    console.log("[QuoteConfigurator] fetchQuotes received", {
+      quotesLength: data.quotes?.length ?? 0,
+      shippingLength: data.shipping?.length ?? 0,
+      priceId: data.priceId,
+      sampleQuote: data.quotes?.[0] ?? null,
+    });
     setQuotes(data.quotes || []);
     setShipping(data.shipping || []);
     // Region switch: clear the selection because a quoteId from the
