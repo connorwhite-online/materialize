@@ -64,13 +64,42 @@ export async function GET(request: Request) {
       .filter((q): q is NonNullable<typeof q> => q !== null);
 
     // Lightweight telemetry. We log each snapshot so the server
-    // log tells a story of how the quote set grows over time.
+    // log tells a story of how the quote set grows over time and
+    // so "why is titanium so expensive?" is answerable from the
+    // server log alone.
+    const prices = enrichedQuotes.map((q) => q.price).sort((a, b) => a - b);
     console.log("[quotes] poll", {
       priceId,
       rawCount: priceResponse.quotes?.length ?? 0,
       enrichedCount: enrichedQuotes.length,
       droppedNoConfig,
       allComplete: priceResponse.allComplete,
+      priceRange: prices.length
+        ? {
+            min: prices[0],
+            median: prices[Math.floor(prices.length / 2)],
+            max: prices[prices.length - 1],
+          }
+        : null,
+      distinctMaterials: new Set(enrichedQuotes.map((q) => q.materialId)).size,
+      distinctVendors: new Set(enrichedQuotes.map((q) => q.vendorId)).size,
+      // Cheapest five quotes with full detail so we can eyeball
+      // pricing 1:1 against CraftCloud.com for the same file.
+      cheapestFive: enrichedQuotes
+        .slice()
+        .sort((a, b) => a.price - b.price)
+        .slice(0, 5)
+        .map((q) => ({
+          material: q.materialName,
+          finish: q.finishGroupName,
+          color: q.color,
+          vendor: q.vendorName,
+          price: q.price,
+          priceInclVat: q.priceInclVat,
+          scale: q.scale,
+          fast: q.productionTimeFast,
+          slow: q.productionTimeSlow,
+        })),
     });
 
     return Response.json({
