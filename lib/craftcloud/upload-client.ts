@@ -13,23 +13,13 @@ export interface UploadedModel {
   triangleCount: number | null;
 }
 
-/**
- * Upload a file to CraftCloud directly from the browser.
- * Downloads from our R2 URL, then uploads to CraftCloud.
- */
-export async function uploadToCraftCloud(
-  downloadUrl: string,
+async function postModelToCraftCloud(
+  body: Blob | File,
   filename: string,
-  unit: "mm" | "cm" | "in" = "mm"
+  unit: "mm" | "cm" | "in"
 ): Promise<UploadedModel> {
-  // Download the file from R2
-  const fileRes = await fetch(downloadUrl);
-  if (!fileRes.ok) throw new Error("Failed to download file");
-  const blob = await fileRes.blob();
-
-  // Upload to CraftCloud
   const formData = new FormData();
-  formData.append("file", blob, filename);
+  formData.append("file", body, filename);
   formData.append("unit", unit);
 
   const uploadRes = await fetch(`${CRAFTCLOUD_BASE_URL}/v5/model`, {
@@ -51,6 +41,32 @@ export async function uploadToCraftCloud(
     modelId: model.modelId || model.id,
     dimensions: model.dimensions || null,
     volume: model.volume || null,
-    triangleCount: model.area ? null : null, // CraftCloud uses 'area' not triangleCount
+    triangleCount: null,
   };
+}
+
+/**
+ * Upload a file to CraftCloud directly from the browser.
+ * Downloads from our R2 URL, then uploads to CraftCloud.
+ */
+export async function uploadToCraftCloud(
+  downloadUrl: string,
+  filename: string,
+  unit: "mm" | "cm" | "in" = "mm"
+): Promise<UploadedModel> {
+  const fileRes = await fetch(downloadUrl);
+  if (!fileRes.ok) throw new Error("Failed to download file");
+  const blob = await fileRes.blob();
+  return postModelToCraftCloud(blob, filename, unit);
+}
+
+/**
+ * Upload a local File object straight to CraftCloud. Used by the
+ * anon draft flow where the user's file never touches our R2.
+ */
+export async function uploadFileToCraftCloud(
+  file: File,
+  unit: "mm" | "cm" | "in" = "mm"
+): Promise<UploadedModel> {
+  return postModelToCraftCloud(file, file.name, unit);
 }

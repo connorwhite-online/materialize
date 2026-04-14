@@ -4,28 +4,41 @@ import { useEffect, useRef, useState } from "react";
 import { useUser } from "@clerk/nextjs";
 import { FileUploader } from "./file-uploader";
 import { useStartPrintFlow } from "./use-start-print-flow";
-import { useAuthModal } from "@/components/auth/auth-modal";
+import { uploadFileToCraftCloud } from "@/lib/craftcloud/upload-client";
+import { QuoteConfigurator } from "@/components/print/quote-configurator";
 
 type PickedFile = {
   file: File;
   format: "stl" | "obj" | "3mf" | "step" | "amf";
 };
 
+type DraftState =
+  | { status: "uploading"; file: PickedFile }
+  | {
+      status: "ready";
+      file: PickedFile;
+      modelId: string;
+      dimensions: { x: number; y: number; z: number } | null;
+      volume: number | null;
+    }
+  | { status: "error"; file: PickedFile; message: string };
+
 /**
  * Drop zone used on the `/print` page. The whole page is about
- * printing, so the intent is unambiguous — as soon as a file is
- * picked we fire the full Print flow (R2 upload → draft file row
- * → redirect to the quote configurator) via the shared
- * useStartPrintFlow hook.
+ * printing, so the intent is unambiguous — on file pick we go
+ * straight into the configurator.
  *
- * Anon users are bounced to the auth modal first; their picked
- * file stays in state and the print flow auto-resumes as soon as
- * they authenticate.
+ * Authed users: full R2-backed flow (presign → PUT → draft file
+ * row → /print/[id]) via useStartPrintFlow. Navigates away.
+ *
+ * Anon users: client-side upload to CraftCloud (no R2, no DB row),
+ * then QuoteConfigurator renders inline in draftMode on this same
+ * page. The auth gate is deferred to "Proceed to Checkout".
  */
 export function InlineUploadDropzone() {
   const { isSignedIn, isLoaded } = useUser();
-  const { openAuth } = useAuthModal();
   const [picked, setPicked] = useState<PickedFile | null>(null);
+  const [draft, setDraft] = useState<DraftState | null>(null);
   const { start, phase, progress, error } = useStartPrintFlow();
   const started = useRef(false);
 
@@ -34,29 +47,53 @@ export function InlineUploadDropzone() {
     format: "stl" | "obj" | "3mf" | "step" | "amf"
   ) => {
     started.current = false;
+    setDraft(null);
     setPicked({ file, format });
   };
 
-  // Kick off the print flow whenever we have a picked file AND a
-  // signed-in user. For signed-out users we open the auth modal
-  // and wait — the moment they come back authenticated, this
-  // effect re-runs and starts the upload automatically.
+  // Authed: fire the existing R2-backed print flow the moment we
+  // have a file. Anon: fire the CraftCloud direct-upload instead.
   useEffect(() => {
     if (!picked || !isLoaded) return;
     if (started.current) return;
+    started.current = true;
 
-    if (!isSignedIn) {
-      openAuth("sign-up");
+    if (isSignedIn) {
+      start(picked.file, picked.format);
       return;
     }
 
-    started.current = true;
-    start(picked.file, picked.format);
-  }, [picked, isSignedIn, isLoaded, start, openAuth]);
+    // Anon draft path.
+    let cancelled = false;
+    setDraft({ status: "uploading", file: picked });
+    (async () => {
+      try {
+        const model = await uploadFileToCraftCloud(picked.file, "mm");
+        if (cancelled) return;
+        setDraft({
+          status: "ready",
+          file: picked,
+          modelId: model.modelId,
+          dimensions: model.dimensions,
+          volume: model.volume,
+        });
+      } catch (err) {
+        if (cancelled) return;
+        setDraft({
+          status: "error",
+          file: picked,
+          message:
+            err instanceof Error ? err.message : "Failed to upload file.",
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [picked, isSignedIn, isLoaded, start]);
 
-  // While the user is uploading / navigating we show a status line
-  // instead of the dropzone. Reduces visual jitter.
-  if (picked && (phase === "uploading" || phase === "saving")) {
+  // Authed upload-in-progress status card.
+  if (picked && isSignedIn && (phase === "uploading" || phase === "saving")) {
     return (
       <div className="rounded-xl border border-border bg-card p-6 text-center">
         <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-muted border-t-foreground" />
@@ -65,22 +102,46 @@ export function InlineUploadDropzone() {
             ? `Uploading ${picked.file.name} — ${progress}%`
             : "Preparing quote configurator…"}
         </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {phase === "uploading"
-            ? "We'll drop you into the material picker the moment this finishes."
-            : ""}
+      </div>
+    );
+  }
+
+  // Anon upload-in-progress status card.
+  if (draft?.status === "uploading") {
+    return (
+      <div className="rounded-xl border border-border bg-card p-6 text-center">
+        <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-muted border-t-foreground" />
+        <p className="mt-3 text-sm font-medium">
+          Preparing {draft.file.file.name} for manufacturing…
         </p>
       </div>
+    );
+  }
+
+  // Anon draft ready — render the full configurator inline.
+  if (draft?.status === "ready") {
+    const geometryData = draft.dimensions
+      ? {
+          dimensions: draft.dimensions,
+          volume: draft.volume ?? undefined,
+        }
+      : null;
+    return (
+      <QuoteConfigurator
+        draftMode={{ modelId: draft.modelId, file: draft.file.file }}
+        filename={draft.file.file.name}
+        format={draft.file.format}
+        hasCachedModel
+        geometryData={geometryData}
+      />
     );
   }
 
   return (
     <div className="space-y-3">
       <FileUploader onFileSelected={handleFilePicked} />
-      {picked && !isSignedIn && (
-        <p className="text-xs text-muted-foreground">
-          Sign up to continue — your file is ready to go.
-        </p>
+      {draft?.status === "error" && (
+        <p className="text-xs text-destructive">{draft.message}</p>
       )}
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>

@@ -23,35 +23,43 @@ export async function POST(request: Request) {
       );
     }
 
-    const { fileAssetId, currency, countryCode, quantity } = parsed.data;
+    const { currency, countryCode, quantity } = parsed.data;
 
-    // Get the file asset with access check
-    const [assetRow] = await db
-      .select({
-        asset: fileAssets,
-        fileUserId: files.userId,
-        fileStatus: files.status,
-      })
-      .from(fileAssets)
-      .leftJoin(files, eq(fileAssets.fileId, files.id))
-      .where(eq(fileAssets.id, fileAssetId));
+    // Resolve a CraftCloud modelId from either an owned file asset
+    // (authed library path) or a direct modelId (anon draft path —
+    // the client uploaded straight to CraftCloud, no DB row exists).
+    let modelId: string;
+    if ("fileAssetId" in parsed.data) {
+      const [assetRow] = await db
+        .select({
+          asset: fileAssets,
+          fileUserId: files.userId,
+          fileStatus: files.status,
+        })
+        .from(fileAssets)
+        .leftJoin(files, eq(fileAssets.fileId, files.id))
+        .where(eq(fileAssets.id, parsed.data.fileAssetId));
 
-    if (!assetRow) {
-      return Response.json({ error: "File not found" }, { status: 404 });
-    }
+      if (!assetRow) {
+        return Response.json({ error: "File not found" }, { status: 404 });
+      }
 
-    const isOwner = userId && assetRow.fileUserId === userId;
-    const isPublished = assetRow.fileStatus === "published";
-    if (!isOwner && !isPublished) {
-      return Response.json({ error: "Forbidden" }, { status: 403 });
-    }
+      const isOwner = userId && assetRow.fileUserId === userId;
+      const isPublished = assetRow.fileStatus === "published";
+      if (!isOwner && !isPublished) {
+        return Response.json({ error: "Forbidden" }, { status: 403 });
+      }
 
-    const modelId = assetRow.asset.craftCloudModelId;
-    if (!modelId) {
-      return Response.json(
-        { error: "File not yet uploaded for printing. Please wait a moment and try again." },
-        { status: 409 }
-      );
+      const resolved = assetRow.asset.craftCloudModelId;
+      if (!resolved) {
+        return Response.json(
+          { error: "File not yet uploaded for printing. Please wait a moment and try again." },
+          { status: 409 }
+        );
+      }
+      modelId = resolved;
+    } else {
+      modelId = parsed.data.modelId;
     }
 
     const { priceId } = await createPriceRequest({

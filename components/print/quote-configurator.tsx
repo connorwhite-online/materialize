@@ -6,6 +6,7 @@ import type { EnrichedQuote } from "./material-picker/types";
 import { PriceDisplay } from "./price-display";
 import { ShippingAddressForm } from "./shipping-address-form";
 import { createPrintOrder, completePrintOrder } from "@/app/actions/print";
+import { createDraftFileForPrint } from "@/app/actions/files";
 import { uploadToCraftCloud } from "@/lib/craftcloud/upload-client";
 import { checkGeometry } from "@/lib/geometry-checks";
 import { REGIONS, DEFAULT_REGION } from "@/lib/craftcloud/regions";
@@ -33,8 +34,21 @@ interface ShippingOption {
   type: "standard" | "express";
 }
 
+export interface DraftModeConfig {
+  /** CraftCloud model id — the client already uploaded the file. */
+  modelId: string;
+  /** Local File for the preview (object URL + future R2 upload). */
+  file: File;
+}
+
 interface QuoteConfiguratorProps {
-  fileAssetId: string;
+  /** Authed path — points at a row in our DB. */
+  fileAssetId?: string;
+  /**
+   * Anon draft path — the file only exists client-side + on
+   * CraftCloud. Mutually exclusive with fileAssetId.
+   */
+  draftMode?: DraftModeConfig;
   filename: string;
   format: string;
   hasCachedModel: boolean;
@@ -51,14 +65,19 @@ type LoadingPhase = "uploading" | "quoting" | "done";
 
 export function QuoteConfigurator({
   fileAssetId,
+  draftMode,
   filename,
   format,
   hasCachedModel,
   geometryData,
   preselectMaterialId,
 }: QuoteConfiguratorProps) {
+  const isDraft = !!draftMode;
+
   const [loadingPhase, setLoadingPhase] = useState<LoadingPhase | null>(
-    "uploading"
+    // In draft mode the model is already on CraftCloud — skip straight
+    // to quoting instead of sitting on the upload spinner.
+    isDraft ? "quoting" : "uploading"
   );
   const [error, setError] = useState<string | null>(null);
   const [quotes, setQuotes] = useState<Quote[]>([]);
@@ -101,6 +120,15 @@ export function QuoteConfigurator({
   const [previewModelUrl, setPreviewModelUrl] = useState<string | null>(null);
 
   useEffect(() => {
+    // Draft mode: blob URL from the in-memory File.
+    if (draftMode) {
+      const url = URL.createObjectURL(draftMode.file);
+      setPreviewModelUrl(url);
+      return () => URL.revokeObjectURL(url);
+    }
+
+    if (!fileAssetId) return;
+
     let cancelled = false;
     (async () => {
       try {
@@ -119,7 +147,7 @@ export function QuoteConfigurator({
     return () => {
       cancelled = true;
     };
-  }, [fileAssetId]);
+  }, [fileAssetId, draftMode]);
 
   // The 3D preview tints the model with the selected quote's real
   // colorCode from CraftCloud's catalog. Falls back to a neutral
@@ -133,6 +161,10 @@ export function QuoteConfigurator({
     format === "stl" || format === "obj" || format === "3mf";
 
   const ensureModelUploaded = useCallback(async () => {
+    // Draft mode — the model was already uploaded client-side and we
+    // have a modelId in hand. Nothing to do.
+    if (draftMode) return;
+    if (!fileAssetId) return;
     if (hasCachedModel) return;
 
     setLoadingPhase("uploading");
@@ -176,7 +208,7 @@ export function QuoteConfigurator({
           : undefined,
       }),
     });
-  }, [fileAssetId, hasCachedModel]);
+  }, [fileAssetId, hasCachedModel, draftMode]);
 
   const fetchQuotes = useCallback(async () => {
     setLoadingPhase("quoting");
@@ -186,7 +218,9 @@ export function QuoteConfigurator({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        fileAssetId,
+        ...(draftMode
+          ? { modelId: draftMode.modelId }
+          : { fileAssetId }),
         currency: region.currency,
         countryCode: region.code,
         quantity,
@@ -206,7 +240,7 @@ export function QuoteConfigurator({
     setSelectedQuote(null);
     setSelectedShipping(null);
     setLoadingPhase("done");
-  }, [fileAssetId, quantity, region.currency, region.code]);
+  }, [fileAssetId, draftMode, quantity, region.currency, region.code]);
 
   useEffect(() => {
     let cancelled = false;
@@ -234,6 +268,16 @@ export function QuoteConfigurator({
   const handleCheckout = async () => {
     if (!selectedQuote || !selectedShipping) return;
     setCheckoutError(null);
+
+    // Draft / anon path — defer the actual order creation until
+    // after the address form finishes the Clerk OTP sign-up flow.
+    // We just need to advance the UI to the address step here; the
+    // heavy chain (R2 → draft file → print order → stripe) runs
+    // inside handleAddressSubmit once we know the user is authed.
+    if (draftMode || !fileAssetId) {
+      setStep("address");
+      return;
+    }
 
     const result = await createPrintOrder({
       fileAssetId,
@@ -285,9 +329,96 @@ export function QuoteConfigurator({
       vatId?: string;
     };
   }) => {
-    if (!printOrderId) return;
     setStep("processing");
     setCheckoutError(null);
+
+    // Draft path — ShippingAddressForm just finished the Clerk OTP
+    // sign-up so the session is hot. Chain the whole pipeline that
+    // authed users normally walk in multiple trips:
+    //   R2 presign → PUT → createDraftFileForPrint
+    //   → createPrintOrder → completePrintOrder → Stripe
+    if (draftMode) {
+      if (!selectedQuote || !selectedShipping) {
+        setCheckoutError("Please pick a material and a shipping option.");
+        setStep("address");
+        return;
+      }
+      try {
+        const presignRes = await fetch("/api/upload/presign", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename: draftMode.file.name,
+            contentType: "application/octet-stream",
+            fileSize: draftMode.file.size,
+          }),
+        });
+        if (!presignRes.ok) {
+          const data = await presignRes.json().catch(() => ({}));
+          throw new Error(
+            data.error || `Upload presign failed (${presignRes.status})`
+          );
+        }
+        const {
+          uploadUrl,
+          storageKey,
+          format: resolvedFormat,
+        } = (await presignRes.json()) as {
+          uploadUrl: string;
+          storageKey: string;
+          format: "stl" | "obj" | "3mf" | "step" | "amf";
+        };
+
+        const putRes = await fetch(uploadUrl, {
+          method: "PUT",
+          headers: { "Content-Type": "application/octet-stream" },
+          body: draftMode.file,
+        });
+        if (!putRes.ok) {
+          throw new Error(`R2 upload failed (${putRes.status})`);
+        }
+
+        const draft = await createDraftFileForPrint({
+          storageKey,
+          originalFilename: draftMode.file.name,
+          format: resolvedFormat,
+          fileSize: draftMode.file.size,
+        });
+        if ("error" in draft) throw new Error(draft.error);
+
+        const orderResult = await createPrintOrder({
+          fileAssetId: draft.fileAssetId,
+          quoteId: selectedQuote.quoteId,
+          vendorId: selectedQuote.vendorId,
+          materialConfigId: selectedQuote.materialConfigId,
+          shippingId: selectedShipping.shippingId,
+          quantity,
+          materialPrice: selectedQuote.price,
+          shippingPrice: selectedShipping.price,
+          currency: selectedQuote.currency as "USD",
+        });
+        if ("error" in orderResult) throw new Error(orderResult.error);
+
+        const completeResult = await completePrintOrder({
+          orderId: orderResult.orderId,
+          email: addressData.email,
+          shipping: addressData.shipping,
+          billing: addressData.billing,
+        });
+        if ("error" in completeResult) throw new Error(completeResult.error);
+
+        window.location.href = completeResult.checkoutUrl;
+        return;
+      } catch (err) {
+        setCheckoutError(
+          err instanceof Error ? err.message : "Checkout failed"
+        );
+        setStep("address");
+        return;
+      }
+    }
+
+    if (!printOrderId) return;
 
     const result = await completePrintOrder({
       orderId: printOrderId,
@@ -345,6 +476,7 @@ export function QuoteConfigurator({
           onSubmit={handleAddressSubmit}
           onBack={() => setStep("configure")}
           isSubmitting={step === "processing"}
+          anonMode={isDraft}
         />
       </div>
     );

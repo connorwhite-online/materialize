@@ -4,12 +4,25 @@ const CURRENCIES = [
   "USD", "EUR", "GBP", "CAD", "AUD", "CHF", "NOK", "JPY", "ILS",
 ] as const;
 
-export const quotesRequestSchema = z.object({
-  fileAssetId: z.string().uuid(),
+const quotesCommonSchema = z.object({
   currency: z.enum(CURRENCIES).default("USD"),
   countryCode: z.string().length(2).default("US"),
   quantity: z.coerce.number().int().min(1).max(100).default(1),
 });
+
+// Two ways to ask for quotes:
+//   1. `fileAssetId` — for files that already live in our DB (the
+//      authed library / dashboard path). We look up the asset, check
+//      ownership/visibility, then forward its CraftCloud modelId.
+//   2. `modelId` — direct CraftCloud model id, used by the anon draft
+//      flow where the file was uploaded straight to CraftCloud and
+//      never persisted in our DB.
+export const quotesRequestSchema = z.union([
+  quotesCommonSchema.extend({ fileAssetId: z.string().uuid() }),
+  quotesCommonSchema.extend({ modelId: z.string().min(1) }),
+]);
+
+export type QuotesRequest = z.infer<typeof quotesRequestSchema>;
 
 export const printOrderSchema = z.object({
   fileAssetId: z.string().uuid(),

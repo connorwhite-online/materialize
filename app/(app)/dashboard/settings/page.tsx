@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { ProfileForm } from "./profile-form";
+import { SignOutButton } from "./sign-out-button";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { ChevronLeft } from "@/components/icons/chevron-left";
 
@@ -40,6 +41,10 @@ export default async function SettingsPage() {
       />
 
       <ThemeSwitcher />
+
+      <div className="border-t border-border pt-6">
+        <SignOutButton />
+      </div>
     </div>
   );
 }
