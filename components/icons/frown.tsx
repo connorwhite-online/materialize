@@ -1,0 +1,28 @@
+import type { SVGProps } from "react";
+
+/**
+ * Frowny face — two dot eyes and a downturned smile inside a
+ * circle. Uses currentColor so it inherits text color.
+ */
+export function Frown({
+  size = 24,
+  strokeWidth = 2,
+  ...props
+}: SVGProps<SVGSVGElement> & { size?: number; strokeWidth?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M14.827 15.1716C13.2649 13.6095 10.7323 13.6095 9.17017 15.1716M9.25 9.5V9.49M14.75 9.5V9.49M18.3639 5.63604C21.8787 9.15076 21.8787 14.8492 18.3639 18.3639C14.8492 21.8787 9.15074 21.8787 5.63604 18.3639C2.12132 14.8492 2.12132 9.15074 5.63604 5.63604C9.15076 2.12132 14.8492 2.12132 18.3639 5.63604ZM9.5 9.5C9.5 9.77614 9.38807 10 9.25 10C9.11193 10 9 9.77614 9 9.5C9 9.22386 9.11193 9 9.25 9C9.38807 9 9.5 9.22386 9.5 9.5ZM15 9.5C15 9.77614 14.8881 10 14.75 10C14.6119 10 14.5 9.77614 14.5 9.5C14.5 9.22386 14.6119 9 14.75 9C14.8881 9 15 9.22386 15 9.5Z" />
+    </svg>
+  );
+}

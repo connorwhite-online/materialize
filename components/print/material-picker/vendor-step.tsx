@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Factory } from "@/components/icons/factory";
+import { Frown } from "@/components/icons/frown";
 import { ChevronRight } from "@/components/icons/chevron-right";
 import type { EnrichedQuote } from "./types";
 
@@ -135,6 +136,18 @@ export function VendorStep({
           })}
         </div>
       )}
+
+      {/* Tariff notice — covers why shipping has gotten rough on
+          US-bound orders from most of CraftCloud's roster. Sits in
+          the same column as the vendor cards so the width lines up. */}
+      <div className="flex items-start gap-3 rounded-xl border border-border bg-muted/40 p-3 text-muted-foreground">
+        <Frown className="mt-0.5 size-5 shrink-0" />
+        <p className="text-xs leading-snug">
+          Heads up — shipping prices from most vendors are higher than
+          usual due to new US import tariffs. We&apos;re surfacing every
+          quote as it comes in so you can still pick the best one.
+        </p>
+      </div>
 
       {/* Vendor quotes for the selected color */}
       <div className="space-y-2">
