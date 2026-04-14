@@ -99,6 +99,13 @@ export function QuoteConfigurator({
 }: QuoteConfiguratorProps) {
   const isDraft = !!draftMode;
 
+  // eslint-disable-next-line no-console
+  console.log("[QuoteConfigurator] mount", {
+    preselectMaterialId,
+    fileAssetId,
+    isDraft,
+  });
+
   const [loadingPhase, setLoadingPhase] = useState<LoadingPhase | null>(
     // In draft mode the model is already on CraftCloud — skip straight
     // to quoting instead of sitting on the upload spinner.
