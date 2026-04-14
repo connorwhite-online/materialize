@@ -1,12 +1,9 @@
-import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { files, fileAssets, purchases } from "@/lib/db/schema";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { getMaterialById } from "@/lib/materials";
-import { Badge } from "@/components/ui/badge";
-import { InlineUploadDropzone } from "@/components/upload/inline-upload-dropzone";
-import { ChevronRight } from "@/components/icons/chevron-right";
+import { PrintPageContent } from "@/components/print/print-page-content";
 
 interface LibraryTile {
   fileAssetId: string;
@@ -99,83 +96,18 @@ export default async function PrintPage(props: {
   const { userId } = await auth();
   const tiles = userId ? await loadLibraryTiles(userId) : [];
 
-  // Carry the material query through to the configurator so the picked
-  // material can be auto-selected once quotes load.
   const linkSuffix = material ? `?material=${material.id}` : "";
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8">
-      <h1 className="text-2xl font-bold">
-        {material ? `Print with ${material.name}` : "Print a File"}
-      </h1>
-      <p className="mt-2 text-muted-foreground">
-        {material
+    <PrintPageContent
+      headline={material ? `Print with ${material.name}` : "Print a File"}
+      subheadline={
+        material
           ? "Pick one of your files or upload a new one — we'll quote it in this material."
-          : "Get instant quotes from professional manufacturers worldwide."}
-      </p>
-
-      {tiles.length > 0 && (
-        <div className="mt-8">
-          <h2 className="text-sm font-medium text-muted-foreground">
-            From your library
-          </h2>
-          <div className="mt-3 grid gap-3 grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6">
-            {tiles.map((tile) => (
-              <Link
-                key={tile.fileAssetId}
-                href={`/print/${tile.fileAssetId}${linkSuffix}`}
-                className="group"
-              >
-                <div className="relative aspect-square w-full overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted/60 to-muted/30 transition-colors group-hover:border-primary/40">
-                  {tile.thumbnailUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={tile.thumbnailUrl}
-                      alt=""
-                      loading="lazy"
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-[10px] uppercase tracking-wider text-muted-foreground/40">
-                      .{tile.format}
-                    </div>
-                  )}
-                  {tile.source === "purchased" && (
-                    <Badge
-                      variant="secondary"
-                      className="absolute left-1 top-1 text-[9px]"
-                    >
-                      Purchased
-                    </Badge>
-                  )}
-                </div>
-                <p className="mt-1.5 truncate text-xs text-foreground/80 group-hover:text-primary">
-                  {tile.name}
-                </p>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="mt-10">
-        <h2 className="text-sm font-medium text-muted-foreground">
-          Or upload a new file
-        </h2>
-        <div className="mt-3">
-          <InlineUploadDropzone />
-        </div>
-      </div>
-
-      <div className="mt-8">
-        <Link
-          href="/files"
-          className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-        >
-          Or browse the marketplace
-          <ChevronRight size={14} />
-        </Link>
-      </div>
-    </div>
+          : "Get instant quotes from professional manufacturers worldwide."
+      }
+      tiles={tiles}
+      linkSuffix={linkSuffix}
+    />
   );
 }

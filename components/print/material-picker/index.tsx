@@ -5,6 +5,7 @@ import { MaterialStep } from "./material-step";
 import { FinishStep } from "./finish-step";
 import { VendorStep } from "./vendor-step";
 import type { EnrichedQuote, PickerStep } from "./types";
+import type { MaterialSummary } from "@/app/actions/catalog";
 
 interface ShippingLite {
   vendorId: string;
@@ -29,6 +30,17 @@ interface MaterialPickerProps {
    * material (if it exists in the returned quote set).
    */
   preselectMaterialId?: string;
+  /**
+   * Full printable material catalog. When present, the material step
+   * renders every material up front with skeleton price/eta until
+   * quotes arrive, instead of waiting on the quote API.
+   */
+  catalog?: MaterialSummary[] | null;
+  /**
+   * File bounding box in mm. Used to hide materials whose max build
+   * volume can't fit the model.
+   */
+  fileDimensions?: { x: number; y: number; z: number } | null;
 }
 
 export function MaterialPicker({
@@ -38,6 +50,8 @@ export function MaterialPicker({
   selectedQuote,
   onSelectQuote,
   preselectMaterialId,
+  catalog,
+  fileDimensions,
 }: MaterialPickerProps) {
   const [step, setStep] = useState<PickerStep>("material");
   const [materialId, setMaterialId] = useState<string | null>(null);
@@ -57,6 +71,8 @@ export function MaterialPicker({
       <MaterialStep
         quotes={quotes}
         quotesLoading={quotesLoading}
+        catalog={catalog ?? null}
+        fileDimensions={fileDimensions ?? null}
         onPick={(id) => {
           setMaterialId(id);
           setFinishGroupId(null);

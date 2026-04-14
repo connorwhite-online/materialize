@@ -6,10 +6,13 @@ import { Button } from "@/components/ui/button";
 import { ChevronRight } from "@/components/icons/chevron-right";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { EnrichedQuote } from "./types";
+import type { MaterialSummary } from "@/app/actions/catalog";
 
 interface MaterialStepProps {
   quotes: EnrichedQuote[];
   quotesLoading: boolean;
+  catalog: MaterialSummary[] | null;
+  fileDimensions: { x: number; y: number; z: number } | null;
   onPick: (materialId: string) => void;
 }
 
@@ -19,10 +22,30 @@ interface MaterialCard {
   materialGroupId: string;
   materialGroupName: string;
   materialImage: string | null;
-  cheapest: number;
-  fastestFast: number;
-  fastestSlow: number;
+  /**
+   * Cheapest quote seen for this material so far. Null until at
+   * least one quote for this material has streamed in from the
+   * /v5/price poll — the card renders a price skeleton instead.
+   */
+  cheapest: number | null;
+  fastestFast: number | null;
+  fastestSlow: number | null;
   configCount: number;
+}
+
+/**
+ * Does `file` (bounding box in mm) fit inside `build` allowing any
+ * axis-aligned rotation? We sort both triples descending and check
+ * each slot. Ignores non-axis-aligned rotations, which is fine for
+ * a printability hint — the real check happens server-side later.
+ */
+function fitsInBuildVolume(
+  file: { x: number; y: number; z: number },
+  build: { x: number; y: number; z: number }
+): boolean {
+  const f = [file.x, file.y, file.z].sort((a, b) => b - a);
+  const b = [build.x, build.y, build.z].sort((a, b) => b - a);
+  return f[0] <= b[0] && f[1] <= b[1] && f[2] <= b[2];
 }
 
 /**
@@ -33,27 +56,32 @@ interface MaterialCard {
 export function MaterialStep({
   quotes,
   quotesLoading,
+  catalog,
+  fileDimensions,
   onPick,
 }: MaterialStepProps) {
   const { groups, cardsByGroup } = useMemo(() => {
-    const byMaterial = new Map<string, MaterialCard>();
-
+    // Build a per-material quote summary in one pass.
+    const quotesByMaterial = new Map<
+      string,
+      {
+        cheapest: number;
+        fastestFast: number;
+        fastestSlow: number;
+        count: number;
+      }
+    >();
     for (const q of quotes) {
-      const existing = byMaterial.get(q.materialId);
+      const existing = quotesByMaterial.get(q.materialId);
       if (!existing) {
-        byMaterial.set(q.materialId, {
-          materialId: q.materialId,
-          materialName: q.materialName,
-          materialGroupId: q.materialGroupId,
-          materialGroupName: q.materialGroupName,
-          materialImage: q.materialImage,
+        quotesByMaterial.set(q.materialId, {
           cheapest: q.price,
           fastestFast: q.productionTimeFast,
           fastestSlow: q.productionTimeSlow,
-          configCount: 1,
+          count: 1,
         });
       } else {
-        existing.configCount++;
+        existing.count++;
         if (q.price < existing.cheapest) {
           existing.cheapest = q.price;
           existing.fastestFast = q.productionTimeFast;
@@ -62,9 +90,78 @@ export function MaterialStep({
       }
     }
 
-    const cards = Array.from(byMaterial.values()).sort(
-      (a, b) => a.cheapest - b.cheapest
-    );
+    // Prefer the full catalog as the source of truth for which
+    // cards to render. This means every compatible material is
+    // visible immediately, with price/eta as skeletons that swap
+    // in as quotes arrive.
+    let cards: MaterialCard[];
+    if (catalog && catalog.length > 0) {
+      const compat = catalog.filter((m) => {
+        if (!fileDimensions) return true;
+        if (!m.maxDimensions) return true;
+        return fitsInBuildVolume(fileDimensions, m.maxDimensions);
+      });
+      cards = compat.map((m) => {
+        const q = quotesByMaterial.get(m.materialId);
+        return {
+          materialId: m.materialId,
+          materialName: m.materialName,
+          materialGroupId: m.materialGroupId,
+          materialGroupName: m.materialGroupName,
+          materialImage: m.materialImage,
+          cheapest: q?.cheapest ?? null,
+          fastestFast: q?.fastestFast ?? null,
+          fastestSlow: q?.fastestSlow ?? null,
+          configCount: m.optionCount,
+        };
+      });
+    } else {
+      // Fallback: we never loaded the catalog (network glitch,
+      // etc.). Derive cards from quotes the old way so the step
+      // still works, just without the pre-fill benefit.
+      const fromQuotes = new Map<string, MaterialCard>();
+      for (const q of quotes) {
+        const existing = fromQuotes.get(q.materialId);
+        if (!existing) {
+          fromQuotes.set(q.materialId, {
+            materialId: q.materialId,
+            materialName: q.materialName,
+            materialGroupId: q.materialGroupId,
+            materialGroupName: q.materialGroupName,
+            materialImage: q.materialImage,
+            cheapest: q.price,
+            fastestFast: q.productionTimeFast,
+            fastestSlow: q.productionTimeSlow,
+            configCount: 1,
+          });
+        } else {
+          existing.configCount++;
+          if (
+            existing.cheapest === null ||
+            q.price < existing.cheapest
+          ) {
+            existing.cheapest = q.price;
+            existing.fastestFast = q.productionTimeFast;
+            existing.fastestSlow = q.productionTimeSlow;
+          }
+        }
+      }
+      cards = Array.from(fromQuotes.values());
+    }
+
+    // Priced cards to the top, cheapest first. Unpriced cards
+    // (still waiting on quotes, or no quotes returned) sort
+    // alphabetically after. Once polling completes and a card
+    // still has no quote, the card disappears — see the filter
+    // below.
+    cards.sort((a, b) => {
+      if (a.cheapest !== null && b.cheapest !== null) {
+        return a.cheapest - b.cheapest;
+      }
+      if (a.cheapest !== null) return -1;
+      if (b.cheapest !== null) return 1;
+      return a.materialName.localeCompare(b.materialName);
+    });
 
     const cardsByGroup = new Map<string, MaterialCard[]>();
     const groupNames = new Map<string, string>();
@@ -81,13 +178,15 @@ export function MaterialStep({
       .sort((a, b) => a.name.localeCompare(b.name));
 
     return { groups, cardsByGroup };
-  }, [quotes]);
+  }, [quotes, catalog, fileDimensions]);
 
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
 
-  // Skeleton branch — same layout shape, same spacing, just greyed
-  // out primitives so the real content fades in without reflow.
-  if (quotesLoading && quotes.length === 0) {
+  // Only fall back to the full-page skeleton if we have neither a
+  // catalog nor any quotes yet. With the catalog streamed in ahead
+  // of time the skeleton never shows at all — each card just has
+  // its price field pulse until the matching quote lands.
+  if (quotesLoading && quotes.length === 0 && (!catalog || catalog.length === 0)) {
     return <MaterialStepSkeleton />;
   }
 
@@ -128,51 +227,80 @@ export function MaterialStep({
 
       <div className="space-y-4">
         {visibleGroups.map((g) => {
-          const cards = cardsByGroup.get(g.id) ?? [];
+          const raw = cardsByGroup.get(g.id) ?? [];
+          // Once polling has finished, unpriced cards get dropped
+          // entirely. During polling they stay in the list as
+          // skeletons, so the section count matches what the user
+          // sees on screen.
+          const cards = quotesLoading
+            ? raw
+            : raw.filter((c) => c.cheapest !== null);
           if (cards.length === 0) return null;
           return (
             <GroupSection key={g.id} name={g.name} count={cards.length}>
               <div className="grid gap-3 pt-3 sm:grid-cols-2">
-                {cards.map((card) => (
-                  <button
-                    key={card.materialId}
-                    type="button"
-                    onClick={() => onPick(card.materialId)}
-                    className="flex items-start gap-3 rounded-xl border border-border bg-card p-3 text-left transition-colors hover:border-primary/40"
-                  >
-                    <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-muted/60">
-                      {card.materialImage && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={resolveCatalogImage(card.materialImage)}
-                          alt=""
-                          loading="lazy"
-                          className="h-full w-full object-cover"
-                        />
-                      )}
-                    </div>
-                    <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium">
-                          {card.materialName}
-                        </p>
-                        <p className="mt-0.5 text-[11px] text-muted-foreground">
-                          {card.configCount}{" "}
-                          {card.configCount === 1 ? "option" : "options"} ·{" "}
-                          {card.fastestFast}-{card.fastestSlow}d
-                        </p>
+                {cards.map((card) => {
+                  const priced = card.cheapest !== null;
+                  // Polling finished and this material never got a
+                  // quote → it's not actually available for this
+                  // file. Drop it rather than leave a permanent
+                  // skeleton on the screen.
+                  if (!priced && !quotesLoading) return null;
+                  return (
+                    <button
+                      key={card.materialId}
+                      type="button"
+                      onClick={() => priced && onPick(card.materialId)}
+                      disabled={!priced}
+                      className="flex items-start gap-3 rounded-xl border border-border bg-card p-3 text-left transition-colors hover:border-primary/40 disabled:cursor-default disabled:hover:border-border"
+                    >
+                      <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-muted/60">
+                        {card.materialImage && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={resolveCatalogImage(card.materialImage)}
+                            alt=""
+                            loading="lazy"
+                            className="h-full w-full object-cover"
+                          />
+                        )}
                       </div>
-                      <div className="shrink-0 text-right">
-                        <p className="text-[10px] text-muted-foreground">
-                          from
-                        </p>
-                        <p className="text-sm font-medium tabular-nums">
-                          ${card.cheapest.toFixed(2)}
-                        </p>
+                      <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">
+                            {card.materialName}
+                          </p>
+                          <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                            <span>
+                              {card.configCount}{" "}
+                              {card.configCount === 1 ? "option" : "options"}
+                            </span>
+                            <span>·</span>
+                            {priced ? (
+                              <span>
+                                {card.fastestFast}-{card.fastestSlow}d
+                              </span>
+                            ) : (
+                              <Skeleton className="h-2.5 w-10" />
+                            )}
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="text-[10px] text-muted-foreground">
+                            from
+                          </p>
+                          {priced ? (
+                            <p className="text-sm font-medium tabular-nums">
+                              ${card.cheapest!.toFixed(2)}
+                            </p>
+                          ) : (
+                            <Skeleton className="ml-auto mt-0.5 h-3.5 w-12" />
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  </button>
-                ))}
+                    </button>
+                  );
+                })}
               </div>
             </GroupSection>
           );

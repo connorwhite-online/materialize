@@ -70,8 +70,8 @@ export function PickedFileActions({
       // Anon users shouldn't be gated here — the whole point of the
       // frictionless flow is to let them walk the quote flow before
       // we ask for anything. Stash the picked file and navigate to
-      // /print, where InlineUploadDropzone will pick it up and run
-      // the draft (client-side CraftCloud) path.
+      // /print, where PrintPageContent will pick it up and run the
+      // draft (client-side CraftCloud) path.
       pendingPrintFile.set({ file: picked.file, format: picked.format });
       router.push("/print");
       return;

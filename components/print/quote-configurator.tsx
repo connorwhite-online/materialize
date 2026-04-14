@@ -7,6 +7,10 @@ import { PriceDisplay } from "./price-display";
 import { ShippingAddressForm } from "./shipping-address-form";
 import { createPrintOrder, completePrintOrder } from "@/app/actions/print";
 import { createDraftFileForPrint } from "@/app/actions/files";
+import {
+  getPrintableMaterialSummaries,
+  type MaterialSummary,
+} from "@/app/actions/catalog";
 import { uploadToCraftCloud } from "@/lib/craftcloud/upload-client";
 import { checkGeometry } from "@/lib/geometry-checks";
 import { REGIONS, DEFAULT_REGION } from "@/lib/craftcloud/regions";
@@ -81,6 +85,9 @@ export function QuoteConfigurator({
   );
   const [error, setError] = useState<string | null>(null);
   const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [materialCatalog, setMaterialCatalog] = useState<
+    MaterialSummary[] | null
+  >(null);
   const [shipping, setShipping] = useState<ShippingOption[]>([]);
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
   const [selectedShipping, setSelectedShipping] =
@@ -115,6 +122,25 @@ export function QuoteConfigurator({
   useEffect(() => {
     setCheckoutError(null);
   }, [selectedQuote, selectedShipping, quantity, regionCode]);
+
+  // Fetch the full printable material catalog up front. Lets the
+  // material picker render every compatible option immediately,
+  // with price/eta as skeletons until the /v5/price polling fills
+  // them in. Server-cached — hits once per day across all visitors.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await getPrintableMaterialSummaries();
+        if (!cancelled) setMaterialCatalog(list);
+      } catch {
+        // Fall back to the quotes-only rendering path — not fatal.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Resolved download URL for the model preview viewer.
   const [previewModelUrl, setPreviewModelUrl] = useState<string | null>(null);
@@ -593,6 +619,8 @@ export function QuoteConfigurator({
             selectedQuote={selectedQuote}
             onSelectQuote={setSelectedQuote}
             preselectMaterialId={preselectMaterialId}
+            catalog={materialCatalog}
+            fileDimensions={geometryData?.dimensions ?? null}
           />
         </div>
 

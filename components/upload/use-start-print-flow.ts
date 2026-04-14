@@ -22,8 +22,7 @@ export interface StartPrintFlowResult {
  * so callers can render their own UI around it.
  *
  * Used by both PickedFileActions (home bottom bar) and the /print
- * page's InlineUploadDropzone so the R2 upload flow lives in one
- * place.
+ * page's PrintPageContent so the R2 upload flow lives in one place.
  */
 export function useStartPrintFlow(): StartPrintFlowResult {
   const router = useRouter();

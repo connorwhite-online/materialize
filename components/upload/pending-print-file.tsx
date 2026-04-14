@@ -20,7 +20,7 @@ interface PendingPrintFileContextValue {
   set: (picked: PendingPrintFile) => void;
   /**
    * Read-and-clear the pending file. Returns null if nothing is
-   * stashed. Used by InlineUploadDropzone on mount to auto-fire the
+   * stashed. Used by PrintPageContent on mount to auto-fire the
    * draft flow when an anon user arrived via "Print this file" on
    * the home bottom bar.
    */
