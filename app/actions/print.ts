@@ -185,6 +185,14 @@ export async function completePrintOrder(params: {
     isCompany: boolean;
     vatId?: string;
   };
+  /**
+   * True when this checkout is the tail end of the anon-signup
+   * flow (file picked on home or /print → email OTP → pay). We
+   * send these users to the orders list with a welcome flag so
+   * they land on the dashboard chrome and understand where their
+   * orders live, instead of a deep-link into a single order page.
+   */
+  isAnonFlow?: boolean;
 }): Promise<{ checkoutUrl: string } | { error: string }> {
   try {
     const { userId } = await auth();
@@ -241,7 +249,9 @@ export async function completePrintOrder(params: {
         printOrderId: params.orderId,
         type: "print_order",
       },
-      success_url: `${appUrl}/dashboard/orders/${params.orderId}?payment=success`,
+      success_url: params.isAnonFlow
+        ? `${appUrl}/dashboard/orders?welcome=1&payment=success`
+        : `${appUrl}/dashboard/orders/${params.orderId}?payment=success`,
       cancel_url: `${appUrl}/dashboard/orders/${params.orderId}?payment=cancelled`,
     });
 

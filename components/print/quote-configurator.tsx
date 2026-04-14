@@ -493,6 +493,7 @@ export function QuoteConfigurator({
           email: addressData.email,
           shipping: addressData.shipping,
           billing: addressData.billing,
+          isAnonFlow: true,
         });
         if ("error" in completeResult) throw new Error(completeResult.error);
 

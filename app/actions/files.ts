@@ -480,8 +480,13 @@ export async function createDraftFileForPrint(params: {
         slug,
         price: 0,
         license: "free",
-        status: "draft",
-        visibility: "private",
+        // Default to a public, free listing so the file is
+        // immediately discoverable in the marketplace. The listing
+        // is intentionally sparse (scraped name, no description or
+        // thumbnail) — the owner can polish it later from their
+        // dashboard without having to republish.
+        status: "published",
+        visibility: "public",
       })
       .returning();
 

@@ -25,11 +25,13 @@ type Tab = "library" | "orders" | "earnings";
 
 export default async function ProfilePage(props: {
   params: Promise<{ username: string }>;
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; welcome?: string; payment?: string }>;
 }) {
   const { username } = await props.params;
   const searchParams = await props.searchParams;
   const { userId } = await auth();
+  const showWelcome =
+    searchParams.welcome === "1" && searchParams.payment === "success";
 
   const [user] = await db
     .select()
@@ -101,6 +103,18 @@ export default async function ProfilePage(props: {
       </div>
 
       <Separator className="my-6" />
+
+      {showWelcome && isOwner && (
+        <div className="mb-6 rounded-xl border border-primary/30 bg-primary/5 p-4">
+          <p className="text-sm font-medium">
+            Welcome to Materialize — your order is in.
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            We created an account for you so you can track this print and any
+            future orders. Your email is already set up for status updates.
+          </p>
+        </div>
+      )}
 
       {/* Tabs */}
       <ProfileTabs username={username} activeTab={activeTab} isOwner={isOwner} />
