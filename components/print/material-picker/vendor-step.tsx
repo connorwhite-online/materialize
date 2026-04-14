@@ -152,7 +152,7 @@ export function VendorStep({
                   : "border-border bg-card hover:border-primary/30"
               }`}
             >
-              <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-muted/60 text-muted-foreground">
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted/80 to-muted/30 text-muted-foreground">
                 <Factory className="size-7" />
               </div>
               <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
