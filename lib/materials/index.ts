@@ -18,6 +18,62 @@ export const FEATURED_MATERIALS: MaterialMetadata[] = FEATURED_MATERIAL_IDS
   .map((id) => MATERIALS.find((m) => m.id === id))
   .filter((m): m is MaterialMetadata => Boolean(m));
 
+/**
+ * Condensed hero carousel — five category-level picks instead of
+ * the full featured set. Each entry spreads from a real material
+ * row and overrides display name + (for plastics) color/PBR so the
+ * 3D torus reads distinctly in each one. The stark #f0f0f0 on the
+ * stock PLA White was losing silhouette detail on the viewer, so
+ * the plastics pick uses a warmer off-white with a small clearcoat
+ * highlight for more definition.
+ */
+const baseMaterial = (id: string): MaterialMetadata => {
+  const hit = MATERIALS.find((m) => m.id === id);
+  if (!hit) throw new Error(`HERO_MATERIALS: missing base material ${id}`);
+  return hit;
+};
+
+export const HERO_MATERIALS: MaterialMetadata[] = [
+  {
+    ...baseMaterial("pla-white"),
+    name: "Plastics",
+    // Warm off-white with a soft clearcoat — the stock #f0f0f0
+    // / 0.55 roughness combo blew out to a matte blob that lost
+    // the torus silhouette under the studio lighting.
+    color: "#c4bca8",
+    pbr: { metalness: 0, roughness: 0.42, clearcoat: 0.25 },
+  },
+  {
+    ...baseMaterial("steel-316l"),
+    name: "Steel",
+  },
+  {
+    ...baseMaterial("resin-standard"),
+    name: "Resin",
+    // Real translucency via transmission — the torus reads as a
+    // glassy resin cast instead of a painted plastic shell.
+    // ior ~1.5 matches typical photopolymer, thickness drives
+    // how much the back-face refracts through the volume.
+    color: "#e6dfcc",
+    pbr: {
+      metalness: 0,
+      roughness: 0.08,
+      clearcoat: 0.9,
+      transmission: 0.85,
+      ior: 1.5,
+      thickness: 1.2,
+    },
+  },
+  {
+    ...baseMaterial("aluminum"),
+    name: "Alloys",
+  },
+  {
+    ...baseMaterial("tpu-flexible"),
+    name: "TPU",
+  },
+];
+
 export function getMaterialById(id: string): MaterialMetadata | undefined {
   return MATERIALS.find((m) => m.id === id);
 }

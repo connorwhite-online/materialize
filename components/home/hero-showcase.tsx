@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Canvas } from "@react-three/fiber";
 import { Environment } from "@react-three/drei";
 import * as THREE from "three";
-import { FEATURED_MATERIALS } from "@/lib/materials";
+import { HERO_MATERIALS } from "@/lib/materials";
 import { ShowcaseMesh } from "./showcase-mesh";
 import { ShowcaseParticles } from "./showcase-particles";
 import { MaterialCarousel } from "./material-carousel";
@@ -34,7 +34,7 @@ export function HeroShowcase() {
   const containerRef = useRef<HTMLDivElement>(null);
   const carouselTrackRef = useRef<HTMLDivElement>(null);
 
-  const material = FEATURED_MATERIALS[selectedIndex];
+  const material = HERO_MATERIALS[selectedIndex];
 
   const target = useMemo(
     () => ({
@@ -42,6 +42,9 @@ export function HeroShowcase() {
       metalness: material.pbr.metalness,
       roughness: material.pbr.roughness,
       clearcoat: material.pbr.clearcoat ?? 0,
+      transmission: material.pbr.transmission ?? 0,
+      ior: material.pbr.ior ?? 1.5,
+      thickness: material.pbr.thickness ?? 0,
     }),
     [material]
   );
@@ -152,7 +155,7 @@ export function HeroShowcase() {
       const currentIndex = selectedIndexRef.current;
       const newIndex = Math.max(
         0,
-        Math.min(FEATURED_MATERIALS.length - 1, currentIndex + direction)
+        Math.min(HERO_MATERIALS.length - 1, currentIndex + direction)
       );
       if (newIndex !== currentIndex) {
         const intensity = 0.3 + state.peakVelocity * 1.2;
@@ -212,7 +215,7 @@ export function HeroShowcase() {
   return (
     <div
       ref={containerRef}
-      className="flex w-full flex-col items-center gap-4 cursor-grab active:cursor-grabbing"
+      className="flex w-full flex-col items-center gap-1 cursor-grab active:cursor-grabbing"
       style={{ overscrollBehaviorX: "contain", touchAction: "pan-y" }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
@@ -220,7 +223,7 @@ export function HeroShowcase() {
       onPointerCancel={handlePointerUp}
     >
       {/* 3D viewport — full-bleed on mobile so particles can fly off-screen */}
-      <div className="relative -mx-4 w-[100vw] h-[420px] sm:mx-0 sm:w-full sm:h-[520px]">
+      <div className="relative -mx-4 w-[100vw] h-[380px] sm:mx-0 sm:w-full sm:h-[480px]">
         <Canvas
           camera={{ position: [0, 0, 4.5], fov: 45 }}
           dpr={[1, 2]}
@@ -251,7 +254,7 @@ export function HeroShowcase() {
       {/* Material carousel — display-only, driven by parent state */}
       <MaterialCarousel
         ref={carouselTrackRef}
-        materials={FEATURED_MATERIALS}
+        materials={HERO_MATERIALS}
         selectedIndex={selectedIndex}
         onSelect={handleSelect}
       />

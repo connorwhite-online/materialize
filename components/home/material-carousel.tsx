@@ -59,9 +59,9 @@ export const MaterialCarousel = forwardRef<HTMLDivElement, MaterialCarouselProps
                   }
                 }}
                 className={cn(
-                  "shrink-0 whitespace-nowrap text-sm transition-all duration-200",
+                  "shrink-0 whitespace-nowrap text-sm font-medium leading-none transition-colors duration-200",
                   isActive
-                    ? "text-foreground font-medium text-base"
+                    ? "text-foreground"
                     : "text-muted-foreground/60 hover:text-muted-foreground"
                 )}
               >

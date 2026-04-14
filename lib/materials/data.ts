@@ -47,6 +47,9 @@ export interface MaterialMetadata {
     metalness: number; // 0 = dielectric, 1 = metal
     roughness: number; // 0 = mirror, 1 = matte
     clearcoat?: number; // 0-1, adds a shiny lacquer layer
+    transmission?: number; // 0-1, how much light passes through (glass/resin)
+    ior?: number; // index of refraction, usually ~1.5 for resin/glass
+    thickness?: number; // volume thickness for refraction depth
   };
 }
 

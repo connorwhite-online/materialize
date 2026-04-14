@@ -9,6 +9,9 @@ interface MaterialTarget {
   metalness: number;
   roughness: number;
   clearcoat: number;
+  transmission: number;
+  ior: number;
+  thickness: number;
 }
 
 interface ShowcaseMeshProps {
@@ -89,6 +92,21 @@ export function ShowcaseMesh({ target, dragVelocityRef }: ShowcaseMeshProps) {
       target.clearcoat,
       matLerp
     );
+    materialRef.current.transmission = THREE.MathUtils.lerp(
+      materialRef.current.transmission,
+      target.transmission,
+      matLerp
+    );
+    materialRef.current.ior = THREE.MathUtils.lerp(
+      materialRef.current.ior,
+      target.ior,
+      matLerp
+    );
+    materialRef.current.thickness = THREE.MathUtils.lerp(
+      materialRef.current.thickness,
+      target.thickness,
+      matLerp
+    );
   });
 
   return (
@@ -103,6 +121,10 @@ export function ShowcaseMesh({ target, dragVelocityRef }: ShowcaseMeshProps) {
           roughness={target.roughness}
           clearcoat={target.clearcoat}
           clearcoatRoughness={0.1}
+          transmission={target.transmission}
+          ior={target.ior}
+          thickness={target.thickness}
+          transparent
         />
       </mesh>
     </group>
