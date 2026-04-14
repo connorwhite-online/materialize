@@ -49,6 +49,18 @@ export function MaterialPicker({
   const preselectFiredRef = useRef(false);
 
   useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.log("[MaterialPicker] preselect effect", {
+      preselectMaterialId,
+      quotesLength: quotes.length,
+      firstFewQuoteMaterialIds: quotes
+        .slice(0, 5)
+        .map((q) => q.materialId),
+      anyExactMatch: preselectMaterialId
+        ? quotes.some((q) => q.materialId === preselectMaterialId)
+        : null,
+      preselectAlreadyFired: preselectFiredRef.current,
+    });
     if (!preselectMaterialId) return;
     if (preselectFiredRef.current) return;
     const hit = quotes.find((q) => q.materialId === preselectMaterialId);
