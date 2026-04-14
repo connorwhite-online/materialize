@@ -397,6 +397,115 @@ export async function deleteFileListing(
   }
 }
 
+/**
+ * Derives a listing name from an uploaded filename. "carabiner.stl"
+ * becomes "Carabiner", "left_bracket_v3.obj" becomes "Left Bracket V3".
+ * Falls back to "Untitled Print" if the filename is pathological.
+ */
+function deriveListingName(originalFilename: string): string {
+  const withoutExt = originalFilename.replace(/\.[^.]+$/, "");
+  const spaced = withoutExt.replace(/[_-]+/g, " ").trim();
+  const titled = spaced
+    .split(/\s+/)
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(" ");
+  return titled || "Untitled Print";
+}
+
+/**
+ * Fast-path for the "Print this file" CTA on the home bar and the
+ * /print page dropzone. Persists the uploaded file as a private
+ * draft — name derived from the filename, no description, no tags,
+ * free license, visibility=private — so the user can walk into the
+ * quote configurator immediately without filling out the full
+ * listing form. They can always rename / publish it later from
+ * their library via the edit dialog.
+ *
+ * Returns the new fileAssetId + file slug so the caller can navigate
+ * straight to /print/[fileAssetId].
+ */
+export async function createDraftFileForPrint(params: {
+  storageKey: string;
+  originalFilename: string;
+  format: "stl" | "obj" | "3mf" | "step" | "amf";
+  fileSize: number;
+  fileUnit?: "mm" | "cm" | "in";
+}): Promise<
+  | { fileAssetId: string; fileSlug: string }
+  | { error: string }
+> {
+  try {
+    const { userId } = await auth();
+    if (!userId) return { error: "Unauthorized" };
+
+    // Only accept storage keys under the user's prefix.
+    if (!params.storageKey.startsWith(`uploads/${userId}/`)) {
+      return { error: "Invalid storage key" };
+    }
+
+    // Anti-piracy: same content-hash check as createFileListing.
+    // Someone can't use the print path as a back door to stand up
+    // a file they don't own.
+    const contentHash = await computeContentHash(params.storageKey);
+    if (contentHash) {
+      const duplicates = await db
+        .select({ id: fileAssets.id })
+        .from(fileAssets)
+        .innerJoin(files, eq(fileAssets.fileId, files.id))
+        .where(
+          and(
+            eq(fileAssets.contentHash, contentHash),
+            ne(files.userId, userId)
+          )
+        );
+      if (duplicates.length > 0) {
+        return {
+          error:
+            "This file has already been listed by another creator. Re-uploading others' files is not permitted.",
+        };
+      }
+    }
+
+    const name = deriveListingName(params.originalFilename);
+    const slug = `${name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")}-${nanoid(6)}`;
+
+    const [file] = await db
+      .insert(files)
+      .values({
+        userId,
+        name,
+        slug,
+        price: 0,
+        license: "free",
+        status: "draft",
+        visibility: "private",
+      })
+      .returning();
+
+    const [asset] = await db
+      .insert(fileAssets)
+      .values({
+        fileId: file.id,
+        storageKey: params.storageKey,
+        originalFilename: params.originalFilename,
+        format: params.format,
+        fileUnit: params.fileUnit ?? "mm",
+        fileSize: params.fileSize,
+        contentHash,
+      })
+      .returning({ id: fileAssets.id });
+
+    revalidatePath("/dashboard/uploads");
+    return { fileAssetId: asset.id, fileSlug: file.slug };
+  } catch (error) {
+    logError("createDraftFileForPrint", error);
+    return { error: "Failed to prepare file for printing. Please try again." };
+  }
+}
+
 export async function toggleFileVisibility(fileId: string) {
   try {
     const { userId } = await auth();

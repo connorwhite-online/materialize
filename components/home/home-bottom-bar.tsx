@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { ChevronRight } from "@/components/icons/chevron-right";
 import { FileUploader } from "@/components/upload/file-uploader";
 import { FileMetadataForm } from "@/components/upload/file-metadata-form";
+import { PickedFileActions } from "@/components/upload/picked-file-actions";
 import { SearchResultsPanel } from "./search-results-panel";
 import type { SearchResponse } from "@/app/api/search/route";
 import {
@@ -28,6 +29,10 @@ export function HomeBottomBar() {
   const [mode, setMode] = useState<Mode>("idle");
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<PickedFile | null>(null);
+  // Separate from `picked` — the metadata dialog only opens when
+  // the user explicitly clicks "Save to library", not on every
+  // file pick.
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResponse | null>(
     null
   );
@@ -121,6 +126,7 @@ export function HomeBottomBar() {
   const handleUploadClick = () => {
     if (mode === "uploading") {
       setMode("idle");
+      setPicked(null);
     } else {
       setMode("uploading");
       setQuery("");
@@ -131,10 +137,16 @@ export function HomeBottomBar() {
     file: File,
     format: "stl" | "obj" | "3mf" | "step" | "amf"
   ) => {
+    // Show the split CTAs, don't jump straight into a listing form.
     setPicked({ file, format });
   };
 
+  const handleUnpick = () => {
+    setPicked(null);
+  };
+
   const handleMetadataClose = () => {
+    setSaveDialogOpen(false);
     setPicked(null);
     setMode("idle");
   };
@@ -184,7 +196,15 @@ export function HomeBottomBar() {
               className="overflow-hidden"
             >
               <div className="px-2 pt-2 pb-1">
-                <FileUploader onFileSelected={handleFilePicked} />
+                {picked ? (
+                  <PickedFileActions
+                    picked={picked}
+                    onUnpick={handleUnpick}
+                    onSave={() => setSaveDialogOpen(true)}
+                  />
+                ) : (
+                  <FileUploader onFileSelected={handleFilePicked} />
+                )}
               </div>
             </motion.div>
           )}
@@ -239,9 +259,10 @@ export function HomeBottomBar() {
         </form>
       </motion.div>
 
-      {/* Metadata form opens in a dialog after a file is picked. */}
+      {/* Metadata form opens only when the user explicitly clicks
+          "Save to your library" on the PickedFileActions CTAs. */}
       <Dialog
-        open={picked !== null}
+        open={saveDialogOpen && picked !== null}
         onOpenChange={(next) => {
           if (!next) handleMetadataClose();
         }}
