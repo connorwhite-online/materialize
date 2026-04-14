@@ -239,10 +239,11 @@ export function HomeBottomBar() {
           )}
         </AnimatePresence>
 
-        {/* Main row — always visible. h-10 + outer p-1 = 48px collapsed total. */}
+        {/* Main row — always visible. 1px border + 4px p-1 + 38px form +
+            4px p-1 + 1px border = 48px collapsed total. */}
         <form
           onSubmit={handleSearchSubmit}
-          className="flex h-10 items-center gap-1 px-1"
+          className="flex h-[38px] items-center gap-1 px-1"
         >
           <input
             ref={searchInputRef}
