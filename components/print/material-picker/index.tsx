@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MaterialStep } from "./material-step";
 import { FinishStep } from "./finish-step";
 import { VendorStep } from "./vendor-step";
@@ -47,6 +47,20 @@ export function MaterialPicker({
   // a later user "Back" out of the finish step would get rubber-
   // banded right back in by the effect re-running.
   const preselectFiredRef = useRef(false);
+
+  // How many finish groups does the currently-selected material
+  // have quotes for? If it's 1, FinishStep auto-advances straight
+  // to vendor — and we need the vendor step's Back button to pop
+  // two steps instead of one, otherwise the user lands on finish,
+  // gets re-auto-advanced, and rubber-bands right back to vendor.
+  const finishGroupCountForMaterial = useMemo(() => {
+    if (!materialId) return 0;
+    const ids = new Set<string>();
+    for (const q of quotes) {
+      if (q.materialId === materialId) ids.add(q.finishGroupId);
+    }
+    return ids.size;
+  }, [quotes, materialId]);
 
   useEffect(() => {
     // eslint-disable-next-line no-console
@@ -111,6 +125,15 @@ export function MaterialPicker({
         selectedQuote={selectedQuote}
         onPick={onSelectQuote}
         onBack={() => {
+          // Single-finish materials skipped the finish step on the
+          // way in — pop back to material so the user isn't bounced
+          // right back here by FinishStep's auto-advance effect.
+          if (finishGroupCountForMaterial <= 1) {
+            setStep("material");
+            setMaterialId(null);
+            setFinishGroupId(null);
+            return;
+          }
           setStep("finish");
           setFinishGroupId(null);
         }}
