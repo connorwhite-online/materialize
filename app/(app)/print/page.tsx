@@ -98,10 +98,6 @@ export default async function PrintPage(props: {
   const material = materialId
     ? (await getCraftCloudCatalog()).materialById.get(materialId) ?? null
     : null;
-  console.log("[/print] preselect resolve", {
-    materialId,
-    resolved: material ? { id: material.id, name: material.name } : null,
-  });
 
   const { userId } = await auth();
   const tiles = userId ? await loadLibraryTiles(userId) : [];

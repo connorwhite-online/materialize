@@ -25,10 +25,6 @@ export default async function PrintConfigPage(props: {
   // effect; exact-id match is reliable since it came from the
   // same catalog the quote route enriches against.
   const { material: preselectMaterialId } = await props.searchParams;
-  console.log("[/print/[fileAssetId]] preselect param", {
-    fileAssetId,
-    preselectMaterialId,
-  });
 
   const [asset] = await db
     .select({

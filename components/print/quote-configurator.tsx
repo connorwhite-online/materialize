@@ -99,13 +99,6 @@ export function QuoteConfigurator({
 }: QuoteConfiguratorProps) {
   const isDraft = !!draftMode;
 
-  // eslint-disable-next-line no-console
-  console.log("[QuoteConfigurator] mount", {
-    preselectMaterialId,
-    fileAssetId,
-    isDraft,
-  });
-
   const [loadingPhase, setLoadingPhase] = useState<LoadingPhase | null>(
     // In draft mode the model is already on CraftCloud — skip straight
     // to quoting instead of sitting on the upload spinner.
@@ -248,6 +241,24 @@ export function QuoteConfigurator({
   // with half-finished polling from the old request.
   const pollAbortRef = useRef<AbortController | null>(null);
 
+  // Active material scope for the CraftCloud price request. Starts
+  // as the preselectMaterialId (from /materials/[slug] → Print with
+  // X); a callback from MaterialPicker clears it when the user
+  // navigates back to the full material grid, which then refetches
+  // the unscoped quote set.
+  const [scopedMaterialId, setScopedMaterialId] = useState<string | null>(
+    preselectMaterialId ?? null
+  );
+  useEffect(() => {
+    // If the parent passes a new preselect on a subsequent render
+    // (rare — really only from a Link prefetch rehydration) adopt
+    // it as the new scope.
+    if (preselectMaterialId && preselectMaterialId !== scopedMaterialId) {
+      setScopedMaterialId(preselectMaterialId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preselectMaterialId]);
+
   const fetchQuotes = useCallback(async () => {
     // Cancel any in-flight polling loop from a previous invocation.
     pollAbortRef.current?.abort();
@@ -275,6 +286,7 @@ export function QuoteConfigurator({
           currency: region.currency,
           countryCode: region.code,
           quantity,
+          ...(scopedMaterialId ? { materialId: scopedMaterialId } : {}),
         }),
         signal,
       });
@@ -341,7 +353,14 @@ export function QuoteConfigurator({
       }
       throw err;
     }
-  }, [fileAssetId, draftMode, quantity, region.currency, region.code]);
+  }, [
+    fileAssetId,
+    draftMode,
+    quantity,
+    region.currency,
+    region.code,
+    scopedMaterialId,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -696,6 +715,7 @@ export function QuoteConfigurator({
             selectedQuote={selectedQuote}
             onSelectQuote={setSelectedQuote}
             preselectMaterialId={preselectMaterialId}
+            onClearPreselectScope={() => setScopedMaterialId(null)}
           />
         </div>
 

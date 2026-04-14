@@ -30,6 +30,13 @@ interface MaterialPickerProps {
    * id here, so an exact match is reliable.
    */
   preselectMaterialId?: string;
+  /**
+   * Fires when the user navigates back to the full material grid
+   * after arriving via a preselect. Lets the parent drop its
+   * scoped-material filter and refetch the unscoped quote set so
+   * the grid populates with every material.
+   */
+  onClearPreselectScope?: () => void;
 }
 
 export function MaterialPicker({
@@ -39,6 +46,7 @@ export function MaterialPicker({
   selectedQuote,
   onSelectQuote,
   preselectMaterialId,
+  onClearPreselectScope,
 }: MaterialPickerProps) {
   const [step, setStep] = useState<PickerStep>("material");
   const [materialId, setMaterialId] = useState<string | null>(null);
@@ -63,18 +71,6 @@ export function MaterialPicker({
   }, [quotes, materialId]);
 
   useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.log("[MaterialPicker] preselect effect", {
-      preselectMaterialId,
-      quotesLength: quotes.length,
-      firstFewQuoteMaterialIds: quotes
-        .slice(0, 5)
-        .map((q) => q.materialId),
-      anyExactMatch: preselectMaterialId
-        ? quotes.some((q) => q.materialId === preselectMaterialId)
-        : null,
-      preselectAlreadyFired: preselectFiredRef.current,
-    });
     if (!preselectMaterialId) return;
     if (preselectFiredRef.current) return;
     const hit = quotes.find((q) => q.materialId === preselectMaterialId);
@@ -110,6 +106,10 @@ export function MaterialPicker({
         onBack={() => {
           setStep("material");
           setMaterialId(null);
+          // Drop the parent's preselect scope so the refetched
+          // quote set includes every material, not just the one
+          // the user came in with.
+          onClearPreselectScope?.();
         }}
       />
     );
@@ -132,6 +132,7 @@ export function MaterialPicker({
             setStep("material");
             setMaterialId(null);
             setFinishGroupId(null);
+            onClearPreselectScope?.();
             return;
           }
           setStep("finish");

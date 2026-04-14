@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { fileAssets, files } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { createPriceRequest } from "@/lib/craftcloud/client";
+import { getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
 import { quotesRequestSchema } from "@/lib/validations/print";
 import { logError } from "@/lib/logger";
 
@@ -26,7 +27,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const { currency, countryCode, quantity } = parsed.data;
+    const { currency, countryCode, quantity, materialId: scopeMaterialId } =
+      parsed.data;
 
     // Resolve a CraftCloud modelId from either an owned file asset
     // (authed library path) or a direct modelId (anon draft path —
@@ -68,10 +70,32 @@ export async function POST(request: Request) {
       modelId = parsed.data.modelId;
     }
 
+    // If the client passed a material-scope hint, expand it to the
+    // full set of materialConfigIds for that material and forward
+    // them to CraftCloud. This narrows the vendor poll so we only
+    // hear from vendors that actually offer configs of this
+    // material — much faster first paint when coming from a
+    // /materials/[slug] "Print with X" entry.
+    let materialConfigIds: string[] | undefined;
+    if (scopeMaterialId) {
+      const catalog = await getCraftCloudCatalog();
+      const material = catalog.materialById.get(scopeMaterialId);
+      if (material) {
+        const ids: string[] = [];
+        for (const finishGroup of material.finishGroups ?? []) {
+          for (const config of finishGroup.materialConfigs ?? []) {
+            ids.push(config.id);
+          }
+        }
+        materialConfigIds = ids.length > 0 ? ids : undefined;
+      }
+    }
+
     const { priceId } = await createPriceRequest({
       currency,
       countryCode,
       models: [{ modelId, quantity }],
+      materialConfigIds,
     });
 
     console.log("[quotes] start", {
@@ -80,6 +104,8 @@ export async function POST(request: Request) {
       currency,
       countryCode,
       quantity,
+      scopeMaterialId: scopeMaterialId ?? null,
+      scopedConfigCount: materialConfigIds?.length ?? null,
     });
 
     return Response.json({ priceId });

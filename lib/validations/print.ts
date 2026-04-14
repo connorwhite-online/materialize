@@ -8,6 +8,11 @@ const quotesCommonSchema = z.object({
   currency: z.enum(CURRENCIES).default("USD"),
   countryCode: z.string().length(2).default("US"),
   quantity: z.coerce.number().int().min(1).max(100).default(1),
+  // Scope the CraftCloud price request to a specific material.
+  // When present, the route expands it to the material's config
+  // ids and passes them as materialConfigIds, which narrows the
+  // vendor poll (fewer round-trips, much faster first paint).
+  materialId: z.string().optional(),
 });
 
 // Two ways to ask for quotes:
