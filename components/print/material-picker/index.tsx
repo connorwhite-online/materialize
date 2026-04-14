@@ -6,8 +6,19 @@ import { FinishStep } from "./finish-step";
 import { VendorStep } from "./vendor-step";
 import type { EnrichedQuote, PickerStep } from "./types";
 
+interface ShippingLite {
+  vendorId: string;
+  price: number;
+}
+
 interface MaterialPickerProps {
   quotes: EnrichedQuote[];
+  /**
+   * Shipping options returned by the same /v5/price call as the
+   * quotes. The vendor step uses these to compute a per-vendor
+   * "cheapest shipping" badge under each price.
+   */
+  shipping: ShippingLite[];
   /** True while the /v5/price request is still in flight. */
   quotesLoading: boolean;
   selectedQuote: EnrichedQuote | null;
@@ -22,6 +33,7 @@ interface MaterialPickerProps {
 
 export function MaterialPicker({
   quotes,
+  shipping,
   quotesLoading,
   selectedQuote,
   onSelectQuote,
@@ -75,6 +87,7 @@ export function MaterialPicker({
     return (
       <VendorStep
         quotes={quotes}
+        shipping={shipping}
         materialId={materialId}
         finishGroupId={finishGroupId}
         selectedQuote={selectedQuote}

@@ -29,6 +29,7 @@ export interface EnrichedQuote {
   materialImage: string | null;
   finishGroupId: string;
   finishGroupName: string;
+  finishGroupImage: string | null;
   color: string;
   colorCode: string;
   configName: string;

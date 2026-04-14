@@ -135,6 +135,7 @@ export async function POST(request: Request) {
           materialImage: entry.material.featuredImage ?? null,
           finishGroupId: entry.finishGroup.id,
           finishGroupName: entry.finishGroup.name,
+          finishGroupImage: entry.finishGroup.featuredImage ?? null,
           color: entry.config.color,
           colorCode: entry.config.colorCode,
           configName: entry.config.name,

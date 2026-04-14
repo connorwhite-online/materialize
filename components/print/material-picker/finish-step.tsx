@@ -14,6 +14,7 @@ interface FinishStepProps {
 interface FinishCard {
   finishGroupId: string;
   finishGroupName: string;
+  finishGroupImage: string | null;
   cheapest: number;
   configCount: number;
   colorCount: number;
@@ -42,6 +43,7 @@ export function FinishStep({
         byFinish.set(q.finishGroupId, {
           finishGroupId: q.finishGroupId,
           finishGroupName: q.finishGroupName,
+          finishGroupImage: q.finishGroupImage,
           cheapest: q.price,
           configCount: 1,
           colorCount: 0,
@@ -58,6 +60,7 @@ export function FinishStep({
       .map((c) => ({
         finishGroupId: c.finishGroupId,
         finishGroupName: c.finishGroupName,
+        finishGroupImage: c.finishGroupImage,
         cheapest: c.cheapest,
         configCount: c.configCount,
         colorCount: c.colors.size,
@@ -88,26 +91,46 @@ export function FinishStep({
             key={card.finishGroupId}
             type="button"
             onClick={() => onPick(card.finishGroupId)}
-            className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-primary/40"
+            className="flex items-start gap-3 rounded-xl border border-border bg-card p-3 text-left transition-colors hover:border-primary/40"
           >
-            <div className="min-w-0">
-              <p className="text-sm font-medium">{card.finishGroupName}</p>
-              <p className="mt-0.5 text-[11px] text-muted-foreground">
-                {card.colorCount}{" "}
-                {card.colorCount === 1 ? "color" : "colors"} ·{" "}
-                {card.configCount}{" "}
-                {card.configCount === 1 ? "option" : "options"}
-              </p>
+            <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border bg-muted/60">
+              {card.finishGroupImage && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={resolveCatalogImage(card.finishGroupImage)}
+                  alt=""
+                  loading="lazy"
+                  className="h-full w-full object-cover"
+                />
+              )}
             </div>
-            <div className="shrink-0 text-right">
-              <p className="text-[10px] text-muted-foreground">from</p>
-              <p className="text-sm font-medium tabular-nums">
-                ${card.cheapest.toFixed(2)}
-              </p>
+            <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium">
+                  {card.finishGroupName}
+                </p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  {card.colorCount}{" "}
+                  {card.colorCount === 1 ? "color" : "colors"} ·{" "}
+                  {card.configCount}{" "}
+                  {card.configCount === 1 ? "option" : "options"}
+                </p>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="text-[10px] text-muted-foreground">from</p>
+                <p className="text-sm font-medium tabular-nums">
+                  ${card.cheapest.toFixed(2)}
+                </p>
+              </div>
             </div>
           </button>
         ))}
       </div>
     </div>
   );
+}
+
+function resolveCatalogImage(path: string): string {
+  if (path.startsWith("http")) return path;
+  return `https://res.cloudinary.com/all3dp/image/upload/w_200,q_auto,f_auto/${path}`;
 }

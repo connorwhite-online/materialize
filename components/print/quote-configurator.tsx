@@ -456,6 +456,7 @@ export function QuoteConfigurator({
 
           <MaterialPicker
             quotes={quotes}
+            shipping={shipping}
             quotesLoading={loadingPhase === "quoting"}
             selectedQuote={selectedQuote}
             onSelectQuote={setSelectedQuote}
