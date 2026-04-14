@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Factory } from "lucide-react";
+import { Factory } from "@/components/icons/factory";
 import { ChevronRight } from "@/components/icons/chevron-right";
 import type { EnrichedQuote } from "./types";
 
