@@ -2,7 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { files, fileAssets, purchases } from "@/lib/db/schema";
 import { eq, and, desc, inArray } from "drizzle-orm";
-import { getMaterialById } from "@/lib/materials";
+import { getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
 import { PrintPageContent } from "@/components/print/print-page-content";
 
 interface LibraryTile {
@@ -91,7 +91,13 @@ export default async function PrintPage(props: {
 }) {
   const searchParams = await props.searchParams;
   const materialId = searchParams.material;
-  const material = materialId ? getMaterialById(materialId) : null;
+  // The "Print with X" link on /materials/[slug] passes CraftCloud's
+  // real material id, so we resolve it against the cached catalog
+  // for the headline and then forward the same id downstream for
+  // the material-step auto-skip.
+  const material = materialId
+    ? (await getCraftCloudCatalog()).materialById.get(materialId) ?? null
+    : null;
 
   const { userId } = await auth();
   const tiles = userId ? await loadLibraryTiles(userId) : [];
@@ -108,7 +114,7 @@ export default async function PrintPage(props: {
       }
       tiles={tiles}
       linkSuffix={linkSuffix}
-      preselectMaterialName={material?.name}
+      preselectMaterialId={material?.id}
     />
   );
 }

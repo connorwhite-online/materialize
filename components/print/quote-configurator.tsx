@@ -77,12 +77,12 @@ interface QuoteConfiguratorProps {
     triangleCount?: number;
   } | null;
   /**
-   * Material-name hint from /materials/[slug] → "Print with X".
-   * Passed straight through to MaterialPicker, which fuzzy-matches
-   * it against quotes to auto-advance the user past the material
-   * step. See MaterialPicker.findMaterialByNameHint.
+   * CraftCloud material id from /materials/[slug] → "Print with X".
+   * Passed straight through to MaterialPicker, which exact-matches
+   * it against the returned quotes to auto-advance past the
+   * material step.
    */
-  preselectMaterialName?: string;
+  preselectMaterialId?: string;
 }
 
 type CheckoutStep = "configure" | "address" | "processing";
@@ -95,7 +95,7 @@ export function QuoteConfigurator({
   format,
   hasCachedModel,
   geometryData,
-  preselectMaterialName,
+  preselectMaterialId,
 }: QuoteConfiguratorProps) {
   const isDraft = !!draftMode;
 
@@ -688,7 +688,7 @@ export function QuoteConfigurator({
             quotesLoading={loadingPhase === "quoting"}
             selectedQuote={selectedQuote}
             onSelectQuote={setSelectedQuote}
-            preselectMaterialName={preselectMaterialName}
+            preselectMaterialId={preselectMaterialId}
           />
         </div>
 

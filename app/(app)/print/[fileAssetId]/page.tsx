@@ -20,16 +20,11 @@ export default async function PrintConfigPage(props: {
   searchParams: Promise<{ material?: string }>;
 }) {
   const { fileAssetId } = await props.params;
-  // Resolve the query-param local material id → name, which is the
-  // loose hint MaterialPicker's fuzzy matcher expects. Our curated
-  // material ids (`pla-white`, `titanium-grade-5`, …) don't align
-  // with CraftCloud's internal ids, so passing the id through was
-  // a silent no-op.
-  const { material: preselectLocalId } = await props.searchParams;
-  const preselectMaterial = preselectLocalId
-    ? getMaterialById(preselectLocalId)
-    : null;
-  const preselectMaterialName = preselectMaterial?.name;
+  // CraftCloud material id threaded from /materials/[slug]'s
+  // "Print with X" link. Forwarded to MaterialPicker's preselect
+  // effect; exact-id match is reliable since it came from the
+  // same catalog the quote route enriches against.
+  const { material: preselectMaterialId } = await props.searchParams;
 
   const [asset] = await db
     .select({
@@ -93,7 +88,7 @@ export default async function PrintConfigPage(props: {
           format={asset.format}
           hasCachedModel={!!asset.craftCloudModelId}
           geometryData={asset.geometryData}
-          preselectMaterialName={preselectMaterialName}
+          preselectMaterialId={preselectMaterialId}
         />
       </div>
     </div>
