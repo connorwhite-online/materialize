@@ -59,6 +59,7 @@ export async function GET(request: Request) {
           colorCode: entry.config.colorCode,
           configName: entry.config.name,
           vendorName: provider?.name ?? q.vendorId,
+          vendorCountryCode: provider?.countryCode ?? null,
         };
       })
       .filter((q): q is NonNullable<typeof q> => q !== null);

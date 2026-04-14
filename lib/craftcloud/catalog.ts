@@ -97,6 +97,14 @@ export interface Provider {
   vendorId: string;
   name: string;
   description?: string;
+  /**
+   * ISO-3166-1 alpha-2 country code of the vendor's headquarters /
+   * primary manufacturing location. Optional because CraftCloud
+   * doesn't publish it for every provider; when present we render
+   * it below the vendor name on the quote card so users can see
+   * where the part is shipping from.
+   */
+  countryCode?: string;
 }
 
 /** Thin lookup indexes built once per catalog fetch. */
@@ -214,6 +222,12 @@ export async function getCraftCloudCatalog(): Promise<CraftCloudCatalog> {
 export async function getProviderIndex(): Promise<Map<string, Provider>> {
   if (cachedProviders) return cachedProviders;
   const list = await fetchProvidersJson();
+  // One-time visibility into what CraftCloud actually returns per
+  // provider — lets us confirm the country field name on first
+  // cold load instead of guessing. Fires at most once per process.
+  if (list.length > 0) {
+    console.log("[catalog] first provider fields", Object.keys(list[0]));
+  }
   cachedProviders = new Map(list.map((p) => [p.vendorId, p]));
   return cachedProviders;
 }

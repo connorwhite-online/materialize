@@ -10,6 +10,13 @@ export interface EnrichedQuote {
   quoteId: string;
   vendorId: string;
   vendorName: string;
+  /**
+   * ISO-3166-1 alpha-2 country code of the vendor. Null when
+   * CraftCloud's provider directory doesn't publish one for a
+   * given vendor — the vendor card then just hides the country
+   * line.
+   */
+  vendorCountryCode: string | null;
   modelId: string;
   materialConfigId: string;
   printingMethodId?: string | null;

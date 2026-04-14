@@ -11,6 +11,22 @@ interface ShippingLite {
   price: number;
 }
 
+/**
+ * Resolve a country code to a human-readable name via the
+ * browser's Intl catalog. Falls back to the raw code if the
+ * runtime doesn't support DisplayNames (very old browsers) or
+ * the code isn't recognized.
+ */
+function countryNameFromCode(code: string | null | undefined): string | null {
+  if (!code) return null;
+  try {
+    const dn = new Intl.DisplayNames(["en"], { type: "region" });
+    return dn.of(code.toUpperCase()) ?? code;
+  } catch {
+    return code;
+  }
+}
+
 interface VendorStepProps {
   quotes: EnrichedQuote[];
   shipping: ShippingLite[];
@@ -173,6 +189,15 @@ export function VendorStep({
                   <p className="truncate text-sm font-medium">
                     {quote.vendorName}
                   </p>
+                  {(() => {
+                    const country = countryNameFromCode(quote.vendorCountryCode);
+                    if (!country) return null;
+                    return (
+                      <p className="truncate text-[11px] text-muted-foreground">
+                        {country}
+                      </p>
+                    );
+                  })()}
                   <p className="mt-0.5 text-[11px] text-muted-foreground">
                     {quote.productionTimeFast}-{quote.productionTimeSlow} day
                     production
