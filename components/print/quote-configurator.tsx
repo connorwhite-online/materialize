@@ -1,16 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { MaterialPicker } from "./material-picker";
 import type { EnrichedQuote } from "./material-picker/types";
 import { PriceDisplay } from "./price-display";
 import { ShippingAddressForm } from "./shipping-address-form";
 import { createPrintOrder, completePrintOrder } from "@/app/actions/print";
 import { createDraftFileForPrint } from "@/app/actions/files";
-import {
-  getPrintableMaterialSummaries,
-  type MaterialSummary,
-} from "@/app/actions/catalog";
 import { uploadToCraftCloud } from "@/lib/craftcloud/upload-client";
 import { checkGeometry } from "@/lib/geometry-checks";
 import { REGIONS, DEFAULT_REGION } from "@/lib/craftcloud/regions";
@@ -28,6 +24,25 @@ import {
 } from "@/components/ui/select";
 
 type Quote = EnrichedQuote;
+
+/** Sleep helper that rejects with an AbortError when the signal fires. */
+function wait(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+    const id = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(id);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
 
 interface ShippingOption {
   shippingId: string;
@@ -85,9 +100,6 @@ export function QuoteConfigurator({
   );
   const [error, setError] = useState<string | null>(null);
   const [quotes, setQuotes] = useState<Quote[]>([]);
-  const [materialCatalog, setMaterialCatalog] = useState<
-    MaterialSummary[] | null
-  >(null);
   const [shipping, setShipping] = useState<ShippingOption[]>([]);
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
   const [selectedShipping, setSelectedShipping] =
@@ -122,26 +134,6 @@ export function QuoteConfigurator({
   useEffect(() => {
     setCheckoutError(null);
   }, [selectedQuote, selectedShipping, quantity, regionCode]);
-
-  // Fetch the full printable material catalog up front. Lets the
-  // material picker render every compatible option immediately,
-  // with price/eta as skeletons until the /v5/price polling fills
-  // them in. Server-cached — hits once per day across all visitors.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const list = await getPrintableMaterialSummaries();
-        if (!cancelled) setMaterialCatalog(list);
-      } catch {
-        // Catalog is a pre-render hint, not a blocker — the
-        // from-quotes fallback path still works without it.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   // Resolved download URL for the model preview viewer.
   const [previewModelUrl, setPreviewModelUrl] = useState<string | null>(null);
@@ -237,36 +229,105 @@ export function QuoteConfigurator({
     });
   }, [fileAssetId, hasCachedModel, draftMode]);
 
+  // Each fetchQuotes invocation owns an AbortController stored in
+  // this ref. A new invocation aborts the previous one so a stale
+  // region/quantity change can't clobber the user's current view
+  // with half-finished polling from the old request.
+  const pollAbortRef = useRef<AbortController | null>(null);
+
   const fetchQuotes = useCallback(async () => {
+    // Cancel any in-flight polling loop from a previous invocation.
+    pollAbortRef.current?.abort();
+    const controller = new AbortController();
+    pollAbortRef.current = controller;
+    const { signal } = controller;
+
     setLoadingPhase("quoting");
     setError(null);
-
-    const res = await fetch("/api/craftcloud/quotes", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...(draftMode
-          ? { modelId: draftMode.modelId }
-          : { fileAssetId }),
-        currency: region.currency,
-        countryCode: region.code,
-        quantity,
-      }),
-    });
-
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.error || "Failed to fetch quotes");
-    }
-
-    const data = await res.json();
-    setQuotes(data.quotes || []);
-    setShipping(data.shipping || []);
-    // Region switch: clear the selection because a quoteId from the
-    // previous region is no longer valid against the new quote set.
+    // Region/quantity switch: clear selection since the existing
+    // quoteId is no longer valid against the new quote set.
     setSelectedQuote(null);
     setSelectedShipping(null);
-    setLoadingPhase("done");
+    // Don't wipe the existing cards — they'll repopulate as new
+    // poll snapshots come in, and keeping them avoids a flash of
+    // empty state during a region change.
+
+    try {
+      // 1. Start the price request and get a priceId back.
+      const startRes = await fetch("/api/craftcloud/quotes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...(draftMode ? { modelId: draftMode.modelId } : { fileAssetId }),
+          currency: region.currency,
+          countryCode: region.code,
+          quantity,
+        }),
+        signal,
+      });
+      if (!startRes.ok) {
+        const data = await startRes.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to start quote request");
+      }
+      const { priceId } = (await startRes.json()) as { priceId: string };
+
+      // 2. Poll snapshot endpoint until CraftCloud says it's done
+      // or we hit the ceiling. Each snapshot replaces the quotes
+      // state — the endpoint returns the full growing set, so no
+      // client-side merging is needed.
+      const POLL_INTERVAL_MS = 1500;
+      const HARD_CEILING_MS = 90_000;
+      const started = Date.now();
+      let allComplete = false;
+      let hadFirstPaint = false;
+
+      while (!signal.aborted && !allComplete) {
+        const elapsed = Date.now() - started;
+        if (elapsed > HARD_CEILING_MS) break;
+
+        const pollRes = await fetch(
+          `/api/craftcloud/quotes/poll?priceId=${encodeURIComponent(priceId)}`,
+          { signal }
+        );
+        if (signal.aborted) return;
+        if (!pollRes.ok) {
+          // Transient poll errors shouldn't kill the loop — retry
+          // after the interval unless the whole thing's aborted.
+          await wait(POLL_INTERVAL_MS, signal);
+          continue;
+        }
+        const snapshot = (await pollRes.json()) as {
+          quotes: Quote[];
+          shipping: ShippingOption[];
+          allComplete: boolean;
+        };
+
+        setQuotes(snapshot.quotes ?? []);
+        setShipping(snapshot.shipping ?? []);
+        allComplete = snapshot.allComplete;
+
+        // Flip loadingPhase to "done" as soon as we have a usable
+        // snapshot. From there the user can interact with the
+        // priced cards even while more vendors trickle in — unpriced
+        // cards still pulse as skeletons because `quotesLoading`
+        // stays tied to `hadFirstPaint` + `allComplete`.
+        if (!hadFirstPaint && (snapshot.quotes?.length ?? 0) > 0) {
+          hadFirstPaint = true;
+        }
+
+        if (allComplete) break;
+        await wait(POLL_INTERVAL_MS, signal);
+      }
+
+      if (!signal.aborted) {
+        setLoadingPhase("done");
+      }
+    } catch (err) {
+      if (signal.aborted || (err as { name?: string }).name === "AbortError") {
+        return;
+      }
+      throw err;
+    }
   }, [fileAssetId, draftMode, quantity, region.currency, region.code]);
 
   useEffect(() => {
@@ -288,6 +349,7 @@ export function QuoteConfigurator({
     init();
     return () => {
       cancelled = true;
+      pollAbortRef.current?.abort();
     };
   }, [ensureModelUploaded, fetchQuotes]);
 
@@ -620,7 +682,6 @@ export function QuoteConfigurator({
             selectedQuote={selectedQuote}
             onSelectQuote={setSelectedQuote}
             preselectMaterialId={preselectMaterialId}
-            catalog={materialCatalog}
           />
         </div>
 
