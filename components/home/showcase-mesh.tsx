@@ -28,20 +28,17 @@ export function ShowcaseMesh({ target, dragVelocityRef }: ShowcaseMeshProps) {
     meshRef.current.rotation.y += delta * 0.15;
     meshRef.current.rotation.x += delta * 0.05;
 
-    // Drag velocity → stretch horizontally in swipe direction, flatten height
-    // Apply a curve (pow 1.8) so small gestures barely distort and only
-    // strong flicks show full squash/stretch.
-    const dragVel = dragVelocityRef.current;
-    const signedCurved = Math.sign(dragVel) * Math.pow(Math.abs(dragVel), 1.8);
-    const absCurved = Math.abs(signedCurved);
-    const stretchX = 1 + absCurved * 0.08;
-    const squashY = 1 - absCurved * 0.06;
-    const squashZ = 1 - absCurved * 0.02;
+    // Spring-tensioned drag: dragVelocityRef is already a tanh-shaped
+    // displacement in [-1, 1] driven by total finger offset, so we don't
+    // re-curve it here — the asymptote IS the increasing resistance.
+    const tension = dragVelocityRef.current;
+    const absT = Math.abs(tension);
+    const stretchX = 1 + absT * 0.07;
+    const squashY = 1 - absT * 0.05;
+    const squashZ = 1 - absT * 0.02;
 
     // Smooth toward target scale. High coefficient so the mesh catches
-    // up to brief high-velocity bursts before the velocity decays away —
-    // with a slower lerp, fast scrolls would only half-deform before
-    // recovering, which reads as a sluggish swell instead of a snap.
+    // up to brief high-velocity bursts before the velocity decays away.
     const scaleLerp = 1 - Math.exp(-delta * 28);
     groupRef.current.scale.x = THREE.MathUtils.lerp(
       groupRef.current.scale.x,
@@ -59,16 +56,15 @@ export function ShowcaseMesh({ target, dragVelocityRef }: ShowcaseMeshProps) {
       scaleLerp
     );
 
-    // Slight tilt in drag direction (also curved for less sensitivity)
-    const tiltTarget = signedCurved * 0.06;
+    const tiltTarget = tension * 0.06;
     groupRef.current.rotation.z = THREE.MathUtils.lerp(
       groupRef.current.rotation.z,
       tiltTarget,
       scaleLerp
     );
 
-    // Sway in the drag direction (curved)
-    const swayTarget = signedCurved * 0.2;
+    // Sway in the drag direction — follows finger with spring resistance.
+    const swayTarget = tension * 0.18;
     groupRef.current.position.x = THREE.MathUtils.lerp(
       groupRef.current.position.x,
       swayTarget,

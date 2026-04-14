@@ -7,7 +7,7 @@ import * as THREE from "three";
 const MAX_PARTICLES = 800;
 const MIN_PARTICLES = 60;
 const PARTICLE_LIFETIME = 0.55;
-const BASE_RADIUS = 1.2;
+const BASE_RADIUS = 1.30;
 
 interface ShowcaseParticlesProps {
   burstKey: number;
@@ -56,7 +56,7 @@ export function ShowcaseParticles({
     );
 
     // Directional push strength scales with intensity
-    const directionalPush = 0.55 + intensity * 0.8;
+    const directionalPush = 0.8 + intensity * 1.05;
 
     for (let i = 0; i < MAX_PARTICLES; i++) {
       const p = particles[i];
@@ -82,7 +82,7 @@ export function ShowcaseParticles({
       const outX = Math.sin(phi) * Math.cos(theta);
       const outY = Math.sin(phi) * Math.sin(theta);
       const outZ = Math.cos(phi);
-      const baseSpeed = 0.5 + Math.random() * 0.55;
+      const baseSpeed = 0.75 + Math.random() * 0.7;
 
       // Directional push in the swipe direction.
       const directionalWeight = Math.random() * Math.random();
@@ -128,8 +128,9 @@ export function ShowcaseParticles({
 
       p.age += delta;
       p.position.addScaledVector(p.velocity, delta);
-      // Stronger drag so particles decelerate quickly after the burst
-      p.velocity.multiplyScalar(0.94);
+      // Lighter drag so particles carry their burst velocity further across
+      // the same lifetime — reads as more motion without lingering longer.
+      p.velocity.multiplyScalar(0.968);
 
       p.rotation.x += p.rotationSpeed.x * delta;
       p.rotation.y += p.rotationSpeed.y * delta;
