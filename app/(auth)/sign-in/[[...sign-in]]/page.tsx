@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSignIn } from "@clerk/nextjs/legacy";
-import { useRouter } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +21,20 @@ type CodeStrategy = "email_code" | "phone_code";
 
 export default function SignInPage() {
   const { isLoaded, signIn, setActive } = useSignIn();
+  const { isLoaded: authLoaded, isSignedIn } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Users can land here already signed in — e.g. bouncing back from
+  // Stripe Checkout after finishing the inline OTP signup earlier in
+  // the flow. Forward them instead of showing a dead form that just
+  // says "you're already signed in".
+  useEffect(() => {
+    if (authLoaded && isSignedIn) {
+      const redirectUrl = searchParams.get("redirect_url") ?? "/dashboard";
+      router.replace(redirectUrl);
+    }
+  }, [authLoaded, isSignedIn, router, searchParams]);
 
   const [identifier, setIdentifier] = useState("");
   const [code, setCode] = useState("");

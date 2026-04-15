@@ -168,6 +168,12 @@ export const printOrders = pgTable("print_orders", {
   stripeSessionId: text("stripe_session_id"),
   totalPrice: integer("total_price").notNull(), // cents
   serviceFee: integer("service_fee").notNull(), // cents
+  // Breakdown of totalPrice — persisted so Stripe Checkout can show
+  // print/shipping/qty as distinct line items instead of one lump.
+  // Nullable for rows created before the breakdown columns existed.
+  materialSubtotal: integer("material_subtotal"), // cents, unit price
+  shippingSubtotal: integer("shipping_subtotal"), // cents
+  quantity: integer("quantity"),
   material: text("material"),
   vendor: text("vendor"),
   status: printOrderStatusEnum("status").notNull().default("quoting"),

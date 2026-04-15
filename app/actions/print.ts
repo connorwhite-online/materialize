@@ -27,10 +27,11 @@
 
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-import { printOrders } from "@/lib/db/schema";
+import { printOrders, fileAssets, files } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { createCart, getOrderStatus } from "@/lib/craftcloud/client";
+import { findMaterialConfig, findProvider } from "@/lib/craftcloud/catalog";
 import { getStripe } from "@/lib/stripe";
 import { printOrderSchema } from "@/lib/validations/print";
 import { checkoutAddressSchema } from "@/lib/validations/address";
@@ -90,9 +91,9 @@ export async function createPrintOrder(params: {
 
     const data = parsed.data;
 
-    const totalPrice = Math.round(
-      (data.materialPrice * data.quantity + data.shippingPrice) * 100
-    );
+    const materialSubtotal = Math.round(data.materialPrice * 100);
+    const shippingSubtotal = Math.round(data.shippingPrice * 100);
+    const totalPrice = materialSubtotal * data.quantity + shippingSubtotal;
     const serviceFee = Math.round(totalPrice * SERVICE_FEE_RATE);
 
     // Create Craft Cloud cart. The v5 API only wants { id: quoteId }
@@ -114,6 +115,9 @@ export async function createPrintOrder(params: {
         craftCloudCartId: cart.cartId,
         totalPrice,
         serviceFee,
+        materialSubtotal,
+        shippingSubtotal,
+        quantity: data.quantity,
         material: data.materialConfigId,
         vendor: data.vendorId,
         status: "cart_created",
@@ -183,6 +187,153 @@ export async function checkOrderStatus(
   }
 }
 
+/**
+ * Builds the Stripe Checkout session for a printOrders row. Shared
+ * between the initial checkout (completePrintOrder) and the
+ * Resume-cart path (resumePrintOrder), so both flows emit the same
+ * success/cancel URLs and the same line-item shape.
+ *
+ * The success + cancel URLs intentionally route through the
+ * /dashboard/orders redirector (not a deep link to a single order)
+ * so users whose Clerk session cookie is still settling after the
+ * inline OTP signup don't get bounced to /sign-in by middleware.
+ */
+async function createStripeSessionForOrder(
+  order: typeof printOrders.$inferSelect,
+  opts: { email: string; isAnonFlow: boolean }
+): Promise<{ id: string; url: string } | { error: string }> {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+
+  // Resolve human-readable names for the Stripe line items. The
+  // printOrders row only stores UUIDs (materialConfigId, vendorId)
+  // and a fileAssetId — without this join the checkout page just
+  // shows "3D Print Order — 4f0d1d2b-..." which means nothing to
+  // the buyer. Catalog lookups are 24h-cached, file join is cheap.
+  const [assetRow] = await db
+    .select({
+      fileName: files.name,
+      originalFilename: fileAssets.originalFilename,
+    })
+    .from(fileAssets)
+    .leftJoin(files, eq(fileAssets.fileId, files.id))
+    .where(eq(fileAssets.id, order.fileAssetId))
+    .limit(1);
+
+  const [materialEntry, provider] = await Promise.all([
+    order.material ? findMaterialConfig(order.material) : null,
+    order.vendor ? findProvider(order.vendor) : null,
+  ]);
+
+  const fileDisplayName =
+    assetRow?.fileName ??
+    assetRow?.originalFilename?.replace(/\.[^.]+$/, "") ??
+    "3D Print";
+  const materialName = materialEntry?.material.name ?? null;
+  const finishName = materialEntry?.finishGroup.name ?? null;
+  const colorName = materialEntry?.config.color ?? null;
+  const vendorName = provider?.name ?? null;
+
+  const descriptionParts = [
+    [materialName, colorName].filter(Boolean).join(" "),
+    finishName,
+    vendorName ? `by ${vendorName}` : null,
+  ].filter((s): s is string => Boolean(s && s.length));
+  const printDescription =
+    descriptionParts.length > 0 ? descriptionParts.join(" · ") : undefined;
+
+  // Prefer the persisted breakdown when present so Stripe shows the
+  // print / shipping split. Older rows (pre-breakdown columns) fall
+  // back to a single Print line item for backwards compatibility.
+  const hasBreakdown =
+    order.materialSubtotal != null &&
+    order.shippingSubtotal != null &&
+    order.quantity != null;
+
+  type LineItem = {
+    price_data: {
+      currency: string;
+      unit_amount: number;
+      product_data: { name: string; description?: string };
+    };
+    quantity: number;
+  };
+  const lineItems: LineItem[] = [];
+
+  if (hasBreakdown) {
+    lineItems.push({
+      price_data: {
+        currency: "usd",
+        unit_amount: order.materialSubtotal!,
+        product_data: {
+          name: `3D Print — ${fileDisplayName}`,
+          ...(printDescription ? { description: printDescription } : {}),
+        },
+      },
+      quantity: order.quantity!,
+    });
+    if (order.shippingSubtotal! > 0) {
+      lineItems.push({
+        price_data: {
+          currency: "usd",
+          unit_amount: order.shippingSubtotal!,
+          product_data: { name: "Shipping" },
+        },
+        quantity: 1,
+      });
+    }
+  } else {
+    lineItems.push({
+      price_data: {
+        currency: "usd",
+        unit_amount: order.totalPrice,
+        product_data: {
+          name: `3D Print — ${fileDisplayName}`,
+          ...(printDescription ? { description: printDescription } : {}),
+        },
+      },
+      quantity: 1,
+    });
+  }
+
+  lineItems.push({
+    price_data: {
+      currency: "usd",
+      unit_amount: order.serviceFee,
+      product_data: {
+        name: "Service fee",
+        description: "Materialize platform fee (3%)",
+      },
+    },
+    quantity: 1,
+  });
+
+  const stripe = getStripe();
+  const session = await stripe.checkout.sessions.create({
+    mode: "payment",
+    customer_email: opts.email,
+    line_items: lineItems,
+    payment_intent_data: {
+      metadata: { printOrderId: order.id },
+    },
+    metadata: {
+      printOrderId: order.id,
+      type: "print_order",
+    },
+    success_url: `${appUrl}/dashboard/orders?${opts.isAnonFlow ? "welcome=1&" : ""}payment=success&orderId=${order.id}`,
+    cancel_url: `${appUrl}/dashboard/orders?payment=cancelled&orderId=${order.id}`,
+  });
+
+  if (!session.url) {
+    logError("createStripeSessionForOrder.missingSessionUrl", {
+      sessionId: session.id,
+      orderId: order.id,
+    });
+    return { error: "Payment provider returned no checkout URL." };
+  }
+
+  return { id: session.id, url: session.url };
+}
+
 export async function completePrintOrder(params: {
   orderId: string;
   email: string;
@@ -244,47 +395,17 @@ export async function completePrintOrder(params: {
     if (order.status !== "cart_created") return { error: "Order already processed" };
     if (!order.craftCloudCartId) return { error: "No cart associated with order" };
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-    const totalWithFee = order.totalPrice + order.serviceFee;
-
-    // Create OUR Stripe Checkout session (not CraftCloud's)
-    const stripe = getStripe();
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      customer_email: params.email,
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-            unit_amount: totalWithFee,
-            product_data: {
-              name: `3D Print Order — ${order.material}`,
-              description: `Quantity: ${order.vendor ? `Vendor: ${order.vendor}` : ""}`,
-            },
-          },
-          quantity: 1,
-        },
-      ],
-      payment_intent_data: {
-        metadata: {
-          printOrderId: params.orderId,
-        },
-      },
-      metadata: {
-        printOrderId: params.orderId,
-        type: "print_order",
-      },
-      success_url: params.isAnonFlow
-        ? `${appUrl}/dashboard/orders?welcome=1&payment=success`
-        : `${appUrl}/dashboard/orders/${params.orderId}?payment=success`,
-      cancel_url: `${appUrl}/dashboard/orders/${params.orderId}?payment=cancelled`,
+    const sessionResult = await createStripeSessionForOrder(order, {
+      email: params.email,
+      isAnonFlow: params.isAnonFlow ?? false,
     });
+    if ("error" in sessionResult) return { error: sessionResult.error };
 
     // Store address + Stripe session for deferred CraftCloud order placement
     await db
       .update(printOrders)
       .set({
-        stripeSessionId: session.id,
+        stripeSessionId: sessionResult.id,
         shippingAddress: {
           email: params.email,
           shipping: params.shipping,
@@ -293,19 +414,76 @@ export async function completePrintOrder(params: {
       })
       .where(eq(printOrders.id, params.orderId));
 
-    if (!session.url) {
-      logError("completePrintOrder.missingSessionUrl", {
-        sessionId: session.id,
-        orderId: params.orderId,
-      });
-      return { error: "Payment provider returned no checkout URL." };
-    }
-
     revalidatePath("/dashboard/orders");
-    return { checkoutUrl: session.url };
+    return { checkoutUrl: sessionResult.url };
   } catch (error) {
     logError("completePrintOrder", error);
     return { error: "Failed to create checkout. Please try again." };
+  }
+}
+
+/**
+ * Resume a cart_created print order: reuse the existing Stripe
+ * Checkout session when it's still open (they live 24h), otherwise
+ * mint a fresh one from the stored address + line items. Used by
+ * the Resume button on the dashboard carts list so a user who
+ * bailed on Stripe lands back on payment in one click instead of
+ * re-walking the material picker.
+ */
+export async function resumePrintOrder(
+  orderId: string
+): Promise<{ checkoutUrl: string } | { error: string }> {
+  try {
+    const { userId } = await auth();
+    if (!userId) return { error: "Unauthorized" };
+
+    const [order] = await db
+      .select()
+      .from(printOrders)
+      .where(and(eq(printOrders.id, orderId), eq(printOrders.userId, userId)));
+
+    if (!order) return { error: "Order not found" };
+    if (order.status !== "cart_created") {
+      return { error: "Order already processed" };
+    }
+    if (!order.shippingAddress?.email) {
+      // Never made it past the address step — can't rebuild a
+      // session without an email. Caller should fall back to the
+      // material-picker entry point.
+      return { error: "Order has no saved address" };
+    }
+
+    const stripe = getStripe();
+
+    if (order.stripeSessionId) {
+      try {
+        const existing = await stripe.checkout.sessions.retrieve(
+          order.stripeSessionId
+        );
+        if (existing.status === "open" && existing.url) {
+          return { checkoutUrl: existing.url };
+        }
+      } catch (error) {
+        // Fall through to re-create on any retrieval failure.
+        logError("resumePrintOrder.retrieve", error);
+      }
+    }
+
+    const sessionResult = await createStripeSessionForOrder(order, {
+      email: order.shippingAddress.email,
+      isAnonFlow: false,
+    });
+    if ("error" in sessionResult) return { error: sessionResult.error };
+
+    await db
+      .update(printOrders)
+      .set({ stripeSessionId: sessionResult.id })
+      .where(eq(printOrders.id, orderId));
+
+    return { checkoutUrl: sessionResult.url };
+  } catch (error) {
+    logError("resumePrintOrder", error);
+    return { error: "Failed to resume order. Please try again." };
   }
 }
 

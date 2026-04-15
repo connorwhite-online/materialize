@@ -473,6 +473,26 @@ export async function createDraftFileForPrint(params: {
     // a file they don't own.
     const contentHash = await computeContentHash(params.storageKey);
     if (contentHash) {
+      // Self-dedupe first: if the current user already owns a file
+      // with this content hash, reuse it instead of creating a
+      // second library row. Hits most often in the anon → OTP →
+      // print flow when a returning user re-uploads a file they've
+      // already listed.
+      const [existing] = await db
+        .select({ assetId: fileAssets.id, fileSlug: files.slug })
+        .from(fileAssets)
+        .innerJoin(files, eq(fileAssets.fileId, files.id))
+        .where(
+          and(
+            eq(fileAssets.contentHash, contentHash),
+            eq(files.userId, userId)
+          )
+        )
+        .limit(1);
+      if (existing) {
+        return { fileAssetId: existing.assetId, fileSlug: existing.fileSlug };
+      }
+
       const duplicates = await db
         .select({ id: fileAssets.id })
         .from(fileAssets)

@@ -1,11 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { discardDraftOrder } from "@/app/actions/print";
+import { discardDraftOrder, resumePrintOrder } from "@/app/actions/print";
 
 interface DraftCartCardProps {
   orderId: string;
@@ -30,7 +29,11 @@ export function DraftCartCard({
 }: DraftCartCardProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [resuming, startResume] = useTransition();
 
+  // Fallback when resumePrintOrder can't reuse or rebuild a Stripe
+  // session (e.g. order has no saved address yet). Drops the user
+  // back into the quote configurator at the material step.
   const resumeHref =
     fileAssetId && materialId
       ? `/print/${fileAssetId}?material=${materialId}`
@@ -48,6 +51,18 @@ export function DraftCartCard({
         return;
       }
       router.refresh();
+    });
+  };
+
+  const handleResume = () => {
+    if (resuming) return;
+    startResume(async () => {
+      const result = await resumePrintOrder(orderId);
+      if ("error" in result) {
+        router.push(resumeHref);
+        return;
+      }
+      window.location.href = result.checkoutUrl;
     });
   };
 
@@ -84,8 +99,8 @@ export function DraftCartCard({
           >
             {pending ? "…" : "Discard"}
           </Button>
-          <Button size="sm" render={<Link href={resumeHref} />}>
-            Resume
+          <Button size="sm" onClick={handleResume} disabled={resuming}>
+            {resuming ? "…" : "Resume"}
           </Button>
         </div>
       </CardContent>
