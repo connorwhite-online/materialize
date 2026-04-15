@@ -45,43 +45,13 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { nanoid } from "nanoid";
 import { createListingSchema } from "@/lib/validations/file";
+import {
+  isIncomingAsset,
+  type IncomingAsset,
+} from "@/lib/validations/incoming-asset";
+import { deriveListingName, buildListingSlug } from "@/lib/filenames";
 import { logError } from "@/lib/logger";
 import { generateDownloadUrl, deleteObject } from "@/lib/storage";
-
-type IncomingAsset = {
-  storageKey: string;
-  originalFilename: string;
-  format: "stl" | "obj" | "3mf" | "step" | "amf";
-  fileSize: number;
-  fileUnit?: "mm" | "cm" | "in";
-};
-
-const VALID_FORMATS = new Set(["stl", "obj", "3mf", "step", "amf"]);
-const VALID_UNITS = new Set(["mm", "cm", "in"]);
-
-/**
- * Runtime type guard for an IncomingAsset row. Used to validate the
- * shape of the assetsJson payload that the client POSTs along with
- * createFileListing — we can't trust it's the type we expect just
- * because JSON.parse returned something.
- */
-function isIncomingAsset(v: unknown): v is IncomingAsset {
-  if (!v || typeof v !== "object") return false;
-  const a = v as Record<string, unknown>;
-  return (
-    typeof a.storageKey === "string" &&
-    a.storageKey.length > 0 &&
-    typeof a.originalFilename === "string" &&
-    a.originalFilename.length > 0 &&
-    typeof a.format === "string" &&
-    VALID_FORMATS.has(a.format) &&
-    typeof a.fileSize === "number" &&
-    Number.isFinite(a.fileSize) &&
-    a.fileSize > 0 &&
-    (a.fileUnit === undefined ||
-      (typeof a.fileUnit === "string" && VALID_UNITS.has(a.fileUnit)))
-  );
-}
 
 async function computeContentHash(storageKey: string): Promise<string | null> {
   try {
@@ -197,10 +167,7 @@ export async function createFileListing(formData: FormData) {
       }
     }
 
-    const slug = `${parsed.data.name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "")}-${nanoid(6)}`;
+    const slug = buildListingSlug(parsed.data.name, nanoid(6));
 
     // New files default to public so they land in browse / search. The
     // owner can flip to private any time via the file settings dialog.
@@ -471,21 +438,6 @@ export async function deleteFileListing(
 }
 
 /**
- * Derives a listing name from an uploaded filename. "carabiner.stl"
- * becomes "Carabiner", "left_bracket_v3.obj" becomes "Left Bracket V3".
- * Falls back to "Untitled Print" if the filename is pathological.
- */
-function deriveListingName(originalFilename: string): string {
-  const withoutExt = originalFilename.replace(/\.[^.]+$/, "");
-  const spaced = withoutExt.replace(/[_-]+/g, " ").trim();
-  const titled = spaced
-    .split(/\s+/)
-    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
-    .join(" ");
-  return titled || "Untitled Print";
-}
-
-/**
  * Fast-path for the "Print this file" CTA on the home bar and the
  * /print page dropzone. Persists the uploaded file as a private
  * draft — name derived from the filename, no description, no tags,
@@ -540,10 +492,7 @@ export async function createDraftFileForPrint(params: {
     }
 
     const name = deriveListingName(params.originalFilename);
-    const slug = `${name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "")}-${nanoid(6)}`;
+    const slug = buildListingSlug(name, nanoid(6));
 
     const [file] = await db
       .insert(files)
