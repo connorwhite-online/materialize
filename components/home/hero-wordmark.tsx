@@ -26,10 +26,12 @@ export function HeroWordmark({ className }: { className?: string }) {
       className={`pointer-events-none select-none flex flex-col items-center gap-1 sm:flex-row sm:items-baseline sm:justify-center sm:gap-2 ${className ?? ""}`}
       aria-label="Materialize Anything"
     >
-      {/* Materialize — PP Fuji Bold. */}
+      {/* Materialize — PP Fuji Bold. viewBox is wide enough to
+          contain the text at fontSize 180 so overflow="visible"
+          isn't bleeding glyphs past the SVG element on mobile. */}
       <svg
-        viewBox="0 0 880 200"
-        className="w-full max-w-[320px] shrink-0 sm:w-auto sm:h-[200px]"
+        viewBox="0 0 1040 200"
+        className="w-full max-w-[360px] shrink-0 sm:w-auto sm:h-[170px]"
         overflow="visible"
         textRendering="geometricPrecision"
         shapeRendering="geometricPrecision"
@@ -48,7 +50,7 @@ export function HeroWordmark({ className }: { className?: string }) {
           </linearGradient>
         </defs>
         <text
-          x="440"
+          x="520"
           y="160"
           textAnchor="middle"
           fill="url(#wordmark-display-gradient)"
@@ -65,8 +67,8 @@ export function HeroWordmark({ className }: { className?: string }) {
 
       {/* Anything — PP Playground Light. */}
       <svg
-        viewBox="0 0 700 200"
-        className="w-full max-w-[230px] shrink-0 sm:w-auto sm:h-[200px]"
+        viewBox="0 0 840 200"
+        className="w-full max-w-[280px] shrink-0 sm:w-auto sm:h-[170px]"
         overflow="visible"
         textRendering="geometricPrecision"
         shapeRendering="geometricPrecision"
@@ -85,7 +87,7 @@ export function HeroWordmark({ className }: { className?: string }) {
           </linearGradient>
         </defs>
         <text
-          x="350"
+          x="420"
           y="160"
           textAnchor="middle"
           fill="url(#wordmark-script-gradient)"
