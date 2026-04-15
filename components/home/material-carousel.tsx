@@ -42,9 +42,9 @@ export const MaterialCarousel = forwardRef<HTMLDivElement, MaterialCarouselProps
 
       const controls = animate(track.scrollLeft, targetScroll, {
         type: "spring",
-        stiffness: 360,
-        damping: 26,
-        mass: 0.9,
+        stiffness: 620,
+        damping: 32,
+        mass: 0.7,
         onUpdate: (latest) => {
           track.scrollLeft = latest;
         },
@@ -61,7 +61,7 @@ export const MaterialCarousel = forwardRef<HTMLDivElement, MaterialCarouselProps
 
         <div
           ref={trackRef}
-          className="flex items-center gap-6 overflow-x-hidden px-[50%] py-2 select-none"
+          className="flex items-center gap-10 overflow-x-hidden px-[50%] py-2 select-none"
         >
           {materials.map((material, i) => {
             const isActive = i === selectedIndex;
