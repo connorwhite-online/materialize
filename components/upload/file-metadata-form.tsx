@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
-import { createFileListing } from "@/app/actions/files";
 import { listMyCollections } from "@/app/actions/collections";
+import { runCreateListing } from "./run-create-listing";
 import { MATERIALS } from "@/lib/materials";
 import { DESIGN_TAG_OPTIONS } from "@/lib/validations/file";
 import { Button } from "@/components/ui/button";
@@ -137,102 +137,26 @@ export function FileMetadataForm({
     setSubmitError(null);
     setErrors(null);
 
-    try {
-      // 1. Get a presigned URL for R2.
-      setPhase("uploading");
-      setProgress(0);
-      const presignRes = await fetch("/api/upload/presign", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          filename: file.name,
-          contentType: "application/octet-stream",
-          fileSize: file.size,
-        }),
-      });
-      if (!presignRes.ok) {
-        const data = await presignRes.json().catch(() => ({}));
-        throw new Error(data.error || `Presign failed (${presignRes.status})`);
-      }
-      const { uploadUrl, storageKey, format: serverFormat } =
-        (await presignRes.json()) as {
-          uploadUrl: string;
-          storageKey: string;
-          format: typeof format;
-        };
+    const result = await runCreateListing({
+      file,
+      fileUnit,
+      formData,
+      selectedDesignTags,
+      recommendedMaterial,
+      sellEnabled,
+      license,
+      collectionChoice,
+      newCollectionName,
+      onProgress: setProgress,
+      onPhaseChange: setPhase,
+    });
 
-      // 2. PUT the file to R2 with progress.
-      await new Promise<void>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.upload.addEventListener("progress", (ev) => {
-          if (ev.lengthComputable) {
-            setProgress(Math.round((ev.loaded / ev.total) * 100));
-          }
-        });
-        xhr.addEventListener("load", () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            resolve();
-          } else {
-            reject(
-              new Error(
-                `R2 upload failed (${xhr.status}). Check R2 CORS settings.`
-              )
-            );
-          }
-        });
-        xhr.addEventListener("error", () =>
-          reject(new Error("Network error uploading to R2."))
-        );
-        xhr.open("PUT", uploadUrl);
-        xhr.setRequestHeader("Content-Type", "application/octet-stream");
-        xhr.send(file);
-      });
-
-      // 3. Hand off to the server action to create the file row + asset
-      //    row + optional collection link, then redirect to the new file.
-      setPhase("saving");
-      formData.set(
-        "assetsJson",
-        JSON.stringify([
-          {
-            storageKey,
-            originalFilename: file.name,
-            format: serverFormat,
-            fileSize: file.size,
-            fileUnit,
-          },
-        ])
-      );
-      for (const tag of selectedDesignTags) {
-        formData.append("designTags", tag);
-      }
-      if (!sellEnabled) {
-        formData.set("price", "0");
-        formData.set("license", "free");
-      } else {
-        formData.set("license", license);
-      }
-      if (recommendedMaterial) {
-        formData.set("recommendedMaterialId", recommendedMaterial);
-      }
-      formData.set("collectionId", collectionChoice);
-      if (collectionChoice === "__new__") {
-        formData.set("newCollectionName", newCollectionName);
-      }
-
-      const result = await createFileListing(formData);
-      // On success the action calls redirect() and we never reach here.
-      if (result && "error" in result && result.error) {
-        setErrors(
-          result.error as Record<string, string[] | undefined>
-        );
-        setPhase("idle");
-        return;
-      }
-    } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Save failed");
+    if (!result.ok) {
+      if (result.fieldErrors) setErrors(result.fieldErrors);
+      if (result.error) setSubmitError(result.error);
       setPhase("idle");
     }
+    // On success the server action redirects — we never reach here.
   };
 
   const submitLabel = (() => {

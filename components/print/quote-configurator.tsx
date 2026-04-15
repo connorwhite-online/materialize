@@ -6,8 +6,8 @@ import type { EnrichedQuote } from "./material-picker/types";
 import { PriceDisplay } from "./price-display";
 import { ShippingAddressForm } from "./shipping-address-form";
 import { pollQuotes } from "./poll-quotes";
+import { runAnonCheckout } from "./run-anon-checkout";
 import { createPrintOrder, completePrintOrder } from "@/app/actions/print";
-import { createDraftFileForPrint } from "@/app/actions/files";
 import { uploadToCraftCloud } from "@/lib/craftcloud/upload-client";
 import { checkGeometry } from "@/lib/geometry-checks";
 import { REGIONS, DEFAULT_REGION } from "@/lib/craftcloud/regions";
@@ -416,10 +416,8 @@ export function QuoteConfigurator({
     setCheckoutError(null);
 
     // Draft path — ShippingAddressForm just finished the Clerk OTP
-    // sign-up so the session is hot. Chain the whole pipeline that
-    // authed users normally walk in multiple trips:
-    //   R2 presign → PUT → createDraftFileForPrint
-    //   → createPrintOrder → completePrintOrder → Stripe
+    // sign-up so the session is hot. Run the shared checkout
+    // chain and redirect to Stripe on success.
     if (draftMode) {
       if (!selectedQuote || !selectedShipping) {
         setCheckoutError("Please pick a material and a shipping option.");
@@ -427,81 +425,33 @@ export function QuoteConfigurator({
         checkoutInFlightRef.current = false;
         return;
       }
-      try {
-        const presignRes = await fetch("/api/upload/presign", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            filename: draftMode.file.name,
-            contentType: "application/octet-stream",
-            fileSize: draftMode.file.size,
-          }),
-        });
-        if (!presignRes.ok) {
-          const data = await presignRes.json().catch(() => ({}));
-          throw new Error(
-            data.error || `Upload presign failed (${presignRes.status})`
-          );
-        }
-        const {
-          uploadUrl,
-          storageKey,
-          format: resolvedFormat,
-        } = (await presignRes.json()) as {
-          uploadUrl: string;
-          storageKey: string;
-          format: "stl" | "obj" | "3mf" | "step" | "amf";
-        };
 
-        const putRes = await fetch(uploadUrl, {
-          method: "PUT",
-          headers: { "Content-Type": "application/octet-stream" },
-          body: draftMode.file,
-        });
-        if (!putRes.ok) {
-          throw new Error(`R2 upload failed (${putRes.status})`);
-        }
-
-        const draft = await createDraftFileForPrint({
-          storageKey,
-          originalFilename: draftMode.file.name,
-          format: resolvedFormat,
-          fileSize: draftMode.file.size,
-        });
-        if ("error" in draft) throw new Error(draft.error);
-
-        const orderResult = await createPrintOrder({
-          fileAssetId: draft.fileAssetId,
+      const result = await runAnonCheckout({
+        file: draftMode.file,
+        selectedQuote: {
           quoteId: selectedQuote.quoteId,
           vendorId: selectedQuote.vendorId,
           materialConfigId: selectedQuote.materialConfigId,
+          price: selectedQuote.price,
+          currency: selectedQuote.currency,
+        },
+        selectedShipping: {
           shippingId: selectedShipping.shippingId,
-          quantity,
-          materialPrice: selectedQuote.price,
-          shippingPrice: selectedShipping.price,
-          currency: selectedQuote.currency as "USD",
-        });
-        if ("error" in orderResult) throw new Error(orderResult.error);
+          price: selectedShipping.price,
+        },
+        quantity,
+        addressData,
+      });
 
-        const completeResult = await completePrintOrder({
-          orderId: orderResult.orderId,
-          email: addressData.email,
-          shipping: addressData.shipping,
-          billing: addressData.billing,
-          isAnonFlow: true,
-        });
-        if ("error" in completeResult) throw new Error(completeResult.error);
-
-        window.location.href = completeResult.checkoutUrl;
-        return;
-      } catch (err) {
-        setCheckoutError(
-          err instanceof Error ? err.message : "Checkout failed"
-        );
+      if (!result.ok) {
+        setCheckoutError(result.error);
         setStep("address");
         checkoutInFlightRef.current = false;
         return;
       }
+
+      window.location.href = result.checkoutUrl;
+      return;
     }
 
     if (!printOrderId) {

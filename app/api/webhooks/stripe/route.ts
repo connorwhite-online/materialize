@@ -1,9 +1,6 @@
 import { headers } from "next/headers";
 import { getStripe } from "@/lib/stripe";
-import { db } from "@/lib/db";
-import { printOrders } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
-import { createOrder } from "@/lib/craftcloud/client";
+import { handlePrintOrderPayment } from "@/lib/stripe/handle-print-order-payment";
 import { logError } from "@/lib/logger";
 import type Stripe from "stripe";
 
@@ -50,58 +47,4 @@ export async function POST(request: Request) {
   }
 
   return Response.json({ received: true });
-}
-
-async function handlePrintOrderPayment(printOrderId: string) {
-  const [order] = await db
-    .select()
-    .from(printOrders)
-    .where(eq(printOrders.id, printOrderId));
-
-  if (!order) {
-    throw new Error(`Print order not found: ${printOrderId}`);
-  }
-
-  // Idempotency guard #1: status has already advanced past
-  // cart_created (webhook fired twice, first call committed).
-  if (order.status !== "cart_created") {
-    return;
-  }
-
-  // Idempotency guard #2: a CraftCloud order id is already on
-  // record even though the status didn't flip to "ordered". This
-  // is the partial-commit case — createOrder succeeded on a
-  // previous call but the status update failed. Don't call
-  // createOrder again; just fix the status and return.
-  if (order.craftCloudOrderId) {
-    await db
-      .update(printOrders)
-      .set({ status: "ordered" })
-      .where(eq(printOrders.id, printOrderId));
-    return;
-  }
-
-  if (!order.craftCloudCartId || !order.shippingAddress) {
-    throw new Error(`Missing cart or address for order: ${printOrderId}`);
-  }
-
-  const addr = order.shippingAddress;
-
-  // Place the CraftCloud order — if this fails, Stripe will retry the webhook
-  const ccOrder = await createOrder({
-    cartId: order.craftCloudCartId,
-    user: {
-      emailAddress: addr.email,
-      shipping: addr.shipping,
-      billing: addr.billing,
-    },
-  });
-
-  await db
-    .update(printOrders)
-    .set({
-      craftCloudOrderId: ccOrder.orderId,
-      status: "ordered",
-    })
-    .where(eq(printOrders.id, printOrderId));
 }
