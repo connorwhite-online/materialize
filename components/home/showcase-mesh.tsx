@@ -23,6 +23,12 @@ export function ShowcaseMesh({ target, dragVelocityRef }: ShowcaseMeshProps) {
   const groupRef = useRef<THREE.Group>(null);
   const meshRef = useRef<THREE.Mesh>(null);
   const materialRef = useRef<THREE.MeshPhysicalMaterial>(null);
+  // Velocity refs for spring-physics integration of position.x and
+  // rotation.z. Damped harmonic oscillators give a natural overshoot
+  // when the drag releases (target snaps to 0) instead of a flat
+  // ease-out.
+  const swayVelRef = useRef(0);
+  const tiltVelRef = useRef(0);
 
   useFrame((_, delta) => {
     if (!groupRef.current || !meshRef.current || !materialRef.current) return;
@@ -61,20 +67,25 @@ export function ShowcaseMesh({ target, dragVelocityRef }: ShowcaseMeshProps) {
       scaleLerp
     );
 
-    const tiltTarget = tension * 0.06;
-    groupRef.current.rotation.z = THREE.MathUtils.lerp(
-      groupRef.current.rotation.z,
-      tiltTarget,
-      scaleLerp
-    );
+    // Sway and tilt use a damped-harmonic-oscillator integration
+    // instead of a flat exponential ease so the release snap-back
+    // overshoots once and settles. The targets follow the tanh-shaped
+    // tension during the drag, then jump to 0 when the user lets go,
+    // and the spring naturally bounces through the equilibrium.
+    const swayTarget = tension * 0.4;
+    const tiltTarget = tension * 0.12;
+    const stiffness = 220;
+    const dampingCoef = 14;
 
-    // Sway in the drag direction — follows finger with spring resistance.
-    const swayTarget = tension * 0.18;
-    groupRef.current.position.x = THREE.MathUtils.lerp(
-      groupRef.current.position.x,
-      swayTarget,
-      scaleLerp
-    );
+    const swayDx = swayTarget - groupRef.current.position.x;
+    swayVelRef.current +=
+      (swayDx * stiffness - swayVelRef.current * dampingCoef) * delta;
+    groupRef.current.position.x += swayVelRef.current * delta;
+
+    const tiltDx = tiltTarget - groupRef.current.rotation.z;
+    tiltVelRef.current +=
+      (tiltDx * stiffness - tiltVelRef.current * dampingCoef) * delta;
+    groupRef.current.rotation.z += tiltVelRef.current * delta;
 
     // Interpolate material properties toward target (smooth ~600ms)
     const matLerp = 1 - Math.exp(-delta * 4);
