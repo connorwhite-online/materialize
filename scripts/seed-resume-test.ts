@@ -21,9 +21,7 @@ async function main() {
     await db.insert(users).values({
       id: USER_ID,
       username: "claudetest",
-      email: "claudetest+clerk_test@example.com",
-      firstName: "Claude",
-      lastName: "Test",
+      displayName: "Claude Test",
     });
     console.log("Created users row");
   } else {
