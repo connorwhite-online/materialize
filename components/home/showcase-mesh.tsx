@@ -74,8 +74,11 @@ export function ShowcaseMesh({ target, dragVelocityRef }: ShowcaseMeshProps) {
     // and the spring naturally bounces through the equilibrium.
     const swayTarget = tension * 0.4;
     const tiltTarget = tension * 0.12;
-    const stiffness = 220;
-    const dampingCoef = 14;
+    // Tight spring — high stiffness for a fast oscillation, damping
+    // tuned to ~0.5 critical so the snap-back overshoots once and
+    // settles within ~250ms.
+    const stiffness = 700;
+    const dampingCoef = 26;
 
     const swayDx = swayTarget - groupRef.current.position.x;
     swayVelRef.current +=
