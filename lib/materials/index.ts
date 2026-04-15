@@ -5,7 +5,7 @@ import {
   type MaterialMetadata,
   type MaterialCategory,
   type QuickFilter,
-} from "./data";
+} from "./preset-library";
 
 export { MATERIALS, CATEGORY_LABELS, FEATURED_MATERIAL_IDS };
 export type { MaterialMetadata, MaterialCategory, QuickFilter };

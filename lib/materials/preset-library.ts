@@ -1,3 +1,31 @@
+/**
+ * Curated material preset library — editorial content, not
+ * CraftCloud. This is the source of truth for:
+ *
+ *   - material landing pages (/materials + /materials/[slug])
+ *   - the home hero carousel picks (HERO_MATERIALS in ./index.ts)
+ *   - listing-form "recommended material" picker
+ *   - filter chips on the files browse page
+ *   - PBR colour + roughness presets for the showcase torus
+ *
+ * Do NOT confuse these ids with CraftCloud material ids. Our
+ * ids here ("pla-white", "titanium", …) are editorial slugs for
+ * our own UI. The CraftCloud catalog lives in
+ * lib/craftcloud/catalog.ts and uses opaque UUIDs. The two
+ * systems are not wired together — a user landing on a
+ * /materials/[slug] page is hitting the CraftCloud catalog
+ * directly via findMaterialBySlug, not this file.
+ *
+ * When adding a new preset:
+ *   1. Pick a unique id + slug
+ *   2. Set a representative colour + PBR values for the torus
+ *   3. Append to FEATURED_MATERIAL_IDS if you want it on the home
+ *      carousel (though HERO_MATERIALS overrides that now anyway)
+ *
+ * The file is long but entirely static reference data — no flow
+ * logic lives here. Safe to skim or skip during most edits.
+ */
+
 export type MaterialCategory =
   | "plastic"
   | "metal"

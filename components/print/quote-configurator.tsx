@@ -5,6 +5,7 @@ import { MaterialPicker } from "./material-picker";
 import type { EnrichedQuote } from "./material-picker/types";
 import { PriceDisplay } from "./price-display";
 import { ShippingAddressForm } from "./shipping-address-form";
+import { pollQuotes } from "./poll-quotes";
 import { createPrintOrder, completePrintOrder } from "@/app/actions/print";
 import { createDraftFileForPrint } from "@/app/actions/files";
 import { uploadToCraftCloud } from "@/lib/craftcloud/upload-client";
@@ -24,25 +25,6 @@ import {
 } from "@/components/ui/select";
 
 type Quote = EnrichedQuote;
-
-/** Sleep helper that rejects with an AbortError when the signal fires. */
-function wait(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) {
-      reject(new DOMException("Aborted", "AbortError"));
-      return;
-    }
-    const id = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(id);
-      reject(new DOMException("Aborted", "AbortError"));
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-}
 
 interface ShippingOption {
   shippingId: string;
@@ -304,73 +286,18 @@ export function QuoteConfigurator({
       }
       const { priceId } = (await startRes.json()) as { priceId: string };
 
-      // 2. Poll snapshot endpoint until the quote set has actually
-      // stabilized — CraftCloud's allComplete flag isn't a reliable
-      // termination signal on its own (it can flip true while
-      // additional vendor responses are still trickling in, and it
-      // can come back true with an empty array for cached library
-      // modelIds before any vendors have responded). We only break
-      // when allComplete is true AND the quote count hasn't grown
-      // for a few consecutive polls, or when the hard ceiling
-      // elapses.
-      const POLL_INTERVAL_MS = 1500;
-      const HARD_CEILING_MS = 90_000;
-      // Number of consecutive polls with no new quotes required
-      // before we trust allComplete and break out.
-      const STABLE_POLLS_REQUIRED = 4;
-      const started = Date.now();
-      let allComplete = false;
-      let hadFirstPaint = false;
-      let lastQuoteCount = 0;
-      let stablePolls = 0;
-
-      while (!signal.aborted) {
-        const elapsed = Date.now() - started;
-        if (elapsed > HARD_CEILING_MS) break;
-
-        const pollRes = await fetch(
-          `/api/craftcloud/quotes/poll?priceId=${encodeURIComponent(priceId)}`,
-          { signal }
-        );
-        if (signal.aborted) return;
-        if (!pollRes.ok) {
-          // Transient poll errors shouldn't kill the loop — retry
-          // after the interval unless the whole thing's aborted.
-          await wait(POLL_INTERVAL_MS, signal);
-          continue;
-        }
-        const snapshot = (await pollRes.json()) as {
-          quotes: Quote[];
-          shipping: ShippingOption[];
-          allComplete: boolean;
-        };
-
-        const quoteCount = snapshot.quotes?.length ?? 0;
-        setQuotes(snapshot.quotes ?? []);
-        setShipping(snapshot.shipping ?? []);
-        allComplete = snapshot.allComplete;
-
-        if (!hadFirstPaint && quoteCount > 0) {
-          hadFirstPaint = true;
-        }
-
-        // Track quote-set stability — reset the counter every time
-        // the count grows.
-        if (quoteCount > lastQuoteCount) {
-          stablePolls = 0;
-          lastQuoteCount = quoteCount;
-        } else {
-          stablePolls++;
-        }
-
-        // Break out only when CraftCloud says complete AND the
-        // quote count has stopped growing for a few polls in a
-        // row. That way we don't miss late-arriving vendors and
-        // we don't bail prematurely on an over-eager allComplete.
-        if (allComplete && stablePolls >= STABLE_POLLS_REQUIRED) break;
-
-        await wait(POLL_INTERVAL_MS, signal);
-      }
+      // 2. Hand off to the shared poll loop. See
+      // components/print/poll-quotes.ts for the termination
+      // invariant (allComplete + stable count). Each snapshot
+      // drops straight into React state.
+      await pollQuotes({
+        priceId,
+        signal,
+        onSnapshot: (snapshot) => {
+          setQuotes(snapshot.quotes ?? []);
+          setShipping(snapshot.shipping ?? []);
+        },
+      });
 
       if (!signal.aborted) {
         setLoadingPhase("done");

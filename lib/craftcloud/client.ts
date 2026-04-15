@@ -1,5 +1,27 @@
 import "server-only";
 
+/**
+ * Thin wrapper over CraftCloud's v5 API. Exports the functions we
+ * actually use from server actions / routes:
+ *
+ *   uploadModel / getModel            — /v5/model
+ *   createPriceRequest / getPrice     — /v5/price  (progressive)
+ *   createCart                        — /v5/cart
+ *   createOrder / getOrderStatus      — /v5/order
+ *   createStripeCheckout              — bookable-side Stripe bridge
+ *
+ * Each function has a real `realX` and a mock `mockX` implementation;
+ * USE_MOCK / USE_MOCK_CHECKOUT env flags decide which is called. Mock
+ * mode is on by default so running the app without an API key still
+ * works against fake data.
+ *
+ * Quote polling is progressive — getPrice returns allComplete:false
+ * while vendor responses are still landing, and the quotes array
+ * grows over time. The client-side polling loop in
+ * quote-configurator.tsx is responsible for waiting long enough; do
+ * not build a long-lived loop inside a server handler here.
+ */
+
 import type {
   CraftCloudModel,
   PriceRequest,

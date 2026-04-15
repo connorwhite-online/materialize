@@ -2,7 +2,7 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { animate } from "motion/react";
-import type { MaterialMetadata } from "@/lib/materials/data";
+import type { MaterialMetadata } from "@/lib/materials/preset-library";
 import { cn } from "@/lib/utils";
 
 interface MaterialCarouselProps {

@@ -7,7 +7,7 @@ import {
   type MaterialCategory,
   type QuickFilter,
 } from "@/lib/materials";
-import { QUICK_FILTER_LABELS } from "@/lib/materials/data";
+import { QUICK_FILTER_LABELS } from "@/lib/materials/preset-library";
 
 export function MaterialFilterBar() {
   const router = useRouter();

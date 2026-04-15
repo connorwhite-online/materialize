@@ -1,5 +1,30 @@
 "use server";
 
+/**
+ * Server actions for the print-order pipeline.
+ *
+ * Flow: createPrintOrder → completePrintOrder → Stripe checkout →
+ * stripe webhook → CraftCloud order placement.
+ *
+ *   createPrintOrder(quote, shipping, quantity, material, vendor)
+ *     - Validates via printOrderSchema.
+ *     - Creates a CraftCloud cart (real API call, costs time).
+ *     - Inserts a printOrders row in status "cart_created".
+ *
+ *   completePrintOrder(orderId, email, shipping, billing, isAnonFlow?)
+ *     - Validates the address via checkoutAddressSchema.
+ *     - Creates a Stripe Checkout session for totalPrice + 3% fee.
+ *     - Stores stripeSessionId + shippingAddress on the printOrder.
+ *     - Returns { checkoutUrl } for the client to window.location to.
+ *     - isAnonFlow swaps the success redirect to /dashboard/orders?welcome=1
+ *
+ * The CraftCloud order itself is NOT placed here — that happens in
+ * app/api/webhooks/stripe/route.ts after the payment clears. See
+ * that file for the idempotency invariants.
+ *
+ * SERVICE_FEE_RATE is our cut. Do not hardcode elsewhere.
+ */
+
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { printOrders } from "@/lib/db/schema";

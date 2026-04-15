@@ -1,5 +1,35 @@
 "use server";
 
+/**
+ * Server actions for file listings and assets.
+ *
+ * Main entry points:
+ *   createFileListing(formData)       — publishes a new listing from
+ *     a client upload. Expects `assetsJson` (IncomingAsset[]) in
+ *     addition to the listing fields. Validates via
+ *     createListingSchema, streams each R2 object through SHA-256
+ *     for the anti-piracy dedup check, inserts file + fileAssets +
+ *     optional collection link, then redirects to /files/[slug].
+ *
+ *   createDraftFileForPrint(params)   — fast path used by the anon
+ *     and authed "Print this file" flows. Takes an already-uploaded
+ *     R2 storage key and creates a private listing row + a single
+ *     fileAsset, returning the fileAssetId. Also runs the
+ *     content-hash dedup check — re-uploading someone else's model
+ *     is rejected with a fixed error string.
+ *
+ *   publishFileListing / archiveFileListing / deleteFileListing —
+ *     state transitions on an existing listing.
+ *
+ * Invariants:
+ *   - Every R2 storage key must start with `uploads/${userId}/` or
+ *     we reject immediately (spoofing guard).
+ *   - computeContentHash streams directly from R2 via a presigned
+ *     GET; hash is persisted on the fileAsset row for later dedup.
+ *   - Nothing in here places real CraftCloud orders — that's
+ *     app/actions/print.ts + the stripe webhook.
+ */
+
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import {

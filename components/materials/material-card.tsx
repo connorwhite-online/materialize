@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import type { MaterialMetadata } from "@/lib/materials/data";
+import type { MaterialMetadata } from "@/lib/materials/preset-library";
 import { MaterialCardPreview } from "./material-card-preview";
 
 interface MaterialCardProps {
