@@ -103,10 +103,24 @@ export async function setUsernameFromEmail(
 
       try {
         await clerk.users.updateUser(userId, { username: candidate });
-      } catch {
-        // Clerk enforces its own uniqueness and can 422 even when
-        // our DB row hasn't been written yet (webhook lag). Treat
-        // as a collision and try a new candidate.
+      } catch (clerkErr) {
+        // Clerk distinguishes 422 (username already taken) from
+        // other failure modes (rate limit, auth, outage). Only
+        // retry on 422 — everything else gets surfaced so we
+        // don't burn retries on a real outage and leave the user
+        // stranded mid-signup.
+        const status =
+          clerkErr &&
+          typeof clerkErr === "object" &&
+          "status" in clerkErr
+            ? (clerkErr as { status?: number }).status
+            : undefined;
+        if (status && status !== 422) {
+          logError("setUsernameFromEmail.clerkNonCollision", clerkErr);
+          return {
+            error: "Account provider is temporarily unavailable.",
+          };
+        }
         continue;
       }
 

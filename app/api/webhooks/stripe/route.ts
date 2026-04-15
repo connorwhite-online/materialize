@@ -62,8 +62,22 @@ async function handlePrintOrderPayment(printOrderId: string) {
     throw new Error(`Print order not found: ${printOrderId}`);
   }
 
+  // Idempotency guard #1: status has already advanced past
+  // cart_created (webhook fired twice, first call committed).
   if (order.status !== "cart_created") {
-    // Already processed — idempotent, safe to return success
+    return;
+  }
+
+  // Idempotency guard #2: a CraftCloud order id is already on
+  // record even though the status didn't flip to "ordered". This
+  // is the partial-commit case — createOrder succeeded on a
+  // previous call but the status update failed. Don't call
+  // createOrder again; just fix the status and return.
+  if (order.craftCloudOrderId) {
+    await db
+      .update(printOrders)
+      .set({ status: "ordered" })
+      .where(eq(printOrders.id, printOrderId));
     return;
   }
 

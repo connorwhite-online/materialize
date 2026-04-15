@@ -268,8 +268,16 @@ export async function completePrintOrder(params: {
       })
       .where(eq(printOrders.id, params.orderId));
 
+    if (!session.url) {
+      logError("completePrintOrder.missingSessionUrl", {
+        sessionId: session.id,
+        orderId: params.orderId,
+      });
+      return { error: "Payment provider returned no checkout URL." };
+    }
+
     revalidatePath("/dashboard/orders");
-    return { checkoutUrl: session.url! };
+    return { checkoutUrl: session.url };
   } catch (error) {
     logError("completePrintOrder", error);
     return { error: "Failed to create checkout. Please try again." };

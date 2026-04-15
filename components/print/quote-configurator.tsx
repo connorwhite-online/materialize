@@ -241,6 +241,14 @@ export function QuoteConfigurator({
   // with half-finished polling from the old request.
   const pollAbortRef = useRef<AbortController | null>(null);
 
+  // Guards handleAddressSubmit against double-fire. Without this,
+  // a double-click (or rapid re-tap on mobile) would run the full
+  // presign → R2 PUT → createDraftFileForPrint → createPrintOrder
+  // → Stripe checkout chain twice in parallel, resulting in two
+  // orders and two charges. Set at the top of the chain and
+  // cleared on error so the user can retry.
+  const checkoutInFlightRef = useRef(false);
+
   // Active material scope for the CraftCloud price request. Starts
   // as the preselectMaterialId (from /materials/[slug] → Print with
   // X); a callback from MaterialPicker clears it when the user
@@ -470,6 +478,13 @@ export function QuoteConfigurator({
       vatId?: string;
     };
   }) => {
+    // Bail immediately if a previous handleAddressSubmit is still
+    // in flight (double-click, mobile tap repeat). Without this
+    // guard, the anon chain below would fire the entire R2 →
+    // draft → order → Stripe pipeline twice in parallel.
+    if (checkoutInFlightRef.current) return;
+    checkoutInFlightRef.current = true;
+
     setStep("processing");
     setCheckoutError(null);
 
@@ -482,6 +497,7 @@ export function QuoteConfigurator({
       if (!selectedQuote || !selectedShipping) {
         setCheckoutError("Please pick a material and a shipping option.");
         setStep("address");
+        checkoutInFlightRef.current = false;
         return;
       }
       try {
@@ -556,11 +572,15 @@ export function QuoteConfigurator({
           err instanceof Error ? err.message : "Checkout failed"
         );
         setStep("address");
+        checkoutInFlightRef.current = false;
         return;
       }
     }
 
-    if (!printOrderId) return;
+    if (!printOrderId) {
+      checkoutInFlightRef.current = false;
+      return;
+    }
 
     const result = await completePrintOrder({
       orderId: printOrderId,
@@ -572,6 +592,7 @@ export function QuoteConfigurator({
     if ("error" in result) {
       setCheckoutError(result.error);
       setStep("address");
+      checkoutInFlightRef.current = false;
       return;
     }
 
@@ -666,9 +687,16 @@ export function QuoteConfigurator({
                 min={1}
                 max={100}
                 value={quantity}
-                onChange={(e) =>
-                  setQuantity(Math.max(1, Number(e.target.value)))
-                }
+                onChange={(e) => {
+                  // Clamp to [1, 100] and reject NaN — empty/invalid
+                  // text falls back to 1 so the quote pipeline never
+                  // sees a non-finite number.
+                  const raw = Number(e.target.value);
+                  const next = Number.isFinite(raw)
+                    ? Math.min(100, Math.max(1, Math.trunc(raw)))
+                    : 1;
+                  setQuantity(next);
+                }}
                 className="w-20"
               />
             </div>

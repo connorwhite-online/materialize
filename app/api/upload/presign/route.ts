@@ -4,6 +4,20 @@ import { nanoid } from "nanoid";
 import { fileExtensionToFormat, MAX_FILE_SIZE } from "@/lib/validations/file";
 import { logError } from "@/lib/logger";
 
+/**
+ * Strip characters that could break a storage key (path separators,
+ * newlines, control bytes, wildcards). Keeps alphanumerics, dots,
+ * dashes and underscores; everything else collapses to an underscore.
+ * Leading dots are trimmed so we never produce a hidden path entry.
+ * Falls back to "file" if the sanitized result is only punctuation.
+ */
+export function sanitizeFilename(raw: string): string {
+  const cleaned = raw.replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/^[._]+/, "");
+  // If nothing meaningful survives, fall back to a safe default.
+  if (!cleaned || /^[._-]+$/.test(cleaned)) return "file";
+  return cleaned;
+}
+
 export async function POST(request: Request) {
   try {
     const { userId } = await auth();
@@ -18,8 +32,12 @@ export async function POST(request: Request) {
       fileSize: number;
     };
 
-    if (!filename) {
+    if (!filename || typeof filename !== "string") {
       return Response.json({ error: "Filename is required" }, { status: 400 });
+    }
+
+    if (typeof fileSize !== "number" || !Number.isFinite(fileSize) || fileSize <= 0) {
+      return Response.json({ error: "Invalid file size" }, { status: 400 });
     }
 
     if (fileSize > MAX_FILE_SIZE) {
@@ -37,7 +55,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const storageKey = `uploads/${userId}/${nanoid()}/${filename}`;
+    const safeName = sanitizeFilename(filename);
+    const storageKey = `uploads/${userId}/${nanoid()}/${safeName}`;
     const uploadUrl = await generateUploadUrl(
       storageKey,
       contentType || "application/octet-stream"

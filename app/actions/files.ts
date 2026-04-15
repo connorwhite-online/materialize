@@ -26,6 +26,33 @@ type IncomingAsset = {
   fileUnit?: "mm" | "cm" | "in";
 };
 
+const VALID_FORMATS = new Set(["stl", "obj", "3mf", "step", "amf"]);
+const VALID_UNITS = new Set(["mm", "cm", "in"]);
+
+/**
+ * Runtime type guard for an IncomingAsset row. Used to validate the
+ * shape of the assetsJson payload that the client POSTs along with
+ * createFileListing — we can't trust it's the type we expect just
+ * because JSON.parse returned something.
+ */
+function isIncomingAsset(v: unknown): v is IncomingAsset {
+  if (!v || typeof v !== "object") return false;
+  const a = v as Record<string, unknown>;
+  return (
+    typeof a.storageKey === "string" &&
+    a.storageKey.length > 0 &&
+    typeof a.originalFilename === "string" &&
+    a.originalFilename.length > 0 &&
+    typeof a.format === "string" &&
+    VALID_FORMATS.has(a.format) &&
+    typeof a.fileSize === "number" &&
+    Number.isFinite(a.fileSize) &&
+    a.fileSize > 0 &&
+    (a.fileUnit === undefined ||
+      (typeof a.fileUnit === "string" && VALID_UNITS.has(a.fileUnit)))
+  );
+}
+
 async function computeContentHash(storageKey: string): Promise<string | null> {
   try {
     const { createHash } = await import("crypto");
@@ -70,12 +97,28 @@ export async function createFileListing(formData: FormData) {
 
   // Decode the uploaded assets payload (assets are uploaded to R2 by the
   // client immediately before this action runs, so the storageKeys exist
-  // but no DB rows do yet).
+  // but no DB rows do yet). Runtime-validate every row — we can't trust
+  // JSON.parse to give us the IncomingAsset shape.
   let incomingAssets: IncomingAsset[] = [];
   try {
     const assetsRaw = formData.get("assetsJson");
     if (typeof assetsRaw === "string" && assetsRaw.length > 0) {
-      incomingAssets = JSON.parse(assetsRaw) as IncomingAsset[];
+      const decoded = JSON.parse(assetsRaw);
+      if (!Array.isArray(decoded)) {
+        logError("createFileListing.parseAssets", {
+          reason: "not-an-array",
+          typeofDecoded: typeof decoded,
+        });
+        return { error: { name: ["Invalid asset payload."] } };
+      }
+      if (!decoded.every(isIncomingAsset)) {
+        logError("createFileListing.parseAssets", {
+          reason: "bad-row-shape",
+          count: decoded.length,
+        });
+        return { error: { name: ["Invalid asset payload."] } };
+      }
+      incomingAssets = decoded;
     }
   } catch (err) {
     logError("createFileListing.parseAssets", err);
