@@ -296,18 +296,25 @@ export function QuoteConfigurator({
       }
       const { priceId } = (await startRes.json()) as { priceId: string };
 
-      // 2. Poll snapshot endpoint until CraftCloud says it's done
-      // *and* we've actually received at least one quote — or the
-      // ceiling elapses. CraftCloud occasionally returns
-      // allComplete:true with an empty quotes array on the first
-      // snapshot for a cached library modelId; in that case we
-      // keep polling so the vendor responses get a chance to land.
+      // 2. Poll snapshot endpoint until the quote set has actually
+      // stabilized — CraftCloud's allComplete flag isn't a reliable
+      // termination signal on its own (it can flip true while
+      // additional vendor responses are still trickling in, and it
+      // can come back true with an empty array for cached library
+      // modelIds before any vendors have responded). We only break
+      // when allComplete is true AND the quote count hasn't grown
+      // for a few consecutive polls, or when the hard ceiling
+      // elapses.
       const POLL_INTERVAL_MS = 1500;
       const HARD_CEILING_MS = 90_000;
+      // Number of consecutive polls with no new quotes required
+      // before we trust allComplete and break out.
+      const STABLE_POLLS_REQUIRED = 4;
       const started = Date.now();
       let allComplete = false;
       let hadFirstPaint = false;
-      let consecutiveEmptyComplete = 0;
+      let lastQuoteCount = 0;
+      let stablePolls = 0;
 
       while (!signal.aborted) {
         const elapsed = Date.now() - started;
@@ -339,17 +346,20 @@ export function QuoteConfigurator({
           hadFirstPaint = true;
         }
 
-        // Done condition: CraftCloud says complete AND we have
-        // quotes. The empty-complete case retries up to 6 times
-        // (~9s) before giving up — gives the API a chance to
-        // actually populate vendor responses.
-        if (allComplete && quoteCount > 0) break;
-        if (allComplete && quoteCount === 0) {
-          consecutiveEmptyComplete++;
-          if (consecutiveEmptyComplete >= 6) break;
+        // Track quote-set stability — reset the counter every time
+        // the count grows.
+        if (quoteCount > lastQuoteCount) {
+          stablePolls = 0;
+          lastQuoteCount = quoteCount;
         } else {
-          consecutiveEmptyComplete = 0;
+          stablePolls++;
         }
+
+        // Break out only when CraftCloud says complete AND the
+        // quote count has stopped growing for a few polls in a
+        // row. That way we don't miss late-arriving vendors and
+        // we don't bail prematurely on an over-eager allComplete.
+        if (allComplete && stablePolls >= STABLE_POLLS_REQUIRED) break;
 
         await wait(POLL_INTERVAL_MS, signal);
       }
