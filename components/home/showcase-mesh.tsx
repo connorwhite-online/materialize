@@ -34,11 +34,13 @@ export function ShowcaseMesh({ target, dragVelocityRef }: ShowcaseMeshProps) {
     // Spring-tensioned drag: dragVelocityRef is already a tanh-shaped
     // displacement in [-1, 1] driven by total finger offset, so we don't
     // re-curve it here — the asymptote IS the increasing resistance.
+    // The stretch coefficients are tuned to read as a meaningful
+    // taffy-pull at full tension without snapping out of the silhouette.
     const tension = dragVelocityRef.current;
     const absT = Math.abs(tension);
-    const stretchX = 1 + absT * 0.07;
-    const squashY = 1 - absT * 0.05;
-    const squashZ = 1 - absT * 0.02;
+    const stretchX = 1 + absT * 0.22;
+    const squashY = 1 - absT * 0.12;
+    const squashZ = 1 - absT * 0.06;
 
     // Smooth toward target scale. High coefficient so the mesh catches
     // up to brief high-velocity bursts before the velocity decays away.
