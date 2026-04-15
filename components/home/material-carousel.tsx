@@ -42,9 +42,9 @@ export const MaterialCarousel = forwardRef<HTMLDivElement, MaterialCarouselProps
 
       const controls = animate(track.scrollLeft, targetScroll, {
         type: "spring",
-        stiffness: 820,
-        damping: 22,
-        mass: 0.6,
+        stiffness: 1050,
+        damping: 30,
+        mass: 0.55,
         onUpdate: (latest) => {
           track.scrollLeft = latest;
         },
