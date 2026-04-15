@@ -44,7 +44,7 @@ describe("CraftCloud client (mock mode)", () => {
   it("getPrice returns quotes and shipping", async () => {
     const result = await getPrice("test-price-id");
     expect(result.priceId).toBe("test-price-id");
-    expect(result.status).toBe("ready");
+    expect(result.allComplete).toBe(true);
     expect(result.quotes.length).toBeGreaterThan(0);
     expect(result.shipping.length).toBeGreaterThan(0);
 
@@ -76,22 +76,14 @@ describe("CraftCloud client (mock mode)", () => {
     expect(vendorIds.length).toBe(3); // 3 mock vendors
   });
 
-  it("createCart returns cartId and price", async () => {
+  it("createCart returns cartId and currency", async () => {
     const cart = await createCart({
       shippingIds: ["ship-1"],
       currency: "USD",
-      quotes: [
-        {
-          quoteId: "q1",
-          vendorId: "v1",
-          modelId: "m1",
-          materialConfigId: "pla-white",
-          quantity: 1,
-        },
-      ],
+      quotes: [{ id: "q1" }],
     });
     expect(cart.cartId).toContain("mock-cart");
-    expect(cart.totalPrice).toBeGreaterThan(0);
+    expect(cart.currency).toBe("USD");
   });
 
   it("createOrder returns orderId", async () => {

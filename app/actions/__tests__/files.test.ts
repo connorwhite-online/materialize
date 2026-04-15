@@ -60,6 +60,26 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/db/schema", () => ({
   files: { id: "id", userId: "user_id", status: "status" },
   fileAssets: { id: "id", fileId: "file_id" },
+  collections: { id: "id", userId: "user_id" },
+  collectionFiles: { collectionId: "collection_id" },
+  filePhotos: { id: "id", fileId: "file_id" },
+  purchases: { id: "id", fileId: "file_id" },
+}));
+
+// Mock the R2 storage layer so computeContentHash can run without a
+// real R2 roundtrip. It reads via fetch(downloadUrl), so we stub
+// generateDownloadUrl to return a data: URL and let fetch work on it.
+vi.mock("@/lib/storage", () => ({
+  generateDownloadUrl: vi.fn(async () =>
+    // Tiny deterministic payload so the SHA-256 is stable across runs.
+    "data:application/octet-stream;base64,AAEC"
+  ),
+  generateUploadUrl: vi.fn(async () => "https://example.com/upload"),
+  deleteObject: vi.fn(async () => undefined),
+}));
+
+vi.mock("@/lib/logger", () => ({
+  logError: vi.fn(),
 }));
 
 import {
@@ -80,7 +100,17 @@ describe("createFileListing", () => {
     formData.set("price", "9.99");
     formData.set("license", "free");
     formData.set("tags", "test, model");
-    formData.append("assetIds", "asset-1");
+    formData.set(
+      "assetsJson",
+      JSON.stringify([
+        {
+          storageKey: "uploads/test-user-id/abc/test.stl",
+          originalFilename: "test.stl",
+          format: "stl",
+          fileSize: 1024,
+        },
+      ])
+    );
 
     // Will throw due to redirect mock
     await expect(createFileListing(formData)).rejects.toThrow("REDIRECT");
@@ -94,8 +124,6 @@ describe("createFileListing", () => {
         license: "free",
       })
     );
-    // Assets should be linked
-    expect(mockUpdate).toHaveBeenCalled();
   });
 
   it("returns error for invalid input", async () => {

@@ -4,14 +4,12 @@ import { db } from "@/lib/db";
 import { printOrders, fileAssets } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { OrderStatusTracker } from "@/components/print/order-status-tracker";
-import { FacilityMap } from "@/components/print/facility-map";
 import { OrderModelPreview } from "@/components/print/order-model-preview";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { getMaterialById } from "@/lib/materials";
-import { getShipmentOrigin } from "@/lib/vendors/data";
 import { formatOrderNumber } from "@/lib/utils/order-number";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -68,7 +66,6 @@ export default async function OrderDetailPage(props: {
   }
 
   const materialMeta = order.material ? getMaterialById(order.material) : null;
-  const shipmentOrigin = getShipmentOrigin(order.trackingInfo);
   const orderNumber = formatOrderNumber(order.id);
   const statusLabel = STATUS_LABELS[order.status] || order.status;
 
@@ -139,9 +136,6 @@ export default async function OrderDetailPage(props: {
 
       {/* Info grid */}
       <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Shipment origin map — only shown when we have real tracking data */}
-        {shipmentOrigin && <FacilityMap origin={shipmentOrigin} />}
-
         {/* Price breakdown */}
         <Card>
           <CardHeader className="pb-3">

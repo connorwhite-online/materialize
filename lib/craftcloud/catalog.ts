@@ -222,12 +222,6 @@ export async function getCraftCloudCatalog(): Promise<CraftCloudCatalog> {
 export async function getProviderIndex(): Promise<Map<string, Provider>> {
   if (cachedProviders) return cachedProviders;
   const list = await fetchProvidersJson();
-  // One-time visibility into what CraftCloud actually returns per
-  // provider — lets us confirm the country field name on first
-  // cold load instead of guessing. Fires at most once per process.
-  if (list.length > 0) {
-    console.log("[catalog] first provider fields", Object.keys(list[0]));
-  }
   cachedProviders = new Map(list.map((p) => [p.vendorId, p]));
   return cachedProviders;
 }
@@ -240,48 +234,6 @@ export async function findMaterialConfig(configId: string) {
 export async function findProvider(vendorId: string): Promise<Provider | null> {
   const providers = await getProviderIndex();
   return providers.get(vendorId) ?? null;
-}
-
-/**
- * Small serializable projection of a CatalogMaterial, suitable for
- * passing from a server component into the client print picker.
- * Drops the heavy physical-properties fields, the full description,
- * and the nested finishGroups — the picker only needs name, image,
- * grouping, and the bounding box for its initial filter.
- */
-export interface PrintableMaterialSummary {
-  id: string;
-  name: string;
-  slug: string;
-  groupId: string;
-  groupName: string;
-  featuredImage: string | null;
-  descriptionShort: string | null;
-  maxDimensions: { x: number; y: number; z: number } | null;
-  sortIndex: number;
-}
-
-export async function getPrintableMaterialSummaries(): Promise<
-  PrintableMaterialSummary[]
-> {
-  const catalog = await getCraftCloudCatalog();
-  const summaries: PrintableMaterialSummary[] = [];
-  for (const group of catalog.groups) {
-    for (const material of group.materials) {
-      summaries.push({
-        id: material.id,
-        name: material.name,
-        slug: material.slug,
-        groupId: group.id,
-        groupName: group.name,
-        featuredImage: material.featuredImage ?? null,
-        descriptionShort: material.descriptionShort ?? null,
-        maxDimensions: material.maximumPrintingDimensions ?? null,
-        sortIndex: material.sortIndex ?? 9999,
-      });
-    }
-  }
-  return summaries;
 }
 
 export async function findMaterialBySlug(slug: string) {
