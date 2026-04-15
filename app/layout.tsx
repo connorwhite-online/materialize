@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import localFont from "next/font/local";
 import "./globals.css";
@@ -29,6 +29,18 @@ export const metadata: Metadata = {
   title: "Materialize",
   description:
     "A marketplace for 3D print files with integrated on-demand printing",
+};
+
+// Tell the browser the soft keyboard should overlay our layout
+// instead of pushing the page up. The fixed bottom search bar
+// then re-positions itself above the keyboard via the
+// VisualViewport API in HomeBottomBar — that way iOS doesn't
+// auto-scroll the document on input focus, and the hero
+// stays put.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  interactiveWidget: "overlays-content",
 };
 
 export default function RootLayout({

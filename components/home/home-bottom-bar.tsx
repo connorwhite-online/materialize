@@ -38,9 +38,42 @@ export function HomeBottomBar() {
   );
   const [searchLoading, setSearchLoading] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Outer fixed wrapper — gets its `bottom` offset rewritten from
+  // the VisualViewport API so the bar sits above the iOS keyboard
+  // instead of disappearing behind it.
+  const fixedWrapperRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const isExpanded = mode === "searching" || mode === "uploading";
+
+  // Pin the bottom bar above the soft keyboard. Without this the
+  // fixed bar stays at bottom-4 of the layout viewport — which on
+  // iOS sits behind the keyboard once it opens, and triggers an
+  // auto-scroll of the document trying to bring the focused input
+  // into view (pushing the rest of the hero up off the screen).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    const updateOffset = () => {
+      const el = fixedWrapperRef.current;
+      if (!el) return;
+      // Distance between the bottom of the layout viewport and the
+      // bottom of the visual viewport — i.e. the keyboard height
+      // (plus any iOS chrome that's overlapping). 16 = bottom-4.
+      const overlap = window.innerHeight - vv.height - vv.offsetTop;
+      el.style.bottom = `${Math.max(16, overlap + 16)}px`;
+    };
+
+    updateOffset();
+    vv.addEventListener("resize", updateOffset);
+    vv.addEventListener("scroll", updateOffset);
+    return () => {
+      vv.removeEventListener("resize", updateOffset);
+      vv.removeEventListener("scroll", updateOffset);
+    };
+  }, []);
 
   // Debounced search fetch. Clears results when the query empties
   // so the panel collapses back to the upload-or-idle layout.
@@ -152,7 +185,10 @@ export function HomeBottomBar() {
   };
 
   return (
-    <div className="fixed inset-x-0 bottom-4 z-40 flex flex-col items-center px-4 pointer-events-none">
+    <div
+      ref={fixedWrapperRef}
+      className="fixed inset-x-0 bottom-4 z-40 flex flex-col items-center px-4 pointer-events-none"
+    >
       {/* Explore materials — visible only when bottom bar is idle */}
       <AnimatePresence initial={false}>
         {mode === "idle" && (
