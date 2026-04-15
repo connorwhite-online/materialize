@@ -297,16 +297,19 @@ export function QuoteConfigurator({
       const { priceId } = (await startRes.json()) as { priceId: string };
 
       // 2. Poll snapshot endpoint until CraftCloud says it's done
-      // or we hit the ceiling. Each snapshot replaces the quotes
-      // state — the endpoint returns the full growing set, so no
-      // client-side merging is needed.
+      // *and* we've actually received at least one quote — or the
+      // ceiling elapses. CraftCloud occasionally returns
+      // allComplete:true with an empty quotes array on the first
+      // snapshot for a cached library modelId; in that case we
+      // keep polling so the vendor responses get a chance to land.
       const POLL_INTERVAL_MS = 1500;
       const HARD_CEILING_MS = 90_000;
       const started = Date.now();
       let allComplete = false;
       let hadFirstPaint = false;
+      let consecutiveEmptyComplete = 0;
 
-      while (!signal.aborted && !allComplete) {
+      while (!signal.aborted) {
         const elapsed = Date.now() - started;
         if (elapsed > HARD_CEILING_MS) break;
 
@@ -327,20 +330,27 @@ export function QuoteConfigurator({
           allComplete: boolean;
         };
 
+        const quoteCount = snapshot.quotes?.length ?? 0;
         setQuotes(snapshot.quotes ?? []);
         setShipping(snapshot.shipping ?? []);
         allComplete = snapshot.allComplete;
 
-        // Flip loadingPhase to "done" as soon as we have a usable
-        // snapshot. From there the user can interact with the
-        // priced cards even while more vendors trickle in — unpriced
-        // cards still pulse as skeletons because `quotesLoading`
-        // stays tied to `hadFirstPaint` + `allComplete`.
-        if (!hadFirstPaint && (snapshot.quotes?.length ?? 0) > 0) {
+        if (!hadFirstPaint && quoteCount > 0) {
           hadFirstPaint = true;
         }
 
-        if (allComplete) break;
+        // Done condition: CraftCloud says complete AND we have
+        // quotes. The empty-complete case retries up to 6 times
+        // (~9s) before giving up — gives the API a chance to
+        // actually populate vendor responses.
+        if (allComplete && quoteCount > 0) break;
+        if (allComplete && quoteCount === 0) {
+          consecutiveEmptyComplete++;
+          if (consecutiveEmptyComplete >= 6) break;
+        } else {
+          consecutiveEmptyComplete = 0;
+        }
+
         await wait(POLL_INTERVAL_MS, signal);
       }
 
