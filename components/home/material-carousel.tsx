@@ -1,6 +1,7 @@
 "use client";
 
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import { animate } from "motion/react";
 import type { MaterialMetadata } from "@/lib/materials/data";
 import { cn } from "@/lib/utils";
 
@@ -22,7 +23,11 @@ export const MaterialCarousel = forwardRef<HTMLDivElement, MaterialCarouselProps
     // Forward the internal ref to the parent
     useImperativeHandle(ref, () => trackRef.current as HTMLDivElement);
 
-    // Scroll to keep selected item centered when selectedIndex changes
+    // Spring-animate scrollLeft when selectedIndex changes — gives
+    // the carousel a small overshoot + settle instead of the linear
+    // browser smooth-scroll. Stiffness/damping tuned for a snappy
+    // pop with one subtle bounce. The animation is cancelled on
+    // cleanup so a rapid sequence of swipes hands off cleanly.
     useEffect(() => {
       const track = trackRef.current;
       if (!track) return;
@@ -34,7 +39,18 @@ export const MaterialCarousel = forwardRef<HTMLDivElement, MaterialCarouselProps
       const targetScroll = itemCenter - trackCenter;
 
       if (Math.abs(track.scrollLeft - targetScroll) < 1) return;
-      track.scrollTo({ left: targetScroll, behavior: "smooth" });
+
+      const controls = animate(track.scrollLeft, targetScroll, {
+        type: "spring",
+        stiffness: 360,
+        damping: 26,
+        mass: 0.9,
+        onUpdate: (latest) => {
+          track.scrollLeft = latest;
+        },
+      });
+
+      return () => controls.stop();
     }, [selectedIndex]);
 
     return (
