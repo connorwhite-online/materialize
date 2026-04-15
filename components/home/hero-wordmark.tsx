@@ -31,7 +31,7 @@ export function HeroWordmark({ className }: { className?: string }) {
           isn't bleeding glyphs past the SVG element on mobile. */}
       <svg
         viewBox="0 0 1040 200"
-        className="w-full max-w-[360px] shrink-0 sm:w-auto sm:h-[170px]"
+        className="w-full max-w-[260px] shrink-0 sm:w-auto sm:h-[170px]"
         overflow="visible"
         textRendering="geometricPrecision"
         shapeRendering="geometricPrecision"
@@ -68,7 +68,7 @@ export function HeroWordmark({ className }: { className?: string }) {
       {/* Anything — PP Playground Light. */}
       <svg
         viewBox="0 0 840 200"
-        className="w-full max-w-[280px] shrink-0 sm:w-auto sm:h-[170px]"
+        className="w-full max-w-[210px] shrink-0 sm:w-auto sm:h-[170px]"
         overflow="visible"
         textRendering="geometricPrecision"
         shapeRendering="geometricPrecision"

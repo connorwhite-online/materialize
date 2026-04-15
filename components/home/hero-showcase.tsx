@@ -223,7 +223,7 @@ export function HeroShowcase() {
       onPointerCancel={handlePointerUp}
     >
       {/* 3D viewport — full-bleed on mobile so particles can fly off-screen */}
-      <div className="relative -mx-4 w-[100vw] h-[380px] sm:mx-0 sm:w-full sm:h-[480px]">
+      <div className="relative -mx-4 w-[100vw] h-[300px] sm:mx-0 sm:w-full sm:h-[480px]">
         <Canvas
           camera={{ position: [0, 0, 4.5], fov: 45 }}
           dpr={[1, 2]}
