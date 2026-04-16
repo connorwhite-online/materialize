@@ -8,6 +8,7 @@ import { ShippingAddressForm } from "./shipping-address-form";
 import { pollQuotes } from "./poll-quotes";
 import { runAnonCheckout } from "./run-anon-checkout";
 import { createPrintOrder, completePrintOrder } from "@/app/actions/print";
+import { useCart } from "./cart-context";
 import { uploadToCraftCloud } from "@/lib/craftcloud/upload-client";
 import { checkGeometry } from "@/lib/geometry-checks";
 import { REGIONS, DEFAULT_REGION } from "@/lib/craftcloud/regions";
@@ -230,6 +231,51 @@ export function QuoteConfigurator({
   // orders and two charges. Set at the top of the chain and
   // cleared on error so the user can retry.
   const checkoutInFlightRef = useRef(false);
+
+  const cart = useCart();
+  const [isAddingToCart, setIsAddingToCart] = useState(false);
+
+  const handleAddToCart = useCallback(async () => {
+    if (!selectedQuote || !selectedShipping || !cart) return;
+    setIsAddingToCart(true);
+    setCheckoutError(null);
+    try {
+      if (draftMode) {
+        cart.addLocalItem({
+          file: draftMode.file,
+          modelId: draftMode.modelId,
+          originalFilename: filename,
+          quoteId: selectedQuote.quoteId,
+          vendorId: selectedQuote.vendorId,
+          materialConfigId: selectedQuote.materialConfigId,
+          shippingId: selectedShipping.shippingId,
+          quantity,
+          materialPrice: selectedQuote.price,
+          shippingPrice: selectedShipping.price,
+          currency: selectedQuote.currency,
+          countryCode: region.code,
+        });
+      } else if (fileAssetId) {
+        const result = await cart.addItem({
+          fileAssetId,
+          quoteId: selectedQuote.quoteId,
+          vendorId: selectedQuote.vendorId,
+          materialConfigId: selectedQuote.materialConfigId,
+          shippingId: selectedShipping.shippingId,
+          quantity,
+          materialPrice: selectedQuote.price,
+          shippingPrice: selectedShipping.price,
+          currency: selectedQuote.currency,
+          countryCode: region.code,
+        });
+        if ("error" in result) {
+          setCheckoutError(result.error);
+        }
+      }
+    } finally {
+      setIsAddingToCart(false);
+    }
+  }, [selectedQuote, selectedShipping, fileAssetId, draftMode, cart, quantity, region.code, filename]);
 
   // Active material scope for the CraftCloud price request. Starts
   // as the preselectMaterialId (from /materials/[slug] → Print with
@@ -660,6 +706,8 @@ export function QuoteConfigurator({
             onCheckout={handleCheckout}
             isCheckingOut={false}
             checkoutError={checkoutError}
+            onAddToCart={(fileAssetId || draftMode) && cart ? handleAddToCart : undefined}
+            isAddingToCart={isAddingToCart}
           />
         </div>
       </div>

@@ -34,6 +34,8 @@ interface PriceDisplayProps {
   onCheckout: () => void;
   isCheckingOut: boolean;
   checkoutError?: string | null;
+  onAddToCart?: () => void;
+  isAddingToCart?: boolean;
 }
 
 export function PriceDisplay({
@@ -45,6 +47,8 @@ export function PriceDisplay({
   onCheckout,
   isCheckingOut,
   checkoutError,
+  onAddToCart,
+  isAddingToCart,
 }: PriceDisplayProps) {
   if (!selectedQuote) {
     return (
@@ -134,6 +138,18 @@ export function PriceDisplay({
           <p className="mt-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
             {checkoutError}
           </p>
+        )}
+
+        {onAddToCart && (
+          <Button
+            variant="outline"
+            onClick={onAddToCart}
+            disabled={!selectedShipping || isAddingToCart}
+            className="w-full mt-2"
+            size="lg"
+          >
+            {isAddingToCart ? "Adding..." : "Add to Cart"}
+          </Button>
         )}
 
         <Button
