@@ -27,8 +27,8 @@
 
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-import { printOrders, fileAssets, files } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { printOrders, printOrderItems, cartItems, fileAssets, files } from "@/lib/db/schema";
+import { eq, and, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { createCart, getOrderStatus } from "@/lib/craftcloud/client";
 import { findMaterialConfig, findProvider } from "@/lib/craftcloud/catalog";
@@ -151,7 +151,9 @@ export async function checkOrderStatus(
     if (!order || !order.craftCloudOrderId) return null;
 
     const status = await getOrderStatus(order.craftCloudOrderId);
-    const vendorStatus = status.vendorStatuses[0];
+    const vendorStatus =
+      status.vendorStatuses.find((v) => v.vendorId === order.vendor) ??
+      status.vendorStatuses[0];
 
     const STATUS_MAP: Record<string, typeof order.status> = {
       ordered: "ordered",
@@ -188,6 +190,88 @@ export async function checkOrderStatus(
 }
 
 /**
+ * Check out all cart items for a single vendor. Creates one
+ * CraftCloud cart (with all the vendor's quote IDs), one printOrders
+ * row, and one printOrderItems row per cart item. The cart items are
+ * deleted after commitment. The caller should then run
+ * completePrintOrder to create the Stripe session.
+ */
+export async function checkoutVendorGroup(
+  vendorId: string
+): Promise<{ orderId: string; cartId: string } | { error: string }> {
+  try {
+    const { userId } = await auth();
+    if (!userId) return { error: "Unauthorized" };
+
+    const items = await db
+      .select()
+      .from(cartItems)
+      .where(and(eq(cartItems.userId, userId), eq(cartItems.vendorId, vendorId)));
+
+    if (items.length === 0) return { error: "No items in cart for this vendor" };
+
+    let totalPrice = 0;
+    for (const item of items) {
+      totalPrice += item.materialPrice * item.quantity + item.shippingPrice;
+    }
+    const serviceFee = Math.round(totalPrice * SERVICE_FEE_RATE);
+
+    const shippingIds = [...new Set(items.map((i) => i.shippingId))];
+    const currency = items[0].currency as Currency;
+
+    const cart = await createCart({
+      shippingIds,
+      currency,
+      quotes: items.map((i) => ({ id: i.quoteId })),
+    });
+
+    const [order] = await db
+      .insert(printOrders)
+      .values({
+        userId,
+        fileAssetId: null,
+        craftCloudCartId: cart.cartId,
+        totalPrice,
+        serviceFee,
+        vendor: vendorId,
+        status: "cart_created",
+      })
+      .returning();
+
+    await db.insert(printOrderItems).values(
+      items.map((i) => ({
+        printOrderId: order.id,
+        fileAssetId: i.fileAssetId,
+        quoteId: i.quoteId,
+        materialConfigId: i.materialConfigId,
+        quantity: i.quantity,
+        materialSubtotal: i.materialPrice,
+        shippingSubtotal: i.shippingPrice,
+      }))
+    );
+
+    await db
+      .delete(cartItems)
+      .where(
+        inArray(
+          cartItems.id,
+          items.map((i) => i.id)
+        )
+      );
+
+    revalidatePath("/dashboard/orders");
+    return { orderId: order.id, cartId: cart.cartId };
+  } catch (error) {
+    logError("checkoutVendorGroup", error);
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to checkout vendor group";
+    return { error: message };
+  }
+}
+
+/**
  * Builds the Stripe Checkout session for a printOrders row. Shared
  * between the initial checkout (completePrintOrder) and the
  * Resume-cart path (resumePrintOrder), so both flows emit the same
@@ -198,101 +282,148 @@ export async function checkOrderStatus(
  * so users whose Clerk session cookie is still settling after the
  * inline OTP signup don't get bounced to /sign-in by middleware.
  */
+async function buildLineItemDescription(materialConfigId: string | null, vendorId: string | null) {
+  const [materialEntry, provider] = await Promise.all([
+    materialConfigId ? findMaterialConfig(materialConfigId) : null,
+    vendorId ? findProvider(vendorId) : null,
+  ]);
+  const parts = [
+    [materialEntry?.material.name, materialEntry?.config.color].filter(Boolean).join(" "),
+    materialEntry?.finishGroup.name,
+    provider?.name ? `by ${provider.name}` : null,
+  ].filter((s): s is string => Boolean(s && s.length));
+  return parts.length > 0 ? parts.join(" · ") : undefined;
+}
+
+type StripeLineItem = {
+  price_data: {
+    currency: string;
+    unit_amount: number;
+    product_data: { name: string; description?: string };
+  };
+  quantity: number;
+};
+
+async function buildMultiItemLineItems(orderId: string): Promise<StripeLineItem[]> {
+  const items = await db
+    .select({
+      fileName: files.name,
+      originalFilename: fileAssets.originalFilename,
+      materialConfigId: printOrderItems.materialConfigId,
+      quantity: printOrderItems.quantity,
+      materialSubtotal: printOrderItems.materialSubtotal,
+      shippingSubtotal: printOrderItems.shippingSubtotal,
+    })
+    .from(printOrderItems)
+    .innerJoin(fileAssets, eq(printOrderItems.fileAssetId, fileAssets.id))
+    .leftJoin(files, eq(fileAssets.fileId, files.id))
+    .where(eq(printOrderItems.printOrderId, orderId));
+
+  const lineItems: StripeLineItem[] = [];
+  let totalShipping = 0;
+
+  for (const item of items) {
+    const name = item.fileName ?? item.originalFilename?.replace(/\.[^.]+$/, "") ?? "3D Print";
+    const description = await buildLineItemDescription(item.materialConfigId, null);
+    lineItems.push({
+      price_data: {
+        currency: "usd",
+        unit_amount: item.materialSubtotal,
+        product_data: {
+          name: `3D Print — ${name}`,
+          ...(description ? { description } : {}),
+        },
+      },
+      quantity: item.quantity,
+    });
+    totalShipping += item.shippingSubtotal;
+  }
+
+  if (totalShipping > 0) {
+    lineItems.push({
+      price_data: {
+        currency: "usd",
+        unit_amount: totalShipping,
+        product_data: { name: "Shipping" },
+      },
+      quantity: 1,
+    });
+  }
+
+  return lineItems;
+}
+
 async function createStripeSessionForOrder(
   order: typeof printOrders.$inferSelect,
   opts: { email: string; isAnonFlow: boolean }
 ): Promise<{ id: string; url: string } | { error: string }> {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
-  // Resolve human-readable names for the Stripe line items. The
-  // printOrders row only stores UUIDs (materialConfigId, vendorId)
-  // and a fileAssetId — without this join the checkout page just
-  // shows "3D Print Order — 4f0d1d2b-..." which means nothing to
-  // the buyer. Catalog lookups are 24h-cached, file join is cheap.
-  const [assetRow] = await db
-    .select({
-      fileName: files.name,
-      originalFilename: fileAssets.originalFilename,
-    })
-    .from(fileAssets)
-    .leftJoin(files, eq(fileAssets.fileId, files.id))
-    .where(eq(fileAssets.id, order.fileAssetId))
-    .limit(1);
+  const lineItems: StripeLineItem[] = [];
 
-  const [materialEntry, provider] = await Promise.all([
-    order.material ? findMaterialConfig(order.material) : null,
-    order.vendor ? findProvider(order.vendor) : null,
-  ]);
+  if (!order.fileAssetId) {
+    // Multi-item order — build line items from printOrderItems
+    const itemLines = await buildMultiItemLineItems(order.id);
+    lineItems.push(...itemLines);
+  } else {
+    // Legacy single-item order — build from the order row itself
+    const [assetRow] = await db
+      .select({
+        fileName: files.name,
+        originalFilename: fileAssets.originalFilename,
+      })
+      .from(fileAssets)
+      .leftJoin(files, eq(fileAssets.fileId, files.id))
+      .where(eq(fileAssets.id, order.fileAssetId))
+      .limit(1);
 
-  const fileDisplayName =
-    assetRow?.fileName ??
-    assetRow?.originalFilename?.replace(/\.[^.]+$/, "") ??
-    "3D Print";
-  const materialName = materialEntry?.material.name ?? null;
-  const finishName = materialEntry?.finishGroup.name ?? null;
-  const colorName = materialEntry?.config.color ?? null;
-  const vendorName = provider?.name ?? null;
+    const description = await buildLineItemDescription(order.material, order.vendor);
 
-  const descriptionParts = [
-    [materialName, colorName].filter(Boolean).join(" "),
-    finishName,
-    vendorName ? `by ${vendorName}` : null,
-  ].filter((s): s is string => Boolean(s && s.length));
-  const printDescription =
-    descriptionParts.length > 0 ? descriptionParts.join(" · ") : undefined;
+    const fileDisplayName =
+      assetRow?.fileName ??
+      assetRow?.originalFilename?.replace(/\.[^.]+$/, "") ??
+      "3D Print";
 
-  // Prefer the persisted breakdown when present so Stripe shows the
-  // print / shipping split. Older rows (pre-breakdown columns) fall
-  // back to a single Print line item for backwards compatibility.
-  const hasBreakdown =
-    order.materialSubtotal != null &&
-    order.shippingSubtotal != null &&
-    order.quantity != null;
+    const hasBreakdown =
+      order.materialSubtotal != null &&
+      order.shippingSubtotal != null &&
+      order.quantity != null;
 
-  type LineItem = {
-    price_data: {
-      currency: string;
-      unit_amount: number;
-      product_data: { name: string; description?: string };
-    };
-    quantity: number;
-  };
-  const lineItems: LineItem[] = [];
-
-  if (hasBreakdown) {
-    lineItems.push({
-      price_data: {
-        currency: "usd",
-        unit_amount: order.materialSubtotal!,
-        product_data: {
-          name: `3D Print — ${fileDisplayName}`,
-          ...(printDescription ? { description: printDescription } : {}),
-        },
-      },
-      quantity: order.quantity!,
-    });
-    if (order.shippingSubtotal! > 0) {
+    if (hasBreakdown) {
       lineItems.push({
         price_data: {
           currency: "usd",
-          unit_amount: order.shippingSubtotal!,
-          product_data: { name: "Shipping" },
+          unit_amount: order.materialSubtotal!,
+          product_data: {
+            name: `3D Print — ${fileDisplayName}`,
+            ...(description ? { description } : {}),
+          },
+        },
+        quantity: order.quantity!,
+      });
+      if (order.shippingSubtotal! > 0) {
+        lineItems.push({
+          price_data: {
+            currency: "usd",
+            unit_amount: order.shippingSubtotal!,
+            product_data: { name: "Shipping" },
+          },
+          quantity: 1,
+        });
+      }
+    } else {
+      lineItems.push({
+        price_data: {
+          currency: "usd",
+          unit_amount: order.totalPrice,
+          product_data: {
+            name: `3D Print — ${fileDisplayName}`,
+            ...(description ? { description } : {}),
+          },
         },
         quantity: 1,
       });
     }
-  } else {
-    lineItems.push({
-      price_data: {
-        currency: "usd",
-        unit_amount: order.totalPrice,
-        product_data: {
-          name: `3D Print — ${fileDisplayName}`,
-          ...(printDescription ? { description: printDescription } : {}),
-        },
-      },
-      quantity: 1,
-    });
   }
 
   lineItems.push({

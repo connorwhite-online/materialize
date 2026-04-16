@@ -160,8 +160,9 @@ export const printOrders = pgTable("print_orders", {
   userId: text("user_id")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
+  // Nullable: legacy single-item orders have this set directly;
+  // multi-item orders (Phase 1+) leave it null and use printOrderItems.
   fileAssetId: uuid("file_asset_id")
-    .notNull()
     .references(() => fileAssets.id, { onDelete: "cascade" }),
   craftCloudOrderId: text("craft_cloud_order_id"),
   craftCloudCartId: text("craft_cloud_cart_id"),
@@ -218,6 +219,64 @@ export const printOrders = pgTable("print_orders", {
     .$onUpdate(() => new Date()),
 }, (table) => [
   index("print_orders_user_id_idx").on(table.userId),
+]);
+
+// Print order line items — committed items on a placed order.
+// Multi-item orders (fileAssetId = null on printOrders) store their
+// per-item detail here. Legacy single-item rows don't have children
+// in this table — the code falls back to printOrders' own columns.
+
+export const printOrderItems = pgTable("print_order_items", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  printOrderId: uuid("print_order_id")
+    .notNull()
+    .references(() => printOrders.id, { onDelete: "cascade" }),
+  fileAssetId: uuid("file_asset_id")
+    .notNull()
+    .references(() => fileAssets.id, { onDelete: "cascade" }),
+  quoteId: text("quote_id").notNull(),
+  materialConfigId: text("material_config_id").notNull(),
+  quantity: integer("quantity").notNull().default(1),
+  materialSubtotal: integer("material_subtotal").notNull(), // cents, unit price
+  shippingSubtotal: integer("shipping_subtotal").notNull(), // cents
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+}, (table) => [
+  index("print_order_items_order_id_idx").on(table.printOrderId),
+]);
+
+// Cart staging — pre-order items accumulated via "Add to Cart".
+// Deleted when the user checks out a vendor group (items move to
+// printOrderItems) or explicitly removes them.
+
+export const cartItems = pgTable("cart_items", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  fileAssetId: uuid("file_asset_id")
+    .notNull()
+    .references(() => fileAssets.id, { onDelete: "cascade" }),
+  quoteId: text("quote_id").notNull(),
+  vendorId: text("vendor_id").notNull(),
+  materialConfigId: text("material_config_id").notNull(),
+  shippingId: text("shipping_id").notNull(),
+  quantity: integer("quantity").notNull().default(1),
+  materialPrice: integer("material_price").notNull(), // cents, unit price
+  shippingPrice: integer("shipping_price").notNull(), // cents
+  currency: text("currency").notNull().default("USD"),
+  countryCode: text("country_code").notNull().default("US"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+}, (table) => [
+  index("cart_items_user_id_idx").on(table.userId),
+  index("cart_items_user_vendor_idx").on(table.userId, table.vendorId),
 ]);
 
 // Collections
