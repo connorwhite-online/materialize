@@ -293,7 +293,7 @@ export function QuoteConfigurator({
     setCheckoutError(null);
     try {
       if (draftMode) {
-        cart.addLocalItem({
+        const localResult = cart.addLocalItem({
           file: draftMode.file,
           modelId: draftMode.modelId,
           originalFilename: filename,
@@ -308,6 +308,9 @@ export function QuoteConfigurator({
           currency: selectedQuote.currency,
           countryCode: region.code,
         });
+        if ("error" in localResult) {
+          setCheckoutError(localResult.error);
+        }
       } else if (fileAssetId) {
         const result = await cart.addItem({
           fileAssetId,

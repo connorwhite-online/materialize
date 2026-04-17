@@ -58,7 +58,9 @@ interface CartContextValue {
     currency: string;
     countryCode: string;
   }) => Promise<{ cartItemId: string } | { error: string }>;
-  addLocalItem: (params: Omit<LocalCartItem, "localId">) => void;
+  addLocalItem: (
+    params: Omit<LocalCartItem, "localId">
+  ) => { ok: true } | { error: string };
   removeItem: (id: string) => Promise<void>;
   removeLocalItem: (localId: string) => void;
   updateQuantity: (id: string, quantity: number) => Promise<void>;
@@ -125,13 +127,27 @@ export function CartProvider({ children }: { children: ReactNode }) {
   );
 
   const addLocalItem = useCallback(
-    (params: Omit<LocalCartItem, "localId">) => {
+    (
+      params: Omit<LocalCartItem, "localId">
+    ): { ok: true } | { error: string } => {
+      // Mirror the server-side currency guard (see addToCart). Both
+      // paths feed into the same checkoutVendorGroup createCart call
+      // which only accepts a single currency — mixing rails would
+      // either mis-price items or 400 at the CraftCloud boundary.
+      const existingCurrency =
+        items[0]?.currency ?? localItems[0]?.currency ?? null;
+      if (existingCurrency && existingCurrency !== params.currency) {
+        return {
+          error: `Your cart is in ${existingCurrency}. Clear it or finish that order before adding ${params.currency} items.`,
+        };
+      }
       setLocalItems((prev) => [
         ...prev,
         { ...params, localId: crypto.randomUUID() },
       ]);
+      return { ok: true };
     },
-    []
+    [items, localItems]
   );
 
   const removeItem = useCallback(async (id: string) => {
