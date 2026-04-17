@@ -6,6 +6,7 @@ import {
   useState,
   useCallback,
   useEffect,
+  useRef,
   type ReactNode,
 } from "react";
 import type { CartItemWithMeta } from "@/app/actions/cart";
@@ -79,6 +80,12 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [materializing, setMaterializing] = useState(false);
+  // Synchronous guard against concurrent materialize calls. The
+  // `materializing` state flips on next render so two rapid clicks
+  // (e.g. two vendor-group Checkout buttons) can both pass the
+  // state-based disabled check and enter the function body —
+  // duplicating uploads + cart inserts. A ref updates immediately.
+  const materializingRef = useRef(false);
 
   const itemCount = dbItemCount + localItems.length;
 
@@ -161,6 +168,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
     error?: string;
   }> => {
     if (localItems.length === 0) return { ok: true };
+    // Synchronous reentry guard — see materializingRef comment.
+    if (materializingRef.current) {
+      return { ok: false, error: "Already preparing cart — please wait" };
+    }
+    materializingRef.current = true;
     setMaterializing(true);
 
     // Snapshot the queue at call time so state updates mid-loop
@@ -238,6 +250,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       return { ok: true };
     } finally {
       setMaterializing(false);
+      materializingRef.current = false;
     }
   }, [localItems, refresh]);
 

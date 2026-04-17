@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useUser } from "@clerk/nextjs";
 import { useCart, type LocalCartItem } from "./cart-context";
 import type { CartItemWithMeta } from "@/app/actions/cart";
@@ -288,6 +288,11 @@ function VendorGroup({
 }) {
   const [error, setError] = useState<string | null>(null);
   const [checkingOut, setCheckingOut] = useState(false);
+  // Synchronous guard — React state doesn't flip until the next
+  // render, so a rapid double-click could enter handleCheckout
+  // twice and create two orders for the same vendor group. The
+  // ref updates immediately.
+  const checkingOutRef = useRef(false);
 
   const subtotal = vendorGroupSubtotal(group.items);
   const serviceFee = Math.round(subtotal * SERVICE_FEE_RATE);
@@ -301,6 +306,8 @@ function VendorGroup({
       return;
     }
 
+    if (checkingOutRef.current) return;
+    checkingOutRef.current = true;
     setCheckingOut(true);
     try {
       if (hasLocalItems) {
@@ -320,6 +327,7 @@ function VendorGroup({
       router.push(`/checkout/${result.orderId}`);
     } finally {
       setCheckingOut(false);
+      checkingOutRef.current = false;
     }
   };
 
