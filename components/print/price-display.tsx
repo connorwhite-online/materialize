@@ -7,6 +7,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { useCart } from "./cart-context";
+import { dedupeShippingByShipId } from "@/lib/pricing/shipping";
 
 const SERVICE_FEE_RATE = 0.03;
 
@@ -224,9 +225,10 @@ function ExistingCartSummary({
 
   const vendorGroups = useMemo(() => {
     if (!cart) return [];
-    // Shipping is per-vendor-per-shipping-option, not per-item —
-    // track it in a side-map keyed by (vendorId, shippingId) so
-    // a 2-item same-vendor cart doesn't show 2× shipping.
+    // Group cart rows by vendor, deferring the shipping dedupe to
+    // the shared helper so all cart-total math comes out of one
+    // place. Local (anon) prices are in dollars — convert to cents
+    // at ingest so everything downstream stays in cents.
     const groups = new Map<
       string,
       {
@@ -234,7 +236,8 @@ function ExistingCartSummary({
         vendorName: string | null;
         count: number;
         materialCents: number;
-        shippingByShipId: Map<string, number>;
+        /** Rows for dedupeShippingByShipId — only shippingId + shippingPrice matter. */
+        shippingRows: Array<{ shippingId: string; shippingPrice: number }>;
       }
     >();
 
@@ -250,26 +253,24 @@ function ExistingCartSummary({
       if (existing) {
         existing.count += quantity;
         existing.materialCents += materialCents;
-        if (!existing.shippingByShipId.has(shippingId)) {
-          existing.shippingByShipId.set(shippingId, shippingCents);
-        }
+        existing.shippingRows.push({
+          shippingId,
+          shippingPrice: shippingCents,
+        });
         if (!existing.vendorName && vendorName) {
           existing.vendorName = vendorName;
         }
       } else {
-        const shippingByShipId = new Map<string, number>();
-        shippingByShipId.set(shippingId, shippingCents);
         groups.set(vendorId, {
           vendorId,
           vendorName,
           count: quantity,
           materialCents,
-          shippingByShipId,
+          shippingRows: [{ shippingId, shippingPrice: shippingCents }],
         });
       }
     };
 
-    // DB cart items — prices already stored in cents.
     for (const item of cart.items) {
       ingest(
         item.vendorId,
@@ -280,8 +281,6 @@ function ExistingCartSummary({
         item.shippingPrice
       );
     }
-
-    // Local anon cart items — prices in dollars, convert to cents.
     for (const item of cart.localItems) {
       ingest(
         item.vendorId,
@@ -293,18 +292,12 @@ function ExistingCartSummary({
       );
     }
 
-    return Array.from(groups.values()).map((g) => {
-      const shippingCents = [...g.shippingByShipId.values()].reduce(
-        (a, b) => a + b,
-        0
-      );
-      return {
-        vendorId: g.vendorId,
-        vendorName: g.vendorName,
-        count: g.count,
-        subtotalCents: g.materialCents + shippingCents,
-      };
-    });
+    return Array.from(groups.values()).map((g) => ({
+      vendorId: g.vendorId,
+      vendorName: g.vendorName,
+      count: g.count,
+      subtotalCents: g.materialCents + dedupeShippingByShipId(g.shippingRows),
+    }));
   }, [cart]);
 
   if (vendorGroups.length === 0) return null;

@@ -36,6 +36,7 @@ import { getStripe } from "@/lib/stripe";
 import { printOrderSchema } from "@/lib/validations/print";
 import { checkoutAddressSchema } from "@/lib/validations/address";
 import { logError } from "@/lib/logger";
+import { dedupeShippingByShipId } from "@/lib/pricing/shipping";
 import type { Currency } from "@/lib/craftcloud/types";
 
 const SERVICE_FEE_RATE = 0.03;
@@ -277,18 +278,11 @@ export async function checkoutVendorGroup(
     // twice. The sum is stored on printOrders.shippingSubtotal so
     // downstream reads (Stripe line items, checkout page) can use
     // the canonical total instead of re-summing item rows.
-    const shippingByShipId = new Map<string, number>();
-    let totalMaterial = 0;
-    for (const item of items) {
-      totalMaterial += item.materialPrice * item.quantity;
-      if (!shippingByShipId.has(item.shippingId)) {
-        shippingByShipId.set(item.shippingId, item.shippingPrice);
-      }
-    }
-    const totalShipping = [...shippingByShipId.values()].reduce(
-      (a, b) => a + b,
+    const totalMaterial = items.reduce(
+      (sum, i) => sum + i.materialPrice * i.quantity,
       0
     );
+    const totalShipping = dedupeShippingByShipId(items);
     const totalPrice = totalMaterial + productionFeeCents + totalShipping;
     const serviceFee = Math.round(totalPrice * SERVICE_FEE_RATE);
 

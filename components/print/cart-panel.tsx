@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { XIcon, MinusIcon, PlusIcon, TrashIcon } from "lucide-react";
 import { checkoutVendorGroup } from "@/app/actions/print";
+import { dedupeShippingByShipId } from "@/lib/pricing/shipping";
 import { useRouter } from "next/navigation";
 
 const SERVICE_FEE_RATE = 0.03;
@@ -59,19 +60,14 @@ function toDisplayItems(
 
 /**
  * Sum a vendor group's subtotal in cents, deduping shipping by
- * shippingId. Cart items redundantly store the vendor's shipping
- * fee on every row — a naive sum charges it N times for N items.
+ * shippingId (see lib/pricing/shipping.ts).
  */
 function vendorGroupSubtotal(items: DisplayItem[]): number {
-  let material = 0;
-  const shippingByShipId = new Map<string, number>();
-  for (const item of items) {
-    material += item.materialPrice * item.quantity;
-    if (!shippingByShipId.has(item.shippingId)) {
-      shippingByShipId.set(item.shippingId, item.shippingPrice);
-    }
-  }
-  const shipping = [...shippingByShipId.values()].reduce((a, b) => a + b, 0);
+  const material = items.reduce(
+    (sum, i) => sum + i.materialPrice * i.quantity,
+    0
+  );
+  const shipping = dedupeShippingByShipId(items);
   return material + shipping;
 }
 
