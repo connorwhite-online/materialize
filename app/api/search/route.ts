@@ -6,6 +6,19 @@ import { getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
 import { logError } from "@/lib/logger";
 
 const PER_CATEGORY_LIMIT = 8;
+/** Below this length, ilike('%x%') hits too many rows to be useful. */
+const MIN_QUERY_LENGTH = 2;
+/** Cap query length to prevent pathological regex-like patterns. */
+const MAX_QUERY_LENGTH = 100;
+
+/**
+ * Escape ilike wildcards so a user typing `%` or `_` can't turn
+ * their substring into a catch-all pattern (or a very slow one).
+ * Backslash-escape the three chars that Postgres treats specially.
+ */
+function escapeLikePattern(input: string): string {
+  return input.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
 
 export interface SearchHitFile {
   type: "file";
@@ -48,9 +61,13 @@ export interface SearchResponse {
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const q = (url.searchParams.get("q") ?? "").trim();
+  const rawQ = (url.searchParams.get("q") ?? "").trim();
 
-  if (!q) {
+  // Return empty instead of erroring on too-short/too-long queries —
+  // the home search bar fires continuously as the user types, so we
+  // want to no-op quietly below the threshold rather than flashing
+  // an error.
+  if (rawQ.length < MIN_QUERY_LENGTH || rawQ.length > MAX_QUERY_LENGTH) {
     return NextResponse.json<SearchResponse>({
       files: [],
       users: [],
@@ -58,7 +75,9 @@ export async function GET(request: Request) {
     });
   }
 
-  const pattern = `%${q}%`;
+  const q = rawQ;
+  // Escape %/_/\\ so user input can't function as ilike wildcards.
+  const pattern = `%${escapeLikePattern(q)}%`;
 
   try {
     const [fileRows, userRows, catalog] = await Promise.all([
