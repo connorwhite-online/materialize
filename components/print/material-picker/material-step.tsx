@@ -93,6 +93,24 @@ export function MaterialStep({
     return <MaterialStepLoading />;
   }
 
+  // Polling finished with no quotes — usually means the file's
+  // geometry exceeds every vendor's print volume, or no vendor in
+  // the selected region supports the model. Avoid a silent empty
+  // grid so the user knows what happened and can try a different
+  // region.
+  if (!quotesLoading && quotes.length === 0) {
+    return (
+      <div className="rounded-xl border border-border bg-muted/20 p-6 text-center">
+        <p className="text-sm font-medium">No quotes available for this file</p>
+        <p className="mx-auto mt-1.5 max-w-sm text-xs text-muted-foreground">
+          This usually means the model exceeds every vendor&apos;s print volume,
+          or no vendor in the selected region can produce it. Try changing
+          the &quot;Ship to&quot; region above, or scaling the model down.
+        </p>
+      </div>
+    );
+  }
+
   const visibleGroups = activeGroup
     ? groups.filter((g) => g.id === activeGroup)
     : groups;
