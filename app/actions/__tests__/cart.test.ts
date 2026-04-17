@@ -91,6 +91,7 @@ describe("addToCart", () => {
     vi.clearAllMocks();
     cartRows = [];
     insertedValues = [];
+    updatedSet = null;
   });
 
   it("inserts a cart item with prices in cents", async () => {
@@ -107,6 +108,23 @@ describe("addToCart", () => {
     const result = await addToCart({ ...baseParams, quantity: 0 });
     expect(result).toHaveProperty("error");
     expect(insertedValues).toHaveLength(0);
+  });
+
+  it("merges with existing row of same (fileAsset, quote) by bumping quantity", async () => {
+    // Existing cart row has qty 1. Adding the same quote (qty 2)
+    // should update the row to qty 3 instead of inserting a second.
+    cartRows = [{ id: "existing-cart-item-id", quantity: 1 }];
+    const result = await addToCart(baseParams);
+    expect(result).toEqual({ cartItemId: "existing-cart-item-id" });
+    expect(insertedValues).toHaveLength(0);
+    expect(updatedSet).toEqual({ quantity: 3 });
+  });
+
+  it("caps the merged quantity at 100", async () => {
+    cartRows = [{ id: "existing-cart-item-id", quantity: 99 }];
+    const result = await addToCart({ ...baseParams, quantity: 5 });
+    expect(result).toEqual({ cartItemId: "existing-cart-item-id" });
+    expect(updatedSet).toEqual({ quantity: 100 });
   });
 });
 

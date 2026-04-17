@@ -47,6 +47,33 @@ export async function addToCart(params: {
 
     const data = parsed.data;
 
+    // Merge duplicates: if this exact file + quote is already in the
+    // cart, bump the quantity instead of inserting a second row. A
+    // "duplicate" is (userId, fileAssetId, quoteId) — the quoteId
+    // already encodes vendor + material + shipping on CraftCloud's
+    // side, so two rows with the same quoteId are definitionally
+    // the same cart line.
+    const [existing] = await db
+      .select({ id: cartItems.id, quantity: cartItems.quantity })
+      .from(cartItems)
+      .where(
+        and(
+          eq(cartItems.userId, userId),
+          eq(cartItems.fileAssetId, data.fileAssetId),
+          eq(cartItems.quoteId, data.quoteId)
+        )
+      );
+
+    if (existing) {
+      const nextQty = Math.min(100, existing.quantity + data.quantity);
+      await db
+        .update(cartItems)
+        .set({ quantity: nextQty })
+        .where(eq(cartItems.id, existing.id));
+      revalidatePath("/");
+      return { cartItemId: existing.id };
+    }
+
     const [item] = await db
       .insert(cartItems)
       .values({
