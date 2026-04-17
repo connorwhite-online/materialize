@@ -44,6 +44,9 @@ export default async function OrderDetailPage(props: {
       status: printOrders.status,
       totalPrice: printOrders.totalPrice,
       serviceFee: printOrders.serviceFee,
+      materialSubtotal: printOrders.materialSubtotal,
+      shippingSubtotal: printOrders.shippingSubtotal,
+      quantity: printOrders.quantity,
       material: printOrders.material,
       vendor: printOrders.vendor,
       vendorName: printOrders.vendorName,
@@ -85,6 +88,8 @@ export default async function OrderDetailPage(props: {
         .select({
           fileAssetId: printOrderItems.fileAssetId,
           materialConfigId: printOrderItems.materialConfigId,
+          quantity: printOrderItems.quantity,
+          materialSubtotal: printOrderItems.materialSubtotal,
           fileName: files.name,
           originalFilename: fileAssets.originalFilename,
           assetFormat: fileAssets.format,
@@ -117,6 +122,19 @@ export default async function OrderDetailPage(props: {
   const displayVendorName = order.vendorName ?? order.vendor ?? null;
   const orderNumber = formatOrderNumber(order.id);
   const statusLabel = STATUS_LABELS[order.status] || order.status;
+
+  // Price breakdown — split the lumped totalPrice into its
+  // components so the user can see what they paid for. Production
+  // fee is anything left over after material + shipping; it only
+  // surfaces when the vendor's minimum exceeded the quoted price.
+  const breakdownMaterial = order.fileAssetId
+    ? (order.materialSubtotal ?? 0) * (order.quantity ?? 1)
+    : items.reduce((sum, i) => sum + i.materialSubtotal * i.quantity, 0);
+  const breakdownShipping = order.shippingSubtotal ?? 0;
+  const breakdownProductionFee = Math.max(
+    0,
+    order.totalPrice - breakdownMaterial - breakdownShipping
+  );
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
@@ -208,18 +226,59 @@ export default async function OrderDetailPage(props: {
             <CardTitle className="text-base">Price Breakdown</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Production</span>
-              <span>${(order.totalPrice / 100).toFixed(2)}</span>
-            </div>
+            {breakdownMaterial > 0 && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">
+                  Material
+                  {order.fileAssetId && order.quantity && order.quantity > 1
+                    ? ` (${order.quantity}x)`
+                    : items.length > 1
+                      ? ` (${items.length} items)`
+                      : ""}
+                </span>
+                <span className="tabular-nums">
+                  ${(breakdownMaterial / 100).toFixed(2)}
+                </span>
+              </div>
+            )}
+            {breakdownProductionFee > 0 && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">
+                  Vendor minimum fee
+                </span>
+                <span className="tabular-nums">
+                  ${(breakdownProductionFee / 100).toFixed(2)}
+                </span>
+              </div>
+            )}
+            {breakdownShipping > 0 && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Shipping</span>
+                <span className="tabular-nums">
+                  ${(breakdownShipping / 100).toFixed(2)}
+                </span>
+              </div>
+            )}
+            {/* Fallback for legacy rows where materialSubtotal +
+                shippingSubtotal are null — just show the lumped total. */}
+            {breakdownMaterial === 0 && breakdownShipping === 0 && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Production</span>
+                <span className="tabular-nums">
+                  ${(order.totalPrice / 100).toFixed(2)}
+                </span>
+              </div>
+            )}
             <div className="flex justify-between">
               <span className="text-muted-foreground">Service fee</span>
-              <span>${(order.serviceFee / 100).toFixed(2)}</span>
+              <span className="tabular-nums">
+                ${(order.serviceFee / 100).toFixed(2)}
+              </span>
             </div>
             <Separator />
             <div className="flex justify-between font-semibold">
               <span>Total</span>
-              <span>
+              <span className="tabular-nums">
                 ${((order.totalPrice + order.serviceFee) / 100).toFixed(2)}
               </span>
             </div>
