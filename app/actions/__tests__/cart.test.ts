@@ -206,6 +206,7 @@ describe("getCart", () => {
         shippingPrice: 800,
         currency: "USD",
         countryCode: "US",
+        updatedAt: new Date("2026-04-15T12:00:00Z"),
       },
     ];
 
@@ -214,6 +215,8 @@ describe("getCart", () => {
     if ("items" in result) {
       expect(result.items).toHaveLength(1);
       expect(result.items[0].fileName).toBe("Caribiner");
+      // updatedAt is normalized to ISO string for client consumption
+      expect(result.items[0].updatedAt).toBe("2026-04-15T12:00:00.000Z");
     }
   });
 

@@ -23,6 +23,8 @@ export type CartItemWithMeta = {
   shippingPrice: number;
   currency: string;
   countryCode: string;
+  /** ISO timestamp the cart row was last written. */
+  updatedAt: string;
 };
 
 export async function addToCart(params: {
@@ -196,6 +198,7 @@ export async function getCart(): Promise<
         shippingPrice: cartItems.shippingPrice,
         currency: cartItems.currency,
         countryCode: cartItems.countryCode,
+        updatedAt: cartItems.updatedAt,
       })
       .from(cartItems)
       .innerJoin(fileAssets, eq(cartItems.fileAssetId, fileAssets.id))
@@ -203,7 +206,12 @@ export async function getCart(): Promise<
       .where(eq(cartItems.userId, userId))
       .orderBy(cartItems.createdAt);
 
-    return { items: rows };
+    return {
+      items: rows.map((r) => ({
+        ...r,
+        updatedAt: r.updatedAt.toISOString(),
+      })),
+    };
   } catch (error) {
     logError("getCart", error);
     return { error: "Failed to load cart" };

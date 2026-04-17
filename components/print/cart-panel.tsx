@@ -25,12 +25,24 @@ type DisplayItem = {
   quantity: number;
   materialPrice: number;
   shippingPrice: number;
+  /** True when the underlying quote is old enough to be at risk of
+   * having expired on CraftCloud's side (DB rows only — local
+   * items are always fresh since they live for one browser session). */
+  staleQuote: boolean;
 };
+
+// CraftCloud's quote TTLs aren't documented but anecdotally they're
+// a few hours. Flag rows older than this as "at risk" so users get
+// a heads-up to refresh before the checkout error surfaces. Soft
+// warning only — checkout still attempts and the server returns a
+// more specific message if the quote actually is gone.
+const STALE_QUOTE_AGE_MS = 2 * 60 * 60 * 1000;
 
 function toDisplayItems(
   dbItems: CartItemWithMeta[],
   localItems: LocalCartItem[]
 ): DisplayItem[] {
+  const now = Date.now();
   const fromDb: DisplayItem[] = dbItems.map((i) => ({
     id: i.id,
     isLocal: false,
@@ -42,6 +54,7 @@ function toDisplayItems(
     quantity: i.quantity,
     materialPrice: i.materialPrice,
     shippingPrice: i.shippingPrice,
+    staleQuote: now - new Date(i.updatedAt).getTime() > STALE_QUOTE_AGE_MS,
   }));
   const fromLocal: DisplayItem[] = localItems.map((i) => ({
     id: i.localId,
@@ -54,6 +67,7 @@ function toDisplayItems(
     quantity: i.quantity,
     materialPrice: Math.round(i.materialPrice * 100),
     shippingPrice: Math.round(i.shippingPrice * 100),
+    staleQuote: false,
   }));
   return [...fromDb, ...fromLocal];
 }
@@ -412,6 +426,11 @@ function CartItemRow({
         <p className="text-xs text-muted-foreground">
           ${unitPrice.toFixed(2)} each
         </p>
+        {item.staleQuote && (
+          <p className="mt-0.5 text-[10px] text-amber-700 dark:text-amber-300">
+            Quote may have expired — re-add from the print page if checkout fails.
+          </p>
+        )}
       </div>
 
       <div className="flex items-center gap-1">

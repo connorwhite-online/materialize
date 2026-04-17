@@ -30,7 +30,11 @@ import { db } from "@/lib/db";
 import { printOrders, printOrderItems, cartItems, fileAssets, files } from "@/lib/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { createCart, getOrderStatus } from "@/lib/craftcloud/client";
+import {
+  createCart,
+  getOrderStatus,
+  CraftCloudApiError,
+} from "@/lib/craftcloud/client";
 import { findMaterialConfig, findProvider } from "@/lib/craftcloud/catalog";
 import { getStripe } from "@/lib/stripe";
 import { printOrderSchema } from "@/lib/validations/print";
@@ -177,6 +181,12 @@ export async function createPrintOrder(params: {
     return { orderId: order.id, cartId: cart.cartId };
   } catch (error) {
     logError("createPrintOrder", error);
+    if (error instanceof CraftCloudApiError && error.isQuoteExpired()) {
+      return {
+        error:
+          "This quote has expired. Please pick a material again — prices may have changed.",
+      };
+    }
     const message =
       error instanceof Error
         ? error.message
@@ -339,6 +349,12 @@ export async function checkoutVendorGroup(
     return { orderId: order.id, cartId: cart.cartId };
   } catch (error) {
     logError("checkoutVendorGroup", error);
+    if (error instanceof CraftCloudApiError && error.isQuoteExpired()) {
+      return {
+        error:
+          "One or more quotes in this cart have expired. Remove those items and re-add them from the quote page.",
+      };
+    }
     const message =
       error instanceof Error
         ? error.message

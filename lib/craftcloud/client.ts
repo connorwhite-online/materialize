@@ -52,6 +52,43 @@ const USE_MOCK = process.env.CRAFTCLOUD_USE_MOCK !== "false";
 const USE_MOCK_CHECKOUT =
   USE_MOCK || process.env.CRAFTCLOUD_MOCK_CHECKOUT === "true";
 
+/**
+ * Thrown when CraftCloud's API returns a non-2xx response. Callers
+ * can inspect `.status` and `.body` to distinguish user-actionable
+ * failures (e.g. "quote expired") from transient server errors.
+ */
+export class CraftCloudApiError extends Error {
+  readonly status: number;
+  readonly body: string;
+  readonly path: string;
+
+  constructor(status: number, body: string, path: string) {
+    super(`Craft Cloud API error ${status} at ${path}: ${body}`);
+    this.name = "CraftCloudApiError";
+    this.status = status;
+    this.body = body;
+    this.path = path;
+  }
+
+  /**
+   * True when the error body suggests a quote is no longer valid —
+   * typically stale cart items after the quoteId's TTL elapsed.
+   * Match the server's wording conservatively; prefer false-negative
+   * (show generic error) over false-positive (tell the user their
+   * cart expired when actually it's a different bug).
+   */
+  isQuoteExpired(): boolean {
+    if (this.status !== 400 && this.status !== 404) return false;
+    const lowered = this.body.toLowerCase();
+    return (
+      lowered.includes("quote") &&
+      (lowered.includes("not found") ||
+        lowered.includes("expired") ||
+        lowered.includes("invalid"))
+    );
+  }
+}
+
 async function apiRequest<T>(
   method: string,
   path: string,
@@ -67,7 +104,7 @@ async function apiRequest<T>(
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Craft Cloud API error ${res.status}: ${text}`);
+    throw new CraftCloudApiError(res.status, text, path);
   }
 
   return res.json();
