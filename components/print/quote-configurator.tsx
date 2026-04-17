@@ -262,20 +262,28 @@ export function QuoteConfigurator({
 
     let cancelled = false;
 
-    checkCartPricing({
-      quoteId: selectedQuote.quoteId,
-      vendorId: selectedQuote.vendorId,
-      shippingId: selectedShipping.shippingId,
-      currency: selectedQuote.currency as Currency,
-    }).then((result) => {
-      if (cancelled) return;
-      setCheckingMinimum(false);
-      if ("error" in result) return;
-      setMinimumFeeInfo(result);
-    });
+    // Debounce — rapid shipping-option toggles would otherwise fire
+    // a disposable CraftCloud cart-create per keystroke. 300ms is
+    // short enough that a committed choice reflects quickly, long
+    // enough that cycling through radio options while deliberating
+    // only pays for the final pick.
+    const handle = setTimeout(() => {
+      checkCartPricing({
+        quoteId: selectedQuote.quoteId,
+        vendorId: selectedQuote.vendorId,
+        shippingId: selectedShipping.shippingId,
+        currency: selectedQuote.currency as Currency,
+      }).then((result) => {
+        if (cancelled) return;
+        setCheckingMinimum(false);
+        if ("error" in result) return;
+        setMinimumFeeInfo(result);
+      });
+    }, 300);
 
     return () => {
       cancelled = true;
+      clearTimeout(handle);
     };
   }, [selectedQuote, selectedShipping, quantity]);
 
@@ -592,8 +600,25 @@ export function QuoteConfigurator({
 
   if (error) {
     return (
-      <Alert variant="destructive">
-        <p className="text-sm">{error}</p>
+      <Alert variant="destructive" className="flex flex-col items-start gap-3">
+        <div>
+          <p className="text-sm font-medium">We couldn&apos;t load quotes for this file</p>
+          <p className="mt-1 text-xs opacity-90">{error}</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setError(null);
+            setLoadingPhase(isDraft ? "quoting" : "uploading");
+            fetchQuotes().catch((err) => {
+              setError(err instanceof Error ? err.message : "Something went wrong");
+              setLoadingPhase("done");
+            });
+          }}
+          className="rounded-md border border-current/30 bg-background/60 px-3 py-1 text-xs font-medium hover:bg-background/90"
+        >
+          Retry
+        </button>
       </Alert>
     );
   }
