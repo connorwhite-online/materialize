@@ -1,7 +1,12 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { printOrders, fileAssets, files } from "@/lib/db/schema";
-import { eq, desc, and, ne } from "drizzle-orm";
+import {
+  printOrders,
+  printOrderItems,
+  fileAssets,
+  files,
+} from "@/lib/db/schema";
+import { eq, desc, and, ne, inArray, asc } from "drizzle-orm";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,10 +44,12 @@ const STATUS_VARIANT: Record<
 export async function OrdersTab({ userId }: { userId: string }) {
   // Drafts (`cart_created`) surface separately as a "Carts" section
   // with Resume / Discard actions — they're not real orders yet.
-  const drafts = await db
+  const draftsRaw = await db
     .select({
       id: printOrders.id,
       material: printOrders.material,
+      vendor: printOrders.vendor,
+      vendorName: printOrders.vendorName,
       totalPrice: printOrders.totalPrice,
       serviceFee: printOrders.serviceFee,
       fileAssetId: printOrders.fileAssetId,
@@ -59,9 +66,90 @@ export async function OrdersTab({ userId }: { userId: string }) {
     )
     .orderBy(desc(printOrders.createdAt));
 
-  const orders = await db
-    .select()
+  // Multi-item drafts have fileAssetId=null on the printOrders row —
+  // the real files live in printOrderItems. Pull the first item per
+  // order (by createdAt asc) so the card can show its filename
+  // instead of the "3D Print" fallback, plus a count for the extras.
+  const multiItemIds = draftsRaw
+    .filter((d) => !d.fileAssetId)
+    .map((d) => d.id);
+
+  const multiItemMeta = multiItemIds.length
+    ? await db
+        .select({
+          printOrderId: printOrderItems.printOrderId,
+          materialConfigId: printOrderItems.materialConfigId,
+          fileName: files.name,
+          originalFilename: fileAssets.originalFilename,
+          createdAt: printOrderItems.createdAt,
+        })
+        .from(printOrderItems)
+        .innerJoin(fileAssets, eq(printOrderItems.fileAssetId, fileAssets.id))
+        .leftJoin(files, eq(fileAssets.fileId, files.id))
+        .where(inArray(printOrderItems.printOrderId, multiItemIds))
+        .orderBy(asc(printOrderItems.createdAt))
+    : [];
+
+  // Group by printOrderId: { firstName, count, firstMaterial }
+  const multiItemByOrder = new Map<
+    string,
+    {
+      firstName: string | null;
+      count: number;
+      firstMaterial: string | null;
+    }
+  >();
+  for (const item of multiItemMeta) {
+    const existing = multiItemByOrder.get(item.printOrderId);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      multiItemByOrder.set(item.printOrderId, {
+        firstName:
+          item.fileName ??
+          item.originalFilename?.replace(/\.[^.]+$/, "") ??
+          null,
+        count: 1,
+        firstMaterial: item.materialConfigId,
+      });
+    }
+  }
+
+  const drafts = draftsRaw.map((d) => {
+    if (d.fileAssetId) return d; // legacy single-item
+    const meta = multiItemByOrder.get(d.id);
+    if (!meta) return d;
+    return {
+      ...d,
+      // Show the first item's filename, with "+N" suffix when the
+      // cart has additional items from the same vendor.
+      fileName:
+        meta.count > 1
+          ? `${meta.firstName ?? "3D Print"} + ${meta.count - 1} more`
+          : meta.firstName,
+      // Multi-item orders don't store a single material on the
+      // parent row. Fall back to the first item's config so the
+      // card shows a material chip instead of blank.
+      material: d.material ?? meta.firstMaterial,
+    };
+  });
+
+  const ordersRaw = await db
+    .select({
+      id: printOrders.id,
+      status: printOrders.status,
+      totalPrice: printOrders.totalPrice,
+      serviceFee: printOrders.serviceFee,
+      material: printOrders.material,
+      vendor: printOrders.vendor,
+      vendorName: printOrders.vendorName,
+      fileAssetId: printOrders.fileAssetId,
+      fileName: files.name,
+      createdAt: printOrders.createdAt,
+    })
     .from(printOrders)
+    .leftJoin(fileAssets, eq(printOrders.fileAssetId, fileAssets.id))
+    .leftJoin(files, eq(fileAssets.fileId, files.id))
     .where(
       and(
         eq(printOrders.userId, userId),
@@ -69,6 +157,64 @@ export async function OrdersTab({ userId }: { userId: string }) {
       )
     )
     .orderBy(desc(printOrders.createdAt));
+
+  // Same multi-item backfill as drafts: for orders with no direct
+  // fileAssetId, pull the first printOrderItems row so the card can
+  // show a filename instead of "3D Print". Cheaper than doing it
+  // per-card because it batches all ids into one query.
+  const multiItemOrderIds = ordersRaw
+    .filter((o) => !o.fileAssetId)
+    .map((o) => o.id);
+
+  const multiItemOrderMeta = multiItemOrderIds.length
+    ? await db
+        .select({
+          printOrderId: printOrderItems.printOrderId,
+          materialConfigId: printOrderItems.materialConfigId,
+          fileName: files.name,
+          originalFilename: fileAssets.originalFilename,
+          createdAt: printOrderItems.createdAt,
+        })
+        .from(printOrderItems)
+        .innerJoin(fileAssets, eq(printOrderItems.fileAssetId, fileAssets.id))
+        .leftJoin(files, eq(fileAssets.fileId, files.id))
+        .where(inArray(printOrderItems.printOrderId, multiItemOrderIds))
+        .orderBy(asc(printOrderItems.createdAt))
+    : [];
+
+  const multiItemByOrderId = new Map<
+    string,
+    { firstName: string | null; count: number; firstMaterial: string | null }
+  >();
+  for (const item of multiItemOrderMeta) {
+    const existing = multiItemByOrderId.get(item.printOrderId);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      multiItemByOrderId.set(item.printOrderId, {
+        firstName:
+          item.fileName ??
+          item.originalFilename?.replace(/\.[^.]+$/, "") ??
+          null,
+        count: 1,
+        firstMaterial: item.materialConfigId,
+      });
+    }
+  }
+
+  const orders = ordersRaw.map((o) => {
+    if (o.fileAssetId) return o;
+    const meta = multiItemByOrderId.get(o.id);
+    if (!meta) return o;
+    return {
+      ...o,
+      fileName:
+        meta.count > 1
+          ? `${meta.firstName ?? "3D Print"} + ${meta.count - 1} more`
+          : meta.firstName,
+      material: o.material ?? meta.firstMaterial,
+    };
+  });
 
   if (orders.length === 0 && drafts.length === 0) {
     return (
@@ -102,6 +248,7 @@ export async function OrdersTab({ userId }: { userId: string }) {
                   orderId={draft.id}
                   fileAssetId={draft.fileAssetId}
                   fileName={draft.fileName}
+                  vendorName={draft.vendorName ?? draft.vendor ?? null}
                   materialId={draft.material}
                   materialName={materialMeta?.name ?? null}
                   materialMethod={materialMeta?.method ?? null}
@@ -143,11 +290,17 @@ export async function OrdersTab({ userId }: { userId: string }) {
                   )}
                   <div>
                     <p className="font-medium text-sm">
-                      {materialMeta?.name || order.material || "3D Print"}
+                      {order.fileName ||
+                        materialMeta?.name ||
+                        order.material ||
+                        "3D Print"}
                     </p>
                     <p className="text-xs text-muted-foreground">
                       {orderNumber}
-                      {materialMeta && ` · ${materialMeta.method}`}
+                      {order.vendorName || order.vendor
+                        ? ` · ${order.vendorName ?? order.vendor}`
+                        : ""}
+                      {materialMeta ? ` · ${materialMeta.method}` : ""}
                     </p>
                   </div>
                 </div>

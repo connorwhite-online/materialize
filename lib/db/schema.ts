@@ -177,6 +177,10 @@ export const printOrders = pgTable("print_orders", {
   quantity: integer("quantity"),
   material: text("material"),
   vendor: text("vendor"),
+  // Human-readable vendor name resolved from CraftCloud's provider
+  // directory at checkout time. Nullable because legacy rows predate
+  // this column and the catalog lookup can miss on unknown vendors.
+  vendorName: text("vendor_name"),
   status: printOrderStatusEnum("status").notNull().default("quoting"),
   shippingAddress: jsonb("shipping_address").$type<{
     email: string;
@@ -235,6 +239,8 @@ export const printOrderItems = pgTable("print_order_items", {
     .notNull()
     .references(() => fileAssets.id, { onDelete: "cascade" }),
   quoteId: text("quote_id").notNull(),
+  vendorId: text("vendor_id"),
+  vendorName: text("vendor_name"),
   materialConfigId: text("material_config_id").notNull(),
   quantity: integer("quantity").notNull().default(1),
   materialSubtotal: integer("material_subtotal").notNull(), // cents, unit price
@@ -260,6 +266,9 @@ export const cartItems = pgTable("cart_items", {
     .references(() => fileAssets.id, { onDelete: "cascade" }),
   quoteId: text("quote_id").notNull(),
   vendorId: text("vendor_id").notNull(),
+  // Friendly vendor name captured at add-time so we don't have to
+  // round-trip to CraftCloud's catalog on every cart render.
+  vendorName: text("vendor_name"),
   materialConfigId: text("material_config_id").notNull(),
   shippingId: text("shipping_id").notNull(),
   quantity: integer("quantity").notNull().default(1),

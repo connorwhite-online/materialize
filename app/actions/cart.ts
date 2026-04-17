@@ -14,6 +14,7 @@ export type CartItemWithMeta = {
   fileName: string | null;
   originalFilename: string;
   vendorId: string;
+  vendorName: string | null;
   materialConfigId: string;
   shippingId: string;
   quoteId: string;
@@ -28,6 +29,7 @@ export async function addToCart(params: {
   fileAssetId: string;
   quoteId: string;
   vendorId: string;
+  vendorName?: string;
   materialConfigId: string;
   shippingId: string;
   quantity: number;
@@ -52,6 +54,7 @@ export async function addToCart(params: {
         fileAssetId: data.fileAssetId,
         quoteId: data.quoteId,
         vendorId: data.vendorId,
+        vendorName: data.vendorName ?? null,
         materialConfigId: data.materialConfigId,
         shippingId: data.shippingId,
         quantity: data.quantity,
@@ -140,6 +143,7 @@ export async function getCart(): Promise<
         fileName: files.name,
         originalFilename: fileAssets.originalFilename,
         vendorId: cartItems.vendorId,
+        vendorName: cartItems.vendorName,
         materialConfigId: cartItems.materialConfigId,
         shippingId: cartItems.shippingId,
         quoteId: cartItems.quoteId,

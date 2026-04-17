@@ -25,6 +25,7 @@ export interface AnonCheckoutInput {
   selectedQuote: {
     quoteId: string;
     vendorId: string;
+    vendorName?: string;
     materialConfigId: string;
     price: number;
     currency: string;
@@ -124,6 +125,7 @@ export async function runAnonCheckout(
       fileAssetId: draft.fileAssetId,
       quoteId: input.selectedQuote.quoteId,
       vendorId: input.selectedQuote.vendorId,
+      vendorName: input.selectedQuote.vendorName,
       materialConfigId: input.selectedQuote.materialConfigId,
       shippingId: input.selectedShipping.shippingId,
       quantity: input.quantity,

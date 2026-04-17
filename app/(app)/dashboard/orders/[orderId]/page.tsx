@@ -1,8 +1,13 @@
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-import { printOrders, fileAssets } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import {
+  printOrders,
+  printOrderItems,
+  fileAssets,
+  files,
+} from "@/lib/db/schema";
+import { eq, and, asc } from "drizzle-orm";
 import { OrderStatusTracker } from "@/components/print/order-status-tracker";
 import { OrderModelPreview } from "@/components/print/order-model-preview";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -41,31 +46,75 @@ export default async function OrderDetailPage(props: {
       serviceFee: printOrders.serviceFee,
       material: printOrders.material,
       vendor: printOrders.vendor,
+      vendorName: printOrders.vendorName,
       trackingInfo: printOrders.trackingInfo,
       craftCloudOrderId: printOrders.craftCloudOrderId,
       createdAt: printOrders.createdAt,
-      filename: fileAssets.originalFilename,
+      filename: files.name,
+      originalFilename: fileAssets.originalFilename,
       fileAssetId: printOrders.fileAssetId,
       assetFormat: fileAssets.format,
     })
     .from(printOrders)
     .leftJoin(fileAssets, eq(printOrders.fileAssetId, fileAssets.id))
+    .leftJoin(files, eq(fileAssets.fileId, files.id))
     .where(and(eq(printOrders.id, orderId), eq(printOrders.userId, userId)));
 
   if (!order) notFound();
 
   // `cart_created` = user picked a material but bailed before entering
-  // address / paying. Treat it as a draft cart and bounce them back
-  // into the quote configurator for the same file asset so they can
-  // pick up where they left off (material picker + configurator
-  // re-fetches fresh quotes). The draft row gets replaced on their
-  // next "Proceed to checkout" click.
-  if (order.status === "cart_created" && order.fileAssetId) {
-    const qs = order.material ? `?material=${order.material}` : "";
-    redirect(`/print/${order.fileAssetId}${qs}`);
+  // address / paying. Legacy single-item drafts bounce back into the
+  // quote configurator; multi-item drafts go to the checkout address
+  // page (no inline address step to land on).
+  if (order.status === "cart_created") {
+    if (order.fileAssetId) {
+      const qs = order.material ? `?material=${order.material}` : "";
+      redirect(`/print/${order.fileAssetId}${qs}`);
+    } else {
+      redirect(`/checkout/${order.id}`);
+    }
   }
 
-  const materialMeta = order.material ? getMaterialById(order.material) : null;
+  // Multi-item orders (`fileAssetId` is null on the parent row) —
+  // pull the printOrderItems children so we can render filename +
+  // model preview + material meta from the first item, same pattern
+  // as the orders list and drafts queries.
+  const items = order.fileAssetId
+    ? []
+    : await db
+        .select({
+          fileAssetId: printOrderItems.fileAssetId,
+          materialConfigId: printOrderItems.materialConfigId,
+          fileName: files.name,
+          originalFilename: fileAssets.originalFilename,
+          assetFormat: fileAssets.format,
+        })
+        .from(printOrderItems)
+        .innerJoin(fileAssets, eq(printOrderItems.fileAssetId, fileAssets.id))
+        .leftJoin(files, eq(fileAssets.fileId, files.id))
+        .where(eq(printOrderItems.printOrderId, order.id))
+        .orderBy(asc(printOrderItems.createdAt));
+
+  // Resolve the best display values: direct columns for single-item
+  // orders, first printOrderItem for multi-item. Material meta only
+  // resolves against our curated catalog (not CraftCloud UUIDs), so
+  // multi-item orders just get no chip — acceptable soft degrade.
+  const firstItem = items[0];
+  const extraItemCount = Math.max(0, items.length - 1);
+
+  const displayFilename =
+    order.filename ??
+    order.originalFilename?.replace(/\.[^.]+$/, "") ??
+    firstItem?.fileName ??
+    firstItem?.originalFilename?.replace(/\.[^.]+$/, "") ??
+    null;
+
+  const previewFileAssetId = order.fileAssetId ?? firstItem?.fileAssetId ?? null;
+  const previewFormat = order.assetFormat ?? firstItem?.assetFormat ?? null;
+  const displayMaterialId = order.material ?? firstItem?.materialConfigId ?? null;
+
+  const materialMeta = displayMaterialId ? getMaterialById(displayMaterialId) : null;
+  const displayVendorName = order.vendorName ?? order.vendor ?? null;
   const orderNumber = formatOrderNumber(order.id);
   const statusLabel = STATUS_LABELS[order.status] || order.status;
 
@@ -94,11 +143,20 @@ export default async function OrderDetailPage(props: {
         <div>
           <p className="text-sm text-muted-foreground">Order {orderNumber}</p>
           <h1 className="text-2xl font-bold mt-0.5">
-            {materialMeta?.name || order.material || "3D Print"}
+            {displayFilename
+              ? extraItemCount > 0
+                ? `${displayFilename} + ${extraItemCount} more`
+                : displayFilename
+              : materialMeta?.name || order.material || "3D Print"}
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            {order.filename}
-            {materialMeta && ` · ${materialMeta.method}`}
+            {[
+              displayVendorName,
+              materialMeta?.name,
+              materialMeta?.method,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </p>
         </div>
         <Badge
@@ -114,14 +172,22 @@ export default async function OrderDetailPage(props: {
         </Badge>
       </div>
 
-      {/* Model preview rendered with the ordered material's color */}
-      {order.fileAssetId && order.assetFormat && (
-        <div className="mt-6 aspect-[16/9] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
+      {/* Model preview rendered with the ordered material's color.
+          For multi-item orders, shows the first item's model with a
+          "+N more" badge in the corner so it's clear there are more
+          items in the order. */}
+      {previewFileAssetId && previewFormat && (
+        <div className="relative mt-6 aspect-[16/9] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
           <OrderModelPreview
-            fileAssetId={order.fileAssetId}
-            format={order.assetFormat}
+            fileAssetId={previewFileAssetId}
+            format={previewFormat}
             materialColor={materialMeta?.color ?? "#a1a1aa"}
           />
+          {extraItemCount > 0 && (
+            <div className="absolute right-3 top-3 rounded-full bg-background/85 px-2.5 py-1 text-xs font-medium backdrop-blur">
+              +{extraItemCount} more{extraItemCount === 1 ? " item" : " items"}
+            </div>
+          )}
         </div>
       )}
 

@@ -3,11 +3,16 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { MaterialPicker } from "./material-picker";
 import type { EnrichedQuote } from "./material-picker/types";
-import { PriceDisplay } from "./price-display";
+import { PriceDisplay, type MinimumFeeInfo } from "./price-display";
+import type { Currency } from "@/lib/craftcloud/types";
 import { ShippingAddressForm } from "./shipping-address-form";
 import { pollQuotes } from "./poll-quotes";
 import { runAnonCheckout } from "./run-anon-checkout";
-import { createPrintOrder, completePrintOrder } from "@/app/actions/print";
+import {
+  createPrintOrder,
+  completePrintOrder,
+  checkCartPricing,
+} from "@/app/actions/print";
 import { useCart } from "./cart-context";
 import { uploadToCraftCloud } from "@/lib/craftcloud/upload-client";
 import { checkGeometry } from "@/lib/geometry-checks";
@@ -235,6 +240,45 @@ export function QuoteConfigurator({
   const cart = useCart();
   const [isAddingToCart, setIsAddingToCart] = useState(false);
 
+  // Vendor minimum production fee — probed via a lightweight cart
+  // creation after the user picks a quote + shipping. The fee is
+  // only available from CraftCloud's /v5/cart response, not in the
+  // quote-level data, so we check as soon as both are selected.
+  const [minimumFeeInfo, setMinimumFeeInfo] = useState<MinimumFeeInfo | null>(
+    null
+  );
+  const [checkingMinimum, setCheckingMinimum] = useState(false);
+
+  useEffect(() => {
+    if (!selectedQuote || !selectedShipping) {
+      setMinimumFeeInfo(null);
+      setCheckingMinimum(false);
+      return;
+    }
+
+    // Clear stale data from the previous vendor/quote while we check.
+    setMinimumFeeInfo(null);
+    setCheckingMinimum(true);
+
+    let cancelled = false;
+
+    checkCartPricing({
+      quoteId: selectedQuote.quoteId,
+      vendorId: selectedQuote.vendorId,
+      shippingId: selectedShipping.shippingId,
+      currency: selectedQuote.currency as Currency,
+    }).then((result) => {
+      if (cancelled) return;
+      setCheckingMinimum(false);
+      if ("error" in result) return;
+      setMinimumFeeInfo(result);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedQuote, selectedShipping, quantity]);
+
   const handleAddToCart = useCallback(async () => {
     if (!selectedQuote || !selectedShipping || !cart) return;
     setIsAddingToCart(true);
@@ -247,6 +291,7 @@ export function QuoteConfigurator({
           originalFilename: filename,
           quoteId: selectedQuote.quoteId,
           vendorId: selectedQuote.vendorId,
+          vendorName: selectedQuote.vendorName,
           materialConfigId: selectedQuote.materialConfigId,
           shippingId: selectedShipping.shippingId,
           quantity,
@@ -260,6 +305,7 @@ export function QuoteConfigurator({
           fileAssetId,
           quoteId: selectedQuote.quoteId,
           vendorId: selectedQuote.vendorId,
+          vendorName: selectedQuote.vendorName,
           materialConfigId: selectedQuote.materialConfigId,
           shippingId: selectedShipping.shippingId,
           quantity,
@@ -405,6 +451,7 @@ export function QuoteConfigurator({
       fileAssetId,
       quoteId: selectedQuote.quoteId,
       vendorId: selectedQuote.vendorId,
+      vendorName: selectedQuote.vendorName,
       materialConfigId: selectedQuote.materialConfigId,
       shippingId: selectedShipping.shippingId,
       quantity,
@@ -477,6 +524,7 @@ export function QuoteConfigurator({
         selectedQuote: {
           quoteId: selectedQuote.quoteId,
           vendorId: selectedQuote.vendorId,
+          vendorName: selectedQuote.vendorName,
           materialConfigId: selectedQuote.materialConfigId,
           price: selectedQuote.price,
           currency: selectedQuote.currency,
@@ -708,6 +756,8 @@ export function QuoteConfigurator({
             checkoutError={checkoutError}
             onAddToCart={(fileAssetId || draftMode) && cart ? handleAddToCart : undefined}
             isAddingToCart={isAddingToCart}
+            minimumFeeInfo={minimumFeeInfo}
+            checkingMinimum={checkingMinimum}
           />
         </div>
       </div>

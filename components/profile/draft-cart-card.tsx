@@ -10,6 +10,8 @@ interface DraftCartCardProps {
   orderId: string;
   fileAssetId: string | null;
   fileName: string | null;
+  /** Friendly vendor label — falls back to vendor id or null upstream. */
+  vendorName?: string | null;
   materialId: string | null;
   materialName: string | null;
   materialMethod: string | null;
@@ -21,6 +23,7 @@ export function DraftCartCard({
   orderId,
   fileAssetId,
   fileName,
+  vendorName,
   materialId,
   materialName,
   materialMethod,
@@ -32,14 +35,18 @@ export function DraftCartCard({
   const [resuming, startResume] = useTransition();
 
   // Fallback when resumePrintOrder can't reuse or rebuild a Stripe
-  // session (e.g. order has no saved address yet). Drops the user
-  // back into the quote configurator at the material step.
+  // session (e.g. order has no saved address yet).
+  //   - Legacy single-item drafts drop back into the quote
+  //     configurator at the material step (they collect the address
+  //     inline).
+  //   - Multi-item drafts (no fileAssetId) have no inline address
+  //     step, so land on /checkout/[orderId] where the form lives.
   const resumeHref =
     fileAssetId && materialId
       ? `/print/${fileAssetId}?material=${materialId}`
       : fileAssetId
         ? `/print/${fileAssetId}`
-        : "/print";
+        : `/checkout/${orderId}`;
 
   const handleDiscard = () => {
     if (pending) return;
@@ -83,6 +90,7 @@ export function DraftCartCard({
               {fileName ?? "3D Print"}
             </p>
             <p className="truncate text-xs text-muted-foreground">
+              {vendorName ? `${vendorName} · ` : ""}
               {materialName ?? "Material"}
               {materialMethod ? ` · ${materialMethod}` : ""}
               {total > 0 ? ` · $${(total / 100).toFixed(2)}` : ""}

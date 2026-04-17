@@ -93,8 +93,29 @@ export interface Cart {
   countryCode?: string;
   expiresAt?: number;
   amounts?: {
-    total?: { net?: number; gross?: number };
+    total?: {
+      net?: number;
+      gross?: number;
+      totalNetPrice?: number;
+      totalGrossPrice?: number;
+    };
   };
+  /**
+   * Per-vendor minimum production prices. Only present when at
+   * least one vendor in the cart has a minimum production charge
+   * that exceeds the quoted price. The `productionFee` is the
+   * additional amount added to reach the vendor's minimum —
+   * e.g. a $1.72 quote against a $130 minimum yields
+   * `{ price: 130, productionFee: 128.28 }`.
+   *
+   * This data is NOT available in the quote-level response —
+   * only after `POST /v5/cart`. Use `checkCartPricing` to
+   * probe for minimums before the user commits to checkout.
+   */
+  minimumProductionPrice?: Record<string, {
+    price: number;
+    productionFee: number;
+  }>;
 }
 
 export interface OrderRequest {

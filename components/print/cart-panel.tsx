@@ -19,6 +19,7 @@ type DisplayItem = {
   fileName: string | null;
   originalFilename: string;
   vendorId: string;
+  vendorName: string | null;
   quantity: number;
   materialPrice: number;
   shippingPrice: number;
@@ -34,6 +35,7 @@ function toDisplayItems(
     fileName: i.fileName,
     originalFilename: i.originalFilename,
     vendorId: i.vendorId,
+    vendorName: i.vendorName,
     quantity: i.quantity,
     materialPrice: i.materialPrice,
     shippingPrice: i.shippingPrice,
@@ -44,6 +46,7 @@ function toDisplayItems(
     fileName: null,
     originalFilename: i.originalFilename,
     vendorId: i.vendorId,
+    vendorName: i.vendorName ?? null,
     quantity: i.quantity,
     materialPrice: Math.round(i.materialPrice * 100),
     shippingPrice: Math.round(i.shippingPrice * 100),
@@ -185,13 +188,25 @@ function CartItemsList({
   const { openAuth } = useAuthModal();
 
   const vendorGroups = useMemo(() => {
-    const groups = new Map<string, { vendorId: string; items: DisplayItem[] }>();
+    const groups = new Map<
+      string,
+      { vendorId: string; vendorName: string | null; items: DisplayItem[] }
+    >();
     for (const item of allItems) {
       const existing = groups.get(item.vendorId);
       if (existing) {
         existing.items.push(item);
+        // First non-null vendor name wins — some older rows may not
+        // have one cached yet.
+        if (!existing.vendorName && item.vendorName) {
+          existing.vendorName = item.vendorName;
+        }
       } else {
-        groups.set(item.vendorId, { vendorId: item.vendorId, items: [item] });
+        groups.set(item.vendorId, {
+          vendorId: item.vendorId,
+          vendorName: item.vendorName,
+          items: [item],
+        });
       }
     }
     return Array.from(groups.values());
@@ -242,7 +257,7 @@ function VendorGroup({
   router,
   showSeparator,
 }: {
-  group: { vendorId: string; items: DisplayItem[] };
+  group: { vendorId: string; vendorName: string | null; items: DisplayItem[] };
   onRemove: (item: DisplayItem) => void;
   onUpdateQty: (item: DisplayItem, qty: number) => void;
   isSignedIn: boolean;
@@ -297,7 +312,7 @@ function VendorGroup({
   return (
     <div>
       <p className="text-xs font-medium text-muted-foreground mb-2 mt-2">
-        Vendor: {group.vendorId}
+        Vendor: {group.vendorName ?? group.vendorId}
       </p>
 
       <div className="space-y-3">

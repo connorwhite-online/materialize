@@ -24,6 +24,7 @@ export interface LocalCartItem {
   modelId: string;
   originalFilename: string;
   vendorId: string;
+  vendorName?: string;
   materialConfigId: string;
   shippingId: string;
   quoteId: string;
@@ -47,6 +48,7 @@ interface CartContextValue {
     fileAssetId: string;
     quoteId: string;
     vendorId: string;
+    vendorName?: string;
     materialConfigId: string;
     shippingId: string;
     quantity: number;
@@ -206,6 +208,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
           fileAssetId: draft.fileAssetId,
           quoteId: item.quoteId,
           vendorId: item.vendorId,
+          vendorName: item.vendorName,
           materialConfigId: item.materialConfigId,
           shippingId: item.shippingId,
           quantity: item.quantity,

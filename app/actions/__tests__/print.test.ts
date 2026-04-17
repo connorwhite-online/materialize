@@ -65,7 +65,7 @@ vi.mock("@/lib/db/schema", () => ({
   fileAssets: { id: "id" },
 }));
 
-import { createPrintOrder, checkOrderStatus } from "../print";
+import { createPrintOrder, checkOrderStatus, checkCartPricing } from "../print";
 
 describe("createPrintOrder", () => {
   beforeEach(() => {
@@ -147,5 +147,93 @@ describe("checkOrderStatus", () => {
     expect(mockDbUpdateSet).toHaveBeenCalledWith(
       expect.objectContaining({ status: "blocked" })
     );
+  });
+});
+
+describe("checkCartPricing", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("creates a cart with the quote + shipping and returns zero fees when no minimum applies", async () => {
+    mockCreateCart.mockResolvedValueOnce({
+      cartId: "cart-probe-1",
+      currency: "USD",
+    } as never);
+
+    const result = await checkCartPricing({
+      quoteId: "quote-1",
+      vendorId: "vendor-1",
+      shippingId: "ship-1",
+      currency: "USD",
+    });
+
+    expect(mockCreateCart).toHaveBeenCalledWith({
+      shippingIds: ["ship-1"],
+      currency: "USD",
+      quotes: [{ id: "quote-1" }],
+    });
+    expect(result).toEqual({
+      minimumProductionFee: 0,
+      vendorMinimumPrice: 0,
+    });
+  });
+
+  it("surfaces productionFee + vendor minimum when CraftCloud reports one", async () => {
+    mockCreateCart.mockResolvedValueOnce({
+      cartId: "cart-probe-2",
+      currency: "USD",
+      minimumProductionPrice: {
+        "vendor-1": { price: 130, productionFee: 128.28 },
+      },
+    } as never);
+
+    const result = await checkCartPricing({
+      quoteId: "quote-1",
+      vendorId: "vendor-1",
+      shippingId: "ship-1",
+      currency: "USD",
+    });
+
+    expect(result).toEqual({
+      minimumProductionFee: 128.28,
+      vendorMinimumPrice: 130,
+    });
+  });
+
+  it("ignores minimums for other vendors in the response", async () => {
+    mockCreateCart.mockResolvedValueOnce({
+      cartId: "cart-probe-3",
+      currency: "USD",
+      minimumProductionPrice: {
+        "vendor-OTHER": { price: 200, productionFee: 199 },
+      },
+    } as never);
+
+    const result = await checkCartPricing({
+      quoteId: "quote-1",
+      vendorId: "vendor-1",
+      shippingId: "ship-1",
+      currency: "USD",
+    });
+
+    // vendor-1 isn't in the minimums map, so no fee.
+    expect(result).toEqual({
+      minimumProductionFee: 0,
+      vendorMinimumPrice: 0,
+    });
+  });
+
+  it("returns an error object when createCart throws", async () => {
+    mockCreateCart.mockRejectedValueOnce(new Error("CraftCloud 500"));
+
+    const result = await checkCartPricing({
+      quoteId: "quote-1",
+      vendorId: "vendor-1",
+      shippingId: "ship-1",
+      currency: "USD",
+    });
+
+    expect(result).toEqual({ error: "Failed to check cart pricing" });
   });
 });

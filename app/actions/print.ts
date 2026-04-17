@@ -40,6 +40,44 @@ import type { Currency } from "@/lib/craftcloud/types";
 
 const SERVICE_FEE_RATE = 0.03;
 
+/**
+ * Lightweight check for vendor minimum production prices. Creates a
+ * CraftCloud cart (free, disposable reservation) purely to inspect
+ * the `minimumProductionPrice` field — no DB writes, no auth needed.
+ *
+ * Called from the QuoteConfigurator after the user selects a quote +
+ * shipping, so the PriceDisplay can show the true total before
+ * checkout. The actual checkout flow in `createPrintOrder` /
+ * `checkoutVendorGroup` re-creates its own cart and applies the same
+ * adjustment, so this check is informational only.
+ */
+export async function checkCartPricing(params: {
+  quoteId: string;
+  vendorId: string;
+  shippingId: string;
+  currency: Currency;
+}): Promise<
+  | { minimumProductionFee: number; vendorMinimumPrice: number }
+  | { error: string }
+> {
+  try {
+    const cart = await createCart({
+      shippingIds: [params.shippingId],
+      currency: params.currency,
+      quotes: [{ id: params.quoteId }],
+    });
+
+    const minimum = cart.minimumProductionPrice?.[params.vendorId];
+    return {
+      minimumProductionFee: minimum?.productionFee ?? 0,
+      vendorMinimumPrice: minimum?.price ?? 0,
+    };
+  } catch (error) {
+    logError("checkCartPricing", error);
+    return { error: "Failed to check cart pricing" };
+  }
+}
+
 export async function discardDraftOrder(
   orderId: string
 ): Promise<{ success: true } | { error: string }> {
@@ -73,6 +111,7 @@ export async function createPrintOrder(params: {
   fileAssetId: string;
   quoteId: string;
   vendorId: string;
+  vendorName?: string;
   materialConfigId: string;
   shippingId: string;
   quantity: number;
@@ -91,11 +130,6 @@ export async function createPrintOrder(params: {
 
     const data = parsed.data;
 
-    const materialSubtotal = Math.round(data.materialPrice * 100);
-    const shippingSubtotal = Math.round(data.shippingPrice * 100);
-    const totalPrice = materialSubtotal * data.quantity + shippingSubtotal;
-    const serviceFee = Math.round(totalPrice * SERVICE_FEE_RATE);
-
     // Create Craft Cloud cart. The v5 API only wants { id: quoteId }
     // in each entry — the quote already encodes vendor, material,
     // model, and quantity by reference, so sending the full blob
@@ -105,6 +139,19 @@ export async function createPrintOrder(params: {
       currency: data.currency,
       quotes: [{ id: data.quoteId }],
     });
+
+    // Check for vendor minimum production prices. Some vendors won't
+    // start their machines below a threshold — CraftCloud adds a
+    // `productionFee` to bridge the gap. Include it in our totals
+    // so the Stripe charge matches what the user was shown.
+    const minimum = cart.minimumProductionPrice?.[data.vendorId];
+    const productionFeeCents = Math.round((minimum?.productionFee ?? 0) * 100);
+
+    const materialSubtotal = Math.round(data.materialPrice * 100);
+    const shippingSubtotal = Math.round(data.shippingPrice * 100);
+    const totalPrice =
+      materialSubtotal * data.quantity + productionFeeCents + shippingSubtotal;
+    const serviceFee = Math.round(totalPrice * SERVICE_FEE_RATE);
 
     // Create print order record
     const [order] = await db
@@ -120,6 +167,7 @@ export async function createPrintOrder(params: {
         quantity: data.quantity,
         material: data.materialConfigId,
         vendor: data.vendorId,
+        vendorName: data.vendorName ?? null,
         status: "cart_created",
       })
       .returning();
@@ -210,12 +258,6 @@ export async function checkoutVendorGroup(
 
     if (items.length === 0) return { error: "No items in cart for this vendor" };
 
-    let totalPrice = 0;
-    for (const item of items) {
-      totalPrice += item.materialPrice * item.quantity + item.shippingPrice;
-    }
-    const serviceFee = Math.round(totalPrice * SERVICE_FEE_RATE);
-
     const shippingIds = [...new Set(items.map((i) => i.shippingId))];
     const currency = items[0].currency as Currency;
 
@@ -224,6 +266,23 @@ export async function checkoutVendorGroup(
       currency,
       quotes: items.map((i) => ({ id: i.quoteId })),
     });
+
+    // Vendor minimum production fee — same logic as createPrintOrder.
+    const minimum = cart.minimumProductionPrice?.[vendorId];
+    const productionFeeCents = Math.round((minimum?.productionFee ?? 0) * 100);
+
+    let totalPrice = 0;
+    for (const item of items) {
+      totalPrice += item.materialPrice * item.quantity + item.shippingPrice;
+    }
+    totalPrice += productionFeeCents;
+    const serviceFee = Math.round(totalPrice * SERVICE_FEE_RATE);
+
+    // All cart items were selected by vendorId, so the vendor name
+    // (if any) is consistent across the group — pick the first
+    // non-null to stamp on the order row for display.
+    const resolvedVendorName =
+      items.find((i) => i.vendorName)?.vendorName ?? null;
 
     const [order] = await db
       .insert(printOrders)
@@ -234,6 +293,7 @@ export async function checkoutVendorGroup(
         totalPrice,
         serviceFee,
         vendor: vendorId,
+        vendorName: resolvedVendorName,
         status: "cart_created",
       })
       .returning();
@@ -243,6 +303,8 @@ export async function checkoutVendorGroup(
         printOrderId: order.id,
         fileAssetId: i.fileAssetId,
         quoteId: i.quoteId,
+        vendorId: i.vendorId,
+        vendorName: i.vendorName ?? null,
         materialConfigId: i.materialConfigId,
         quantity: i.quantity,
         materialSubtotal: i.materialPrice,
@@ -282,15 +344,26 @@ export async function checkoutVendorGroup(
  * so users whose Clerk session cookie is still settling after the
  * inline OTP signup don't get bounced to /sign-in by middleware.
  */
-async function buildLineItemDescription(materialConfigId: string | null, vendorId: string | null) {
+async function buildLineItemDescription(
+  materialConfigId: string | null,
+  vendorId: string | null,
+  /**
+   * Pre-resolved vendor name cached on the order/item row. When
+   * present we skip the catalog round-trip — this is the default
+   * path for orders created after the vendor_name migration.
+   * Legacy rows pass null and fall back to findProvider lookup.
+   */
+  vendorName?: string | null
+) {
   const [materialEntry, provider] = await Promise.all([
     materialConfigId ? findMaterialConfig(materialConfigId) : null,
-    vendorId ? findProvider(vendorId) : null,
+    vendorName || !vendorId ? null : findProvider(vendorId),
   ]);
+  const resolvedVendorName = vendorName || provider?.name || null;
   const parts = [
     [materialEntry?.material.name, materialEntry?.config.color].filter(Boolean).join(" "),
     materialEntry?.finishGroup.name,
-    provider?.name ? `by ${provider.name}` : null,
+    resolvedVendorName ? `by ${resolvedVendorName}` : null,
   ].filter((s): s is string => Boolean(s && s.length));
   return parts.length > 0 ? parts.join(" · ") : undefined;
 }
@@ -304,12 +377,17 @@ type StripeLineItem = {
   quantity: number;
 };
 
-async function buildMultiItemLineItems(orderId: string): Promise<StripeLineItem[]> {
+async function buildMultiItemLineItems(
+  orderId: string,
+  orderTotalPrice: number
+): Promise<StripeLineItem[]> {
   const items = await db
     .select({
       fileName: files.name,
       originalFilename: fileAssets.originalFilename,
       materialConfigId: printOrderItems.materialConfigId,
+      vendorId: printOrderItems.vendorId,
+      vendorName: printOrderItems.vendorName,
       quantity: printOrderItems.quantity,
       materialSubtotal: printOrderItems.materialSubtotal,
       shippingSubtotal: printOrderItems.shippingSubtotal,
@@ -321,10 +399,15 @@ async function buildMultiItemLineItems(orderId: string): Promise<StripeLineItem[
 
   const lineItems: StripeLineItem[] = [];
   let totalShipping = 0;
+  let totalMaterial = 0;
 
   for (const item of items) {
     const name = item.fileName ?? item.originalFilename?.replace(/\.[^.]+$/, "") ?? "3D Print";
-    const description = await buildLineItemDescription(item.materialConfigId, null);
+    const description = await buildLineItemDescription(
+      item.materialConfigId,
+      item.vendorId,
+      item.vendorName
+    );
     lineItems.push({
       price_data: {
         currency: "usd",
@@ -336,7 +419,25 @@ async function buildMultiItemLineItems(orderId: string): Promise<StripeLineItem[
       },
       quantity: item.quantity,
     });
+    totalMaterial += item.materialSubtotal * item.quantity;
     totalShipping += item.shippingSubtotal;
+  }
+
+  // Vendor minimum production fee for multi-item orders.
+  const impliedProductionFee = orderTotalPrice - (totalMaterial + totalShipping);
+  if (impliedProductionFee > 0) {
+    lineItems.push({
+      price_data: {
+        currency: "usd",
+        unit_amount: impliedProductionFee,
+        product_data: {
+          name: "Vendor minimum production fee",
+          description:
+            "Additional charge to meet this vendor's minimum production requirement",
+        },
+      },
+      quantity: 1,
+    });
   }
 
   if (totalShipping > 0) {
@@ -363,7 +464,7 @@ async function createStripeSessionForOrder(
 
   if (!order.fileAssetId) {
     // Multi-item order — build line items from printOrderItems
-    const itemLines = await buildMultiItemLineItems(order.id);
+    const itemLines = await buildMultiItemLineItems(order.id, order.totalPrice);
     lineItems.push(...itemLines);
   } else {
     // Legacy single-item order — build from the order row itself
@@ -377,7 +478,11 @@ async function createStripeSessionForOrder(
       .where(eq(fileAssets.id, order.fileAssetId))
       .limit(1);
 
-    const description = await buildLineItemDescription(order.material, order.vendor);
+    const description = await buildLineItemDescription(
+      order.material,
+      order.vendor,
+      order.vendorName
+    );
 
     const fileDisplayName =
       assetRow?.fileName ??
@@ -401,6 +506,29 @@ async function createStripeSessionForOrder(
         },
         quantity: order.quantity!,
       });
+
+      // Vendor minimum production fee: the difference between the
+      // stored totalPrice and the sum of material + shipping tells
+      // us how much was added to meet the vendor's minimum. Show it
+      // as a separate line so the Stripe receipt is transparent.
+      const impliedProductionFee =
+        order.totalPrice -
+        (order.materialSubtotal! * order.quantity! + order.shippingSubtotal!);
+      if (impliedProductionFee > 0) {
+        lineItems.push({
+          price_data: {
+            currency: "usd",
+            unit_amount: impliedProductionFee,
+            product_data: {
+              name: "Vendor minimum production fee",
+              description:
+                "Additional charge to meet this vendor's minimum production requirement",
+            },
+          },
+          quantity: 1,
+        });
+      }
+
       if (order.shippingSubtotal! > 0) {
         lineItems.push({
           price_data: {
