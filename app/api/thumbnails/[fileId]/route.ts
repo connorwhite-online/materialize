@@ -1,3 +1,4 @@
+import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -10,6 +11,11 @@ import { logError } from "@/lib/logger";
  * stable reference so that browsers get a short-lived presigned URL
  * each time they load the image — working around S3's 7-day
  * max-expiration limit without re-writing the DB row.
+ *
+ * Published thumbnails are public (this is how browse/search show
+ * previews to anon visitors). For unpublished files (drafts), the
+ * thumbnail is gated to the owner so a leaked fileId can't surface
+ * work-in-progress artwork.
  */
 export async function GET(
   _request: Request,
@@ -22,12 +28,24 @@ export async function GET(
     }
 
     const [file] = await db
-      .select({ id: files.id, thumbnailUrl: files.thumbnailUrl })
+      .select({
+        id: files.id,
+        thumbnailUrl: files.thumbnailUrl,
+        status: files.status,
+        userId: files.userId,
+      })
       .from(files)
       .where(eq(files.id, fileId));
 
     if (!file || !file.thumbnailUrl) {
       return new Response("Not found", { status: 404 });
+    }
+
+    if (file.status !== "published") {
+      const { userId } = await auth();
+      if (!userId || userId !== file.userId) {
+        return new Response("Not found", { status: 404 });
+      }
     }
 
     const storageKey = `thumbnails/${fileId}.webp`;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -44,6 +44,11 @@ export function CheckoutForm({
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Synchronous guard — parent's `submitting` state only flips on
+  // next render, so a rapid double-click could call
+  // completePrintOrder twice and mint two Stripe sessions for the
+  // same order.
+  const submittingRef = useRef(false);
 
   const handleSubmit = async (data: {
     email: string;
@@ -74,23 +79,34 @@ export function CheckoutForm({
       vatId?: string;
     };
   }) => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     setError(null);
 
-    const result = await completePrintOrder({
-      orderId,
-      email: data.email,
-      shipping: data.shipping,
-      billing: data.billing,
-    });
+    try {
+      const result = await completePrintOrder({
+        orderId,
+        email: data.email,
+        shipping: data.shipping,
+        billing: data.billing,
+      });
 
-    if ("error" in result) {
-      setError(result.error);
+      if ("error" in result) {
+        setError(result.error);
+        setSubmitting(false);
+        submittingRef.current = false;
+        return;
+      }
+
+      // Successful redirect — leave the ref set so a stray late
+      // click can't re-enter before navigation happens.
+      window.location.href = result.checkoutUrl;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Checkout failed");
       setSubmitting(false);
-      return;
+      submittingRef.current = false;
     }
-
-    window.location.href = result.checkoutUrl;
   };
 
   return (
