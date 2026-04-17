@@ -14,13 +14,17 @@ export interface CheckoutItem {
   quantity: number;
   /** Unit price in cents. */
   materialSubtotal: number;
-  /** Per-item shipping in cents. */
-  shippingSubtotal: number;
 }
 
 interface CheckoutFormProps {
   orderId: string;
   items: CheckoutItem[];
+  /**
+   * Order-level shipping total in cents. Lives on printOrders, not
+   * on individual items, so same-vendor multi-item orders don't
+   * double-charge the shipping fee.
+   */
+  shippingTotal: number;
   /** Vendor minimum production fee, in cents. */
   productionFee: number;
   /** Total print price (incl. production fee + shipping), in cents. */
@@ -32,6 +36,7 @@ interface CheckoutFormProps {
 export function CheckoutForm({
   orderId,
   items,
+  shippingTotal,
   productionFee,
   totalPrice,
   serviceFee,
@@ -39,8 +44,6 @@ export function CheckoutForm({
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const totalShipping = items.reduce((sum, i) => sum + i.shippingSubtotal, 0);
 
   const handleSubmit = async (data: {
     email: string;
@@ -146,11 +149,11 @@ export function CheckoutForm({
               </div>
             )}
 
-            {totalShipping > 0 && (
+            {shippingTotal > 0 && (
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Shipping</span>
                 <span className="tabular-nums">
-                  ${(totalShipping / 100).toFixed(2)}
+                  ${(shippingTotal / 100).toFixed(2)}
                 </span>
               </div>
             )}

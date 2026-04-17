@@ -20,6 +20,7 @@ type DisplayItem = {
   originalFilename: string;
   vendorId: string;
   vendorName: string | null;
+  shippingId: string;
   quantity: number;
   materialPrice: number;
   shippingPrice: number;
@@ -36,6 +37,7 @@ function toDisplayItems(
     originalFilename: i.originalFilename,
     vendorId: i.vendorId,
     vendorName: i.vendorName,
+    shippingId: i.shippingId,
     quantity: i.quantity,
     materialPrice: i.materialPrice,
     shippingPrice: i.shippingPrice,
@@ -47,11 +49,30 @@ function toDisplayItems(
     originalFilename: i.originalFilename,
     vendorId: i.vendorId,
     vendorName: i.vendorName ?? null,
+    shippingId: i.shippingId,
     quantity: i.quantity,
     materialPrice: Math.round(i.materialPrice * 100),
     shippingPrice: Math.round(i.shippingPrice * 100),
   }));
   return [...fromDb, ...fromLocal];
+}
+
+/**
+ * Sum a vendor group's subtotal in cents, deduping shipping by
+ * shippingId. Cart items redundantly store the vendor's shipping
+ * fee on every row — a naive sum charges it N times for N items.
+ */
+function vendorGroupSubtotal(items: DisplayItem[]): number {
+  let material = 0;
+  const shippingByShipId = new Map<string, number>();
+  for (const item of items) {
+    material += item.materialPrice * item.quantity;
+    if (!shippingByShipId.has(item.shippingId)) {
+      shippingByShipId.set(item.shippingId, item.shippingPrice);
+    }
+  }
+  const shipping = [...shippingByShipId.values()].reduce((a, b) => a + b, 0);
+  return material + shipping;
 }
 
 export function CartPanel() {
@@ -272,10 +293,7 @@ function VendorGroup({
   const [error, setError] = useState<string | null>(null);
   const [checkingOut, setCheckingOut] = useState(false);
 
-  const subtotal = group.items.reduce(
-    (sum, i) => sum + i.materialPrice * i.quantity + i.shippingPrice,
-    0
-  );
+  const subtotal = vendorGroupSubtotal(group.items);
   const serviceFee = Math.round(subtotal * SERVICE_FEE_RATE);
   const total = subtotal + serviceFee;
 

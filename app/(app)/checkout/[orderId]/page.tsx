@@ -50,7 +50,6 @@ export default async function CheckoutPage(props: {
           originalFilename: fileAssets.originalFilename,
           quantity: printOrders.quantity,
           materialSubtotal: printOrders.materialSubtotal,
-          shippingSubtotal: printOrders.shippingSubtotal,
         })
         .from(printOrders)
         .leftJoin(fileAssets, eq(printOrders.fileAssetId, fileAssets.id))
@@ -62,24 +61,28 @@ export default async function CheckoutPage(props: {
           originalFilename: fileAssets.originalFilename,
           quantity: printOrderItems.quantity,
           materialSubtotal: printOrderItems.materialSubtotal,
-          shippingSubtotal: printOrderItems.shippingSubtotal,
         })
         .from(printOrderItems)
         .innerJoin(fileAssets, eq(printOrderItems.fileAssetId, fileAssets.id))
         .leftJoin(files, eq(fileAssets.fileId, files.id))
         .where(eq(printOrderItems.printOrderId, orderId));
 
+  // Shipping lives canonically on the order row (not on each item —
+  // items used to carry a copy of the vendor's fee and summing them
+  // double-charged). For legacy rows where the column is null, show
+  // zero here; the order row's totalPrice already reflects reality.
+  const totalShipping = order.shippingSubtotal ?? 0;
+
   // Production fee surfaced as an implied line: whatever isn't
-  // explained by the sum of material + shipping must be the vendor's
+  // explained by material + shipping must be the vendor's
   // minimum-production charge.
-  const explainedSubtotal = items.reduce(
-    (sum, i) =>
-      sum + (i.materialSubtotal ?? 0) * (i.quantity ?? 1) + (i.shippingSubtotal ?? 0),
+  const totalMaterial = items.reduce(
+    (sum, i) => sum + (i.materialSubtotal ?? 0) * (i.quantity ?? 1),
     0
   );
   const impliedProductionFee = Math.max(
     0,
-    order.totalPrice - explainedSubtotal
+    order.totalPrice - totalMaterial - totalShipping
   );
 
   return (
@@ -91,8 +94,8 @@ export default async function CheckoutPage(props: {
           originalFilename: i.originalFilename,
           quantity: i.quantity ?? 1,
           materialSubtotal: i.materialSubtotal ?? 0,
-          shippingSubtotal: i.shippingSubtotal ?? 0,
         }))}
+        shippingTotal={totalShipping}
         productionFee={impliedProductionFee}
         totalPrice={order.totalPrice}
         serviceFee={order.serviceFee}

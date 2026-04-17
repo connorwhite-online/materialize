@@ -271,11 +271,25 @@ export async function checkoutVendorGroup(
     const minimum = cart.minimumProductionPrice?.[vendorId];
     const productionFeeCents = Math.round((minimum?.productionFee ?? 0) * 100);
 
-    let totalPrice = 0;
+    // Shipping is per-order on CraftCloud's side, but cart_items
+    // redundantly stores the price on every row. Dedupe by shippingId
+    // so a 2-item cart with one shipping option doesn't get charged
+    // twice. The sum is stored on printOrders.shippingSubtotal so
+    // downstream reads (Stripe line items, checkout page) can use
+    // the canonical total instead of re-summing item rows.
+    const shippingByShipId = new Map<string, number>();
+    let totalMaterial = 0;
     for (const item of items) {
-      totalPrice += item.materialPrice * item.quantity + item.shippingPrice;
+      totalMaterial += item.materialPrice * item.quantity;
+      if (!shippingByShipId.has(item.shippingId)) {
+        shippingByShipId.set(item.shippingId, item.shippingPrice);
+      }
     }
-    totalPrice += productionFeeCents;
+    const totalShipping = [...shippingByShipId.values()].reduce(
+      (a, b) => a + b,
+      0
+    );
+    const totalPrice = totalMaterial + productionFeeCents + totalShipping;
     const serviceFee = Math.round(totalPrice * SERVICE_FEE_RATE);
 
     // All cart items were selected by vendorId, so the vendor name
@@ -292,12 +306,18 @@ export async function checkoutVendorGroup(
         craftCloudCartId: cart.cartId,
         totalPrice,
         serviceFee,
+        shippingSubtotal: totalShipping,
         vendor: vendorId,
         vendorName: resolvedVendorName,
         status: "cart_created",
       })
       .returning();
 
+    // Per-item shippingSubtotal stored as 0 — the canonical total
+    // lives on printOrders.shippingSubtotal above. This stops the
+    // doubling bug where summing item.shippingSubtotal across
+    // multiple cart_items (which all carried the same shipping fee)
+    // inflated the order total.
     await db.insert(printOrderItems).values(
       items.map((i) => ({
         printOrderId: order.id,
@@ -308,7 +328,7 @@ export async function checkoutVendorGroup(
         materialConfigId: i.materialConfigId,
         quantity: i.quantity,
         materialSubtotal: i.materialPrice,
-        shippingSubtotal: i.shippingPrice,
+        shippingSubtotal: 0,
       }))
     );
 
@@ -379,7 +399,16 @@ type StripeLineItem = {
 
 async function buildMultiItemLineItems(
   orderId: string,
-  orderTotalPrice: number
+  orderTotalPrice: number,
+  /**
+   * Canonical shipping total from printOrders.shippingSubtotal. We
+   * prefer this over summing per-item rows because the per-item
+   * shippingSubtotal was historically redundant (same shipping fee
+   * copied onto every item row in a vendor group) — summing would
+   * double-charge. New rows write the deduped total here and
+   * zero on items.
+   */
+  orderShippingSubtotal: number | null
 ): Promise<StripeLineItem[]> {
   const items = await db
     .select({
@@ -398,7 +427,6 @@ async function buildMultiItemLineItems(
     .where(eq(printOrderItems.printOrderId, orderId));
 
   const lineItems: StripeLineItem[] = [];
-  let totalShipping = 0;
   let totalMaterial = 0;
 
   for (const item of items) {
@@ -420,8 +448,16 @@ async function buildMultiItemLineItems(
       quantity: item.quantity,
     });
     totalMaterial += item.materialSubtotal * item.quantity;
-    totalShipping += item.shippingSubtotal;
   }
+
+  // Legacy rows (written before the shipping-dedupe fix) have
+  // shippingSubtotal=null on the order row and duplicated prices on
+  // items. Fall back to summing items but dedupe any exact
+  // duplicates — a coarse best-effort repair.
+  const totalShipping =
+    orderShippingSubtotal != null
+      ? orderShippingSubtotal
+      : dedupeShippingSum(items);
 
   // Vendor minimum production fee for multi-item orders.
   const impliedProductionFee = orderTotalPrice - (totalMaterial + totalShipping);
@@ -454,6 +490,26 @@ async function buildMultiItemLineItems(
   return lineItems;
 }
 
+/**
+ * Legacy repair: collapses identical per-item shipping values down
+ * to a single charge. Used only when `printOrders.shippingSubtotal`
+ * is null (rows written before the dedupe fix). Same-vendor groups
+ * historically wrote the identical shipping price to every item
+ * row — summing them caused the double-charge bug.
+ */
+function dedupeShippingSum(
+  items: Array<{ shippingSubtotal: number }>
+): number {
+  if (items.length === 0) return 0;
+  // If every item has the same shipping value, assume it's the
+  // pre-dedupe duplication pattern and count it once.
+  const unique = new Set(items.map((i) => i.shippingSubtotal));
+  if (unique.size === 1) return items[0].shippingSubtotal;
+  // Mixed values — sum them (conservative: we don't know how they
+  // should group). Not something new rows will produce.
+  return items.reduce((sum, i) => sum + i.shippingSubtotal, 0);
+}
+
 async function createStripeSessionForOrder(
   order: typeof printOrders.$inferSelect,
   opts: { email: string; isAnonFlow: boolean }
@@ -464,7 +520,11 @@ async function createStripeSessionForOrder(
 
   if (!order.fileAssetId) {
     // Multi-item order — build line items from printOrderItems
-    const itemLines = await buildMultiItemLineItems(order.id, order.totalPrice);
+    const itemLines = await buildMultiItemLineItems(
+      order.id,
+      order.totalPrice,
+      order.shippingSubtotal
+    );
     lineItems.push(...itemLines);
   } else {
     // Legacy single-item order — build from the order row itself

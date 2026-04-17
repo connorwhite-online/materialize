@@ -163,8 +163,15 @@ export function CartProvider({ children }: { children: ReactNode }) {
     if (localItems.length === 0) return { ok: true };
     setMaterializing(true);
 
+    // Snapshot the queue at call time so state updates mid-loop
+    // don't shift the iteration. Each successful item gets removed
+    // from localItems immediately, so if a later item fails and the
+    // user retries, we don't re-upload the ones that already
+    // landed in the DB cart.
+    const queue = [...localItems];
+
     try {
-      for (const item of localItems) {
+      for (const item of queue) {
         const presignRes = await fetch("/api/upload/presign", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -218,9 +225,15 @@ export function CartProvider({ children }: { children: ReactNode }) {
           countryCode: item.countryCode,
         });
         if ("error" in cartResult) return { ok: false, error: cartResult.error };
+
+        // This item is now safely in the DB cart — drop it from
+        // the local queue so a retry after a later failure
+        // doesn't duplicate it.
+        setLocalItems((prev) =>
+          prev.filter((i) => i.localId !== item.localId)
+        );
       }
 
-      setLocalItems([]);
       await refresh();
       return { ok: true };
     } finally {

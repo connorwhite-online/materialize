@@ -224,60 +224,87 @@ function ExistingCartSummary({
 
   const vendorGroups = useMemo(() => {
     if (!cart) return [];
+    // Shipping is per-vendor-per-shipping-option, not per-item —
+    // track it in a side-map keyed by (vendorId, shippingId) so
+    // a 2-item same-vendor cart doesn't show 2× shipping.
     const groups = new Map<
       string,
       {
         vendorId: string;
         vendorName: string | null;
         count: number;
-        subtotalCents: number;
+        materialCents: number;
+        shippingByShipId: Map<string, number>;
       }
     >();
 
-    // DB cart items — prices already stored in cents.
-    for (const item of cart.items) {
-      const itemTotal =
-        item.materialPrice * item.quantity + item.shippingPrice;
-      const existing = groups.get(item.vendorId);
+    const ingest = (
+      vendorId: string,
+      vendorName: string | null,
+      shippingId: string,
+      quantity: number,
+      materialCents: number,
+      shippingCents: number
+    ) => {
+      const existing = groups.get(vendorId);
       if (existing) {
-        existing.count += item.quantity;
-        existing.subtotalCents += itemTotal;
-        if (!existing.vendorName && item.vendorName) {
-          existing.vendorName = item.vendorName;
+        existing.count += quantity;
+        existing.materialCents += materialCents;
+        if (!existing.shippingByShipId.has(shippingId)) {
+          existing.shippingByShipId.set(shippingId, shippingCents);
+        }
+        if (!existing.vendorName && vendorName) {
+          existing.vendorName = vendorName;
         }
       } else {
-        groups.set(item.vendorId, {
-          vendorId: item.vendorId,
-          vendorName: item.vendorName,
-          count: item.quantity,
-          subtotalCents: itemTotal,
+        const shippingByShipId = new Map<string, number>();
+        shippingByShipId.set(shippingId, shippingCents);
+        groups.set(vendorId, {
+          vendorId,
+          vendorName,
+          count: quantity,
+          materialCents,
+          shippingByShipId,
         });
       }
+    };
+
+    // DB cart items — prices already stored in cents.
+    for (const item of cart.items) {
+      ingest(
+        item.vendorId,
+        item.vendorName,
+        item.shippingId,
+        item.quantity,
+        item.materialPrice * item.quantity,
+        item.shippingPrice
+      );
     }
 
     // Local anon cart items — prices in dollars, convert to cents.
     for (const item of cart.localItems) {
-      const itemTotalCents = Math.round(
-        (item.materialPrice * item.quantity + item.shippingPrice) * 100
+      ingest(
+        item.vendorId,
+        item.vendorName ?? null,
+        item.shippingId,
+        item.quantity,
+        Math.round(item.materialPrice * item.quantity * 100),
+        Math.round(item.shippingPrice * 100)
       );
-      const existing = groups.get(item.vendorId);
-      if (existing) {
-        existing.count += item.quantity;
-        existing.subtotalCents += itemTotalCents;
-        if (!existing.vendorName && item.vendorName) {
-          existing.vendorName = item.vendorName;
-        }
-      } else {
-        groups.set(item.vendorId, {
-          vendorId: item.vendorId,
-          vendorName: item.vendorName ?? null,
-          count: item.quantity,
-          subtotalCents: itemTotalCents,
-        });
-      }
     }
 
-    return Array.from(groups.values());
+    return Array.from(groups.values()).map((g) => {
+      const shippingCents = [...g.shippingByShipId.values()].reduce(
+        (a, b) => a + b,
+        0
+      );
+      return {
+        vendorId: g.vendorId,
+        vendorName: g.vendorName,
+        count: g.count,
+        subtotalCents: g.materialCents + shippingCents,
+      };
+    });
   }, [cart]);
 
   if (vendorGroups.length === 0) return null;
