@@ -47,6 +47,23 @@ export async function addToCart(params: {
 
     const data = parsed.data;
 
+    // Reject cart lines in a different currency than what's already
+    // in the cart. CraftCloud quotes are currency-scoped and
+    // checkoutVendorGroup only sends one currency per cart create —
+    // mixing would silently ignore all but the first item's currency
+    // (and likely 400 at the CraftCloud boundary). Force the user to
+    // clear or finish the existing cart first.
+    const [anyExisting] = await db
+      .select({ currency: cartItems.currency })
+      .from(cartItems)
+      .where(eq(cartItems.userId, userId));
+
+    if (anyExisting && anyExisting.currency !== data.currency) {
+      return {
+        error: `Your cart is in ${anyExisting.currency}. Clear it or finish that order before adding ${data.currency} items.`,
+      };
+    }
+
     // Merge duplicates: if this exact file + quote is already in the
     // cart, bump the quantity instead of inserting a second row. A
     // "duplicate" is (userId, fileAssetId, quoteId) — the quoteId

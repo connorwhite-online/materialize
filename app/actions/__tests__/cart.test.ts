@@ -113,7 +113,7 @@ describe("addToCart", () => {
   it("merges with existing row of same (fileAsset, quote) by bumping quantity", async () => {
     // Existing cart row has qty 1. Adding the same quote (qty 2)
     // should update the row to qty 3 instead of inserting a second.
-    cartRows = [{ id: "existing-cart-item-id", quantity: 1 }];
+    cartRows = [{ id: "existing-cart-item-id", quantity: 1, currency: "USD" }];
     const result = await addToCart(baseParams);
     expect(result).toEqual({ cartItemId: "existing-cart-item-id" });
     expect(insertedValues).toHaveLength(0);
@@ -121,10 +121,22 @@ describe("addToCart", () => {
   });
 
   it("caps the merged quantity at 100", async () => {
-    cartRows = [{ id: "existing-cart-item-id", quantity: 99 }];
+    cartRows = [
+      { id: "existing-cart-item-id", quantity: 99, currency: "USD" },
+    ];
     const result = await addToCart({ ...baseParams, quantity: 5 });
     expect(result).toEqual({ cartItemId: "existing-cart-item-id" });
     expect(updatedSet).toEqual({ quantity: 100 });
+  });
+
+  it("rejects adds in a different currency than what's already in the cart", async () => {
+    cartRows = [
+      { id: "existing-cart-item-id", quantity: 1, currency: "EUR" },
+    ];
+    const result = await addToCart({ ...baseParams, currency: "USD" });
+    expect(result).toMatchObject({ error: expect.stringContaining("EUR") });
+    expect(insertedValues).toHaveLength(0);
+    expect(updatedSet).toBeNull();
   });
 });
 
