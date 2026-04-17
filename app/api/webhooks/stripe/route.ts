@@ -28,7 +28,21 @@ export async function POST(request: Request) {
     return Response.json({ error: "Invalid signature" }, { status: 400 });
   }
 
-  if (event.type === "checkout.session.completed") {
+  // We place the CraftCloud order on two events:
+  //   - checkout.session.completed WITH payment_status === "paid"
+  //     (card + synchronous rails — the common path).
+  //   - checkout.session.async_payment_succeeded (ACH, SEPA, any
+  //     delayed rail where "completed" fires before payment
+  //     confirms). Stripe's docs call this out explicitly.
+  // Both events carry the same session + metadata shape. The
+  // handler is idempotent, so if both fire for the same order we
+  // only place it once.
+  const isPaidCheckout =
+    event.type === "checkout.session.completed" &&
+    (event.data.object as Stripe.Checkout.Session).payment_status === "paid";
+  const isAsyncSuccess = event.type === "checkout.session.async_payment_succeeded";
+
+  if (isPaidCheckout || isAsyncSuccess) {
     const session = event.data.object as Stripe.Checkout.Session;
     const printOrderId = session.metadata?.printOrderId;
 
