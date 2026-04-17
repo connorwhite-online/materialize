@@ -19,7 +19,26 @@
  * we hit the same public CraftCloud endpoint directly instead.
  */
 
+import fs from "node:fs";
+import path from "node:path";
 import { neon } from "@neondatabase/serverless";
+
+// Lift DATABASE_URL out of .env.local when running directly via
+// tsx/npm (Next.js only auto-loads it for framework contexts).
+// Same pattern as scripts/db-migrate.ts.
+if (!process.env.DATABASE_URL) {
+  const envPath = path.resolve(process.cwd(), ".env.local");
+  if (fs.existsSync(envPath)) {
+    for (const line of fs.readFileSync(envPath, "utf8").split("\n")) {
+      const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)$/i);
+      if (!match) continue;
+      const [, key, rawValue] = match;
+      if (process.env[key]) continue;
+      const value = rawValue.replace(/^["']|["']$/g, "");
+      process.env[key] = value;
+    }
+  }
+}
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const CRAFTCLOUD_PROVIDERS_URL =
