@@ -24,6 +24,13 @@ interface LibraryTabProps {
 
 type LibraryItem = LibraryFileCardItem;
 
+// Cap owned + purchased file fetches at a user-friendly ceiling.
+// Picked so a prolific creator still gets a full working view while
+// pathological accounts (10k+ uploads) can't DoS the tab by joining
+// every asset row. Real pagination is a future refactor; a truncation
+// notice flags the cap to the user so nothing silently disappears.
+const LIBRARY_MAX_FILES = 500;
+
 export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
   // Owned files (creator content)
   const fileConditions = [eq(files.userId, userId)];
@@ -31,11 +38,18 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
     fileConditions.push(eq(files.status, "published"));
     fileConditions.push(eq(files.visibility, "public"));
   }
-  const ownedFiles = await db
+  // Fetch one extra so we can tell if the library was truncated
+  // without a second count() query.
+  const ownedFilesRaw = await db
     .select()
     .from(files)
     .where(and(...fileConditions))
-    .orderBy(desc(files.createdAt));
+    .orderBy(desc(files.createdAt))
+    .limit(LIBRARY_MAX_FILES + 1);
+  const ownedTruncated = ownedFilesRaw.length > LIBRARY_MAX_FILES;
+  const ownedFiles = ownedTruncated
+    ? ownedFilesRaw.slice(0, LIBRARY_MAX_FILES)
+    : ownedFilesRaw;
 
   // Purchased files (buyer content) — owner only, since purchases are private
   type PurchasedRow = {
@@ -49,8 +63,9 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
     creatorDisplayName: string | null;
   };
   let purchasedRows: PurchasedRow[] = [];
+  let purchasedTruncated = false;
   if (isOwner) {
-    purchasedRows = await db
+    const rawPurchased = await db
       .select({
         id: files.id,
         name: files.name,
@@ -69,7 +84,12 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
           eq(purchases.buyerId, userId),
           eq(purchases.status, "completed")
         )
-      );
+      )
+      .limit(LIBRARY_MAX_FILES + 1);
+    purchasedTruncated = rawPurchased.length > LIBRARY_MAX_FILES;
+    purchasedRows = purchasedTruncated
+      ? rawPurchased.slice(0, LIBRARY_MAX_FILES)
+      : rawPurchased;
   }
 
   const allFileIds = [
@@ -245,6 +265,18 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
               }
             />
           </div>
+        </div>
+      )}
+
+      {(ownedTruncated || purchasedTruncated) && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+          Showing your most recent {LIBRARY_MAX_FILES}{" "}
+          {ownedTruncated && purchasedTruncated
+            ? "owned and purchased files"
+            : ownedTruncated
+              ? "uploads"
+              : "purchases"}
+          . Older items aren&apos;t shown here yet — reach out if you need a full export.
         </div>
       )}
 
