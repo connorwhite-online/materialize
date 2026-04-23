@@ -120,10 +120,15 @@ export function CartProvider({ children }: { children: ReactNode }) {
       const result = await addToCart(params);
       if ("cartItemId" in result) {
         setDbItemCount((c) => c + 1);
+        // The /print cart-slot stack renders cart groups inline, so
+        // the caller expects items to be queryable immediately after
+        // a successful add — not only once the modal panel is
+        // opened. Refresh here so both surfaces stay in sync.
+        await refresh();
       }
       return result;
     },
-    []
+    [refresh]
   );
 
   const addLocalItem = useCallback(

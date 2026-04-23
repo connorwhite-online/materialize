@@ -154,9 +154,15 @@ export async function createPrintOrder(params: {
 
     const materialSubtotal = Math.round(data.materialPrice * 100);
     const shippingSubtotal = Math.round(data.shippingPrice * 100);
-    const totalPrice =
-      materialSubtotal * data.quantity + productionFeeCents + shippingSubtotal;
-    const serviceFee = Math.round(totalPrice * SERVICE_FEE_RATE);
+    // Service fee is 3% of the pre-shipping subtotal — charging
+    // a platform fee on freight would make our cut scale with
+    // unrelated logistics costs. Shipping is still part of
+    // totalPrice (it's money the user owes) but sits outside the
+    // service-fee base.
+    const preShippingTotal =
+      materialSubtotal * data.quantity + productionFeeCents;
+    const totalPrice = preShippingTotal + shippingSubtotal;
+    const serviceFee = Math.round(preShippingTotal * SERVICE_FEE_RATE);
 
     // Create print order record
     const [order] = await db
@@ -293,8 +299,11 @@ export async function checkoutVendorGroup(
       0
     );
     const totalShipping = dedupeShippingByShipId(items);
-    const totalPrice = totalMaterial + productionFeeCents + totalShipping;
-    const serviceFee = Math.round(totalPrice * SERVICE_FEE_RATE);
+    // See createPrintOrder — service fee is 3% of the pre-shipping
+    // subtotal so freight doesn't inflate our cut.
+    const preShippingTotal = totalMaterial + productionFeeCents;
+    const totalPrice = preShippingTotal + totalShipping;
+    const serviceFee = Math.round(preShippingTotal * SERVICE_FEE_RATE);
 
     // All cart items were selected by vendorId, so the vendor name
     // (if any) is consistent across the group — pick the first

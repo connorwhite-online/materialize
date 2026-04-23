@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { fileAssets, files } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { QuoteConfigurator } from "@/components/print/quote-configurator";
+import { FileAssetPrintShell } from "@/components/print/file-asset-print-shell";
 import { getMaterialById } from "@/lib/materials";
 import { Badge } from "@/components/ui/badge";
 
@@ -50,8 +50,8 @@ export default async function PrintConfigPage(props: {
     ? getMaterialById(asset.recommendedMaterialId)
     : null;
 
-  return (
-    <div className="mx-auto max-w-7xl px-4 py-8">
+  const configureHeader = (
+    <div>
       <h1 className="text-2xl font-bold">
         Print: {asset.fileName || asset.originalFilename}
       </h1>
@@ -59,9 +59,8 @@ export default async function PrintConfigPage(props: {
         {asset.originalFilename} &middot;{" "}
         {(asset.fileSize / 1024 / 1024).toFixed(1)} MB
       </p>
-
-      {/* Creator's recommendation */}
-      {(recommendedMaterial || (asset.designTags && asset.designTags.length > 0)) && (
+      {(recommendedMaterial ||
+        (asset.designTags && asset.designTags.length > 0)) && (
         <div className="mt-4 flex items-center gap-2 text-sm">
           <span className="text-muted-foreground">Creator recommends:</span>
           {recommendedMaterial && (
@@ -80,17 +79,20 @@ export default async function PrintConfigPage(props: {
           ))}
         </div>
       )}
+    </div>
+  );
 
-      <div className="mt-6">
-        <QuoteConfigurator
-          fileAssetId={asset.id}
-          filename={asset.originalFilename}
-          format={asset.format}
-          hasCachedModel={!!asset.craftCloudModelId}
-          geometryData={asset.geometryData}
-          preselectMaterialId={preselectMaterialId}
-        />
-      </div>
+  return (
+    <div className="mx-auto max-w-7xl px-4 py-8">
+      <FileAssetPrintShell
+        fileAssetId={asset.id}
+        filename={asset.originalFilename}
+        format={asset.format}
+        hasCachedModel={!!asset.craftCloudModelId}
+        geometryData={asset.geometryData}
+        preselectMaterialId={preselectMaterialId}
+        configureHeader={configureHeader}
+      />
     </div>
   );
 }

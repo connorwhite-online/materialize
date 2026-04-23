@@ -73,16 +73,20 @@ function toDisplayItems(
 }
 
 /**
- * Sum a vendor group's subtotal in cents, deduping shipping by
- * shippingId (see lib/pricing/shipping.ts).
+ * Per-vendor-group material total (cents) — service fee is 3% of
+ * this, not of the shipping-inclusive figure.
  */
-function vendorGroupSubtotal(items: DisplayItem[]): number {
-  const material = items.reduce(
-    (sum, i) => sum + i.materialPrice * i.quantity,
-    0
-  );
-  const shipping = dedupeShippingByShipId(items);
-  return material + shipping;
+function vendorGroupMaterial(items: DisplayItem[]): number {
+  return items.reduce((sum, i) => sum + i.materialPrice * i.quantity, 0);
+}
+
+/**
+ * Per-vendor-group shipping total (cents), deduped by shippingId —
+ * CraftCloud stores shipping per line item but bills it once per
+ * order, so summing raw would double-count multi-item carts.
+ */
+function vendorGroupShipping(items: DisplayItem[]): number {
+  return dedupeShippingByShipId(items);
 }
 
 export function CartPanel() {
@@ -308,9 +312,12 @@ function VendorGroup({
   // ref updates immediately.
   const checkingOutRef = useRef(false);
 
-  const subtotal = vendorGroupSubtotal(group.items);
-  const serviceFee = Math.round(subtotal * SERVICE_FEE_RATE);
-  const total = subtotal + serviceFee;
+  const material = vendorGroupMaterial(group.items);
+  const shipping = vendorGroupShipping(group.items);
+  // Service fee is 3% of material (production fee gets folded in
+  // server-side at checkout — we don't have that figure here).
+  const serviceFee = Math.round(material * SERVICE_FEE_RATE);
+  const total = material + serviceFee + shipping;
 
   const handleCheckout = async () => {
     setError(null);
@@ -366,12 +373,16 @@ function VendorGroup({
 
       <div className="space-y-1 text-sm">
         <div className="flex justify-between text-muted-foreground">
-          <span>Subtotal</span>
-          <span>${(subtotal / 100).toFixed(2)}</span>
+          <span>Material</span>
+          <span>${(material / 100).toFixed(2)}</span>
         </div>
         <div className="flex justify-between text-muted-foreground">
           <span>Service fee (3%)</span>
           <span>${(serviceFee / 100).toFixed(2)}</span>
+        </div>
+        <div className="flex justify-between text-muted-foreground">
+          <span>Shipping</span>
+          <span>${(shipping / 100).toFixed(2)}</span>
         </div>
         <div className="flex justify-between font-semibold">
           <span>Total</span>

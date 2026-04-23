@@ -1,13 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { useCart } from "./cart-context";
-import { dedupeShippingByShipId } from "@/lib/pricing/shipping";
 
 const SERVICE_FEE_RATE = 0.03;
 
@@ -85,9 +82,12 @@ export function PriceDisplay({
   const materialCost = selectedQuote.price * quantity;
   const minimumFee = minimumFeeInfo?.minimumProductionFee ?? 0;
   const shippingCost = selectedShipping?.price ?? 0;
-  const subtotal = materialCost + minimumFee + shippingCost;
-  const serviceFee = subtotal * SERVICE_FEE_RATE;
-  const total = subtotal + serviceFee;
+  // Service fee is 3% of material + production fee, NOT shipping —
+  // freight shouldn't inflate our platform cut. Shipping sits in
+  // its own line below and flows into total.
+  const preShipping = materialCost + minimumFee;
+  const serviceFee = preShipping * SERVICE_FEE_RATE;
+  const total = preShipping + serviceFee + shippingCost;
 
   return (
     <Card>
@@ -95,8 +95,6 @@ export function PriceDisplay({
         <CardTitle className="text-base">Order Summary</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        <ExistingCartSummary currentVendorId={selectedQuote.vendorId} />
-
         <div className="flex justify-between text-sm">
           <span className="text-muted-foreground">Material ({quantity}x)</span>
           <span>${materialCost.toFixed(2)}</span>
@@ -203,150 +201,5 @@ export function PriceDisplay({
         </Button>
       </CardContent>
     </Card>
-  );
-}
-
-/**
- * Shows the user's other cart groupings so they can see — while
- * picking a vendor for a new print — whether the selection will
- * consolidate into an existing group (one checkout) or spin up a
- * new vendor group (separate checkout). The row matching the
- * currently-selected vendor is highlighted.
- *
- * Hidden entirely when the cart is empty or the cart context
- * isn't available (e.g. legacy callers outside CartProvider).
- */
-function ExistingCartSummary({
-  currentVendorId,
-}: {
-  currentVendorId: string;
-}) {
-  const cart = useCart();
-
-  const vendorGroups = useMemo(() => {
-    if (!cart) return [];
-    // Group cart rows by vendor, deferring the shipping dedupe to
-    // the shared helper so all cart-total math comes out of one
-    // place. Local (anon) prices are in dollars — convert to cents
-    // at ingest so everything downstream stays in cents.
-    const groups = new Map<
-      string,
-      {
-        vendorId: string;
-        vendorName: string | null;
-        count: number;
-        materialCents: number;
-        /** Rows for dedupeShippingByShipId — only shippingId + shippingPrice matter. */
-        shippingRows: Array<{ shippingId: string; shippingPrice: number }>;
-      }
-    >();
-
-    const ingest = (
-      vendorId: string,
-      vendorName: string | null,
-      shippingId: string,
-      quantity: number,
-      materialCents: number,
-      shippingCents: number
-    ) => {
-      const existing = groups.get(vendorId);
-      if (existing) {
-        existing.count += quantity;
-        existing.materialCents += materialCents;
-        existing.shippingRows.push({
-          shippingId,
-          shippingPrice: shippingCents,
-        });
-        if (!existing.vendorName && vendorName) {
-          existing.vendorName = vendorName;
-        }
-      } else {
-        groups.set(vendorId, {
-          vendorId,
-          vendorName,
-          count: quantity,
-          materialCents,
-          shippingRows: [{ shippingId, shippingPrice: shippingCents }],
-        });
-      }
-    };
-
-    for (const item of cart.items) {
-      ingest(
-        item.vendorId,
-        item.vendorName,
-        item.shippingId,
-        item.quantity,
-        item.materialPrice * item.quantity,
-        item.shippingPrice
-      );
-    }
-    for (const item of cart.localItems) {
-      ingest(
-        item.vendorId,
-        item.vendorName ?? null,
-        item.shippingId,
-        item.quantity,
-        Math.round(item.materialPrice * item.quantity * 100),
-        Math.round(item.shippingPrice * 100)
-      );
-    }
-
-    return Array.from(groups.values()).map((g) => ({
-      vendorId: g.vendorId,
-      vendorName: g.vendorName,
-      count: g.count,
-      subtotalCents: g.materialCents + dedupeShippingByShipId(g.shippingRows),
-    }));
-  }, [cart]);
-
-  if (vendorGroups.length === 0) return null;
-
-  const matchesCurrent = vendorGroups.some(
-    (g) => g.vendorId === currentVendorId
-  );
-
-  return (
-    <div className="space-y-2 pb-1">
-      <p className="text-xs font-medium text-muted-foreground">In your cart</p>
-      <div className="space-y-1.5">
-        {vendorGroups.map((g) => {
-          const isCurrent = g.vendorId === currentVendorId;
-          return (
-            <div
-              key={g.vendorId}
-              className={`flex items-center justify-between rounded-md px-2 py-1.5 text-xs ${
-                isCurrent
-                  ? "border border-primary/30 bg-primary/5"
-                  : "bg-muted/50"
-              }`}
-            >
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="truncate font-medium">
-                  {g.vendorName ?? g.vendorId}
-                </span>
-                <span className="shrink-0 text-muted-foreground">
-                  ({g.count} {g.count === 1 ? "item" : "items"})
-                </span>
-                {isCurrent && (
-                  <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-primary">
-                    same vendor
-                  </span>
-                )}
-              </div>
-              <span className="shrink-0 tabular-nums">
-                ${(g.subtotalCents / 100).toFixed(2)}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-      <p className="text-[11px] leading-relaxed text-muted-foreground">
-        {matchesCurrent
-          ? "Adding to cart will group this print with the same vendor — one checkout."
-          : "This vendor isn't in your cart yet — adding it creates a separate checkout."}
-      </p>
-      <Separator />
-    </div>
   );
 }

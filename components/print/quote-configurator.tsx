@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
+import type { PendingItem } from "./cart-slot-stack";
 import { MaterialPicker } from "./material-picker";
 import type { EnrichedQuote } from "./material-picker/types";
 import { PriceDisplay, type MinimumFeeInfo } from "./price-display";
@@ -71,6 +72,20 @@ interface QuoteConfiguratorProps {
    * material step.
    */
   preselectMaterialId?: string;
+  /**
+   * Fired after a successful Add to Cart. The parent uses this to
+   * pivot /print into the "what next?" state and expand the
+   * matching vendor slot in the cart stack.
+   */
+  onAddedToCart?: (vendorId: string) => void;
+  /**
+   * Extra content rendered below PriceDisplay in the sticky right
+   * column — used to slot the CartSlotStack beneath the active
+   * session's order summary on /print. Receives the live
+   * pendingItem so the stack can preview a merge into a matching
+   * existing vendor cart.
+   */
+  rightAnnex?: (ctx: { pendingItem: PendingItem | null }) => ReactNode;
 }
 
 type CheckoutStep = "configure" | "address" | "processing";
@@ -84,6 +99,8 @@ export function QuoteConfigurator({
   hasCachedModel,
   geometryData,
   preselectMaterialId,
+  onAddedToCart,
+  rightAnnex,
 }: QuoteConfiguratorProps) {
   const isDraft = !!draftMode;
 
@@ -310,6 +327,8 @@ export function QuoteConfigurator({
         });
         if ("error" in localResult) {
           setCheckoutError(localResult.error);
+        } else {
+          onAddedToCart?.(selectedQuote.vendorId);
         }
       } else if (fileAssetId) {
         const result = await cart.addItem({
@@ -327,12 +346,14 @@ export function QuoteConfigurator({
         });
         if ("error" in result) {
           setCheckoutError(result.error);
+        } else {
+          onAddedToCart?.(selectedQuote.vendorId);
         }
       }
     } finally {
       setIsAddingToCart(false);
     }
-  }, [selectedQuote, selectedShipping, fileAssetId, draftMode, cart, quantity, region.code, filename]);
+  }, [selectedQuote, selectedShipping, fileAssetId, draftMode, cart, quantity, region.code, filename, onAddedToCart]);
 
   // Active material scope for the CraftCloud price request. Starts
   // as the preselectMaterialId (from /materials/[slug] → Print with
@@ -626,6 +647,19 @@ export function QuoteConfigurator({
     );
   }
 
+  // Shape the current selection as a PendingItem so the cart-slot
+  // stack on the right can preview a merge into a matching vendor
+  // cart. Only populated once a quote is picked — before that,
+  // there's no vendor to merge into.
+  const pendingItem: PendingItem | null = selectedQuote
+    ? {
+        vendorId: selectedQuote.vendorId,
+        filename,
+        quantity,
+        materialPrice: Math.round(selectedQuote.price * 100),
+      }
+    : null;
+
   if (step === "address" || step === "processing") {
     return (
       <div className="max-w-lg mx-auto">
@@ -772,7 +806,7 @@ export function QuoteConfigurator({
           />
         </div>
 
-        <div className="lg:sticky lg:top-6">
+        <div className="lg:sticky lg:top-6 space-y-4">
           <PriceDisplay
             selectedQuote={selectedQuote}
             shipping={shipping}
@@ -787,6 +821,7 @@ export function QuoteConfigurator({
             minimumFeeInfo={minimumFeeInfo}
             checkingMinimum={checkingMinimum}
           />
+          {rightAnnex?.({ pendingItem })}
         </div>
       </div>
     </div>

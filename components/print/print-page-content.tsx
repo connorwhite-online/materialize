@@ -1,16 +1,15 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
-import { Badge } from "@/components/ui/badge";
-import { ChevronRight } from "@/components/icons/chevron-right";
 import { XIcon } from "lucide-react";
-import { FileUploader } from "@/components/upload/file-uploader";
 import { useStartPrintFlow } from "@/components/upload/use-start-print-flow";
 import { usePendingPrintFile } from "@/components/upload/pending-print-file";
 import { uploadFileToCraftCloud } from "@/lib/craftcloud/upload-client";
 import { QuoteConfigurator } from "@/components/print/quote-configurator";
+import { WhatNextPane } from "@/components/print/what-next-pane";
+import { CartSlotStack } from "@/components/print/cart-slot-stack";
 import {
   Select,
   SelectContent,
@@ -44,6 +43,14 @@ interface PrintPageContentProps {
    * material step gets auto-advanced.
    */
   preselectMaterialId?: string;
+  /**
+   * Vendor id to expand in the cart stack on initial render —
+   * forwarded from a `?expand=<vendorId>` query param set by the
+   * authed /print/[fileAssetId] page after a successful Add to
+   * Cart, so the just-added slot surfaces its line items without
+   * the user having to click.
+   */
+  initialExpandVendorId?: string;
 }
 
 type PickedFile = { file: File; format: Format };
@@ -61,21 +68,18 @@ type DraftState =
   | { status: "error"; file: PickedFile; unit: Unit; message: string };
 
 /**
- * Client shell for the /print page. Switches between two layouts:
+ * Client shell for the /print page. One layout, two content modes:
  *
- *   1. Idle — header, library tiles, "upload a new file" dropzone,
- *      "browse the marketplace" link. This is what the user sees
- *      when they land on /print with no file active.
+ *   • Idle — WhatNextPane (uploader + collapsed recent files) on
+ *     the left, CartSlotStack on the right. The user sees their
+ *     existing vendor carts immediately so they can resume or
+ *     remove an in-flight order without hunting for it.
  *
- *   2. Active — a compact file-context bar ("Printing foo.stl · ×")
- *      sitting where the header was, with the QuoteConfigurator
- *      below it. The library tiles and upload prompt get out of the
- *      way so the configurator has the page to itself.
- *
- * Absorbed the draft state machine that previously lived in
- * InlineUploadDropzone — anon users upload client-side to CraftCloud
- * and stay on this page in draft mode; authed users fire the
- * existing useStartPrintFlow which navigates to /print/[id].
+ *   • Active — a FileContextBar + QuoteConfigurator replace the
+ *     WhatNextPane on the left while the cart stack stays put on
+ *     the right (prior vendor groups visible + collapsible). After
+ *     a successful Add to Cart we fall back to Idle with the just
+ *     added vendor slot expanded.
  */
 export function PrintPageContent({
   headline,
@@ -83,15 +87,12 @@ export function PrintPageContent({
   tiles,
   linkSuffix,
   preselectMaterialId,
+  initialExpandVendorId,
 }: PrintPageContentProps) {
   const { isSignedIn, isLoaded } = useUser();
+  const router = useRouter();
   const pendingPrintFile = usePendingPrintFile();
   const [picked, setPicked] = useState<PickedFile | null>(null);
-  // Persisted to localStorage so the last-used source unit survives
-  // page reloads. SSR-safe: the initial value always renders as
-  // "mm", then a useEffect below hydrates from storage on mount.
-  // `unitHydrated` gates the auto-upload effect so we don't fire
-  // a CraftCloud upload with "mm" before localStorage has been read.
   const [unit, setUnit] = useState<Unit>("mm");
   const [unitHydrated, setUnitHydrated] = useState(false);
   useEffect(() => {
@@ -104,14 +105,32 @@ export function PrintPageContent({
     setUnitHydrated(true);
   }, []);
   const [draft, setDraft] = useState<DraftState | null>(null);
+  // Which vendor slot in the cart stack is expanded. Starts with
+  // the server-provided value (if any, from the ?expand= param),
+  // then overwritten when the user finishes an Add to Cart in this
+  // session.
+  const [expandedVendorId, setExpandedVendorId] = useState<string | null>(
+    initialExpandVendorId ?? null
+  );
+
+  // Strip ?expand= from the URL once we've consumed it — otherwise
+  // a refresh or back-nav would re-trigger the same slot expanding,
+  // which is stale after the user has already interacted with the
+  // stack. replace() keeps it out of history so Back doesn't send
+  // them to the exact same expand state.
+  useEffect(() => {
+    if (!initialExpandVendorId) return;
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("expand")) {
+      url.searchParams.delete("expand");
+      router.replace(url.pathname + url.search);
+    }
+  }, [initialExpandVendorId, router]);
   const { start, phase, progress, error } = useStartPrintFlow();
   const started = useRef(false);
-  // Generation counter so a stale upload promise (e.g., user
-  // changed units twice in a row) can't clobber the newer draft
-  // when it eventually resolves.
   const uploadGenRef = useRef(0);
 
-  // Consume a file stashed from the home bar's "Print this file" CTA.
   useEffect(() => {
     const stashed = pendingPrintFile.consume();
     if (!stashed) return;
@@ -124,6 +143,7 @@ export function PrintPageContent({
   const handleFilePicked = (file: File, format: Format) => {
     started.current = false;
     setDraft(null);
+    setExpandedVendorId(null);
     setPicked({ file, format });
   };
 
@@ -134,9 +154,16 @@ export function PrintPageContent({
     setDraft(null);
   };
 
-  // Core upload routine — posts the File to CraftCloud with the
-  // given unit and updates draft state. Used by both the initial
-  // auto-upload effect and the unit picker on the file-context bar.
+  const handleAddedToCart = (vendorId: string) => {
+    // Fall back to the idle "print anything" layout with the
+    // just-added slot expanded — no separate "what next?" state,
+    // it IS the idle state.
+    setPicked(null);
+    setDraft(null);
+    started.current = false;
+    setExpandedVendorId(vendorId);
+  };
+
   const uploadWithUnit = useCallback(
     async (pickedFile: PickedFile, nextUnit: Unit) => {
       const gen = ++uploadGenRef.current;
@@ -166,10 +193,6 @@ export function PrintPageContent({
     []
   );
 
-  // Authed: kick off R2-backed flow. Anon: upload straight to
-  // CraftCloud with the current unit and render the configurator
-  // inline. Waits on unitHydrated so the first upload uses the
-  // persisted unit instead of the pre-hydration default.
   useEffect(() => {
     if (!picked || !isLoaded) return;
     if (!unitHydrated) return;
@@ -202,163 +225,154 @@ export function PrintPageContent({
     uploadWithUnit(picked, next);
   };
 
-  // Memoize the draftMode object so QuoteConfigurator's useCallback
-  // deps stay referentially stable across unrelated parent renders.
-  // Only changes when the underlying draft.modelId does.
   const draftConfig = useMemo(() => {
     if (draft?.status !== "ready") return null;
     return { modelId: draft.modelId, file: draft.file.file };
   }, [draft]);
 
-  // Active states — we're either uploading or rendering the
-  // configurator. Either way, hide the idle chrome.
   const authedActive =
     picked && isSignedIn && (phase === "uploading" || phase === "saving");
   const anonUploading = draft?.status === "uploading";
   const anonReady = draft?.status === "ready";
-  const isActive = authedActive || anonUploading || anonReady;
-
-  if (isActive && picked) {
-    return (
-      <div className="mx-auto max-w-7xl px-4 py-8">
-        <FileContextBar
-          file={picked.file}
-          format={picked.format}
-          unit={unit}
-          // In draft mode we show the dimensions CraftCloud
-          // reported so the user can sanity-check them against
-          // their source file and change unit if they look wrong.
-          dimensions={
-            draft?.status === "ready" ? draft.dimensions : null
-          }
-          onUnitChange={handleUnitChange}
-          // Lock the unit picker while an upload is in flight —
-          // it's read-only during authed flows too, since those
-          // go through R2 instead of client-side CraftCloud.
-          unitPickerDisabled={!!authedActive || anonUploading}
-          showUnitPicker={!isSignedIn}
-          onReset={handleReset}
-          statusLabel={
-            authedActive
-              ? phase === "uploading"
-                ? `Uploading · ${progress}%`
-                : "Preparing…"
-              : anonUploading
-                ? "Preparing for manufacturing…"
-                : null
-          }
-        />
-
-        {anonReady && draftConfig && draft?.status === "ready" && (
-          <div className="mt-6">
-            <QuoteConfigurator
-              draftMode={draftConfig}
-              filename={draft.file.file.name}
-              format={draft.file.format}
-              hasCachedModel
-              geometryData={
-                draft.dimensions
-                  ? {
-                      dimensions: draft.dimensions,
-                      volume: draft.volume ?? undefined,
-                    }
-                  : null
-              }
-              preselectMaterialId={preselectMaterialId}
-            />
-          </div>
-        )}
-
-        {authedActive && (
-          <div className="mt-6 rounded-xl border border-border bg-card p-6 text-center">
-            <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-muted border-t-foreground" />
-            <p className="mt-3 text-sm font-medium">
-              {phase === "uploading"
-                ? `Uploading ${picked.file.name} — ${progress}%`
-                : "Preparing quote configurator…"}
-            </p>
-          </div>
-        )}
-
-        {draft?.status === "error" && (
-          <p className="mt-4 text-xs text-destructive">{draft.message}</p>
-        )}
-      </div>
-    );
-  }
+  const isActive = !!(picked && (authedActive || anonUploading || anonReady));
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
-      <h1 className="text-2xl font-bold">{headline}</h1>
-      <p className="mt-2 text-muted-foreground">{subheadline}</p>
-
-      {tiles.length > 0 && (
-        <div className="mt-8">
-          <h2 className="text-sm font-medium text-muted-foreground">
-            From your library
-          </h2>
-          <div className="mt-3 grid gap-3 grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6">
-            {tiles.map((tile) => (
-              <Link
-                key={tile.fileAssetId}
-                href={`/print/${tile.fileAssetId}${linkSuffix}`}
-                className="group"
-              >
-                <div className="relative aspect-square w-full overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted/60 to-muted/30 transition-colors group-hover:border-primary/40">
-                  {tile.thumbnailUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={tile.thumbnailUrl}
-                      alt=""
-                      loading="lazy"
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-[10px] uppercase tracking-wider text-muted-foreground/40">
-                      .{tile.format}
-                    </div>
-                  )}
-                  {tile.source === "purchased" && (
-                    <Badge
-                      variant="secondary"
-                      className="absolute left-1 top-1 text-[9px]"
-                    >
-                      Purchased
-                    </Badge>
-                  )}
-                </div>
-                <p className="mt-1.5 truncate text-xs text-foreground/80 group-hover:text-primary">
-                  {tile.name}
-                </p>
-              </Link>
-            ))}
-          </div>
+      {!isActive && (
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold">{headline}</h1>
+          <p className="mt-2 text-muted-foreground">{subheadline}</p>
         </div>
       )}
 
-      <div className="mt-10">
-        <h2 className="text-sm font-medium text-muted-foreground">
-          {tiles.length > 0 ? "Or upload a new file" : "Upload a file"}
-        </h2>
-        <div className="mt-3 space-y-3">
-          <FileUploader onFileSelected={handleFilePicked} />
-          {draft?.status === "error" && (
-            <p className="text-xs text-destructive">{draft.message}</p>
+      <div className="grid items-start gap-8 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          {isActive && picked ? (
+            <ActiveColumn
+              picked={picked}
+              unit={unit}
+              isSignedIn={!!isSignedIn}
+              draft={draft}
+              anonUploading={anonUploading}
+              anonReady={anonReady}
+              authedActive={!!authedActive}
+              draftConfig={draftConfig}
+              preselectMaterialId={preselectMaterialId}
+              phase={phase}
+              progress={progress}
+              onUnitChange={handleUnitChange}
+              onReset={handleReset}
+              onAddedToCart={handleAddedToCart}
+            />
+          ) : (
+            <WhatNextPane
+              tiles={tiles}
+              linkSuffix={linkSuffix}
+              onFilePicked={handleFilePicked}
+              uploadError={draft?.status === "error" ? draft.message : error}
+            />
           )}
-          {error && <p className="text-xs text-destructive">{error}</p>}
+        </div>
+        <div className="lg:sticky lg:top-6">
+          <CartSlotStack expandedVendorId={expandedVendorId} />
         </div>
       </div>
-
-      <div className="mt-8">
-        <Link
-          href="/files"
-          className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-        >
-          Or browse the marketplace
-          <ChevronRight size={14} />
-        </Link>
-      </div>
     </div>
+  );
+}
+
+function ActiveColumn({
+  picked,
+  unit,
+  isSignedIn,
+  draft,
+  anonUploading,
+  anonReady,
+  authedActive,
+  draftConfig,
+  preselectMaterialId,
+  phase,
+  progress,
+  onUnitChange,
+  onReset,
+  onAddedToCart,
+}: {
+  picked: PickedFile;
+  unit: Unit;
+  isSignedIn: boolean;
+  draft: DraftState | null;
+  anonUploading: boolean;
+  anonReady: boolean;
+  authedActive: boolean;
+  draftConfig: { modelId: string; file: File } | null;
+  preselectMaterialId?: string;
+  phase: "idle" | "uploading" | "saving";
+  progress: number;
+  onUnitChange: (u: Unit) => void;
+  onReset: () => void;
+  onAddedToCart: (vendorId: string) => void;
+}) {
+  return (
+    <>
+      <FileContextBar
+        file={picked.file}
+        format={picked.format}
+        unit={unit}
+        dimensions={draft?.status === "ready" ? draft.dimensions : null}
+        onUnitChange={onUnitChange}
+        unitPickerDisabled={authedActive || anonUploading}
+        showUnitPicker={!isSignedIn}
+        onReset={onReset}
+        statusLabel={
+          authedActive
+            ? phase === "uploading"
+              ? `Uploading · ${progress}%`
+              : "Preparing…"
+            : anonUploading
+              ? "Preparing for manufacturing…"
+              : null
+        }
+      />
+
+      {anonReady && draftConfig && draft?.status === "ready" && (
+        <div className="mt-6">
+          <QuoteConfigurator
+            draftMode={draftConfig}
+            filename={draft.file.file.name}
+            format={draft.file.format}
+            hasCachedModel
+            geometryData={
+              draft.dimensions
+                ? {
+                    dimensions: draft.dimensions,
+                    volume: draft.volume ?? undefined,
+                  }
+                : null
+            }
+            preselectMaterialId={preselectMaterialId}
+            onAddedToCart={onAddedToCart}
+            rightAnnex={({ pendingItem }) => (
+              <CartSlotStack pendingItem={pendingItem} />
+            )}
+          />
+        </div>
+      )}
+
+      {authedActive && (
+        <div className="mt-6 rounded-xl border border-border bg-card p-6 text-center">
+          <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-muted border-t-foreground" />
+          <p className="mt-3 text-sm font-medium">
+            {phase === "uploading"
+              ? `Uploading ${picked.file.name} — ${progress}%`
+              : "Preparing quote configurator…"}
+          </p>
+        </div>
+      )}
+
+      {draft?.status === "error" && (
+        <p className="mt-4 text-xs text-destructive">{draft.message}</p>
+      )}
+    </>
   );
 }
 

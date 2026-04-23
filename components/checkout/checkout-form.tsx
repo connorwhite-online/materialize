@@ -165,6 +165,13 @@ export function CheckoutForm({
               </div>
             )}
 
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Service fee (3%)</span>
+              <span className="tabular-nums">
+                ${(serviceFee / 100).toFixed(2)}
+              </span>
+            </div>
+
             {shippingTotal > 0 && (
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Shipping</span>
@@ -173,15 +180,6 @@ export function CheckoutForm({
                 </span>
               </div>
             )}
-
-            <Separator />
-
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Service fee (3%)</span>
-              <span className="tabular-nums">
-                ${(serviceFee / 100).toFixed(2)}
-              </span>
-            </div>
 
             <Separator />
 
