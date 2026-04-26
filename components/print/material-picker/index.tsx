@@ -21,6 +21,14 @@ interface MaterialPickerProps {
   shipping: ShippingLite[];
   /** True while the /v5/price request is still in flight. */
   quotesLoading: boolean;
+  /**
+   * True when polling exited at the hard ceiling without seeing a
+   * stable allComplete — the quotes shown are partial. The material
+   * step renders a "showing partial results" hint with a Retry CTA.
+   */
+  quotesPartial?: boolean;
+  /** Re-run the quote fetch from scratch. Used by the partial-results retry. */
+  onRetryQuotes?: () => void;
   selectedQuote: EnrichedQuote | null;
   onSelectQuote: (quote: EnrichedQuote) => void;
   /**
@@ -43,6 +51,8 @@ export function MaterialPicker({
   quotes,
   shipping,
   quotesLoading,
+  quotesPartial = false,
+  onRetryQuotes,
   selectedQuote,
   onSelectQuote,
   preselectMaterialId,
@@ -85,6 +95,8 @@ export function MaterialPicker({
       <MaterialStep
         quotes={quotes}
         quotesLoading={quotesLoading}
+        quotesPartial={quotesPartial}
+        onRetryQuotes={onRetryQuotes}
         onPick={(id) => {
           setMaterialId(id);
           setFinishGroupId(null);

@@ -77,7 +77,7 @@ describe("pollQuotes", () => {
     });
 
     await vi.advanceTimersByTimeAsync(10_000);
-    await done;
+    expect(await done).toBe("complete");
 
     // First two snapshots grow (1 → 2), then we need 4 more
     // "stable" snapshots before the loop breaks.
@@ -87,6 +87,59 @@ describe("pollQuotes", () => {
     for (const count of snapshots.slice(1)) {
       expect(count).toBe(2);
     }
+  });
+
+  it("returns 'timeout' when the hard ceiling is reached without stability", async () => {
+    // Quotes never stabilize: every poll grows the count by 1, so
+    // stablePolls never reaches STABLE_POLLS_REQUIRED.
+    let n = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      n++;
+      const quotes = Array.from({ length: n }, (_, i) =>
+        makeQuote(`q${i}`)
+      );
+      return new Response(
+        JSON.stringify({ quotes, shipping: [], allComplete: false }),
+        { status: 200 }
+      );
+    });
+
+    const controller = new AbortController();
+    const done = pollQuotes({
+      priceId: "p1",
+      signal: controller.signal,
+      onSnapshot: () => void 0,
+    });
+
+    // Advance well past the 90s ceiling.
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(await done).toBe("timeout");
+  });
+
+  it("returns 'aborted' when the signal fires", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            quotes: [makeQuote("q1")],
+            shipping: [],
+            allComplete: false,
+          }),
+          { status: 200 }
+        )
+    );
+
+    const controller = new AbortController();
+    const done = pollQuotes({
+      priceId: "p1",
+      signal: controller.signal,
+      onSnapshot: () => void 0,
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await done).toBe("aborted");
   });
 
   it("does NOT break on a single allComplete=true with empty quotes", async () => {

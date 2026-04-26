@@ -15,6 +15,15 @@ export interface QuoteSnapshot {
   allComplete: boolean;
 }
 
+/**
+ * Why the poll loop exited. The UI uses this to distinguish "we have
+ * the full vendor set, the price grid below is final" from "we ran
+ * out of patience and there might be more quotes still landing if you
+ * wait." Without this signal the user can't tell whether the cheapest
+ * card on screen is the global minimum or just the fastest responder.
+ */
+export type PollExitReason = "complete" | "timeout" | "aborted";
+
 export interface PollQuotesOptions {
   priceId: string;
   signal: AbortSignal;
@@ -80,7 +89,7 @@ export async function pollQuotes({
   priceId,
   signal,
   onSnapshot,
-}: PollQuotesOptions): Promise<void> {
+}: PollQuotesOptions): Promise<PollExitReason> {
   const isAbort = (err: unknown) =>
     signal.aborted || (err as { name?: string } | null)?.name === "AbortError";
 
@@ -90,7 +99,7 @@ export async function pollQuotes({
     let stablePolls = 0;
 
     while (!signal.aborted) {
-      if (Date.now() - started > HARD_CEILING_MS) break;
+      if (Date.now() - started > HARD_CEILING_MS) return "timeout";
 
       let pollRes: Response;
       try {
@@ -99,13 +108,13 @@ export async function pollQuotes({
           { signal }
         );
       } catch (err) {
-        if (isAbort(err)) return;
+        if (isAbort(err)) return "aborted";
         // Transient network error — retry after the interval.
         await wait(POLL_INTERVAL_MS, signal);
         continue;
       }
 
-      if (signal.aborted) return;
+      if (signal.aborted) return "aborted";
       if (!pollRes.ok) {
         await wait(POLL_INTERVAL_MS, signal);
         continue;
@@ -122,12 +131,17 @@ export async function pollQuotes({
         stablePolls++;
       }
 
-      if (snapshot.allComplete && stablePolls >= STABLE_POLLS_REQUIRED) break;
+      if (snapshot.allComplete && stablePolls >= STABLE_POLLS_REQUIRED) {
+        return "complete";
+      }
       await wait(POLL_INTERVAL_MS, signal);
     }
+    return "aborted";
   } catch (err) {
     // wait() rejects with AbortError when the signal fires
-    // mid-sleep. Swallow that — it's the expected exit path.
-    if (!isAbort(err)) throw err;
+    // mid-sleep. Surface that as the abort exit; rethrow anything
+    // else so the caller can react to genuine failures.
+    if (isAbort(err)) return "aborted";
+    throw err;
   }
 }

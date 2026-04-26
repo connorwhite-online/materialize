@@ -9,6 +9,14 @@ import type { EnrichedQuote } from "./types";
 interface MaterialStepProps {
   quotes: EnrichedQuote[];
   quotesLoading: boolean;
+  /**
+   * True when polling exited at the hard ceiling without seeing the
+   * stable allComplete signal — the quotes shown are partial, late
+   * vendors might still arrive on a retry.
+   */
+  quotesPartial?: boolean;
+  /** Re-runs the quote fetch from scratch. */
+  onRetryQuotes?: () => void;
   onPick: (materialId: string) => void;
 }
 
@@ -34,6 +42,8 @@ interface MaterialCard {
 export function MaterialStep({
   quotes,
   quotesLoading,
+  quotesPartial = false,
+  onRetryQuotes,
   onPick,
 }: MaterialStepProps) {
   const { groups, cardsByGroup } = useMemo(() => {
@@ -97,8 +107,33 @@ export function MaterialStep({
   // geometry exceeds every vendor's print volume, or no vendor in
   // the selected region supports the model. Avoid a silent empty
   // grid so the user knows what happened and can try a different
-  // region.
+  // region. When the empty result came from a polling timeout (not
+  // a stable allComplete from CraftCloud), suggest a retry instead
+  // of "scale the model down" — a slow vendor may just have missed
+  // the window.
   if (!quotesLoading && quotes.length === 0) {
+    if (quotesPartial) {
+      return (
+        <div className="rounded-xl border border-border bg-muted/20 p-6 text-center">
+          <p className="text-sm font-medium">
+            Couldn&apos;t reach all vendors in time
+          </p>
+          <p className="mx-auto mt-1.5 max-w-sm text-xs text-muted-foreground">
+            CraftCloud is slow to respond right now. Retry — most quotes
+            will arrive within a few seconds.
+          </p>
+          {onRetryQuotes && (
+            <Button
+              variant="outline"
+              className="mt-3"
+              onClick={onRetryQuotes}
+            >
+              Retry
+            </Button>
+          )}
+        </div>
+      );
+    }
     return (
       <div className="rounded-xl border border-border bg-muted/20 p-6 text-center">
         <p className="text-sm font-medium">No quotes available for this file</p>
@@ -127,6 +162,26 @@ export function MaterialStep({
       </div>
 
       {quotesLoading && <LoadingBar />}
+
+      {!quotesLoading && quotesPartial && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+          <span className="font-medium">Showing partial results.</span>{" "}
+          Some vendors didn&apos;t respond in time — a cheaper option may
+          appear if you{" "}
+          {onRetryQuotes ? (
+            <button
+              type="button"
+              onClick={onRetryQuotes}
+              className="underline underline-offset-2 hover:text-amber-700"
+            >
+              retry
+            </button>
+          ) : (
+            "retry"
+          )}
+          .
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2">
         <Button

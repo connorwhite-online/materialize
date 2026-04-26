@@ -89,7 +89,7 @@ interface QuoteConfiguratorProps {
 }
 
 type CheckoutStep = "configure" | "address" | "processing";
-type LoadingPhase = "uploading" | "quoting" | "done";
+type LoadingPhase = "uploading" | "quoting" | "done" | "timeout";
 
 export function QuoteConfigurator({
   fileAssetId,
@@ -414,7 +414,7 @@ export function QuoteConfigurator({
       // components/print/poll-quotes.ts for the termination
       // invariant (allComplete + stable count). Each snapshot
       // drops straight into React state.
-      await pollQuotes({
+      const reason = await pollQuotes({
         priceId,
         signal,
         onSnapshot: (snapshot) => {
@@ -424,7 +424,12 @@ export function QuoteConfigurator({
       });
 
       if (!signal.aborted) {
-        setLoadingPhase("done");
+        // "timeout" means we hit the hard ceiling before CraftCloud
+        // marked the quote set stable — late vendors might still
+        // arrive if the user retries. The picker uses this phase to
+        // show a "showing partial results" hint with a Retry action
+        // instead of the silent "Done" state.
+        setLoadingPhase(reason === "timeout" ? "timeout" : "done");
       }
     } catch (err) {
       if (signal.aborted || (err as { name?: string }).name === "AbortError") {
@@ -799,6 +804,14 @@ export function QuoteConfigurator({
             quotes={quotes}
             shipping={shipping}
             quotesLoading={loadingPhase === "quoting"}
+            quotesPartial={loadingPhase === "timeout"}
+            onRetryQuotes={() => {
+              setLoadingPhase(isDraft ? "quoting" : "uploading");
+              fetchQuotes().catch((err) => {
+                setError(err instanceof Error ? err.message : "Something went wrong");
+                setLoadingPhase("done");
+              });
+            }}
             selectedQuote={selectedQuote}
             onSelectQuote={setSelectedQuote}
             preselectMaterialId={preselectMaterialId}
