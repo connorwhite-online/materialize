@@ -89,25 +89,70 @@ export class CraftCloudApiError extends Error {
   }
 }
 
+/**
+ * Status codes we consider safely retryable. 408/429/5xx are transient
+ * by definition; 4xx (other than 408/429) are client-side bugs we don't
+ * recover from by trying again.
+ */
+const TRANSIENT_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+const RETRY_ATTEMPTS = 3;
+const RETRY_BASE_MS = 200;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function apiRequest<T>(
   method: string,
   path: string,
   body?: unknown
 ): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method,
-    headers: {
-      "Content-Type": "application/json; charset=UTF-8",
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  // Only auto-retry GETs. POSTs that mutate (createCart, createOrder)
+  // are not idempotent on CraftCloud's side — retrying after a
+  // network blip could place a duplicate cart/order with no way for
+  // us to tell if the prior attempt succeeded. The webhook layer's
+  // atomic claim handles end-to-end retries for createOrder.
+  const canRetry = method.toUpperCase() === "GET";
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new CraftCloudApiError(res.status, text, path);
+  let lastError: unknown;
+  for (let attempt = 0; attempt < (canRetry ? RETRY_ATTEMPTS : 1); attempt++) {
+    try {
+      const res = await fetch(`${BASE_URL}${path}`, {
+        method,
+        headers: {
+          "Content-Type": "application/json; charset=UTF-8",
+        },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+
+      if (res.ok) return res.json();
+
+      const text = await res.text();
+      const error = new CraftCloudApiError(res.status, text, path);
+      if (canRetry && TRANSIENT_STATUSES.has(res.status)) {
+        lastError = error;
+      } else {
+        throw error;
+      }
+    } catch (err) {
+      // fetch() rejects on network errors (DNS, ECONNRESET, etc.) —
+      // those are always transient.
+      if (err instanceof CraftCloudApiError) {
+        if (!canRetry || !TRANSIENT_STATUSES.has(err.status)) throw err;
+        lastError = err;
+      } else {
+        if (!canRetry) throw err;
+        lastError = err;
+      }
+    }
+
+    // Exponential backoff: 200ms, 800ms, then we exit the loop.
+    if (attempt < RETRY_ATTEMPTS - 1) {
+      await sleep(RETRY_BASE_MS * Math.pow(4, attempt));
+    }
   }
 
-  return res.json();
+  throw lastError;
 }
 
 // --- Real API client ---
