@@ -12,7 +12,8 @@ import {
   projectFiles,
 } from "@/lib/db/schema";
 import { eq, and, asc } from "drizzle-orm";
-import { userOwnsFile } from "@/lib/entitlement";
+import { ownsLoadedFile } from "@/lib/entitlement";
+import { DESIGN_TAG_LABELS } from "@/lib/validations/file";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,15 +33,6 @@ function formatBytes(bytes: number) {
   if (kb < 1024) return `${kb.toFixed(1)} KB`;
   return `${(kb / 1024).toFixed(1)} MB`;
 }
-
-const DESIGN_TAG_LABELS: Record<string, string> = {
-  strong: "Strong",
-  flexible: "Flexible",
-  "heat-resistant": "Heat Resistant",
-  watertight: "Watertight",
-  detailed: "Detailed",
-  lightweight: "Lightweight",
-};
 
 export default async function FileDetailPage(props: {
   params: Promise<{ slug: string }>;
@@ -104,7 +96,11 @@ export default async function FileDetailPage(props: {
   );
 
   const isOwner = viewerIsOwner;
-  const canDownload = await userOwnsFile(userId, file.id);
+  const canDownload = await ownsLoadedFile(userId, {
+    id: file.id,
+    price: file.price,
+    userId: file.userId,
+  });
 
   // Owner needs the buyer count to know whether deleting will hard-
   // delete or soft-archive — gate the query on isOwner so we don't pay
@@ -112,23 +108,25 @@ export default async function FileDetailPage(props: {
   // project purchases that include this file.
   let ownerBuyerCount = 0;
   if (isOwner) {
-    const directBuyers = await db
-      .select({ id: purchases.id })
-      .from(purchases)
-      .where(
-        and(eq(purchases.fileId, file.id), eq(purchases.status, "completed"))
-      );
-    const projectBuyers = await db
-      .select({ id: purchases.id })
-      .from(purchases)
-      .innerJoin(projects, eq(purchases.projectId, projects.id))
-      .innerJoin(projectFiles, eq(projectFiles.projectId, projects.id))
-      .where(
-        and(
-          eq(projectFiles.fileId, file.id),
-          eq(purchases.status, "completed")
-        )
-      );
+    const [directBuyers, projectBuyers] = await Promise.all([
+      db
+        .select({ id: purchases.id })
+        .from(purchases)
+        .where(
+          and(eq(purchases.fileId, file.id), eq(purchases.status, "completed"))
+        ),
+      db
+        .select({ id: purchases.id })
+        .from(purchases)
+        .innerJoin(projects, eq(purchases.projectId, projects.id))
+        .innerJoin(projectFiles, eq(projectFiles.projectId, projects.id))
+        .where(
+          and(
+            eq(projectFiles.fileId, file.id),
+            eq(purchases.status, "completed")
+          )
+        ),
+    ]);
     ownerBuyerCount = directBuyers.length + projectBuyers.length;
   }
   const recommendedMaterial = file.recommendedMaterialId

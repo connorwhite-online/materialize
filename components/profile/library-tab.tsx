@@ -39,70 +39,199 @@ type LibraryItem = LibraryFileCardItem;
 const LIBRARY_MAX_FILES = 500;
 
 export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
-  // Owned files (creator content)
   const fileConditions = [eq(files.userId, userId)];
   if (!isOwner) {
     fileConditions.push(eq(files.status, "published"));
     fileConditions.push(eq(files.visibility, "public"));
   }
-  // Fetch one extra so we can tell if the library was truncated
-  // without a second count() query.
-  const ownedFilesRaw = await db
-    .select()
-    .from(files)
-    .where(and(...fileConditions))
-    .orderBy(desc(files.createdAt))
-    .limit(LIBRARY_MAX_FILES + 1);
+  const collectionConditions = [eq(collections.userId, userId)];
+  if (!isOwner) {
+    collectionConditions.push(eq(collections.visibility, "public"));
+  }
+  const projectConditions = [eq(projects.userId, userId)];
+  if (!isOwner) {
+    projectConditions.push(eq(projects.status, "published"));
+    projectConditions.push(eq(projects.visibility, "public"));
+  }
+
+  // Wave 1: every "top-level" fetch is independent; run in parallel.
+  const [
+    ownedFilesRaw,
+    rawPurchasedFiles,
+    userCollections,
+    ownedProjects,
+    rawPurchasedProjects,
+  ] = await Promise.all([
+    // Fetch one extra so we can tell if the library was truncated
+    // without a second count() query.
+    db
+      .select()
+      .from(files)
+      .where(and(...fileConditions))
+      .orderBy(desc(files.createdAt))
+      .limit(LIBRARY_MAX_FILES + 1),
+    isOwner
+      ? db
+          .select({
+            id: files.id,
+            name: files.name,
+            slug: files.slug,
+            price: files.price,
+            visibility: files.visibility,
+            thumbnailUrl: files.thumbnailUrl,
+            creatorUsername: users.username,
+            creatorDisplayName: users.displayName,
+          })
+          .from(purchases)
+          .innerJoin(files, eq(purchases.fileId, files.id))
+          .innerJoin(users, eq(files.userId, users.id))
+          .where(
+            and(
+              eq(purchases.buyerId, userId),
+              eq(purchases.status, "completed")
+            )
+          )
+          .limit(LIBRARY_MAX_FILES + 1)
+      : Promise.resolve(
+          [] as Array<{
+            id: string;
+            name: string;
+            slug: string;
+            price: number;
+            visibility: string;
+            thumbnailUrl: string | null;
+            creatorUsername: string | null;
+            creatorDisplayName: string | null;
+          }>
+        ),
+    db
+      .select({
+        id: collections.id,
+        name: collections.name,
+        slug: collections.slug,
+        description: collections.description,
+        visibility: collections.visibility,
+      })
+      .from(collections)
+      .where(and(...collectionConditions))
+      .orderBy(desc(collections.createdAt)),
+    db
+      .select({
+        id: projects.id,
+        name: projects.name,
+        slug: projects.slug,
+        price: projects.price,
+        visibility: projects.visibility,
+        thumbnailUrl: projects.thumbnailUrl,
+        fileCount: sql<number>`cast(count(${projectFiles.fileId}) as int)`,
+      })
+      .from(projects)
+      .leftJoin(projectFiles, eq(projectFiles.projectId, projects.id))
+      .where(and(...projectConditions))
+      .groupBy(projects.id)
+      .orderBy(desc(projects.createdAt)),
+    isOwner
+      ? db
+          .select({
+            id: projects.id,
+            name: projects.name,
+            slug: projects.slug,
+            price: projects.price,
+            visibility: projects.visibility,
+            thumbnailUrl: projects.thumbnailUrl,
+          })
+          .from(purchases)
+          .innerJoin(projects, eq(purchases.projectId, projects.id))
+          .where(
+            and(
+              eq(purchases.buyerId, userId),
+              eq(purchases.status, "completed")
+            )
+          )
+      : Promise.resolve(
+          [] as Array<{
+            id: string;
+            name: string;
+            slug: string;
+            price: number;
+            visibility: string;
+            thumbnailUrl: string | null;
+          }>
+        ),
+  ]);
+
   const ownedTruncated = ownedFilesRaw.length > LIBRARY_MAX_FILES;
   const ownedFiles = ownedTruncated
     ? ownedFilesRaw.slice(0, LIBRARY_MAX_FILES)
     : ownedFilesRaw;
+  const purchasedTruncated = rawPurchasedFiles.length > LIBRARY_MAX_FILES;
+  const purchasedRows = purchasedTruncated
+    ? rawPurchasedFiles.slice(0, LIBRARY_MAX_FILES)
+    : rawPurchasedFiles;
 
-  // Purchased files (buyer content) — owner only, since purchases are private
-  type PurchasedRow = {
-    id: string;
-    name: string;
-    slug: string;
-    price: number;
-    visibility: string;
-    thumbnailUrl: string | null;
-    creatorUsername: string | null;
-    creatorDisplayName: string | null;
-  };
-  let purchasedRows: PurchasedRow[] = [];
-  let purchasedTruncated = false;
-  if (isOwner) {
-    const rawPurchased = await db
-      .select({
-        id: files.id,
-        name: files.name,
-        slug: files.slug,
-        price: files.price,
-        visibility: files.visibility,
-        thumbnailUrl: files.thumbnailUrl,
-        creatorUsername: users.username,
-        creatorDisplayName: users.displayName,
-      })
-      .from(purchases)
-      .innerJoin(files, eq(purchases.fileId, files.id))
-      .innerJoin(users, eq(files.userId, users.id))
-      .where(
-        and(
-          eq(purchases.buyerId, userId),
-          eq(purchases.status, "completed")
-        )
-      )
-      .limit(LIBRARY_MAX_FILES + 1);
-    purchasedTruncated = rawPurchased.length > LIBRARY_MAX_FILES;
-    purchasedRows = purchasedTruncated
-      ? rawPurchased.slice(0, LIBRARY_MAX_FILES)
-      : rawPurchased;
-  }
-
+  // Wave 2: each second-wave query depends on a wave-1 result, but the
+  // four are independent of each other → parallel.
   const allFileIds = [
     ...ownedFiles.map((f) => f.id),
     ...purchasedRows.map((r) => r.id),
   ];
+  const collectionIds = userCollections.map((c) => c.id);
+  const ownedProjectIds = ownedProjects.map((p) => p.id);
+  const purchasedProjectIds = rawPurchasedProjects.map((p) => p.id);
+
+  const [
+    assetRows,
+    collectionItemRows,
+    purchasedCounts,
+    ownedProjectLinks,
+  ] = await Promise.all([
+    allFileIds.length > 0
+      ? db
+          .select({
+            id: fileAssets.id,
+            fileId: fileAssets.fileId,
+            format: fileAssets.format,
+            geometryData: fileAssets.geometryData,
+            createdAt: fileAssets.createdAt,
+          })
+          .from(fileAssets)
+          .where(inArray(fileAssets.fileId, allFileIds))
+          .orderBy(fileAssets.createdAt)
+      : Promise.resolve(
+          [] as Array<{
+            id: string;
+            fileId: string | null;
+            format: typeof fileAssets.format._.data;
+            geometryData: typeof fileAssets.geometryData._.data;
+            createdAt: Date;
+          }>
+        ),
+    collectionIds.length > 0
+      ? db
+          .select()
+          .from(collectionItems)
+          .where(inArray(collectionItems.collectionId, collectionIds))
+      : Promise.resolve([] as (typeof collectionItems.$inferSelect)[]),
+    purchasedProjectIds.length > 0
+      ? db
+          .select({
+            projectId: projectFiles.projectId,
+            count: sql<number>`cast(count(${projectFiles.fileId}) as int)`,
+          })
+          .from(projectFiles)
+          .where(inArray(projectFiles.projectId, purchasedProjectIds))
+          .groupBy(projectFiles.projectId)
+      : Promise.resolve(
+          [] as Array<{ projectId: string; count: number }>
+        ),
+    ownedProjectIds.length > 0
+      ? db
+          .select({ fileId: projectFiles.fileId })
+          .from(projectFiles)
+          .where(inArray(projectFiles.projectId, ownedProjectIds))
+      : Promise.resolve([] as Array<{ fileId: string }>),
+  ]);
+
   const primaryAssetByFileId = new Map<
     string,
     {
@@ -111,37 +240,24 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
       dimensions: [number, number, number] | null;
     }
   >();
-  if (allFileIds.length > 0) {
-    const assetRows = await db
-      .select({
-        id: fileAssets.id,
-        fileId: fileAssets.fileId,
-        format: fileAssets.format,
-        geometryData: fileAssets.geometryData,
-        createdAt: fileAssets.createdAt,
-      })
-      .from(fileAssets)
-      .where(inArray(fileAssets.fileId, allFileIds))
-      .orderBy(fileAssets.createdAt);
-    for (const asset of assetRows) {
-      if (!asset.fileId) continue;
-      if (!primaryAssetByFileId.has(asset.fileId)) {
-        const dims = asset.geometryData?.dimensions;
-        // Older CraftCloud responses sometimes returned partial shapes
-        // (e.g. {x: null, y: null, z: null}) that we persisted before
-        // the normalize at the cache boundary; treat anything missing
-        // a numeric axis as no dimensions at all.
-        const dimsOk =
-          dims &&
-          typeof dims.x === "number" &&
-          typeof dims.y === "number" &&
-          typeof dims.z === "number";
-        primaryAssetByFileId.set(asset.fileId, {
-          id: asset.id,
-          format: asset.format,
-          dimensions: dimsOk ? [dims.x, dims.y, dims.z] : null,
-        });
-      }
+  for (const asset of assetRows) {
+    if (!asset.fileId) continue;
+    if (!primaryAssetByFileId.has(asset.fileId)) {
+      const dims = asset.geometryData?.dimensions;
+      // Older CraftCloud responses sometimes returned partial shapes
+      // (e.g. {x: null, y: null, z: null}) that we persisted before
+      // the normalize at the cache boundary; treat anything missing
+      // a numeric axis as no dimensions at all.
+      const dimsOk =
+        dims &&
+        typeof dims.x === "number" &&
+        typeof dims.y === "number" &&
+        typeof dims.z === "number";
+      primaryAssetByFileId.set(asset.fileId, {
+        id: asset.id,
+        format: asset.format,
+        dimensions: dimsOk ? [dims.x, dims.y, dims.z] : null,
+      });
     }
   }
 
@@ -163,117 +279,28 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
     };
   });
 
-  // Collections (only owned files live in them)
-  const collectionConditions = [eq(collections.userId, userId)];
-  if (!isOwner) {
-    collectionConditions.push(eq(collections.visibility, "public"));
-  }
-  const userCollections = await db
-    .select({
-      id: collections.id,
-      name: collections.name,
-      slug: collections.slug,
-      description: collections.description,
-      visibility: collections.visibility,
+  const purchasedCountMap = new Map(
+    purchasedCounts.map((c) => [c.projectId, c.count])
+  );
+  const purchasedProjects: LibraryProjectCardItem[] = rawPurchasedProjects.map(
+    (p) => ({
+      id: p.id,
+      name: p.name,
+      slug: p.slug,
+      price: p.price,
+      visibility: p.visibility,
+      source: "purchased" as const,
+      thumbnailUrl: p.thumbnailUrl,
+      fileCount: purchasedCountMap.get(p.id) ?? 0,
     })
-    .from(collections)
-    .where(and(...collectionConditions))
-    .orderBy(desc(collections.createdAt));
-
-  const collectionItemRows =
-    userCollections.length > 0
-      ? await db
-          .select()
-          .from(collectionItems)
-          .where(
-            inArray(
-              collectionItems.collectionId,
-              userCollections.map((c) => c.id)
-            )
-          )
-      : [];
-
-  // Owned projects (creator's bundles)
-  const ownedProjects = await db
-    .select({
-      id: projects.id,
-      name: projects.name,
-      slug: projects.slug,
-      price: projects.price,
-      visibility: projects.visibility,
-      thumbnailUrl: projects.thumbnailUrl,
-      fileCount: sql<number>`cast(count(${projectFiles.fileId}) as int)`,
-    })
-    .from(projects)
-    .leftJoin(projectFiles, eq(projectFiles.projectId, projects.id))
-    .where(
-      and(
-        eq(projects.userId, userId),
-        ...(isOwner ? [] : [eq(projects.status, "published"), eq(projects.visibility, "public")])
-      )
-    )
-    .groupBy(projects.id)
-    .orderBy(desc(projects.createdAt));
-
-  // Purchased projects (owner-only). The bundled files come along for
-  // free via the entitlement helper at download time, so we don't need
-  // to flatten them into the file grid.
-  type PurchasedProjectRow = LibraryProjectCardItem;
-  let purchasedProjects: PurchasedProjectRow[] = [];
-  if (isOwner) {
-    const rawPurchased = await db
-      .select({
-        id: projects.id,
-        name: projects.name,
-        slug: projects.slug,
-        price: projects.price,
-        visibility: projects.visibility,
-        thumbnailUrl: projects.thumbnailUrl,
-      })
-      .from(purchases)
-      .innerJoin(projects, eq(purchases.projectId, projects.id))
-      .where(
-        and(
-          eq(purchases.buyerId, userId),
-          eq(purchases.status, "completed")
-        )
-      );
-    if (rawPurchased.length > 0) {
-      const purchasedIds = rawPurchased.map((p) => p.id);
-      const counts = await db
-        .select({
-          projectId: projectFiles.projectId,
-          count: sql<number>`cast(count(${projectFiles.fileId}) as int)`,
-        })
-        .from(projectFiles)
-        .where(inArray(projectFiles.projectId, purchasedIds))
-        .groupBy(projectFiles.projectId);
-      const countMap = new Map(counts.map((c) => [c.projectId, c.count]));
-      purchasedProjects = rawPurchased.map((p) => ({
-        id: p.id,
-        name: p.name,
-        slug: p.slug,
-        price: p.price,
-        visibility: p.visibility,
-        source: "purchased" as const,
-        thumbnailUrl: p.thumbnailUrl,
-        fileCount: countMap.get(p.id) ?? 0,
-      }));
-    }
-  }
+  );
 
   // Files referenced by any of the user's owned projects — we dedupe
   // these out of the standalone file grid so a creator doesn't see the
   // same file twice (once inside its project card, once on its own).
-  let fileIdsInOwnedProjects = new Set<string>();
-  if (ownedProjects.length > 0) {
-    const ownedProjectIds = ownedProjects.map((p) => p.id);
-    const links = await db
-      .select({ fileId: projectFiles.fileId })
-      .from(projectFiles)
-      .where(inArray(projectFiles.projectId, ownedProjectIds));
-    fileIdsInOwnedProjects = new Set(links.map((l) => l.fileId));
-  }
+  const fileIdsInOwnedProjects = new Set(
+    ownedProjectLinks.map((l) => l.fileId)
+  );
 
   const ownedProjectItems: LibraryProjectCardItem[] = ownedProjects.map(
     (p) => ({

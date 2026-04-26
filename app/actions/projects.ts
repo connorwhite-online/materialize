@@ -26,7 +26,7 @@ import { redirect } from "next/navigation";
 import { nanoid } from "nanoid";
 import { createProjectSchema, updateProjectSchema } from "@/lib/validations/project";
 import { buildListingSlug } from "@/lib/filenames";
-import { logError } from "@/lib/logger";
+import { logError, isRedirectError } from "@/lib/logger";
 
 async function assertUserOwnsAllFiles(userId: string, fileIds: string[]) {
   if (fileIds.length === 0) return false;
@@ -99,13 +99,7 @@ export async function createProject(formData: FormData) {
     revalidatePath("/dashboard");
     redirect(`/projects/${project.slug}`);
   } catch (error) {
-    if (
-      error instanceof Error &&
-      (error.message.includes("NEXT_REDIRECT") ||
-        error.message.includes("REDIRECT"))
-    ) {
-      throw error;
-    }
+    if (isRedirectError(error)) throw error;
     logError("createProject", error);
     return {
       error: { name: ["Failed to create project. Please try again."] },
@@ -259,7 +253,6 @@ export async function reorderProjectFiles(
       .where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
     if (!project) return { error: "Project not found" };
 
-    // Update each row's position. CASE WHEN keeps it to one statement.
     await Promise.all(
       orderedFileIds.map((fileId, i) =>
         db

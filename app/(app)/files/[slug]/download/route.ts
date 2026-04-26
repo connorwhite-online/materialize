@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { files, fileAssets } from "@/lib/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
-import { userOwnsFile } from "@/lib/entitlement";
+import { ownsLoadedFile } from "@/lib/entitlement";
 import { NextRequest } from "next/server";
 
 export async function GET(
@@ -24,7 +24,7 @@ export async function GET(
     return new Response("Not found", { status: 404 });
   }
 
-  if (!(await userOwnsFile(userId, file.id))) {
+  if (!(await ownsLoadedFile(userId, file))) {
     return new Response(userId ? "Payment required" : "Unauthorized", {
       status: userId ? 402 : 401,
     });

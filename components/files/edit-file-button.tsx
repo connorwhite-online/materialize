@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/select";
 import { updateFileListing } from "@/app/actions/files";
 import { MATERIALS } from "@/lib/materials";
-import { DESIGN_TAG_OPTIONS } from "@/lib/validations/file";
+import { DESIGN_TAG_OPTIONS, DESIGN_TAG_LABELS } from "@/lib/validations/file";
 
 interface EditFileButtonProps {
   fileId: string;
@@ -41,15 +41,6 @@ interface EditFileButtonProps {
   };
   hasBuyers: boolean;
 }
-
-const DESIGN_TAG_LABELS: Record<string, string> = {
-  strong: "Strong",
-  flexible: "Flexible",
-  "heat-resistant": "Heat Resistant",
-  watertight: "Watertight",
-  detailed: "Detailed",
-  lightweight: "Lightweight",
-};
 
 export function EditFileButton({
   fileId,

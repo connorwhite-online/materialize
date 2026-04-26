@@ -13,16 +13,32 @@ import { eq, and, sql } from "drizzle-orm";
  *
  * `userId` may be null for anonymous viewers — only the "free" branch
  * resolves true in that case.
+ *
+ * Prefer `ownsLoadedFile` when the caller already has the file row in
+ * hand (e.g. the download route or detail page) — saves a redundant
+ * `files` lookup on the hot path.
  */
 export async function userOwnsFile(
   userId: string | null,
   fileId: string
 ): Promise<boolean> {
   const [file] = await db
-    .select({ price: files.price, userId: files.userId })
+    .select({ id: files.id, price: files.price, userId: files.userId })
     .from(files)
     .where(eq(files.id, fileId));
   if (!file) return false;
+  return ownsLoadedFile(userId, file);
+}
+
+/**
+ * Same logic as `userOwnsFile` but takes the already-loaded file row,
+ * skipping the initial `files` SELECT. Use this when the caller has
+ * just looked up the file by slug for an unrelated reason.
+ */
+export async function ownsLoadedFile(
+  userId: string | null,
+  file: { id: string; price: number; userId: string }
+): Promise<boolean> {
   if (file.price === 0) return true;
   if (!userId) return false;
   if (file.userId === userId) return true;
@@ -33,7 +49,7 @@ export async function userOwnsFile(
     .where(
       and(
         eq(purchases.buyerId, userId),
-        eq(purchases.fileId, fileId),
+        eq(purchases.fileId, file.id),
         eq(purchases.status, "completed")
       )
     )
@@ -49,7 +65,7 @@ export async function userOwnsFile(
       and(
         eq(purchases.buyerId, userId),
         eq(purchases.status, "completed"),
-        eq(projectFiles.fileId, fileId),
+        eq(projectFiles.fileId, file.id),
         sql`${purchases.projectId} IS NOT NULL`
       )
     )

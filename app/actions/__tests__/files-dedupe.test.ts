@@ -55,6 +55,9 @@ vi.mock("@/lib/storage", () => ({
 
 vi.mock("@/lib/logger", () => ({
   logError: vi.fn(),
+  isRedirectError: (e: unknown) =>
+    e instanceof Error &&
+    (e.message.includes("NEXT_REDIRECT") || e.message.includes("REDIRECT")),
 }));
 
 import { createDraftFileForPrint } from "../files";

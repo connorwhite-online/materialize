@@ -6,7 +6,7 @@ import Link from "next/link";
 import { listMyCollections } from "@/app/actions/collections";
 import { runCreateListing } from "./run-create-listing";
 import { MATERIALS } from "@/lib/materials";
-import { DESIGN_TAG_OPTIONS } from "@/lib/validations/file";
+import { DESIGN_TAG_OPTIONS, DESIGN_TAG_LABELS } from "@/lib/validations/file";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -39,15 +39,6 @@ interface FileMetadataFormProps {
    */
   onCancel?: () => void;
 }
-
-const DESIGN_TAG_LABELS: Record<string, string> = {
-  strong: "Strong",
-  flexible: "Flexible",
-  "heat-resistant": "Heat Resistant",
-  watertight: "Watertight",
-  detailed: "Detailed",
-  lightweight: "Lightweight",
-};
 
 function formatDim(n: number) {
   return n.toFixed(1);

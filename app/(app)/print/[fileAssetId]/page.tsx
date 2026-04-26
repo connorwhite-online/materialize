@@ -5,15 +5,7 @@ import { eq } from "drizzle-orm";
 import { FileAssetPrintShell } from "@/components/print/file-asset-print-shell";
 import { getMaterialById } from "@/lib/materials";
 import { Badge } from "@/components/ui/badge";
-
-const DESIGN_TAG_LABELS: Record<string, string> = {
-  strong: "Strong",
-  flexible: "Flexible",
-  "heat-resistant": "Heat Resistant",
-  watertight: "Watertight",
-  detailed: "Detailed",
-  lightweight: "Lightweight",
-};
+import { DESIGN_TAG_LABELS } from "@/lib/validations/file";
 
 export default async function PrintConfigPage(props: {
   params: Promise<{ fileAssetId: string }>;

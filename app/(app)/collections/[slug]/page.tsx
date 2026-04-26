@@ -58,47 +58,48 @@ export default async function CollectionPage(props: {
 
   if (!collection) notFound();
 
-  const fileRows = await db
-    .select({
-      id: files.id,
-      name: files.name,
-      slug: files.slug,
-      thumbnailUrl: files.thumbnailUrl,
-      price: files.price,
-      license: files.license,
-      sortOrder: collectionItems.sortOrder,
-    })
-    .from(collectionItems)
-    .innerJoin(files, eq(collectionItems.fileId, files.id))
-    .where(
-      and(
-        eq(collectionItems.collectionId, collection.id),
-        isNotNull(collectionItems.fileId),
-        eq(files.status, "published"),
-        eq(files.visibility, "public")
-      )
-    );
-
-  const projectRows = await db
-    .select({
-      id: projects.id,
-      name: projects.name,
-      slug: projects.slug,
-      thumbnailUrl: projects.thumbnailUrl,
-      price: projects.price,
-      license: projects.license,
-      sortOrder: collectionItems.sortOrder,
-    })
-    .from(collectionItems)
-    .innerJoin(projects, eq(collectionItems.projectId, projects.id))
-    .where(
-      and(
-        eq(collectionItems.collectionId, collection.id),
-        isNotNull(collectionItems.projectId),
-        eq(projects.status, "published"),
-        eq(projects.visibility, "public")
-      )
-    );
+  const [fileRows, projectRows] = await Promise.all([
+    db
+      .select({
+        id: files.id,
+        name: files.name,
+        slug: files.slug,
+        thumbnailUrl: files.thumbnailUrl,
+        price: files.price,
+        license: files.license,
+        sortOrder: collectionItems.sortOrder,
+      })
+      .from(collectionItems)
+      .innerJoin(files, eq(collectionItems.fileId, files.id))
+      .where(
+        and(
+          eq(collectionItems.collectionId, collection.id),
+          isNotNull(collectionItems.fileId),
+          eq(files.status, "published"),
+          eq(files.visibility, "public")
+        )
+      ),
+    db
+      .select({
+        id: projects.id,
+        name: projects.name,
+        slug: projects.slug,
+        thumbnailUrl: projects.thumbnailUrl,
+        price: projects.price,
+        license: projects.license,
+        sortOrder: collectionItems.sortOrder,
+      })
+      .from(collectionItems)
+      .innerJoin(projects, eq(collectionItems.projectId, projects.id))
+      .where(
+        and(
+          eq(collectionItems.collectionId, collection.id),
+          isNotNull(collectionItems.projectId),
+          eq(projects.status, "published"),
+          eq(projects.visibility, "public")
+        )
+      ),
+  ]);
 
   // Look up file counts for each project — used in the "N files" badge.
   const projectIds = projectRows.map((p) => p.id);

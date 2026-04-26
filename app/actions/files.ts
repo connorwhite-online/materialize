@@ -52,7 +52,7 @@ import {
   type IncomingAsset,
 } from "@/lib/validations/incoming-asset";
 import { deriveListingName, buildListingSlug } from "@/lib/filenames";
-import { logError } from "@/lib/logger";
+import { logError, isRedirectError } from "@/lib/logger";
 import { generateDownloadUrl, deleteObject } from "@/lib/storage";
 
 async function computeContentHash(storageKey: string): Promise<string | null> {
@@ -244,10 +244,7 @@ export async function createFileListing(formData: FormData) {
     revalidatePath("/dashboard");
     redirect(`/files/${file.slug}`);
   } catch (error) {
-    // Re-throw redirect/notFound errors (Next.js uses throw for navigation)
-    if (error instanceof Error && (error.message.includes("NEXT_REDIRECT") || error.message.includes("REDIRECT"))) {
-      throw error;
-    }
+    if (isRedirectError(error)) throw error;
     logError("createFileListing", error);
     return { error: { name: ["Failed to create listing. Please try again."] } };
   }

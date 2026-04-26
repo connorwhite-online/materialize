@@ -36,6 +36,18 @@ export const DESIGN_TAG_OPTIONS = [
   "lightweight",
 ] as const;
 
+// Keyed loosely as Record<string, string> so callers indexing with a
+// raw `string` from a tag column don't need to narrow first; the
+// `|| tag` fallback at every call site handles unknown tags.
+export const DESIGN_TAG_LABELS: Record<string, string> = {
+  strong: "Strong",
+  flexible: "Flexible",
+  "heat-resistant": "Heat Resistant",
+  watertight: "Watertight",
+  detailed: "Detailed",
+  lightweight: "Lightweight",
+};
+
 export const createListingSchema = z.object({
   name: z.string().min(1, "Name is required").max(200),
   description: z.string().max(5000).optional(),

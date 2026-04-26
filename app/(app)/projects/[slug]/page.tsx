@@ -16,15 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { DeleteProjectButton } from "@/components/projects/delete-project-button";
 import { userOwnsProject } from "@/lib/entitlement";
-
-const DESIGN_TAG_LABELS: Record<string, string> = {
-  strong: "Strong",
-  flexible: "Flexible",
-  "heat-resistant": "Heat Resistant",
-  watertight: "Watertight",
-  detailed: "Detailed",
-  lightweight: "Lightweight",
-};
+import { DESIGN_TAG_LABELS } from "@/lib/validations/file";
 
 export default async function ProjectDetailPage(props: {
   params: Promise<{ slug: string }>;

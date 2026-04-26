@@ -75,7 +75,12 @@ vi.mock("@/lib/db/schema", () => ({
   },
 }));
 
-vi.mock("@/lib/logger", () => ({ logError: vi.fn() }));
+vi.mock("@/lib/logger", () => ({
+  logError: vi.fn(),
+  isRedirectError: (e: unknown) =>
+    e instanceof Error &&
+    (e.message.includes("NEXT_REDIRECT") || e.message.includes("REDIRECT")),
+}));
 
 import {
   createProject,
