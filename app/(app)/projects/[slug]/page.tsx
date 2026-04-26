@@ -50,7 +50,16 @@ export default async function ProjectDetailPage(props: {
 
   if (!project) notFound();
   const isOwner = userId === project.userId;
-  if (project.status !== "published" && !isOwner) notFound();
+  // Owner sees their own project regardless of status/visibility.
+  // Non-owners need both: the project must be published AND public.
+  // (Skipping the visibility check let private published projects leak
+  // to anyone with the slug.)
+  if (
+    !isOwner &&
+    (project.status !== "published" || project.visibility !== "public")
+  ) {
+    notFound();
+  }
 
   const bundledFiles = await db
     .select({

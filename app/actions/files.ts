@@ -474,12 +474,35 @@ export async function createDraftFileForPrint(params: {
   | { fileAssetId: string; fileSlug: string }
   | { error: string }
 > {
+  // Track whether the upload was adopted into a file_assets row.
+  // Anything that exits without claiming the storageKey (rejected
+  // upload, dedup-to-existing, thrown error) needs to delete the R2
+  // object so the bucket doesn't accumulate orphans. Best-effort —
+  // failed deletes are logged but don't block the response, since
+  // the cleanup-orphan-uploads sweep is the safety net.
+  let claimed = false;
+  const releaseR2 = async () => {
+    if (claimed) return;
+    try {
+      await deleteObject(params.storageKey);
+    } catch (err) {
+      logError("createDraftFileForPrint.releaseR2", err);
+    }
+  };
+
   try {
     const { userId } = await auth();
-    if (!userId) return { error: "Unauthorized" };
+    if (!userId) {
+      await releaseR2();
+      return { error: "Unauthorized" };
+    }
 
     // Only accept storage keys under the user's prefix.
     if (!params.storageKey.startsWith(`uploads/${userId}/`)) {
+      // Don't release: this might be someone trying to attribute
+      // another user's upload to themselves. Leaving the object
+      // alone avoids letting a malicious caller delete arbitrary
+      // R2 keys by guessing the path.
       return { error: "Invalid storage key" };
     }
 
@@ -505,6 +528,7 @@ export async function createDraftFileForPrint(params: {
         )
         .limit(1);
       if (existing) {
+        await releaseR2();
         return { fileAssetId: existing.assetId, fileSlug: existing.fileSlug };
       }
 
@@ -519,6 +543,7 @@ export async function createDraftFileForPrint(params: {
           )
         );
       if (duplicates.length > 0) {
+        await releaseR2();
         return {
           error:
             "This file has already been listed by another creator. Re-uploading others' files is not permitted.",
@@ -560,10 +585,12 @@ export async function createDraftFileForPrint(params: {
       })
       .returning({ id: fileAssets.id });
 
+    claimed = true;
     revalidatePath("/dashboard/uploads");
     return { fileAssetId: asset.id, fileSlug: file.slug };
   } catch (error) {
     logError("createDraftFileForPrint", error);
+    await releaseR2();
     return { error: "Failed to prepare file for printing. Please try again." };
   }
 }
