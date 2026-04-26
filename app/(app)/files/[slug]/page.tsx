@@ -2,8 +2,17 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-import { files, fileAssets, users, purchases, filePhotos } from "@/lib/db/schema";
+import {
+  files,
+  fileAssets,
+  users,
+  purchases,
+  filePhotos,
+  projects,
+  projectFiles,
+} from "@/lib/db/schema";
 import { eq, and, asc } from "drizzle-orm";
+import { userOwnsFile } from "@/lib/entitlement";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -95,37 +104,33 @@ export default async function FileDetailPage(props: {
   );
 
   const isOwner = viewerIsOwner;
-
-  let hasPurchased = false;
-  if (userId && !isOwner && file.price > 0) {
-    const [purchase] = await db
-      .select()
-      .from(purchases)
-      .where(
-        and(
-          eq(purchases.buyerId, userId),
-          eq(purchases.fileId, file.id),
-          eq(purchases.status, "completed")
-        )
-      );
-    hasPurchased = !!purchase;
-  }
+  const canDownload = await userOwnsFile(userId, file.id);
 
   // Owner needs the buyer count to know whether deleting will hard-
   // delete or soft-archive — gate the query on isOwner so we don't pay
-  // for it on every public view.
+  // for it on every public view. Counts both direct file purchases and
+  // project purchases that include this file.
   let ownerBuyerCount = 0;
   if (isOwner) {
-    const buyerRows = await db
+    const directBuyers = await db
       .select({ id: purchases.id })
       .from(purchases)
       .where(
         and(eq(purchases.fileId, file.id), eq(purchases.status, "completed"))
       );
-    ownerBuyerCount = buyerRows.length;
+    const projectBuyers = await db
+      .select({ id: purchases.id })
+      .from(purchases)
+      .innerJoin(projects, eq(purchases.projectId, projects.id))
+      .innerJoin(projectFiles, eq(projectFiles.projectId, projects.id))
+      .where(
+        and(
+          eq(projectFiles.fileId, file.id),
+          eq(purchases.status, "completed")
+        )
+      );
+    ownerBuyerCount = directBuyers.length + projectBuyers.length;
   }
-
-  const canDownload = isOwner || file.price === 0 || hasPurchased;
   const recommendedMaterial = file.recommendedMaterialId
     ? getMaterialById(file.recommendedMaterialId)
     : null;

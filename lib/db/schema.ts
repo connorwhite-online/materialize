@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   pgTable,
   text,
@@ -9,6 +10,8 @@ import {
   jsonb,
   pgEnum,
   index,
+  check,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 // Enums
@@ -111,6 +114,64 @@ export const files = pgTable("files", {
   index("files_slug_idx").on(table.slug),
 ]);
 
+// Projects — sellable bundles of files. A creator can list a single
+// file directly OR group multiple files into a project that's sold as
+// a unit. Buying a project grants access to every file inside it.
+// File <-> project is many-to-many (a file can be reused across
+// bundles); see projectFiles below.
+
+export const projects = pgTable("projects", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  slug: text("slug").notNull().unique(),
+  price: integer("price").notNull().default(0), // cents, 0 = free
+  currency: text("currency").notNull().default("USD"),
+  license: licenseEnum("license").notNull().default("free"),
+  status: fileStatusEnum("status").notNull().default("draft"),
+  visibility: visibilityEnum("visibility").notNull().default("public"),
+  tags: text("tags").array(),
+  designTags: text("design_tags").array(),
+  thumbnailUrl: text("thumbnail_url"),
+  downloadCount: integer("download_count").notNull().default(0),
+  viewCount: integer("view_count").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+}, (table) => [
+  index("projects_user_id_idx").on(table.userId),
+  index("projects_status_idx").on(table.status),
+  index("projects_slug_idx").on(table.slug),
+]);
+
+export const projectFiles = pgTable("project_files", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  fileId: uuid("file_id")
+    .notNull()
+    .references(() => files.id, { onDelete: "cascade" }),
+  position: integer("position").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+}, (table) => [
+  index("project_files_project_id_idx").on(table.projectId),
+  index("project_files_file_id_idx").on(table.fileId),
+  uniqueIndex("project_files_project_file_uniq").on(
+    table.projectId,
+    table.fileId
+  ),
+]);
+
 export const fileAssets = pgTable("file_assets", {
   id: uuid("id").primaryKey().defaultRandom(),
   fileId: uuid("file_id").references(() => files.id, { onDelete: "cascade" }), // nullable until linked to a listing
@@ -134,14 +195,20 @@ export const fileAssets = pgTable("file_assets", {
   index("file_assets_content_hash_idx").on(table.contentHash),
 ]);
 
+// A purchase grants ownership of exactly one sellable: either a
+// standalone file or a project (which transitively grants its files
+// via the entitlement helper). The CHECK constraint enforces the
+// xor — exactly one of file_id / project_id is set.
+
 export const purchases = pgTable("purchases", {
   id: uuid("id").primaryKey().defaultRandom(),
   buyerId: text("buyer_id")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
-  fileId: uuid("file_id")
-    .notNull()
-    .references(() => files.id, { onDelete: "cascade" }),
+  fileId: uuid("file_id").references(() => files.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").references(() => projects.id, {
+    onDelete: "cascade",
+  }),
   amount: integer("amount").notNull(), // cents
   serviceFee: integer("service_fee").notNull(), // cents
   creatorPayout: integer("creator_payout").notNull(), // cents
@@ -153,6 +220,11 @@ export const purchases = pgTable("purchases", {
 }, (table) => [
   index("purchases_buyer_id_idx").on(table.buyerId),
   index("purchases_file_id_idx").on(table.fileId),
+  index("purchases_project_id_idx").on(table.projectId),
+  check(
+    "purchases_target_exactly_one",
+    sql`(${table.fileId} IS NOT NULL AND ${table.projectId} IS NULL) OR (${table.fileId} IS NULL AND ${table.projectId} IS NOT NULL)`
+  ),
 ]);
 
 export const printOrders = pgTable("print_orders", {
@@ -312,21 +384,31 @@ export const collections = pgTable("collections", {
   index("collections_slug_idx").on(table.slug),
 ]);
 
-export const collectionFiles = pgTable("collection_files", {
+// Collection items — heterogeneous, can hold a file OR a project.
+// Renamed from collection_files in migration 0003. Same xor CHECK
+// pattern as purchases.
+
+export const collectionItems = pgTable("collection_items", {
   id: uuid("id").primaryKey().defaultRandom(),
   collectionId: uuid("collection_id")
     .notNull()
     .references(() => collections.id, { onDelete: "cascade" }),
-  fileId: uuid("file_id")
-    .notNull()
-    .references(() => files.id, { onDelete: "cascade" }),
+  fileId: uuid("file_id").references(() => files.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").references(() => projects.id, {
+    onDelete: "cascade",
+  }),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
 }, (table) => [
-  index("collection_files_collection_id_idx").on(table.collectionId),
-  index("collection_files_file_id_idx").on(table.fileId),
+  index("collection_items_collection_id_idx").on(table.collectionId),
+  index("collection_items_file_id_idx").on(table.fileId),
+  index("collection_items_project_id_idx").on(table.projectId),
+  check(
+    "collection_items_target_exactly_one",
+    sql`(${table.fileId} IS NOT NULL AND ${table.projectId} IS NULL) OR (${table.fileId} IS NULL AND ${table.projectId} IS NOT NULL)`
+  ),
 ]);
 
 // Part photos — real-world images of printed parts

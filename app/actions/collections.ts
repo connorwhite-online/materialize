@@ -2,7 +2,7 @@
 
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-import { collections, collectionFiles } from "@/lib/db/schema";
+import { collections, collectionItems, projects } from "@/lib/db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { nanoid } from "nanoid";
@@ -82,12 +82,19 @@ export async function createCollection(formData: FormData) {
   }
 }
 
+async function nextSortOrder(collectionId: string) {
+  const existing = await db
+    .select({ sortOrder: collectionItems.sortOrder })
+    .from(collectionItems)
+    .where(eq(collectionItems.collectionId, collectionId));
+  return existing.reduce((max, e) => Math.max(max, e.sortOrder), -1) + 1;
+}
+
 export async function addFileToCollection(collectionId: string, fileId: string) {
   try {
     const { userId } = await auth();
     if (!userId) return { error: "Unauthorized" };
 
-    // Verify user owns the collection
     const [collection] = await db
       .select()
       .from(collections)
@@ -95,18 +102,10 @@ export async function addFileToCollection(collectionId: string, fileId: string) 
 
     if (!collection) return { error: "Collection not found" };
 
-    // Get max sort order
-    const existing = await db
-      .select({ sortOrder: collectionFiles.sortOrder })
-      .from(collectionFiles)
-      .where(eq(collectionFiles.collectionId, collectionId));
-
-    const maxOrder = existing.reduce((max, e) => Math.max(max, e.sortOrder), -1);
-
-    await db.insert(collectionFiles).values({
+    await db.insert(collectionItems).values({
       collectionId,
       fileId,
-      sortOrder: maxOrder + 1,
+      sortOrder: await nextSortOrder(collectionId),
     });
 
     revalidatePath("/dashboard/uploads");
@@ -117,12 +116,50 @@ export async function addFileToCollection(collectionId: string, fileId: string) 
   }
 }
 
+export async function addProjectToCollection(
+  collectionId: string,
+  projectId: string
+) {
+  try {
+    const { userId } = await auth();
+    if (!userId) return { error: "Unauthorized" };
+
+    const [collection] = await db
+      .select()
+      .from(collections)
+      .where(
+        and(eq(collections.id, collectionId), eq(collections.userId, userId))
+      );
+    if (!collection) return { error: "Collection not found" };
+
+    // Verify project exists (any user's published project can be
+    // collected — same as files. Visibility check happens at render).
+    const [project] = await db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(eq(projects.id, projectId));
+    if (!project) return { error: "Project not found" };
+
+    await db.insert(collectionItems).values({
+      collectionId,
+      projectId,
+      sortOrder: await nextSortOrder(collectionId),
+    });
+
+    revalidatePath("/dashboard/uploads");
+    revalidatePath(`/collections/${collection.slug}`);
+    return { success: true };
+  } catch (error) {
+    logError("addProjectToCollection", error);
+    return { error: "Failed to add project to collection" };
+  }
+}
+
 export async function removeFileFromCollection(collectionId: string, fileId: string) {
   try {
     const { userId } = await auth();
     if (!userId) return { error: "Unauthorized" };
 
-    // Verify ownership
     const [collection] = await db
       .select()
       .from(collections)
@@ -131,11 +168,11 @@ export async function removeFileFromCollection(collectionId: string, fileId: str
     if (!collection) return { error: "Collection not found" };
 
     await db
-      .delete(collectionFiles)
+      .delete(collectionItems)
       .where(
         and(
-          eq(collectionFiles.collectionId, collectionId),
-          eq(collectionFiles.fileId, fileId)
+          eq(collectionItems.collectionId, collectionId),
+          eq(collectionItems.fileId, fileId)
         )
       );
 
@@ -144,6 +181,40 @@ export async function removeFileFromCollection(collectionId: string, fileId: str
   } catch (error) {
     logError("removeFileFromCollection", error);
     return { error: "Failed to remove file" };
+  }
+}
+
+export async function removeProjectFromCollection(
+  collectionId: string,
+  projectId: string
+) {
+  try {
+    const { userId } = await auth();
+    if (!userId) return { error: "Unauthorized" };
+
+    const [collection] = await db
+      .select()
+      .from(collections)
+      .where(
+        and(eq(collections.id, collectionId), eq(collections.userId, userId))
+      );
+    if (!collection) return { error: "Collection not found" };
+
+    await db
+      .delete(collectionItems)
+      .where(
+        and(
+          eq(collectionItems.collectionId, collectionId),
+          eq(collectionItems.projectId, projectId)
+        )
+      );
+
+    revalidatePath("/dashboard/uploads");
+    revalidatePath(`/collections/${collection.slug}`);
+    return { success: true };
+  } catch (error) {
+    logError("removeProjectFromCollection", error);
+    return { error: "Failed to remove project" };
   }
 }
 

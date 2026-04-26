@@ -61,9 +61,11 @@ vi.mock("@/lib/db/schema", () => ({
   files: { id: "id", userId: "user_id", status: "status" },
   fileAssets: { id: "id", fileId: "file_id" },
   collections: { id: "id", userId: "user_id" },
-  collectionFiles: { collectionId: "collection_id" },
+  collectionItems: { collectionId: "collection_id" },
   filePhotos: { id: "id", fileId: "file_id" },
-  purchases: { id: "id", fileId: "file_id" },
+  purchases: { id: "id", fileId: "file_id", projectId: "project_id" },
+  projects: { id: "id", userId: "user_id" },
+  projectFiles: { projectId: "project_id", fileId: "file_id" },
 }));
 
 // Mock the R2 storage layer so computeContentHash can run without a

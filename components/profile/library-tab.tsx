@@ -3,19 +3,26 @@ import {
   files,
   fileAssets,
   collections,
-  collectionFiles,
+  collectionItems,
   purchases,
   users,
+  projects,
+  projectFiles,
 } from "@/lib/db/schema";
-import { eq, and, desc, inArray } from "drizzle-orm";
+import { eq, and, desc, inArray, sql } from "drizzle-orm";
 import { Button } from "@/components/ui/button";
 import { CollectionSection } from "./collection-section";
 import {
   LibraryFileCard,
   type LibraryFileCardItem,
 } from "./library-file-card";
+import {
+  LibraryProjectCard,
+  type LibraryProjectCardItem,
+} from "./library-project-card";
 import { NewCollectionButton } from "./new-collection-button";
 import { UploadDialog } from "@/components/upload/upload-dialog";
+import Link from "next/link";
 
 interface LibraryTabProps {
   userId: string;
@@ -173,40 +180,138 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
     .where(and(...collectionConditions))
     .orderBy(desc(collections.createdAt));
 
-  const collectionFileRows =
+  const collectionItemRows =
     userCollections.length > 0
       ? await db
           .select()
-          .from(collectionFiles)
+          .from(collectionItems)
           .where(
             inArray(
-              collectionFiles.collectionId,
+              collectionItems.collectionId,
               userCollections.map((c) => c.id)
             )
           )
       : [];
 
-  const ownedItems: LibraryItem[] = ownedFiles.map((f) => {
-    const asset = primaryAssetByFileId.get(f.id);
-    return {
-      id: f.id,
-      name: f.name,
-      slug: f.slug,
-      price: f.price,
-      visibility: f.visibility,
+  // Owned projects (creator's bundles)
+  const ownedProjects = await db
+    .select({
+      id: projects.id,
+      name: projects.name,
+      slug: projects.slug,
+      price: projects.price,
+      visibility: projects.visibility,
+      thumbnailUrl: projects.thumbnailUrl,
+      fileCount: sql<number>`cast(count(${projectFiles.fileId}) as int)`,
+    })
+    .from(projects)
+    .leftJoin(projectFiles, eq(projectFiles.projectId, projects.id))
+    .where(
+      and(
+        eq(projects.userId, userId),
+        ...(isOwner ? [] : [eq(projects.status, "published"), eq(projects.visibility, "public")])
+      )
+    )
+    .groupBy(projects.id)
+    .orderBy(desc(projects.createdAt));
+
+  // Purchased projects (owner-only). The bundled files come along for
+  // free via the entitlement helper at download time, so we don't need
+  // to flatten them into the file grid.
+  type PurchasedProjectRow = LibraryProjectCardItem;
+  let purchasedProjects: PurchasedProjectRow[] = [];
+  if (isOwner) {
+    const rawPurchased = await db
+      .select({
+        id: projects.id,
+        name: projects.name,
+        slug: projects.slug,
+        price: projects.price,
+        visibility: projects.visibility,
+        thumbnailUrl: projects.thumbnailUrl,
+      })
+      .from(purchases)
+      .innerJoin(projects, eq(purchases.projectId, projects.id))
+      .where(
+        and(
+          eq(purchases.buyerId, userId),
+          eq(purchases.status, "completed")
+        )
+      );
+    if (rawPurchased.length > 0) {
+      const purchasedIds = rawPurchased.map((p) => p.id);
+      const counts = await db
+        .select({
+          projectId: projectFiles.projectId,
+          count: sql<number>`cast(count(${projectFiles.fileId}) as int)`,
+        })
+        .from(projectFiles)
+        .where(inArray(projectFiles.projectId, purchasedIds))
+        .groupBy(projectFiles.projectId);
+      const countMap = new Map(counts.map((c) => [c.projectId, c.count]));
+      purchasedProjects = rawPurchased.map((p) => ({
+        id: p.id,
+        name: p.name,
+        slug: p.slug,
+        price: p.price,
+        visibility: p.visibility,
+        source: "purchased" as const,
+        thumbnailUrl: p.thumbnailUrl,
+        fileCount: countMap.get(p.id) ?? 0,
+      }));
+    }
+  }
+
+  // Files referenced by any of the user's owned projects — we dedupe
+  // these out of the standalone file grid so a creator doesn't see the
+  // same file twice (once inside its project card, once on its own).
+  let fileIdsInOwnedProjects = new Set<string>();
+  if (ownedProjects.length > 0) {
+    const ownedProjectIds = ownedProjects.map((p) => p.id);
+    const links = await db
+      .select({ fileId: projectFiles.fileId })
+      .from(projectFiles)
+      .where(inArray(projectFiles.projectId, ownedProjectIds));
+    fileIdsInOwnedProjects = new Set(links.map((l) => l.fileId));
+  }
+
+  const ownedProjectItems: LibraryProjectCardItem[] = ownedProjects.map(
+    (p) => ({
+      id: p.id,
+      name: p.name,
+      slug: p.slug,
+      price: p.price,
+      visibility: p.visibility,
       source: "owned" as const,
-      thumbnailUrl: f.thumbnailUrl,
-      primaryAssetId: asset?.id ?? null,
-      primaryFormat: asset?.format ?? null,
-      dimensions: asset?.dimensions ?? null,
-    };
-  });
+      thumbnailUrl: p.thumbnailUrl,
+      fileCount: p.fileCount,
+    })
+  );
+
+  const ownedItems: LibraryItem[] = ownedFiles
+    .filter((f) => !fileIdsInOwnedProjects.has(f.id))
+    .map((f) => {
+      const asset = primaryAssetByFileId.get(f.id);
+      return {
+        id: f.id,
+        name: f.name,
+        slug: f.slug,
+        price: f.price,
+        visibility: f.visibility,
+        source: "owned" as const,
+        thumbnailUrl: f.thumbnailUrl,
+        primaryAssetId: asset?.id ?? null,
+        primaryFormat: asset?.format ?? null,
+        dimensions: asset?.dimensions ?? null,
+      };
+    });
 
   const itemMap = new Map(ownedItems.map((f) => [f.id, f]));
   const itemsInCollection = new Map<string, LibraryItem[]>();
   const idsInAnyCollection = new Set<string>();
 
-  for (const row of collectionFileRows) {
+  for (const row of collectionItemRows) {
+    if (!row.fileId) continue;
     const item = itemMap.get(row.fileId);
     if (!item) continue;
     idsInAnyCollection.add(row.fileId);
@@ -219,14 +324,20 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
   const uncollectedOwned = ownedItems.filter(
     (f) => !idsInAnyCollection.has(f.id)
   );
-  // Purchased files can't be in a user-created collection, so they live
-  // alongside the uncollected owned files in the "all files" grid.
   const mainGridItems: LibraryItem[] = [
     ...uncollectedOwned,
     ...purchasedItems,
   ];
+  const projectGridItems: LibraryProjectCardItem[] = [
+    ...ownedProjectItems,
+    ...purchasedProjects,
+  ];
 
-  const totalItems = ownedItems.length + purchasedItems.length;
+  const totalItems =
+    ownedItems.length +
+    purchasedItems.length +
+    ownedProjectItems.length +
+    purchasedProjects.length;
   const hasAnyContent = totalItems > 0 || userCollections.length > 0;
 
   if (!hasAnyContent) {
@@ -251,12 +362,21 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
       {isOwner && (
         <div className="flex items-center justify-between">
           <p className="text-sm text-muted-foreground">
-            {totalItems} {totalItems === 1 ? "file" : "files"}
+            {totalItems} {totalItems === 1 ? "item" : "items"}
             {userCollections.length > 0 &&
               ` · ${userCollections.length} ${userCollections.length === 1 ? "collection" : "collections"}`}
           </p>
           <div className="flex items-center gap-2">
             <NewCollectionButton />
+            {ownedFiles.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                render={<Link href="/projects/new" />}
+              >
+                New project
+              </Button>
+            )}
             <UploadDialog
               trigger={
                 <Button variant="outline" size="sm">
@@ -303,6 +423,20 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
           </CollectionSection>
         );
       })}
+
+      {/* Projects (owned + purchased bundles) */}
+      {projectGridItems.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            Projects
+          </p>
+          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+            {projectGridItems.map((p) => (
+              <LibraryProjectCard key={p.id} item={p} />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Uncollected files — not collapsible, just a soft panel */}
       {mainGridItems.length > 0 && (

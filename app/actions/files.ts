@@ -36,9 +36,11 @@ import {
   files,
   fileAssets,
   collections,
-  collectionFiles,
+  collectionItems,
   filePhotos,
   purchases,
+  projectFiles,
+  projects,
 } from "@/lib/db/schema";
 import { eq, and, ne, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -232,7 +234,7 @@ export async function createFileListing(formData: FormData) {
     }
 
     if (targetCollectionId) {
-      await db.insert(collectionFiles).values({
+      await db.insert(collectionItems).values({
         collectionId: targetCollectionId,
         fileId: file.id,
         sortOrder: 0,
@@ -375,7 +377,7 @@ export async function deleteFileListing(
 
     if (!file) return { error: "File not found" };
 
-    const buyerRows = await db
+    const directBuyers = await db
       .select({ id: purchases.id })
       .from(purchases)
       .where(
@@ -385,7 +387,23 @@ export async function deleteFileListing(
         )
       );
 
-    if (buyerRows.length > 0) {
+    // Indirect entitlement: anyone who bought a project containing
+    // this file also owns it. Hard-deleting would silently revoke
+    // their access, so we soft-archive instead.
+    const projectBuyers = await db
+      .select({ id: purchases.id })
+      .from(purchases)
+      .innerJoin(projects, eq(purchases.projectId, projects.id))
+      .innerJoin(projectFiles, eq(projectFiles.projectId, projects.id))
+      .where(
+        and(
+          eq(projectFiles.fileId, fileId),
+          eq(purchases.status, "completed")
+        )
+      );
+
+    const totalBuyers = directBuyers.length + projectBuyers.length;
+    if (totalBuyers > 0) {
       await db
         .update(files)
         .set({ status: "archived", visibility: "private" })
@@ -396,7 +414,7 @@ export async function deleteFileListing(
       return {
         archived: true,
         reason: "has-buyers",
-        buyerCount: buyerRows.length,
+        buyerCount: totalBuyers,
       };
     }
 
@@ -423,8 +441,8 @@ export async function deleteFileListing(
     // failed delete leaving a half-gone file row.
     await Promise.allSettled(keys.map((k) => deleteObject(k)));
 
-    // Cascade rules clean up file_assets, file_photos, collection_files,
-    // and print_orders for us.
+    // Cascade rules clean up file_assets, file_photos, collection_items,
+    // project_files, and print_orders for us.
     await db.delete(files).where(eq(files.id, fileId));
 
     revalidatePath(`/files/${file.slug}`);

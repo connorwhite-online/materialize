@@ -22,6 +22,13 @@
       "when": 1776371182656,
       "tag": "0002_vendor_name",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1777074147678,
+      "tag": "0003_projects",
+      "breakpoints": true
     }
   ]
 }

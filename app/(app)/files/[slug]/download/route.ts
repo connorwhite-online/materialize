@@ -1,12 +1,9 @@
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-import {
-  files,
-  fileAssets,
-  purchases,
-} from "@/lib/db/schema";
+import { files, fileAssets } from "@/lib/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
+import { userOwnsFile } from "@/lib/entitlement";
 import { NextRequest } from "next/server";
 
 export async function GET(
@@ -18,7 +15,6 @@ export async function GET(
 
   const { userId } = await auth();
 
-  // Get the file
   const [file] = await db
     .select()
     .from(files)
@@ -28,28 +24,10 @@ export async function GET(
     return new Response("Not found", { status: 404 });
   }
 
-  const isOwner = userId === file.userId;
-
-  // Check access for paid files
-  if (file.price > 0 && !isOwner) {
-    if (!userId) {
-      return new Response("Unauthorized", { status: 401 });
-    }
-
-    const [purchase] = await db
-      .select()
-      .from(purchases)
-      .where(
-        and(
-          eq(purchases.buyerId, userId),
-          eq(purchases.fileId, file.id),
-          eq(purchases.status, "completed")
-        )
-      );
-
-    if (!purchase) {
-      return new Response("Payment required", { status: 402 });
-    }
+  if (!(await userOwnsFile(userId, file.id))) {
+    return new Response(userId ? "Payment required" : "Unauthorized", {
+      status: userId ? 402 : 401,
+    });
   }
 
   // Get the requested asset (or first asset)

@@ -38,9 +38,11 @@ vi.mock("@/lib/db/schema", () => ({
   files: { id: "id", userId: "user_id", slug: "slug" },
   fileAssets: { id: "id", fileId: "file_id", contentHash: "content_hash" },
   collections: { id: "id" },
-  collectionFiles: { collectionId: "collection_id" },
+  collectionItems: { collectionId: "collection_id" },
   filePhotos: { id: "id" },
   purchases: { id: "id" },
+  projects: { id: "id", userId: "user_id" },
+  projectFiles: { projectId: "project_id", fileId: "file_id" },
 }));
 
 vi.mock("@/lib/storage", () => ({
