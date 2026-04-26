@@ -24,7 +24,11 @@ import { eq, and, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { nanoid } from "nanoid";
-import { createProjectSchema, updateProjectSchema } from "@/lib/validations/project";
+import {
+  createProjectSchema,
+  updateProjectSchema,
+  MAX_PROJECT_FILES,
+} from "@/lib/validations/project";
 import { buildListingSlug } from "@/lib/filenames";
 import { logError, isRedirectError } from "@/lib/logger";
 
@@ -169,25 +173,38 @@ export async function addFilesToProject(
     const { userId } = await auth();
     if (!userId) return { error: "Unauthorized" };
 
+    // Dedupe + cap up front. Without this a malicious caller could
+    // post a giant fileIds array that scales the DB cost of the
+    // ownership join and the bulk insert.
+    const sanitized = Array.from(new Set(fileIds));
+    if (sanitized.length === 0) return { success: true };
+
     const [project] = await db
       .select({ id: projects.id, slug: projects.slug })
       .from(projects)
       .where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
     if (!project) return { error: "Project not found" };
 
-    if (!(await assertUserOwnsAllFiles(userId, fileIds))) {
+    if (!(await assertUserOwnsAllFiles(userId, sanitized))) {
       return { error: "One or more files are not yours." };
     }
 
-    // Skip duplicates already linked to the project.
+    // Skip duplicates already linked to the project, then enforce
+    // the per-project file cap on the resulting total.
     const existing = await db
       .select({ fileId: projectFiles.fileId })
       .from(projectFiles)
       .where(eq(projectFiles.projectId, projectId));
     const existingSet = new Set(existing.map((r) => r.fileId));
-    const additions = fileIds.filter((id) => !existingSet.has(id));
+    const additions = sanitized.filter((id) => !existingSet.has(id));
 
     if (additions.length === 0) return { success: true };
+
+    if (existing.length + additions.length > MAX_PROJECT_FILES) {
+      return {
+        error: `A project can bundle at most ${MAX_PROJECT_FILES} files.`,
+      };
+    }
 
     const startPosition = existing.length;
     await db.insert(projectFiles).values(
