@@ -89,10 +89,11 @@ export function DeleteFileButton({
           <DialogDescription>
             {hasBuyers ? (
               <>
-                {buyerCount} {buyerCount === 1 ? "person has" : "people have"}{" "}
-                purchased this file. We&apos;ll stop selling it and hide it
-                from your library, but their purchased copies stay
-                downloadable. This can&apos;t be undone.
+                This file is referenced by {buyerCount} existing{" "}
+                {buyerCount === 1 ? "purchase, cart, or order" : "purchases, carts, or orders"}.
+                We&apos;ll stop selling it and hide it from your library,
+                but those existing references keep working. This
+                can&apos;t be undone.
               </>
             ) : (
               <>

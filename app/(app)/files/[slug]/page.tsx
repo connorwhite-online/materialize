@@ -10,8 +10,11 @@ import {
   filePhotos,
   projects,
   projectFiles,
+  cartItems,
+  printOrders,
+  printOrderItems,
 } from "@/lib/db/schema";
-import { eq, and, asc } from "drizzle-orm";
+import { eq, and, asc, inArray } from "drizzle-orm";
 import { ownsLoadedFile } from "@/lib/entitlement";
 import { DESIGN_TAG_LABELS } from "@/lib/validations/file";
 import { Card, CardContent } from "@/components/ui/card";
@@ -102,32 +105,84 @@ export default async function FileDetailPage(props: {
     userId: file.userId,
   });
 
-  // Owner needs the buyer count to know whether deleting will hard-
-  // delete or soft-archive — gate the query on isOwner so we don't pay
-  // for it on every public view. Counts both direct file purchases and
-  // project purchases that include this file.
+  // Owner needs to know whether deleting will hard-delete or soft-
+  // archive. Soft-archive triggers when ANY of the following references
+  // the file:
+  //   - a completed direct purchase
+  //   - a completed project purchase whose project bundles this file
+  //   - an open cart item targeting one of this file's assets
+  //   - an active print order (cart_created → shipped) — single-item
+  //     OR multi-item — referencing this file
+  // The dialog copy switches accordingly so users aren't surprised
+  // when "Delete" silently archives instead.
   let ownerBuyerCount = 0;
   if (isOwner) {
-    const [directBuyers, projectBuyers] = await Promise.all([
-      db
-        .select({ id: purchases.id })
-        .from(purchases)
-        .where(
-          and(eq(purchases.fileId, file.id), eq(purchases.status, "completed"))
-        ),
-      db
-        .select({ id: purchases.id })
-        .from(purchases)
-        .innerJoin(projects, eq(purchases.projectId, projects.id))
-        .innerJoin(projectFiles, eq(projectFiles.projectId, projects.id))
-        .where(
-          and(
-            eq(projectFiles.fileId, file.id),
-            eq(purchases.status, "completed")
-          )
-        ),
-    ]);
-    ownerBuyerCount = directBuyers.length + projectBuyers.length;
+    const fileAssetIds = assets.map((a) => a.id);
+    const ACTIVE_ORDER_STATUSES = [
+      "cart_created",
+      "ordered",
+      "in_production",
+      "shipped",
+    ] as const;
+
+    const [directBuyers, projectBuyers, cartUses, orderItemUses, orderUses] =
+      await Promise.all([
+        db
+          .select({ id: purchases.id })
+          .from(purchases)
+          .where(
+            and(eq(purchases.fileId, file.id), eq(purchases.status, "completed"))
+          ),
+        db
+          .select({ id: purchases.id })
+          .from(purchases)
+          .innerJoin(projects, eq(purchases.projectId, projects.id))
+          .innerJoin(projectFiles, eq(projectFiles.projectId, projects.id))
+          .where(
+            and(
+              eq(projectFiles.fileId, file.id),
+              eq(purchases.status, "completed")
+            )
+          ),
+        fileAssetIds.length > 0
+          ? db
+              .select({ id: cartItems.id })
+              .from(cartItems)
+              .where(inArray(cartItems.fileAssetId, fileAssetIds))
+          : Promise.resolve([]),
+        fileAssetIds.length > 0
+          ? db
+              .select({ id: printOrderItems.id })
+              .from(printOrderItems)
+              .innerJoin(
+                printOrders,
+                eq(printOrderItems.printOrderId, printOrders.id)
+              )
+              .where(
+                and(
+                  inArray(printOrderItems.fileAssetId, fileAssetIds),
+                  inArray(printOrders.status, [...ACTIVE_ORDER_STATUSES])
+                )
+              )
+          : Promise.resolve([]),
+        fileAssetIds.length > 0
+          ? db
+              .select({ id: printOrders.id })
+              .from(printOrders)
+              .where(
+                and(
+                  inArray(printOrders.fileAssetId, fileAssetIds),
+                  inArray(printOrders.status, [...ACTIVE_ORDER_STATUSES])
+                )
+              )
+          : Promise.resolve([]),
+      ]);
+    ownerBuyerCount =
+      directBuyers.length +
+      projectBuyers.length +
+      cartUses.length +
+      orderItemUses.length +
+      orderUses.length;
   }
   const recommendedMaterial = file.recommendedMaterialId
     ? getMaterialById(file.recommendedMaterialId)

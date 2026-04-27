@@ -41,6 +41,9 @@ import {
   purchases,
   projectFiles,
   projects,
+  cartItems,
+  printOrders,
+  printOrderItems,
 } from "@/lib/db/schema";
 import { eq, and, ne, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -352,10 +355,23 @@ export async function archiveFileListing(fileId: string) {
  * Caller is expected to confirm intent twice — this action does no
  * additional confirmation of its own.
  */
+/** Print order statuses where the order is still mid-flow — paid or
+ * about to be paid, but not yet received/refunded/cancelled. A file
+ * referenced by an active row in either of these states must not be
+ * hard-deleted: cascading the fileAsset away would silently drop the
+ * line item from a Stripe session, the buyer's library, or a
+ * production-side order at CraftCloud. */
+const ACTIVE_ORDER_STATUSES = [
+  "cart_created",
+  "ordered",
+  "in_production",
+  "shipped",
+] as const;
+
 export async function deleteFileListing(
   fileId: string
 ): Promise<
-  | { archived: true; reason: "has-buyers"; buyerCount: number }
+  | { archived: true; reason: "has-buyers" | "in-flight"; buyerCount: number }
   | { deleted: true }
   | { error: string }
 > {
@@ -415,6 +431,72 @@ export async function deleteFileListing(
       };
     }
 
+    // No completed purchases, but the file might still be referenced by
+    // someone's open cart or by a print order that hasn't shipped yet.
+    // Cascading those rows away would silently drop line items from a
+    // pending Stripe session or break a placed CraftCloud order. Soft-
+    // archive in that case too — once the order completes (or the user
+    // empties their cart), a re-attempt will hard-delete cleanly.
+    const fileAssetIds = (
+      await db
+        .select({ id: fileAssets.id })
+        .from(fileAssets)
+        .where(eq(fileAssets.fileId, fileId))
+    ).map((r) => r.id);
+
+    if (fileAssetIds.length > 0) {
+      const [activeCartItems, activeOrderItems, activeSingleOrders] =
+        await Promise.all([
+          db
+            .select({ id: cartItems.id })
+            .from(cartItems)
+            .where(inArray(cartItems.fileAssetId, fileAssetIds))
+            .limit(1),
+          db
+            .select({ id: printOrderItems.id })
+            .from(printOrderItems)
+            .innerJoin(
+              printOrders,
+              eq(printOrderItems.printOrderId, printOrders.id)
+            )
+            .where(
+              and(
+                inArray(printOrderItems.fileAssetId, fileAssetIds),
+                inArray(printOrders.status, [...ACTIVE_ORDER_STATUSES])
+              )
+            )
+            .limit(1),
+          db
+            .select({ id: printOrders.id })
+            .from(printOrders)
+            .where(
+              and(
+                inArray(printOrders.fileAssetId, fileAssetIds),
+                inArray(printOrders.status, [...ACTIVE_ORDER_STATUSES])
+              )
+            )
+            .limit(1),
+        ]);
+
+      const inFlight =
+        activeCartItems.length +
+        activeOrderItems.length +
+        activeSingleOrders.length;
+      if (inFlight > 0) {
+        await db
+          .update(files)
+          .set({ status: "archived", visibility: "private" })
+          .where(eq(files.id, fileId));
+        revalidatePath(`/files/${file.slug}`);
+        revalidatePath("/files");
+        revalidatePath("/dashboard/uploads");
+        return {
+          archived: true,
+          reason: "in-flight",
+          buyerCount: inFlight,
+        };
+      }
+    }
     // No buyers — safe to hard-delete. Collect every storage key first
     // so we can scrub R2 even after the DB rows are gone.
     const assets = await db
