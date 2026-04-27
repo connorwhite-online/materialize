@@ -1,4 +1,7 @@
 import { headers } from "next/headers";
+import { db } from "@/lib/db";
+import { webhookEventsProcessed } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 import { getStripe } from "@/lib/stripe";
 import { handlePrintOrderPayment } from "@/lib/stripe/handle-print-order-payment";
 import { logError } from "@/lib/logger";
@@ -41,8 +44,28 @@ export async function POST(request: Request) {
     event.type === "checkout.session.completed" &&
     (event.data.object as Stripe.Checkout.Session).payment_status === "paid";
   const isAsyncSuccess = event.type === "checkout.session.async_payment_succeeded";
+  const isHandled = isPaidCheckout || isAsyncSuccess;
 
-  if (isPaidCheckout || isAsyncSuccess) {
+  // Defense-in-depth dedup — the inner handlePrintOrderPayment also
+  // claims atomically against the printOrders row, but recording the
+  // Stripe event id here lets us no-op duplicate deliveries before
+  // any DB or CraftCloud work fires. Only events we actually handle
+  // are recorded; the table grows in proportion to real work, not
+  // every Stripe event type. We check FIRST and INSERT after success
+  // so transient handler failures still get retried by Stripe — the
+  // ack on a duplicate happens only if the prior delivery committed.
+  if (isHandled) {
+    const [existing] = await db
+      .select({ id: webhookEventsProcessed.id })
+      .from(webhookEventsProcessed)
+      .where(eq(webhookEventsProcessed.id, event.id))
+      .limit(1);
+    if (existing) {
+      return Response.json({ received: true, duplicate: true });
+    }
+  }
+
+  if (isHandled) {
     const session = event.data.object as Stripe.Checkout.Session;
     const printOrderId = session.metadata?.printOrderId;
 
@@ -57,6 +80,23 @@ export async function POST(request: Request) {
           { status: 500 }
         );
       }
+    }
+
+    // Mark the event processed only after the handler succeeded (or
+    // was correctly no-op'd because metadata didn't match a known
+    // shape). ON CONFLICT DO NOTHING absorbs the rare double-insert
+    // when two near-simultaneous deliveries both pass the SELECT.
+    try {
+      await db
+        .insert(webhookEventsProcessed)
+        .values({ id: event.id, eventType: event.type })
+        .onConflictDoNothing();
+    } catch (err) {
+      // Don't fail the webhook on dedup-table issues — handler
+      // succeeded, the user paid, the order is placed. A missed
+      // dedup row at worst means we re-run on the next retry
+      // (handler is itself idempotent).
+      logError("stripe-webhook-dedup-insert", err);
     }
   }
 

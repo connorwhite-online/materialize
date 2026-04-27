@@ -430,3 +430,27 @@ export const filePhotos = pgTable("file_photos", {
 }, (table) => [
   index("file_photos_file_id_idx").on(table.fileId),
 ]);
+
+// Webhook event-level dedup. Stripe delivers events at-least-once
+// and may double-deliver across retries; the inner atomic claim in
+// handlePrintOrderPayment already protects against duplicate
+// CraftCloud orders, but recording event ids here lets the webhook
+// route ack pure duplicates with zero downstream side effects.
+// Only events we actively handle land here — other event types are
+// acked but not recorded, so the table only grows with real work.
+
+export const webhookEventsProcessed = pgTable(
+  "webhook_events_processed",
+  {
+    // Stripe event id, e.g. "evt_1Nv...". Primary key — the unique
+    // constraint is the dedup mechanism.
+    id: text("id").primaryKey(),
+    eventType: text("event_type").notNull(),
+    processedAt: timestamp("processed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("webhook_events_processed_processed_at_idx").on(table.processedAt),
+  ]
+);
