@@ -6,6 +6,7 @@ import { UserAvatar } from "@/components/auth/user-avatar";
 import type {
   SearchHitFile,
   SearchHitMaterial,
+  SearchHitProject,
   SearchHitUser,
   SearchResponse,
 } from "@/app/api/search/route";
@@ -37,6 +38,7 @@ export function SearchResultsPanel({
 
   const anyResults =
     results.files.length > 0 ||
+    results.projects.length > 0 ||
     results.users.length > 0 ||
     results.materials.length > 0;
 
@@ -52,6 +54,14 @@ export function SearchResultsPanel({
 
   return (
     <div className="space-y-4 px-2 pt-2 pb-3">
+      {results.projects.length > 0 && (
+        <Section title="Projects">
+          {results.projects.map((hit) => (
+            <ProjectCard key={hit.id} hit={hit} onNavigate={onNavigate} />
+          ))}
+        </Section>
+      )}
+
       {results.files.length > 0 && (
         <Section title="Files">
           {results.files.map((hit) => (
@@ -127,6 +137,48 @@ function FileCard({
           {hit.name}
         </p>
         <p className="truncate text-[10px] text-muted-foreground">
+          {hit.creatorDisplayName || hit.creatorUsername || ""}
+        </p>
+      </div>
+    </Link>
+  );
+}
+
+function ProjectCard({
+  hit,
+  onNavigate,
+}: {
+  hit: SearchHitProject;
+  onNavigate: () => void;
+}) {
+  return (
+    <Link
+      href={`/projects/${hit.slug}`}
+      onClick={onNavigate}
+      className="group flex w-28 shrink-0 flex-col gap-1.5"
+    >
+      <div className="aspect-square overflow-hidden rounded-lg border border-border bg-muted/60">
+        {hit.thumbnailUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={hit.thumbnailUrl}
+            alt=""
+            loading="lazy"
+            className="h-full w-full object-cover transition-transform group-hover:scale-105"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-[10px] text-muted-foreground/60">
+            Project
+          </div>
+        )}
+      </div>
+      <div className="min-w-0 px-0.5">
+        <p className="truncate text-xs font-medium group-hover:text-primary">
+          {hit.name}
+        </p>
+        <p className="truncate text-[10px] text-muted-foreground">
+          {hit.fileCount} {hit.fileCount === 1 ? "file" : "files"}
+          {(hit.creatorDisplayName || hit.creatorUsername) && " · "}
           {hit.creatorDisplayName || hit.creatorUsername || ""}
         </p>
       </div>

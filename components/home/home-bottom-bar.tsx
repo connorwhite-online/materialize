@@ -99,7 +99,12 @@ export function HomeBottomBar() {
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
           console.warn("[search] fetch failed", err);
-          setSearchResults({ files: [], users: [], materials: [] });
+          setSearchResults({
+            files: [],
+            projects: [],
+            users: [],
+            materials: [],
+          });
         }
       } finally {
         setSearchLoading(false);

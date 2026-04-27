@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { files, users } from "@/lib/db/schema";
-import { and, eq, ilike, or, desc } from "drizzle-orm";
+import { files, users, projects, projectFiles } from "@/lib/db/schema";
+import { and, eq, ilike, or, desc, sql } from "drizzle-orm";
 import { getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
 import { logError } from "@/lib/logger";
 
@@ -47,8 +47,20 @@ export interface SearchHitMaterial {
   featuredImage: string | null;
 }
 
+export interface SearchHitProject {
+  type: "project";
+  id: string;
+  slug: string;
+  name: string;
+  thumbnailUrl: string | null;
+  fileCount: number;
+  creatorUsername: string | null;
+  creatorDisplayName: string | null;
+}
+
 export interface SearchResponse {
   files: SearchHitFile[];
+  projects: SearchHitProject[];
   users: SearchHitUser[];
   materials: SearchHitMaterial[];
 }
@@ -70,6 +82,7 @@ export async function GET(request: Request) {
   if (rawQ.length < MIN_QUERY_LENGTH || rawQ.length > MAX_QUERY_LENGTH) {
     return NextResponse.json<SearchResponse>({
       files: [],
+      projects: [],
       users: [],
       materials: [],
     });
@@ -80,7 +93,7 @@ export async function GET(request: Request) {
   const pattern = `%${escapeLikePattern(q)}%`;
 
   try {
-    const [fileRows, userRows, catalog] = await Promise.all([
+    const [fileRows, projectRows, userRows, catalog] = await Promise.all([
       db
         .select({
           id: files.id,
@@ -100,6 +113,34 @@ export async function GET(request: Request) {
           )
         )
         .orderBy(desc(files.createdAt))
+        .limit(PER_CATEGORY_LIMIT),
+      db
+        .select({
+          id: projects.id,
+          slug: projects.slug,
+          name: projects.name,
+          thumbnailUrl: projects.thumbnailUrl,
+          creatorUsername: users.username,
+          creatorDisplayName: users.displayName,
+          fileCount: sql<number>`cast(count(${projectFiles.fileId}) as int)`,
+        })
+        .from(projects)
+        .innerJoin(users, eq(projects.userId, users.id))
+        .leftJoin(projectFiles, eq(projectFiles.projectId, projects.id))
+        .where(
+          and(
+            eq(projects.status, "published"),
+            eq(projects.visibility, "public"),
+            ilike(projects.name, pattern)
+          )
+        )
+        .groupBy(
+          projects.id,
+          users.username,
+          users.displayName,
+          projects.createdAt
+        )
+        .orderBy(desc(projects.createdAt))
         .limit(PER_CATEGORY_LIMIT),
       db
         .select({
@@ -154,6 +195,17 @@ export async function GET(request: Request) {
       creatorDisplayName: r.creatorDisplayName,
     }));
 
+    const projectsOut: SearchHitProject[] = projectRows.map((r) => ({
+      type: "project",
+      id: r.id,
+      slug: r.slug,
+      name: r.name,
+      thumbnailUrl: r.thumbnailUrl,
+      fileCount: r.fileCount,
+      creatorUsername: r.creatorUsername,
+      creatorDisplayName: r.creatorDisplayName,
+    }));
+
     const usersOut: SearchHitUser[] = userRows
       .filter(
         (u): u is typeof u & { username: string } =>
@@ -169,6 +221,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json<SearchResponse>({
       files: filesOut,
+      projects: projectsOut,
       users: usersOut,
       materials,
     });
