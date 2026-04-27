@@ -8,6 +8,8 @@ import { revalidatePath } from "next/cache";
 import { deleteObject } from "@/lib/storage";
 import { logError } from "@/lib/logger";
 
+const MAX_CAPTION_LENGTH = 500;
+
 export async function addFilePhoto(params: {
   fileId: string;
   storageKey: string;
@@ -16,6 +18,21 @@ export async function addFilePhoto(params: {
   try {
     const { userId } = await auth();
     if (!userId) return { error: "Unauthorized" };
+
+    // Reject any storageKey that isn't rooted at this user's photo
+    // prefix. The photo-presign route always emits `photos/<userId>/`
+    // — anything else is either spoofed (caller crafted a key for
+    // another user's R2 path) or a stale model-upload key being
+    // recycled. Both cases must not become a photo row.
+    const expectedPrefix = `photos/${userId}/`;
+    if (
+      typeof params.storageKey !== "string" ||
+      !params.storageKey.startsWith(expectedPrefix)
+    ) {
+      return { error: "Invalid storage key" };
+    }
+
+    const trimmedCaption = params.caption?.trim().slice(0, MAX_CAPTION_LENGTH);
 
     // Verify user owns the file
     const [file] = await db
@@ -39,7 +56,7 @@ export async function addFilePhoto(params: {
         fileId: params.fileId,
         userId,
         storageKey: params.storageKey,
-        caption: params.caption,
+        caption: trimmedCaption || null,
         sortOrder: maxOrder + 1,
       })
       .returning();
@@ -93,6 +110,11 @@ export async function updatePhotoCaption(photoId: string, caption: string) {
     const { userId } = await auth();
     if (!userId) return { error: "Unauthorized" };
 
+    if (typeof caption !== "string") {
+      return { error: "Invalid caption" };
+    }
+    const trimmed = caption.trim().slice(0, MAX_CAPTION_LENGTH);
+
     // Verify ownership via file
     const [photo] = await db
       .select({
@@ -109,7 +131,7 @@ export async function updatePhotoCaption(photoId: string, caption: string) {
 
     await db
       .update(filePhotos)
-      .set({ caption })
+      .set({ caption: trimmed || null })
       .where(eq(filePhotos.id, photoId));
 
     return { success: true };
