@@ -116,6 +116,61 @@ describe("pollQuotes", () => {
     expect(await done).toBe("timeout");
   });
 
+  it("returns 'timeout' early after 3 consecutive 4xx (stale priceId)", async () => {
+    // Simulates the mobile-backgrounded-tab case: CraftCloud has
+    // expired the priceId, every poll comes back 404 — without the
+    // bail-out the loop would spin until HARD_CEILING_MS.
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () => new Response("not found", { status: 404 })
+    );
+
+    const controller = new AbortController();
+    const done = pollQuotes({
+      priceId: "p1",
+      signal: controller.signal,
+      onSnapshot: () => void 0,
+    });
+
+    // Three failed polls + interspersed waits should resolve well
+    // under the 90s ceiling.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(await done).toBe("timeout");
+    expect(fetchSpy.mock.calls.length).toBeLessThanOrEqual(4);
+  });
+
+  it("resets the 4xx counter when a poll succeeds", async () => {
+    // A transient single 4xx mid-stream shouldn't be treated as a
+    // stale session — only a sustained run of them.
+    let n = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      n++;
+      if (n === 1 || n === 3) {
+        return new Response("transient", { status: 404 });
+      }
+      // Counter resets between the isolated 4xx hits, so we never
+      // reach 3 in a row. After a couple successes we settle.
+      const q = makeQuote("q1");
+      return new Response(
+        JSON.stringify({
+          quotes: [q],
+          shipping: [],
+          allComplete: true,
+        }),
+        { status: 200 }
+      );
+    });
+
+    const controller = new AbortController();
+    const done = pollQuotes({
+      priceId: "p1",
+      signal: controller.signal,
+      onSnapshot: () => void 0,
+    });
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(await done).toBe("complete");
+  });
+
   it("returns 'aborted' when the signal fires", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       async () =>

@@ -41,6 +41,14 @@ const HARD_CEILING_MS = 90_000;
 // we trust CraftCloud's allComplete flag and break out. Raising
 // this gives late vendors more time at the cost of a longer tail.
 const STABLE_POLLS_REQUIRED = 4;
+// Mobile browsers throttle background-tab JS; if the user backgrounded
+// the tab for several minutes the priceId can outlive its TTL on
+// CraftCloud's side and every subsequent poll comes back 4xx. Without
+// this counter the loop just spins until HARD_CEILING_MS — the user
+// stares at a loader for 90s for nothing. Three consecutive 4xx is
+// "the session is stale, stop trying" — bubble out as a timeout so
+// the existing retry UI fires.
+const CONSECUTIVE_CLIENT_ERROR_LIMIT = 3;
 
 /**
  * Sleep helper that rejects with an AbortError when the signal
@@ -97,6 +105,7 @@ export async function pollQuotes({
     const started = Date.now();
     let lastQuoteCount = 0;
     let stablePolls = 0;
+    let consecutiveClientErrors = 0;
 
     while (!signal.aborted) {
       if (Date.now() - started > HARD_CEILING_MS) return "timeout";
@@ -116,9 +125,20 @@ export async function pollQuotes({
 
       if (signal.aborted) return "aborted";
       if (!pollRes.ok) {
+        // 4xx repeated → priceId is stale (most often after a
+        // mobile tab was backgrounded long enough for CraftCloud to
+        // expire the session). Bail early so the retry UI fires
+        // instead of the user staring at a loader for 90s.
+        if (pollRes.status >= 400 && pollRes.status < 500) {
+          consecutiveClientErrors++;
+          if (consecutiveClientErrors >= CONSECUTIVE_CLIENT_ERROR_LIMIT) {
+            return "timeout";
+          }
+        }
         await wait(POLL_INTERVAL_MS, signal);
         continue;
       }
+      consecutiveClientErrors = 0;
 
       const snapshot = (await pollRes.json()) as QuoteSnapshot;
       onSnapshot(snapshot);
