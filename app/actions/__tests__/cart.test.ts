@@ -2,6 +2,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 let cartRows: unknown[] = [];
 let insertedValues: unknown[] = [];
+let upsertSet: unknown = null;
+// What the upsert's .returning() should yield — defaults to a brand
+// new id; tests can override to mimic the conflict-hit case where
+// the UNIQUE INDEX matches an existing row and ON CONFLICT DO UPDATE
+// returns that row's id.
+let upsertReturnsId = "new-cart-item-id";
 let deletedIds: string[] = [];
 let updatedSet: unknown = null;
 
@@ -28,7 +34,13 @@ vi.mock("@/lib/db", () => ({
       values: (v: unknown) => {
         insertedValues.push(v);
         return {
-          returning: () => [{ id: "new-cart-item-id" }],
+          onConflictDoUpdate: (cfg: { set?: unknown }) => {
+            if (cfg?.set) upsertSet = cfg.set;
+            return {
+              returning: () => [{ id: upsertReturnsId }],
+            };
+          },
+          returning: () => [{ id: upsertReturnsId }],
         };
       },
     }),
@@ -91,10 +103,12 @@ describe("addToCart", () => {
     vi.clearAllMocks();
     cartRows = [];
     insertedValues = [];
+    upsertSet = null;
+    upsertReturnsId = "new-cart-item-id";
     updatedSet = null;
   });
 
-  it("inserts a cart item with prices in cents", async () => {
+  it("upserts a cart item with prices in cents", async () => {
     const result = await addToCart(baseParams);
     expect(result).toEqual({ cartItemId: "new-cart-item-id" });
     expect(insertedValues).toHaveLength(1);
@@ -102,6 +116,13 @@ describe("addToCart", () => {
     expect(inserted.materialPrice).toBe(4250);
     expect(inserted.shippingPrice).toBe(800);
     expect(inserted.quantity).toBe(2);
+    // ON CONFLICT path is wired to bump the existing row's quantity
+    // (capped at 100 via LEAST). updatedAt also re-stamps so cart
+    // staleness UI reflects the latest touch.
+    const setShape = upsertSet as Record<string, unknown> | null;
+    expect(setShape).not.toBeNull();
+    expect(setShape).toHaveProperty("quantity");
+    expect(setShape).toHaveProperty("updatedAt");
   });
 
   it("rejects invalid params", async () => {
@@ -110,23 +131,13 @@ describe("addToCart", () => {
     expect(insertedValues).toHaveLength(0);
   });
 
-  it("merges with existing row of same (fileAsset, quote) by bumping quantity", async () => {
-    // Existing cart row has qty 1. Adding the same quote (qty 2)
-    // should update the row to qty 3 instead of inserting a second.
-    cartRows = [{ id: "existing-cart-item-id", quantity: 1, currency: "USD" }];
+  it("returns the existing row id when the upsert hits the unique constraint", async () => {
+    // Mimics the ON CONFLICT path: insert collides with the existing
+    // (user, file, quote) row, postgres bumps quantity, RETURNING
+    // yields that row's id.
+    upsertReturnsId = "existing-cart-item-id";
     const result = await addToCart(baseParams);
     expect(result).toEqual({ cartItemId: "existing-cart-item-id" });
-    expect(insertedValues).toHaveLength(0);
-    expect(updatedSet).toEqual({ quantity: 3 });
-  });
-
-  it("caps the merged quantity at 100", async () => {
-    cartRows = [
-      { id: "existing-cart-item-id", quantity: 99, currency: "USD" },
-    ];
-    const result = await addToCart({ ...baseParams, quantity: 5 });
-    expect(result).toEqual({ cartItemId: "existing-cart-item-id" });
-    expect(updatedSet).toEqual({ quantity: 100 });
   });
 
   it("rejects adds in a different currency than what's already in the cart", async () => {
@@ -136,7 +147,7 @@ describe("addToCart", () => {
     const result = await addToCart({ ...baseParams, currency: "USD" });
     expect(result).toMatchObject({ error: expect.stringContaining("EUR") });
     expect(insertedValues).toHaveLength(0);
-    expect(updatedSet).toBeNull();
+    expect(upsertSet).toBeNull();
   });
 });
 

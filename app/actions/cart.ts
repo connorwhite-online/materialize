@@ -3,7 +3,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { cartItems, fileAssets, files } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { addToCartSchema } from "@/lib/validations/print";
 import { logError } from "@/lib/logger";
@@ -66,33 +66,16 @@ export async function addToCart(params: {
       };
     }
 
-    // Merge duplicates: if this exact file + quote is already in the
-    // cart, bump the quantity instead of inserting a second row. A
-    // "duplicate" is (userId, fileAssetId, quoteId) — the quoteId
-    // already encodes vendor + material + shipping on CraftCloud's
-    // side, so two rows with the same quoteId are definitionally
-    // the same cart line.
-    const [existing] = await db
-      .select({ id: cartItems.id, quantity: cartItems.quantity })
-      .from(cartItems)
-      .where(
-        and(
-          eq(cartItems.userId, userId),
-          eq(cartItems.fileAssetId, data.fileAssetId),
-          eq(cartItems.quoteId, data.quoteId)
-        )
-      );
-
-    if (existing) {
-      const nextQty = Math.min(100, existing.quantity + data.quantity);
-      await db
-        .update(cartItems)
-        .set({ quantity: nextQty })
-        .where(eq(cartItems.id, existing.id));
-      revalidatePath("/");
-      return { cartItemId: existing.id };
-    }
-
+    // Merge duplicates atomically: a "duplicate" is
+    // (userId, fileAssetId, quoteId) — the quoteId already encodes
+    // vendor + material + shipping on CraftCloud's side, so two rows
+    // with the same quoteId are definitionally the same cart line.
+    // The previous SELECT-then-INSERT pattern raced when a user
+    // double-clicked Add — both requests passed the existence check
+    // and both inserted. The (user, file, quote) UNIQUE INDEX added
+    // in migration 0005 makes ON CONFLICT DO UPDATE the right shape
+    // here: postgres serializes the upsert and bumps the keeper row's
+    // quantity instead of producing a sibling row.
     const [item] = await db
       .insert(cartItems)
       .values({
@@ -108,6 +91,16 @@ export async function addToCart(params: {
         shippingPrice: Math.round(data.shippingPrice * 100),
         currency: data.currency,
         countryCode: data.countryCode,
+      })
+      .onConflictDoUpdate({
+        target: [cartItems.userId, cartItems.fileAssetId, cartItems.quoteId],
+        set: {
+          quantity: sql`LEAST(100, ${cartItems.quantity} + EXCLUDED.quantity)`,
+          // Bump updatedAt so cart-staleness UI reflects the latest
+          // touch (the `$onUpdate` only fires on full UPDATE statements,
+          // not the implicit one inside ON CONFLICT DO UPDATE).
+          updatedAt: new Date(),
+        },
       })
       .returning({ id: cartItems.id });
 

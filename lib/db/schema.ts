@@ -358,6 +358,16 @@ export const cartItems = pgTable("cart_items", {
 }, (table) => [
   index("cart_items_user_id_idx").on(table.userId),
   index("cart_items_user_vendor_idx").on(table.userId, table.vendorId),
+  // Race-safe dedup: a double "Add to Cart" click can otherwise pass
+  // the SELECT-then-INSERT check on both requests and end up with two
+  // rows for the same (file, quote). The constraint pairs with an
+  // INSERT ... ON CONFLICT DO UPDATE in addToCart so the second
+  // request becomes a quantity bump instead of a duplicate row.
+  uniqueIndex("cart_items_user_file_quote_uniq").on(
+    table.userId,
+    table.fileAssetId,
+    table.quoteId
+  ),
 ]);
 
 // Collections

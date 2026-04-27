@@ -224,7 +224,7 @@ export function EditFileButton({
               {visibility === "public"
                 ? "Appears in browse and search."
                 : hasBuyers
-                  ? "Hidden from browse and search. Existing buyers keep their download access."
+                  ? "Hidden from browse and search. Existing buyers and active orders keep their access."
                   : "Hidden from browse and search. Only you can see it."}
             </p>
           </div>
