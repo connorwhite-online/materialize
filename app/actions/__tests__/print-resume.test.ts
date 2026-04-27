@@ -3,6 +3,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Per-test row the db.select mock will return. Let tests swap in
 // different printOrders shapes without rebuilding the whole mock.
 let selectedOrder: unknown = null;
+// Whether the atomic-claim UPDATE().returning() in resumePrintOrder
+// finds a row to claim. Default to "we won the claim" so the
+// happy-path fresh-session test runs as it always did.
+let claimReturns: Array<{ id: string }> = [{ id: "order-id-1" }];
 const mockDbUpdateSet = vi.fn();
 
 vi.mock("@/lib/db", () => ({
@@ -34,7 +38,17 @@ vi.mock("@/lib/db", () => ({
     update: () => ({
       set: (...args: unknown[]) => {
         mockDbUpdateSet(...args);
-        return { where: () => Promise.resolve() };
+        return {
+          where: (..._w: unknown[]) => {
+            const promise: Promise<void> & {
+              returning: () => Array<{ id: string }>;
+            } = Promise.resolve() as Promise<void> & {
+              returning: () => Array<{ id: string }>;
+            };
+            promise.returning = () => claimReturns;
+            return promise;
+          },
+        };
       },
     }),
   },
@@ -103,6 +117,7 @@ describe("resumePrintOrder", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     selectedOrder = null;
+    claimReturns = [{ id: "order-id-1" }];
   });
 
   it("returns the existing Stripe URL when the session is still open", async () => {
@@ -158,6 +173,22 @@ describe("resumePrintOrder", () => {
     selectedOrder = { ...baseOrder, status: "ordered" };
     const result = await resumePrintOrder("order-id-1");
     expect(result).toEqual({ error: "Order already processed" });
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("returns 'in progress' when the atomic claim is lost mid-flight", async () => {
+    // Sibling tab/device already started a Resume — they hold the
+    // claim sentinel, no real id has landed yet. We must NOT mint a
+    // second Stripe session.
+    selectedOrder = {
+      ...baseOrder,
+      stripeSessionId: "session_claim:other-worker",
+    };
+    claimReturns = [];
+    const result = await resumePrintOrder("order-id-1");
+    expect(result).toEqual({
+      error: "Checkout already in progress. Please refresh and try again.",
+    });
     expect(mockCreate).not.toHaveBeenCalled();
   });
 

@@ -917,7 +917,15 @@ export async function resumePrintOrder(
 
     const stripe = getStripe();
 
-    if (order.stripeSessionId) {
+    // Same multi-tab guard as completePrintOrder: if a real session
+    // is already attached, retrieve it; if it's open, return that URL
+    // so two Resume clicks across tabs land on the same Stripe page.
+    // Skip claim sentinels — they signal a sibling worker is mid-flight
+    // and the lost-race branch below handles the wait.
+    if (
+      order.stripeSessionId &&
+      !isSessionClaimSentinel(order.stripeSessionId)
+    ) {
       try {
         const existing = await stripe.checkout.sessions.retrieve(
           order.stripeSessionId
@@ -925,22 +933,91 @@ export async function resumePrintOrder(
         if (existing.status === "open" && existing.url) {
           return { checkoutUrl: existing.url };
         }
+        // Expired/closed → null out the stale id so the atomic
+        // claim below can fire on a clean row.
+        await db
+          .update(printOrders)
+          .set({ stripeSessionId: null })
+          .where(
+            and(
+              eq(printOrders.id, orderId),
+              eq(printOrders.stripeSessionId, order.stripeSessionId)
+            )
+          );
       } catch (error) {
-        // Fall through to re-create on any retrieval failure.
         logError("resumePrintOrder.retrieve", error);
       }
     }
 
-    const sessionResult = await createStripeSessionForOrder(order, {
-      email: order.shippingAddress.email,
-      isAnonFlow: false,
-    });
-    if ("error" in sessionResult) return { error: sessionResult.error };
+    // Atomic claim — only one Resume click across tabs/devices wins.
+    const sentinel = `${SESSION_CLAIM_PREFIX}${nanoid()}`;
+    const claimed = await db
+      .update(printOrders)
+      .set({ stripeSessionId: sentinel })
+      .where(
+        and(
+          eq(printOrders.id, orderId),
+          eq(printOrders.userId, userId),
+          eq(printOrders.status, "cart_created"),
+          isNull(printOrders.stripeSessionId)
+        )
+      )
+      .returning({ id: printOrders.id });
 
+    if (claimed.length === 0) {
+      const [refreshed] = await db
+        .select()
+        .from(printOrders)
+        .where(eq(printOrders.id, orderId));
+      if (!refreshed) return { error: "Order not found" };
+      if (refreshed.status !== "cart_created") {
+        return { error: "Order already processed" };
+      }
+      if (
+        refreshed.stripeSessionId &&
+        !isSessionClaimSentinel(refreshed.stripeSessionId)
+      ) {
+        try {
+          const existing = await stripe.checkout.sessions.retrieve(
+            refreshed.stripeSessionId
+          );
+          if (existing.status === "open" && existing.url) {
+            return { checkoutUrl: existing.url };
+          }
+        } catch (err) {
+          logError("resumePrintOrder.retrieve.lostRace", err);
+        }
+      }
+      return {
+        error: "Checkout already in progress. Please refresh and try again.",
+      };
+    }
+
+    let sessionResult: Awaited<ReturnType<typeof createStripeSessionForOrder>>;
+    try {
+      sessionResult = await createStripeSessionForOrder(order, {
+        email: order.shippingAddress.email,
+        isAnonFlow: false,
+      });
+    } catch (err) {
+      await releaseSessionClaim(orderId, sentinel);
+      throw err;
+    }
+    if ("error" in sessionResult) {
+      await releaseSessionClaim(orderId, sentinel);
+      return { error: sessionResult.error };
+    }
+
+    // Conditional swap — only commit if our sentinel is still here.
     await db
       .update(printOrders)
       .set({ stripeSessionId: sessionResult.id })
-      .where(eq(printOrders.id, orderId));
+      .where(
+        and(
+          eq(printOrders.id, orderId),
+          eq(printOrders.stripeSessionId, sentinel)
+        )
+      );
 
     return { checkoutUrl: sessionResult.url };
   } catch (error) {
