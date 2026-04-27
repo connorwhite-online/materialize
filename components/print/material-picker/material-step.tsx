@@ -15,8 +15,21 @@ interface MaterialStepProps {
    * vendors might still arrive on a retry.
    */
   quotesPartial?: boolean;
+  /**
+   * True when the parent passed a `preselectMaterialId` — the user
+   * came in via "Print with X" and the price request was scoped to
+   * that one material. Empty-results in this branch are usually
+   * transient vendor unavailability, not a too-big-to-print case.
+   */
+  materialScoped?: boolean;
   /** Re-runs the quote fetch from scratch. */
   onRetryQuotes?: () => void;
+  /**
+   * Drops the parent's preselect scope so a refetch returns the
+   * full unscoped quote set. Used in the scoped-empty branch to
+   * offer "browse other materials" as a recovery action.
+   */
+  onClearScope?: () => void;
   onPick: (materialId: string) => void;
 }
 
@@ -43,7 +56,9 @@ export function MaterialStep({
   quotes,
   quotesLoading,
   quotesPartial = false,
+  materialScoped = false,
   onRetryQuotes,
+  onClearScope,
   onPick,
 }: MaterialStepProps) {
   const { groups, cardsByGroup } = useMemo(() => {
@@ -103,14 +118,25 @@ export function MaterialStep({
     return <MaterialStepLoading />;
   }
 
-  // Polling finished with no quotes — usually means the file's
-  // geometry exceeds every vendor's print volume, or no vendor in
-  // the selected region supports the model. Avoid a silent empty
-  // grid so the user knows what happened and can try a different
-  // region. When the empty result came from a polling timeout (not
-  // a stable allComplete from CraftCloud), suggest a retry instead
-  // of "scale the model down" — a slow vendor may just have missed
-  // the window.
+  // Polling finished with no quotes. Three sub-cases drive different
+  // copy + recovery actions:
+  //
+  //   - timeout (quotesPartial=true): the loop hit the hard ceiling
+  //     before CraftCloud reported a stable allComplete. Slow vendor
+  //     responses, mobile network throttling — retrying usually fixes
+  //     it.
+  //
+  //   - scoped + complete: a "Print with X" entry constrained the
+  //     request to one material. With niche materials (copper,
+  //     titanium) the legitimate vendor count is tiny and individual
+  //     vendor flakiness can produce a transient zero. The generic
+  //     "model exceeds print volume" copy is misleading here — guide
+  //     the user to retry or browse other materials.
+  //
+  //   - unscoped + complete: a real empty result. The geometry is
+  //     too big for every vendor in the region, or no producer ships
+  //     to the selected country. Keep the original copy — it matches
+  //     the actual problem.
   if (!quotesLoading && quotes.length === 0) {
     if (quotesPartial) {
       return (
@@ -131,6 +157,32 @@ export function MaterialStep({
               Retry
             </Button>
           )}
+        </div>
+      );
+    }
+    if (materialScoped) {
+      return (
+        <div className="rounded-xl border border-border bg-muted/20 p-6 text-center">
+          <p className="text-sm font-medium">
+            No vendors are quoting this material right now
+          </p>
+          <p className="mx-auto mt-1.5 max-w-sm text-xs text-muted-foreground">
+            Specialty materials are produced by a handful of vendors and
+            sometimes none respond in time. Retry, or browse other
+            materials that work for your model.
+          </p>
+          <div className="mt-3 flex flex-wrap justify-center gap-2">
+            {onRetryQuotes && (
+              <Button variant="outline" onClick={onRetryQuotes}>
+                Retry
+              </Button>
+            )}
+            {onClearScope && (
+              <Button variant="ghost" onClick={onClearScope}>
+                Try a different material
+              </Button>
+            )}
+          </div>
         </div>
       );
     }

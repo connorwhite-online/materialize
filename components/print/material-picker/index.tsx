@@ -96,7 +96,9 @@ export function MaterialPicker({
         quotes={quotes}
         quotesLoading={quotesLoading}
         quotesPartial={quotesPartial}
+        materialScoped={!!preselectMaterialId}
         onRetryQuotes={onRetryQuotes}
+        onClearScope={onClearPreselectScope}
         onPick={(id) => {
           setMaterialId(id);
           setFinishGroupId(null);
