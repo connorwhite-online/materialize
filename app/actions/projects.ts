@@ -20,7 +20,7 @@ import {
   files,
   purchases,
 } from "@/lib/db/schema";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { nanoid } from "nanoid";
@@ -270,19 +270,39 @@ export async function reorderProjectFiles(
       .where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
     if (!project) return { error: "Project not found" };
 
-    await Promise.all(
-      orderedFileIds.map((fileId, i) =>
-        db
-          .update(projectFiles)
-          .set({ position: i })
-          .where(
-            and(
-              eq(projectFiles.projectId, projectId),
-              eq(projectFiles.fileId, fileId)
-            )
-          )
-      )
+    // Dedupe + cap to MAX_PROJECT_FILES so a malicious caller can't
+    // submit a giant ordered list. Keep first occurrence ordering.
+    const seen = new Set<string>();
+    const ordered: string[] = [];
+    for (const id of orderedFileIds) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      ordered.push(id);
+      if (ordered.length >= MAX_PROJECT_FILES) break;
+    }
+    if (ordered.length === 0) return { success: true };
+
+    // Atomic re-numbering: a single UPDATE...CASE WHEN statement
+    // assigns every row's position in one round-trip. The previous
+    // Promise.all-of-N-updates approach interleaved when the user
+    // dragged fast — two reorders in flight could leave rows pointing
+    // at conflicting positions, with the visible order matching
+    // neither drag.
+    const cases = ordered.map(
+      (fileId, i) =>
+        sql`WHEN ${projectFiles.fileId} = ${fileId} THEN ${i}`
     );
+    await db
+      .update(projectFiles)
+      .set({
+        position: sql`CASE ${sql.join(cases, sql` `)} ELSE ${projectFiles.position} END`,
+      })
+      .where(
+        and(
+          eq(projectFiles.projectId, projectId),
+          inArray(projectFiles.fileId, ordered)
+        )
+      );
 
     revalidatePath(`/projects/${project.slug}`);
     return { success: true };
