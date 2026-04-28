@@ -40,14 +40,24 @@ export function SignUpForm({
   const [error, setError] = useState("");
   const otpInputRef = useRef<HTMLInputElement>(null);
 
-  // Modal-shake recovery: when AuthModal blocks an outside-press the
-  // hidden OTP input can lose focus from the click. rAF defers our
-  // refocus past any focus changes the outside-click triggered so
-  // .focus() actually sticks.
+  // Modal-shake recovery (see sign-in-form for the full reasoning).
+  // Multiple deferred attempts + a DOM query fallback so the OTP
+  // input gets refocused even when Base UI's focus-trap restoration
+  // races our synchronous .focus() call.
   useEffect(() => {
     if (step !== "code") return;
+    const focusOtp = () => {
+      const el =
+        otpInputRef.current ??
+        (document.querySelector(
+          "input[data-input-otp]"
+        ) as HTMLInputElement | null);
+      el?.focus();
+    };
     const onShake = () => {
-      requestAnimationFrame(() => otpInputRef.current?.focus());
+      requestAnimationFrame(focusOtp);
+      setTimeout(focusOtp, 60);
+      setTimeout(focusOtp, 180);
     };
     window.addEventListener(AUTH_MODAL_SHAKE_EVENT, onShake);
     return () => window.removeEventListener(AUTH_MODAL_SHAKE_EVENT, onShake);

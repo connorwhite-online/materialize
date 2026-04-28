@@ -35,14 +35,27 @@ export function SignInForm({ onSuccess, redirectUrl = "/dashboard" }: SignInForm
   const otpInputRef = useRef<HTMLInputElement>(null);
 
   // When the AuthModal blocks an outside-press / escape-key it shakes
-  // the dialog and dispatches AUTH_MODAL_SHAKE_EVENT. The hidden OTP
-  // input can lose focus from the click. rAF defers our refocus past
-  // any focus changes the outside-click triggered (body taking focus,
-  // dialog focus-trap re-running, etc.) so .focus() actually lands.
+  // the dialog and dispatches AUTH_MODAL_SHAKE_EVENT. Re-focusing the
+  // OTP input is fiddly: Base UI's focus trap runs its own restoration
+  // on its own schedule (microtask / rAF), and a single .focus() in
+  // the synchronous handler gets stolen back. We retry across rAF +
+  // two short timeouts to outlast that restoration. The DOM query
+  // fallback covers the case where the wrapper InputOTP component
+  // isn't forwarding ref through React 19's ref-as-prop pipe.
   useEffect(() => {
     if (step !== "code") return;
+    const focusOtp = () => {
+      const el =
+        otpInputRef.current ??
+        (document.querySelector(
+          "input[data-input-otp]"
+        ) as HTMLInputElement | null);
+      el?.focus();
+    };
     const onShake = () => {
-      requestAnimationFrame(() => otpInputRef.current?.focus());
+      requestAnimationFrame(focusOtp);
+      setTimeout(focusOtp, 60);
+      setTimeout(focusOtp, 180);
     };
     window.addEventListener(AUTH_MODAL_SHAKE_EVENT, onShake);
     return () => window.removeEventListener(AUTH_MODAL_SHAKE_EVENT, onShake);
