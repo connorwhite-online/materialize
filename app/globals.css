@@ -313,28 +313,6 @@
   }
 }
 
-/* Auth-modal shake on a blocked outside-press / escape-key.
-   Tailwind v4 centers via the `translate` CSS property (not
-   `transform`) — `-translate-x-1/2 -translate-y-1/2` outputs
-   `translate: -50% -50%`. Animating `transform` stacked on top and
-   doubled the offset, jumping the popup up-and-left at animation
-   start. Animate the same `translate` property so the keyframes
-   own it cleanly. Asymmetric initial swing + decaying rebounds
-   for the "you missed a step" springy feel rather than the
-   symmetric error vibrate. */
-@keyframes auth-modal-shake {
-  0%, 100% { translate: -50% -50%; }
-  15% { translate: calc(-50% - 14px) -50%; }
-  30% { translate: calc(-50% + 11px) -50%; }
-  45% { translate: calc(-50% - 7px) -50%; }
-  60% { translate: calc(-50% + 4px) -50%; }
-  80% { translate: calc(-50% - 2px) -50%; }
-}
-
-.auth-modal-shake {
-  animation: auth-modal-shake 0.28s cubic-bezier(0.36, 0.07, 0.19, 0.97);
-}
-
 @layer base {
   * {
     @apply border-border outline-ring/50;

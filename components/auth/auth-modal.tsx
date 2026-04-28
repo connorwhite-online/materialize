@@ -27,8 +27,20 @@ const AuthModalContext = createContext<AuthModalContextValue | null>(null);
  */
 export const AUTH_MODAL_SHAKE_EVENT = "auth-modal:shake";
 
-const SHAKE_CLASS = "auth-modal-shake";
 const SHAKE_DURATION_MS = 280;
+// Match Tailwind's `translate: -50% -50%` (the popup's resting
+// centering) so the first/last keyframes are pixel-identical to the
+// rest state — prevents a paint flash when the animation finishes
+// and the compositor layer is dropped.
+const SHAKE_KEYFRAMES: Keyframe[] = [
+  { translate: "-50% -50%", offset: 0 },
+  { translate: "calc(-50% - 14px) -50%", offset: 0.15 },
+  { translate: "calc(-50% + 11px) -50%", offset: 0.3 },
+  { translate: "calc(-50% - 7px) -50%", offset: 0.45 },
+  { translate: "calc(-50% + 4px) -50%", offset: 0.6 },
+  { translate: "calc(-50% - 2px) -50%", offset: 0.8 },
+  { translate: "-50% -50%", offset: 1 },
+];
 
 export function useAuthModal() {
   const ctx = useContext(AuthModalContext);
@@ -42,7 +54,7 @@ export function AuthModalProvider({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("sign-in");
   const popupRef = useRef<HTMLDivElement>(null);
-  const shakeTimer = useRef<number | null>(null);
+  const activeShake = useRef<Animation | null>(null);
 
   const openAuth = useCallback((newMode: Mode = "sign-in") => {
     setMode(newMode);
@@ -56,19 +68,18 @@ export function AuthModalProvider({ children }: { children: React.ReactNode }) {
   const triggerShake = useCallback(() => {
     const el = popupRef.current;
     if (!el) return;
-    // Re-trigger pattern: remove the class, force a reflow, then
-    // re-add — ensures the keyframe restarts cleanly even if the
-    // user clicks outside multiple times in rapid succession.
-    el.classList.remove(SHAKE_CLASS);
-    void el.offsetWidth;
-    el.classList.add(SHAKE_CLASS);
-    if (shakeTimer.current !== null) {
-      window.clearTimeout(shakeTimer.current);
-    }
-    shakeTimer.current = window.setTimeout(() => {
-      el.classList.remove(SHAKE_CLASS);
-      shakeTimer.current = null;
-    }, SHAKE_DURATION_MS);
+    // WAAPI over a className toggle: the browser owns the animation
+    // lifecycle, the compositor layer is promoted/demoted smoothly,
+    // and there's no className → no flash when the animation ends.
+    // Cancel any in-flight shake so rapid clicks restart cleanly.
+    activeShake.current?.cancel();
+    activeShake.current = el.animate(SHAKE_KEYFRAMES, {
+      duration: SHAKE_DURATION_MS,
+      easing: "cubic-bezier(0.36, 0.07, 0.19, 0.97)",
+      // No fill mode — once the animation ends, computed style
+      // reverts to the underlying CSS rule (Tailwind's translate),
+      // which matches the final keyframe pixel-for-pixel.
+    });
     // Forms in the code/OTP step latch onto this to recover focus.
     window.dispatchEvent(new CustomEvent(AUTH_MODAL_SHAKE_EVENT));
   }, []);
