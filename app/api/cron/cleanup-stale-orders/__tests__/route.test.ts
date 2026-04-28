@@ -1,26 +1,43 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-let updateReturns: Array<{ id: string }> = [];
+// Per-test return shapes for the three sweep statements. Each one
+// runs independently in the route's Promise.all, so the mock has to
+// disambiguate by the table being targeted.
+let orderUpdateReturns: Array<{ id: string }> = [];
+let cartDeleteReturns: Array<{ id: string }> = [];
+let webhookDeleteReturns: Array<{ id: string }> = [];
 const updateSet = vi.fn();
-const updateWhere = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
-    update: () => ({
+    update: (table: { __name?: string }) => ({
       set: (values: unknown) => {
-        updateSet(values);
+        updateSet({ table: table?.__name, values });
         return {
-          where: (w: unknown) => {
-            updateWhere(w);
+          where: () => {
             const promise: Promise<void> & {
               returning: () => Array<{ id: string }>;
             } = Promise.resolve() as Promise<void> & {
               returning: () => Array<{ id: string }>;
             };
-            promise.returning = () => updateReturns;
+            promise.returning = () => orderUpdateReturns;
             return promise;
           },
         };
+      },
+    }),
+    delete: (table: { __name?: string }) => ({
+      where: () => {
+        const promise: Promise<void> & {
+          returning: () => Array<{ id: string }>;
+        } = Promise.resolve() as Promise<void> & {
+          returning: () => Array<{ id: string }>;
+        };
+        promise.returning = () =>
+          table?.__name === "cartItems"
+            ? cartDeleteReturns
+            : webhookDeleteReturns;
+        return promise;
       },
     }),
   },
@@ -28,9 +45,20 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("@/lib/db/schema", () => ({
   printOrders: {
+    __name: "printOrders",
     id: "id",
     status: "status",
     createdAt: "created_at",
+  },
+  cartItems: {
+    __name: "cartItems",
+    id: "id",
+    updatedAt: "updated_at",
+  },
+  webhookEventsProcessed: {
+    __name: "webhookEventsProcessed",
+    id: "id",
+    processedAt: "processed_at",
   },
 }));
 
@@ -54,7 +82,9 @@ describe("cron/cleanup-stale-orders", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    updateReturns = [];
+    orderUpdateReturns = [];
+    cartDeleteReturns = [];
+    webhookDeleteReturns = [];
     process.env.CRON_SECRET = "test-secret";
   });
 
@@ -82,24 +112,38 @@ describe("cron/cleanup-stale-orders", () => {
     expect(updateSet).not.toHaveBeenCalled();
   });
 
-  it("cancels stale cart_created orders and reports the count", async () => {
-    updateReturns = [
-      { id: "order-1" },
-      { id: "order-2" },
-      { id: "order-3" },
+  it("runs all three sweeps and reports per-task counts", async () => {
+    orderUpdateReturns = [{ id: "order-1" }, { id: "order-2" }];
+    cartDeleteReturns = [
+      { id: "cart-1" },
+      { id: "cart-2" },
+      { id: "cart-3" },
     ];
+    webhookDeleteReturns = [{ id: "evt-1" }];
+
     const res = await GET(makeRequest("Bearer test-secret"));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.cancelled).toBe(3);
-    expect(updateSet).toHaveBeenCalledWith({ status: "cancelled" });
+    expect(body.cancelledOrders).toBe(2);
+    expect(body.deletedCartItems).toBe(3);
+    expect(body.prunedWebhookEvents).toBe(1);
+    expect(body.cutoffs).toMatchObject({
+      orders: expect.any(String),
+      cartItems: expect.any(String),
+      webhookEvents: expect.any(String),
+    });
+    expect(updateSet).toHaveBeenCalledWith({
+      table: "printOrders",
+      values: { status: "cancelled" },
+    });
   });
 
-  it("returns 0 when nothing is stale", async () => {
-    updateReturns = [];
+  it("returns 0 across the board when nothing is stale", async () => {
     const res = await GET(makeRequest("Bearer test-secret"));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.cancelled).toBe(0);
+    expect(body.cancelledOrders).toBe(0);
+    expect(body.deletedCartItems).toBe(0);
+    expect(body.prunedWebhookEvents).toBe(0);
   });
 });

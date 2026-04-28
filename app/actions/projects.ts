@@ -189,8 +189,15 @@ export async function addFilesToProject(
       return { error: "One or more files are not yours." };
     }
 
-    // Skip duplicates already linked to the project, then enforce
-    // the per-project file cap on the resulting total.
+    // Cap total project size before doing the bulk insert. The
+    // following SELECT-then-INSERT was previously racy: two near-
+    // simultaneous addFiles requests both saw the same `existing`
+    // count and could push the project past MAX_PROJECT_FILES, OR
+    // both insert the same fileId and hit the
+    // project_files_project_file_uniq constraint. The unique index
+    // (project_id, file_id) already exists from migration 0003 —
+    // route the second-arrival's collision through onConflictDoNothing
+    // so it cleanly no-ops instead of throwing.
     const existing = await db
       .select({ fileId: projectFiles.fileId })
       .from(projectFiles)
@@ -207,13 +214,18 @@ export async function addFilesToProject(
     }
 
     const startPosition = existing.length;
-    await db.insert(projectFiles).values(
-      additions.map((fileId, i) => ({
-        projectId,
-        fileId,
-        position: startPosition + i,
-      }))
-    );
+    await db
+      .insert(projectFiles)
+      .values(
+        additions.map((fileId, i) => ({
+          projectId,
+          fileId,
+          position: startPosition + i,
+        }))
+      )
+      .onConflictDoNothing({
+        target: [projectFiles.projectId, projectFiles.fileId],
+      });
 
     revalidatePath("/dashboard");
     revalidatePath(`/projects/${project.slug}`);
