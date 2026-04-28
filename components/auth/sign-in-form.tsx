@@ -44,21 +44,37 @@ export function SignInForm({ onSuccess, redirectUrl = "/dashboard" }: SignInForm
   // isn't forwarding ref through React 19's ref-as-prop pipe.
   useEffect(() => {
     if (step !== "code") return;
-    const focusOtp = () => {
-      const el =
-        otpInputRef.current ??
-        (document.querySelector(
-          "input[data-input-otp]"
-        ) as HTMLInputElement | null);
+    console.log("[auth-debug] sign-in code step: listener registered");
+    const focusOtp = (label: string) => {
+      const ref = otpInputRef.current;
+      const fallback = document.querySelector<HTMLInputElement>(
+        "input[data-input-otp]"
+      );
+      const el = ref ?? fallback;
+      console.log("[auth-debug] focusOtp", {
+        label,
+        hasRef: !!ref,
+        hasFallback: !!fallback,
+        activeBefore: document.activeElement?.tagName,
+      });
       el?.focus();
+      console.log("[auth-debug] focusOtp after", {
+        label,
+        activeAfter: document.activeElement?.tagName,
+        activeIsOtp: document.activeElement === el,
+      });
     };
     const onShake = () => {
-      requestAnimationFrame(focusOtp);
-      setTimeout(focusOtp, 60);
-      setTimeout(focusOtp, 180);
+      console.log("[auth-debug] shake event received in sign-in-form");
+      requestAnimationFrame(() => focusOtp("rAF"));
+      setTimeout(() => focusOtp("60ms"), 60);
+      setTimeout(() => focusOtp("180ms"), 180);
     };
     window.addEventListener(AUTH_MODAL_SHAKE_EVENT, onShake);
-    return () => window.removeEventListener(AUTH_MODAL_SHAKE_EVENT, onShake);
+    return () => {
+      console.log("[auth-debug] sign-in code step: listener removed");
+      window.removeEventListener(AUTH_MODAL_SHAKE_EVENT, onShake);
+    };
   }, [step]);
 
   const handleSendCode = async (e: React.FormEvent) => {

@@ -67,20 +67,14 @@ export function AuthModalProvider({ children }: { children: React.ReactNode }) {
 
   const triggerShake = useCallback(() => {
     const el = popupRef.current;
+    console.log("[auth-debug] triggerShake", { hasPopup: !!el });
     if (!el) return;
-    // WAAPI over a className toggle: the browser owns the animation
-    // lifecycle, the compositor layer is promoted/demoted smoothly,
-    // and there's no className → no flash when the animation ends.
-    // Cancel any in-flight shake so rapid clicks restart cleanly.
     activeShake.current?.cancel();
     activeShake.current = el.animate(SHAKE_KEYFRAMES, {
       duration: SHAKE_DURATION_MS,
       easing: "cubic-bezier(0.36, 0.07, 0.19, 0.97)",
-      // No fill mode — once the animation ends, computed style
-      // reverts to the underlying CSS rule (Tailwind's translate),
-      // which matches the final keyframe pixel-for-pixel.
     });
-    // Forms in the code/OTP step latch onto this to recover focus.
+    console.log("[auth-debug] dispatching AUTH_MODAL_SHAKE_EVENT");
     window.dispatchEvent(new CustomEvent(AUTH_MODAL_SHAKE_EVENT));
   }, []);
 
