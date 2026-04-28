@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useSignIn } from "@clerk/nextjs/legacy";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,6 @@ import {
 } from "@/components/ui/input-otp";
 import { Separator } from "@/components/ui/separator";
 import { SocialButtons } from "./social-buttons";
-import { AUTH_MODAL_SHAKE_EVENT } from "./auth-modal";
 
 type CodeStrategy = "email_code" | "phone_code";
 
@@ -32,50 +31,6 @@ export function SignInForm({ onSuccess, redirectUrl = "/dashboard" }: SignInForm
   const [strategy, setStrategy] = useState<CodeStrategy>("email_code");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const otpInputRef = useRef<HTMLInputElement>(null);
-
-  // When the AuthModal blocks an outside-press / escape-key it shakes
-  // the dialog and dispatches AUTH_MODAL_SHAKE_EVENT. Re-focusing the
-  // OTP input is fiddly: Base UI's focus trap runs its own restoration
-  // on its own schedule (microtask / rAF), and a single .focus() in
-  // the synchronous handler gets stolen back. We retry across rAF +
-  // two short timeouts to outlast that restoration. The DOM query
-  // fallback covers the case where the wrapper InputOTP component
-  // isn't forwarding ref through React 19's ref-as-prop pipe.
-  useEffect(() => {
-    if (step !== "code") return;
-    console.log("[auth-debug] sign-in code step: listener registered");
-    const focusOtp = (label: string) => {
-      const ref = otpInputRef.current;
-      const fallback = document.querySelector<HTMLInputElement>(
-        "input[data-input-otp]"
-      );
-      const el = ref ?? fallback;
-      console.log("[auth-debug] focusOtp", {
-        label,
-        hasRef: !!ref,
-        hasFallback: !!fallback,
-        activeBefore: document.activeElement?.tagName,
-      });
-      el?.focus();
-      console.log("[auth-debug] focusOtp after", {
-        label,
-        activeAfter: document.activeElement?.tagName,
-        activeIsOtp: document.activeElement === el,
-      });
-    };
-    const onShake = () => {
-      console.log("[auth-debug] shake event received in sign-in-form");
-      requestAnimationFrame(() => focusOtp("rAF"));
-      setTimeout(() => focusOtp("60ms"), 60);
-      setTimeout(() => focusOtp("180ms"), 180);
-    };
-    window.addEventListener(AUTH_MODAL_SHAKE_EVENT, onShake);
-    return () => {
-      console.log("[auth-debug] sign-in code step: listener removed");
-      window.removeEventListener(AUTH_MODAL_SHAKE_EVENT, onShake);
-    };
-  }, [step]);
 
   const handleSendCode = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -162,7 +117,6 @@ export function SignInForm({ onSuccess, redirectUrl = "/dashboard" }: SignInForm
         </p>
         <div className="flex justify-center">
           <InputOTP
-            ref={otpInputRef}
             maxLength={6}
             value={code}
             onChange={(value) => {

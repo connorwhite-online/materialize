@@ -67,14 +67,34 @@ export function AuthModalProvider({ children }: { children: React.ReactNode }) {
 
   const triggerShake = useCallback(() => {
     const el = popupRef.current;
-    console.log("[auth-debug] triggerShake", { hasPopup: !!el });
     if (!el) return;
     activeShake.current?.cancel();
     activeShake.current = el.animate(SHAKE_KEYFRAMES, {
       duration: SHAKE_DURATION_MS,
       easing: "cubic-bezier(0.36, 0.07, 0.19, 0.97)",
     });
-    console.log("[auth-debug] dispatching AUTH_MODAL_SHAKE_EVENT");
+
+    // Re-focus the OTP input if the user is mid-code-entry. Done from
+    // the modal itself (not via event → form listener) so the chain is
+    // shorter and easier to keep working: scoped DOM query within the
+    // popup, multiple deferred attempts to outlast Base UI's focus
+    // trap restoration. Five attempts spread across the shake's full
+    // duration covers any reasonable timing.
+    const focusOtpIfPresent = () => {
+      const otp = el.querySelector<HTMLInputElement>(
+        "input[data-input-otp]"
+      );
+      if (otp && document.activeElement !== otp) otp.focus();
+    };
+    requestAnimationFrame(focusOtpIfPresent);
+    setTimeout(focusOtpIfPresent, 50);
+    setTimeout(focusOtpIfPresent, 120);
+    setTimeout(focusOtpIfPresent, 220);
+    setTimeout(focusOtpIfPresent, 320);
+
+    // Kept for any consumers that want to react to a blocked close —
+    // forms previously used this for their own focus restoration but
+    // the modal now owns it directly.
     window.dispatchEvent(new CustomEvent(AUTH_MODAL_SHAKE_EVENT));
   }, []);
 

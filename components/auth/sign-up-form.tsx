@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useSignUp } from "@clerk/nextjs/legacy";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,6 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { SocialButtons } from "./social-buttons";
 import { setUsername } from "@/app/actions/onboarding";
-import { AUTH_MODAL_SHAKE_EVENT } from "./auth-modal";
 
 type Method = "email" | "phone";
 type Step = "identifier" | "code" | "username";
@@ -38,30 +37,6 @@ export function SignUpForm({
   const [step, setStep] = useState<Step>("identifier");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const otpInputRef = useRef<HTMLInputElement>(null);
-
-  // Modal-shake recovery (see sign-in-form for the full reasoning).
-  // Multiple deferred attempts + a DOM query fallback so the OTP
-  // input gets refocused even when Base UI's focus-trap restoration
-  // races our synchronous .focus() call.
-  useEffect(() => {
-    if (step !== "code") return;
-    const focusOtp = () => {
-      const el =
-        otpInputRef.current ??
-        (document.querySelector(
-          "input[data-input-otp]"
-        ) as HTMLInputElement | null);
-      el?.focus();
-    };
-    const onShake = () => {
-      requestAnimationFrame(focusOtp);
-      setTimeout(focusOtp, 60);
-      setTimeout(focusOtp, 180);
-    };
-    window.addEventListener(AUTH_MODAL_SHAKE_EVENT, onShake);
-    return () => window.removeEventListener(AUTH_MODAL_SHAKE_EVENT, onShake);
-  }, [step]);
 
   const handleSendCode = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -195,7 +170,6 @@ export function SignUpForm({
         </p>
         <div className="flex justify-center">
           <InputOTP
-            ref={otpInputRef}
             maxLength={6}
             value={code}
             onChange={(codeValue) => {
