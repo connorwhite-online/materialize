@@ -1,7 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback } from "react";
-import { motion, useAnimationControls } from "motion/react";
+import { createContext, useContext, useState, useCallback, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -28,6 +27,9 @@ const AuthModalContext = createContext<AuthModalContextValue | null>(null);
  */
 export const AUTH_MODAL_SHAKE_EVENT = "auth-modal:shake";
 
+const SHAKE_CLASS = "auth-modal-shake";
+const SHAKE_DURATION_MS = 280;
+
 export function useAuthModal() {
   const ctx = useContext(AuthModalContext);
   if (!ctx) {
@@ -39,7 +41,8 @@ export function useAuthModal() {
 export function AuthModalProvider({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("sign-in");
-  const shakeControls = useAnimationControls();
+  const popupRef = useRef<HTMLDivElement>(null);
+  const shakeTimer = useRef<number | null>(null);
 
   const openAuth = useCallback((newMode: Mode = "sign-in") => {
     setMode(newMode);
@@ -51,19 +54,24 @@ export function AuthModalProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const triggerShake = useCallback(() => {
-    // Asymmetric, decaying offsets give the "springy" read — initial
-    // swing further than the rebound, then a quick settle. Tighter
-    // duration than a typical error shake so it reads as "missed a
-    // step" rather than "you broke something."
-    shakeControls.start({
-      x: [0, -8, 6, -4, 2, 0],
-      transition: { duration: 0.22, ease: [0.36, 0.07, 0.19, 0.97] },
-    });
-    // Forms in the code/OTP step latch onto this to recover focus.
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent(AUTH_MODAL_SHAKE_EVENT));
+    const el = popupRef.current;
+    if (!el) return;
+    // Re-trigger pattern: remove the class, force a reflow, then
+    // re-add — ensures the keyframe restarts cleanly even if the
+    // user clicks outside multiple times in rapid succession.
+    el.classList.remove(SHAKE_CLASS);
+    void el.offsetWidth;
+    el.classList.add(SHAKE_CLASS);
+    if (shakeTimer.current !== null) {
+      window.clearTimeout(shakeTimer.current);
     }
-  }, [shakeControls]);
+    shakeTimer.current = window.setTimeout(() => {
+      el.classList.remove(SHAKE_CLASS);
+      shakeTimer.current = null;
+    }, SHAKE_DURATION_MS);
+    // Forms in the code/OTP step latch onto this to recover focus.
+    window.dispatchEvent(new CustomEvent(AUTH_MODAL_SHAKE_EVENT));
+  }, []);
 
   return (
     <AuthModalContext.Provider value={{ openAuth, closeAuth }}>
@@ -88,22 +96,12 @@ export function AuthModalProvider({ children }: { children: React.ReactNode }) {
       >
         <DialogContent
           className="sm:max-w-sm"
-          // Swap the popup's underlying div for a motion element so the
-          // shake moves the entire chrome (bg, border, shadow), not
-          // just the inner content. transformTemplate composes the
-          // centering translate with motion's animated x — without it,
-          // motion would clobber the Tailwind -translate-1/2 used to
-          // center the popup over the viewport.
-          render={
-            <motion.div
-              animate={shakeControls}
-              transformTemplate={({ x }) => {
-                const xPx =
-                  typeof x === "number" ? `${x}px` : (x ?? "0px");
-                return `translate(calc(-50% + ${xPx}), -50%)`;
-              }}
-            />
-          }
+          // ref reaches the popup root so triggerShake() can toggle the
+          // shake class on the same element that owns the centering
+          // transform — keyframes drive the whole transform property
+          // and include the -50%, -50% centering, so we don't fight a
+          // composition battle with Tailwind's translate utilities.
+          ref={popupRef}
         >
           <DialogHeader>
             <DialogTitle className="text-center">
