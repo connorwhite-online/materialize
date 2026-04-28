@@ -52,12 +52,12 @@ export function AuthModalProvider({ children }: { children: React.ReactNode }) {
 
   const triggerShake = useCallback(() => {
     // Asymmetric, decaying offsets give the "springy" read — initial
-    // swing further than the rebound, then a quick settle. Keyed on a
-    // single transition so motion runs them as one tween rather than
-    // queuing per keyframe.
+    // swing further than the rebound, then a quick settle. Tighter
+    // duration than a typical error shake so it reads as "missed a
+    // step" rather than "you broke something."
     shakeControls.start({
-      x: [0, -10, 8, -6, 4, -2, 0],
-      transition: { duration: 0.4, ease: [0.36, 0.07, 0.19, 0.97] },
+      x: [0, -8, 6, -4, 2, 0],
+      transition: { duration: 0.22, ease: [0.36, 0.07, 0.19, 0.97] },
     });
     // Forms in the code/OTP step latch onto this to recover focus.
     if (typeof window !== "undefined") {
@@ -86,48 +86,64 @@ export function AuthModalProvider({ children }: { children: React.ReactNode }) {
           setOpen(nextOpen);
         }}
       >
-        <DialogContent className="sm:max-w-sm">
-          <motion.div animate={shakeControls}>
-            <DialogHeader>
-              <DialogTitle className="text-center">
-                {mode === "sign-in" ? "Sign in" : "Create an account"}
-              </DialogTitle>
-            </DialogHeader>
+        <DialogContent
+          className="sm:max-w-sm"
+          // Swap the popup's underlying div for a motion element so the
+          // shake moves the entire chrome (bg, border, shadow), not
+          // just the inner content. transformTemplate composes the
+          // centering translate with motion's animated x — without it,
+          // motion would clobber the Tailwind -translate-1/2 used to
+          // center the popup over the viewport.
+          render={
+            <motion.div
+              animate={shakeControls}
+              transformTemplate={({ x }) => {
+                const xPx =
+                  typeof x === "number" ? `${x}px` : (x ?? "0px");
+                return `translate(calc(-50% + ${xPx}), -50%)`;
+              }}
+            />
+          }
+        >
+          <DialogHeader>
+            <DialogTitle className="text-center">
+              {mode === "sign-in" ? "Sign in" : "Create an account"}
+            </DialogTitle>
+          </DialogHeader>
 
-            <div className="mt-2">
-              {mode === "sign-in" ? (
-                <SignInForm onSuccess={closeAuth} />
-              ) : (
-                <SignUpForm onSuccess={closeAuth} />
-              )}
-            </div>
+          <div className="mt-2">
+            {mode === "sign-in" ? (
+              <SignInForm onSuccess={closeAuth} />
+            ) : (
+              <SignUpForm onSuccess={closeAuth} />
+            )}
+          </div>
 
-            <p className="mt-4 text-center text-sm text-muted-foreground">
-              {mode === "sign-in" ? (
-                <>
-                  Don&apos;t have an account?{" "}
-                  <button
-                    type="button"
-                    onClick={() => setMode("sign-up")}
-                    className="text-foreground transition-colors hover:text-foreground/80"
-                  >
-                    Sign up
-                  </button>
-                </>
-              ) : (
-                <>
-                  Already have an account?{" "}
-                  <button
-                    type="button"
-                    onClick={() => setMode("sign-in")}
-                    className="text-foreground transition-colors hover:text-foreground/80"
-                  >
-                    Sign in
-                  </button>
-                </>
-              )}
-            </p>
-          </motion.div>
+          <p className="mt-4 text-center text-sm text-muted-foreground">
+            {mode === "sign-in" ? (
+              <>
+                Don&apos;t have an account?{" "}
+                <button
+                  type="button"
+                  onClick={() => setMode("sign-up")}
+                  className="text-foreground transition-colors hover:text-foreground/80"
+                >
+                  Sign up
+                </button>
+              </>
+            ) : (
+              <>
+                Already have an account?{" "}
+                <button
+                  type="button"
+                  onClick={() => setMode("sign-in")}
+                  className="text-foreground transition-colors hover:text-foreground/80"
+                >
+                  Sign in
+                </button>
+              </>
+            )}
+          </p>
         </DialogContent>
       </Dialog>
     </AuthModalContext.Provider>
