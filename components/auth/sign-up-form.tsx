@@ -41,11 +41,14 @@ export function SignUpForm({
   const otpInputRef = useRef<HTMLInputElement>(null);
 
   // Modal-shake recovery: when AuthModal blocks an outside-press the
-  // hidden OTP input can lose focus from the click. Re-focus on the
-  // shake event so the user can keep typing without re-tapping.
+  // hidden OTP input can lose focus from the click. rAF defers our
+  // refocus past any focus changes the outside-click triggered so
+  // .focus() actually sticks.
   useEffect(() => {
     if (step !== "code") return;
-    const onShake = () => otpInputRef.current?.focus();
+    const onShake = () => {
+      requestAnimationFrame(() => otpInputRef.current?.focus());
+    };
     window.addEventListener(AUTH_MODAL_SHAKE_EVENT, onShake);
     return () => window.removeEventListener(AUTH_MODAL_SHAKE_EVENT, onShake);
   }, [step]);

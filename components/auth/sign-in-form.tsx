@@ -36,11 +36,14 @@ export function SignInForm({ onSuccess, redirectUrl = "/dashboard" }: SignInForm
 
   // When the AuthModal blocks an outside-press / escape-key it shakes
   // the dialog and dispatches AUTH_MODAL_SHAKE_EVENT. The hidden OTP
-  // input can lose focus from the click, so we reach back and refocus
-  // it — keeps the keyboard ready and the visual caret blinking.
+  // input can lose focus from the click. rAF defers our refocus past
+  // any focus changes the outside-click triggered (body taking focus,
+  // dialog focus-trap re-running, etc.) so .focus() actually lands.
   useEffect(() => {
     if (step !== "code") return;
-    const onShake = () => otpInputRef.current?.focus();
+    const onShake = () => {
+      requestAnimationFrame(() => otpInputRef.current?.focus());
+    };
     window.addEventListener(AUTH_MODAL_SHAKE_EVENT, onShake);
     return () => window.removeEventListener(AUTH_MODAL_SHAKE_EVENT, onShake);
   }, [step]);
