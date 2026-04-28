@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSignUp } from "@clerk/nextjs/legacy";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { SocialButtons } from "./social-buttons";
 import { setUsername } from "@/app/actions/onboarding";
+import { AUTH_MODAL_SHAKE_EVENT } from "./auth-modal";
 
 type Method = "email" | "phone";
 type Step = "identifier" | "code" | "username";
@@ -37,6 +38,17 @@ export function SignUpForm({
   const [step, setStep] = useState<Step>("identifier");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const otpInputRef = useRef<HTMLInputElement>(null);
+
+  // Modal-shake recovery: when AuthModal blocks an outside-press the
+  // hidden OTP input can lose focus from the click. Re-focus on the
+  // shake event so the user can keep typing without re-tapping.
+  useEffect(() => {
+    if (step !== "code") return;
+    const onShake = () => otpInputRef.current?.focus();
+    window.addEventListener(AUTH_MODAL_SHAKE_EVENT, onShake);
+    return () => window.removeEventListener(AUTH_MODAL_SHAKE_EVENT, onShake);
+  }, [step]);
 
   const handleSendCode = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -170,6 +182,7 @@ export function SignUpForm({
         </p>
         <div className="flex justify-center">
           <InputOTP
+            ref={otpInputRef}
             maxLength={6}
             value={code}
             onChange={(codeValue) => {
