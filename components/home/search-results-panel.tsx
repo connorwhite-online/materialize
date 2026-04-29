@@ -252,23 +252,32 @@ function UserCard({
   );
 }
 
+/**
+ * Single-section skeleton sized to match exactly one Section + cards
+ * row in the real results. We render only ONE section (vs the 3-4
+ * the real panel can produce) so the container never SHRINKS as
+ * real data lands — it grows to fit additional sections, which
+ * reads better than a confident-looking placeholder collapsing.
+ *
+ * Cards mirror the real card shape (w-28, aspect-square thumb,
+ * two truncated text lines) so the transition feels like content
+ * filling in, not a layout swap.
+ */
 function SearchResultsSkeleton() {
   return (
     <div className="space-y-4 px-2 pt-2 pb-3">
-      {["Files", "Materials", "Creators"].map((title) => (
-        <div key={title}>
-          <Skeleton className="mx-2 mb-1.5 h-2.5 w-14" />
-          <div className="flex gap-2 px-2 pb-1">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="flex w-28 shrink-0 flex-col gap-1.5">
-                <Skeleton className="aspect-square w-full rounded-lg" />
-                <Skeleton className="h-2.5 w-20 mx-0.5" />
-                <Skeleton className="h-2 w-14 mx-0.5" />
-              </div>
-            ))}
-          </div>
+      <div>
+        <Skeleton className="mx-2 mb-1.5 h-2.5 w-14" />
+        <div className="flex gap-2 px-2 pb-1">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="flex w-28 shrink-0 flex-col gap-1.5">
+              <Skeleton className="aspect-square w-full rounded-lg" />
+              <Skeleton className="h-2.5 w-20 mx-0.5" />
+              <Skeleton className="h-2 w-14 mx-0.5" />
+            </div>
+          ))}
         </div>
-      ))}
+      </div>
     </div>
   );
 }
