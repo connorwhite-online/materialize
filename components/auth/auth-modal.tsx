@@ -74,18 +74,27 @@ export function AuthModalProvider({ children }: { children: React.ReactNode }) {
       easing: "cubic-bezier(0.36, 0.07, 0.19, 0.97)",
     });
 
-    // Re-focus the OTP input if the user is mid-code-entry. Done from
-    // the modal itself (not via event → form listener) so the chain is
-    // shorter and easier to keep working: scoped DOM query within the
-    // popup, multiple deferred attempts to outlast Base UI's focus
-    // trap restoration. Five attempts spread across the shake's full
-    // duration covers any reasonable timing.
+    // Re-focus the OTP input if the user is mid-code-entry. Done
+    // from the modal itself (not via event → form listener) so the
+    // chain is short and easier to keep working: scoped DOM query
+    // within the popup.
+    //
+    // iOS Safari only honors programmatic .focus() on a text input
+    // when it's called inside a live user-activation token, which
+    // expires when control returns to the event loop. setTimeout /
+    // requestAnimationFrame consume that token — deferred .focus()
+    // calls become silent no-ops on iOS. So we fire SYNCHRONOUSLY
+    // first (still inside the click handler's user gesture), then
+    // queue deferred retries as a desktop fallback for cases where
+    // Base UI's focus trap restoration races and steals focus back
+    // after our sync call.
     const focusOtpIfPresent = () => {
       const otp = el.querySelector<HTMLInputElement>(
         "input[data-input-otp]"
       );
       if (otp && document.activeElement !== otp) otp.focus();
     };
+    focusOtpIfPresent();
     requestAnimationFrame(focusOtpIfPresent);
     setTimeout(focusOtpIfPresent, 50);
     setTimeout(focusOtpIfPresent, 120);
