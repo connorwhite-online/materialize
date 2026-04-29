@@ -19,7 +19,6 @@ import { uploadToCraftCloud } from "@/lib/craftcloud/upload-client";
 import { checkGeometry } from "@/lib/geometry-checks";
 import { REGIONS, DEFAULT_REGION } from "@/lib/craftcloud/regions";
 import { MaterialPreview } from "@/components/viewer/material-preview";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -706,7 +705,16 @@ export function QuoteConfigurator({
               >
                 Quantity
               </Label>
-              <Input
+              {/*
+                Plain input rather than <Input> so it can wear the
+                same depth-raised pill as the Ship-to <Select> sitting
+                next to it. The default Input is depth-sunken — at the
+                same h-10 the inset shadow reads visually shorter than
+                the raised select, so the two pills don't line up as
+                a matched pair. Same height, padding, radius, and
+                focus-shadow as SelectTrigger.
+              */}
+              <input
                 id="quantity"
                 type="number"
                 min={1}
@@ -722,7 +730,7 @@ export function QuoteConfigurator({
                     : 1;
                   setQuantity(next);
                 }}
-                className="w-20"
+                className="depth-raised h-10 w-20 rounded-xl border border-border bg-card px-3.5 py-1 text-sm outline-none transition-shadow duration-200 ease-out focus-visible:shadow-[var(--shadow-raised),var(--shadow-focus-ring)]"
               />
             </div>
             <div className="flex items-center gap-2">

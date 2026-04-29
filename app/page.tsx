@@ -4,8 +4,14 @@ import { HeroWordmark } from "@/components/home/hero-wordmark";
 import { HomeBottomBar } from "@/components/home/home-bottom-bar";
 
 export default async function HomePage() {
+  // h-dvh, not h-screen: 100vh on iOS Safari includes the area the
+  // URL bar occupies, so the page comes out taller than the actual
+  // visible viewport whenever the bar is shown — the body then
+  // scrolls a hair to absorb the difference even though our layout
+  // is sized to fit. dvh follows the URL-bar visibility and matches
+  // what's actually on screen.
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
+    <div className="flex h-dvh flex-col overflow-hidden">
       {/* Minimal header — auth nav only, no border, no brand
           text. The hero wordmark below serves as the brand. */}
       <header>
