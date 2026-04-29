@@ -21,6 +21,9 @@ const isPublicRoute = createRouteMatcher([
   "/api/cron/(.*)",
   // Public thumbnails for marketplace listings.
   "/api/thumbnails(.*)",
+  // Same-origin proxy for the 3D model preview on published file
+  // pages. The route itself enforces published-or-owner access.
+  "/api/files/preview/(.*)",
 ]);
 
 export default clerkMiddleware(async (auth, req) => {

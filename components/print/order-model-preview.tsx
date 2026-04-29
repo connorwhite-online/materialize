@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { MaterialPreview } from "@/components/viewer/material-preview";
 
 interface OrderModelPreviewProps {
@@ -12,41 +11,23 @@ interface OrderModelPreviewProps {
 const PREVIEWABLE = new Set(["stl", "obj", "3mf"]);
 
 /**
- * Resolves a signed download URL for the order's file asset and renders
- * it with the Materialize shader tinted to the ordered material's color.
- * Server-side rendering can't issue the signed URL request, hence the
- * client component layer in front of MaterialPreview.
+ * Renders the file-detail / order 3D preview by pointing the loader
+ * at our same-origin proxy route, which streams the model bytes from
+ * R2 server-side.
+ *
+ * We used to round-trip through `/api/craftcloud/download-url` to get
+ * a signed R2 URL and hand that to the loader directly — but that
+ * makes the client do a cross-origin fetch to R2 and falls over the
+ * moment the bucket's CORS rules don't include the current origin
+ * (which is every preview deploy and the production domain after a
+ * domain change). The proxy moves the R2 read server-side, where
+ * CORS doesn't apply.
  */
 export function OrderModelPreview({
   fileAssetId,
   format,
   materialColor,
 }: OrderModelPreviewProps) {
-  const [modelUrl, setModelUrl] = useState<string | null>(null);
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    if (!PREVIEWABLE.has(format)) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/craftcloud/download-url", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fileAssetId }),
-        });
-        if (!res.ok) throw new Error("download url failed");
-        const data = await res.json();
-        if (!cancelled) setModelUrl(data.downloadUrl);
-      } catch {
-        if (!cancelled) setError(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [fileAssetId, format]);
-
   if (!PREVIEWABLE.has(format)) {
     return (
       <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
@@ -55,21 +36,7 @@ export function OrderModelPreview({
     );
   }
 
-  if (error) {
-    return (
-      <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
-        Preview unavailable
-      </div>
-    );
-  }
-
-  if (!modelUrl) {
-    return (
-      <div className="flex h-full w-full items-center justify-center">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted border-t-foreground" />
-      </div>
-    );
-  }
+  const modelUrl = `/api/files/preview/${fileAssetId}`;
 
   return (
     <MaterialPreview
