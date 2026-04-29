@@ -216,14 +216,18 @@ export function HomeBottomBar() {
         )}
       </AnimatePresence>
 
-      <motion.div
+      {/* Plain div — no `layout` animation. The inner AnimatePresence
+          children already transition `height: 0 ↔ auto` cleanly, and
+          motion's layout-FLIP would scale-transform the container
+          across that change, visibly stretching the placeholder /
+          Upload-button text for the duration of the animation. The
+          container's height is content-driven; that's enough. */}
+      <div
         ref={containerRef}
-        layout
-        transition={{ type: "spring", stiffness: 400, damping: 34 }}
         className={cn(
-          "depth-sunken pointer-events-auto w-full max-w-2xl rounded-3xl border border-input",
+          "pointer-events-auto w-full max-w-2xl rounded-3xl border border-input",
           "bg-muted/70 backdrop-blur-xl dark:bg-input/40",
-          "p-1"
+          "depth-sunken p-1"
         )}
       >
         <AnimatePresence initial={false}>
@@ -299,7 +303,7 @@ export function HomeBottomBar() {
             {mode === "uploading" ? "Cancel" : "Upload"}
           </Button>
         </form>
-      </motion.div>
+      </div>
 
       {/* Metadata form opens only when the user explicitly clicks
           "Save to your library" on the PickedFileActions CTAs. */}

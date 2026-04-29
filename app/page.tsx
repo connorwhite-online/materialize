@@ -14,25 +14,20 @@ export default async function HomePage() {
         </div>
       </header>
 
-      {/* pb-56 on mobile leaves more bottom space so the hero
-          sits higher; pb-40 on sm+ keeps the desktop spacing. */}
-      <main className="flex-1 flex flex-col pb-56 sm:pb-40">
+      {/* Bottom padding reserves vertical room for the fixed
+          HomeBottomBar (search + explore + upload). pb-44 on mobile
+          is sized to fit the wordmark + canvas + carousel inside the
+          remaining viewport on small phones without forcing scroll. */}
+      <main className="flex-1 flex flex-col pb-44 sm:pb-40">
         <div className="flex-1 flex items-end justify-center px-4">
-          {/* z-0 establishes a local stacking context so the
-              wordmark's -z-10 stays below siblings here but above
-              the page background. */}
-          <div className="relative z-0 w-full max-w-5xl flex flex-col items-center">
-            {/* Mobile: wordmark sits in normal flow above the
-                canvas (just above the torus, below the header).
-                Desktop (sm+): wordmark becomes absolutely
-                positioned BEHIND the canvas (-z-10). The canvas
-                uses alpha:true so its non-torus pixels are
-                transparent — the wordmark shows through everywhere
-                except where the torus is actually drawn, which
-                makes the torus appear to float in front of the
-                letters. pointer-events-none lets drag/swipe pass
-                straight through. */}
-            <HeroWordmark className="flex justify-center sm:absolute sm:inset-x-0 sm:-top-40 sm:-z-10" />
+          <div className="w-full max-w-5xl flex flex-col items-center gap-2">
+            {/* Wordmark sits in normal flow above the canvas on every
+                viewport. We had it absolutely positioned behind the
+                canvas previously (so the torus floated through the
+                glyphs), but the overlap was decorative-only and the
+                extra height on mobile caused the page to scroll a
+                hair. Keeping the typography simple and stacked. */}
+            <HeroWordmark />
             <HeroShowcase />
           </div>
         </div>
