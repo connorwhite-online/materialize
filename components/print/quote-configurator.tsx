@@ -146,37 +146,24 @@ export function QuoteConfigurator({
     setCheckoutError(null);
   }, [selectedQuote, selectedShipping, quantity, regionCode]);
 
-  // Resolved download URL for the model preview viewer.
-  const [previewModelUrl, setPreviewModelUrl] = useState<string | null>(null);
+  // Model URL for the preview viewer.
+  // - Draft mode (anon, in-memory File): a blob URL we own.
+  // - File-asset mode: a stable same-origin proxy URL — no JSON
+  //   round-trip needed, the proxy enforces access on each request.
+  const [previewModelUrl, setPreviewModelUrl] = useState<string | null>(() =>
+    fileAssetId ? `/api/files/preview/${fileAssetId}` : null
+  );
 
   useEffect(() => {
-    // Draft mode: blob URL from the in-memory File.
-    if (draftMode) {
-      const url = URL.createObjectURL(draftMode.file);
-      setPreviewModelUrl(url);
-      return () => URL.revokeObjectURL(url);
+    if (!draftMode) {
+      setPreviewModelUrl(
+        fileAssetId ? `/api/files/preview/${fileAssetId}` : null
+      );
+      return;
     }
-
-    if (!fileAssetId) return;
-
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/craftcloud/download-url", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fileAssetId }),
-        });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!cancelled) setPreviewModelUrl(data.downloadUrl);
-      } catch {
-        // Preview is non-critical — fall back to silent skip.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    const url = URL.createObjectURL(draftMode.file);
+    setPreviewModelUrl(url);
+    return () => URL.revokeObjectURL(url);
   }, [fileAssetId, draftMode]);
 
   // The 3D preview tints the model with the selected quote's real

@@ -130,53 +130,36 @@ export function UploadPreview({
   format,
   onDimensionsComputed,
 }: UploadPreviewProps) {
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
-  const [error, setError] = useState(false);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(() => {
+    // Synchronous URL resolution for the same-origin proxy paths —
+    // no JSON pre-fetch needed, the route enforces access on each
+    // request.
+    if (fileAssetId) return `/api/files/preview/${fileAssetId}`;
+    if (storageKey) {
+      return `/api/files/preview/by-key?key=${encodeURIComponent(storageKey)}`;
+    }
+    return null;
+  });
 
   useEffect(() => {
-    // In-memory File path: build a blob URL synchronously and revoke
-    // it on unmount. No network round trip.
+    // In-memory File path (anon draft, not yet uploaded): build a blob
+    // URL synchronously and revoke it on unmount.
     if (file) {
       const url = URL.createObjectURL(file);
       setDownloadUrl(url);
       return () => URL.revokeObjectURL(url);
     }
 
-    let cancelled = false;
-    (async () => {
-      try {
-        // Prefer fileAssetId — works for owners and viewers of published
-        // files. Fall back to storageKey for owner-only contexts.
-        const body = fileAssetId
-          ? { fileAssetId }
-          : storageKey
-            ? { storageKey }
-            : null;
-        if (!body) throw new Error("no source");
-        const res = await fetch("/api/craftcloud/download-url", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        if (!res.ok) throw new Error("failed");
-        const data = await res.json();
-        if (!cancelled) setDownloadUrl(data.downloadUrl);
-      } catch {
-        if (!cancelled) setError(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    if (fileAssetId) {
+      setDownloadUrl(`/api/files/preview/${fileAssetId}`);
+    } else if (storageKey) {
+      setDownloadUrl(
+        `/api/files/preview/by-key?key=${encodeURIComponent(storageKey)}`
+      );
+    } else {
+      setDownloadUrl(null);
+    }
   }, [file, storageKey, fileAssetId]);
-
-  if (error) {
-    return (
-      <div className="relative w-full h-full flex items-center justify-center">
-        <p className="text-xs text-muted-foreground">Preview unavailable</p>
-      </div>
-    );
-  }
 
   if (!downloadUrl) {
     return <LoadingPreview />;

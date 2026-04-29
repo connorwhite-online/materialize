@@ -53,33 +53,13 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
     !!item.primaryFormat &&
     PREVIEWABLE_FORMATS.has(item.primaryFormat);
 
-  const kickOffCapture = useCallback(async () => {
+  const kickOffCapture = useCallback(() => {
     if (capturing || !item.primaryAssetId) return;
     setCapturing(true);
-    try {
-      const res = await fetch("/api/craftcloud/download-url", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileAssetId: item.primaryAssetId }),
-      });
-      if (!res.ok) {
-        console.warn(
-          `[thumbnail] download-url failed for asset ${item.primaryAssetId}`,
-          res.status
-        );
-        throw new Error("download url failed");
-      }
-      const data = await res.json();
-      console.log(
-        `[thumbnail] capture starting for "${item.name}"`,
-        data.downloadUrl
-      );
-      setCaptureModelUrl(data.downloadUrl);
-    } catch (err) {
-      console.error(`[thumbnail] kickOffCapture failed`, err);
-      setCapturing(false);
-    }
-  }, [capturing, item.primaryAssetId, item.name]);
+    // Same-origin proxy URL — no JSON pre-fetch, the proxy enforces
+    // access on each request and there's no signed URL to expire.
+    setCaptureModelUrl(`/api/files/preview/${item.primaryAssetId}`);
+  }, [capturing, item.primaryAssetId]);
 
   // Safety net — if the offscreen capture hasn't produced a thumbnail
   // after 20s (loader error, CORS block, infinite suspense, etc.), let

@@ -6,27 +6,33 @@ import { generateDownloadUrl } from "@/lib/storage";
 import { logError } from "@/lib/logger";
 
 /**
- * Same-origin streaming proxy for the 3D model preview on file pages.
+ * Same-origin streaming proxy for the asset's bytes.
  *
- * `STLLoader` (and the other three.js loaders) does a browser `fetch()`
- * for the model bytes — which means a cross-origin GET to R2 needs a
- * CORS preflight that allows our origin + the GET method. Bucket-side
- * CORS is configured for uploads (PUT) but not for previews, and we
- * don't want to keep that surface in lockstep with every new origin
- * (preview deploys, custom domains, etc.).
+ * Browser-side three.js loaders (`STLLoader`, `OBJLoader`, `ThreeMFLoader`)
+ * and the CraftCloud-upload helper both `fetch()` the model from this
+ * URL. Talking directly to R2 from the browser would need a CORS
+ * preflight allowing every origin we ship from (production, preview
+ * deploys, dev), and the bucket only has CORS configured for the upload
+ * PUT — every GET browser-side trips "Failed to fetch". Keeping the R2
+ * read on the server kills the dependency on bucket-side CORS for
+ * downloads entirely.
  *
- * Streaming through this route side-steps the issue entirely: the
- * client fetches `/api/files/preview/<assetId>` (same origin, no
- * preflight), and the server pipes the R2 GET response body straight
- * back. The signed-URL step still happens, just server-side where
- * CORS doesn't apply.
- *
- * Access policy mirrors the existing `/api/craftcloud/download-url`
- * route: published files are previewable by anyone; draft files are
- * only previewable by their creator.
+ * Access policy: published files are previewable by anyone (mirrors the
+ * detail page); draft files are owner-only. Anything that pulls model
+ * bytes back into the browser flows through here, so this is the one
+ * place to enforce that policy.
  */
+
+const FORMAT_MIME: Record<string, string> = {
+  stl: "model/stl",
+  obj: "text/plain",
+  "3mf": "model/3mf",
+  step: "application/step",
+  amf: "application/x-amf",
+};
+
 export async function GET(
-  _request: Request,
+  request: Request,
   props: { params: Promise<{ fileAssetId: string }> }
 ) {
   const { fileAssetId } = await props.params;
@@ -56,22 +62,32 @@ export async function GET(
     }
 
     const downloadUrl = await generateDownloadUrl(assetRow.storageKey, 300);
-    const upstream = await fetch(downloadUrl);
+    // Forward the client's AbortSignal so a navigation away during
+    // load doesn't keep the upstream R2 connection open.
+    const upstream = await fetch(downloadUrl, { signal: request.signal });
     if (!upstream.ok || !upstream.body) {
       return new Response("Upstream fetch failed", { status: 502 });
     }
 
-    // Pass the bytes through. Cache for a few minutes — the asset is
-    // immutable for a given fileAssetId (storage keys are content-
-    // addressed at upload time), so the browser/CDN can hold onto it.
-    return new Response(upstream.body, {
-      status: 200,
-      headers: {
-        "Content-Type": "application/octet-stream",
-        "Cache-Control": "private, max-age=300",
-      },
+    const headers = new Headers({
+      "Content-Type":
+        FORMAT_MIME[assetRow.format] ?? "application/octet-stream",
+      // Storage keys are immutable per asset (uploads are content-
+      // addressed at create time), so the bytes are safe to cache for
+      // the full life of the URL. Private because the proxy itself is
+      // auth-gated.
+      "Cache-Control": "private, max-age=86400, immutable",
     });
+    const upstreamLength = upstream.headers.get("content-length");
+    if (upstreamLength) headers.set("Content-Length", upstreamLength);
+
+    return new Response(upstream.body, { status: 200, headers });
   } catch (error) {
+    // AbortError just means the client navigated away — not a real
+    // failure, don't pollute logs.
+    if ((error as Error)?.name === "AbortError") {
+      return new Response(null, { status: 499 });
+    }
     logError("api/files/preview", error);
     return new Response("Preview failed", { status: 500 });
   }
