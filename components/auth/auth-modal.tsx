@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback, useRef } from "react";
+import { createContext, useContext, useState, useCallback } from "react";
 import {
   Dialog,
   DialogContent,
@@ -19,29 +19,6 @@ interface AuthModalContextValue {
 
 const AuthModalContext = createContext<AuthModalContextValue | null>(null);
 
-/**
- * Custom event fired on `window` whenever the modal blocks an
- * outside-press / escape-key. Forms listen for it to re-focus their
- * active input — most importantly the hidden OTP input which can
- * lose focus when the user clicks the dim overlay.
- */
-export const AUTH_MODAL_SHAKE_EVENT = "auth-modal:shake";
-
-const SHAKE_DURATION_MS = 280;
-// Match Tailwind's `translate: -50% -50%` (the popup's resting
-// centering) so the first/last keyframes are pixel-identical to the
-// rest state — prevents a paint flash when the animation finishes
-// and the compositor layer is dropped.
-const SHAKE_KEYFRAMES: Keyframe[] = [
-  { translate: "-50% -50%", offset: 0 },
-  { translate: "calc(-50% - 14px) -50%", offset: 0.15 },
-  { translate: "calc(-50% + 11px) -50%", offset: 0.3 },
-  { translate: "calc(-50% - 7px) -50%", offset: 0.45 },
-  { translate: "calc(-50% + 4px) -50%", offset: 0.6 },
-  { translate: "calc(-50% - 2px) -50%", offset: 0.8 },
-  { translate: "-50% -50%", offset: 1 },
-];
-
 export function useAuthModal() {
   const ctx = useContext(AuthModalContext);
   if (!ctx) {
@@ -53,8 +30,6 @@ export function useAuthModal() {
 export function AuthModalProvider({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("sign-in");
-  const popupRef = useRef<HTMLDivElement>(null);
-  const activeShake = useRef<Animation | null>(null);
 
   const openAuth = useCallback((newMode: Mode = "sign-in") => {
     setMode(newMode);
@@ -65,48 +40,6 @@ export function AuthModalProvider({ children }: { children: React.ReactNode }) {
     setOpen(false);
   }, []);
 
-  const triggerShake = useCallback(() => {
-    const el = popupRef.current;
-    if (!el) return;
-    activeShake.current?.cancel();
-    activeShake.current = el.animate(SHAKE_KEYFRAMES, {
-      duration: SHAKE_DURATION_MS,
-      easing: "cubic-bezier(0.36, 0.07, 0.19, 0.97)",
-    });
-
-    // Re-focus the OTP input if the user is mid-code-entry. Done
-    // from the modal itself (not via event → form listener) so the
-    // chain is short and easier to keep working: scoped DOM query
-    // within the popup.
-    //
-    // iOS Safari only honors programmatic .focus() on a text input
-    // when it's called inside a live user-activation token, which
-    // expires when control returns to the event loop. setTimeout /
-    // requestAnimationFrame consume that token — deferred .focus()
-    // calls become silent no-ops on iOS. So we fire SYNCHRONOUSLY
-    // first (still inside the click handler's user gesture), then
-    // queue deferred retries as a desktop fallback for cases where
-    // Base UI's focus trap restoration races and steals focus back
-    // after our sync call.
-    const focusOtpIfPresent = () => {
-      const otp = el.querySelector<HTMLInputElement>(
-        "input[data-input-otp]"
-      );
-      if (otp && document.activeElement !== otp) otp.focus();
-    };
-    focusOtpIfPresent();
-    requestAnimationFrame(focusOtpIfPresent);
-    setTimeout(focusOtpIfPresent, 50);
-    setTimeout(focusOtpIfPresent, 120);
-    setTimeout(focusOtpIfPresent, 220);
-    setTimeout(focusOtpIfPresent, 320);
-
-    // Kept for any consumers that want to react to a blocked close —
-    // forms previously used this for their own focus restoration but
-    // the modal now owns it directly.
-    window.dispatchEvent(new CustomEvent(AUTH_MODAL_SHAKE_EVENT));
-  }, []);
-
   return (
     <AuthModalContext.Provider value={{ openAuth, closeAuth }}>
       {children}
@@ -115,28 +48,18 @@ export function AuthModalProvider({ children }: { children: React.ReactNode }) {
         onOpenChange={(nextOpen, details) => {
           // Only allow closing via the X button or programmatic close.
           // Block outside-press and escape-key so users can't accidentally
-          // abandon a half-filled sign-in — and shake the modal to make
-          // it obvious the click was intentional but ignored.
+          // abandon a half-filled sign-in.
           const reason = details?.reason;
           if (
             !nextOpen &&
             (reason === "outside-press" || reason === "escape-key")
           ) {
-            triggerShake();
             return;
           }
           setOpen(nextOpen);
         }}
       >
-        <DialogContent
-          className="sm:max-w-sm"
-          // ref reaches the popup root so triggerShake() can toggle the
-          // shake class on the same element that owns the centering
-          // transform — keyframes drive the whole transform property
-          // and include the -50%, -50% centering, so we don't fight a
-          // composition battle with Tailwind's translate utilities.
-          ref={popupRef}
-        >
+        <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle className="text-center">
               {mode === "sign-in" ? "Sign in" : "Create an account"}
