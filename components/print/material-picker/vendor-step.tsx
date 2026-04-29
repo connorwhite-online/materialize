@@ -35,6 +35,13 @@ interface VendorStepProps {
   selectedQuote: EnrichedQuote | null;
   onPick: (quote: EnrichedQuote) => void;
   onBack: () => void;
+  /**
+   * Label for the back button. Single-finish materials skip the
+   * finish step entirely on the way in, so back from vendor goes
+   * to the material grid — and the label needs to say so. The
+   * parent owns that decision and passes the right copy down.
+   */
+  backLabel: string;
 }
 
 /**
@@ -51,6 +58,7 @@ export function VendorStep({
   selectedQuote,
   onPick,
   onBack,
+  backLabel,
 }: VendorStepProps) {
   // Cheapest shipping price per vendor — used to surface the "+ $X
   // Shipping" line on each vendor card.
@@ -112,7 +120,7 @@ export function VendorStep({
           className="inline-flex cursor-pointer items-center gap-1 rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
         >
           <ChevronRight size={14} className="rotate-180" />
-          Finishes
+          {backLabel}
         </button>
         <h2 className="mt-2 text-lg font-semibold">
           {materialName}

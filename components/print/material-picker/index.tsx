@@ -130,6 +130,12 @@ export function MaterialPicker({
   }
 
   if (step === "vendor" && materialId && finishGroupId) {
+    // The label has to match where Back actually goes. Single-finish
+    // materials skip the finish step on the way in, so vendor → back
+    // pops two steps and lands on the material grid; saying
+    // "Finishes" there would lie to the user. Mirror FinishStep's
+    // own back-to-materials copy ("All materials") for consistency.
+    const isSingleFinish = finishGroupCountForMaterial <= 1;
     return (
       <VendorStep
         quotes={quotes}
@@ -138,11 +144,9 @@ export function MaterialPicker({
         finishGroupId={finishGroupId}
         selectedQuote={selectedQuote}
         onPick={onSelectQuote}
+        backLabel={isSingleFinish ? "All materials" : "Finishes"}
         onBack={() => {
-          // Single-finish materials skipped the finish step on the
-          // way in — pop back to material so the user isn't bounced
-          // right back here by FinishStep's auto-advance effect.
-          if (finishGroupCountForMaterial <= 1) {
+          if (isSingleFinish) {
             setStep("material");
             setMaterialId(null);
             setFinishGroupId(null);
