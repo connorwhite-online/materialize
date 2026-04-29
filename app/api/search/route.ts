@@ -6,10 +6,19 @@ import { getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
 import { logError } from "@/lib/logger";
 
 const PER_CATEGORY_LIMIT = 8;
-/** Below this length, ilike('%x%') hits too many rows to be useful. */
-const MIN_QUERY_LENGTH = 2;
+/** Drop empty queries; one character is fine — see PREFIX_ONLY_LENGTH. */
+const MIN_QUERY_LENGTH = 1;
 /** Cap query length to prevent pathological regex-like patterns. */
 const MAX_QUERY_LENGTH = 100;
+/**
+ * Below this length we match by PREFIX (`x%`) rather than substring
+ * (`%x%`). A single character substring scans far too many rows to be
+ * useful — typing "c" would otherwise return everything containing
+ * the letter c. Prefix matching keeps the result set scoped to "things
+ * that start with c" (Instagram-style filter) and is much cheaper for
+ * the DB. Two characters and up, substring works as expected.
+ */
+const PREFIX_ONLY_LENGTH = 2;
 
 /**
  * Escape ilike wildcards so a user typing `%` or `_` can't turn
@@ -89,8 +98,11 @@ export async function GET(request: Request) {
   }
 
   const q = rawQ;
-  // Escape %/_/\\ so user input can't function as ilike wildcards.
-  const pattern = `%${escapeLikePattern(q)}%`;
+  // Escape %/_/\\ so user input can't function as ilike wildcards,
+  // then choose pattern shape based on query length.
+  const escaped = escapeLikePattern(q);
+  const isPrefixOnly = q.length < PREFIX_ONLY_LENGTH;
+  const pattern = isPrefixOnly ? `${escaped}%` : `%${escaped}%`;
 
   try {
     const [fileRows, projectRows, userRows, catalog] = await Promise.all([
@@ -165,13 +177,18 @@ export async function GET(request: Request) {
     ]);
 
     // Material search runs over the in-memory catalog. Match on
-    // material name OR group name, case-insensitive substring.
+    // material name OR group name, case-insensitive. Mirror the
+    // DB-side semantics: prefix for single-char queries, substring
+    // for two or more.
     const needle = q.toLowerCase();
+    const matches = isPrefixOnly
+      ? (s: string) => s.toLowerCase().startsWith(needle)
+      : (s: string) => s.toLowerCase().includes(needle);
     const materials: SearchHitMaterial[] = [];
     outer: for (const group of catalog.groups) {
       for (const material of group.materials) {
-        const nameHit = material.name.toLowerCase().includes(needle);
-        const groupHit = group.name.toLowerCase().includes(needle);
+        const nameHit = matches(material.name);
+        const groupHit = matches(group.name);
         if (!nameHit && !groupHit) continue;
         materials.push({
           type: "material",
