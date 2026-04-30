@@ -41,16 +41,13 @@ export function SidebarUserBlock() {
         <Link
           href={profileHref}
           aria-label="Your profile"
-          // Inline border-radius to bypass any Tailwind class-merge
-          // weirdness — `rounded-l-full rounded-r-3xl` should have
-          // worked but the right corners kept rendering square in
-          // production. Inline styles always win the cascade.
-          style={{
-            borderTopLeftRadius: 9999,
-            borderBottomLeftRadius: 9999,
-            borderTopRightRadius: 22,
-            borderBottomRightRadius: 22,
-          }}
+          // Single border-radius shorthand: TL TR BR BL.
+          // Tried longhand properties + Tailwind classes both,
+          // computed style read 22px on the right but visually it
+          // rendered square in Chrome. The shorthand seems to
+          // commit cleanly to the paint pipeline where the
+          // longhands sometimes don't.
+          style={{ borderRadius: "9999px 22px 22px 9999px" }}
           className="flex items-center gap-2 p-1.5 transition-colors hover:bg-muted/50"
         >
           <UserAvatar
