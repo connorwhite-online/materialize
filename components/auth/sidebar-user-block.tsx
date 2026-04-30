@@ -41,7 +41,7 @@ export function SidebarUserBlock() {
         <Link
           href={profileHref}
           aria-label="Your profile"
-          className="flex items-center gap-2 rounded-r-3xl rounded-l-full p-1.5 transition-colors hover:bg-muted/50"
+          className="flex items-center gap-2 rounded-r-3xl rounded-l-full p-1.5 transition-colors hover:bg-muted"
         >
           <UserAvatar
             seed={user.username || user.id}
