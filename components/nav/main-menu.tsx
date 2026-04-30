@@ -10,8 +10,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { MenuExpand } from "@/components/icons/menu-expand";
+import { Browse } from "@/components/icons/browse";
+import { Materials } from "@/components/icons/materials";
+import { Print } from "@/components/icons/print";
 import { SidebarUserBlock } from "@/components/auth/sidebar-user-block";
 import { cn } from "@/lib/utils";
+
+import type { ComponentType, SVGProps } from "react";
+
+type NavIcon = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>;
 
 /**
  * Top-level destinations shown in both the dropdown trigger menu
@@ -19,11 +26,15 @@ import { cn } from "@/lib/utils";
  * the sidebar's bottom user-block IS the profile link, and the
  * dropdown's hit-target is the avatar in the header at sub-lg.
  */
-const NAV_ITEMS = [
-  { href: "/files", label: "Browse" },
-  { href: "/materials", label: "Materials" },
-  { href: "/print", label: "Print" },
-] as const;
+const NAV_ITEMS: ReadonlyArray<{
+  href: string;
+  label: string;
+  Icon: NavIcon;
+}> = [
+  { href: "/files", label: "Browse", Icon: Browse },
+  { href: "/materials", label: "Materials", Icon: Materials },
+  { href: "/print", label: "Print", Icon: Print },
+];
 
 /**
  * Pathname → page-label table. Only matches EXACT top-level routes —
@@ -55,10 +66,15 @@ function getPageLabel(
   return PAGE_LABELS[pathname] ?? null;
 }
 
+/**
+ * Exact-match active state. Detail pages like /files/<slug> are
+ * NOT the Browse listing — they have their own h1 and the nav
+ * shouldn't highlight Browse just because the URL starts with
+ * /files. Same rule as getPageLabel above so the trigger label
+ * and the nav highlight always agree on what "active" means.
+ */
 function isActive(pathname: string | null, href: string): boolean {
-  if (!pathname) return false;
-  if (href === "/") return pathname === "/";
-  return pathname === href || pathname.startsWith(`${href}/`);
+  return pathname === href;
 }
 
 // Sidebar lives in the reserved gutter the layout opens up at
@@ -118,15 +134,17 @@ export function MainMenuTrigger() {
         >
           {NAV_ITEMS.map((item) => {
             const active = isActive(pathname, item.href);
+            const { Icon } = item;
             return (
               <DropdownMenuItem
                 key={item.href}
                 render={<Link href={item.href} />}
                 className={cn(
-                  "px-3 py-2 text-base",
+                  "flex items-center gap-2.5 px-3 py-2 text-base",
                   active && "bg-muted/60 text-foreground"
                 )}
               >
+                <Icon size={18} className="shrink-0" />
                 {item.label}
               </DropdownMenuItem>
             );
@@ -164,18 +182,20 @@ export function MainMenuSidebar() {
       <nav className="mt-4 flex flex-col gap-0.5">
         {NAV_ITEMS.map((item) => {
           const active = isActive(pathname, item.href);
+          const { Icon } = item;
           return (
             <Link
               key={item.href}
               href={item.href}
               aria-current={active ? "page" : undefined}
               className={cn(
-                "rounded-lg px-3 py-2 text-sm transition-colors",
+                "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
                 active
                   ? "bg-muted/60 text-foreground"
                   : "text-muted-foreground hover:bg-muted/40 hover:text-foreground"
               )}
             >
+              <Icon size={18} className="shrink-0" />
               {item.label}
             </Link>
           );
