@@ -28,41 +28,33 @@ const NAV_ITEMS = [
 ] as const;
 
 /**
- * Pathname-prefix → page-label table. Drives the "page title" the
- * trigger button displays so the user always sees where they are
- * instead of the brand wordmark on every page. Order matters —
- * first match wins, longer prefixes go first.
+ * Pathname → page-label table. Only matches EXACT top-level routes —
+ * detail pages like /files/<slug> or /materials/<slug> are not
+ * "Browse" or "Materials" listings, they have their own h1 and the
+ * trigger should fall back to the wordmark there.
  */
-const PAGE_LABEL_PREFIXES: Array<{ prefix: string; label: string }> = [
-  { prefix: "/dashboard", label: "Dashboard" },
-  { prefix: "/collections", label: "Collections" },
-  { prefix: "/projects", label: "Projects" },
-  { prefix: "/materials", label: "Materials" },
-  { prefix: "/files", label: "Browse" },
-  { prefix: "/print", label: "Print" },
-  { prefix: "/u/", label: "Profile" },
-];
+const PAGE_LABELS: Record<string, string> = {
+  "/files": "Browse",
+  "/materials": "Materials",
+  "/print": "Print",
+  "/dashboard": "Dashboard",
+  "/collections": "Collections",
+  "/projects": "Projects",
+};
 
 /**
  * Resolve the trigger button's text. Returning `null` means "show
  * the brand wordmark instead" — used for the user's own profile
- * (their authed home, where the brand reads better than "Profile")
- * and for any path we don't have a specific label for.
+ * (their authed home), every detail page, and any path that
+ * isn't one of the top-level destinations above.
  */
 function getPageLabel(
   pathname: string | null,
   ownProfilePath: string | null
 ): string | null {
   if (!pathname) return null;
-  // Own profile = authed home; the brand wordmark belongs here.
-  // Other users' profiles still get the generic "Profile" label.
   if (ownProfilePath && pathname === ownProfilePath) return null;
-  for (const { prefix, label } of PAGE_LABEL_PREFIXES) {
-    if (pathname === prefix || pathname.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`)) {
-      return label;
-    }
-  }
-  return null;
+  return PAGE_LABELS[pathname] ?? null;
 }
 
 function isActive(pathname: string | null, href: string): boolean {
