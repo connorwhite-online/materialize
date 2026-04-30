@@ -10,7 +10,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,9 +23,21 @@ import {
 } from "@/components/ui/select";
 import { createCollection } from "@/app/actions/collections";
 
-export function NewCollectionButton() {
+interface NewCollectionDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+/**
+ * Controlled "create a collection" dialog. Used by the library
+ * AddMenu to pop open the form when the user picks "Collection"
+ * from the + Add dropdown. The caller owns the open state.
+ */
+export function NewCollectionDialog({
+  open,
+  onOpenChange,
+}: NewCollectionDialogProps) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [visibility, setVisibility] = useState<"public" | "private">("public");
@@ -38,6 +49,11 @@ export function NewCollectionButton() {
     setDescription("");
     setVisibility("public");
     setError(null);
+  };
+
+  const close = () => {
+    reset();
+    onOpenChange(false);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -62,7 +78,7 @@ export function NewCollectionButton() {
         return;
       }
       reset();
-      setOpen(false);
+      onOpenChange(false);
       router.refresh();
     });
   };
@@ -71,17 +87,10 @@ export function NewCollectionButton() {
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        setOpen(next);
         if (!next) reset();
+        onOpenChange(next);
       }}
     >
-      <DialogTrigger
-        render={
-          <Button variant="outline" size="sm">
-            New collection
-          </Button>
-        }
-      />
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>New collection</DialogTitle>
@@ -140,7 +149,7 @@ export function NewCollectionButton() {
             <Button
               type="button"
               variant="ghost"
-              onClick={() => setOpen(false)}
+              onClick={close}
               disabled={pending}
             >
               Cancel

@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { ChevronRight } from "@/components/icons/chevron-right";
 import { Badge } from "@/components/ui/badge";
 import { CollectionSettingsMenu } from "./collection-settings-menu";
+import { cn } from "@/lib/utils";
 
 interface CollectionSectionProps {
   collectionId: string;
@@ -61,7 +62,15 @@ export function CollectionSection({
           <h2 className="min-w-0 truncate text-lg font-semibold">{name}</h2>
           <Badge
             variant="outline"
-            className="ml-4 h-6 shrink-0 px-2.5"
+            className={cn(
+              "ml-4 h-6 shrink-0 px-2.5",
+              // The "Empty" pill on mobile reads as clutter — phone
+              // users can see at a glance that there's nothing
+              // beneath the section header. Keep the count badge
+              // ("3 Files") on every viewport, but hide the empty
+              // state's badge below sm.
+              fileCount === 0 && "hidden sm:inline-flex"
+            )}
           >
             {countLabel}
           </Badge>

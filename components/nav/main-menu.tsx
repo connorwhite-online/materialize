@@ -110,8 +110,12 @@ export function MainMenuTrigger() {
             // Wordmark mode — own profile (authed home) and any
             // path we don't have a label for. Same gradient/display
             // font as the sidebar HeaderBrand for visual continuity.
+            // PPFuji's caps sit a couple pixels low inside the
+            // em-box so items-center on the flex misaligns it
+            // against the caret's geometric center; nudge it up
+            // so the visual middles match.
             <span
-              className="text-xl tracking-tight bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-transparent leading-none"
+              className="text-xl tracking-tight bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-transparent leading-none -translate-y-[2px]"
               style={{
                 fontFamily: "var(--font-display), system-ui, sans-serif",
               }}
@@ -131,7 +135,7 @@ export function MainMenuTrigger() {
         <DropdownMenuContent
           align="start"
           sideOffset={8}
-          className="min-w-44 p-1"
+          className="min-w-48 p-1.5"
         >
           {NAV_ITEMS.map((item) => {
             const active = isActive(pathname, item.href);
@@ -140,7 +144,10 @@ export function MainMenuTrigger() {
                 key={item.href}
                 render={<Link href={item.href} />}
                 className={cn(
-                  "px-2 py-1.5 text-sm",
+                  // Larger tap target than the default dropdown
+                  // item — this is the primary nav menu, so it
+                  // earns more presence than a generic action menu.
+                  "px-3 py-2 text-base",
                   active && "bg-muted/60 text-foreground"
                 )}
               >

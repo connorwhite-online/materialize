@@ -20,9 +20,8 @@ import {
   LibraryProjectCard,
   type LibraryProjectCardItem,
 } from "./library-project-card";
-import { NewCollectionButton } from "./new-collection-button";
+import { LibraryAddMenu } from "./library-add-menu";
 import { UploadDialog } from "@/components/upload/upload-dialog";
-import Link from "next/link";
 
 interface LibraryTabProps {
   userId: string;
@@ -393,25 +392,7 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
             {userCollections.length > 0 &&
               ` · ${userCollections.length} ${userCollections.length === 1 ? "collection" : "collections"}`}
           </p>
-          <div className="flex items-center gap-2">
-            <NewCollectionButton />
-            {ownedFiles.length > 0 && (
-              <Button
-                variant="outline"
-                size="sm"
-                render={<Link href="/projects/new" />}
-              >
-                New project
-              </Button>
-            )}
-            <UploadDialog
-              trigger={
-                <Button variant="outline" size="sm">
-                  Upload file
-                </Button>
-              }
-            />
-          </div>
+          <LibraryAddMenu canAddProject={ownedFiles.length > 0} />
         </div>
       )}
 
