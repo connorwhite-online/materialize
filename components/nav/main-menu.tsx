@@ -43,14 +43,26 @@ const PAGE_LABEL_PREFIXES: Array<{ prefix: string; label: string }> = [
   { prefix: "/u/", label: "Profile" },
 ];
 
-function getPageLabel(pathname: string | null): string {
-  if (!pathname) return "Materialize";
+/**
+ * Resolve the trigger button's text. Returning `null` means "show
+ * the brand wordmark instead" — used for the user's own profile
+ * (their authed home, where the brand reads better than "Profile")
+ * and for any path we don't have a specific label for.
+ */
+function getPageLabel(
+  pathname: string | null,
+  ownProfilePath: string | null
+): string | null {
+  if (!pathname) return null;
+  // Own profile = authed home; the brand wordmark belongs here.
+  // Other users' profiles still get the generic "Profile" label.
+  if (ownProfilePath && pathname === ownProfilePath) return null;
   for (const { prefix, label } of PAGE_LABEL_PREFIXES) {
     if (pathname === prefix || pathname.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`)) {
       return label;
     }
   }
-  return "Materialize";
+  return null;
 }
 
 function isActive(pathname: string | null, href: string): boolean {
@@ -83,15 +95,34 @@ function isActive(pathname: string | null, href: string): boolean {
  */
 export function MainMenuTrigger() {
   const pathname = usePathname();
-  const label = getPageLabel(pathname);
+  const { user, isLoaded } = useUser();
+  const ownProfilePath =
+    isLoaded && user?.username ? `/u/${user.username}` : null;
+  const label = getPageLabel(pathname, ownProfilePath);
   return (
     <div className="min-[1700px]:hidden">
       <DropdownMenu>
         <DropdownMenuTrigger
           aria-label="Open menu"
-          className="-ml-2 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xl font-semibold leading-none tracking-tight text-foreground transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          className="-ml-2 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 leading-none transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         >
-          <span className="leading-none">{label}</span>
+          {label === null ? (
+            // Wordmark mode — own profile (authed home) and any
+            // path we don't have a label for. Same gradient/display
+            // font as the sidebar HeaderBrand for visual continuity.
+            <span
+              className="text-xl tracking-tight bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-transparent leading-none"
+              style={{
+                fontFamily: "var(--font-display), system-ui, sans-serif",
+              }}
+            >
+              Materialize
+            </span>
+          ) : (
+            <span className="text-xl font-semibold leading-none tracking-tight text-foreground">
+              {label}
+            </span>
+          )}
           <MenuExpand
             size={16}
             className="shrink-0 text-muted-foreground"
