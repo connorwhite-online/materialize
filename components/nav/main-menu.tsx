@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { MenuExpand } from "@/components/icons/menu-expand";
+import { AuthNav } from "@/components/auth/auth-nav";
 import { cn } from "@/lib/utils";
 
 /**
@@ -17,7 +18,7 @@ import { cn } from "@/lib/utils";
  * the same list plus a Profile entry that's computed from the
  * signed-in user (since the href is dynamic per-account).
  *
- * Profile is sidebar-only on purpose: at sub-1700 widths the
+ * Profile is sidebar-only on purpose: at sub-lg widths the
  * top-right avatar already covers the same destination, and
  * doubling it in the dropdown would just add scroll on phones.
  */
@@ -59,31 +60,21 @@ function getPageLabel(
 
 function isActive(pathname: string | null, href: string): boolean {
   if (!pathname) return false;
-  // /files matches /files and /files/[slug]; root-only match for "/".
   if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-// Breakpoint math: the left rail can live entirely outside the
-// centered max-w-7xl (1280px) content column when a 192px (w-48)
-// sidebar plus a ~16px gap fits in the empty side margin —
-// (V - 1280) / 2 ≥ 208 → V ≥ 1696. Round up to 1700 for headroom;
-// below this the dropdown trigger carries the same nav. "Even
-// smaller desktops" (1280–1699) explicitly stay on the dropdown per
-// the design brief. The literal `min-[1700px]:` string is repeated
-// inline below — Tailwind's JIT only picks up class names that
-// appear verbatim in source, so we can't extract it to a constant.
+// Sidebar lives in the reserved gutter the layout opens up at
+// `lg:pl-56`. Below `lg` (1024px) the rail is hidden and the
+// dropdown trigger in the header carries the same nav.
 
 /**
  * Brand+menu trigger that occupies the left of the header on
- * sub-1700 viewports. The whole [page-title text + caret] block is
+ * sub-lg viewports. The whole [page-title text + caret] block is
  * one button — single hit-target, rounded hover bg, opens the
  * dropdown. Page title comes from `getPageLabel(pathname)` so the
  * user always sees where they are; we don't fall back to the
  * "Materialize" wordmark unless the path is genuinely unknown.
- *
- * Hidden at 1700+ — at that width the brand wordmark sits on its
- * own in the header and the sidebar carries the nav.
  */
 export function MainMenuTrigger() {
   const pathname = usePathname();
@@ -92,7 +83,7 @@ export function MainMenuTrigger() {
     isLoaded && user?.username ? `/u/${user.username}` : null;
   const label = getPageLabel(pathname, ownProfilePath);
   return (
-    <div className="min-[1700px]:hidden">
+    <div className="lg:hidden">
       <DropdownMenu>
         <DropdownMenuTrigger
           aria-label="Open menu"
@@ -100,12 +91,11 @@ export function MainMenuTrigger() {
         >
           {label === null ? (
             // Wordmark mode — own profile (authed home) and any
-            // path we don't have a label for. Same gradient/display
-            // font as the sidebar HeaderBrand for visual continuity.
-            // PPFuji's caps sit a couple pixels low inside the
-            // em-box so items-center on the flex misaligns it
-            // against the caret's geometric center; nudge it up
-            // so the visual middles match.
+            // path we don't have a label for. PPFuji's caps occupy
+            // the upper portion of the em-box, so items-center on
+            // the flex misaligns the wordmark against the caret's
+            // geometric center; nudge it up to match the visual
+            // midline.
             <span
               className="text-xl tracking-tight bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-transparent leading-none -translate-y-[2px]"
               style={{
@@ -136,9 +126,6 @@ export function MainMenuTrigger() {
                 key={item.href}
                 render={<Link href={item.href} />}
                 className={cn(
-                  // Larger tap target than the default dropdown
-                  // item — this is the primary nav menu, so it
-                  // earns more presence than a generic action menu.
                   "px-3 py-2 text-base",
                   active && "bg-muted/60 text-foreground"
                 )}
@@ -154,36 +141,16 @@ export function MainMenuTrigger() {
 }
 
 /**
- * "Materialize" wordmark for the header at the sidebar breakpoint
- * and up. Below that the trigger button replaces it (and the
- * trigger's own text shows the page title). Keeps the brand
- * presence visible on widescreen layouts where the sidebar carries
- * the nav itself.
- */
-export function HeaderBrand() {
-  return (
-    <Link
-      href="/"
-      className="hidden text-xl tracking-tight bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-transparent leading-none min-[1700px]:inline-block"
-      style={{ fontFamily: "var(--font-display), system-ui, sans-serif" }}
-    >
-      Materialize
-    </Link>
-  );
-}
-
-/**
- * Fixed left rail visible only at the sidebar breakpoint and up.
- * Anchored just below the 56-px (h-14) header so it shares vertical
- * space with the page content but stays clear of the top bar.
- * Width is 12rem (w-48) — narrow enough to fit in the side margin
- * around max-w-7xl with a ~16px gap to content at 1700-1728px
- * viewports, generous beyond that.
+ * Floating left-rail at lg+ — a rounded card with a soft drop
+ * shadow, anchored at top/left/bottom-4 in the gutter the layout
+ * reserves with `lg:pl-56`. Stacks the brand wordmark, the nav
+ * items, and the user/cart auth controls in one self-contained
+ * panel; at lg+ the page header is hidden because everything
+ * the header carried lives here now.
  *
  * Profile is appended below the shared NAV_ITEMS when the user has
  * a username — this is where the avatar's destination "lives" at
- * sidebar size, replacing the redundant top-right avatar (which
- * the layout hides on the user's own profile page anyway).
+ * sidebar size.
  */
 export function MainMenuSidebar() {
   const pathname = usePathname();
@@ -194,9 +161,16 @@ export function MainMenuSidebar() {
   return (
     <aside
       aria-label="Primary"
-      className="fixed top-14 left-0 z-30 hidden h-[calc(100dvh-3.5rem)] w-48 px-4 pt-8 min-[1700px]:block"
+      className="fixed top-4 bottom-4 left-4 z-30 hidden w-48 flex-col rounded-2xl bg-card p-3 shadow-lg shadow-foreground/5 ring-1 ring-foreground/10 lg:flex"
     >
-      <nav className="flex flex-col gap-0.5">
+      <Link
+        href="/"
+        className="block px-2 py-1 text-xl tracking-tight bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-transparent leading-none -translate-y-[2px]"
+        style={{ fontFamily: "var(--font-display), system-ui, sans-serif" }}
+      >
+        Materialize
+      </Link>
+      <nav className="mt-4 flex flex-col gap-0.5">
         {NAV_ITEMS.map((item) => {
           const active = isActive(pathname, item.href);
           return (
@@ -230,6 +204,17 @@ export function MainMenuSidebar() {
           </Link>
         )}
       </nav>
+      {/*
+        Auth controls (cart icon + avatar / sign-in button) ride
+        along at the bottom of the rail. AuthNav already collapses
+        the cart when empty and hides the avatar on the user's own
+        profile, so this section can be empty in the steady-authed-
+        on-own-profile case — and that's fine, the rail's still
+        framed by the rounded card.
+      */}
+      <div className="mt-auto px-1">
+        <AuthNav />
+      </div>
     </aside>
   );
 }
