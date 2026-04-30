@@ -41,14 +41,7 @@ export function SidebarUserBlock() {
         <Link
           href={profileHref}
           aria-label="Your profile"
-          // Single border-radius shorthand: TL TR BR BL.
-          // Tried longhand properties + Tailwind classes both,
-          // computed style read 22px on the right but visually it
-          // rendered square in Chrome. The shorthand seems to
-          // commit cleanly to the paint pipeline where the
-          // longhands sometimes don't.
-          style={{ borderRadius: "9999px 22px 22px 9999px" }}
-          className="flex items-center gap-2 p-1.5 transition-colors hover:bg-muted/50"
+          className="flex items-center gap-2 rounded-xl p-1.5 transition-colors hover:bg-muted/50"
         >
           <UserAvatar
             seed={user.username || user.id}
