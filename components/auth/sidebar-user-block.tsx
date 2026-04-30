@@ -41,7 +41,17 @@ export function SidebarUserBlock() {
         <Link
           href={profileHref}
           aria-label="Your profile"
-          className="flex items-center gap-2 rounded-r-3xl rounded-l-full p-1.5 transition-colors hover:bg-muted"
+          // Inline border-radius to bypass any Tailwind class-merge
+          // weirdness — `rounded-l-full rounded-r-3xl` should have
+          // worked but the right corners kept rendering square in
+          // production. Inline styles always win the cascade.
+          style={{
+            borderTopLeftRadius: 9999,
+            borderBottomLeftRadius: 9999,
+            borderTopRightRadius: 22,
+            borderBottomRightRadius: 22,
+          }}
+          className="flex items-center gap-2 p-1.5 transition-colors hover:bg-muted/50"
         >
           <UserAvatar
             seed={user.username || user.id}
