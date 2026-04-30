@@ -1,9 +1,26 @@
+import { auth, currentUser } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
 import { AuthNav } from "@/components/auth/auth-nav";
 import { HeroShowcase } from "@/components/home/hero-showcase";
 import { HeroWordmark } from "@/components/home/hero-wordmark";
 import { HomeBottomBar } from "@/components/home/home-bottom-bar";
 
 export default async function HomePage() {
+  // Authed home = the user's own profile. Materialize is mostly a
+  // personal-files tool, and the profile/dashboard is what they
+  // come here to see. Anon visitors keep getting the marketing hero
+  // below. A user without a username is mid-onboarding — punt them
+  // there so we don't render a logged-in shell over an incomplete
+  // account.
+  const { userId } = await auth();
+  if (userId) {
+    const user = await currentUser();
+    if (user?.username) {
+      redirect(`/u/${user.username}`);
+    }
+    redirect("/onboarding");
+  }
+
   // h-dvh, not h-screen: 100vh on iOS Safari includes the area the
   // URL bar occupies, so the page comes out taller than the actual
   // visible viewport whenever the bar is shown — the body then

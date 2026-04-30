@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useUser } from "@clerk/nextjs";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,19 +13,45 @@ import { MenuExpand } from "@/components/icons/menu-expand";
 import { cn } from "@/lib/utils";
 
 /**
- * Top-level destinations the main nav exposes. Single source of
- * truth for both the inline-trigger dropdown (small viewports) and
- * the left sidebar (>= 2xl). Add a row here and it shows up in both
- * places.
+ * Top-level destinations the dropdown exposes. The sidebar uses
+ * the same list plus a Profile entry that's computed from the
+ * signed-in user (since the href is dynamic per-account).
  *
- * The icon next to the logo is the "expand" caret-pair the design
- * brief specified (components/icons/menu-expand.tsx).
+ * Profile is sidebar-only on purpose: at sub-1700 widths the
+ * top-right avatar already covers the same destination, and
+ * doubling it in the dropdown would just add scroll on phones.
  */
 const NAV_ITEMS = [
   { href: "/files", label: "Browse" },
   { href: "/materials", label: "Materials" },
   { href: "/print", label: "Print" },
 ] as const;
+
+/**
+ * Pathname-prefix → page-label table. Drives the "page title" the
+ * trigger button displays so the user always sees where they are
+ * instead of the brand wordmark on every page. Order matters —
+ * first match wins, longer prefixes go first.
+ */
+const PAGE_LABEL_PREFIXES: Array<{ prefix: string; label: string }> = [
+  { prefix: "/dashboard", label: "Dashboard" },
+  { prefix: "/collections", label: "Collections" },
+  { prefix: "/projects", label: "Projects" },
+  { prefix: "/materials", label: "Materials" },
+  { prefix: "/files", label: "Browse" },
+  { prefix: "/print", label: "Print" },
+  { prefix: "/u/", label: "Profile" },
+];
+
+function getPageLabel(pathname: string | null): string {
+  if (!pathname) return "Materialize";
+  for (const { prefix, label } of PAGE_LABEL_PREFIXES) {
+    if (pathname === prefix || pathname.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`)) {
+      return label;
+    }
+  }
+  return "Materialize";
+}
 
 function isActive(pathname: string | null, href: string): boolean {
   if (!pathname) return false;
@@ -44,19 +71,31 @@ function isActive(pathname: string | null, href: string): boolean {
 // appear verbatim in source, so we can't extract it to a constant.
 
 /**
- * Compact dropdown trigger that sits next to the logo. Hidden at
- * 1700px+ where the sidebar takes over.
+ * Brand+menu trigger that occupies the left of the header on
+ * sub-1700 viewports. The whole [page-title text + caret] block is
+ * one button — single hit-target, rounded hover bg, opens the
+ * dropdown. Page title comes from `getPageLabel(pathname)` so the
+ * user always sees where they are; we don't fall back to the
+ * "Materialize" wordmark unless the path is genuinely unknown.
+ *
+ * Hidden at 1700+ — at that width the brand wordmark sits on its
+ * own in the header and the sidebar carries the nav.
  */
 export function MainMenuTrigger() {
   const pathname = usePathname();
+  const label = getPageLabel(pathname);
   return (
     <div className="min-[1700px]:hidden">
       <DropdownMenu>
         <DropdownMenuTrigger
           aria-label="Open menu"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          className="-ml-2 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xl font-semibold leading-none tracking-tight text-foreground transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         >
-          <MenuExpand size={18} />
+          <span className="leading-none">{label}</span>
+          <MenuExpand
+            size={16}
+            className="shrink-0 text-muted-foreground"
+          />
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="start"
@@ -85,15 +124,43 @@ export function MainMenuTrigger() {
 }
 
 /**
+ * "Materialize" wordmark for the header at the sidebar breakpoint
+ * and up. Below that the trigger button replaces it (and the
+ * trigger's own text shows the page title). Keeps the brand
+ * presence visible on widescreen layouts where the sidebar carries
+ * the nav itself.
+ */
+export function HeaderBrand() {
+  return (
+    <Link
+      href="/"
+      className="hidden text-xl tracking-tight bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-transparent leading-none min-[1700px]:inline-block"
+      style={{ fontFamily: "var(--font-display), system-ui, sans-serif" }}
+    >
+      Materialize
+    </Link>
+  );
+}
+
+/**
  * Fixed left rail visible only at the sidebar breakpoint and up.
  * Anchored just below the 56-px (h-14) header so it shares vertical
  * space with the page content but stays clear of the top bar.
  * Width is 12rem (w-48) — narrow enough to fit in the side margin
  * around max-w-7xl with a ~16px gap to content at 1700-1728px
  * viewports, generous beyond that.
+ *
+ * Profile is appended below the shared NAV_ITEMS when the user has
+ * a username — this is where the avatar's destination "lives" at
+ * sidebar size, replacing the redundant top-right avatar (which
+ * the layout hides on the user's own profile page anyway).
  */
 export function MainMenuSidebar() {
   const pathname = usePathname();
+  const { user, isLoaded } = useUser();
+  const profileHref =
+    isLoaded && user?.username ? `/u/${user.username}` : null;
+
   return (
     <aside
       aria-label="Primary"
@@ -118,6 +185,20 @@ export function MainMenuSidebar() {
             </Link>
           );
         })}
+        {profileHref && (
+          <Link
+            href={profileHref}
+            aria-current={isActive(pathname, profileHref) ? "page" : undefined}
+            className={cn(
+              "rounded-lg px-3 py-2 text-sm transition-colors",
+              isActive(pathname, profileHref)
+                ? "bg-muted/60 text-foreground"
+                : "text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+            )}
+          >
+            Profile
+          </Link>
+        )}
       </nav>
     </aside>
   );
