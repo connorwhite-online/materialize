@@ -60,7 +60,14 @@ export function FileAssetPrintShell({
           preselectMaterialId={preselectMaterialId}
           onAddedToCart={handleAddedToCart}
           rightAnnex={({ pendingItem }) => (
-            <CartSlotStack pendingItem={pendingItem} />
+            // Mobile already has cart access via the top-right
+            // CartButton, which opens the full CartPanel drawer.
+            // Stacking this inline cart below all vendors on a
+            // phone is just noise the user has to scroll past — it
+            // reads as a desktop side-rail and that's where it stays.
+            <div className="hidden lg:block">
+              <CartSlotStack pendingItem={pendingItem} />
+            </div>
           )}
         />
       </div>

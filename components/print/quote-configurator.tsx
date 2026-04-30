@@ -697,7 +697,15 @@ export function QuoteConfigurator({
             </div>
           )}
 
-          <div className="mb-4 flex flex-wrap items-center gap-4">
+          {/*
+            Stack the controls on mobile, side-by-side from sm+.
+            At 390px the row's natural width (~395px content) exceeds
+            the available 358px, and flex-wrap behavior with the
+            select's min-w-44 produced an x-scroll on iOS Safari
+            instead of cleanly wrapping. flex-col below sm sidesteps
+            it entirely and reads better at phone widths anyway.
+          */}
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
             <div className="flex items-center gap-2">
               <Label
                 htmlFor="quantity"
