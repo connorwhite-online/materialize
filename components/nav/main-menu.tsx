@@ -10,17 +10,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { MenuExpand } from "@/components/icons/menu-expand";
-import { AuthNav } from "@/components/auth/auth-nav";
+import { SidebarUserBlock } from "@/components/auth/sidebar-user-block";
 import { cn } from "@/lib/utils";
 
 /**
- * Top-level destinations the dropdown exposes. The sidebar uses
- * the same list plus a Profile entry that's computed from the
- * signed-in user (since the href is dynamic per-account).
- *
- * Profile is sidebar-only on purpose: at sub-lg widths the
- * top-right avatar already covers the same destination, and
- * doubling it in the dropdown would just add scroll on phones.
+ * Top-level destinations shown in both the dropdown trigger menu
+ * (sub-lg) and the sidebar nav (lg+). Profile isn't here on purpose:
+ * the sidebar's bottom user-block IS the profile link, and the
+ * dropdown's hit-target is the avatar in the header at sub-lg.
  */
 const NAV_ITEMS = [
   { href: "/files", label: "Browse" },
@@ -144,19 +141,13 @@ export function MainMenuTrigger() {
  * Floating left-rail at lg+ — a rounded card with a soft drop
  * shadow, anchored at top/left/bottom-4 in the gutter the layout
  * reserves with `lg:pl-56`. Stacks the brand wordmark, the nav
- * items, and the user/cart auth controls in one self-contained
- * panel; at lg+ the page header is hidden because everything
- * the header carried lives here now.
- *
- * Profile is appended below the shared NAV_ITEMS when the user has
- * a username — this is where the avatar's destination "lives" at
- * sidebar size.
+ * items, and the user-block (cart icon + avatar+username for
+ * authed visitors, Sign in for anon) in one self-contained panel.
+ * At lg+ the page header is hidden because everything the header
+ * carried lives here now.
  */
 export function MainMenuSidebar() {
   const pathname = usePathname();
-  const { user, isLoaded } = useUser();
-  const profileHref =
-    isLoaded && user?.username ? `/u/${user.username}` : null;
 
   return (
     <aside
@@ -189,31 +180,9 @@ export function MainMenuSidebar() {
             </Link>
           );
         })}
-        {profileHref && (
-          <Link
-            href={profileHref}
-            aria-current={isActive(pathname, profileHref) ? "page" : undefined}
-            className={cn(
-              "rounded-lg px-3 py-2 text-sm transition-colors",
-              isActive(pathname, profileHref)
-                ? "bg-muted/60 text-foreground"
-                : "text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-            )}
-          >
-            Profile
-          </Link>
-        )}
       </nav>
-      {/*
-        Auth controls (cart icon + avatar / sign-in button) ride
-        along at the bottom of the rail. AuthNav already collapses
-        the cart when empty and hides the avatar on the user's own
-        profile, so this section can be empty in the steady-authed-
-        on-own-profile case — and that's fine, the rail's still
-        framed by the rounded card.
-      */}
-      <div className="mt-auto px-1">
-        <AuthNav />
+      <div className="mt-auto">
+        <SidebarUserBlock />
       </div>
     </aside>
   );
