@@ -195,7 +195,7 @@ export default async function FileDetailPage(props: {
   // Primary asset drives the filename / size / preview / bounding box.
   const primaryAsset = assets[0] ?? null;
   const PREVIEWABLE = new Set(["stl", "obj", "3mf"]);
-  const FINGERPRINTABLE = new Set(["stl", "obj"]);
+  const FINGERPRINTABLE = new Set(["stl", "obj", "3mf"]);
   const previewable =
     !!primaryAsset && PREVIEWABLE.has(primaryAsset.format);
 

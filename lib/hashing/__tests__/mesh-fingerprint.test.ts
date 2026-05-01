@@ -1,8 +1,63 @@
 import { describe, it, expect } from "vitest";
+import { zipSync, strToU8 } from "fflate";
 import {
   computeFingerprintFromTriangles,
   fingerprintFromStream,
 } from "../mesh-fingerprint";
+
+// Synthetic 3mf builder. Wraps an arbitrary <model> XML in the OPC
+// ZIP layout the parser expects (just the `3D/3dmodel.model` entry —
+// real 3mfs also ship `[Content_Types].xml` and a `_rels` folder, but
+// the parser only reads the model part).
+function makeThreemf(modelXml: string): Uint8Array {
+  return zipSync({
+    "3D/3dmodel.model": strToU8(modelXml),
+  });
+}
+
+function buildSimple3mfXml(
+  triangles: Float64Array,
+  buildTransform?: string
+): string {
+  const triCount = triangles.length / 9;
+  // Deduplicate vertices so the file is well-formed (real 3mf files
+  // index, they don't duplicate). Keyed on the rounded triple to keep
+  // the dedup deterministic across float jitter.
+  const vertIndex = new Map<string, number>();
+  const verts: string[] = [];
+  const tris: string[] = [];
+  for (let t = 0; t < triCount; t++) {
+    const idxs: number[] = [];
+    for (let v = 0; v < 3; v++) {
+      const o = t * 9 + v * 3;
+      const x = triangles[o], y = triangles[o + 1], z = triangles[o + 2];
+      const key = `${x}|${y}|${z}`;
+      let id = vertIndex.get(key);
+      if (id === undefined) {
+        id = verts.length;
+        verts.push(`<vertex x="${x}" y="${y}" z="${z}"/>`);
+        vertIndex.set(key, id);
+      }
+      idxs.push(id);
+    }
+    tris.push(`<triangle v1="${idxs[0]}" v2="${idxs[1]}" v3="${idxs[2]}"/>`);
+  }
+  const item = buildTransform
+    ? `<item objectid="1" transform="${buildTransform}"/>`
+    : `<item objectid="1"/>`;
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/spec/2015/02" unit="millimeter">
+  <resources>
+    <object id="1" type="model">
+      <mesh>
+        <vertices>${verts.join("")}</vertices>
+        <triangles>${tris.join("")}</triangles>
+      </mesh>
+    </object>
+  </resources>
+  <build>${item}</build>
+</model>`;
+}
 
 // Build an axis-aligned box (12 triangles) starting at origin with the
 // given size in mm. Used for both fingerprint and STL-byte tests.
@@ -164,5 +219,85 @@ f 1 2 3
     );
     const stlFp = computeFingerprintFromTriangles("x", tri, "mm");
     expect(objFp.geometryHash).toBe(stlFp.geometryHash);
+  });
+
+  it("parses 3mf and produces same geometry hash as the equivalent STL", async () => {
+    const tris = makeBoxTriangles(20, 30, 40);
+    const xml = buildSimple3mfXml(tris);
+    const fp = await fingerprintFromStream(
+      streamOf(makeThreemf(xml)),
+      "3mf",
+      "mm"
+    );
+    const stlFp = computeFingerprintFromTriangles("x", tris, "mm");
+    expect(fp.triangleCount).toBe(12);
+    expect(fp.geometryHash).toBe(stlFp.geometryHash);
+    expect(fp.coarseFingerprint).toBe(stlFp.coarseFingerprint);
+  });
+
+  it("3mf with translation transform hashes the same as untransformed (translation is normalized)", async () => {
+    const tris = makeBoxTriangles(20, 30, 40);
+    // Identity rotation, translation of (100, 200, 300). Column-major
+    // 3x3 + t triple = "1 0 0 0 1 0 0 0 1 100 200 300".
+    const translated = buildSimple3mfXml(tris, "1 0 0 0 1 0 0 0 1 100 200 300");
+    const plain = buildSimple3mfXml(tris);
+    const fpA = await fingerprintFromStream(
+      streamOf(makeThreemf(translated)),
+      "3mf",
+      "mm"
+    );
+    const fpB = await fingerprintFromStream(
+      streamOf(makeThreemf(plain)),
+      "3mf",
+      "mm"
+    );
+    expect(fpA.geometryHash).toBe(fpB.geometryHash);
+  });
+
+  it("3mf with rotation transform hashes differently (rotation is NOT normalized)", async () => {
+    const tris = makeBoxTriangles(20, 30, 40);
+    // 90° rotation around Z: x' = -y, y' = x, z' = z.
+    // Column-major 3x3: m11=0, m21=1, m31=0 / m12=-1, m22=0, m32=0 / m13=0, m23=0, m33=1
+    const rotated = buildSimple3mfXml(tris, "0 1 0 -1 0 0 0 0 1 0 0 0");
+    const plain = buildSimple3mfXml(tris);
+    const fpA = await fingerprintFromStream(
+      streamOf(makeThreemf(rotated)),
+      "3mf",
+      "mm"
+    );
+    const fpB = await fingerprintFromStream(
+      streamOf(makeThreemf(plain)),
+      "3mf",
+      "mm"
+    );
+    expect(fpA.geometryHash).not.toBe(fpB.geometryHash);
+    // But the bbox volume is preserved — the box's shape stats are
+    // rotation-invariant in the symmetric case.
+    expect(fpA.volumeUm3).toBe(fpB.volumeUm3);
+  });
+
+  it("returns empty fingerprint for malformed 3mf (not a zip)", async () => {
+    const garbage = new Uint8Array([0x00, 0x01, 0x02, 0x03, 0x04]);
+    const fp = await fingerprintFromStream(streamOf(garbage), "3mf", "mm");
+    expect(fp.byteHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(fp.geometryHash).toBeNull();
+  });
+
+  it("returns empty fingerprint for 3mf with no model entry", async () => {
+    const zip = zipSync({ "[Content_Types].xml": strToU8("<Types/>") });
+    const fp = await fingerprintFromStream(streamOf(zip), "3mf", "mm");
+    expect(fp.byteHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(fp.geometryHash).toBeNull();
+  });
+
+  it("returns empty fingerprint when the model XML has no vertices", async () => {
+    const xml = `<?xml version="1.0"?>
+<model><resources><object id="1"><mesh><vertices/><triangles/></mesh></object></resources></model>`;
+    const fp = await fingerprintFromStream(
+      streamOf(makeThreemf(xml)),
+      "3mf",
+      "mm"
+    );
+    expect(fp.geometryHash).toBeNull();
   });
 });

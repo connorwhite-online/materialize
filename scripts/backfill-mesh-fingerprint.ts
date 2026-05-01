@@ -79,7 +79,7 @@ async function main() {
 
   const counts = (await sql`
     SELECT
-      count(*) FILTER (WHERE geometry_hash IS NULL AND format IN ('stl','obj'))::int AS need_geom,
+      count(*) FILTER (WHERE geometry_hash IS NULL AND format IN ('stl','obj','3mf'))::int AS need_geom,
       count(*) FILTER (WHERE content_hash IS NULL)::int AS need_byte,
       count(*)::int AS total
     FROM file_assets
@@ -87,7 +87,7 @@ async function main() {
   const { need_geom, need_byte, total } = counts[0];
 
   console.log(`file_assets total:               ${total}`);
-  console.log(`needs geometry hash (stl/obj):   ${need_geom}`);
+  console.log(`needs geometry hash (stl/obj/3mf): ${need_geom}`);
   console.log(`needs byte hash:                 ${need_byte}`);
 
   if (dryRun) {
@@ -111,7 +111,7 @@ async function main() {
             (content_hash IS NOT NULL) AS has_byte_hash
           FROM file_assets
           WHERE
-            (geometry_hash IS NULL AND format IN ('stl','obj'))
+            (geometry_hash IS NULL AND format IN ('stl','obj','3mf'))
             OR content_hash IS NULL
           ORDER BY created_at ASC
           LIMIT ${safeLimit}
@@ -125,7 +125,7 @@ async function main() {
             (content_hash IS NOT NULL) AS has_byte_hash
           FROM file_assets
           WHERE
-            (geometry_hash IS NULL AND format IN ('stl','obj'))
+            (geometry_hash IS NULL AND format IN ('stl','obj','3mf'))
             OR content_hash IS NULL
           ORDER BY created_at ASC
         `

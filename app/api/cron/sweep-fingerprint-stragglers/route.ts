@@ -69,7 +69,7 @@ export async function GET(request: Request) {
       .where(
         and(
           isNull(fileAssets.geometryHash),
-          inArray(fileAssets.format, ["stl", "obj"]),
+          inArray(fileAssets.format, ["stl", "obj", "3mf"]),
           lt(fileAssets.createdAt, cutoff)
         )
       )

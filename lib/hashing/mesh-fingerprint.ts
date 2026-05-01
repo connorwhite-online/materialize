@@ -3,13 +3,14 @@
 // component. Letting Node scripts (e.g. the backfill in
 // scripts/backfill-mesh-fingerprint.ts) import it directly.
 import { createHash } from "node:crypto";
+import { unzipSync, strFromU8 } from "fflate";
 
 // Geometry hash version — bump whenever the normalization rules below
 // change, so old rows can be backfilled instead of mixing schemes
 // silently in the same index.
 export const GEOMETRY_HASH_VERSION = 1;
 
-const PARSEABLE_FORMATS = new Set(["stl", "obj"]);
+const PARSEABLE_FORMATS = new Set(["stl", "obj", "3mf"]);
 
 export type MeshFormat = "stl" | "obj" | "3mf" | "step" | "amf";
 
@@ -75,6 +76,7 @@ export async function fingerprintFromStream(
   try {
     if (format === "stl") triangles = parseStl(buf);
     else if (format === "obj") triangles = parseObj(buf);
+    else if (format === "3mf") triangles = parse3mf(buf);
   } catch {
     triangles = null;
   }
@@ -321,4 +323,193 @@ function parseObj(buf: Uint8Array): Float64Array {
     }
   }
   return out.length === 0 ? new Float64Array(0) : Float64Array.from(out);
+}
+
+// ---- 3mf parser ----
+//
+// 3mf is a ZIP container (OPC, the same packaging convention as docx)
+// with the geometry XML at `3D/3dmodel.model`. The relevant pieces:
+//
+//   <model>
+//     <resources>
+//       <object id="1"><mesh>
+//         <vertices>
+//           <vertex x="..." y="..." z="..."/> ...
+//         </vertices>
+//         <triangles>
+//           <triangle v1="0" v2="1" v3="2"/> ...
+//         </triangles>
+//       </mesh></object>
+//       <object id="2">...</object>
+//     </resources>
+//     <build>
+//       <item objectid="1" transform="m11 m21 m31 m12 m22 m32 m13 m23 m33 t1 t2 t3"/>
+//     </build>
+//   </model>
+//
+// We don't pull in an XML parser. The element shapes are simple and
+// regex-extractable, and 3mf in the wild is well-formed (it has to
+// pass schema validation to load in slicers). What we DO handle:
+//
+//   - multiple <object> blocks with their own meshes
+//   - <build><item> instancing with optional column-major 4x3 transform
+//   - objects without a build item (rare but legal — fingerprinted at
+//     identity transform; matches what a slicer would do if you load
+//     the file with no scene data)
+//
+// What we DON'T handle (returns empty fingerprint, falls through to
+// byte-hash-only):
+//
+//   - <components>: object-of-objects references. Real but rare.
+//   - <beamlattice>: lattice extension. Not a triangle mesh.
+//   - production extension's external part references.
+//
+// Build transforms make translation and uniform-scale dedup-equivalent
+// (we normalize both anyway downstream), but rotations baked into the
+// transform DO change the geometry hash. Same caveat as STL/OBJ: we
+// don't normalize rotation.
+
+type ParsedObject = { vertices: Float64Array; triIndices: Int32Array };
+
+function parse3mf(buf: Uint8Array): Float64Array {
+  let entries: Record<string, Uint8Array>;
+  try {
+    entries = unzipSync(buf, {
+      filter: (file) => file.name === "3D/3dmodel.model",
+    });
+  } catch {
+    return new Float64Array(0);
+  }
+  const modelBytes = entries["3D/3dmodel.model"];
+  if (!modelBytes) return new Float64Array(0);
+  const xml = strFromU8(modelBytes);
+
+  // Parse all <object> blocks. Each gets its own vertex/triangle list,
+  // keyed by id so the build section can transform-and-instance them.
+  const objects = new Map<string, ParsedObject>();
+  const objRe = /<object\b[^>]*\bid\s*=\s*"([^"]+)"[^>]*>([\s\S]*?)<\/object>/g;
+  let objMatch: RegExpExecArray | null;
+  while ((objMatch = objRe.exec(xml)) !== null) {
+    const id = objMatch[1];
+    const body = objMatch[2];
+    const obj = parseObjectBody(body);
+    if (obj) objects.set(id, obj);
+  }
+  if (objects.size === 0) return new Float64Array(0);
+
+  // Build section: each <item> instantiates an object, optionally with
+  // a transform. If there's no <build> section (or no items), fall back
+  // to emitting every object once at identity — covers the legal-but-
+  // unusual "model without a scene" case.
+  type BuildItem = { objectId: string; transform: number[] | null };
+  const items: BuildItem[] = [];
+  const itemRe = /<item\b([^>]*)\/?>/g;
+  let itemMatch: RegExpExecArray | null;
+  while ((itemMatch = itemRe.exec(xml)) !== null) {
+    const attrs = itemMatch[1];
+    const idAttr = /\bobjectid\s*=\s*"([^"]+)"/i.exec(attrs);
+    if (!idAttr) continue;
+    const transformAttr = /\btransform\s*=\s*"([^"]+)"/i.exec(attrs);
+    const transform = transformAttr
+      ? parseTransform(transformAttr[1])
+      : null;
+    items.push({ objectId: idAttr[1], transform });
+  }
+  if (items.length === 0) {
+    for (const id of objects.keys()) items.push({ objectId: id, transform: null });
+  }
+
+  const out: number[] = [];
+  for (const item of items) {
+    const obj = objects.get(item.objectId);
+    if (!obj) continue;
+    appendInstancedTriangles(out, obj, item.transform);
+  }
+  return out.length === 0 ? new Float64Array(0) : Float64Array.from(out);
+}
+
+function parseObjectBody(body: string): ParsedObject | null {
+  // Vertices — 3mf requires explicit x/y/z attributes.
+  const vertices: number[] = [];
+  const vertRe = /<vertex\b[^>]*\bx\s*=\s*"([^"]+)"[^>]*\by\s*=\s*"([^"]+)"[^>]*\bz\s*=\s*"([^"]+)"/g;
+  let vm: RegExpExecArray | null;
+  while ((vm = vertRe.exec(body)) !== null) {
+    const x = parseFloat(vm[1]);
+    const y = parseFloat(vm[2]);
+    const z = parseFloat(vm[3]);
+    if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(z)) return null;
+    vertices.push(x, y, z);
+  }
+  if (vertices.length === 0) return null;
+
+  // Triangles — v1/v2/v3 are zero-based vertex indices.
+  const triIndices: number[] = [];
+  const triRe = /<triangle\b[^>]*\bv1\s*=\s*"([^"]+)"[^>]*\bv2\s*=\s*"([^"]+)"[^>]*\bv3\s*=\s*"([^"]+)"/g;
+  const vertCount = vertices.length / 3;
+  let tm: RegExpExecArray | null;
+  while ((tm = triRe.exec(body)) !== null) {
+    const a = parseInt(tm[1], 10);
+    const b = parseInt(tm[2], 10);
+    const c = parseInt(tm[3], 10);
+    if (
+      !Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(c) ||
+      a < 0 || b < 0 || c < 0 ||
+      a >= vertCount || b >= vertCount || c >= vertCount
+    ) {
+      return null;
+    }
+    triIndices.push(a, b, c);
+  }
+  if (triIndices.length === 0) return null;
+
+  return {
+    vertices: Float64Array.from(vertices),
+    triIndices: Int32Array.from(triIndices),
+  };
+}
+
+// 3mf transforms are 12 numbers, column-major:
+//   m11 m21 m31  m12 m22 m32  m13 m23 m33  t1 t2 t3
+// Layout matches the spec — the rotation/scale 3x3 is the first nine
+// values stored column-by-column, then the translation triple.
+function parseTransform(raw: string): number[] | null {
+  const parts = raw.trim().split(/\s+/).map((s) => parseFloat(s));
+  if (parts.length !== 12 || parts.some((n) => Number.isNaN(n))) return null;
+  return parts;
+}
+
+function appendInstancedTriangles(
+  out: number[],
+  obj: ParsedObject,
+  t: number[] | null
+): void {
+  const v = obj.vertices;
+  const idx = obj.triIndices;
+
+  // No transform = identity, fast path.
+  if (!t) {
+    for (let i = 0; i < idx.length; i++) {
+      const o = idx[i] * 3;
+      out.push(v[o], v[o + 1], v[o + 2]);
+    }
+    return;
+  }
+
+  // Apply column-major 3x3 + translation. Per spec:
+  //   x' = m11*x + m12*y + m13*z + t1
+  //   y' = m21*x + m22*y + m23*z + t2
+  //   z' = m31*x + m32*y + m33*z + t3
+  const m11 = t[0], m21 = t[1], m31 = t[2];
+  const m12 = t[3], m22 = t[4], m32 = t[5];
+  const m13 = t[6], m23 = t[7], m33 = t[8];
+  const t1 = t[9], t2 = t[10], t3 = t[11];
+  for (let i = 0; i < idx.length; i++) {
+    const o = idx[i] * 3;
+    const x = v[o], y = v[o + 1], z = v[o + 2];
+    out.push(
+      m11 * x + m12 * y + m13 * z + t1,
+      m21 * x + m22 * y + m23 * z + t2,
+      m31 * x + m32 * y + m33 * z + t3
+    );
+  }
 }
