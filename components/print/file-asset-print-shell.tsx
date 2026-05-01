@@ -48,29 +48,29 @@ export function FileAssetPrintShell({
   };
 
   return (
-    <div>
-      {configureHeader}
-      <div className={configureHeader ? "mt-6" : undefined}>
-        <QuoteConfigurator
-          fileAssetId={fileAssetId}
-          filename={filename}
-          format={format}
-          hasCachedModel={hasCachedModel}
-          geometryData={geometryData}
-          preselectMaterialId={preselectMaterialId}
-          onAddedToCart={handleAddedToCart}
-          rightAnnex={({ pendingItem }) => (
-            // Mobile already has cart access via the top-right
-            // CartButton, which opens the full CartPanel drawer.
-            // Stacking this inline cart below all vendors on a
-            // phone is just noise the user has to scroll past — it
-            // reads as a desktop side-rail and that's where it stays.
-            <div className="hidden lg:block">
-              <CartSlotStack pendingItem={pendingItem} />
-            </div>
-          )}
-        />
-      </div>
-    </div>
+    // Header is forwarded into QuoteConfigurator as `headerSlot` so
+    // that on lg+ it sits beside the 3D viewer rather than stretching
+    // across the full width above. QuoteConfigurator handles the
+    // mobile fallback (header on top, viewer below) internally.
+    <QuoteConfigurator
+      fileAssetId={fileAssetId}
+      filename={filename}
+      format={format}
+      hasCachedModel={hasCachedModel}
+      geometryData={geometryData}
+      preselectMaterialId={preselectMaterialId}
+      onAddedToCart={handleAddedToCart}
+      headerSlot={configureHeader}
+      rightAnnex={({ pendingItem }) => (
+        // Mobile already has cart access via the top-right
+        // CartButton, which opens the full CartPanel drawer.
+        // Stacking this inline cart below all vendors on a
+        // phone is just noise the user has to scroll past — it
+        // reads as a desktop side-rail and that's where it stays.
+        <div className="hidden lg:block">
+          <CartSlotStack pendingItem={pendingItem} />
+        </div>
+      )}
+    />
   );
 }

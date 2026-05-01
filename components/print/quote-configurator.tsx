@@ -90,6 +90,17 @@ interface QuoteConfiguratorProps {
    * existing vendor cart.
    */
   rightAnnex?: (ctx: { pendingItem: PendingItem | null }) => ReactNode;
+  /**
+   * Optional page-level header (h1 + filename meta + creator
+   * recommendation). On lg+ it renders next to the 3D viewer in a
+   * 2-col sub-grid so the viewer can shrink to make room for the
+   * controls instead of dominating the upper half. On mobile it
+   * stays above the viewer in the natural top-to-bottom reading
+   * order. Authed /print/[fileAssetId] passes its configureHeader
+   * here; the anon /print page leaves it null since it has its own
+   * inline FileContextBar pill at the top.
+   */
+  headerSlot?: ReactNode;
 }
 
 type CheckoutStep = "configure" | "address" | "processing";
@@ -105,6 +116,7 @@ export function QuoteConfigurator({
   preselectMaterialId,
   onAddedToCart,
   rightAnnex,
+  headerSlot,
 }: QuoteConfiguratorProps) {
   const isDraft = !!draftMode;
 
@@ -742,139 +754,176 @@ export function QuoteConfigurator({
     );
   }
 
+  const dimensionsText =
+    geometryData?.dimensions &&
+    typeof geometryData.dimensions.x === "number" &&
+    typeof geometryData.dimensions.y === "number" &&
+    typeof geometryData.dimensions.z === "number" ? (
+      <div className="text-sm text-muted-foreground">
+        Dimensions: {geometryData.dimensions.x.toFixed(1)} ×{" "}
+        {geometryData.dimensions.y.toFixed(1)} ×{" "}
+        {geometryData.dimensions.z.toFixed(1)} mm
+      </div>
+    ) : null;
+
   return (
     <div>
       <div className="grid items-start gap-8 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          {geometryData?.dimensions &&
-            typeof geometryData.dimensions.x === "number" &&
-            typeof geometryData.dimensions.y === "number" &&
-            typeof geometryData.dimensions.z === "number" && (
-              <div className="mb-3 text-sm text-muted-foreground">
-                Dimensions: {geometryData.dimensions.x.toFixed(1)} ×{" "}
-                {geometryData.dimensions.y.toFixed(1)} ×{" "}
-                {geometryData.dimensions.z.toFixed(1)} mm
+          {/*
+            Mobile-only render of the page header above the sub-grid
+            so reading order on a phone stays top-down: header →
+            viewer → controls → picker. On desktop we hide this copy
+            and render a second copy inside the right side-panel
+            below, alongside the controls.
+          */}
+          {headerSlot && <div className="mb-6 lg:hidden">{headerSlot}</div>}
+
+          {/*
+            Upper sub-grid splits into viewer (left) + side-panel
+            (right) on lg+. The viewer used to take the full width
+            of the col-span-2 area and dominate the upper half;
+            shrinking it to ~60% lets the file metadata, dimensions,
+            and quantity/region controls sit beside it instead of
+            stacking below.
+
+            On mobile this collapses to a single column — viewer
+            then side-panel — which preserves the previous reading
+            order (after the mobile-only header above).
+          */}
+          <div className="grid gap-6 lg:grid-cols-[3fr_2fr] lg:items-start">
+            {previewModelUrl && previewableFormat && (
+              <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
+                <MaterialPreview
+                  modelUrl={previewModelUrl}
+                  format={format as "stl" | "obj" | "3mf"}
+                  materialColor={previewColor}
+                  className="h-full w-full"
+                  enableWheelZoom={false}
+                  showZoomControls
+                />
               </div>
             )}
 
-          {previewModelUrl && previewableFormat && (
-            <div className="mb-6 aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
-              <MaterialPreview
-                modelUrl={previewModelUrl}
-                format={format as "stl" | "obj" | "3mf"}
-                materialColor={previewColor}
-                className="h-full w-full"
-                enableWheelZoom={false}
-                showZoomControls
-              />
-            </div>
-          )}
+            <div className="space-y-4">
+              {/* Desktop-only header — twin of the lg:hidden copy
+                  above, rendered here so it sits beside the viewer
+                  on wide layouts. Static markup, safe to duplicate. */}
+              {headerSlot && (
+                <div className="hidden lg:block">{headerSlot}</div>
+              )}
 
-          {/*
-            Stack the controls on mobile, side-by-side from sm+.
-            At 390px the row's natural width (~395px content) exceeds
-            the available 358px, and flex-wrap behavior with the
-            select's min-w-44 produced an x-scroll on iOS Safari
-            instead of cleanly wrapping. flex-col below sm sidesteps
-            it entirely and reads better at phone widths anyway.
-          */}
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
-            <div className="flex items-center gap-2">
-              <Label
-                htmlFor="quantity"
-                className="mb-0 text-sm font-medium leading-none"
-              >
-                Quantity
-              </Label>
+              {dimensionsText}
+
               {/*
-                Plain input rather than <Input> so it can wear the
-                same depth-raised pill as the Ship-to <Select> sitting
-                next to it. The default Input is depth-sunken — at the
-                same h-10 the inset shadow reads visually shorter than
-                the raised select, so the two pills don't line up as
-                a matched pair. Same height, padding, radius, and
-                focus-shadow as SelectTrigger.
+                Stack the controls on mobile, side-by-side from sm+.
+                At 390px the row's natural width (~395px content)
+                exceeds the available 358px, and flex-wrap behavior
+                with the select's min-w-44 produced an x-scroll on
+                iOS Safari instead of cleanly wrapping. flex-col
+                below sm sidesteps it entirely and reads better at
+                phone widths anyway.
               */}
-              <input
-                id="quantity"
-                type="number"
-                min={1}
-                max={100}
-                value={quantity}
-                onChange={(e) => {
-                  // Clamp to [1, 100] and reject NaN — empty/invalid
-                  // text falls back to 1 so the quote pipeline never
-                  // sees a non-finite number.
-                  const raw = Number(e.target.value);
-                  const next = Number.isFinite(raw)
-                    ? Math.min(100, Math.max(1, Math.trunc(raw)))
-                    : 1;
-                  setQuantity(next);
-                }}
-                // text-base on phones (iOS auto-zooms < 16px), text-sm
-                // on md+ to match the rest of the controls row.
-                className="depth-raised h-10 w-20 rounded-xl border border-border bg-card px-3.5 py-1 text-base md:text-sm outline-none transition-shadow duration-200 ease-out focus-visible:shadow-[var(--shadow-raised),var(--shadow-focus-ring)]"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <Label
-                htmlFor="region"
-                className="mb-0 text-sm font-medium leading-none"
-              >
-                Ship to
-              </Label>
-              <Select
-                value={regionCode}
-                onValueChange={(value) => {
-                  if (!value) return;
-                  setRegionCode(value);
-                  if (typeof window !== "undefined") {
-                    window.localStorage.setItem("print-region", value);
-                  }
-                }}
-              >
-                <SelectTrigger id="region" className="min-w-44">
-                  <SelectValue>
-                    {(value) => {
-                      const r = REGIONS.find((r) => r.code === value);
-                      if (!r) return DEFAULT_REGION.name;
-                      return `${r.name} (${r.currency})`;
+              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
+                <div className="flex items-center gap-2">
+                  <Label
+                    htmlFor="quantity"
+                    className="mb-0 text-sm font-medium leading-none"
+                  >
+                    Quantity
+                  </Label>
+                  {/*
+                    Plain input rather than <Input> so it can wear the
+                    same depth-raised pill as the Ship-to <Select>
+                    sitting next to it. The default Input is depth-
+                    sunken — at the same h-10 the inset shadow reads
+                    visually shorter than the raised select, so the
+                    two pills don't line up as a matched pair. Same
+                    height, padding, radius, and focus-shadow as
+                    SelectTrigger.
+                  */}
+                  <input
+                    id="quantity"
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={quantity}
+                    onChange={(e) => {
+                      // Clamp to [1, 100] and reject NaN — empty/
+                      // invalid text falls back to 1 so the quote
+                      // pipeline never sees a non-finite number.
+                      const raw = Number(e.target.value);
+                      const next = Number.isFinite(raw)
+                        ? Math.min(100, Math.max(1, Math.trunc(raw)))
+                        : 1;
+                      setQuantity(next);
                     }}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {REGIONS.map((r) => (
-                    <SelectItem key={r.code} value={r.code}>
-                      {r.name} ({r.currency})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                    // text-base on phones (iOS auto-zooms < 16px),
+                    // text-sm on md+ to match the rest of the row.
+                    className="depth-raised h-10 w-20 rounded-xl border border-border bg-card px-3.5 py-1 text-base md:text-sm outline-none transition-shadow duration-200 ease-out focus-visible:shadow-[var(--shadow-raised),var(--shadow-focus-ring)]"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label
+                    htmlFor="region"
+                    className="mb-0 text-sm font-medium leading-none"
+                  >
+                    Ship to
+                  </Label>
+                  <Select
+                    value={regionCode}
+                    onValueChange={(value) => {
+                      if (!value) return;
+                      setRegionCode(value);
+                      if (typeof window !== "undefined") {
+                        window.localStorage.setItem("print-region", value);
+                      }
+                    }}
+                  >
+                    <SelectTrigger id="region" className="min-w-44">
+                      <SelectValue>
+                        {(value) => {
+                          const r = REGIONS.find((r) => r.code === value);
+                          if (!r) return DEFAULT_REGION.name;
+                          return `${r.name} (${r.currency})`;
+                        }}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {REGIONS.map((r) => (
+                        <SelectItem key={r.code} value={r.code}>
+                          {r.name} ({r.currency})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Geometry hints — soft warnings, never blocking */}
+              {(() => {
+                const hints = checkGeometry(geometryData);
+                if (hints.length === 0) return null;
+                return (
+                  <div className="space-y-2">
+                    {hints.map((hint, i) => (
+                      <div
+                        key={i}
+                        className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-800 dark:bg-amber-950"
+                      >
+                        <p className="text-xs font-medium text-amber-800 dark:text-amber-200">
+                          {hint.message}
+                        </p>
+                        <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
+                          {hint.detail}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           </div>
-
-          {/* Geometry hints — soft warnings, never blocking */}
-          {(() => {
-            const hints = checkGeometry(geometryData);
-            if (hints.length === 0) return null;
-            return (
-              <div className="mb-4 space-y-2">
-                {hints.map((hint, i) => (
-                  <div
-                    key={i}
-                    className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-800 dark:bg-amber-950"
-                  >
-                    <p className="text-xs font-medium text-amber-800 dark:text-amber-200">
-                      {hint.message}
-                    </p>
-                    <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
-                      {hint.detail}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            );
-          })()}
 
           <div className="my-6 border-t border-border" />
 
