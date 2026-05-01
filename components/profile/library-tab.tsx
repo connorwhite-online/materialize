@@ -329,6 +329,7 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
         primaryAssetId: asset?.id ?? null,
         primaryFormat: asset?.format ?? null,
         dimensions: asset?.dimensions ?? null,
+        flaggedReason: f.flaggedReason,
       };
     });
 

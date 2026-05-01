@@ -6,17 +6,21 @@
  * Main entry points:
  *   createFileListing(formData)       — publishes a new listing from
  *     a client upload. Expects `assetsJson` (IncomingAsset[]) in
- *     addition to the listing fields. Validates via
- *     createListingSchema, streams each R2 object through SHA-256
- *     for the anti-piracy dedup check, inserts file + fileAssets +
- *     optional collection link, then redirects to /files/[slug].
+ *     addition to the listing fields. Sync work: validate, byte-hash
+ *     each asset, hard-block on cross-user byte-hash collision,
+ *     insert files + fileAssets + optional collection link, then
+ *     redirect. Async work (via Next 16 `after()`): parse the mesh,
+ *     compute geometry hash + coarse fingerprint + bbox/volume/tri
+ *     stats, UPDATE the asset row, and run the cross-user geometry-
+ *     hash check; on a hit, the listing auto-archives with a
+ *     flagged_reason / flagged_at / flagged_against_file_id audit
+ *     trail (owner can dispute later).
  *
  *   createDraftFileForPrint(params)   — fast path used by the anon
  *     and authed "Print this file" flows. Takes an already-uploaded
  *     R2 storage key and creates a private listing row + a single
- *     fileAsset, returning the fileAssetId. Also runs the
- *     content-hash dedup check — re-uploading someone else's model
- *     is rejected with a fixed error string.
+ *     fileAsset, returning the fileAssetId. Same sync/async split
+ *     as createFileListing.
  *
  *   publishFileListing / archiveFileListing / deleteFileListing —
  *     state transitions on an existing listing.
@@ -24,8 +28,10 @@
  * Invariants:
  *   - Every R2 storage key must start with `uploads/${userId}/` or
  *     we reject immediately (spoofing guard).
- *   - computeContentHash streams directly from R2 via a presigned
- *     GET; hash is persisted on the fileAsset row for later dedup.
+ *   - The byte hash is computed inline on the upload's hot path and
+ *     persisted with the row before the response returns; the
+ *     geometry / coarse / stats columns fill in over the next 1-3s
+ *     of after() work and may be NULL transiently.
  *   - Nothing in here places real CraftCloud orders — that's
  *     app/actions/print.ts + the stripe webhook.
  */
@@ -57,13 +63,22 @@ import {
 import { deriveListingName, buildListingSlug } from "@/lib/filenames";
 import { logError, isRedirectError } from "@/lib/logger";
 import { generateDownloadUrl, deleteObject } from "@/lib/storage";
+import { type MeshFormat } from "@/lib/hashing/mesh-fingerprint";
+import { fingerprintAndPersistAsset } from "@/lib/hashing/fingerprint-asset";
+import { after } from "next/server";
 
-async function computeContentHash(storageKey: string): Promise<string | null> {
+// Sync helper: stream R2 -> SHA-256 of raw bytes. This is the only
+// fingerprint work we do on the upload's hot path now — the geometry
+// parse + canonical-sort happens deferred via fingerprintAndPersistAsset.
+// Streaming hash is bandwidth-bound, ~500ms for a 50 MB file.
+async function computeByteHashOnly(
+  storageKey: string
+): Promise<string | null> {
   try {
-    const { createHash } = await import("crypto");
     const downloadUrl = await generateDownloadUrl(storageKey, 300);
     const res = await fetch(downloadUrl);
     if (!res.ok || !res.body) return null;
+    const { createHash } = await import("node:crypto");
     const hash = createHash("sha256");
     const reader = res.body.getReader();
     while (true) {
@@ -73,9 +88,26 @@ async function computeContentHash(storageKey: string): Promise<string | null> {
     }
     return hash.digest("hex");
   } catch (err) {
-    logError("computeContentHash", err);
+    logError("computeByteHashOnly", err);
     return null;
   }
+}
+
+// Sync cross-user byte-hash check, run before INSERT. The strongest
+// dedup signal and the cheapest to compute, so it stays inline.
+async function checkByteHashCollision(
+  byteHash: string,
+  userId: string
+): Promise<boolean> {
+  const [hit] = await db
+    .select({ id: fileAssets.id })
+    .from(fileAssets)
+    .innerJoin(files, eq(fileAssets.fileId, files.id))
+    .where(
+      and(eq(fileAssets.contentHash, byteHash), ne(files.userId, userId))
+    )
+    .limit(1);
+  return !!hit;
 }
 
 export async function createFileListing(formData: FormData) {
@@ -142,26 +174,14 @@ export async function createFileListing(formData: FormData) {
   }
 
   try {
-    // Compute content hashes by streaming the freshly-uploaded R2 objects.
-    const hashes = await Promise.all(
-      incomingAssets.map((a) => computeContentHash(a.storageKey))
+    // Sync: byte hash + cross-user byte-hash collision check. The
+    // expensive geometry parse is deferred via after() below.
+    const byteHashes = await Promise.all(
+      incomingAssets.map((a) => computeByteHashOnly(a.storageKey))
     );
-
-    // Anti-piracy: any hash collision with a file owned by someone else
-    // means this user is re-uploading work that isn't theirs.
-    const definedHashes = hashes.filter((h): h is string => h !== null);
-    if (definedHashes.length > 0) {
-      const duplicates = await db
-        .select({ id: fileAssets.id })
-        .from(fileAssets)
-        .innerJoin(files, eq(fileAssets.fileId, files.id))
-        .where(
-          and(
-            inArray(fileAssets.contentHash, definedHashes),
-            ne(files.userId, userId)
-          )
-        );
-      if (duplicates.length > 0) {
+    for (const hash of byteHashes) {
+      if (!hash) continue;
+      if (await checkByteHashCollision(hash, userId)) {
         return {
           error: {
             name: [
@@ -197,18 +217,39 @@ export async function createFileListing(formData: FormData) {
       })
       .returning();
 
-    // Insert the file asset rows now that we have a fileId to link them to.
-    await db.insert(fileAssets).values(
-      incomingAssets.map((asset, i) => ({
-        fileId: file.id,
-        storageKey: asset.storageKey,
-        originalFilename: asset.originalFilename,
-        format: asset.format,
-        fileUnit: asset.fileUnit ?? "mm",
-        fileSize: asset.fileSize,
-        contentHash: hashes[i],
-      }))
-    );
+    // Insert with byte hash now; geometry hash + stats fill in async.
+    const insertedAssets = await db
+      .insert(fileAssets)
+      .values(
+        incomingAssets.map((asset, i) => ({
+          fileId: file.id,
+          storageKey: asset.storageKey,
+          originalFilename: asset.originalFilename,
+          format: asset.format,
+          fileUnit: asset.fileUnit ?? "mm",
+          fileSize: asset.fileSize,
+          contentHash: byteHashes[i] ?? null,
+        }))
+      )
+      .returning({ id: fileAssets.id });
+
+    // Defer the geometry parse + cross-user geometry-hash check. If
+    // it finds a collision, the listing gets auto-archived with a
+    // flag — see fingerprintAndPersistAsset.
+    for (let i = 0; i < insertedAssets.length; i++) {
+      const a = incomingAssets[i];
+      const inserted = insertedAssets[i];
+      after(() =>
+        fingerprintAndPersistAsset({
+          assetId: inserted.id,
+          fileId: file.id,
+          ownerUserId: userId,
+          storageKey: a.storageKey,
+          format: a.format as MeshFormat,
+          fileUnit: a.fileUnit ?? "mm",
+        })
+      );
+    }
 
     // Optional: add to an existing collection or create a new one
     const rawCollectionId = (formData.get("collectionId") as string | null) || "";
@@ -588,24 +629,21 @@ export async function createDraftFileForPrint(params: {
       return { error: "Invalid storage key" };
     }
 
-    // Anti-piracy: same content-hash check as createFileListing.
-    // Someone can't use the print path as a back door to stand up
-    // a file they don't own.
-    const contentHash = await computeContentHash(params.storageKey);
-    if (contentHash) {
-      // Self-dedupe first: if the current user already owns a file
-      // with this content hash, reuse it instead of creating a
-      // second library row. Hits most often in the anon → OTP →
-      // print flow when a returning user re-uploads a file they've
-      // already listed.
+    // Sync: byte hash + cross-user byte-hash check. Geometry parse
+    // happens deferred via after() below.
+    const byteHash = await computeByteHashOnly(params.storageKey);
+
+    if (byteHash) {
+      // Self-dedupe: if this user already owns an asset with the
+      // same byte hash, reuse the existing library row.
       const [existing] = await db
         .select({ assetId: fileAssets.id, fileSlug: files.slug })
         .from(fileAssets)
         .innerJoin(files, eq(fileAssets.fileId, files.id))
         .where(
           and(
-            eq(fileAssets.contentHash, contentHash),
-            eq(files.userId, userId)
+            eq(files.userId, userId),
+            eq(fileAssets.contentHash, byteHash)
           )
         )
         .limit(1);
@@ -614,17 +652,7 @@ export async function createDraftFileForPrint(params: {
         return { fileAssetId: existing.assetId, fileSlug: existing.fileSlug };
       }
 
-      const duplicates = await db
-        .select({ id: fileAssets.id })
-        .from(fileAssets)
-        .innerJoin(files, eq(fileAssets.fileId, files.id))
-        .where(
-          and(
-            eq(fileAssets.contentHash, contentHash),
-            ne(files.userId, userId)
-          )
-        );
-      if (duplicates.length > 0) {
+      if (await checkByteHashCollision(byteHash, userId)) {
         await releaseR2();
         return {
           error:
@@ -663,11 +691,24 @@ export async function createDraftFileForPrint(params: {
         format: params.format,
         fileUnit: params.fileUnit ?? "mm",
         fileSize: params.fileSize,
-        contentHash,
+        contentHash: byteHash ?? null,
       })
       .returning({ id: fileAssets.id });
 
     claimed = true;
+
+    // Defer the geometry parse + cross-user geometry-hash check.
+    after(() =>
+      fingerprintAndPersistAsset({
+        assetId: asset.id,
+        fileId: file.id,
+        ownerUserId: userId,
+        storageKey: params.storageKey,
+        format: params.format as MeshFormat,
+        fileUnit: params.fileUnit ?? "mm",
+      })
+    );
+
     revalidatePath("/dashboard/uploads");
     return { fileAssetId: asset.id, fileSlug: file.slug };
   } catch (error) {

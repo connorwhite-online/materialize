@@ -28,6 +28,17 @@ vi.mock("next/cache", () => ({
   unstable_cache: vi.fn((fn: unknown) => fn),
 }));
 
+// Mock next/server's `after` so tests don't need a request context.
+// We swallow the callback — deferred work is verified by direct unit
+// tests on the helpers, not through the action surface.
+vi.mock("next/server", async () => {
+  const actual = await vi.importActual<Record<string, unknown>>("next/server");
+  return {
+    ...actual,
+    after: vi.fn((_fn: () => unknown) => undefined),
+  };
+});
+
 // Mock next/navigation
 vi.mock("next/navigation", () => ({
   redirect: vi.fn((url: string) => {

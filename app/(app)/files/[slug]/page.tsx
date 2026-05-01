@@ -27,6 +27,8 @@ import { DeleteFileButton } from "@/components/files/delete-file-button";
 import { EditFileButton } from "@/components/files/edit-file-button";
 import { FileThumbnailGenerator } from "@/components/files/file-thumbnail-generator";
 import { OrderModelPreview } from "@/components/print/order-model-preview";
+import { VerifyingPill } from "@/components/files/verifying-pill";
+import { ListingFlaggedBanner } from "@/components/files/listing-flagged-banner";
 import { getMaterialById } from "@/lib/materials";
 import { generateDownloadUrl } from "@/lib/storage";
 
@@ -62,6 +64,8 @@ export default async function FileDetailPage(props: {
       downloadCount: files.downloadCount,
       viewCount: files.viewCount,
       createdAt: files.createdAt,
+      flaggedReason: files.flaggedReason,
+      flaggedAt: files.flaggedAt,
       userId: files.userId,
       username: users.username,
       displayName: users.displayName,
@@ -191,8 +195,20 @@ export default async function FileDetailPage(props: {
   // Primary asset drives the filename / size / preview / bounding box.
   const primaryAsset = assets[0] ?? null;
   const PREVIEWABLE = new Set(["stl", "obj", "3mf"]);
+  const FINGERPRINTABLE = new Set(["stl", "obj"]);
   const previewable =
     !!primaryAsset && PREVIEWABLE.has(primaryAsset.format);
+
+  // Owner-only "Verifying upload..." pill while the deferred fingerprint
+  // pass hasn't filled in geometry_hash yet. Only show for parseable
+  // formats — 3mf/step/amf intentionally leave geometry_hash null and
+  // would render the pill forever otherwise.
+  const verifying =
+    isOwner &&
+    !file.flaggedReason &&
+    !!primaryAsset &&
+    FINGERPRINTABLE.has(primaryAsset.format) &&
+    !primaryAsset.geometryHash;
   const rawDims = primaryAsset?.geometryData?.dimensions;
   const dims =
     rawDims &&
@@ -217,11 +233,20 @@ export default async function FileDetailPage(props: {
           format={primaryAsset.format}
         />
       )}
+      {isOwner && file.flaggedReason && file.flaggedAt && (
+        <ListingFlaggedBanner
+          reason={file.flaggedReason}
+          flaggedAt={file.flaggedAt}
+        />
+      )}
       <div className="grid gap-8 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-6">
           {/* Title + filename · size */}
           <div>
-            <h1 className="text-2xl font-bold">{file.name}</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold">{file.name}</h1>
+              {verifying && <VerifyingPill />}
+            </div>
             {primaryAsset && (
               <p className="mt-1 text-sm text-muted-foreground">
                 {primaryAsset.originalFilename}

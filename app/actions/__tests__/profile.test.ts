@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock DB
-const mockUpdateSet = vi.fn();
-const mockUpdateWhere = vi.fn(() => Promise.resolve());
+// Mock DB. Mocks accept rest args so they type-check when called via
+// the spread-forwarding wrapper inside vi.mock's factory below.
+const mockUpdateSet = vi.fn((..._args: unknown[]) => undefined);
+const mockUpdateWhere = vi.fn((..._args: unknown[]) => Promise.resolve());
 
 vi.mock("@/lib/db", () => ({
   db: {

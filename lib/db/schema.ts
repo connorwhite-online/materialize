@@ -101,6 +101,14 @@ export const files = pgTable("files", {
   downloadCount: integer("download_count").notNull().default(0),
   viewCount: integer("view_count").notNull().default(0),
   thumbnailUrl: text("thumbnail_url"),
+  // Set when a deferred check (e.g. async geometry-hash dedup) finds
+  // something that should pull this listing out of public view. The
+  // server action that detects the collision flips status -> archived
+  // and writes both fields together. flaggedAgainstFileId points at
+  // the existing listing whose work we matched.
+  flaggedReason: text("flagged_reason"),
+  flaggedAt: timestamp("flagged_at", { withTimezone: true }),
+  flaggedAgainstFileId: uuid("flagged_against_file_id"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -112,6 +120,7 @@ export const files = pgTable("files", {
   index("files_user_id_idx").on(table.userId),
   index("files_status_idx").on(table.status),
   index("files_slug_idx").on(table.slug),
+  index("files_flagged_at_idx").on(table.flaggedAt),
 ]);
 
 // Projects — sellable bundles of files. A creator can list a single
@@ -186,13 +195,34 @@ export const fileAssets = pgTable("file_assets", {
     triangleCount?: number;
   }>(),
   craftCloudModelId: text("craft_cloud_model_id"),
-  contentHash: text("content_hash"), // SHA-256 of file content for anti-piracy
+  contentHash: text("content_hash"), // SHA-256 of raw file bytes
+  // Normalized geometry hash — SHA-256 over a canonical (sorted, rounded)
+  // triangle list. Survives format conversion, vertex reordering, and
+  // re-export by the same software. Null for formats we don't parse
+  // server-side (3mf/step/amf today) or files that fail to parse.
+  geometryHash: text("geometry_hash"),
+  // Bumped when normalization rules change; lets us re-fingerprint
+  // older rows in a backfill rather than mixing schemes in one index.
+  geometryHashVersion: integer("geometry_hash_version"),
+  // Coarse shape fingerprint — SHA-256 over the (volume, triangle
+  // count, bbox dimensions) tuple at integer-micrometer precision.
+  // Cheaper to collide than the geometry hash, useful as a soft
+  // flag when the byte/geometry hashes both miss but the basic
+  // shape stats line up suspiciously.
+  coarseFingerprint: text("coarse_fingerprint"),
+  volumeUm3: bigint("volume_um3", { mode: "number" }),
+  triangleCount: integer("triangle_count"),
+  bboxXUm: bigint("bbox_x_um", { mode: "number" }),
+  bboxYUm: bigint("bbox_y_um", { mode: "number" }),
+  bboxZUm: bigint("bbox_z_um", { mode: "number" }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
 }, (table) => [
   index("file_assets_file_id_idx").on(table.fileId),
   index("file_assets_content_hash_idx").on(table.contentHash),
+  index("file_assets_geometry_hash_idx").on(table.geometryHash),
+  index("file_assets_coarse_fingerprint_idx").on(table.coarseFingerprint),
 ]);
 
 // A purchase grants ownership of exactly one sellable: either a

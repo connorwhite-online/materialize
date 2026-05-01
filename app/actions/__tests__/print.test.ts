@@ -1,16 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { OrderStatusResponse } from "@/lib/craftcloud/types";
 
-// Mock CraftCloud client
-const mockCreateCart = vi.fn(() =>
+// Mock CraftCloud client. Mocks accept rest args so the indirection
+// in vi.mock's factory (`(...args) => mockX(...args)`) type-checks.
+const mockCreateCart = vi.fn((..._args: unknown[]) =>
   Promise.resolve({ cartId: "cart-123", totalPrice: 29.99, currency: "USD" })
 );
-const mockGetOrderStatus = vi.fn(() =>
-  Promise.resolve({
-    orderId: "order-123",
-    vendorStatuses: [
-      { vendorId: "v1", status: "shipped", trackingUrl: "https://track.me/123" },
-    ],
-  })
+const mockGetOrderStatus = vi.fn(
+  (..._args: unknown[]): Promise<OrderStatusResponse> =>
+    Promise.resolve({
+      orderId: "order-123",
+      vendorStatuses: [
+        {
+          vendorId: "v1",
+          status: "shipped",
+          trackingUrl: "https://track.me/123",
+        },
+      ],
+    })
 );
 
 vi.mock("@/lib/craftcloud/client", () => ({

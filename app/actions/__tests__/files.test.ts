@@ -49,7 +49,16 @@ vi.mock("@/lib/db", () => ({
             { id: "test-file-id", userId: "test-user-id", slug: "test-slug" },
           ],
           innerJoin: () => ({
-            where: () => [], // no duplicates found
+            where: () => {
+              // Dedup checks — no collisions. Both with and without
+              // a trailing .limit() are exercised by createFileListing
+              // (byte/geom/coarse) and createDraftFileForPrint.
+              const empty: never[] = [];
+              const result = Object.assign(empty, {
+                limit: () => [],
+              });
+              return result;
+            },
           }),
         };
       },

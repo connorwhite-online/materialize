@@ -19,6 +19,11 @@ export interface LibraryFileCardItem {
   dimensions: [number, number, number] | null;
   creatorUsername?: string | null;
   creatorDisplayName?: string | null;
+  // Set when the deferred fingerprint pass auto-archived this listing
+  // on a cross-user geometry collision; surfaces a "Flagged" badge so
+  // the owner notices something they wouldn't otherwise see (the
+  // listing is still in their library but hidden from buyers).
+  flaggedReason?: string | null;
 }
 
 interface LibraryFileCardProps {
@@ -133,6 +138,8 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
     item.source === "owned" && isOwner && item.visibility === "private";
   const isPurchased = item.source === "purchased";
   const hasPrice = item.source === "owned" && item.price > 0;
+  const isFlagged =
+    item.source === "owned" && isOwner && !!item.flaggedReason;
 
   return (
     <Link href={`/files/${item.slug}`}>
@@ -166,7 +173,7 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
                 ? `by ${item.creatorDisplayName || item.creatorUsername}`
                 : "—"}
           </p>
-          {(hasPrice || isPurchased || isHidden) && (
+          {(hasPrice || isPurchased || isHidden || isFlagged) && (
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {hasPrice && (
                 <Badge variant="secondary" className="text-[10px]">
@@ -181,6 +188,11 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
               {isHidden && (
                 <Badge variant="outline" className="text-[10px]">
                   Hidden
+                </Badge>
+              )}
+              {isFlagged && (
+                <Badge variant="destructive" className="text-[10px]">
+                  Flagged
                 </Badge>
               )}
             </div>
