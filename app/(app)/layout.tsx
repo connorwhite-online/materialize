@@ -36,15 +36,20 @@ export default function AppLayout({
         <header className="sticky top-0 z-30 lg:hidden">
           <div
             aria-hidden="true"
-            // h-28 so the blur extends well past the nav row and has
-            // room to fade out — at h-20 the fade was compressed into
-            // 24px which read as a hard line. The mask now ramps from
-            // fully visible all the way to transparent over the full
-            // height; the bg gradient does the same so the colored
-            // wash and the blur fall off in lockstep.
+            // h-28 (112px) total: top 50% (56px = nav-row height) is
+            // a fully-opaque blur+bg plateau so the wordmark and
+            // avatar stay readable, then the bottom 50% fades to
+            // transparent so the blur dissolves smoothly into page
+            // content instead of cutting at a hard line.
+            //
+            // Uniform bg-background/85 instead of a vertical bg
+            // gradient — the mask alone owns the fade now, which
+            // means the colored wash and the blur opacity drop off
+            // in perfect lockstep.
+            //
             // -webkit-mask-image is paired with mask-image so older
             // iOS Safari (<16.4) renders the same mask.
-            className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-background to-background/0 backdrop-blur-xl [mask-image:linear-gradient(to_bottom,white,transparent)] [-webkit-mask-image:linear-gradient(to_bottom,white,transparent)]"
+            className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-background/85 backdrop-blur-xl [mask-image:linear-gradient(to_bottom,white,white_50%,transparent)] [-webkit-mask-image:linear-gradient(to_bottom,white,white_50%,transparent)]"
           />
           <div className="relative mx-auto flex h-14 max-w-7xl items-center justify-between px-4">
             <MainMenuTrigger />
