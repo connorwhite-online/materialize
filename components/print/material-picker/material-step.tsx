@@ -3,8 +3,9 @@
 import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ChevronRight } from "@/components/icons/chevron-right";
-import type { EnrichedQuote } from "./types";
+import type { EnrichedQuote, OptimisticMaterial } from "./types";
 
 interface MaterialStepProps {
   quotes: EnrichedQuote[];
@@ -22,6 +23,15 @@ interface MaterialStepProps {
    * transient vendor unavailability, not a too-big-to-print case.
    */
   materialScoped?: boolean;
+  /**
+   * Optimistic material list filtered to those whose build volume
+   * fits this model. When set and quote polling hasn't completed
+   * yet, materials without a quote render as skeleton-priced cards
+   * so the picker shows something immediately. Once polling finishes,
+   * any optimistic card without a real quote disappears (no vendors
+   * actually quoted it for this region).
+   */
+  viableMaterials?: OptimisticMaterial[] | null;
   /** Re-runs the quote fetch from scratch. */
   onRetryQuotes?: () => void;
   /**
@@ -40,9 +50,15 @@ interface MaterialCard {
   materialGroupName: string;
   materialImage: string | null;
   materialSortIndex: number;
-  cheapest: number;
-  fastestFast: number;
-  fastestSlow: number;
+  /**
+   * Null when this card is an optimistic placeholder — a viable
+   * material with no real quote yet. The card renders skeletons in
+   * place of price + leadtime and is non-interactive (clicking would
+   * push the user into a finish step with no quotes to enumerate).
+   */
+  cheapest: number | null;
+  fastestFast: number | null;
+  fastestSlow: number | null;
   configCount: number;
 }
 
@@ -69,16 +85,38 @@ export function MaterialStep({
   quotesLoading,
   quotesPartial = false,
   materialScoped = false,
+  viableMaterials = null,
   onRetryQuotes,
   onClearScope,
   onPick,
 }: MaterialStepProps) {
-  const { groups, cardsByGroup, popularCards } = useMemo(() => {
+  const { groups, cardsByGroup, popularCards, totalCards } = useMemo(() => {
     const byMaterial = new Map<string, MaterialCard>();
+
+    // Seed the map with optimistic placeholders. Anything still in
+    // the map after the quotes loop with a null `cheapest` is a card
+    // we believe is geometrically printable but haven't priced yet —
+    // shown as a skeleton while polling continues.
+    if (viableMaterials && quotesLoading) {
+      for (const m of viableMaterials) {
+        byMaterial.set(m.id, {
+          materialId: m.id,
+          materialName: m.name,
+          materialGroupId: m.groupId,
+          materialGroupName: m.groupName,
+          materialImage: m.image,
+          materialSortIndex: m.sortIndex,
+          cheapest: null,
+          fastestFast: null,
+          fastestSlow: null,
+          configCount: 0,
+        });
+      }
+    }
 
     for (const q of quotes) {
       const existing = byMaterial.get(q.materialId);
-      if (!existing) {
+      if (!existing || existing.cheapest === null) {
         byMaterial.set(q.materialId, {
           materialId: q.materialId,
           materialName: q.materialName,
@@ -104,11 +142,16 @@ export function MaterialStep({
     // Sort by sortIndex first (popularity), price as tiebreaker. Within
     // a group section the user reads top-to-bottom expecting the most
     // common pick first; price is the natural disambiguator only when
-    // CraftCloud's curation hasn't said anything.
+    // CraftCloud's curation hasn't said anything. Skeleton cards
+    // (cheapest === null) sort with their peers by sortIndex; ties
+    // among unpriced cards stay in insertion order, which is fine.
     const cards = Array.from(byMaterial.values()).sort((a, b) => {
       if (a.materialSortIndex !== b.materialSortIndex) {
         return a.materialSortIndex - b.materialSortIndex;
       }
+      if (a.cheapest === null && b.cheapest === null) return 0;
+      if (a.cheapest === null) return 1;
+      if (b.cheapest === null) return -1;
       return a.cheapest - b.cheapest;
     });
 
@@ -150,15 +193,17 @@ export function MaterialStep({
         return a.name.localeCompare(b.name);
       });
 
-    return { groups, cardsByGroup, popularCards };
-  }, [quotes]);
+    return { groups, cardsByGroup, popularCards, totalCards: cards.length };
+  }, [quotes, viableMaterials, quotesLoading]);
 
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
 
-  // Nothing to show yet — render a thin indeterminate loader while
-  // we wait for the first snapshot. As soon as any quotes land the
-  // grid takes over, and further arrivals just append cards.
-  if (quotesLoading && quotes.length === 0) {
+  // Nothing at all to render — fall back to the thin loader. This
+  // path now only fires when (a) we don't have viableMaterials yet
+  // (dimensions unknown, manifest still in flight, or scoped) AND
+  // (b) no real quotes have arrived. With viableMaterials in hand,
+  // totalCards > 0 and we render the optimistic skeleton grid below.
+  if (quotesLoading && totalCards === 0) {
     return <MaterialStepLoading />;
   }
 
@@ -349,11 +394,21 @@ function MaterialCardButton({
   card: MaterialCard;
   onPick: (materialId: string) => void;
 }) {
+  // Optimistic placeholder — material is geometrically printable but
+  // we don't have a quote yet. Disable click; the finish step needs
+  // at least one quote to enumerate options.
+  const pending =
+    card.cheapest === null ||
+    card.fastestFast === null ||
+    card.fastestSlow === null;
+
   return (
     <button
       type="button"
       onClick={() => onPick(card.materialId)}
-      className="flex items-start gap-3 rounded-xl border border-border bg-card p-3 text-left transition-colors hover:border-primary/40"
+      disabled={pending}
+      aria-busy={pending}
+      className="flex items-start gap-3 rounded-xl border border-border bg-card p-3 text-left transition-colors enabled:hover:border-primary/40 disabled:cursor-default"
     >
       <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-muted/60">
         {card.materialImage && (
@@ -369,17 +424,25 @@ function MaterialCardButton({
       <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate text-sm font-medium">{card.materialName}</p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">
-            {card.configCount}{" "}
-            {card.configCount === 1 ? "option" : "options"} ·{" "}
-            {card.fastestFast}-{card.fastestSlow}d
-          </p>
+          {pending ? (
+            <Skeleton className="mt-1 h-3 w-24" />
+          ) : (
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
+              {card.configCount}{" "}
+              {card.configCount === 1 ? "option" : "options"} ·{" "}
+              {card.fastestFast}-{card.fastestSlow}d
+            </p>
+          )}
         </div>
         <div className="shrink-0 text-right">
           <p className="text-[10px] text-muted-foreground">from</p>
-          <p className="text-sm font-medium tabular-nums">
-            ${card.cheapest.toFixed(2)}
-          </p>
+          {pending ? (
+            <Skeleton className="mt-1 h-4 w-12" />
+          ) : (
+            <p className="text-sm font-medium tabular-nums">
+              ${card.cheapest!.toFixed(2)}
+            </p>
+          )}
         </div>
       </div>
     </button>

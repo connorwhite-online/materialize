@@ -4,7 +4,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { MaterialStep } from "./material-step";
 import { FinishStep } from "./finish-step";
 import { VendorStep } from "./vendor-step";
-import type { EnrichedQuote, PickerStep } from "./types";
+import type {
+  EnrichedQuote,
+  OptimisticMaterial,
+  PickerStep,
+} from "./types";
 
 interface ShippingLite {
   vendorId: string;
@@ -29,6 +33,13 @@ interface MaterialPickerProps {
   quotesPartial?: boolean;
   /** Re-run the quote fetch from scratch. Used by the partial-results retry. */
   onRetryQuotes?: () => void;
+  /**
+   * Optimistic material list filtered to those whose build volume can
+   * fit the model. Drives the skeleton-priced cards on the material
+   * step before real quotes arrive. Null when we don't know the
+   * dimensions or the request is scoped to a single material.
+   */
+  viableMaterials?: OptimisticMaterial[] | null;
   selectedQuote: EnrichedQuote | null;
   onSelectQuote: (quote: EnrichedQuote) => void;
   /**
@@ -52,6 +63,7 @@ export function MaterialPicker({
   shipping,
   quotesLoading,
   quotesPartial = false,
+  viableMaterials = null,
   onRetryQuotes,
   selectedQuote,
   onSelectQuote,
@@ -97,6 +109,7 @@ export function MaterialPicker({
         quotesLoading={quotesLoading}
         quotesPartial={quotesPartial}
         materialScoped={!!preselectMaterialId}
+        viableMaterials={viableMaterials}
         onRetryQuotes={onRetryQuotes}
         onClearScope={onClearPreselectScope}
         onPick={(id) => {

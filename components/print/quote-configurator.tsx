@@ -3,7 +3,12 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
 import type { PendingItem } from "./cart-slot-stack";
 import { MaterialPicker } from "./material-picker";
-import type { EnrichedQuote } from "./material-picker/types";
+import type {
+  EnrichedQuote,
+  OptimisticMaterial,
+} from "./material-picker/types";
+import { modelFitsInVolume } from "@/lib/craftcloud/fits-volume";
+import type { MaterialsManifestResponse } from "@/app/api/craftcloud/materials-manifest/route";
 import { PriceDisplay, type MinimumFeeInfo } from "./price-display";
 import type { Currency } from "@/lib/craftcloud/types";
 import { ShippingAddressForm } from "./shipping-address-form";
@@ -110,6 +115,15 @@ export function QuoteConfigurator({
   );
   const [error, setError] = useState<string | null>(null);
   const [quotes, setQuotes] = useState<Quote[]>([]);
+  // Optimistic material list — populated from the catalog manifest as
+  // soon as it arrives (in parallel with quote polling), filtered by
+  // the model's bounding box. Drives the skeleton-priced cards that
+  // appear on the material step before real quotes land. Null until
+  // we have both dimensions AND the manifest; an empty array means
+  // "fetched but nothing fits this model".
+  const [viableMaterials, setViableMaterials] = useState<
+    OptimisticMaterial[] | null
+  >(null);
   const [shipping, setShipping] = useState<ShippingOption[]>([]);
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
   const [selectedShipping, setSelectedShipping] =
@@ -454,6 +468,65 @@ export function QuoteConfigurator({
       pollAbortRef.current?.abort();
     };
   }, [ensureModelUploaded, fetchQuotes]);
+
+  // Fetch the materials manifest in parallel with quote polling and
+  // filter to the materials whose build volume can actually fit this
+  // model. Independent of the quote pipeline — even if quoting fails,
+  // these cards still render so the user has something to look at.
+  // Skipped when we don't know the dimensions (we'd be guessing) or
+  // when the request is scoped to a single material via preselect
+  // (the picker auto-advances past the material step in that case).
+  const dims = geometryData?.dimensions;
+  const dimsReady =
+    !!dims &&
+    typeof dims.x === "number" &&
+    typeof dims.y === "number" &&
+    typeof dims.z === "number";
+  useEffect(() => {
+    if (!dimsReady || !dims) {
+      setViableMaterials(null);
+      return;
+    }
+    if (scopedMaterialId) {
+      setViableMaterials(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/craftcloud/materials-manifest");
+        if (!res.ok) return;
+        const data = (await res.json()) as MaterialsManifestResponse;
+        if (cancelled) return;
+        const modelDims: [number, number, number] = [dims.x, dims.y, dims.z];
+        const viable = data.materials
+          // Keep materials that publish a max volume the model fits in.
+          // Materials without a published max are ambiguous — skip them
+          // here; they'll still appear if a real quote comes back.
+          .filter(
+            (m) =>
+              m.maxDimensions !== null &&
+              modelFitsInVolume(modelDims, m.maxDimensions)
+          )
+          .map<OptimisticMaterial>((m) => ({
+            id: m.id,
+            name: m.name,
+            groupId: m.groupId,
+            groupName: m.groupName,
+            image: m.image,
+            sortIndex: m.sortIndex,
+          }));
+        setViableMaterials(viable);
+      } catch {
+        // Manifest is best-effort; if it fails the picker silently
+        // falls back to the no-optimistic-cards behavior. The real
+        // quote polling is the source of truth either way.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [dimsReady, dims, scopedMaterialId]);
 
 
   const handleCheckout = async () => {
@@ -808,6 +881,7 @@ export function QuoteConfigurator({
             shipping={shipping}
             quotesLoading={loadingPhase === "quoting"}
             quotesPartial={loadingPhase === "timeout"}
+            viableMaterials={viableMaterials}
             onRetryQuotes={() => {
               setLoadingPhase(isDraft ? "quoting" : "uploading");
               fetchQuotes().catch((err) => {

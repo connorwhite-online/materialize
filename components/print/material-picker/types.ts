@@ -52,3 +52,19 @@ export interface EnrichedQuote {
 }
 
 export type PickerStep = "material" | "finish" | "vendor";
+
+/**
+ * Slim material descriptor used to render optimistic cards on the
+ * material step before any real quotes have arrived. Filtered by
+ * the model's bounding box upstream of the picker, so every entry
+ * in this list is "geometrically printable" — but until a quote
+ * lands we don't know price, leadtime, or vendor coverage.
+ */
+export interface OptimisticMaterial {
+  id: string;
+  name: string;
+  groupId: string;
+  groupName: string;
+  image: string | null;
+  sortIndex: number;
+}
