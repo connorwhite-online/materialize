@@ -355,7 +355,7 @@ export function MaterialStep({
             view complete without forcing the user to hunt for PLA. */}
         {activeGroup === null && popularCards.length > 0 && (
           <GroupSection name="Popular" count={popularCards.length}>
-            <div className="grid gap-3 pt-3 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 pt-3 sm:grid-cols-2">
               {popularCards.map((card) => (
                 <MaterialCardButton
                   key={card.materialId}
@@ -373,7 +373,7 @@ export function MaterialStep({
           if (cards.length === 0) return null;
           return (
             <GroupSection key={g.id} name={g.name} count={cards.length}>
-              <div className="grid gap-3 pt-3 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3 pt-3 sm:grid-cols-2">
                 {cards.map((card) => (
                   <MaterialCardButton
                     key={card.materialId}
@@ -417,7 +417,13 @@ function MaterialCardButton({
       onClick={() => onPick(card.materialId)}
       disabled={!interactive}
       aria-busy={pending}
-      className="flex items-start gap-3 rounded-xl border border-border bg-card p-3 text-left transition-colors enabled:hover:border-primary/40 disabled:cursor-default"
+      // w-full + min-w-0 keep the button inside its grid cell even when
+      // a long material name (e.g. "BASF® Ultrafuse 17-4 PH Steel")
+      // would otherwise push min-content past the viewport. Without
+      // them iOS Safari treats the page as wider than the viewport
+      // and auto-zooms the layout to fit, leaving content visibly
+      // clipped on the right edge.
+      className="flex w-full min-w-0 items-start gap-3 rounded-xl border border-border bg-card p-3 text-left transition-colors enabled:hover:border-primary/40 disabled:cursor-default"
     >
       <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-muted/60">
         {card.materialImage && (
