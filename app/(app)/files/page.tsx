@@ -13,6 +13,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { BrowseSearchBar } from "@/components/browse/browse-search-bar";
+import { Download } from "@/components/icons/download";
+import { formatCompactCount } from "@/lib/utils/format-count";
 
 const PER_SECTION = 24;
 /**
@@ -302,8 +304,13 @@ function FileGrid({ files }: { files: FileRow[] }) {
                     Free
                   </Badge>
                 )}
-                <span className="text-[10px] text-muted-foreground tabular-nums">
-                  {file.downloadCount} dl
+                <span
+                  className="inline-flex items-center gap-1 text-[10px] text-muted-foreground tabular-nums"
+                  aria-label={`${file.downloadCount} downloads`}
+                  title={`${file.downloadCount} downloads`}
+                >
+                  <Download size={11} />
+                  {formatCompactCount(file.downloadCount)}
                 </span>
               </div>
             </CardContent>
