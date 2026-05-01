@@ -12,18 +12,82 @@ interface CatalogBrowserProps {
 }
 
 /**
+ * How many materials to surface in the "Popular" section at the top
+ * of the All view. Eight fills two rows of four at xl, three rows at
+ * lg, four at sm — and CraftCloud's first ten sortIndex slots are
+ * exactly the canonical shortlist (PLA, SLS Nylon, 316L Steel, etc.)
+ * so eight gives breathing room past the obvious picks.
+ */
+const POPULAR_LIMIT = 8;
+
+/**
  * Materials browse UI. Top-level filter chip row narrows to a
  * specific material group; each group renders as a collapsible
  * section (chevron + name + count) so the user can fold away
  * families they aren't interested in.
+ *
+ * Group ordering and the top-of-page "Popular" shortlist both key off
+ * CraftCloud's editorial sortIndex (lower = more popular). Same
+ * approach as the print picker so the two views stay consistent in
+ * which materials they treat as "what most people want".
  */
 export function CatalogBrowser({ groups }: CatalogBrowserProps) {
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
 
+  const { sortedGroups, popularMaterials } = useMemo(() => {
+    const sortIndexOf = (m: CatalogMaterial) => m.sortIndex ?? 9999;
+
+    // Order materials within each group by sortIndex so the most
+    // common picks float to the top of the family section too.
+    const sortedGroups = groups
+      .map((g) => ({
+        ...g,
+        materials: [...g.materials].sort(
+          (a, b) =>
+            sortIndexOf(a as CatalogMaterial) -
+            sortIndexOf(b as CatalogMaterial)
+        ),
+      }))
+      // Then sort the groups themselves by their best (lowest)
+      // sortIndex — Standard Plastics first because of PLA, Nylons
+      // next because of SLS PA12, etc. Falls back to the original
+      // order when two groups happen to tie on their best material.
+      .sort((a, b) => {
+        const bestA = a.materials.reduce(
+          (min, m) => Math.min(min, sortIndexOf(m as CatalogMaterial)),
+          Infinity
+        );
+        const bestB = b.materials.reduce(
+          (min, m) => Math.min(min, sortIndexOf(m as CatalogMaterial)),
+          Infinity
+        );
+        return bestA - bestB;
+      });
+
+    const popularMaterials = sortedGroups
+      .flatMap((g) =>
+        g.materials.map((m) => ({ material: m as CatalogMaterial, group: g }))
+      )
+      .sort(
+        (a, b) => sortIndexOf(a.material) - sortIndexOf(b.material)
+      )
+      .slice(0, POPULAR_LIMIT);
+
+    return { sortedGroups, popularMaterials };
+  }, [groups]);
+
   const visibleGroups = useMemo(
-    () => (activeGroup ? groups.filter((g) => g.id === activeGroup) : groups),
-    [groups, activeGroup]
+    () =>
+      activeGroup
+        ? sortedGroups.filter((g) => g.id === activeGroup)
+        : sortedGroups,
+    [sortedGroups, activeGroup]
   );
+
+  // Popular shortlist only makes sense when the user is browsing All —
+  // a group filter narrows to one family and the popular block would
+  // visually duplicate the first few cards of that family below.
+  const showPopular = activeGroup === null && popularMaterials.length > 0;
 
   return (
     <div className="space-y-6">
@@ -35,10 +99,10 @@ export function CatalogBrowser({ groups }: CatalogBrowserProps) {
         >
           All
           <span className="ml-1 text-xs opacity-60">
-            {groups.reduce((s, g) => s + g.materials.length, 0)}
+            {sortedGroups.reduce((s, g) => s + g.materials.length, 0)}
           </span>
         </Button>
-        {groups.map((g) => (
+        {sortedGroups.map((g) => (
           <Button
             key={g.id}
             variant={activeGroup === g.id ? "secondary" : "ghost"}
@@ -61,6 +125,19 @@ export function CatalogBrowser({ groups }: CatalogBrowserProps) {
         </div>
       ) : (
         <div className="space-y-4">
+          {showPopular && (
+            <GroupSection name="Popular" count={popularMaterials.length}>
+              <div className="grid grid-cols-1 gap-4 pt-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {popularMaterials.map(({ material, group }) => (
+                  <CatalogMaterialCard
+                    key={material.id}
+                    material={material}
+                    group={group}
+                  />
+                ))}
+              </div>
+            </GroupSection>
+          )}
           {visibleGroups.map((g) => (
             <GroupSection key={g.id} name={g.name} count={g.materials.length}>
               <div className="grid grid-cols-1 gap-4 pt-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
