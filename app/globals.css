@@ -279,6 +279,13 @@
   --shadow-raised: var(--shadow-raised);
   --shadow-raised-hover: var(--shadow-raised-hover);
   --shadow-sunken: var(--shadow-sunken);
+  /* Custom breakpoint used to swap the mobile top-nav for the
+     desktop sidebar. Sits between Tailwind's lg (1024px) and xl
+     (1280px) — at 1024 the page already feels cramped with both
+     the centered max-w-7xl content and the sidebar gutter, but
+     by 1080 there's enough room for the rail to feel comfortable.
+     Used as `nav:`, e.g. `nav:hidden`, `nav:flex`. */
+  --breakpoint-nav: 67.5rem;
 }
 
 @layer components {

@@ -78,12 +78,15 @@ function isActive(pathname: string | null, href: string): boolean {
 }
 
 // Sidebar lives in the reserved gutter the layout opens up at
-// `lg:pl-56`. Below `lg` (1024px) the rail is hidden and the
-// dropdown trigger in the header carries the same nav.
+// `nav:pl-56`. Below the `nav` breakpoint (1080px, defined in
+// globals.css) the rail is hidden and the dropdown trigger in
+// the header carries the same nav. We use a custom breakpoint
+// instead of lg so the rail doesn't appear until the page has
+// enough room for both content + sidebar without feeling cramped.
 
 /**
  * Brand+menu trigger that occupies the left of the header on
- * sub-lg viewports. The whole [page-title text + caret] block is
+ * sub-nav viewports. The whole [page-title text + caret] block is
  * one button — single hit-target, rounded hover bg, opens the
  * dropdown. Page title comes from `getPageLabel(pathname)` so the
  * user always sees where they are; we don't fall back to the
@@ -96,7 +99,7 @@ export function MainMenuTrigger() {
     isLoaded && user?.username ? `/u/${user.username}` : null;
   const label = getPageLabel(pathname, ownProfilePath);
   return (
-    <div className="lg:hidden">
+    <div className="nav:hidden">
       <DropdownMenu>
         <DropdownMenuTrigger
           aria-label="Open menu"
@@ -156,12 +159,12 @@ export function MainMenuTrigger() {
 }
 
 /**
- * Floating left-rail at lg+ — a rounded card with a soft drop
+ * Floating left-rail at nav+ — a rounded card with a soft drop
  * shadow, anchored at top/left/bottom-4 in the gutter the layout
- * reserves with `lg:pl-56`. Stacks the brand wordmark, the nav
+ * reserves with `nav:pl-56`. Stacks the brand wordmark, the nav
  * items, and the user-block (cart icon + avatar+username for
  * authed visitors, Sign in for anon) in one self-contained panel.
- * At lg+ the page header is hidden because everything the header
+ * At nav+ the page header is hidden because everything the header
  * carried lives here now.
  */
 export function MainMenuSidebar() {
@@ -173,14 +176,14 @@ export function MainMenuSidebar() {
       // Track the content's outer left edge with a 16px gap. Pages
       // wrap themselves in `mx-auto max-w-7xl px-4` (80rem + 16px
       // padding), so once the viewport exceeds 1504px (= max-w-7xl
-      // + the 14rem lg:pl-56 gutter) the centered content drifts
+      // + the 14rem nav:pl-56 gutter) the centered content drifts
       // right and the sidebar would otherwise stay glued to the
       // viewport edge. The calc derives sidebar.left from
       // content_outer_left - sidebar_width (12rem) - gap (1rem):
       //   = (50vw - 640) - 16 - 192 + 224  →  50vw - 736
       // and clamps to 16px on narrower viewports where the content
-      // is still flush against the lg:pl-56 gutter.
-      className="fixed top-4 bottom-4 left-[max(1rem,calc(50vw-736px))] z-30 hidden w-48 flex-col rounded-2xl bg-card p-2 shadow-lg shadow-foreground/5 ring-1 ring-foreground/10 lg:flex"
+      // is still flush against the nav:pl-56 gutter.
+      className="fixed top-4 bottom-4 left-[max(1rem,calc(50vw-736px))] z-30 hidden w-48 flex-col rounded-2xl bg-card p-2 shadow-lg shadow-foreground/5 ring-1 ring-foreground/10 nav:flex"
     >
       <Link
         href="/"

@@ -14,13 +14,17 @@ export default function AppLayout({
   return (
     <CartProvider>
       {/*
-        lg:pl-56 reserves a 14rem gutter on the left for the
-        sidebar card to live in. Below lg the rail is hidden and
-        the dropdown trigger in the header carries the same nav.
+        nav:pl-56 reserves a 14rem gutter on the left for the
+        sidebar card to live in. Below the nav breakpoint (1080px,
+        defined in globals.css) the rail is hidden and the dropdown
+        trigger in the header carries the same nav. We use a custom
+        breakpoint instead of lg (1024px) because at 1024 the page
+        feels cramped with both the centered max-w-7xl content and
+        the sidebar gutter — by 1080 there's enough room.
       */}
-      <div className="flex min-h-screen flex-col lg:pl-56">
+      <div className="flex min-h-screen flex-col nav:pl-56">
         {/*
-          Header is hidden once the sidebar takes over — at lg+ the
+          Header is hidden once the sidebar takes over — at nav+ the
           brand wordmark and the auth controls both live inside the
           rail, and the page content gets the full vertical space.
 
@@ -33,7 +37,7 @@ export default function AppLayout({
           what makes the blur dissolve smoothly into the page.
           z-30 sits above page content but below modals/dropdowns.
         */}
-        <header className="sticky top-0 z-30 lg:hidden">
+        <header className="sticky top-0 z-30 nav:hidden">
           <div
             aria-hidden="true"
             // Layer is sized to exactly safe-area-inset-top + the
