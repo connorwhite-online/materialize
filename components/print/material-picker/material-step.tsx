@@ -93,11 +93,13 @@ export function MaterialStep({
   const { groups, cardsByGroup, popularCards, totalCards } = useMemo(() => {
     const byMaterial = new Map<string, MaterialCard>();
 
-    // Seed the map with optimistic placeholders. Anything still in
-    // the map after the quotes loop with a null `cheapest` is a card
-    // we believe is geometrically printable but haven't priced yet —
-    // shown as a skeleton while polling continues.
-    if (viableMaterials && quotesLoading) {
+    // Seed the map with optimistic placeholders for every viable
+    // material — these stay visible regardless of whether a quote
+    // ever arrives, so the grid never shifts. Cards keep `cheapest:
+    // null` until a quote upgrades them; the renderer shows a price-
+    // skeleton while polling and a "—" placeholder once polling
+    // completes without a quote.
+    if (viableMaterials) {
       for (const m of viableMaterials) {
         byMaterial.set(m.id, {
           materialId: m.id,
@@ -194,7 +196,7 @@ export function MaterialStep({
       });
 
     return { groups, cardsByGroup, popularCards, totalCards: cards.length };
-  }, [quotes, viableMaterials, quotesLoading]);
+  }, [quotes, viableMaterials]);
 
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
 
@@ -358,6 +360,7 @@ export function MaterialStep({
                 <MaterialCardButton
                   key={card.materialId}
                   card={card}
+                  quotesLoading={quotesLoading}
                   onPick={onPick}
                 />
               ))}
@@ -375,6 +378,7 @@ export function MaterialStep({
                   <MaterialCardButton
                     key={card.materialId}
                     card={card}
+                    quotesLoading={quotesLoading}
                     onPick={onPick}
                   />
                 ))}
@@ -389,24 +393,29 @@ export function MaterialStep({
 
 function MaterialCardButton({
   card,
+  quotesLoading,
   onPick,
 }: {
   card: MaterialCard;
+  quotesLoading: boolean;
   onPick: (materialId: string) => void;
 }) {
-  // Optimistic placeholder — material is geometrically printable but
-  // we don't have a quote yet. Disable click; the finish step needs
-  // at least one quote to enumerate options.
-  const pending =
-    card.cheapest === null ||
-    card.fastestFast === null ||
-    card.fastestSlow === null;
+  const priced = card.cheapest !== null;
+  // Three states for the price slot:
+  //   - priced: real quote arrived, render the price
+  //   - pending: still polling, no quote yet — render a skeleton
+  //   - unavailable: polling done, no quote came back — render "—"
+  // The card itself stays mounted in all three so the grid never
+  // shifts. Subtitle is the material group name (always known from
+  // the manifest), so it doesn't skeleton-then-swap either.
+  const pending = !priced && quotesLoading;
+  const interactive = priced;
 
   return (
     <button
       type="button"
       onClick={() => onPick(card.materialId)}
-      disabled={pending}
+      disabled={!interactive}
       aria-busy={pending}
       className="flex items-start gap-3 rounded-xl border border-border bg-card p-3 text-left transition-colors enabled:hover:border-primary/40 disabled:cursor-default"
     >
@@ -424,23 +433,23 @@ function MaterialCardButton({
       <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate text-sm font-medium">{card.materialName}</p>
-          {pending ? (
-            <Skeleton className="mt-1 h-3 w-24" />
-          ) : (
-            <p className="mt-0.5 text-[11px] text-muted-foreground">
-              {card.configCount}{" "}
-              {card.configCount === 1 ? "option" : "options"} ·{" "}
-              {card.fastestFast}-{card.fastestSlow}d
-            </p>
-          )}
+          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+            {priced
+              ? `${card.configCount} ${card.configCount === 1 ? "option" : "options"} · ${card.fastestFast}-${card.fastestSlow}d`
+              : card.materialGroupName}
+          </p>
         </div>
         <div className="shrink-0 text-right">
           <p className="text-[10px] text-muted-foreground">from</p>
-          {pending ? (
-            <Skeleton className="mt-1 h-4 w-12" />
-          ) : (
+          {priced ? (
             <p className="text-sm font-medium tabular-nums">
               ${card.cheapest!.toFixed(2)}
+            </p>
+          ) : pending ? (
+            <Skeleton className="mt-1 h-4 w-12" />
+          ) : (
+            <p className="text-sm font-medium text-muted-foreground tabular-nums">
+              —
             </p>
           )}
         </div>
