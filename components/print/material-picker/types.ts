@@ -34,6 +34,15 @@ export interface EnrichedQuote {
   materialGroupId: string;
   materialGroupName: string;
   materialImage: string | null;
+  /**
+   * CraftCloud's curated popularity ordering — lower = more popular
+   * (PLA = 1, SLS Nylon PA12 = 0, 316L Steel = 4). We use it to drive
+   * the "Popular materials" section at the top of the picker and to
+   * order cards within each group's section. Defaults to a large
+   * sentinel when the catalog row is missing it so unknowns sink to
+   * the bottom rather than tying with rank-0.
+   */
+  materialSortIndex: number;
   finishGroupId: string;
   finishGroupName: string;
   finishGroupImage: string | null;

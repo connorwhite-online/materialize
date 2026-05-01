@@ -21,6 +21,7 @@ function makeQuote(id: string, materialId = "mat-1"): EnrichedQuote {
     materialGroupId: "plastics",
     materialGroupName: "Plastics",
     materialImage: null,
+    materialSortIndex: 1,
     finishGroupId: "standard",
     finishGroupName: "Standard",
     finishGroupImage: null,

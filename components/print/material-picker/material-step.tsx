@@ -39,11 +39,23 @@ interface MaterialCard {
   materialGroupId: string;
   materialGroupName: string;
   materialImage: string | null;
+  materialSortIndex: number;
   cheapest: number;
   fastestFast: number;
   fastestSlow: number;
   configCount: number;
 }
+
+/**
+ * How many cards to surface in the "Popular materials" section at
+ * the top of the picker. CraftCloud's editorial sortIndex puts PLA,
+ * SLS Nylon PA12, 316L Steel, Aluminum, and a couple of resins in
+ * the first 8 slots — exactly the canonical "what should I pick?"
+ * shortlist for a new buyer. Six is enough headroom that the
+ * shortlist still has variety after a couple of slots are eaten by
+ * resins the user might not be looking for.
+ */
+const POPULAR_LIMIT = 6;
 
 /**
  * Step 1 — pick a material. Cards are derived from whatever quotes
@@ -61,7 +73,7 @@ export function MaterialStep({
   onClearScope,
   onPick,
 }: MaterialStepProps) {
-  const { groups, cardsByGroup } = useMemo(() => {
+  const { groups, cardsByGroup, popularCards } = useMemo(() => {
     const byMaterial = new Map<string, MaterialCard>();
 
     for (const q of quotes) {
@@ -73,6 +85,7 @@ export function MaterialStep({
           materialGroupId: q.materialGroupId,
           materialGroupName: q.materialGroupName,
           materialImage: q.materialImage,
+          materialSortIndex: q.materialSortIndex,
           cheapest: q.price,
           fastestFast: q.productionTimeFast,
           fastestSlow: q.productionTimeSlow,
@@ -88,25 +101,56 @@ export function MaterialStep({
       }
     }
 
-    const cards = Array.from(byMaterial.values()).sort(
-      (a, b) => a.cheapest - b.cheapest
-    );
+    // Sort by sortIndex first (popularity), price as tiebreaker. Within
+    // a group section the user reads top-to-bottom expecting the most
+    // common pick first; price is the natural disambiguator only when
+    // CraftCloud's curation hasn't said anything.
+    const cards = Array.from(byMaterial.values()).sort((a, b) => {
+      if (a.materialSortIndex !== b.materialSortIndex) {
+        return a.materialSortIndex - b.materialSortIndex;
+      }
+      return a.cheapest - b.cheapest;
+    });
+
+    // Top-N popular across all groups. Skip the section entirely when
+    // the user has too few materials for a "shortlist" to be
+    // distinguishable from "all of them".
+    const popularCards =
+      cards.length > POPULAR_LIMIT ? cards.slice(0, POPULAR_LIMIT) : [];
 
     const cardsByGroup = new Map<string, MaterialCard[]>();
+    const groupBestSort = new Map<string, number>();
     const groupNames = new Map<string, string>();
     for (const card of cards) {
       if (!cardsByGroup.has(card.materialGroupId)) {
         cardsByGroup.set(card.materialGroupId, []);
         groupNames.set(card.materialGroupId, card.materialGroupName);
+        groupBestSort.set(card.materialGroupId, card.materialSortIndex);
+      } else {
+        const prev = groupBestSort.get(card.materialGroupId) ?? Infinity;
+        if (card.materialSortIndex < prev) {
+          groupBestSort.set(card.materialGroupId, card.materialSortIndex);
+        }
       }
       cardsByGroup.get(card.materialGroupId)!.push(card);
     }
 
+    // Order groups by their best (lowest) sortIndex — so "Standard
+    // Plastics" leads because it contains PLA, then "Nylons" because
+    // of SLS PA12, etc. Alphabetical fallback is just for stability
+    // when two groups happen to tie on their best material.
     const groups = Array.from(groupNames.entries())
-      .map(([id, name]) => ({ id, name }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .map(([id, name]) => ({
+        id,
+        name,
+        bestSort: groupBestSort.get(id) ?? Infinity,
+      }))
+      .sort((a, b) => {
+        if (a.bestSort !== b.bestSort) return a.bestSort - b.bestSort;
+        return a.name.localeCompare(b.name);
+      });
 
-    return { groups, cardsByGroup };
+    return { groups, cardsByGroup, popularCards };
   }, [quotes]);
 
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
@@ -258,6 +302,24 @@ export function MaterialStep({
       </div>
 
       <div className="space-y-4">
+        {/* Popular shortlist — only when the user is browsing All. The
+            cards here also appear in their respective group sections
+            below; that intentional duplication keeps the per-group
+            view complete without forcing the user to hunt for PLA. */}
+        {activeGroup === null && popularCards.length > 0 && (
+          <GroupSection name="Popular" count={popularCards.length}>
+            <div className="grid gap-3 pt-3 sm:grid-cols-2">
+              {popularCards.map((card) => (
+                <MaterialCardButton
+                  key={card.materialId}
+                  card={card}
+                  onPick={onPick}
+                />
+              ))}
+            </div>
+          </GroupSection>
+        )}
+
         {visibleGroups.map((g) => {
           const cards = cardsByGroup.get(g.id) ?? [];
           if (cards.length === 0) return null;
@@ -265,44 +327,11 @@ export function MaterialStep({
             <GroupSection key={g.id} name={g.name} count={cards.length}>
               <div className="grid gap-3 pt-3 sm:grid-cols-2">
                 {cards.map((card) => (
-                  <button
+                  <MaterialCardButton
                     key={card.materialId}
-                    type="button"
-                    onClick={() => onPick(card.materialId)}
-                    className="flex items-start gap-3 rounded-xl border border-border bg-card p-3 text-left transition-colors hover:border-primary/40"
-                  >
-                    <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-muted/60">
-                      {card.materialImage && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={resolveCatalogImage(card.materialImage)}
-                          alt=""
-                          loading="lazy"
-                          className="h-full w-full object-cover"
-                        />
-                      )}
-                    </div>
-                    <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium">
-                          {card.materialName}
-                        </p>
-                        <p className="mt-0.5 text-[11px] text-muted-foreground">
-                          {card.configCount}{" "}
-                          {card.configCount === 1 ? "option" : "options"} ·{" "}
-                          {card.fastestFast}-{card.fastestSlow}d
-                        </p>
-                      </div>
-                      <div className="shrink-0 text-right">
-                        <p className="text-[10px] text-muted-foreground">
-                          from
-                        </p>
-                        <p className="text-sm font-medium tabular-nums">
-                          ${card.cheapest.toFixed(2)}
-                        </p>
-                      </div>
-                    </div>
-                  </button>
+                    card={card}
+                    onPick={onPick}
+                  />
                 ))}
               </div>
             </GroupSection>
@@ -310,6 +339,50 @@ export function MaterialStep({
         })}
       </div>
     </div>
+  );
+}
+
+function MaterialCardButton({
+  card,
+  onPick,
+}: {
+  card: MaterialCard;
+  onPick: (materialId: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onPick(card.materialId)}
+      className="flex items-start gap-3 rounded-xl border border-border bg-card p-3 text-left transition-colors hover:border-primary/40"
+    >
+      <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-muted/60">
+        {card.materialImage && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={resolveCatalogImage(card.materialImage)}
+            alt=""
+            loading="lazy"
+            className="h-full w-full object-cover"
+          />
+        )}
+      </div>
+      <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium">{card.materialName}</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            {card.configCount}{" "}
+            {card.configCount === 1 ? "option" : "options"} ·{" "}
+            {card.fastestFast}-{card.fastestSlow}d
+          </p>
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="text-[10px] text-muted-foreground">from</p>
+          <p className="text-sm font-medium tabular-nums">
+            ${card.cheapest.toFixed(2)}
+          </p>
+        </div>
+      </div>
+    </button>
   );
 }
 

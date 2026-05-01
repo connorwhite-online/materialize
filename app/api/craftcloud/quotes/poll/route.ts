@@ -52,6 +52,9 @@ export async function GET(request: Request) {
           materialGroupId: entry.material.materialGroupId,
           materialGroupName: entry.group.name,
           materialImage: entry.material.featuredImage ?? null,
+          // 9999 sentinel pushes unranked materials to the bottom of
+          // the Popular sort instead of tying with rank-0.
+          materialSortIndex: entry.material.sortIndex ?? 9999,
           finishGroupId: entry.finishGroup.id,
           finishGroupName: entry.finishGroup.name,
           finishGroupImage: entry.finishGroup.featuredImage ?? null,
