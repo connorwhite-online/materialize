@@ -28,36 +28,19 @@ export default function AppLayout({
           brand wordmark and the auth controls both live inside the
           rail, and the page content gets the full vertical space.
 
-          On mobile it's sticky so it survives scroll. The blurred
-          backdrop is rendered as a separate absolute layer that
-          extends ~24px past the nav row and is masked with a vertical
-          gradient. backdrop-filter on its own clips cleanly at the
-          element box, so even with a fading bg gradient the blur
-          itself leaves a visible edge — masking the whole layer is
-          what makes the blur dissolve smoothly into the page.
+          On mobile it's a plain sticky bar with a translucent bg +
+          backdrop-blur. No mask, no fade tail — earlier iterations
+          tried to fade the blur out below the nav for a softer edge,
+          but every variation either bled into page content at rest
+          or created a visible seam against the safe-area zone.
+          html bg-background (set in globals.css) covers the safe-
+          area zone in the same color as the nav, so there's no
+          visible boundary at rest; when scrolled, content slides
+          under the nav and is softened by the blur there.
           z-30 sits above page content but below modals/dropdowns.
         */}
-        <header className="sticky top-[env(safe-area-inset-top)] z-30 nav:hidden">
-          <div
-            aria-hidden="true"
-            // Layer is fixed at viewport top:0 (with viewport-fit=cover
-            // that's the device top, above the safe-area zone), and
-            // sized to safe-area-inset-top + 4rem so it covers
-            // safe-area + the h-16 nav row + a small 8px buffer below.
-            // The continuous coverage from device top through nav row
-            // means there's no visible boundary at the safe-area edge.
-            //
-            // Mask: solid plateau through 100% - 16px, then a quick
-            // 16px fade to transparent. The fade lives in the bottom
-            // 8px of the nav row (empty space below the wordmark) +
-            // the 8px buffer below the nav, so it dissolves into page
-            // content without softening any actual content.
-            //
-            // -webkit-mask-image is paired with mask-image so older
-            // iOS Safari (<16.4) renders the same mask.
-            className="pointer-events-none fixed inset-x-0 top-0 bg-background/85 backdrop-blur-xl [height:calc(env(safe-area-inset-top)+4rem)] [mask-image:linear-gradient(to_bottom,white,white_calc(100%-16px),transparent)] [-webkit-mask-image:linear-gradient(to_bottom,white,white_calc(100%-16px),transparent)]"
-          />
-          <div className="relative mx-auto flex h-16 max-w-7xl items-center justify-between px-4">
+        <header className="sticky top-0 z-30 bg-background/85 backdrop-blur-xl nav:hidden">
+          <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4">
             <MainMenuTrigger />
             <AuthNav />
           </div>

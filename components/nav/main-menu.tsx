@@ -133,7 +133,10 @@ export function MainMenuTrigger() {
         <DropdownMenuContent
           align="start"
           sideOffset={8}
-          className="min-w-48 p-1.5"
+          // gap-0.5 = 2px between items so they're individually
+          // distinguishable as rows without the visual heaviness
+          // of bigger spacing.
+          className="flex min-w-48 flex-col gap-0.5 p-1.5"
         >
           {NAV_ITEMS.map((item) => {
             const active = isActive(pathname, item.href);
@@ -143,7 +146,10 @@ export function MainMenuTrigger() {
                 key={item.href}
                 render={<Link href={item.href} />}
                 className={cn(
-                  "flex items-center gap-2.5 px-3 py-2 text-base",
+                  // py-1.5 (was py-2) — tightens the row height a
+                  // touch while still leaving comfortable tap area
+                  // on mobile.
+                  "flex items-center gap-2.5 px-3 py-1.5 text-base",
                   active && "bg-muted/60 text-foreground"
                 )}
               >

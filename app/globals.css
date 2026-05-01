@@ -329,14 +329,6 @@
     -webkit-tap-highlight-color: transparent;
     text-rendering: optimizeLegibility;
     overscroll-behavior-x: none;
-    /* viewport-fit=cover (set in app/layout.tsx) extends the layout
-       viewport edge-to-edge under the iOS safe-area. Push body
-       content back below the dynamic-island region so the nav row
-       isn't obscured. The mobile header's fixed blur layer then
-       covers the safe-area zone visually with the same backdrop
-       treatment as the nav row, eliminating the boundary seam. */
-    padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
   }
   html {
     /* bg-background on html (in addition to body) so iOS Safari
