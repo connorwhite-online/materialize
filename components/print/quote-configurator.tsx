@@ -782,7 +782,7 @@ export function QuoteConfigurator({
             <div className="flex items-center gap-2">
               <Label
                 htmlFor="quantity"
-                className="text-sm font-medium leading-none"
+                className="mb-0 text-sm font-medium leading-none"
               >
                 Quantity
               </Label>
@@ -819,7 +819,7 @@ export function QuoteConfigurator({
             <div className="flex items-center gap-2">
               <Label
                 htmlFor="region"
-                className="text-sm font-medium leading-none"
+                className="mb-0 text-sm font-medium leading-none"
               >
                 Ship to
               </Label>
