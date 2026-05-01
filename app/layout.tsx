@@ -40,6 +40,13 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  // Extend the layout viewport edge-to-edge so the mobile header's
+  // blur layer can cover the iOS safe-area zone (status-bar /
+  // dynamic-island region) instead of stopping at its bottom edge
+  // and creating a visible color seam there. Body padding-top in
+  // globals.css respects env(safe-area-inset-top) so initial content
+  // still clears the dynamic island.
+  viewportFit: "cover",
   interactiveWidget: "overlays-content",
 };
 
