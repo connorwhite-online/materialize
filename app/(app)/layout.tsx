@@ -36,20 +36,21 @@ export default function AppLayout({
         <header className="sticky top-0 z-30 lg:hidden">
           <div
             aria-hidden="true"
-            // h-28 (112px) total: top 50% (56px = nav-row height) is
-            // a fully-opaque blur+bg plateau so the wordmark and
-            // avatar stay readable, then the bottom 50% fades to
-            // transparent so the blur dissolves smoothly into page
-            // content instead of cutting at a hard line.
-            //
-            // Uniform bg-background/85 instead of a vertical bg
-            // gradient — the mask alone owns the fade now, which
-            // means the colored wash and the blur opacity drop off
-            // in perfect lockstep.
+            // h-32 (128px) total. The mask is a 3-stop ease-out so
+            // there's no perceptible "edge" where the plateau hands
+            // off to the fade — going from constant opacity straight
+            // to a linear decrease creates a derivative discontinuity
+            // the eye reads as a soft line. Stops:
+            //   0-40%  fully opaque (covers the nav row at h-14
+            //          plus a small buffer so the wordmark reads
+            //          on a solid backdrop)
+            //   40-70% white → 50% alpha (gentle initial decrease)
+            //   70-100% 50% alpha → transparent (final tail, where
+            //          the blur dissolves before the eye can find it)
             //
             // -webkit-mask-image is paired with mask-image so older
             // iOS Safari (<16.4) renders the same mask.
-            className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-background/85 backdrop-blur-xl [mask-image:linear-gradient(to_bottom,white,white_50%,transparent)] [-webkit-mask-image:linear-gradient(to_bottom,white,white_50%,transparent)]"
+            className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-background/85 backdrop-blur-xl [mask-image:linear-gradient(to_bottom,white_40%,rgb(255_255_255/0.5)_70%,transparent)] [-webkit-mask-image:linear-gradient(to_bottom,white_40%,rgb(255_255_255/0.5)_70%,transparent)]"
           />
           <div className="relative mx-auto flex h-14 max-w-7xl items-center justify-between px-4">
             <MainMenuTrigger />
