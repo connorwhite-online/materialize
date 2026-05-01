@@ -811,7 +811,9 @@ export function QuoteConfigurator({
                     : 1;
                   setQuantity(next);
                 }}
-                className="depth-raised h-10 w-20 rounded-xl border border-border bg-card px-3.5 py-1 text-sm outline-none transition-shadow duration-200 ease-out focus-visible:shadow-[var(--shadow-raised),var(--shadow-focus-ring)]"
+                // text-base on phones (iOS auto-zooms < 16px), text-sm
+                // on md+ to match the rest of the controls row.
+                className="depth-raised h-10 w-20 rounded-xl border border-border bg-card px-3.5 py-1 text-base md:text-sm outline-none transition-shadow duration-200 ease-out focus-visible:shadow-[var(--shadow-raised),var(--shadow-focus-ring)]"
               />
             </div>
             <div className="flex items-center gap-2">

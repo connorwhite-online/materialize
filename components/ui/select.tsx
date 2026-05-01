@@ -42,7 +42,12 @@ function SelectTrigger({
       data-slot="select-trigger"
       data-size={size}
       className={cn(
-        "depth-raised flex w-fit items-center justify-between gap-1.5 rounded-xl border border-border bg-card py-2 pr-3 pl-3.5 text-sm whitespace-nowrap outline-none select-none transition-shadow duration-200 ease-out hover:shadow-[var(--shadow-raised-hover)] focus-visible:shadow-[var(--shadow-raised),var(--shadow-focus-ring)] disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 data-placeholder:text-muted-foreground data-[size=default]:h-10 data-[size=sm]:h-9 data-[size=sm]:rounded-[min(var(--radius-md),12px)] *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5 dark:border-input dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        // text-base on phones, text-sm on md+ — iOS Safari auto-zooms
+        // the page when a form control has font-size < 16px and the
+        // zoom doesn't always reverse on blur, leaving the layout
+        // visibly clipped on the right edge. Mirrors the Input /
+        // Textarea pattern.
+        "depth-raised flex w-fit items-center justify-between gap-1.5 rounded-xl border border-border bg-card py-2 pr-3 pl-3.5 text-base md:text-sm whitespace-nowrap outline-none select-none transition-shadow duration-200 ease-out hover:shadow-[var(--shadow-raised-hover)] focus-visible:shadow-[var(--shadow-raised),var(--shadow-focus-ring)] disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 data-placeholder:text-muted-foreground data-[size=default]:h-10 data-[size=sm]:h-9 data-[size=sm]:rounded-[min(var(--radius-md),12px)] *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5 dark:border-input dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className
       )}
       {...props}
