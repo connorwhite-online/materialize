@@ -36,31 +36,24 @@ export default function AppLayout({
         <header className="sticky top-0 z-30 lg:hidden">
           <div
             aria-hidden="true"
-            // Fixed (not absolute) so the layer anchors to viewport
-            // top:0 and covers the iOS safe-area zone alongside the
-            // nav row in one continuous treatment.
+            // Layer is sized to exactly safe-area-inset-top + the
+            // 3.5rem (h-14) nav row, so the blur is contained to the
+            // menu container and never extends past the nav row's
+            // own bottom edge into page content. env() makes the
+            // height device-aware — iPhone SE (~20px safe-area) and
+            // iPhone Pro (~60px) both end up snug.
             //
-            // The mask feathers BOTH ends so the layer never has a
-            // hard edge against the page below or against the safe-
-            // area zone above. h-36 (144px) gives enough room for a
-            // typical iPhone-Pro safe-area (~62px) + nav row (56px)
-            // plus a tail short enough to live in the gap between
-            // the nav row and the first page-content element (which
-            // sits below the page wrapper's py-8 padding).
-            //
-            //   0-7%   transparent → full (top fade-in, hides the
-            //          subpixel boundary between blur and the html
-            //          bg in the safe-area zone)
-            //   7-78%  fully opaque plateau (covers safe-area + the
-            //          full nav row so wordmark reads cleanly)
-            //   78-88% 1.0 → 0.6 alpha (gentle initial decrease)
-            //   88-96% 0.6 → 0.15 alpha (steeper middle)
-            //   96-100% 0.15 → transparent (final tail asymptotes
-            //          out before the eye can pin a boundary)
+            // Mask: solid plateau through 100% - 16px, then a quick
+            // 16px fade to transparent. The fade lives entirely
+            // inside the bottom of the nav row (where there's just
+            // background, no nav text or avatar — those are
+            // vertically centered higher up), so it dissolves
+            // smoothly into the page content directly below without
+            // softening any actual content.
             //
             // -webkit-mask-image is paired with mask-image so older
             // iOS Safari (<16.4) renders the same mask.
-            className="pointer-events-none fixed inset-x-0 top-0 h-36 bg-background/85 backdrop-blur-xl [mask-image:linear-gradient(to_bottom,transparent,white_7%,white_78%,rgb(255_255_255/0.6)_88%,rgb(255_255_255/0.15)_96%,transparent)] [-webkit-mask-image:linear-gradient(to_bottom,transparent,white_7%,white_78%,rgb(255_255_255/0.6)_88%,rgb(255_255_255/0.15)_96%,transparent)]"
+            className="pointer-events-none fixed inset-x-0 top-0 bg-background/85 backdrop-blur-xl [height:calc(env(safe-area-inset-top)+3.5rem)] [mask-image:linear-gradient(to_bottom,white,white_calc(100%-16px),transparent)] [-webkit-mask-image:linear-gradient(to_bottom,white,white_calc(100%-16px),transparent)]"
           />
           <div className="relative mx-auto flex h-14 max-w-7xl items-center justify-between px-4">
             <MainMenuTrigger />
