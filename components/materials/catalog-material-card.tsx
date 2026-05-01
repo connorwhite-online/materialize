@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import type { CatalogMaterial, MaterialGroup } from "@/lib/craftcloud/catalog";
 
@@ -13,15 +12,14 @@ interface CatalogMaterialCardProps {
 
 /**
  * Marketing-style card for the materials browse page. Renders
- * CraftCloud's `featuredImage` at top, the material name (truncated
- * to one line), a two-line description, and a single row of tag
- * chips that clips on overflow rather than wrapping.
+ * CraftCloud's `featuredImage` at top, the material name, and a
+ * two-line description. Tags are surfaced on the detail page only —
+ * the browse grid is dense enough that a tag row was crowding the
+ * scan.
  */
 export function CatalogMaterialCard({
   material,
 }: CatalogMaterialCardProps) {
-  const tags = material.tags ?? [];
-
   return (
     <Link href={`/materials/${material.slug}`}>
       <Card className="group gap-0 p-1 overflow-hidden transition-colors hover:border-primary/30">
@@ -45,24 +43,6 @@ export function CatalogMaterialCard({
             <p className="mt-1.5 line-clamp-2 text-xs text-muted-foreground leading-relaxed">
               {material.descriptionShort}
             </p>
-          )}
-          {tags.length > 0 && (
-            <div
-              className="mt-3 flex gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-              // Don't hijack touch scroll on the parent Link — browsers
-              // treat a drag as a scroll gesture, not a tap, so swiping
-              // to browse tags won't trigger navigation.
-            >
-              {tags.map((t) => (
-                <Badge
-                  key={t.id}
-                  variant="secondary"
-                  className="shrink-0 text-[10px] whitespace-nowrap"
-                >
-                  {t.name}
-                </Badge>
-              ))}
-            </div>
           )}
         </CardContent>
       </Card>

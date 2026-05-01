@@ -147,9 +147,9 @@ export default async function MaterialDetailPage(props: {
                   Maximum build volume
                 </p>
                 <p className="mt-0.5 font-mono">
-                  {material.maximumPrintingDimensions.x} ×{" "}
-                  {material.maximumPrintingDimensions.y} ×{" "}
-                  {material.maximumPrintingDimensions.z} mm
+                  {material.maximumPrintingDimensions[0]} ×{" "}
+                  {material.maximumPrintingDimensions[1]} ×{" "}
+                  {material.maximumPrintingDimensions[2]} mm
                 </p>
               </div>
             )}

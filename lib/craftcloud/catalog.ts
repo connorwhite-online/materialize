@@ -53,7 +53,10 @@ export interface CatalogMaterial {
   materialGroupName?: string;
   technology?: string;
   sortIndex?: number;
-  maximumPrintingDimensions?: { x: number; y: number; z: number };
+  // CraftCloud sends this as a positional [x, y, z] tuple in mm.
+  // Some materials omit it entirely (e.g. material types where build
+  // size is vendor-dependent rather than process-bounded).
+  maximumPrintingDimensions?: [number, number, number];
   tags?: Array<{ id: string; name: string; originalName?: string }>;
   finishGroups: FinishGroup[];
   // Mechanical / thermal / print properties — ranges where CraftCloud
