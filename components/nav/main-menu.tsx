@@ -170,7 +170,17 @@ export function MainMenuSidebar() {
   return (
     <aside
       aria-label="Primary"
-      className="fixed top-4 bottom-4 left-4 z-30 hidden w-48 flex-col rounded-2xl bg-card p-2 shadow-lg shadow-foreground/5 ring-1 ring-foreground/10 lg:flex"
+      // Track the content's outer left edge with a 16px gap. Pages
+      // wrap themselves in `mx-auto max-w-7xl px-4` (80rem + 16px
+      // padding), so once the viewport exceeds 1504px (= max-w-7xl
+      // + the 14rem lg:pl-56 gutter) the centered content drifts
+      // right and the sidebar would otherwise stay glued to the
+      // viewport edge. The calc derives sidebar.left from
+      // content_outer_left - sidebar_width (12rem) - gap (1rem):
+      //   = (50vw - 640) - 16 - 192 + 224  →  50vw - 736
+      // and clamps to 16px on narrower viewports where the content
+      // is still flush against the lg:pl-56 gutter.
+      className="fixed top-4 bottom-4 left-[max(1rem,calc(50vw-736px))] z-30 hidden w-48 flex-col rounded-2xl bg-card p-2 shadow-lg shadow-foreground/5 ring-1 ring-foreground/10 lg:flex"
     >
       <Link
         href="/"
