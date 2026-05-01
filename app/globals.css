@@ -324,7 +324,12 @@
     overscroll-behavior-x: none;
   }
   html {
-    @apply font-sans;
+    /* bg-background on html (in addition to body) so iOS Safari
+       fills the safe-area / over-scroll zones with the active
+       theme's color. Without it the html element keeps its UA
+       default white, and dark mode shows a cream strip behind the
+       status bar. */
+    @apply bg-background font-sans;
     -webkit-text-size-adjust: 100%;
     overscroll-behavior-x: none;
   }
