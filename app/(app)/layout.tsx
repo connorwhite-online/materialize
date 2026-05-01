@@ -36,21 +36,30 @@ export default function AppLayout({
         <header className="sticky top-0 z-30 lg:hidden">
           <div
             aria-hidden="true"
-            // h-32 (128px) total. The mask is a 3-stop ease-out so
+            // Fixed (not absolute) so the layer anchors to viewport
+            // top:0 — that puts it under the iOS safe-area / status-
+            // bar zone too, instead of starting at the safe-area
+            // boundary and creating a visible color seam where the
+            // blur+bg overlay begins. Page content doesn't render in
+            // the safe-area on iOS, so the top portion of the layer
+            // is just uniform bg/blur (nothing to soften), and the
+            // boundary between safe-area and nav row disappears.
+            //
+            // h-36 (144px) total. The mask is a 3-stop ease-out so
             // there's no perceptible "edge" where the plateau hands
-            // off to the fade — going from constant opacity straight
-            // to a linear decrease creates a derivative discontinuity
-            // the eye reads as a soft line. Stops:
-            //   0-40%  fully opaque (covers the nav row at h-14
-            //          plus a small buffer so the wordmark reads
-            //          on a solid backdrop)
-            //   40-70% white → 50% alpha (gentle initial decrease)
-            //   70-100% 50% alpha → transparent (final tail, where
-            //          the blur dissolves before the eye can find it)
+            // off to the fade — a constant-then-linear curve has a
+            // slope discontinuity the eye reads as a soft line.
+            // Stops:
+            //   0-45%  fully opaque (covers safe-area + the nav row
+            //          at h-14 with buffer so the wordmark reads on
+            //          a solid backdrop)
+            //   45-72% white → 50% alpha (gentle initial decrease)
+            //   72-100% 50% alpha → transparent (final tail, blur
+            //          dissolves before the eye can pin a boundary)
             //
             // -webkit-mask-image is paired with mask-image so older
             // iOS Safari (<16.4) renders the same mask.
-            className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-background/85 backdrop-blur-xl [mask-image:linear-gradient(to_bottom,white_40%,rgb(255_255_255/0.5)_70%,transparent)] [-webkit-mask-image:linear-gradient(to_bottom,white_40%,rgb(255_255_255/0.5)_70%,transparent)]"
+            className="pointer-events-none fixed inset-x-0 top-0 h-36 bg-background/85 backdrop-blur-xl [mask-image:linear-gradient(to_bottom,white_45%,rgb(255_255_255/0.5)_72%,transparent)] [-webkit-mask-image:linear-gradient(to_bottom,white_45%,rgb(255_255_255/0.5)_72%,transparent)]"
           />
           <div className="relative mx-auto flex h-14 max-w-7xl items-center justify-between px-4">
             <MainMenuTrigger />
