@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import type {
+  SearchHitCollection,
   SearchHitFile,
   SearchHitMaterial,
   SearchHitProject,
@@ -39,6 +40,7 @@ export function SearchResultsPanel({
   const anyResults =
     results.files.length > 0 ||
     results.projects.length > 0 ||
+    results.collections.length > 0 ||
     results.users.length > 0 ||
     results.materials.length > 0;
 
@@ -58,6 +60,14 @@ export function SearchResultsPanel({
         <Section title="Projects">
           {results.projects.map((hit) => (
             <ProjectCard key={hit.id} hit={hit} onNavigate={onNavigate} />
+          ))}
+        </Section>
+      )}
+
+      {results.collections.length > 0 && (
+        <Section title="Collections">
+          {results.collections.map((hit) => (
+            <CollectionCard key={hit.id} hit={hit} onNavigate={onNavigate} />
           ))}
         </Section>
       )}
@@ -171,6 +181,36 @@ function ProjectCard({
             Project
           </div>
         )}
+      </div>
+      <div className="min-w-0 px-0.5">
+        <p className="truncate text-xs font-medium group-hover:text-primary">
+          {hit.name}
+        </p>
+        <p className="truncate text-[10px] text-muted-foreground">
+          {hit.fileCount} {hit.fileCount === 1 ? "file" : "files"}
+          {(hit.creatorDisplayName || hit.creatorUsername) && " · "}
+          {hit.creatorDisplayName || hit.creatorUsername || ""}
+        </p>
+      </div>
+    </Link>
+  );
+}
+
+function CollectionCard({
+  hit,
+  onNavigate,
+}: {
+  hit: SearchHitCollection;
+  onNavigate: () => void;
+}) {
+  return (
+    <Link
+      href={`/collections/${hit.slug}`}
+      onClick={onNavigate}
+      className="group flex w-28 shrink-0 flex-col gap-1.5"
+    >
+      <div className="flex aspect-square w-full items-center justify-center rounded-lg border border-border bg-muted/60 text-[10px] text-muted-foreground/60">
+        Collection
       </div>
       <div className="min-w-0 px-0.5">
         <p className="truncate text-xs font-medium group-hover:text-primary">

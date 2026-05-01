@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { files, users, projects, projectFiles } from "@/lib/db/schema";
+import {
+  files,
+  users,
+  projects,
+  projectFiles,
+  collections,
+  collectionItems,
+} from "@/lib/db/schema";
 import { and, eq, ilike, or, desc, sql } from "drizzle-orm";
 import { getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
 import { logError } from "@/lib/logger";
@@ -67,9 +74,20 @@ export interface SearchHitProject {
   creatorDisplayName: string | null;
 }
 
+export interface SearchHitCollection {
+  type: "collection";
+  id: string;
+  slug: string;
+  name: string;
+  fileCount: number;
+  creatorUsername: string | null;
+  creatorDisplayName: string | null;
+}
+
 export interface SearchResponse {
   files: SearchHitFile[];
   projects: SearchHitProject[];
+  collections: SearchHitCollection[];
   users: SearchHitUser[];
   materials: SearchHitMaterial[];
 }
@@ -92,6 +110,7 @@ export async function GET(request: Request) {
     return NextResponse.json<SearchResponse>({
       files: [],
       projects: [],
+      collections: [],
       users: [],
       materials: [],
     });
@@ -105,7 +124,7 @@ export async function GET(request: Request) {
   const pattern = isPrefixOnly ? `${escaped}%` : `%${escaped}%`;
 
   try {
-    const [fileRows, projectRows, userRows, catalog] = await Promise.all([
+    const [fileRows, projectRows, collectionRows, userRows, catalog] = await Promise.all([
       db
         .select({
           id: files.id,
@@ -153,6 +172,35 @@ export async function GET(request: Request) {
           projects.createdAt
         )
         .orderBy(desc(projects.createdAt))
+        .limit(PER_CATEGORY_LIMIT),
+      db
+        .select({
+          id: collections.id,
+          slug: collections.slug,
+          name: collections.name,
+          creatorUsername: users.username,
+          creatorDisplayName: users.displayName,
+          fileCount: sql<number>`cast(count(${collectionItems.fileId}) as int)`,
+        })
+        .from(collections)
+        .innerJoin(users, eq(collections.userId, users.id))
+        .leftJoin(
+          collectionItems,
+          eq(collectionItems.collectionId, collections.id)
+        )
+        .where(
+          and(
+            eq(collections.visibility, "public"),
+            ilike(collections.name, pattern)
+          )
+        )
+        .groupBy(
+          collections.id,
+          users.username,
+          users.displayName,
+          collections.createdAt
+        )
+        .orderBy(desc(collections.createdAt))
         .limit(PER_CATEGORY_LIMIT),
       db
         .select({
@@ -223,6 +271,16 @@ export async function GET(request: Request) {
       creatorDisplayName: r.creatorDisplayName,
     }));
 
+    const collectionsOut: SearchHitCollection[] = collectionRows.map((r) => ({
+      type: "collection",
+      id: r.id,
+      slug: r.slug,
+      name: r.name,
+      fileCount: r.fileCount,
+      creatorUsername: r.creatorUsername,
+      creatorDisplayName: r.creatorDisplayName,
+    }));
+
     const usersOut: SearchHitUser[] = userRows
       .filter(
         (u): u is typeof u & { username: string } =>
@@ -239,6 +297,7 @@ export async function GET(request: Request) {
     return NextResponse.json<SearchResponse>({
       files: filesOut,
       projects: projectsOut,
+      collections: collectionsOut,
       users: usersOut,
       materials,
     });

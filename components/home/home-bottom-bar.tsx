@@ -102,6 +102,7 @@ export function HomeBottomBar() {
           setSearchResults({
             files: [],
             projects: [],
+            collections: [],
             users: [],
             materials: [],
           });
