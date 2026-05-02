@@ -28,19 +28,25 @@ export default function AppLayout({
           brand wordmark and the auth controls both live inside the
           rail, and the page content gets the full vertical space.
 
-          On mobile it's a plain sticky bar with a translucent bg +
-          backdrop-blur. No mask, no fade tail — earlier iterations
-          tried to fade the blur out below the nav for a softer edge,
-          but every variation either bled into page content at rest
-          or created a visible seam against the safe-area zone.
-          html bg-background (set in globals.css) covers the safe-
-          area zone in the same color as the nav, so there's no
-          visible boundary at rest; when scrolled, content slides
-          under the nav and is softened by the blur there.
+          On mobile it's a sticky bar containing a single absolute
+          backdrop layer that pairs a linear bg-color gradient with a
+          linear mask gradient. Both fade from 100% at the top of the
+          nav (where it abuts the safe-area zone — html bg-background
+          provides matching color there for a seamless join) down to
+          transparent at the bottom of the nav (where it dissolves
+          into page content with no hard line). The blur strength is
+          uniform but is gated by the mask, so it visually fades in
+          lockstep with the bg color. Contained entirely to the nav
+          row's footprint — nothing extends past h-16 into page
+          content.
           z-30 sits above page content but below modals/dropdowns.
         */}
-        <header className="sticky top-0 z-30 bg-background/85 backdrop-blur-xl nav:hidden">
-          <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4">
+        <header className="sticky top-0 z-30 nav:hidden">
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 bg-gradient-to-b from-background to-transparent backdrop-blur-xl [mask-image:linear-gradient(to_bottom,white,transparent)] [-webkit-mask-image:linear-gradient(to_bottom,white,transparent)]"
+          />
+          <div className="relative mx-auto flex h-16 max-w-7xl items-center justify-between px-4">
             <MainMenuTrigger />
             <AuthNav />
           </div>
