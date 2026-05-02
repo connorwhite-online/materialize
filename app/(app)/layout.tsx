@@ -44,18 +44,18 @@ export default function AppLayout({
         <header className="sticky top-0 z-30 nav:hidden">
           <div
             aria-hidden="true"
-            // Uniform bg color, mask alone owns the fade. Previously
-            // the bg-gradient and the mask were fading independently,
-            // which can leave a visible boundary at the point where
-            // bg hits transparent but the masked blur still has some
-            // opacity (or vice versa) — the mismatched curves show
-            // up as a soft line. With one uniform bg color, the mask
-            // fades color and blur in lockstep.
+            // Bg gradient only — no backdrop-filter. Safari's blur
+            // implementation has a halo that extends a few px past
+            // the masked boundary, which renders as a second visible
+            // line beside the bg fade and reads as "two distinct
+            // gradients". Dropping the blur eliminates the second
+            // band; the colored fade alone still gives a clean
+            // separation from page content.
             //
-            // Plateau at 100% through the top half of the nav (covers
-            // wordmark + avatar on a solid backdrop), then linear
-            // fade to transparent across the bottom half.
-            className="pointer-events-none absolute inset-0 bg-background/85 backdrop-blur-xl [mask-image:linear-gradient(to_bottom,white,white_50%,transparent)] [-webkit-mask-image:linear-gradient(to_bottom,white,white_50%,transparent)]"
+            // Plateau the bg color through the top half of the nav
+            // (covers wordmark + avatar on a solid backdrop), then
+            // linear fade to transparent across the bottom half.
+            className="pointer-events-none absolute inset-0 bg-gradient-to-b from-background from-50% to-transparent"
           />
           <div className="relative mx-auto flex h-16 max-w-7xl items-center justify-between px-4">
             <MainMenuTrigger />
