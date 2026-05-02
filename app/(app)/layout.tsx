@@ -44,15 +44,18 @@ export default function AppLayout({
         <header className="sticky top-0 z-30 nav:hidden">
           <div
             aria-hidden="true"
-            // Plateau at 100% through the top half of the nav, then
-            // linear fade to transparent across the bottom half. The
-            // plateau covers the wordmark / avatar region so they read
-            // on a solid backdrop, and the bottom half drops off twice
-            // as fast as a full-height linear gradient would (slope of
-            // -2 per 100% vs -1 per 100%) — a steeper fall-off that
-            // makes the bg color and blur both feel more present at
-            // the top.
-            className="pointer-events-none absolute inset-0 bg-gradient-to-b from-background from-50% to-transparent backdrop-blur-xl [mask-image:linear-gradient(to_bottom,white,white_50%,transparent)] [-webkit-mask-image:linear-gradient(to_bottom,white,white_50%,transparent)]"
+            // Uniform bg color, mask alone owns the fade. Previously
+            // the bg-gradient and the mask were fading independently,
+            // which can leave a visible boundary at the point where
+            // bg hits transparent but the masked blur still has some
+            // opacity (or vice versa) — the mismatched curves show
+            // up as a soft line. With one uniform bg color, the mask
+            // fades color and blur in lockstep.
+            //
+            // Plateau at 100% through the top half of the nav (covers
+            // wordmark + avatar on a solid backdrop), then linear
+            // fade to transparent across the bottom half.
+            className="pointer-events-none absolute inset-0 bg-background/85 backdrop-blur-xl [mask-image:linear-gradient(to_bottom,white,white_50%,transparent)] [-webkit-mask-image:linear-gradient(to_bottom,white,white_50%,transparent)]"
           />
           <div className="relative mx-auto flex h-16 max-w-7xl items-center justify-between px-4">
             <MainMenuTrigger />
