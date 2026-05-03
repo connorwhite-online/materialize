@@ -6,6 +6,43 @@ import {
   MainMenuTrigger,
 } from "@/components/nav/main-menu";
 
+/**
+ * Progressive-blur layer table for the mobile header backdrop.
+ * Each entry is one stacked div: the blur radius + a mask that
+ * defines where on the nav's vertical axis that layer is visible.
+ * Heaviest blur sits on top (last in array → highest paint order)
+ * and is masked to the upper portion of the nav; lighter blurs
+ * fade in below. Adjacent layers' masks overlap so the blur
+ * intensity transitions smoothly from heavy → none top to bottom
+ * without any single layer's mask edge being a visible boundary.
+ *
+ * Percentages are along the nav's height (h-16 = 64px). Stops
+ * are 4-stop trapezoids (0 → 1 → 1 → 0) except the top layer
+ * which is open at the top edge so it covers the very top of
+ * the nav at full strength.
+ */
+const NAV_BLUR_LAYERS: Array<{ blur: number; mask: string }> = [
+  // Lightest blur, visible only at the bottom of the nav.
+  {
+    blur: 2,
+    mask:
+      "linear-gradient(to bottom, rgba(0,0,0,0) 60%, rgba(0,0,0,1) 70%, rgba(0,0,0,1) 90%, rgba(0,0,0,0) 100%)",
+  },
+  // Medium blur, visible across the middle of the nav.
+  {
+    blur: 6,
+    mask:
+      "linear-gradient(to bottom, rgba(0,0,0,0) 30%, rgba(0,0,0,1) 50%, rgba(0,0,0,1) 70%, rgba(0,0,0,0) 80%)",
+  },
+  // Heaviest blur, anchored at the top of the nav (where the
+  // wordmark sits) and fading out before the middle.
+  {
+    blur: 16,
+    mask:
+      "linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 40%, rgba(0,0,0,0) 60%)",
+  },
+];
+
 export default function AppLayout({
   children,
 }: Readonly<{
@@ -44,19 +81,47 @@ export default function AppLayout({
         <header className="sticky top-0 z-30 nav:hidden">
           <div
             aria-hidden="true"
-            // Bg gradient only — no backdrop-filter. Safari's blur
-            // implementation has a halo that extends a few px past
-            // the masked boundary, which renders as a second visible
-            // line beside the bg fade and reads as "two distinct
-            // gradients". Dropping the blur eliminates the second
-            // band; the colored fade alone still gives a clean
-            // separation from page content.
-            //
-            // Plateau the bg color through the top half of the nav
-            // (covers wordmark + avatar on a solid backdrop), then
-            // linear fade to transparent across the bottom half.
-            className="pointer-events-none absolute inset-0 bg-gradient-to-b from-background from-50% to-transparent"
-          />
+            className="pointer-events-none absolute inset-0"
+          >
+            {/*
+              Progressive blur stack — the canonical fix for the
+              "two visible bands" problem we kept hitting with a
+              single backdrop-filter + mask. A single blurred
+              element's halo extends past the mask edge by a few
+              pixels, which renders as a second line beside the
+              bg-color fade.
+              See: kennethnym.com/blog/progressive-blur-in-css and
+              devslovecoffee.com/blog/making-apple-progressive-blur-on-web
+
+              Three layers, each with a different blur radius and a
+              mask that fades in/out at overlapping vertical bands.
+              The strongest blur is on top (covering the upper
+              portion of the nav under the wordmark); the lightest
+              is at the back (visible only at the bottom of the nav
+              before dissolving). The overlapping masks make the
+              transition between blur strengths seamless — no
+              visible band because no single layer's mask edge is
+              the boundary.
+
+              The bg-color gradient sits behind the blur stack so
+              the blur diffuses both the page content AND a tint of
+              bg-background, giving the nav a unified colored feel
+              that fades to transparent at the bottom.
+            */}
+            <div className="absolute inset-0 bg-gradient-to-b from-background from-50% to-transparent" />
+            {NAV_BLUR_LAYERS.map((layer, i) => (
+              <div
+                key={i}
+                className="absolute inset-0"
+                style={{
+                  backdropFilter: `blur(${layer.blur}px)`,
+                  WebkitBackdropFilter: `blur(${layer.blur}px)`,
+                  maskImage: layer.mask,
+                  WebkitMaskImage: layer.mask,
+                }}
+              />
+            ))}
+          </div>
           <div className="relative mx-auto flex h-16 max-w-7xl items-center justify-between px-4">
             <MainMenuTrigger />
             <AuthNav />
