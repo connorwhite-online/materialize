@@ -53,12 +53,16 @@ const NAV_BLUR_LAYERS: Array<{ blur: number; mask: string }> = [
     mask:
       "linear-gradient(to bottom, rgba(0,0,0,0) 10%, rgba(0,0,0,1) 20%, rgba(0,0,0,1) 40%, rgba(0,0,0,0) 60%)",
   },
-  // Heaviest blur, anchored at the top of the nav (where the
-  // wordmark sits) and fading out before the middle.
+  // Heaviest blur. Trapezoid like the others — including a fade-in
+  // from the top edge — so it doesn't snap on at full strength
+  // against the safe-area zone above (which has no blur). With this
+  // fade-in, every layer in the stack starts at 0 alpha at y=0,
+  // meaning the blur effect ramps up from invisible at the very
+  // top of the nav rather than slamming on as a hard edge.
   {
     blur: 24,
     mask:
-      "linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 20%, rgba(0,0,0,0) 40%)",
+      "linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,1) 10%, rgba(0,0,0,1) 20%, rgba(0,0,0,0) 40%)",
   },
 ];
 
