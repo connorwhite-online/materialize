@@ -22,24 +22,43 @@ import {
  * the nav at full strength.
  */
 const NAV_BLUR_LAYERS: Array<{ blur: number; mask: string }> = [
-  // Lightest blur, visible only at the bottom of the nav.
+  // Six layers, blur radius roughly doubling each step. More layers
+  // = smaller per-step difference in blur strength = no visible
+  // banding between the steps. Each mask is a 4-stop trapezoid with
+  // 10% fade-in / fade-out wings that overlap the neighboring
+  // layers' wings, so blur intensity glides smoothly from heavy at
+  // the top of the nav to none at the bottom.
   {
-    blur: 2,
+    blur: 1,
     mask:
       "linear-gradient(to bottom, rgba(0,0,0,0) 60%, rgba(0,0,0,1) 70%, rgba(0,0,0,1) 90%, rgba(0,0,0,0) 100%)",
   },
-  // Medium blur, visible across the middle of the nav.
   {
-    blur: 6,
+    blur: 2,
     mask:
-      "linear-gradient(to bottom, rgba(0,0,0,0) 30%, rgba(0,0,0,1) 50%, rgba(0,0,0,1) 70%, rgba(0,0,0,0) 80%)",
+      "linear-gradient(to bottom, rgba(0,0,0,0) 50%, rgba(0,0,0,1) 60%, rgba(0,0,0,1) 80%, rgba(0,0,0,0) 90%)",
+  },
+  {
+    blur: 4,
+    mask:
+      "linear-gradient(to bottom, rgba(0,0,0,0) 40%, rgba(0,0,0,1) 50%, rgba(0,0,0,1) 70%, rgba(0,0,0,0) 85%)",
+  },
+  {
+    blur: 8,
+    mask:
+      "linear-gradient(to bottom, rgba(0,0,0,0) 30%, rgba(0,0,0,1) 40%, rgba(0,0,0,1) 60%, rgba(0,0,0,0) 80%)",
+  },
+  {
+    blur: 16,
+    mask:
+      "linear-gradient(to bottom, rgba(0,0,0,0) 10%, rgba(0,0,0,1) 20%, rgba(0,0,0,1) 40%, rgba(0,0,0,0) 60%)",
   },
   // Heaviest blur, anchored at the top of the nav (where the
   // wordmark sits) and fading out before the middle.
   {
-    blur: 16,
+    blur: 24,
     mask:
-      "linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 40%, rgba(0,0,0,0) 60%)",
+      "linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 20%, rgba(0,0,0,0) 40%)",
   },
 ];
 
