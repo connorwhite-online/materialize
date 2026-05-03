@@ -48,21 +48,23 @@ const NAV_BLUR_LAYERS: Array<{ blur: number; mask: string }> = [
     mask:
       "linear-gradient(to bottom, rgba(0,0,0,0) 30%, rgba(0,0,0,1) 40%, rgba(0,0,0,1) 60%, rgba(0,0,0,0) 80%)",
   },
+  // Top two layers have wider fade-in zones than the lower layers
+  // so the cumulative blur intensity ramps up gradually from y=0
+  // instead of spiking. A short fade-in concentrates the contrast
+  // between "no blur" (above the nav) and "full heavy blur" into a
+  // few pixels, which the eye reads as a halo line — especially
+  // when the page content has dark elements that smear into the
+  // ramp zone. Wider fade-ins spread that contrast over more
+  // pixels so it never reaches a perceptible threshold.
   {
     blur: 16,
     mask:
-      "linear-gradient(to bottom, rgba(0,0,0,0) 10%, rgba(0,0,0,1) 20%, rgba(0,0,0,1) 40%, rgba(0,0,0,0) 60%)",
+      "linear-gradient(to bottom, rgba(0,0,0,0) 5%, rgba(0,0,0,1) 30%, rgba(0,0,0,1) 45%, rgba(0,0,0,0) 65%)",
   },
-  // Heaviest blur. Trapezoid like the others — including a fade-in
-  // from the top edge — so it doesn't snap on at full strength
-  // against the safe-area zone above (which has no blur). With this
-  // fade-in, every layer in the stack starts at 0 alpha at y=0,
-  // meaning the blur effect ramps up from invisible at the very
-  // top of the nav rather than slamming on as a hard edge.
   {
     blur: 24,
     mask:
-      "linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,1) 10%, rgba(0,0,0,1) 20%, rgba(0,0,0,0) 40%)",
+      "linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,1) 35%, rgba(0,0,0,1) 50%, rgba(0,0,0,0) 70%)",
   },
 ];
 
