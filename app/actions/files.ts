@@ -50,6 +50,7 @@ import {
   cartItems,
   printOrders,
   printOrderItems,
+  users,
 } from "@/lib/db/schema";
 import { eq, and, ne, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -664,6 +665,13 @@ export async function createDraftFileForPrint(params: {
     const name = deriveListingName(params.originalFilename);
     const slug = buildListingSlug(name, nanoid(6));
 
+    const [pref] = await db
+      .select({ defaultUploadVisibility: users.defaultUploadVisibility })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    const visibility = pref?.defaultUploadVisibility ?? "private";
+
     const [file] = await db
       .insert(files)
       .values({
@@ -672,13 +680,14 @@ export async function createDraftFileForPrint(params: {
         slug,
         price: 0,
         license: "free",
-        // Default to a public, free listing so the file is
-        // immediately discoverable in the marketplace. The listing
-        // is intentionally sparse (scraped name, no description or
-        // thumbnail) — the owner can polish it later from their
-        // dashboard without having to republish.
-        status: "published",
-        visibility: "public",
+        // Default visibility comes from the user's settings (default
+        // "private"). The user uploaded this to print, not to
+        // publish — but power users can flip the default to "public"
+        // from /dashboard/settings if they want every print upload
+        // to also appear on their profile. Status follows visibility:
+        // "private" → "draft", "public" → "published".
+        status: visibility === "public" ? "published" : "draft",
+        visibility,
       })
       .returning();
 

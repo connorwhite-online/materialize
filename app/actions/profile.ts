@@ -39,6 +39,30 @@ export async function updateProfile(formData: FormData) {
   }
 }
 
+export async function updateDefaultUploadVisibility(
+  visibility: "public" | "private"
+): Promise<{ ok: true } | { error: string }> {
+  const { userId } = await auth();
+  if (!userId) return { error: "Unauthorized" };
+
+  if (visibility !== "public" && visibility !== "private") {
+    return { error: "Invalid value" };
+  }
+
+  try {
+    await db
+      .update(users)
+      .set({ defaultUploadVisibility: visibility })
+      .where(eq(users.id, userId));
+
+    revalidatePath("/dashboard/settings");
+    return { ok: true };
+  } catch (error) {
+    logError("updateDefaultUploadVisibility", error);
+    return { error: "Failed to save. Please try again." };
+  }
+}
+
 export async function updateSocialLinks(linksJson: string) {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");

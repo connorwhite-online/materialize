@@ -20,8 +20,48 @@ export default async function MaterialDetailPage(props: {
 
   const tags = material.tags ?? [];
 
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: material.name,
+    description: material.description ?? material.descriptionShort ?? undefined,
+    image: material.featuredImage ?? undefined,
+    brand: { "@type": "Brand", name: "Materialize" },
+    category: group.name,
+    additionalProperty: [
+      hasNumber(material.tensileStrengthMax)
+        ? {
+            "@type": "PropertyValue",
+            name: "Tensile strength (max)",
+            value: material.tensileStrengthMax,
+            unitText: "MPa",
+          }
+        : null,
+      hasNumber(material.density)
+        ? {
+            "@type": "PropertyValue",
+            name: "Density",
+            value: material.density,
+            unitText: "g/cm³",
+          }
+        : null,
+      hasNumber(material.heatDeflectionTemp66PSIMax)
+        ? {
+            "@type": "PropertyValue",
+            name: "Heat deflection (66 PSI)",
+            value: material.heatDeflectionTemp66PSIMax,
+            unitText: "°C",
+          }
+        : null,
+    ].filter(Boolean),
+  };
+
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       {/* Hero */}
       <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
         <div className="relative aspect-square overflow-hidden rounded-xl border border-border bg-muted/30">

@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "default_upload_visibility" "visibility" DEFAULT 'private' NOT NULL;

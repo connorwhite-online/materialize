@@ -4,6 +4,7 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -51,6 +52,25 @@ export async function generateDownloadUrl(
     Key: key,
   });
   return getSignedUrl(getS3(), command, { expiresIn });
+}
+
+export async function objectExists(
+  key: string
+): Promise<{ exists: true; sizeBytes: number } | { exists: false }> {
+  try {
+    const result = await getS3().send(
+      new HeadObjectCommand({ Bucket: getBucket(), Key: key })
+    );
+    return { exists: true, sizeBytes: result.ContentLength ?? 0 };
+  } catch (err) {
+    const status = (err as { $metadata?: { httpStatusCode?: number } })
+      .$metadata?.httpStatusCode;
+    const name = (err as { name?: string }).name;
+    if (status === 404 || name === "NotFound" || name === "NoSuchKey") {
+      return { exists: false };
+    }
+    throw err;
+  }
 }
 
 export async function deleteObject(key: string): Promise<void> {

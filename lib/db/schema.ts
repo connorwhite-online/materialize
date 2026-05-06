@@ -48,6 +48,11 @@ export const visibilityEnum = pgEnum("visibility", ["public", "private"]);
 export const printOrderStatusEnum = pgEnum("print_order_status", [
   "quoting",
   "cart_created",
+  // Agent-initiated orders waiting for the user to approve via email link.
+  // Lives between cart_created and ordered: the CraftCloud cart exists,
+  // but no Stripe session has been opened yet. Cleanup jobs that prune
+  // stale `cart_created` rows should leave this state alone.
+  "awaiting_agent_approval",
   "ordered",
   "in_production",
   "shipped",
@@ -72,6 +77,12 @@ export const users = pgTable("users", {
   stripeOnboardingComplete: boolean("stripe_onboarding_complete")
     .notNull()
     .default(false),
+  // Default visibility for files uploaded through implicit flows
+  // (print checkout, agent MCP uploads). Explicit dashboard
+  // publishes ignore this setting.
+  defaultUploadVisibility: visibilityEnum("default_upload_visibility")
+    .notNull()
+    .default("private"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -316,6 +327,25 @@ export const printOrders = pgTable("print_orders", {
     trackingNumber?: string;
     carrier?: string;
   }>(),
+  // Set on agent-initiated orders (created via the MCP server). Points
+  // at the PAT used to create the draft. SET NULL on token revocation
+  // so we keep order history intact even after the agent is removed.
+  initiatedByTokenId: uuid("initiated_by_token_id"),
+  // Captured at create time (rather than joining personalAccessTokens
+  // every time we render the confirmation page) so a later rename or
+  // revoke of the token doesn't muddy the audit trail.
+  agentName: text("agent_name"),
+  // Random opaque secret embedded in the confirmation email URL. Lets
+  // the user open the confirmation page from email without a session;
+  // never logged or surfaced to the agent.
+  confirmationToken: text("confirmation_token"),
+  confirmationExpiresAt: timestamp("confirmation_expires_at", {
+    withTimezone: true,
+  }),
+  // Per-(user, key) idempotency for create_order. Lets an agent retry
+  // a tool call after a transient failure without producing a second
+  // draft order.
+  agentIdempotencyKey: text("agent_idempotency_key"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -325,6 +355,13 @@ export const printOrders = pgTable("print_orders", {
     .$onUpdate(() => new Date()),
 }, (table) => [
   index("print_orders_user_id_idx").on(table.userId),
+  uniqueIndex("print_orders_confirmation_token_uniq").on(
+    table.confirmationToken
+  ),
+  uniqueIndex("print_orders_agent_idempotency_uniq").on(
+    table.userId,
+    table.agentIdempotencyKey
+  ),
 ]);
 
 // Print order line items — committed items on a placed order.
@@ -470,6 +507,47 @@ export const filePhotos = pgTable("file_photos", {
 }, (table) => [
   index("file_photos_file_id_idx").on(table.fileId),
 ]);
+
+// Personal Access Tokens — the agent-facing auth surface for the MCP
+// server (see docs/mcp-server.md). Users mint a PAT in account
+// settings, paste it into their agent's config, and the agent passes
+// it as a Bearer token on every MCP request. We never store the raw
+// token; only its SHA-256 hash plus a short visible prefix so the
+// user can identify the token in the UI.
+//
+// Scopes are stored as a string[] (not an enum) so we can introduce
+// new scopes without an enum migration. Known scopes are documented
+// in lib/mcp/scopes.ts.
+
+export const personalAccessTokens = pgTable(
+  "personal_access_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // User-supplied label. e.g. "Claude Desktop", "My CAD agent".
+    name: text("name").notNull(),
+    // SHA-256 (hex) of the raw token. We look tokens up by computing
+    // the hash of the incoming bearer and matching this column.
+    tokenHash: text("token_hash").notNull(),
+    // First 16 chars of the raw token (e.g. "mtl_pat_abcd1234").
+    // Shown in the UI so users can recognize which row corresponds
+    // to which token without revealing the secret.
+    prefix: text("prefix").notNull(),
+    scopes: text("scopes").array().notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("personal_access_tokens_user_id_idx").on(table.userId),
+    uniqueIndex("personal_access_tokens_token_hash_uniq").on(table.tokenHash),
+  ]
+);
 
 // Webhook event-level dedup. Stripe delivers events at-least-once
 // and may double-deliver across retries; the inner atomic claim in

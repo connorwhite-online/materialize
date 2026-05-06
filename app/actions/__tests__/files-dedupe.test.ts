@@ -10,7 +10,7 @@ vi.mock("@/lib/db", () => ({
   db: {
     select: () => ({
       from: () => ({
-        where: () => [],
+        where: () => Object.assign([] as unknown[], { limit: () => [] }),
         innerJoin: () => ({
           where: () => {
             const next = innerJoinResults.shift() ?? [];
@@ -43,6 +43,7 @@ vi.mock("@/lib/db/schema", () => ({
   purchases: { id: "id" },
   projects: { id: "id", userId: "user_id" },
   projectFiles: { projectId: "project_id", fileId: "file_id" },
+  users: { id: "id", defaultUploadVisibility: "default_upload_visibility" },
 }));
 
 vi.mock("@/lib/storage", () => ({

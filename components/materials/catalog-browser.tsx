@@ -177,7 +177,7 @@ function GroupSection({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="group flex w-full items-center justify-between gap-2 text-left"
+        className="group flex w-full cursor-pointer items-center justify-between gap-2 text-left"
         aria-expanded={open}
       >
         <div className="flex items-center gap-2">

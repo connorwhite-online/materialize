@@ -5,6 +5,7 @@ import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { ProfileForm } from "./profile-form";
 import { SignOutButton } from "./sign-out-button";
+import { UploadVisibilitySetting } from "./upload-visibility-setting";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { ChevronLeft } from "@/components/icons/chevron-left";
 
@@ -41,6 +42,25 @@ export default async function SettingsPage() {
       />
 
       <ThemeSwitcher />
+
+      <UploadVisibilitySetting
+        initial={user?.defaultUploadVisibility ?? "private"}
+      />
+
+      <div className="border-t border-border pt-6">
+        <Link
+          href="/dashboard/settings/tokens"
+          className="flex items-center justify-between text-sm transition-colors hover:text-foreground"
+        >
+          <div>
+            <div className="font-medium">Connected agents</div>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Personal access tokens for the Materialize MCP server
+            </p>
+          </div>
+          <span className="text-muted-foreground">→</span>
+        </Link>
+      </div>
 
       <div className="border-t border-border pt-6">
         <SignOutButton />
