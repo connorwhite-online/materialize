@@ -24,6 +24,10 @@ const isPublicRoute = createRouteMatcher([
   // Same-origin proxy for the 3D model preview on published file
   // pages. The route itself enforces published-or-owner access.
   "/api/files/preview/(.*)",
+  // MCP server. The transport route (app/api/[transport]/route.ts)
+  // does its own bearer-token auth via withMcpAuth — Clerk session
+  // cookies are not relevant here.
+  "/api/mcp(.*)",
 ]);
 
 export default clerkMiddleware(async (auth, req) => {
