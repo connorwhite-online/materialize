@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { auth } from "@clerk/nextjs/server";
 import { ChevronLeft } from "@/components/icons/chevron-left";
 import { listPersonalAccessTokens } from "@/app/actions/tokens";
@@ -9,6 +10,17 @@ export default async function TokensSettingsPage() {
   if (!userId) return null;
 
   const tokens = await listPersonalAccessTokens();
+
+  // Derive the MCP endpoint URL from the live request rather than a
+  // build-time env var. NEXT_PUBLIC_APP_URL was unreliable here —
+  // unset in some environments, baked at build time when set — and
+  // produced an obviously-wrong "http://localhost:3000" on prod.
+  const h = await headers();
+  const host = h.get("x-forwarded-host") ?? h.get("host");
+  const proto = h.get("x-forwarded-proto") ?? "https";
+  const baseUrl = host
+    ? `${proto}://${host}`
+    : process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-8 space-y-6">
@@ -31,7 +43,7 @@ export default async function TokensSettingsPage() {
         <p className="mt-2 text-xs text-muted-foreground">
           MCP endpoint:{" "}
           <code className="rounded bg-muted px-1 py-0.5">
-            {process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/api/mcp
+            {baseUrl}/api/mcp
           </code>
         </p>
       </div>
