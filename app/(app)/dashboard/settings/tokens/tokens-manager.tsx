@@ -14,12 +14,15 @@ import {
   SCOPE_DESCRIPTIONS,
   type Scope,
 } from "@/lib/mcp/scopes";
+import type { SpendingPolicy } from "@/lib/billing/policy";
+import { TokenPolicyEditor } from "./token-policy-editor";
 
 interface TokenSummary {
   id: string;
   name: string;
   prefix: string;
   scopes: string[];
+  spendingPolicy: SpendingPolicy | null;
   createdAt: string;
   lastUsedAt: string | null;
   expiresAt: string | null;
@@ -28,9 +31,10 @@ interface TokenSummary {
 
 interface Props {
   initialTokens: TokenSummary[];
+  hasPaymentMethod: boolean;
 }
 
-export function TokensManager({ initialTokens }: Props) {
+export function TokensManager({ initialTokens, hasPaymentMethod }: Props) {
   const [tokens, setTokens] = useState(initialTokens);
   const [showCreate, setShowCreate] = useState(initialTokens.length === 0);
   const [name, setName] = useState("");
@@ -61,6 +65,7 @@ export function TokensManager({ initialTokens }: Props) {
           name,
           prefix: result.prefix,
           scopes: [...selectedScopes],
+          spendingPolicy: null,
           createdAt: new Date().toISOString(),
           lastUsedAt: null,
           expiresAt: null,
@@ -238,6 +243,22 @@ export function TokensManager({ initialTokens }: Props) {
                   ? ` · revoked ${new Date(t.revokedAt).toLocaleDateString()}`
                   : ""}
               </div>
+              {!t.revokedAt && (
+                <TokenPolicyEditor
+                  tokenId={t.id}
+                  initialPolicy={t.spendingPolicy}
+                  hasPaymentMethod={hasPaymentMethod}
+                  onChange={(policy) =>
+                    setTokens((prev) =>
+                      prev.map((row) =>
+                        row.id === t.id
+                          ? { ...row, spendingPolicy: policy }
+                          : row
+                      )
+                    )
+                  }
+                />
+              )}
             </div>
           ))}
         </div>

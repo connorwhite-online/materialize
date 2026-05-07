@@ -479,6 +479,29 @@ const handler = createMcpHandler(
           const emailResult = await sendOrderConfirmationEmail({
             orderId: result.orderId,
           });
+
+          if (result.path === "auto_approved") {
+            return jsonResult({
+              orderId: result.orderId,
+              status: "auto_approved",
+              terminal: false,
+              chargedAt: new Date().toISOString(),
+              cancellationDeadline: result.cancellationDeadline,
+              totalPriceCents: result.totalPriceCents,
+              serviceFeeCents: result.serviceFeeCents,
+              currency: "USD",
+              remainingPeriodBudgetCents: result.remainingPeriodBudgetCents,
+              notificationsSent: { email: emailResult.ok, push: false },
+              ...(emailResult.ok
+                ? {}
+                : {
+                    warnings: [
+                      `Notification email failed to send (${emailResult.error}). The user can still cancel via their dashboard.`,
+                    ],
+                  }),
+            });
+          }
+
           return jsonResult({
             orderId: result.orderId,
             status: "awaiting_user_approval",
@@ -488,6 +511,9 @@ const handler = createMcpHandler(
             totalPriceCents: result.totalPriceCents,
             serviceFeeCents: result.serviceFeeCents,
             currency: "USD",
+            ...(result.fallbackReason
+              ? { reason: result.fallbackReason }
+              : {}),
             notificationsSent: { email: emailResult.ok, push: false },
             ...(emailResult.ok
               ? {}

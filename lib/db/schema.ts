@@ -53,6 +53,11 @@ export const printOrderStatusEnum = pgEnum("print_order_status", [
   // but no Stripe session has been opened yet. Cleanup jobs that prune
   // stale `cart_created` rows should leave this state alone.
   "awaiting_agent_approval",
+  // Agent-initiated orders auto-charged via off-session PaymentIntent
+  // because the token's spending policy permitted it. Sits between
+  // payment success and CraftCloud-order placement to give the user a
+  // short cancellation window (see auto_approved_until on print_orders).
+  "auto_approved",
   "ordered",
   "in_production",
   "shipped",
@@ -77,6 +82,12 @@ export const users = pgTable("users", {
   stripeOnboardingComplete: boolean("stripe_onboarding_complete")
     .notNull()
     .default(false),
+  // Stripe Customer + saved off-session payment method, used for
+  // agent-initiated orders that pass the per-token spending policy.
+  // Both nullable — users without a card on file fall through to the
+  // confirm-by-email flow regardless of token policy.
+  stripeCustomerId: text("stripe_customer_id"),
+  defaultPaymentMethod: text("default_payment_method"),
   // Default visibility for files uploaded through implicit flows
   // (print checkout, agent MCP uploads). Explicit dashboard
   // publishes ignore this setting.
@@ -346,6 +357,14 @@ export const printOrders = pgTable("print_orders", {
   // a tool call after a transient failure without producing a second
   // draft order.
   agentIdempotencyKey: text("agent_idempotency_key"),
+  // Set on agent-initiated orders that were auto-charged. The
+  // CraftCloud-placement webhook handler skips rows where this
+  // timestamp is in the future, giving the user a one-click "cancel"
+  // window before fulfillment proceeds. Null on every other order
+  // path (anon checkout, agent confirm-by-email, etc.).
+  autoApprovedUntil: timestamp("auto_approved_until", {
+    withTimezone: true,
+  }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -536,6 +555,19 @@ export const personalAccessTokens = pgTable(
     // to which token without revealing the secret.
     prefix: text("prefix").notNull(),
     scopes: text("scopes").array().notNull(),
+    // Optional auto-approval policy. Null = "every order needs the
+    // confirm-by-email loop" (today's behavior). When set, agent
+    // orders that fit within the policy are auto-charged off-session
+    // and skip the email step. See docs/agent-payments.md.
+    spendingPolicy: jsonb("spending_policy").$type<{
+      perOrderLimitCents: number;
+      periodBudgetCents: number;
+      periodWindow: "day" | "week" | "month";
+      confirmAboveCents?: number;
+      allowedVendorIds?: string[];
+      allowedMaterialIds?: string[];
+      cancellationWindowMinutes?: number;
+    }>(),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
@@ -546,6 +578,34 @@ export const personalAccessTokens = pgTable(
   (table) => [
     index("personal_access_tokens_user_id_idx").on(table.userId),
     uniqueIndex("personal_access_tokens_token_hash_uniq").on(table.tokenHash),
+  ]
+);
+
+// Per-token spending ledger for agent-initiated auto-approved orders.
+// Lets us compute "how much has this token spent in the current
+// period" without scanning all of print_orders. Period boundary
+// (day/week/month) is computed in app code, not stored.
+
+export const tokenSpendingLedger = pgTable(
+  "token_spending_ledger",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tokenId: uuid("token_id")
+      .notNull()
+      .references(() => personalAccessTokens.id, { onDelete: "cascade" }),
+    printOrderId: uuid("print_order_id")
+      .notNull()
+      .references(() => printOrders.id, { onDelete: "cascade" }),
+    amountCents: integer("amount_cents").notNull(),
+    chargedAt: timestamp("charged_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("token_spending_ledger_token_id_charged_at_idx").on(
+      table.tokenId,
+      table.chargedAt
+    ),
   ]
 );
 

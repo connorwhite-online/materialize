@@ -63,6 +63,21 @@ export default async function SettingsPage() {
       </div>
 
       <div className="border-t border-border pt-6">
+        <Link
+          href="/dashboard/settings/billing"
+          className="flex items-center justify-between text-sm transition-colors hover:text-foreground"
+        >
+          <div>
+            <div className="font-medium">Billing</div>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Saved card for agent-initiated orders
+            </p>
+          </div>
+          <span className="text-muted-foreground">→</span>
+        </Link>
+      </div>
+
+      <div className="border-t border-border pt-6">
         <SignOutButton />
       </div>
     </div>

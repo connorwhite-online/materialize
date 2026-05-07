@@ -1,14 +1,29 @@
 import "server-only";
 
-import { eq } from "drizzle-orm";
+import { and, eq, gte } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { printOrders, fileAssets, files } from "@/lib/db/schema";
+import {
+  fileAssets,
+  files,
+  personalAccessTokens,
+  printOrders,
+  tokenSpendingLedger,
+} from "@/lib/db/schema";
 import { findMaterialConfig, findProvider } from "@/lib/craftcloud/catalog";
 import { sendEmail } from "@/lib/email/client";
 import {
   AgentOrderConfirmationEmail,
   renderAgentOrderConfirmationText,
 } from "@/lib/email/templates/agent-order-confirmation";
+import {
+  AgentOrderAutoApprovedEmail,
+  renderAgentOrderAutoApprovedText,
+} from "@/lib/email/templates/agent-order-auto-approved";
+import {
+  AgentOrderCancellationConfirmedEmail,
+  renderAgentOrderCancellationConfirmedText,
+} from "@/lib/email/templates/agent-order-cancellation-confirmed";
+import { computePeriodStart, type SpendingPolicy } from "@/lib/billing/policy";
 import { logError } from "@/lib/logger";
 
 /**
@@ -38,8 +53,8 @@ export async function sendOrderConfirmationEmail(params: {
     if (!row.shippingAddress?.email) {
       return { ok: false, error: "Order has no shipping email" };
     }
-    if (!row.confirmationToken || !row.confirmationExpiresAt) {
-      return { ok: false, error: "Order is not awaiting confirmation" };
+    if (!row.confirmationToken) {
+      return { ok: false, error: "Order has no confirmation token" };
     }
 
     const [materialEntry, providerEntry, fileRow] = await Promise.all([
@@ -81,28 +96,74 @@ export async function sendOrderConfirmationEmail(params: {
       row.vendorName ?? providerEntry?.name ?? "Vendor details unavailable";
 
     const totalDisplay = formatPrice(row.totalPrice + row.serviceFee);
-
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-    const confirmationUrl = `${appUrl}/orders/${row.id}/confirm?token=${row.confirmationToken}`;
     const revokeAgentUrl = `${appUrl}/dashboard/settings/tokens`;
-    const expiresAtDisplay = formatExpiry(row.confirmationExpiresAt);
+    const agentName = row.agentName ?? "An agent";
 
-    const templateProps = {
-      agentName: row.agentName ?? "An agent",
-      fileName,
-      materialName,
-      vendorName,
-      totalDisplay,
-      confirmationUrl,
-      revokeAgentUrl,
-      expiresAtDisplay,
-    };
+    if (row.status === "auto_approved" && row.autoApprovedUntil) {
+      const cancelUrl = `${appUrl}/orders/${row.id}/cancel?token=${row.confirmationToken}`;
+      const cancelDeadlineDisplay = formatRelativeFuture(row.autoApprovedUntil);
+      const remainingBudgetDisplay =
+        await formatRemainingBudget(row.initiatedByTokenId);
+
+      return await sendEmail({
+        to: row.shippingAddress.email,
+        subject: `${agentName} placed an order — cancel ${cancelDeadlineDisplay}`,
+        react: AgentOrderAutoApprovedEmail({
+          agentName,
+          fileName,
+          materialName,
+          vendorName,
+          totalDisplay,
+          cancelUrl,
+          cancelDeadlineDisplay,
+          remainingBudgetDisplay,
+          revokeAgentUrl,
+        }),
+        text: renderAgentOrderAutoApprovedText({
+          agentName,
+          fileName,
+          materialName,
+          vendorName,
+          totalDisplay,
+          cancelUrl,
+          cancelDeadlineDisplay,
+          remainingBudgetDisplay,
+          revokeAgentUrl,
+        }),
+      });
+    }
+
+    // Default: confirm-by-email flow (today's path).
+    if (!row.confirmationExpiresAt) {
+      return { ok: false, error: "Order is not awaiting confirmation" };
+    }
+    const confirmationUrl = `${appUrl}/orders/${row.id}/confirm?token=${row.confirmationToken}`;
+    const expiresAtDisplay = formatExpiry(row.confirmationExpiresAt);
 
     return await sendEmail({
       to: row.shippingAddress.email,
-      subject: `Confirm print order from ${templateProps.agentName} — Materialize`,
-      react: AgentOrderConfirmationEmail(templateProps),
-      text: renderAgentOrderConfirmationText(templateProps),
+      subject: `Confirm print order from ${agentName} — Materialize`,
+      react: AgentOrderConfirmationEmail({
+        agentName,
+        fileName,
+        materialName,
+        vendorName,
+        totalDisplay,
+        confirmationUrl,
+        revokeAgentUrl,
+        expiresAtDisplay,
+      }),
+      text: renderAgentOrderConfirmationText({
+        agentName,
+        fileName,
+        materialName,
+        vendorName,
+        totalDisplay,
+        confirmationUrl,
+        revokeAgentUrl,
+        expiresAtDisplay,
+      }),
     });
   } catch (error) {
     logError("sendOrderConfirmationEmail", error);
@@ -111,6 +172,120 @@ export async function sendOrderConfirmationEmail(params: {
       error: error instanceof Error ? error.message : "Failed to send email",
     };
   }
+}
+
+/**
+ * Sent after the user clicks "Cancel" on an auto-approved order
+ * during the cancellation window. Resolves order details from the
+ * order id and dispatches the cancellation-confirmed template.
+ */
+export async function sendCancellationConfirmedEmail(params: {
+  orderId: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const [row] = await db
+      .select()
+      .from(printOrders)
+      .where(eq(printOrders.id, params.orderId))
+      .limit(1);
+
+    if (!row) return { ok: false, error: "Order not found" };
+    if (!row.shippingAddress?.email) {
+      return { ok: false, error: "Order has no shipping email" };
+    }
+
+    const fileRow = row.fileAssetId
+      ? await db
+          .select({
+            name: files.name,
+            originalFilename: fileAssets.originalFilename,
+          })
+          .from(fileAssets)
+          .leftJoin(files, eq(fileAssets.fileId, files.id))
+          .where(eq(fileAssets.id, row.fileAssetId))
+          .limit(1)
+          .then((rows) => rows[0] ?? null)
+      : null;
+    const fileName =
+      fileRow?.name ??
+      fileRow?.originalFilename?.replace(/\.[^.]+$/, "") ??
+      "Untitled model";
+
+    const totalDisplay = formatPrice(row.totalPrice + row.serviceFee);
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+
+    const props = {
+      agentName: row.agentName ?? "An agent",
+      fileName,
+      totalDisplay,
+      ordersUrl: `${appUrl}/dashboard/orders`,
+      revokeAgentUrl: `${appUrl}/dashboard/settings/tokens`,
+    };
+
+    return await sendEmail({
+      to: row.shippingAddress.email,
+      subject: `Order cancelled — refund of ${totalDisplay} on the way`,
+      react: AgentOrderCancellationConfirmedEmail(props),
+      text: renderAgentOrderCancellationConfirmedText(props),
+    });
+  } catch (error) {
+    logError("sendCancellationConfirmedEmail", error);
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Failed to send email",
+    };
+  }
+}
+
+/**
+ * Looks up the token's spending policy + the period spend so far,
+ * formats "$X.XX of $Y.YY remaining" for display in the auto-approved
+ * email. Returns null if the token has no policy (so we just don't
+ * show that line) or the lookup fails — never blocks the email.
+ */
+async function formatRemainingBudget(
+  tokenId: string | null
+): Promise<string | null> {
+  if (!tokenId) return null;
+  try {
+    const [tokenRow] = await db
+      .select({ spendingPolicy: personalAccessTokens.spendingPolicy })
+      .from(personalAccessTokens)
+      .where(eq(personalAccessTokens.id, tokenId))
+      .limit(1);
+    const policy = tokenRow?.spendingPolicy as SpendingPolicy | null | undefined;
+    if (!policy) return null;
+
+    const periodStart = computePeriodStart(policy.periodWindow, new Date());
+    const recent = await db
+      .select({ amountCents: tokenSpendingLedger.amountCents })
+      .from(tokenSpendingLedger)
+      .where(
+        and(
+          eq(tokenSpendingLedger.tokenId, tokenId),
+          gte(tokenSpendingLedger.chargedAt, periodStart)
+        )
+      );
+    const spent = recent.reduce((sum, r) => sum + r.amountCents, 0);
+    const remaining = Math.max(0, policy.periodBudgetCents - spent);
+    return `${formatPrice(remaining)} of ${formatPrice(policy.periodBudgetCents)} this ${policy.periodWindow}`;
+  } catch (err) {
+    logError("formatRemainingBudget", err);
+    return null;
+  }
+}
+
+/**
+ * "in 5 minutes" / "in less than a minute" — used for the cancel
+ * deadline in the auto-approved email subject + body.
+ */
+function formatRelativeFuture(date: Date): string {
+  const diffMs = date.getTime() - Date.now();
+  if (diffMs <= 0) return "shortly";
+  const minutes = Math.round(diffMs / (60 * 1000));
+  if (minutes < 1) return "in less than a minute";
+  if (minutes === 1) return "in 1 minute";
+  return `in ${minutes} minutes`;
 }
 
 function formatPrice(cents: number): string {

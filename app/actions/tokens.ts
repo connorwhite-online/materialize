@@ -9,6 +9,7 @@ import { personalAccessTokens } from "@/lib/db/schema";
 import { logError } from "@/lib/logger";
 import { generateToken } from "@/lib/mcp/tokens";
 import { isValidScope, type Scope } from "@/lib/mcp/scopes";
+import type { SpendingPolicy } from "@/lib/billing/policy";
 
 const createTokenSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(80),
@@ -67,6 +68,7 @@ export async function listPersonalAccessTokens() {
       name: personalAccessTokens.name,
       prefix: personalAccessTokens.prefix,
       scopes: personalAccessTokens.scopes,
+      spendingPolicy: personalAccessTokens.spendingPolicy,
       createdAt: personalAccessTokens.createdAt,
       lastUsedAt: personalAccessTokens.lastUsedAt,
       expiresAt: personalAccessTokens.expiresAt,
@@ -75,6 +77,73 @@ export async function listPersonalAccessTokens() {
     .from(personalAccessTokens)
     .where(eq(personalAccessTokens.userId, userId))
     .orderBy(desc(personalAccessTokens.createdAt));
+}
+
+const spendingPolicySchema = z
+  .object({
+    perOrderLimitCents: z.number().int().min(50).max(1_000_000),
+    periodBudgetCents: z.number().int().min(50).max(10_000_000),
+    periodWindow: z.enum(["day", "week", "month"]),
+    confirmAboveCents: z.number().int().min(50).max(1_000_000).optional(),
+    allowedVendorIds: z.array(z.string()).max(50).optional(),
+    allowedMaterialIds: z.array(z.string()).max(50).optional(),
+    cancellationWindowMinutes: z
+      .number()
+      .int()
+      .min(0)
+      .max(60)
+      .optional(),
+  })
+  .refine(
+    (p) => p.periodBudgetCents >= p.perOrderLimitCents,
+    "Period budget must be at least the per-order limit"
+  )
+  .refine(
+    (p) =>
+      p.confirmAboveCents == null || p.confirmAboveCents <= p.perOrderLimitCents,
+    "Confirm-above threshold must be at or below the per-order limit"
+  );
+
+export async function updateTokenSpendingPolicy(input: {
+  tokenId: string;
+  policy: SpendingPolicy | null;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { userId } = await auth();
+  if (!userId) return { ok: false, error: "Unauthorized" };
+
+  let policyToStore: SpendingPolicy | null = null;
+  if (input.policy != null) {
+    const parsed = spendingPolicySchema.safeParse(input.policy);
+    if (!parsed.success) {
+      const first =
+        parsed.error.flatten().formErrors[0] ??
+        Object.values(parsed.error.flatten().fieldErrors)[0]?.[0] ??
+        "Invalid policy";
+      return { ok: false, error: first };
+    }
+    policyToStore = parsed.data;
+  }
+
+  try {
+    const result = await db
+      .update(personalAccessTokens)
+      .set({ spendingPolicy: policyToStore })
+      .where(
+        and(
+          eq(personalAccessTokens.id, input.tokenId),
+          eq(personalAccessTokens.userId, userId)
+        )
+      )
+      .returning({ id: personalAccessTokens.id });
+
+    if (result.length === 0) return { ok: false, error: "Token not found" };
+
+    revalidatePath("/dashboard/settings/tokens");
+    return { ok: true };
+  } catch (error) {
+    logError("updateTokenSpendingPolicy", error);
+    return { ok: false, error: "Failed to save policy" };
+  }
 }
 
 export async function revokePersonalAccessToken(

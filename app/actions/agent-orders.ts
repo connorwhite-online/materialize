@@ -1,13 +1,20 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
-import { printOrders, fileAssets, files } from "@/lib/db/schema";
+import {
+  printOrders,
+  fileAssets,
+  files,
+  tokenSpendingLedger,
+} from "@/lib/db/schema";
 import { getStripe } from "@/lib/stripe";
 import { findMaterialConfig, findProvider } from "@/lib/craftcloud/catalog";
+import { sendCancellationConfirmedEmail } from "@/lib/mcp/email";
 import { logError } from "@/lib/logger";
+import { revalidatePath } from "next/cache";
 
 const SESSION_CLAIM_PREFIX = "session_claim:";
 
@@ -276,4 +283,130 @@ async function mintStripeSession(params: {
     return { error: "Stripe returned no checkout URL" };
   }
   return { id: session.id, url: session.url };
+}
+
+/**
+ * Cancels an auto-approved agent order during its cancellation
+ * window. Refunds the PaymentIntent, transitions the order to
+ * `cancelled`, and removes the spending-ledger row so the user's
+ * period budget is restored.
+ *
+ * Auth: Clerk session + ownership match + the unguessable
+ * confirmation token (passed through the cancel URL in the email)
+ * — same pattern as confirmAgentInitiatedOrder.
+ *
+ * Time gate: status must still be `auto_approved` AND
+ * `autoApprovedUntil > now`. After the window closes the cron has
+ * already (or is about to) place the CraftCloud order; refunds
+ * after that point go through the existing dispute/refund flow.
+ *
+ * Idempotency: the atomic `auto_approved → cancelled` UPDATE means
+ * only the first concurrent caller wins. Subsequent duplicate calls
+ * see 0 rows updated and return "already cancelled".
+ */
+export async function cancelAutoApprovedOrder(input: {
+  orderId: string;
+  confirmationToken: string;
+}): Promise<{ ok: true } | { error: string }> {
+  try {
+    const { userId } = await auth();
+    if (!userId) return { error: "Sign in required" };
+
+    const [order] = await db
+      .select()
+      .from(printOrders)
+      .where(
+        and(
+          eq(printOrders.id, input.orderId),
+          eq(printOrders.userId, userId)
+        )
+      )
+      .limit(1);
+
+    if (!order) return { error: "Order not found" };
+    if (order.confirmationToken !== input.confirmationToken) {
+      return { error: "Invalid cancel link" };
+    }
+    if (order.status !== "auto_approved") {
+      return {
+        error:
+          order.status === "cancelled"
+            ? "Order is already cancelled"
+            : "This order can no longer be cancelled — fulfillment has started",
+      };
+    }
+    if (
+      !order.autoApprovedUntil ||
+      order.autoApprovedUntil.getTime() <= Date.now()
+    ) {
+      return {
+        error:
+          "Cancellation window has closed — the order is being placed with the print vendor",
+      };
+    }
+
+    // Atomic transition. The status guard is the dedup primitive —
+    // a concurrent cron sweep flipping the row to cart_created will
+    // make this UPDATE return 0 rows.
+    const claimed = await db
+      .update(printOrders)
+      .set({ status: "cancelled" })
+      .where(
+        and(
+          eq(printOrders.id, input.orderId),
+          eq(printOrders.userId, userId),
+          eq(printOrders.status, "auto_approved"),
+          gt(printOrders.autoApprovedUntil, new Date())
+        )
+      )
+      .returning({ id: printOrders.id });
+
+    if (claimed.length === 0) {
+      return {
+        error:
+          "Cancellation window just closed. The order is being placed; refunds are available on your dashboard.",
+      };
+    }
+
+    // Refund the PaymentIntent. We stored the id in stripeSessionId
+    // (reused column — see createAgentInitiatedOrder for context).
+    if (order.stripeSessionId) {
+      try {
+        const stripe = getStripe();
+        await stripe.refunds.create({
+          payment_intent: order.stripeSessionId,
+          reason: "requested_by_customer",
+          metadata: { printOrderId: order.id, source: "agent_auto_cancel" },
+        });
+      } catch (err) {
+        // The order is already cancelled in our DB — log the refund
+        // failure but don't roll back. The user can still get their
+        // money back via Stripe's dispute flow if needed.
+        logError("cancelAutoApprovedOrder.refund", err);
+      }
+    }
+
+    // Remove the spending-ledger row so the period budget reflects
+    // the cancellation. Best-effort — even if this fails the
+    // budget will reset at the next period boundary.
+    try {
+      await db
+        .delete(tokenSpendingLedger)
+        .where(eq(tokenSpendingLedger.printOrderId, order.id));
+    } catch (err) {
+      logError("cancelAutoApprovedOrder.ledger", err);
+    }
+
+    // Best-effort confirmation email — failure is logged but doesn't
+    // affect the cancellation success that the UI just confirmed.
+    sendCancellationConfirmedEmail({ orderId: order.id }).catch((err) =>
+      logError("cancelAutoApprovedOrder.confirmationEmail", err)
+    );
+
+    revalidatePath("/dashboard/orders");
+    return { ok: true };
+  } catch (error) {
+    logError("cancelAutoApprovedOrder", error);
+    return { error: "Failed to cancel. Please try again." };
+  }
 }

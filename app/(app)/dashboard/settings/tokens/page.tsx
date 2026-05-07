@@ -1,15 +1,26 @@
 import Link from "next/link";
 import { headers } from "next/headers";
+import { eq } from "drizzle-orm";
 import { auth } from "@clerk/nextjs/server";
 import { ChevronLeft } from "@/components/icons/chevron-left";
 import { listPersonalAccessTokens } from "@/app/actions/tokens";
+import { db } from "@/lib/db";
+import { users } from "@/lib/db/schema";
 import { TokensManager } from "./tokens-manager";
 
 export default async function TokensSettingsPage() {
   const { userId } = await auth();
   if (!userId) return null;
 
-  const tokens = await listPersonalAccessTokens();
+  const [tokens, [billingRow]] = await Promise.all([
+    listPersonalAccessTokens(),
+    db
+      .select({ defaultPaymentMethod: users.defaultPaymentMethod })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1),
+  ]);
+  const hasPaymentMethod = !!billingRow?.defaultPaymentMethod;
 
   // Derive the MCP endpoint URL from the live request rather than a
   // build-time env var. NEXT_PUBLIC_APP_URL was unreliable here —
@@ -49,6 +60,7 @@ export default async function TokensSettingsPage() {
       </div>
 
       <TokensManager
+        hasPaymentMethod={hasPaymentMethod}
         initialTokens={tokens.map((t) => ({
           ...t,
           createdAt: t.createdAt.toISOString(),

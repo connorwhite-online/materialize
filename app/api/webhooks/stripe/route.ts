@@ -1,6 +1,6 @@
 import { headers } from "next/headers";
 import { db } from "@/lib/db";
-import { webhookEventsProcessed } from "@/lib/db/schema";
+import { users, webhookEventsProcessed } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { getStripe } from "@/lib/stripe";
 import { handlePrintOrderPayment } from "@/lib/stripe/handle-print-order-payment";
@@ -44,7 +44,17 @@ export async function POST(request: Request) {
     event.type === "checkout.session.completed" &&
     (event.data.object as Stripe.Checkout.Session).payment_status === "paid";
   const isAsyncSuccess = event.type === "checkout.session.async_payment_succeeded";
-  const isHandled = isPaidCheckout || isAsyncSuccess;
+  // Mode=setup Checkout Sessions don't have payment_status — they
+  // complete the SetupIntent and we persist the resulting payment
+  // method onto the user. Tagged with metadata.type=billing_setup
+  // by createBillingSetupSession so we don't conflate this with
+  // print-order checkouts.
+  const isBillingSetup =
+    event.type === "checkout.session.completed" &&
+    (event.data.object as Stripe.Checkout.Session).mode === "setup" &&
+    (event.data.object as Stripe.Checkout.Session).metadata?.type ===
+      "billing_setup";
+  const isHandled = isPaidCheckout || isAsyncSuccess || isBillingSetup;
 
   // Defense-in-depth dedup — the inner handlePrintOrderPayment also
   // claims atomically against the printOrders row, but recording the
@@ -79,6 +89,42 @@ export async function POST(request: Request) {
           { error: "Failed to process order" },
           { status: 500 }
         );
+      }
+    }
+
+    if (isBillingSetup) {
+      const userId = session.metadata?.userId;
+      if (userId) {
+        try {
+          // The Checkout Session in setup mode produces a SetupIntent
+          // whose payment_method is the card the user just saved.
+          // Pull the SetupIntent fresh — `setup_intent` on the
+          // session is just the id, not the expanded object.
+          const setupIntentId =
+            typeof session.setup_intent === "string"
+              ? session.setup_intent
+              : session.setup_intent?.id;
+          if (setupIntentId) {
+            const stripe = getStripe();
+            const setupIntent =
+              await stripe.setupIntents.retrieve(setupIntentId);
+            const paymentMethodId =
+              typeof setupIntent.payment_method === "string"
+                ? setupIntent.payment_method
+                : setupIntent.payment_method?.id;
+            if (paymentMethodId) {
+              await db
+                .update(users)
+                .set({ defaultPaymentMethod: paymentMethodId })
+                .where(eq(users.id, userId));
+            }
+          }
+        } catch (error) {
+          logError("stripe-webhook-billing-setup", error);
+          // Don't 500 — the user already paid nothing, this is just
+          // saving a card. Returning 500 makes Stripe retry forever.
+          // We log and let the user try again from the dashboard.
+        }
       }
     }
 
