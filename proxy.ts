@@ -28,6 +28,11 @@ const isPublicRoute = createRouteMatcher([
   // does its own bearer-token auth via withMcpAuth — Clerk session
   // cookies are not relevant here.
   "/api/mcp(.*)",
+  // Discovery surfaces for crawlers + AI agents.
+  "/llms.txt",
+  "/llms-full.txt",
+  "/robots.txt",
+  "/sitemap.xml",
 ]);
 
 export default clerkMiddleware(async (auth, req) => {

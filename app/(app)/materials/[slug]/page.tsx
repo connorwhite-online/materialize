@@ -19,15 +19,37 @@ export default async function MaterialDetailPage(props: {
   const { material, group } = hit;
 
   const tags = material.tags ?? [];
+  const appUrl =
+    process.env.NEXT_PUBLIC_APP_URL ?? "https://materialize.cc";
+  const printUrl = `${appUrl}/print?material=${material.id}`;
+  const detailUrl = `${appUrl}/materials/${material.slug}`;
 
+  // JSON-LD for agent crawlers and search engines. Includes an Offer
+  // pointing at the print page so agent shopping flows can find a
+  // checkout entry, even though we don't surface a fixed price here
+  // (every material × geometry × vendor combo is custom-priced at
+  // quote time). When Stage 3 of the agent-payments roadmap lands,
+  // this will gain priceSpecification: PriceRange data computed from
+  // a benchmark geometry; for now availability + URL are the
+  // honest signals we can give.
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "Product",
     name: material.name,
     description: material.description ?? material.descriptionShort ?? undefined,
     image: material.featuredImage ?? undefined,
+    url: detailUrl,
+    sku: material.id,
     brand: { "@type": "Brand", name: "Materialize" },
     category: group.name,
+    offers: {
+      "@type": "Offer",
+      url: printUrl,
+      availability: "https://schema.org/InStock",
+      priceCurrency: "USD",
+      itemCondition: "https://schema.org/NewCondition",
+      seller: { "@type": "Organization", name: "Materialize" },
+    },
     additionalProperty: [
       hasNumber(material.tensileStrengthMax)
         ? {
