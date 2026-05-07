@@ -1,5 +1,26 @@
 # Agent Payments — Design Doc
 
+## 0. Status (2026-05)
+
+**Phase 1 — Delegated Billing on the existing MCP.** Shipped behind `MATERIALIZE_AGENT_BILLING_ENABLED`. Default-off, no behavior change until flipped per-environment. 60 tests in `lib/billing/__tests__`, `lib/mcp/internal/__tests__`, `app/actions/__tests__`, `app/api/cron/place-auto-approved-orders/__tests__`.
+
+Phase 1 surfaces:
+- `lib/billing/policy.ts` — spending-policy evaluator
+- `app/actions/billing.ts` — Stripe customer + SetupIntent + remove + summary
+- `app/(app)/dashboard/settings/billing/` — saved-card UI
+- `app/(app)/dashboard/settings/tokens/token-policy-editor.tsx` — per-PAT policy editor
+- `lib/mcp/internal/orders.ts` — `createAgentInitiatedOrder` policy check + off-session charge
+- `app/api/cron/place-auto-approved-orders/route.ts` — runs every minute, places orders past their cancel window
+- `app/(app)/orders/[orderId]/cancel/` — cancel UI
+- `lib/email/templates/agent-order-{auto-approved,cancellation-confirmed}.tsx`
+- `app/api/webhooks/stripe/route.ts` — extended with the `mode=setup + metadata.type=billing_setup` branch that persists the saved payment method
+
+**Phase 2 — ACP / UCP support.**
+
+- *Stage 1 (Discovery surface).* Shipped. `app/llms.txt`, `app/llms-full.txt`, `app/(app)/materials/[slug]/page.tsx` (Offer JSON-LD), `app/robots.ts`, `app/sitemap.ts`. Public-route matcher in `proxy.ts` updated.
+- *Stage 2 (Decision spike).* **Not started — next step.** See §13 below for the concrete checklist.
+- *Stages 3–7.* Not started. See §10 for the architecture and §13 for the gating decisions.
+
 ## 1. Context
 
 The MCP server (`docs/mcp-server.md`) shipped v1 with a hard gate: every agent-initiated order requires the human to click an emailed confirmation link before the Stripe Checkout session is minted. That's the right default for v1, but it kills the "agent designs and prints 20 parts overnight" workflow because the user is in the loop on every transaction.
@@ -277,5 +298,51 @@ If/when we hit a wall (Stripe Suite UX doesn't fit our flow, takes a cut we don'
 1. **Cancellation window length.** 5 minutes is a guess. Real users may want longer (30 min) or no window at all (instant fulfillment for trust-the-agent users, opt-in via policy). Worth a per-policy setting: `cancellationWindowMinutes: 0 | 5 | 15 | 30`.
 2. **Receipts.** Do we send a separate receipt email after the cancellation window passes, or is the auto-approved email sufficient? Probably yes — confirms "the order is now placed and on its way."
 3. **Multi-currency.** Phase 1 stays USD only (matches the MCP fix from earlier this week). Phase 2 needs to think about agent platforms that surface non-USD prices.
-4. **ACP timing.** Stripe is iterating fast. Worth committing to a re-evaluation point — say Q4 2026 — to decide whether to start Phase 2 then or push it.
-5. **Deal with the existing `awaiting_agent_approval` email.** Does it still get sent for out-of-policy orders, or only when no policy is configured at all? Probably the former for safety.
+4. **Deal with the existing `awaiting_agent_approval` email.** Does it still get sent for out-of-policy orders, or only when no policy is configured at all? Probably the former for safety.
+
+## 13. Phase 2 Stage 2 — Decision spike checklist
+
+The next concrete step on Phase 2. Output is an addendum to this doc with the answers to the two questions below; everything from Stage 3 onward depends on them. This section is the running brief — pick it up cold.
+
+### Question A: Hosted Stripe Agentic Commerce Suite vs self-hosted ACP endpoints?
+
+**To answer:**
+
+1. Sign in at https://dashboard.stripe.com with the existing Materialize Stripe account.
+2. Look for "Agentic Commerce" / "Agent Connect" / similar in the dashboard nav. Document what's actually there (Stripe is iterating; the nav label may have changed since this was written).
+3. If self-serve, walk the enrollment flow — note what catalog format it expects (Stripe Products? a custom feed URL? CSV upload? webhook callback?), what events it emits, and what UX the buyer sees on the agent platform side.
+4. If gated behind a sales call, decide whether the timeline cost is worth waiting on. Self-hosted ACP is the alternative.
+
+**Decision criteria:**
+
+- Hosted is the right answer if: Stripe Suite supports either dynamic pricing (a price-on-demand callback) or accepts a "starting from" price model AND order events flow through the existing `/api/webhooks/stripe` route with minimal new branching.
+- Self-hosted is the right answer if: Stripe Suite forces fixed-SKU pricing, requires a sales engagement to enroll, OR doesn't expose enough material/finish detail to drive a real quote.
+
+**Default fallback if undecided:** start hosted, fall through to self-hosted only when blocked. The Stage 3 catalog feed is shared work between the two paths, so committing isn't required to start Stage 3.
+
+### Question B: Pricing model for the dynamic-quote problem?
+
+Materialize prices are computed at quote time per (model geometry × material × vendor). ACP catalogs assume buyers can see prices upfront. Three options, see §1 of this doc for the full discussion:
+
+- **A — "Starting from" pricing.** Benchmark each material against a fixed reference geometry (probably a 30mm calibration cube), refresh nightly, surface that as the discoverable price. Real price comes back at cart time.
+- **B — Curated instant-quote SKUs.** Pick ~10–20 common parts (calibration cubes, hooks, brackets, common figurines), pre-quote across all materials, surface those as fixed-price ACP SKUs.
+- **C — Quote-at-cart upload.** ACP discovery surfaces materials only; cart endpoint accepts a model upload and runs the existing quote pipeline.
+
+**To answer:**
+
+1. Verify which agent platforms (ChatGPT, Claude apps, Perplexity, etc.) actually have ACP buyer-side support shipped today. Without buyers, the choice is theoretical.
+2. Look at what those platforms expect from a merchant catalog — fixed SKUs only, or do they handle "starting from" pricing gracefully? File-upload flows? Quote-at-cart?
+3. Pick.
+
+**Recommendation (revisit when answering):** A + B together. Curated SKUs cover the fast happy-path; "starting from" pricing covers the broader catalog with a re-quote at cart. C is the eventual destination but probably needs ACP to mature.
+
+### What this stage produces
+
+Append a new §14 to this doc titled "Phase 2 Stage 2 — Decisions" with:
+
+1. **Choice for Question A** + a paragraph on what tipped it (with screenshots / links to whatever Stripe surface was inspected).
+2. **Choice for Question B** + criteria used.
+3. Any new constraints that surfaced during the spike (e.g. "Stripe Suite caps catalog at 10k SKUs", "Claude apps' ACP buyer doesn't support file uploads yet").
+4. Updated estimate of which existing Phase 1 surfaces will be reused vs net-new for Stage 3+.
+
+Once §14 is written, Stage 3 (catalog feed) is unblocked and can start without further input.
