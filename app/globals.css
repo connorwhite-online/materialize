@@ -66,6 +66,17 @@
 :root {
   --background: oklch(0.975 0.006 80);
   --background-translucent: oklch(0.975 0.006 80 / 0.72);
+  /* Bottom-to-top page gradient. Bottom sits a hair darker + slightly
+     warmer than --background, fading up to the current near-white.
+     Lightness delta is intentionally tiny (~0.02) so the page reads
+     as flat-with-a-hint-of-depth rather than visibly graded. Used on
+     <body>; <html> stays solid --background so iOS safe-area fills
+     match the active theme. */
+  --background-gradient: linear-gradient(
+    to top,
+    oklch(0.955 0.012 80),
+    oklch(0.975 0.006 80) 60%
+  );
   --foreground: oklch(0.145 0.008 80);
   --card: oklch(1 0.006 80);
   --card-foreground: oklch(0.145 0.008 80);
@@ -104,6 +115,15 @@
      the darks don't drift toward brown. */
   --background: oklch(0.145 0.005 80);
   --background-translucent: oklch(0.145 0.005 80 / 0.7);
+  /* Dark-mode page gradient. Subtle "ground glow" feel — bottom is
+     ever so slightly lighter than --background, fading down to the
+     baseline at the top. Same lightness delta (~0.02) as light mode
+     for symmetry. */
+  --background-gradient: linear-gradient(
+    to top,
+    oklch(0.165 0.006 80),
+    oklch(0.145 0.005 80) 60%
+  );
   --foreground: oklch(0.985 0.005 80);
   --card: oklch(0.205 0.006 80);
   --card-foreground: oklch(0.985 0.005 80);
@@ -326,6 +346,15 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
+    /* Subtle theme-aware bottom-to-top gradient. background-image
+       layers over the solid bg-color we keep on body+html for iOS
+       safe-area filling. background-attachment: fixed so the
+       gradient is anchored to the viewport rather than scrolling
+       with content (otherwise long pages would expose the falloff
+       repeatedly). */
+    background-image: var(--background-gradient);
+    background-attachment: fixed;
+    background-repeat: no-repeat;
     -webkit-tap-highlight-color: transparent;
     text-rendering: optimizeLegibility;
     overscroll-behavior-x: none;
