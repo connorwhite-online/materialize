@@ -41,6 +41,7 @@ interface Props {
 }
 
 const VISIBLE_LIMIT = 20;
+const POLL_INTERVAL_MS = 30_000;
 
 /**
  * Notification bell with dropdown.
@@ -56,10 +57,29 @@ const VISIBLE_LIMIT = 20;
  * also marks it read individually before navigating, in case the
  * server action above failed (e.g. cold-start blip).
  */
-export function NotificationBell({ unreadCount, recent, className }: Props) {
+export function NotificationBell({
+  unreadCount: initialUnreadCount,
+  recent: initialRecent,
+  className,
+}: Props) {
   const [open, setOpen] = useState(false);
   const [, startTransition] = useTransition();
   const router = useRouter();
+
+  // Local state seeded from server props so polling can swap in fresh
+  // data without a full page navigation. The server-provided values
+  // remain the source of truth on initial render and after a
+  // `router.refresh()` (which re-runs the layout's data fetch).
+  const [unreadCount, setUnreadCount] = useState(initialUnreadCount);
+  const [recent, setRecent] = useState<NotificationItem[]>(initialRecent);
+
+  // Re-seed from server props whenever they change (router.refresh()
+  // fires the layout query again and re-passes new props down).
+  useEffect(() => {
+    setUnreadCount(initialUnreadCount);
+    setRecent(initialRecent);
+  }, [initialUnreadCount, initialRecent]);
+
   // Track items that were unread at *open time* and therefore got
   // batch-marked. We don't want to re-mark on every popover toggle.
   const batchMarkedRef = useRef(new Set<string>());
@@ -75,6 +95,66 @@ export function NotificationBell({ unreadCount, recent, className }: Props) {
       markNotificationsRead(unseen).then(() => router.refresh());
     });
   }, [open, recent, router]);
+
+  // Poll for new notifications while the tab is visible. Pauses
+  // entirely when hidden so a backgrounded tab doesn't keep hitting
+  // the API. On regaining visibility we fire one immediate fetch so
+  // the user sees fresh state without a 30s wait.
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const poll = async () => {
+      if (cancelled) return;
+      try {
+        const res = await fetch("/api/notifications/recent", {
+          credentials: "same-origin",
+          cache: "no-store",
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          unreadCount: number;
+          recent: NotificationItem[];
+        };
+        if (cancelled) return;
+        setUnreadCount(data.unreadCount);
+        setRecent(data.recent);
+      } catch {
+        // Network blips are silent — next interval will retry.
+      }
+    };
+
+    const schedule = () => {
+      if (timer) clearTimeout(timer);
+      if (typeof document !== "undefined" && document.hidden) return;
+      timer = setTimeout(async () => {
+        await poll();
+        schedule();
+      }, POLL_INTERVAL_MS);
+    };
+
+    const onVisibility = () => {
+      if (typeof document === "undefined") return;
+      if (document.hidden) {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+      } else {
+        // Just became visible: fetch immediately, then resume cadence.
+        poll().then(schedule);
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVisibility);
+    schedule();
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisibility);
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
