@@ -6,6 +6,7 @@ import {
   projects,
   projectFiles,
   projectComments,
+  projectBomItems,
   files,
   users,
   purchases,
@@ -16,6 +17,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { DeleteProjectButton } from "@/components/projects/delete-project-button";
+import { BomDisplay } from "@/components/projects/bom-display";
+import { EditBomDialog } from "@/components/projects/edit-bom-dialog";
 import {
   CommentsSection,
   type CommentRow,
@@ -82,6 +85,24 @@ export default async function ProjectDetailPage(props: {
     .orderBy(asc(projectFiles.position));
 
   const canDownload = await userOwnsProject(userId, project.id);
+
+  // BOM — the project's bill of materials, in display order. Empty
+  // for most projects; the page only renders the section when items
+  // exist (progressive disclosure).
+  const bomItems = await swallow(
+    db
+      .select({
+        id: projectBomItems.id,
+        name: projectBomItems.name,
+        quantity: projectBomItems.quantity,
+        unit: projectBomItems.unit,
+        notes: projectBomItems.notes,
+        sourceUrl: projectBomItems.sourceUrl,
+      })
+      .from(projectBomItems)
+      .where(eq(projectBomItems.projectId, project.id))
+      .orderBy(asc(projectBomItems.sortOrder))
+  );
 
   // Comments — same query shape as on the file detail page. Pull every
   // row (top-level + replies) ordered chronologically; the renderer
@@ -204,6 +225,12 @@ export default async function ProjectDetailPage(props: {
             </Card>
           )}
 
+          {/* Bill of materials — sits above the files grid because
+              it's part of the assembly story ("here's what you need")
+              before "and here are the parts to print". Self-hides
+              when empty. */}
+          <BomDisplay items={bomItems} />
+
           <div>
             <h2 className="text-sm font-medium mb-3">
               Files in this project
@@ -309,6 +336,16 @@ export default async function ProjectDetailPage(props: {
                 <>
                   <Separator className="my-4" />
                   <div className="space-y-2">
+                    <EditBomDialog
+                      projectId={project.id}
+                      initial={bomItems.map((it) => ({
+                        name: it.name,
+                        quantity: String(it.quantity),
+                        unit: it.unit ?? "",
+                        notes: it.notes ?? "",
+                        sourceUrl: it.sourceUrl ?? "",
+                      }))}
+                    />
                     <DeleteProjectButton
                       projectId={project.id}
                       projectName={project.name}

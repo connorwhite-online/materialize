@@ -8,6 +8,7 @@ import {
   boolean,
   timestamp,
   jsonb,
+  numeric,
   pgEnum,
   index,
   check,
@@ -523,6 +524,51 @@ export const collectionItems = pgTable("collection_items", {
     sql`(${table.fileId} IS NOT NULL AND ${table.projectId} IS NULL) OR (${table.fileId} IS NULL AND ${table.projectId} IS NOT NULL)`
   ),
 ]);
+
+// Bill of Materials — line items required to assemble a project
+// beyond the printed parts (screws, electronics, magnets, etc.).
+//
+// Project-only by design (see plan doc). A creator with a single STL
+// that needs hardware bundles into a single-file project to attach a
+// BOM. This keeps file pages tight and reuses the project primitive
+// as the assembly surface.
+//
+// Bulk-replace edit pattern: server action drops all rows for a
+// project + reinserts the new list inside one transaction. Simpler
+// than per-item CRUD; matches the editor UX (one form, one save).
+
+export const projectBomItems = pgTable(
+  "project_bom_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    // Stored as numeric so we can represent "0.5m of wire". Drizzle's
+    // `mode: 'number'` returns it as a JS number — fine because the
+    // realistic upper bound (100k pieces of anything) is well under
+    // Number.MAX_SAFE_INTEGER and we never do exact math on quantities.
+    quantity: numeric("quantity", {
+      precision: 12,
+      scale: 3,
+      mode: "number",
+    }).notNull(),
+    unit: text("unit"),
+    notes: text("notes"),
+    sourceUrl: text("source_url"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("project_bom_items_project_id_sort_idx").on(
+      table.projectId,
+      table.sortOrder
+    ),
+  ]
+);
 
 // Comments — public discussion on a file or project listing.
 //
