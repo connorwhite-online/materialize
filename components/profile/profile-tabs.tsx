@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
 
-type Tab = "library" | "orders" | "earnings";
+type Tab = "library" | "orders" | "earnings" | "comments";
 
 interface ProfileTabsProps {
   username: string;
@@ -22,6 +22,7 @@ export function ProfileTabs({ username, activeTab, isOwner }: ProfileTabsProps) 
   const tabs: Array<{ key: Tab; label: string; ownerOnly?: boolean }> = [
     { key: "library", label: "Library" },
     { key: "orders", label: "Orders", ownerOnly: true },
+    { key: "comments", label: "Comments", ownerOnly: true },
     { key: "earnings", label: "Earnings", ownerOnly: true },
   ];
 

@@ -6,6 +6,7 @@ import {
   files,
   fileAssets,
   fileDownloads,
+  fileComments,
   users,
   purchases,
   filePhotos,
@@ -15,14 +16,15 @@ import {
   printOrders,
   printOrderItems,
 } from "@/lib/db/schema";
-import { eq, and, asc, desc, inArray } from "drizzle-orm";
-import { ownsLoadedFile } from "@/lib/entitlement";
+import { eq, and, asc, desc, inArray, isNull } from "drizzle-orm";
+import { ownsLoadedFile, userHasUsedFile } from "@/lib/entitlement";
 import { DESIGN_TAG_LABELS } from "@/lib/validations/file";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PhotoGallery } from "@/components/photos/photo-gallery";
 import { PhotoUploader } from "@/components/photos/photo-uploader";
+import { MakesSection } from "@/components/photos/makes-section";
 import { DeleteFileButton } from "@/components/files/delete-file-button";
 import { EditFileButton } from "@/components/files/edit-file-button";
 import { FileThumbnailGenerator } from "@/components/files/file-thumbnail-generator";
@@ -34,6 +36,10 @@ import {
   type DownloadActivity,
   type PrintActivity,
 } from "@/components/files/file-activity";
+import {
+  CommentsSection,
+  type CommentRow,
+} from "@/components/comments/comments-section";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { Pencil } from "@/components/icons/pencil";
 import { Trash } from "@/components/icons/trash";
@@ -105,11 +111,13 @@ export default async function FileDetailPage(props: {
     .from(fileAssets)
     .where(eq(fileAssets.fileId, file.id));
 
-  // Get part photos
+  // Curator gallery photos — `kind = 'creator'`. Community-made photos
+  // (`kind = 'make'`) live in the same table but render in the Makes
+  // section below; we filter here so the gallery stays curator-only.
   const photos = await db
     .select()
     .from(filePhotos)
-    .where(eq(filePhotos.fileId, file.id))
+    .where(and(eq(filePhotos.fileId, file.id), eq(filePhotos.kind, "creator")))
     .orderBy(asc(filePhotos.sortOrder));
 
   // Generate download URLs for photos
@@ -122,7 +130,47 @@ export default async function FileDetailPage(props: {
     }))
   );
 
+  // Community makes — joined to users for poster identity. R2 URLs
+  // are signed at request time same as curator photos. Limit to 60 so
+  // a popular file doesn't push 500 makes through the page.
+  const makeRows = await db
+    .select({
+      id: filePhotos.id,
+      storageKey: filePhotos.storageKey,
+      caption: filePhotos.caption,
+      createdAt: filePhotos.createdAt,
+      authorId: users.id,
+      authorUsername: users.username,
+      authorDisplayName: users.displayName,
+      authorAvatarUrl: users.avatarUrl,
+    })
+    .from(filePhotos)
+    .innerJoin(users, eq(filePhotos.userId, users.id))
+    .where(
+      and(eq(filePhotos.fileId, file.id), eq(filePhotos.kind, "make"))
+    )
+    .orderBy(desc(filePhotos.createdAt))
+    .limit(60);
+  const makesWithUrls = await Promise.all(
+    makeRows.map(async (row) => ({
+      id: row.id,
+      caption: row.caption,
+      createdAt: row.createdAt,
+      downloadUrl: await generateDownloadUrl(row.storageKey, 3600),
+      author: {
+        id: row.authorId,
+        username: row.authorUsername,
+        displayName: row.authorDisplayName,
+        avatarUrl: row.authorAvatarUrl,
+      },
+    }))
+  );
+
   const isOwner = viewerIsOwner;
+  // Gates the "Share your make" affordance. Owners can also share —
+  // they're a user too — but we still call the helper to be uniform.
+  // The helper returns false for anon viewers without a roundtrip.
+  const canPostMake = await userHasUsedFile(userId, file.id);
   const canDownload = await ownsLoadedFile(userId, {
     id: file.id,
     price: file.price,
@@ -228,6 +276,7 @@ export default async function FileDetailPage(props: {
     legacyPrintRows,
     itemPrintRows,
     downloadRows,
+    commentRows,
   ] = await Promise.all([
     fileAssetIds.length === 0
       ? Promise.resolve(
@@ -335,6 +384,31 @@ export default async function FileDetailPage(props: {
         .orderBy(desc(fileDownloads.createdAt))
         .limit(ACTIVITY_LIMIT)
     ),
+    // Comments — pull every comment for this file (top-level + replies)
+    // in one query, ordered chronologically. The component splits
+    // them into threads client-side via parentId. We don't filter
+    // out soft-deleted rows here because the renderer needs them as
+    // `[deleted]` placeholders to keep nested replies coherent.
+    swallow(
+      db
+        .select({
+          id: fileComments.id,
+          parentId: fileComments.parentId,
+          body: fileComments.body,
+          deletedAt: fileComments.deletedAt,
+          createdAt: fileComments.createdAt,
+          updatedAt: fileComments.updatedAt,
+          authorId: users.id,
+          authorUsername: users.username,
+          authorDisplayName: users.displayName,
+          authorAvatarUrl: users.avatarUrl,
+        })
+        .from(fileComments)
+        .innerJoin(users, eq(fileComments.userId, users.id))
+        .where(eq(fileComments.fileId, file.id))
+        .orderBy(asc(fileComments.createdAt))
+        .limit(500)
+    ),
   ]);
 
   const printRowsRaw = [
@@ -389,6 +463,24 @@ export default async function FileDetailPage(props: {
       username: row.username,
       displayName: row.displayName,
       avatarUrl: row.avatarUrl,
+    },
+  }));
+
+  // Blank deleted-comment bodies before serializing to the client.
+  // The renderer ignores `body` when `deletedAt` is set anyway, but
+  // not sending the original prose is one less audit risk.
+  const comments: CommentRow[] = commentRows.map((row) => ({
+    id: row.id,
+    parentId: row.parentId,
+    body: row.deletedAt ? "" : row.body,
+    deletedAt: row.deletedAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    author: {
+      id: row.authorId,
+      username: row.authorUsername,
+      displayName: row.authorDisplayName,
+      avatarUrl: row.authorAvatarUrl,
     },
   }));
 
@@ -554,13 +646,39 @@ export default async function FileDetailPage(props: {
             </Card>
           )}
 
-          {/* Part photos */}
+          {/* Part photos — owner-curated gallery. */}
           {(photosWithUrls.length > 0 || isOwner) && (
             <div>
               <PhotoGallery photos={photosWithUrls} isOwner={isOwner} />
               {isOwner && <PhotoUploader fileId={file.id} />}
             </div>
           )}
+
+          {/* Community makes — anyone who has downloaded or printed
+              the file can share theirs. Empty state lives inside the
+              component. */}
+          <MakesSection
+            fileId={file.id}
+            fileSlug={slug}
+            makes={makesWithUrls}
+            canPost={canPostMake}
+            isSignedIn={!!userId}
+            primaryAssetId={primaryAsset?.id ?? null}
+            ownerId={file.userId}
+            viewerId={userId}
+          />
+
+          {/* Comments — public discussion. Empty state is rendered
+              inside the component. */}
+          <CommentsSection
+            target="file"
+            targetId={file.id}
+            comments={comments}
+            ownerId={file.userId}
+            viewerId={userId}
+            isSignedIn={!!userId}
+            signInRedirect={`/files/${slug}`}
+          />
 
           {/* Activity stream — prints + downloads. The component
               self-hides when both are empty. */}

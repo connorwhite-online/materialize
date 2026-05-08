@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import {
   projects,
   projectFiles,
+  projectComments,
   files,
   users,
   purchases,
@@ -15,8 +16,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { DeleteProjectButton } from "@/components/projects/delete-project-button";
+import {
+  CommentsSection,
+  type CommentRow,
+} from "@/components/comments/comments-section";
 import { userOwnsProject } from "@/lib/entitlement";
 import { DESIGN_TAG_LABELS } from "@/lib/validations/file";
+import { swallow } from "@/lib/utils/swallow";
 
 export default async function ProjectDetailPage(props: {
   params: Promise<{ slug: string }>;
@@ -76,6 +82,45 @@ export default async function ProjectDetailPage(props: {
     .orderBy(asc(projectFiles.position));
 
   const canDownload = await userOwnsProject(userId, project.id);
+
+  // Comments — same query shape as on the file detail page. Pull every
+  // row (top-level + replies) ordered chronologically; the renderer
+  // splits into threads via parentId. swallow() so a transient Neon
+  // blip doesn't 500 the page.
+  const commentRows = await swallow(
+    db
+      .select({
+        id: projectComments.id,
+        parentId: projectComments.parentId,
+        body: projectComments.body,
+        deletedAt: projectComments.deletedAt,
+        createdAt: projectComments.createdAt,
+        updatedAt: projectComments.updatedAt,
+        authorId: users.id,
+        authorUsername: users.username,
+        authorDisplayName: users.displayName,
+        authorAvatarUrl: users.avatarUrl,
+      })
+      .from(projectComments)
+      .innerJoin(users, eq(projectComments.userId, users.id))
+      .where(eq(projectComments.projectId, project.id))
+      .orderBy(asc(projectComments.createdAt))
+      .limit(500)
+  );
+  const comments: CommentRow[] = commentRows.map((row) => ({
+    id: row.id,
+    parentId: row.parentId,
+    body: row.deletedAt ? "" : row.body,
+    deletedAt: row.deletedAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    author: {
+      id: row.authorId,
+      username: row.authorUsername,
+      displayName: row.authorDisplayName,
+      avatarUrl: row.authorAvatarUrl,
+    },
+  }));
 
   let ownerBuyerCount = 0;
   if (isOwner) {
@@ -191,6 +236,18 @@ export default async function ProjectDetailPage(props: {
               ))}
             </div>
           </div>
+
+          {/* Comments — public discussion. Empty state is rendered
+              inside the component. */}
+          <CommentsSection
+            target="project"
+            targetId={project.id}
+            comments={comments}
+            ownerId={project.userId}
+            viewerId={userId}
+            isSignedIn={!!userId}
+            signInRedirect={`/projects/${slug}`}
+          />
         </div>
 
         <div className="space-y-4">

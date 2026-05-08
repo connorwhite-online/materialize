@@ -1,7 +1,17 @@
 import "server-only";
 import { db } from "@/lib/db";
-import { files, projects, projectFiles, purchases } from "@/lib/db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import {
+  files,
+  fileAssets,
+  fileDownloads,
+  printOrders,
+  printOrderItems,
+  projects,
+  projectFiles,
+  purchases,
+} from "@/lib/db/schema";
+import { eq, and, inArray, sql } from "drizzle-orm";
+import { PRINTED_STATUSES } from "@/lib/print-statuses";
 
 /**
  * Does the viewer own this file? "Own" means any of:
@@ -103,4 +113,82 @@ export async function userOwnsProject(
     )
     .limit(1);
   return !!purchase;
+}
+
+/**
+ * Has the user actually used this file? "Used" means either:
+ *   - they downloaded it (a `fileDownloads` row exists with their userId)
+ *   - they have a print order in PRINTED_STATUSES touching one of the
+ *     file's assets (legacy single-item `printOrders.fileAssetId` OR
+ *     multi-item `printOrderItems.fileAssetId`).
+ *
+ * Used to gate the "share your make" affordance — only users who have
+ * a credible reason to have a printed copy can post a community make.
+ *
+ * Anonymous viewers (no userId) → false. The file owner is treated like
+ * any other user; if they want a make on their own file, they can post
+ * via the curator gallery instead.
+ */
+export async function userHasUsedFile(
+  userId: string | null,
+  fileId: string
+): Promise<boolean> {
+  if (!userId) return false;
+
+  // Cheapest check first — single index hit on (file_id, created_at)
+  // and a userId equality.
+  const [downloaded] = await db
+    .select({ id: fileDownloads.id })
+    .from(fileDownloads)
+    .where(
+      and(
+        eq(fileDownloads.fileId, fileId),
+        eq(fileDownloads.userId, userId)
+      )
+    )
+    .limit(1);
+  if (downloaded) return true;
+
+  // Resolve asset ids once for both print-order paths. Files routinely
+  // have one asset; the IN list stays small.
+  const assetIds = (
+    await db
+      .select({ id: fileAssets.id })
+      .from(fileAssets)
+      .where(eq(fileAssets.fileId, fileId))
+  ).map((r) => r.id);
+  if (assetIds.length === 0) return false;
+
+  // Legacy single-item path — `printOrders.fileAssetId` set on parent.
+  const [legacy] = await db
+    .select({ id: printOrders.id })
+    .from(printOrders)
+    .where(
+      and(
+        eq(printOrders.userId, userId),
+        inArray(printOrders.fileAssetId, assetIds),
+        inArray(printOrders.status, [...PRINTED_STATUSES])
+      )
+    )
+    .limit(1);
+  if (legacy) return true;
+
+  // Multi-item path — items live in `printOrderItems`, status hangs
+  // off the parent printOrders row.
+  const [item] = await db
+    .select({ id: printOrderItems.id })
+    .from(printOrderItems)
+    .innerJoin(
+      printOrders,
+      eq(printOrderItems.printOrderId, printOrders.id)
+    )
+    .where(
+      and(
+        eq(printOrders.userId, userId),
+        inArray(printOrderItems.fileAssetId, assetIds),
+        inArray(printOrders.status, [...PRINTED_STATUSES])
+      )
+    )
+    .limit(1);
+  return !!item;
 }

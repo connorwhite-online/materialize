@@ -3,6 +3,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 type FileRow = { price: number; userId: string };
 type ProjectRow = { price: number; userId: string };
 type PurchaseRow = { id: string };
+type AssetRow = { id: string };
+type PrintOrderRow = { id: string };
+type DownloadRow = { id: string };
 
 const state: {
   fileRow: FileRow | null;
@@ -10,12 +13,20 @@ const state: {
   directPurchase: PurchaseRow | null;
   projectPurchaseViaJoin: PurchaseRow | null;
   projectPurchase: PurchaseRow | null;
+  fileDownload: DownloadRow | null;
+  assets: AssetRow[];
+  legacyPrintOrder: PrintOrderRow | null;
+  multiItemPrintOrderItem: PrintOrderRow | null;
 } = {
   fileRow: null,
   projectRow: null,
   directPurchase: null,
   projectPurchaseViaJoin: null,
   projectPurchase: null,
+  fileDownload: null,
+  assets: [],
+  legacyPrintOrder: null,
+  multiItemPrintOrderItem: null,
 };
 
 vi.mock("@/lib/db", () => ({
@@ -65,6 +76,39 @@ vi.mock("@/lib/db", () => ({
               }),
             };
           }
+          if (table.__name === "file_downloads") {
+            return {
+              where: () => ({
+                limit: () =>
+                  state.fileDownload ? [state.fileDownload] : [],
+              }),
+            };
+          }
+          if (table.__name === "file_assets") {
+            return {
+              where: () => state.assets,
+            };
+          }
+          if (table.__name === "print_orders") {
+            return {
+              where: () => ({
+                limit: () =>
+                  state.legacyPrintOrder ? [state.legacyPrintOrder] : [],
+              }),
+            };
+          }
+          if (table.__name === "print_order_items") {
+            return {
+              innerJoin: () => ({
+                where: () => ({
+                  limit: () =>
+                    state.multiItemPrintOrderItem
+                      ? [state.multiItemPrintOrderItem]
+                      : [],
+                }),
+              }),
+            };
+          }
           return { where: () => [] };
         },
       };
@@ -93,9 +137,33 @@ vi.mock("@/lib/db/schema", () => ({
     projectId: "project_id",
     status: "status",
   },
+  fileDownloads: {
+    __name: "file_downloads",
+    id: "id",
+    fileId: "file_id",
+    userId: "user_id",
+  },
+  fileAssets: { __name: "file_assets", id: "id", fileId: "file_id" },
+  printOrders: {
+    __name: "print_orders",
+    id: "id",
+    userId: "user_id",
+    fileAssetId: "file_asset_id",
+    status: "status",
+  },
+  printOrderItems: {
+    __name: "print_order_items",
+    id: "id",
+    printOrderId: "print_order_id",
+    fileAssetId: "file_asset_id",
+  },
 }));
 
-import { userOwnsFile, userOwnsProject } from "@/lib/entitlement";
+import {
+  userOwnsFile,
+  userOwnsProject,
+  userHasUsedFile,
+} from "@/lib/entitlement";
 
 describe("userOwnsFile", () => {
   beforeEach(() => {
@@ -175,5 +243,52 @@ describe("userOwnsProject", () => {
     state.projectRow = { price: 1000, userId: "creator" };
     state.directPurchase = null;
     expect(await userOwnsProject("u1", "pr1")).toBe(false);
+  });
+});
+
+describe("userHasUsedFile", () => {
+  beforeEach(() => {
+    state.fileDownload = null;
+    state.assets = [];
+    state.legacyPrintOrder = null;
+    state.multiItemPrintOrderItem = null;
+  });
+
+  it("returns false for anonymous viewers without hitting the DB", async () => {
+    expect(await userHasUsedFile(null, "f1")).toBe(false);
+  });
+
+  it("returns false when signed in but no download / no print", async () => {
+    state.fileDownload = null;
+    state.assets = [{ id: "a1" }];
+    state.legacyPrintOrder = null;
+    state.multiItemPrintOrderItem = null;
+    expect(await userHasUsedFile("u1", "f1")).toBe(false);
+  });
+
+  it("returns true when the user has a fileDownloads row", async () => {
+    state.fileDownload = { id: "d1" };
+    expect(await userHasUsedFile("u1", "f1")).toBe(true);
+  });
+
+  it("returns true via legacy single-item printOrders.fileAssetId", async () => {
+    state.fileDownload = null;
+    state.assets = [{ id: "a1" }];
+    state.legacyPrintOrder = { id: "po1" };
+    expect(await userHasUsedFile("u1", "f1")).toBe(true);
+  });
+
+  it("returns true via multi-item printOrderItems.fileAssetId", async () => {
+    state.fileDownload = null;
+    state.assets = [{ id: "a1" }];
+    state.legacyPrintOrder = null;
+    state.multiItemPrintOrderItem = { id: "poi1" };
+    expect(await userHasUsedFile("u1", "f1")).toBe(true);
+  });
+
+  it("returns false when the file has no assets and no download row", async () => {
+    state.fileDownload = null;
+    state.assets = [];
+    expect(await userHasUsedFile("u1", "f1")).toBe(false);
   });
 });

@@ -12,6 +12,7 @@ import {
   index,
   check,
   uniqueIndex,
+  foreignKey,
 } from "drizzle-orm/pg-core";
 
 // Enums
@@ -523,6 +524,103 @@ export const collectionItems = pgTable("collection_items", {
   ),
 ]);
 
+// Comments — public discussion on a file or project listing.
+//
+// Two parallel tables (one per target type) instead of one polymorphic
+// table with a `target_type` discriminator. Same precedent as
+// `purchases.fileId` vs `purchases.projectId`: separate FKs let
+// Postgres enforce referential integrity (cascade on listing delete)
+// and keep queries free of `WHERE target_type = ?` filters.
+//
+// Threading: `parentId` is a self-FK. Depth-1 only (top-level + one
+// level of replies); enforced in the server action so the DB stays
+// constraint-free. Replies cascade-delete with their parent.
+//
+// Soft-delete: `deletedAt` non-null = "deleted, render as placeholder".
+// Lets threads stay coherent when an author or the listing owner
+// removes a single comment from the middle of a discussion.
+//
+// Indexes:
+//   - (file_id|project_id, parent_id, created_at) for the listing
+//     render: pull all top-level rows for a file + their replies in
+//     one query, ordered chronologically.
+//   - (user_id, created_at) for the per-user "your comments" view.
+
+export const fileComments = pgTable(
+  "file_comments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    fileId: uuid("file_id")
+      .notNull()
+      .references(() => files.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    parentId: uuid("parent_id"),
+    body: text("body").notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.parentId],
+      foreignColumns: [table.id],
+      name: "file_comments_parent_id_fk",
+    }).onDelete("cascade"),
+    index("file_comments_file_parent_created_idx").on(
+      table.fileId,
+      table.parentId,
+      table.createdAt
+    ),
+    index("file_comments_user_created_idx").on(table.userId, table.createdAt),
+  ]
+);
+
+export const projectComments = pgTable(
+  "project_comments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    parentId: uuid("parent_id"),
+    body: text("body").notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.parentId],
+      foreignColumns: [table.id],
+      name: "project_comments_parent_id_fk",
+    }).onDelete("cascade"),
+    index("project_comments_project_parent_created_idx").on(
+      table.projectId,
+      table.parentId,
+      table.createdAt
+    ),
+    index("project_comments_user_created_idx").on(
+      table.userId,
+      table.createdAt
+    ),
+  ]
+);
+
 // Per-download log — one row per successful file download. The hot
 // `files.downloadCount` counter remains the source of truth for the
 // running total (cheap to read on listing pages); this table is for
@@ -566,7 +664,19 @@ export const fileDownloads = pgTable(
   ]
 );
 
-// Part photos — real-world images of printed parts
+// Part photos — real-world images of printed parts.
+//
+// Two flavors share the table:
+//   - `kind = 'creator'` — owner-curated gallery shots (default,
+//     preserves existing behavior).
+//   - `kind = 'make'` — community build photos posted by a user who
+//     has downloaded or printed the file. The Thingiverse "makes"
+//     concept. Posters can have userId != fileId.userId.
+//
+// Sharing one table is the "v1 keep it simple" choice: when a real
+// `Make` model with material/printer/settings/multiple-photos is
+// needed, we'll graduate to a `file_makes` parent + photos as
+// children, and migrate `kind='make'` rows over.
 
 export const filePhotos = pgTable("file_photos", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -579,11 +689,23 @@ export const filePhotos = pgTable("file_photos", {
   storageKey: text("storage_key").notNull(),
   caption: text("caption"),
   sortOrder: integer("sort_order").notNull().default(0),
+  // 'creator' (curator gallery) or 'make' (community post). Free-form
+  // text + CHECK constraint instead of an enum so we can add new
+  // kinds without an enum migration. Index covers the
+  // `WHERE kind = 'creator'` and `WHERE kind = 'make'` paths used by
+  // the file detail page (creator gallery vs makes section render).
+  kind: text("kind").notNull().default("creator"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
 }, (table) => [
   index("file_photos_file_id_idx").on(table.fileId),
+  index("file_photos_file_kind_created_idx").on(
+    table.fileId,
+    table.kind,
+    table.createdAt
+  ),
+  check("file_photos_kind_check", sql`${table.kind} IN ('creator', 'make')`),
 ]);
 
 // Personal Access Tokens — the agent-facing auth surface for the MCP

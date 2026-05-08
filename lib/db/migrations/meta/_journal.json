@@ -92,6 +92,20 @@
       "when": 1778191086540,
       "tag": "0012_sudden_monster_badoon",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1778267546997,
+      "tag": "0013_yielding_victor_mancha",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1778268030893,
+      "tag": "0014_mysterious_guardsmen",
+      "breakpoints": true
     }
   ]
 }

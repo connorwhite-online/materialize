@@ -11,6 +11,7 @@ import { ProfileTabs } from "@/components/profile/profile-tabs";
 import { LibraryTab } from "@/components/profile/library-tab";
 import { OrdersTab } from "@/components/profile/orders-tab";
 import { EarningsTab } from "@/components/profile/earnings-tab";
+import { CommentsInboxTab } from "@/components/profile/comments-inbox-tab";
 
 const PLATFORM_LABELS: Record<string, string> = {
   twitter: "X / Twitter",
@@ -21,7 +22,7 @@ const PLATFORM_LABELS: Record<string, string> = {
   website: "Website",
 };
 
-type Tab = "library" | "orders" | "earnings";
+type Tab = "library" | "orders" | "earnings" | "comments";
 
 export default async function ProfilePage(props: {
   params: Promise<{ username: string }>;
@@ -44,10 +45,19 @@ export default async function ProfilePage(props: {
   // Accept the legacy "files" key as an alias for the merged library view.
   const rawTab = searchParams.tab;
   const activeTab: Tab =
-    rawTab === "orders" || rawTab === "earnings" ? rawTab : "library";
+    rawTab === "orders" ||
+    rawTab === "earnings" ||
+    rawTab === "comments"
+      ? rawTab
+      : "library";
 
   // Guard owner-only tabs
-  if (!isOwner && (activeTab === "orders" || activeTab === "earnings")) {
+  if (
+    !isOwner &&
+    (activeTab === "orders" ||
+      activeTab === "earnings" ||
+      activeTab === "comments")
+  ) {
     redirect(`/u/${username}`);
   }
 
@@ -124,6 +134,9 @@ export default async function ProfilePage(props: {
           <LibraryTab userId={user.id} isOwner={isOwner} />
         )}
         {activeTab === "orders" && isOwner && <OrdersTab userId={user.id} />}
+        {activeTab === "comments" && isOwner && (
+          <CommentsInboxTab userId={user.id} />
+        )}
         {activeTab === "earnings" && isOwner && <EarningsTab userId={user.id} />}
       </div>
     </div>

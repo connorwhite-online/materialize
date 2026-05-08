@@ -7,9 +7,16 @@ import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { deleteObject } from "@/lib/storage";
 import { logError } from "@/lib/logger";
+import { userHasUsedFile } from "@/lib/entitlement";
 
 const MAX_CAPTION_LENGTH = 500;
 
+/**
+ * Add a curator gallery photo. File-owner-only — used by the existing
+ * PhotoUploader on the file detail page. The community-makes counterpart
+ * is `addFileMake` below; same R2 prefix, same caption rules, but a
+ * different ownership check and a different `kind`.
+ */
 export async function addFilePhoto(params: {
   fileId: string;
   storageKey: string;
@@ -58,6 +65,7 @@ export async function addFilePhoto(params: {
         storageKey: params.storageKey,
         caption: trimmedCaption || null,
         sortOrder: maxOrder + 1,
+        kind: "creator",
       })
       .returning();
 
@@ -69,17 +77,91 @@ export async function addFilePhoto(params: {
   }
 }
 
+/**
+ * Add a community "make" photo. Gated to users who have actually used
+ * the file (downloaded OR printed in a non-failure status). The file
+ * owner can also post — they're a "user" too, just with their own copy.
+ *
+ * Same R2 prefix as creator photos (`photos/<userId>/...`) so cleanup
+ * stays uniform; the row's `kind = 'make'` is what separates this from
+ * the curator gallery.
+ */
+export async function addFileMake(params: {
+  fileId: string;
+  storageKey: string;
+  caption?: string;
+}) {
+  try {
+    const { userId } = await auth();
+    if (!userId) return { error: "Sign in to share a make" };
+
+    const expectedPrefix = `photos/${userId}/`;
+    if (
+      typeof params.storageKey !== "string" ||
+      !params.storageKey.startsWith(expectedPrefix)
+    ) {
+      return { error: "Invalid storage key" };
+    }
+
+    // Verify the file exists. We deliberately don't gate on owner here
+    // — owners aren't the typical poster, but they can also share a
+    // make of their own work without restriction.
+    const [file] = await db
+      .select({ id: files.id, slug: files.slug })
+      .from(files)
+      .where(eq(files.id, params.fileId));
+    if (!file) return { error: "File not found" };
+
+    // The download-or-print gate — central rule for who can post a make.
+    const ok = await userHasUsedFile(userId, file.id);
+    if (!ok) {
+      return {
+        error:
+          "Print or download this file first to share a make of it.",
+      };
+    }
+
+    const trimmedCaption = params.caption?.trim().slice(0, MAX_CAPTION_LENGTH);
+
+    const [photo] = await db
+      .insert(filePhotos)
+      .values({
+        fileId: file.id,
+        userId,
+        storageKey: params.storageKey,
+        caption: trimmedCaption || null,
+        // Makes don't compete with curator photos for sortOrder; the
+        // listing query orders by createdAt descending, so any value
+        // here is fine.
+        sortOrder: 0,
+        kind: "make",
+      })
+      .returning();
+
+    revalidatePath(`/files/${file.slug}`);
+    return { photoId: photo.id };
+  } catch (error) {
+    logError("addFileMake", error);
+    return { error: "Failed to share make" };
+  }
+}
+
+/**
+ * Delete a photo (creator or make). The author can always remove their
+ * own; the file owner can additionally remove any photo on their file
+ * (moderation against off-topic makes).
+ */
 export async function deleteFilePhoto(photoId: string) {
   try {
     const { userId } = await auth();
     if (!userId) return { error: "Unauthorized" };
 
-    // Get photo and verify ownership
     const [photo] = await db
       .select({
         id: filePhotos.id,
         storageKey: filePhotos.storageKey,
         fileId: filePhotos.fileId,
+        authorId: filePhotos.userId,
         fileUserId: files.userId,
         fileSlug: files.slug,
       })
@@ -87,7 +169,10 @@ export async function deleteFilePhoto(photoId: string) {
       .innerJoin(files, eq(filePhotos.fileId, files.id))
       .where(eq(filePhotos.id, photoId));
 
-    if (!photo || photo.fileUserId !== userId) {
+    if (
+      !photo ||
+      (photo.authorId !== userId && photo.fileUserId !== userId)
+    ) {
       return { error: "Photo not found" };
     }
 

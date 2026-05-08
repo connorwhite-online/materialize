@@ -1,11 +1,22 @@
 "use client";
 
 import { useState, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
-import { addFilePhoto } from "@/app/actions/photos";
+import { addFilePhoto, addFileMake } from "@/app/actions/photos";
 
 interface PhotoUploaderProps {
   fileId: string;
+  /**
+   * 'creator' — owner's curator gallery (default; existing behavior).
+   * 'make' — community build photo. Routes through `addFileMake`,
+   * which gates on download/print.
+   */
+  kind?: "creator" | "make";
+  /** Override the heading text. */
+  label?: string;
+  /** Override the caption placeholder. */
+  captionPlaceholder?: string;
 }
 
 const MAX_PHOTO_SIZE = 10 * 1024 * 1024;
@@ -16,7 +27,13 @@ const ACCEPTED_MIME = new Set([
   "image/webp",
 ]);
 
-export function PhotoUploader({ fileId }: PhotoUploaderProps) {
+export function PhotoUploader({
+  fileId,
+  kind = "creator",
+  label,
+  captionPlaceholder = "Caption (optional)",
+}: PhotoUploaderProps) {
+  const router = useRouter();
   const [uploading, setUploading] = useState(false);
   const [caption, setCaption] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -74,7 +91,8 @@ export function PhotoUploader({ fileId }: PhotoUploaderProps) {
         throw new Error(`R2 upload failed (${putRes.status})`);
       }
 
-      const result = await addFilePhoto({
+      const action = kind === "make" ? addFileMake : addFilePhoto;
+      const result = await action({
         fileId,
         storageKey,
         caption: caption || undefined,
@@ -85,6 +103,10 @@ export function PhotoUploader({ fileId }: PhotoUploaderProps) {
 
       setCaption("");
       if (fileInputRef.current) fileInputRef.current.value = "";
+      // Refresh the page so the new photo / make appears immediately.
+      // The server action revalidates the path; this surfaces the
+      // re-fetched data without a full hard reload.
+      router.refresh();
     } catch (err) {
       console.error("Photo upload failed:", err);
       setErrorMessage(
@@ -97,9 +119,11 @@ export function PhotoUploader({ fileId }: PhotoUploaderProps) {
 
   return (
     <div className="space-y-2">
-      <p className="text-sm font-medium">Add a photo of your print</p>
+      <p className="text-sm font-medium">
+        {label ?? "Add a photo of your print"}
+      </p>
       <Input
-        placeholder="Caption (optional)"
+        placeholder={captionPlaceholder}
         value={caption}
         onChange={(e) => setCaption(e.target.value)}
         maxLength={500}
