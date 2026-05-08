@@ -203,7 +203,10 @@ function CommentRow({
 
   if (comment.deletedAt) {
     return (
-      <div className="flex items-start gap-3 text-sm text-muted-foreground">
+      <div
+        id={`comment-${comment.id}`}
+        className="flex scroll-mt-24 items-start gap-3 text-sm text-muted-foreground"
+      >
         <UserAvatar
           seed={comment.author.username || comment.author.id}
           imageUrl={null}
@@ -216,7 +219,10 @@ function CommentRow({
   }
 
   return (
-    <div className="flex items-start gap-3">
+    <div
+      id={`comment-${comment.id}`}
+      className="flex scroll-mt-24 items-start gap-3"
+    >
       <UserAvatar
         seed={comment.author.username || comment.author.id}
         imageUrl={comment.author.avatarUrl}

@@ -146,7 +146,10 @@ function MakeCard({
   };
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-card">
+    <div
+      id={`make-${make.id}`}
+      className="scroll-mt-24 overflow-hidden rounded-xl border border-border bg-card"
+    >
       <div className="relative aspect-[4/3]">
         <img
           src={make.downloadUrl}

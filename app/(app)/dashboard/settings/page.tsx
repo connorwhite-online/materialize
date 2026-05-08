@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { ProfileForm } from "./profile-form";
 import { SignOutButton } from "./sign-out-button";
 import { UploadVisibilitySetting } from "./upload-visibility-setting";
+import { EmailNotificationsSetting } from "./email-notifications-setting";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { ChevronLeft } from "@/components/icons/chevron-left";
 
@@ -45,6 +46,10 @@ export default async function SettingsPage() {
 
       <UploadVisibilitySetting
         initial={user?.defaultUploadVisibility ?? "private"}
+      />
+
+      <EmailNotificationsSetting
+        initial={user?.emailNotificationsEnabled ?? true}
       />
 
       <div className="border-t border-border pt-6">

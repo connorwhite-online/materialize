@@ -1,8 +1,10 @@
 import "server-only";
 
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { notifications } from "@/lib/db/schema";
+import { notifications, users } from "@/lib/db/schema";
 import { logError } from "@/lib/logger";
+import { sendNotificationEmail } from "./email";
 import type {
   CommentOnListingPayload,
   MakeOnFilePayload,
@@ -11,19 +13,29 @@ import type {
 } from "./types";
 
 /**
- * Fire-and-forget notification insert. Wraps the DB write in a try /
- * catch so a transient Neon hiccup never breaks the parent action
- * (a comment posting succeeds even if the notification fails to
- * write — the notification is a side effect, not the contract).
+ * Insert a notification + fire the corresponding email if the
+ * recipient has email notifications enabled. Both writes wrapped so a
+ * transient Neon / Resend hiccup never breaks the parent action — a
+ * comment posting succeeds even if the notification side-effects fail
+ * (notifications are not the contract).
  *
  * Recipients of self-events are skipped — we don't notify you that
  * you commented on your own listing or replied to your own comment.
+ *
+ * Email send is fired without await: it does an external HTTP call
+ * (Clerk for the email lookup, Resend for delivery) which would
+ * otherwise add hundreds of ms to the parent action. We capture the
+ * Promise via `void` so the lint isn't unhappy and any thrown error
+ * is logged via the email helper's own try/catch.
  */
 async function insert(
   recipientId: string,
   actorId: string,
   type: NotificationType,
-  payload: object
+  payload:
+    | CommentOnListingPayload
+    | ReplyToCommentPayload
+    | MakeOnFilePayload
 ) {
   if (recipientId === actorId) return;
   try {
@@ -34,6 +46,24 @@ async function insert(
     });
   } catch (error) {
     logError(`notify(${type})`, error);
+  }
+
+  // Email side-effect — opt-in via the user's pref. Look up the row
+  // we just touched to read the toggle; if it's off, skip the send.
+  try {
+    const [recipient] = await db
+      .select({
+        id: users.id,
+        emailEnabled: users.emailNotificationsEnabled,
+      })
+      .from(users)
+      .where(eq(users.id, recipientId));
+    if (recipient?.emailEnabled) {
+      // Don't await — email send is best-effort. Errors logged inside.
+      void sendNotificationEmail(recipientId, type, payload);
+    }
+  } catch (error) {
+    logError(`notify(${type}) email-pref-lookup`, error);
   }
 }
 

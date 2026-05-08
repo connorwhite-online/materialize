@@ -112,6 +112,14 @@ export const users = pgTable("users", {
   defaultUploadVisibility: visibilityEnum("default_upload_visibility")
     .notNull()
     .default("private"),
+  // Master switch for transactional email notifications (comment on
+  // your listing, reply to your comment, make on your file). The
+  // in-app bell always works regardless; this toggle only governs
+  // email. Default ON so users actually find out about activity
+  // without having to hunt for the setting.
+  emailNotificationsEnabled: boolean("email_notifications_enabled")
+    .notNull()
+    .default(true),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

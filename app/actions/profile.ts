@@ -63,6 +63,31 @@ export async function updateDefaultUploadVisibility(
   }
 }
 
+/**
+ * Master switch for transactional notification emails (comments, replies,
+ * makes). The in-app bell stays on regardless; this only governs whether
+ * we also fire an email per event.
+ */
+export async function updateEmailNotificationsEnabled(
+  enabled: boolean
+): Promise<{ ok: true } | { error: string }> {
+  const { userId } = await auth();
+  if (!userId) return { error: "Unauthorized" };
+
+  try {
+    await db
+      .update(users)
+      .set({ emailNotificationsEnabled: !!enabled })
+      .where(eq(users.id, userId));
+
+    revalidatePath("/dashboard/settings");
+    return { ok: true };
+  } catch (error) {
+    logError("updateEmailNotificationsEnabled", error);
+    return { error: "Failed to save. Please try again." };
+  }
+}
+
 export async function updateSocialLinks(linksJson: string) {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
