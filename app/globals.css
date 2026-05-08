@@ -74,8 +74,8 @@
      match the active theme. */
   --background-gradient: linear-gradient(
     to top,
-    oklch(0.955 0.012 80),
-    oklch(0.975 0.006 80) 60%
+    oklch(0.92 0.014 80),
+    oklch(0.975 0.006 80) 70%
   );
   --foreground: oklch(0.145 0.008 80);
   --card: oklch(1 0.006 80);
@@ -121,8 +121,8 @@
      for symmetry. */
   --background-gradient: linear-gradient(
     to top,
-    oklch(0.165 0.006 80),
-    oklch(0.145 0.005 80) 60%
+    oklch(0.085 0.005 80),
+    oklch(0.145 0.005 80) 70%
   );
   --foreground: oklch(0.985 0.005 80);
   --card: oklch(0.205 0.006 80);

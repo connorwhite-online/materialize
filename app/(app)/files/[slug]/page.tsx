@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import {
   files,
   fileAssets,
+  fileDownloads,
   users,
   purchases,
   filePhotos,
@@ -14,13 +15,12 @@ import {
   printOrders,
   printOrderItems,
 } from "@/lib/db/schema";
-import { eq, and, asc, inArray } from "drizzle-orm";
+import { eq, and, asc, desc, inArray } from "drizzle-orm";
 import { ownsLoadedFile } from "@/lib/entitlement";
 import { DESIGN_TAG_LABELS } from "@/lib/validations/file";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { PhotoGallery } from "@/components/photos/photo-gallery";
 import { PhotoUploader } from "@/components/photos/photo-uploader";
 import { DeleteFileButton } from "@/components/files/delete-file-button";
@@ -29,8 +29,28 @@ import { FileThumbnailGenerator } from "@/components/files/file-thumbnail-genera
 import { OrderModelPreview } from "@/components/print/order-model-preview";
 import { VerifyingPill } from "@/components/files/verifying-pill";
 import { ListingFlaggedBanner } from "@/components/files/listing-flagged-banner";
+import {
+  FileActivity,
+  type DownloadActivity,
+  type PrintActivity,
+} from "@/components/files/file-activity";
+import { UserAvatar } from "@/components/auth/user-avatar";
+import { Pencil } from "@/components/icons/pencil";
+import { Trash } from "@/components/icons/trash";
+import { getLicenseMeta } from "@/lib/licenses";
 import { getMaterialById } from "@/lib/materials";
+import { findMaterialConfig } from "@/lib/craftcloud/catalog";
 import { generateDownloadUrl } from "@/lib/storage";
+import { PRINTED_STATUSES } from "@/lib/print-statuses";
+import { swallow } from "@/lib/utils/swallow";
+
+async function buildMaterialLabel(configId: string | null): Promise<string | null> {
+  if (!configId) return null;
+  const entry = await findMaterialConfig(configId);
+  if (!entry) return null;
+  const color = entry.config.color || entry.config.originalColorName;
+  return [entry.material.name, color].filter(Boolean).join(" ") || null;
+}
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -188,6 +208,190 @@ export default async function FileDetailPage(props: {
       orderItemUses.length +
       orderUses.length;
   }
+  // Activity stream — who has printed and who has downloaded this
+  // file. Print activity unions legacy single-item printOrders rows
+  // (`fileAssetId` set on the parent) with multi-item printOrderItems
+  // children; only `PRINTED_STATUSES` count. Download activity is
+  // sourced from `fileDownloads` (one row inserted per request by the
+  // download route), grouped by user with the latest download time.
+  // Anon downloads (userId IS NULL on free files) bump the running
+  // counter on `files.downloadCount` but don't surface here.
+  const fileAssetIds = assets.map((a) => a.id);
+  const ACTIVITY_LIMIT = 50;
+
+  // Each activity query is independently fallible — Neon HTTP can
+  // cold-start with `fetch failed` connect timeouts, and any one of
+  // these failing inside a top-level Promise.all would 500 the whole
+  // page. The shared `swallow()` helper falls back to [] on failure so
+  // the section just renders empty, rather than 500-ing the page.
+  const [
+    legacyPrintRows,
+    itemPrintRows,
+    downloadRows,
+  ] = await Promise.all([
+    fileAssetIds.length === 0
+      ? Promise.resolve(
+          [] as Array<{
+            id: string;
+            createdAt: Date;
+            material: string | null;
+            vendorName: string | null;
+            vendor: string | null;
+            status: string;
+            userId: string;
+            username: string | null;
+            displayName: string | null;
+            avatarUrl: string | null;
+          }>
+        )
+      : swallow(
+          db
+            .select({
+              id: printOrders.id,
+              createdAt: printOrders.createdAt,
+              material: printOrders.material,
+              vendorName: printOrders.vendorName,
+              vendor: printOrders.vendor,
+              status: printOrders.status,
+              userId: users.id,
+              username: users.username,
+              displayName: users.displayName,
+              avatarUrl: users.avatarUrl,
+            })
+            .from(printOrders)
+            .innerJoin(users, eq(printOrders.userId, users.id))
+            .where(
+              and(
+                inArray(printOrders.fileAssetId, fileAssetIds),
+                inArray(printOrders.status, [...PRINTED_STATUSES])
+              )
+            )
+            .orderBy(desc(printOrders.createdAt))
+            .limit(ACTIVITY_LIMIT)
+        ),
+    fileAssetIds.length === 0
+      ? Promise.resolve(
+          [] as Array<{
+            id: string;
+            createdAt: Date;
+            materialConfigId: string;
+            vendorName: string | null;
+            vendor: string | null;
+            status: string;
+            userId: string;
+            username: string | null;
+            displayName: string | null;
+            avatarUrl: string | null;
+          }>
+        )
+      : swallow(
+          db
+            .select({
+              id: printOrderItems.id,
+              createdAt: printOrderItems.createdAt,
+              materialConfigId: printOrderItems.materialConfigId,
+              vendorName: printOrderItems.vendorName,
+              vendor: printOrderItems.vendorId,
+              status: printOrders.status,
+              userId: users.id,
+              username: users.username,
+              displayName: users.displayName,
+              avatarUrl: users.avatarUrl,
+            })
+            .from(printOrderItems)
+            .innerJoin(
+              printOrders,
+              eq(printOrderItems.printOrderId, printOrders.id)
+            )
+            .innerJoin(users, eq(printOrders.userId, users.id))
+            .where(
+              and(
+                inArray(printOrderItems.fileAssetId, fileAssetIds),
+                inArray(printOrders.status, [...PRINTED_STATUSES])
+              )
+            )
+            .orderBy(desc(printOrderItems.createdAt))
+            .limit(ACTIVITY_LIMIT)
+        ),
+    // One row per download event — the same user shows up once per
+    // download. We could DISTINCT ON (user_id) here for a "unique
+    // users" view, but the explicit ask is that the stream count
+    // align with `files.downloadCount` (which counts every event).
+    // Anon free-file downloads (userId IS NULL) are LEFT-joined
+    // through; the renderer falls back to "Anonymous" for them.
+    swallow(
+      db
+        .select({
+          id: fileDownloads.id,
+          userId: fileDownloads.userId,
+          createdAt: fileDownloads.createdAt,
+          username: users.username,
+          displayName: users.displayName,
+          avatarUrl: users.avatarUrl,
+        })
+        .from(fileDownloads)
+        .leftJoin(users, eq(fileDownloads.userId, users.id))
+        .where(eq(fileDownloads.fileId, file.id))
+        .orderBy(desc(fileDownloads.createdAt))
+        .limit(ACTIVITY_LIMIT)
+    ),
+  ]);
+
+  const printRowsRaw = [
+    ...legacyPrintRows.map((row) => ({
+      id: row.id,
+      createdAt: row.createdAt,
+      materialConfigId: row.material,
+      vendorName: row.vendorName ?? row.vendor,
+      status: row.status,
+      user: {
+        id: row.userId,
+        username: row.username,
+        displayName: row.displayName,
+        avatarUrl: row.avatarUrl,
+      },
+    })),
+    ...itemPrintRows.map((row) => ({
+      id: row.id,
+      createdAt: row.createdAt,
+      materialConfigId: row.materialConfigId,
+      vendorName: row.vendorName ?? row.vendor,
+      status: row.status,
+      user: {
+        id: row.userId,
+        username: row.username,
+        displayName: row.displayName,
+        avatarUrl: row.avatarUrl,
+      },
+    })),
+  ]
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    .slice(0, ACTIVITY_LIMIT);
+
+  const materialLabels = await Promise.all(
+    printRowsRaw.map((row) => buildMaterialLabel(row.materialConfigId))
+  );
+
+  const printActivity: PrintActivity[] = printRowsRaw.map((row, i) => ({
+    id: row.id,
+    user: row.user,
+    materialLabel: materialLabels[i],
+    vendorName: row.vendorName,
+    status: row.status,
+    createdAt: row.createdAt,
+  }));
+
+  const downloadActivity: DownloadActivity[] = downloadRows.map((row) => ({
+    id: row.id,
+    createdAt: row.createdAt,
+    user: {
+      id: row.userId,
+      username: row.username,
+      displayName: row.displayName,
+      avatarUrl: row.avatarUrl,
+    },
+  }));
+
   const recommendedMaterial = file.recommendedMaterialId
     ? getMaterialById(file.recommendedMaterialId)
     : null;
@@ -239,7 +443,7 @@ export default async function FileDetailPage(props: {
           flaggedAt={file.flaggedAt}
         />
       )}
-      <div className="grid gap-8 lg:grid-cols-3">
+      <div className="grid items-start gap-8 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-6">
           {/* Title + filename · size */}
           <div>
@@ -357,83 +561,54 @@ export default async function FileDetailPage(props: {
               {isOwner && <PhotoUploader fileId={file.id} />}
             </div>
           )}
+
+          {/* Activity stream — prints + downloads. The component
+              self-hides when both are empty. */}
+          <FileActivity
+            prints={printActivity}
+            downloads={downloadActivity}
+          />
         </div>
 
-        {/* Sidebar */}
-        <div className="space-y-4">
-          {/* Creator card */}
+        {/* Sidebar — sticky on lg+ so the price + actions card stays
+            in view while the user scrolls the description, photos, and
+            activity stream. Mirrors the cart pattern on /print. */}
+        <div className="space-y-4 lg:sticky lg:top-6">
+          {/* Compact action card. Top row pairs the creator identity
+              (left) with owner-only edit/delete icons (right) in a
+              flex row — keeps the icons aligned to the top edge of
+              the card without absolute positioning. Print is the
+              primary CTA (the project's revenue path); Download is
+              demoted to secondary. License is a tiny line below the
+              price; the running download count moved to the activity
+              tab so it's no longer duplicated here. */}
           <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                {file.avatarUrl && (
-                  <img
-                    src={file.avatarUrl}
-                    alt=""
-                    className="h-10 w-10 rounded-full"
+            <CardContent className="space-y-4">
+              <div className="flex items-start gap-2">
+                <Link
+                  href={`/u/${file.username}`}
+                  className="flex flex-1 min-w-0 items-center gap-2.5 hover:opacity-80 transition-opacity"
+                >
+                  <UserAvatar
+                    seed={file.username || file.userId}
+                    imageUrl={file.avatarUrl}
+                    displayName={file.displayName || file.username}
+                    className="h-10 w-10"
                   />
-                )}
-                <div>
-                  <Link
-                    href={`/u/${file.username}`}
-                    className="font-medium text-sm hover:underline"
-                  >
-                    {file.displayName || file.username}
-                  </Link>
-                </div>
-              </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium leading-tight truncate">
+                      {file.displayName || file.username}
+                    </div>
+                    {file.username && (
+                      <div className="text-xs text-muted-foreground truncate">
+                        @{file.username}
+                      </div>
+                    )}
+                  </div>
+                </Link>
 
-              <Separator className="my-4" />
-
-              {/* Price + actions */}
-              {file.price > 0 ? (
-                <>
-                  <p className="text-2xl font-bold">
-                    ${(file.price / 100).toFixed(2)}
-                  </p>
-                  {canDownload ? (
-                    <Button className="w-full mt-3" render={
-                      <a href={`/files/${slug}/download`} />
-                    }>
-                      Download
-                    </Button>
-                  ) : (
-                    <Button className="w-full mt-3">
-                      Purchase
-                    </Button>
-                  )}
-                </>
-              ) : (
-                <>
-                  <p className="text-lg font-medium text-muted-foreground">
-                    Free
-                  </p>
-                  <Button className="w-full mt-3" render={
-                    <a href={`/files/${slug}/download`} />
-                  }>
-                    Download
-                  </Button>
-                </>
-              )}
-
-              {assets[0] && (
-                <Button variant="outline" className="w-full mt-2" render={
-                  <Link href={`/print/${assets[0].id}`} />
-                }>
-                  Print this file
-                </Button>
-              )}
-
-              <Separator className="my-4" />
-
-              <div className="text-sm text-muted-foreground space-y-1">
-                <p className="capitalize">License: {file.license}</p>
-                <p>{file.downloadCount} downloads</p>
-              </div>
-
-              {isOwner && (
-                <>
-                  <Separator className="my-4" />
-                  <div className="space-y-2">
+                {isOwner && (
+                  <div className="flex shrink-0 gap-1">
                     <EditFileButton
                       fileId={file.id}
                       initial={{
@@ -448,6 +623,16 @@ export default async function FileDetailPage(props: {
                         minWallThickness: file.minWallThickness,
                       }}
                       hasBuyers={ownerBuyerCount > 0}
+                      trigger={
+                        <Button
+                          variant="ghost"
+                          size="icon-lg"
+                          className="rounded-[12px] p-2"
+                          aria-label="Edit file"
+                        >
+                          <Pencil className="size-5" />
+                        </Button>
+                      }
                     />
                     <DeleteFileButton
                       fileId={file.id}
@@ -455,10 +640,71 @@ export default async function FileDetailPage(props: {
                       hasBuyers={ownerBuyerCount > 0}
                       buyerCount={ownerBuyerCount}
                       redirectTo={`/u/${file.username}`}
+                      trigger={
+                        <Button
+                          variant="ghost"
+                          size="icon-lg"
+                          className="rounded-[12px] p-2 text-destructive hover:text-destructive"
+                          aria-label="Delete file"
+                        >
+                          <Trash className="size-5" />
+                        </Button>
+                      }
                     />
                   </div>
-                </>
-              )}
+                )}
+              </div>
+
+              <div>
+                {file.price > 0 ? (
+                  <div className="text-2xl font-bold leading-none">
+                    ${(file.price / 100).toFixed(2)}
+                  </div>
+                ) : (
+                  <div className="text-base font-semibold leading-tight">
+                    Free to use
+                  </div>
+                )}
+                {(() => {
+                  const meta = getLicenseMeta(file.license);
+                  if (!meta) return null;
+                  return (
+                    <a
+                      href={meta.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={meta.summary}
+                      className="mt-1 inline-block text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                    >
+                      {meta.shortName} · {meta.name}
+                    </a>
+                  );
+                })()}
+              </div>
+
+              <div className="space-y-2">
+                {assets[0] && (
+                  <Button
+                    className="w-full"
+                    render={<Link href={`/print/${assets[0].id}`} />}
+                  >
+                    Print this file
+                  </Button>
+                )}
+                {canDownload ? (
+                  <Button
+                    variant="secondary"
+                    className="w-full"
+                    render={<a href={`/files/${slug}/download`} />}
+                  >
+                    Download
+                  </Button>
+                ) : file.price > 0 ? (
+                  <Button variant="secondary" className="w-full">
+                    Purchase
+                  </Button>
+                ) : null}
+              </div>
             </CardContent>
           </Card>
         </div>

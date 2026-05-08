@@ -78,6 +78,20 @@
       "when": 1778115684477,
       "tag": "0010_past_switch",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1778188109553,
+      "tag": "0011_unique_wither",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1778191086540,
+      "tag": "0012_sudden_monster_badoon",
+      "breakpoints": true
     }
   ]
 }

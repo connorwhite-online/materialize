@@ -125,7 +125,7 @@ export async function runCreateListing(
     }
     if (!input.sellEnabled) {
       input.formData.set("price", "0");
-      input.formData.set("license", "free");
+      input.formData.set("license", "cc_by");
     } else {
       input.formData.set("license", input.license);
     }

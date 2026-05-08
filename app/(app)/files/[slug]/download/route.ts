@@ -1,6 +1,12 @@
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-import { files, fileAssets, purchases, projectFiles } from "@/lib/db/schema";
+import {
+  files,
+  fileAssets,
+  fileDownloads,
+  purchases,
+  projectFiles,
+} from "@/lib/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
 import { ownsLoadedFile } from "@/lib/entitlement";
@@ -102,10 +108,21 @@ export async function GET(
     return new Response("Asset not found", { status: 404 });
   }
 
-  await db
-    .update(files)
-    .set({ downloadCount: sql`${files.downloadCount} + 1` })
-    .where(eq(files.id, file.id));
+  await Promise.all([
+    db
+      .update(files)
+      .set({ downloadCount: sql`${files.downloadCount} + 1` })
+      .where(eq(files.id, file.id)),
+    // Per-download log row, powering the activity stream on the file
+    // detail page. userId is null for anon downloads of free files —
+    // those still increment the counter and show up in totals, just
+    // not in the per-user stream.
+    db.insert(fileDownloads).values({
+      fileId: file.id,
+      fileAssetId: asset.id,
+      userId: userId ?? null,
+    }),
+  ]);
 
   // Stream from R2, embed a watermark in the format-appropriate
   // metadata region, then serve. We have to buffer the bytes for the

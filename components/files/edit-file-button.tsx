@@ -25,6 +25,13 @@ import {
 import { updateFileListing } from "@/app/actions/files";
 import { MATERIALS } from "@/lib/materials";
 import { DESIGN_TAG_OPTIONS, DESIGN_TAG_LABELS } from "@/lib/validations/file";
+import {
+  LICENSES,
+  LICENSE_ORDER,
+  DEFAULT_LICENSE,
+  getLicenseMeta,
+  type LicenseId,
+} from "@/lib/licenses";
 
 interface EditFileButtonProps {
   fileId: string;
@@ -33,19 +40,36 @@ interface EditFileButtonProps {
     description: string | null;
     tags: string[] | null;
     price: number; // cents
-    license: "free" | "personal" | "commercial" | string;
+    /** May be either a current LicenseId or a legacy enum value. */
+    license: string;
     visibility: "public" | "private" | string;
     recommendedMaterialId: string | null;
     designTags: string[] | null;
     minWallThickness: number | null; // 0.1mm units
   };
   hasBuyers: boolean;
+  /**
+   * Optional custom trigger element. Lets the call site swap in an
+   * icon button or any other shape; defaults to a full-width outline
+   * button labeled "Edit file".
+   */
+  trigger?: React.ReactNode;
+}
+
+// Map any incoming license value (CC id OR legacy `free`/`personal`/
+// `commercial`) to a current CC id so the Select always starts with
+// a valid option. Backfill should make this a no-op for fresh data,
+// but a stale row from before migration 0012 still renders sanely.
+function resolveLicense(raw: string | undefined): LicenseId {
+  const meta = getLicenseMeta(raw);
+  return meta?.id ?? DEFAULT_LICENSE;
 }
 
 export function EditFileButton({
   fileId,
   initial,
   hasBuyers,
+  trigger,
 }: EditFileButtonProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -58,8 +82,8 @@ export function EditFileButton({
   const [priceDollars, setPriceDollars] = useState(
     (initial.price / 100).toString()
   );
-  const [license, setLicense] = useState<"free" | "personal" | "commercial">(
-    (initial.license as "free" | "personal" | "commercial") || "free"
+  const [license, setLicense] = useState<LicenseId>(
+    resolveLicense(initial.license)
   );
   const [visibility, setVisibility] = useState<"public" | "private">(
     (initial.visibility as "public" | "private") || "public"
@@ -79,7 +103,7 @@ export function EditFileButton({
     setDescription(initial.description ?? "");
     setTags((initial.tags ?? []).join(", "));
     setPriceDollars((initial.price / 100).toString());
-    setLicense((initial.license as "free" | "personal" | "commercial") || "free");
+    setLicense(resolveLicense(initial.license));
     setVisibility((initial.visibility as "public" | "private") || "public");
     setRecommendedMaterial(initial.recommendedMaterialId ?? "");
     setDesignTags(initial.designTags ?? []);
@@ -145,9 +169,13 @@ export function EditFileButton({
     >
       <DialogTrigger
         render={
-          <Button variant="outline" className="w-full">
-            Edit file
-          </Button>
+          trigger ? (
+            (trigger as React.ReactElement)
+          ) : (
+            <Button variant="outline" className="w-full">
+              Edit file
+            </Button>
+          )
         }
       />
       <DialogContent className="max-h-[90vh] w-full max-w-2xl overflow-y-auto sm:max-w-2xl">
@@ -253,23 +281,34 @@ export function EditFileButton({
               </Label>
               <Select
                 value={license}
-                onValueChange={(v) =>
-                  setLicense(v as "free" | "personal" | "commercial")
-                }
+                onValueChange={(v) => setLicense(v as LicenseId)}
               >
                 <SelectTrigger id="edit-license" className="w-full">
                   <SelectValue>
                     {(value) => {
-                      if (value === "personal") return "Personal Use";
-                      if (value === "commercial") return "Commercial Use";
-                      return "Free";
+                      const meta = LICENSES[value as LicenseId];
+                      return meta
+                        ? `${meta.shortName} — ${meta.name}`
+                        : "Select a license";
                     }}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="free">Free</SelectItem>
-                  <SelectItem value="personal">Personal Use</SelectItem>
-                  <SelectItem value="commercial">Commercial Use</SelectItem>
+                  {LICENSE_ORDER.map((id) => {
+                    const meta = LICENSES[id];
+                    return (
+                      <SelectItem key={id} value={id}>
+                        <div className="flex flex-col gap-0.5">
+                          <span>
+                            {meta.shortName} — {meta.name}
+                          </span>
+                          <span className="text-[11px] leading-tight text-muted-foreground">
+                            {meta.summary}
+                          </span>
+                        </div>
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>

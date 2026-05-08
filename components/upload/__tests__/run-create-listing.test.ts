@@ -79,7 +79,7 @@ function makeInput(over: Partial<CreateListingInput> = {}): CreateListingInput {
     selectedDesignTags: ["strong", "lightweight"],
     recommendedMaterial: "pla",
     sellEnabled: false,
-    license: "free",
+    license: "cc_by",
     collectionChoice: "none",
     newCollectionName: "",
     ...over,
@@ -153,17 +153,17 @@ describe("runCreateListing", () => {
     if (!result.ok) expect(result.error).toBe("database exploded");
   });
 
-  it("forces price=0 and license=free when sellEnabled is off", async () => {
+  it("forces price=0 and license=cc_by when sellEnabled is off", async () => {
     mockPresign();
     const seen: FormData[] = [];
     createImpl = async (fd) => {
       seen.push(fd);
       return undefined;
     };
-    const input = makeInput({ sellEnabled: false, license: "commercial" });
+    const input = makeInput({ sellEnabled: false, license: "cc_by_nc" });
     await runCreateListing(input);
     expect(seen[0].get("price")).toBe("0");
-    expect(seen[0].get("license")).toBe("free");
+    expect(seen[0].get("license")).toBe("cc_by");
   });
 
   it("uses the chosen license when sellEnabled is on", async () => {
@@ -173,8 +173,8 @@ describe("runCreateListing", () => {
       seen.push(fd);
       return undefined;
     };
-    await runCreateListing(makeInput({ sellEnabled: true, license: "commercial" }));
-    expect(seen[0].get("license")).toBe("commercial");
+    await runCreateListing(makeInput({ sellEnabled: true, license: "cc_by_nc" }));
+    expect(seen[0].get("license")).toBe("cc_by_nc");
   });
 
   it("packs assetsJson with storageKey, format, fileSize, fileUnit", async () => {

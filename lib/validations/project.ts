@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DESIGN_TAG_OPTIONS } from "./file";
+import { LICENSE_ENUM_VALUES } from "@/lib/licenses";
 
 // Hard ceilings — pasted JSON, scripted requests, or a runaway loop
 // shouldn't be able to push thousands of file IDs or tags into a
@@ -28,7 +29,7 @@ export const createProjectSchema = z.object({
     .min(0, "Price must be 0 or more")
     .max(MAX_PRICE_CENTS / 100, `Price must be under $${MAX_PRICE_CENTS / 100}`)
     .transform((val) => Math.round(val * 100)),
-  license: z.enum(["free", "personal", "commercial"]),
+  license: z.enum(LICENSE_ENUM_VALUES),
   visibility: z.enum(["public", "private"]).optional(),
   tags: z
     .string()

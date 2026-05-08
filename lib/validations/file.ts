@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { LICENSE_ENUM_VALUES } from "@/lib/licenses";
 
 export const ACCEPTED_FORMATS = [
   "stl",
@@ -55,7 +56,7 @@ export const createListingSchema = z.object({
     .number()
     .min(0, "Price must be 0 or more")
     .transform((val) => Math.round(val * 100)), // dollars to cents
-  license: z.enum(["free", "personal", "commercial"]),
+  license: z.enum(LICENSE_ENUM_VALUES),
   visibility: z.enum(["public", "private"]).optional(),
   tags: z
     .string()

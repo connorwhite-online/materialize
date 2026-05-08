@@ -7,6 +7,12 @@ import { listMyCollections } from "@/app/actions/collections";
 import { runCreateListing } from "./run-create-listing";
 import { MATERIALS } from "@/lib/materials";
 import { DESIGN_TAG_OPTIONS, DESIGN_TAG_LABELS } from "@/lib/validations/file";
+import {
+  LICENSES,
+  LICENSE_ORDER,
+  DEFAULT_LICENSE,
+  type LicenseId,
+} from "@/lib/licenses";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -72,7 +78,7 @@ export function FileMetadataForm({
 }: FileMetadataFormProps) {
   const [selectedDesignTags, setSelectedDesignTags] = useState<string[]>([]);
   const [recommendedMaterial, setRecommendedMaterial] = useState("");
-  const [license, setLicense] = useState("free");
+  const [license, setLicense] = useState<LicenseId>(DEFAULT_LICENSE);
   const [sellEnabled, setSellEnabled] = useState(false);
   const [printRecOpen, setPrintRecOpen] = useState(false);
   const [fileUnit, setFileUnit] = useState<"mm" | "cm" | "in">("mm");
@@ -331,25 +337,46 @@ export function FileMetadataForm({
                     <Label htmlFor="license-trigger">License</Label>
                     <Select
                       value={license}
-                      onValueChange={(v) => v && setLicense(v)}
+                      onValueChange={(v) => v && setLicense(v as LicenseId)}
                     >
                       <SelectTrigger id="license-trigger" className="w-full">
                         <SelectValue>
                           {(value) => {
-                            if (value === "personal") return "Personal Use";
-                            if (value === "commercial") return "Commercial Use";
-                            return "Free";
+                            const meta = LICENSES[value as LicenseId];
+                            return meta
+                              ? `${meta.shortName} — ${meta.name}`
+                              : "Select a license";
                           }}
                         </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="free">Free</SelectItem>
-                        <SelectItem value="personal">Personal Use</SelectItem>
-                        <SelectItem value="commercial">
-                          Commercial Use
-                        </SelectItem>
+                        {LICENSE_ORDER.map((id) => {
+                          const meta = LICENSES[id];
+                          return (
+                            <SelectItem key={id} value={id}>
+                              <div className="flex flex-col gap-0.5">
+                                <span>
+                                  {meta.shortName} — {meta.name}
+                                </span>
+                                <span className="text-[11px] text-muted-foreground leading-tight">
+                                  {meta.summary}
+                                </span>
+                              </div>
+                            </SelectItem>
+                          );
+                        })}
                       </SelectContent>
                     </Select>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      <a
+                        href="https://creativecommons.org/share-your-work/cclicenses/"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline-offset-2 hover:underline"
+                      >
+                        Compare CC licenses
+                      </a>
+                    </p>
                   </div>
                 </div>
               </CardContent>

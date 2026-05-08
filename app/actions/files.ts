@@ -580,7 +580,7 @@ export async function deleteFileListing(
  * Fast-path for the "Print this file" CTA on the home bar and the
  * /print page dropzone. Persists the uploaded file as a private
  * draft — name derived from the filename, no description, no tags,
- * free license, visibility=private — so the user can walk into the
+ * CC-BY license (the platform default), visibility=private — so the user can walk into the
  * quote configurator immediately without filling out the full
  * listing form. They can always rename / publish it later from
  * their library via the edit dialog.
@@ -679,7 +679,7 @@ export async function createDraftFileForPrint(params: {
         name,
         slug,
         price: 0,
-        license: "free",
+        license: "cc_by",
         // Default visibility comes from the user's settings (default
         // "private"). The user uploaded this to print, not to
         // publish — but power users can flip the default to "public"

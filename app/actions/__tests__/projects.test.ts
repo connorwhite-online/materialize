@@ -108,7 +108,7 @@ describe("createProject", () => {
     const formData = new FormData();
     formData.set("name", "Chess Set");
     formData.set("price", "0");
-    formData.set("license", "free");
+    formData.set("license", "cc_by");
     formData.append("fileIds", FILE_1);
     formData.append("fileIds", FILE_2);
 
@@ -124,7 +124,7 @@ describe("createProject", () => {
     const formData = new FormData();
     formData.set("name", "Chess Set");
     formData.set("price", "0");
-    formData.set("license", "free");
+    formData.set("license", "cc_by");
     formData.append("fileIds", FILE_1);
     formData.append("fileIds", FILE_2);
 

@@ -15,6 +15,12 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { createProject } from "@/app/actions/projects";
+import {
+  LICENSES,
+  LICENSE_ORDER,
+  DEFAULT_LICENSE,
+  type LicenseId,
+} from "@/lib/licenses";
 
 interface OwnedFile {
   id: string;
@@ -28,7 +34,7 @@ export function ProjectCreateForm({
   ownedFiles: OwnedFile[];
 }) {
   const [selected, setSelected] = useState<string[]>([]);
-  const [license, setLicense] = useState("free");
+  const [license, setLicense] = useState<LicenseId>(DEFAULT_LICENSE);
   const [sellEnabled, setSellEnabled] = useState(false);
   const [errors, setErrors] = useState<Record<string, string[]> | null>(null);
   const [pending, startTransition] = useTransition();
@@ -113,21 +119,34 @@ export function ProjectCreateForm({
                 <Label htmlFor="license-trigger">License</Label>
                 <Select
                   value={license}
-                  onValueChange={(v) => v && setLicense(v)}
+                  onValueChange={(v) => v && setLicense(v as LicenseId)}
                 >
                   <SelectTrigger id="license-trigger" className="w-full">
                     <SelectValue>
                       {(value) => {
-                        if (value === "personal") return "Personal Use";
-                        if (value === "commercial") return "Commercial Use";
-                        return "Free";
+                        const meta = LICENSES[value as LicenseId];
+                        return meta
+                          ? `${meta.shortName} — ${meta.name}`
+                          : "Select a license";
                       }}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="free">Free</SelectItem>
-                    <SelectItem value="personal">Personal Use</SelectItem>
-                    <SelectItem value="commercial">Commercial Use</SelectItem>
+                    {LICENSE_ORDER.map((id) => {
+                      const meta = LICENSES[id];
+                      return (
+                        <SelectItem key={id} value={id}>
+                          <div className="flex flex-col gap-0.5">
+                            <span>
+                              {meta.shortName} — {meta.name}
+                            </span>
+                            <span className="text-[11px] leading-tight text-muted-foreground">
+                              {meta.summary}
+                            </span>
+                          </div>
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
               </div>

@@ -112,7 +112,7 @@ describe("createFileListing", () => {
     formData.set("name", "Test Model");
     formData.set("description", "A test model");
     formData.set("price", "9.99");
-    formData.set("license", "free");
+    formData.set("license", "cc_by");
     formData.set("tags", "test, model");
     formData.set(
       "assetsJson",
@@ -135,7 +135,7 @@ describe("createFileListing", () => {
         userId: "test-user-id",
         name: "Test Model",
         price: 999,
-        license: "free",
+        license: "cc_by",
       })
     );
   });
@@ -144,7 +144,7 @@ describe("createFileListing", () => {
     const formData = new FormData();
     formData.set("name", ""); // empty name should fail
     formData.set("price", "-1");
-    formData.set("license", "free");
+    formData.set("license", "cc_by");
 
     const result = await createFileListing(formData);
     expect(result).toHaveProperty("error");

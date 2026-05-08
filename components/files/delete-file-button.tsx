@@ -22,6 +22,12 @@ interface DeleteFileButtonProps {
   hasBuyers: boolean;
   buyerCount: number;
   redirectTo: string;
+  /**
+   * Optional custom trigger element. Lets the call site swap in an
+   * icon button or any other shape; defaults to a full-width outline
+   * button labeled "Delete file".
+   */
+  trigger?: React.ReactNode;
 }
 
 /**
@@ -39,6 +45,7 @@ export function DeleteFileButton({
   hasBuyers,
   buyerCount,
   redirectTo,
+  trigger,
 }: DeleteFileButtonProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -76,9 +83,13 @@ export function DeleteFileButton({
     >
       <DialogTrigger
         render={
-          <Button variant="outline" className="w-full text-destructive">
-            Delete file
-          </Button>
+          trigger ? (
+            (trigger as React.ReactElement)
+          ) : (
+            <Button variant="outline" className="w-full text-destructive">
+              Delete file
+            </Button>
+          )
         }
       />
       <DialogContent className="max-w-md">

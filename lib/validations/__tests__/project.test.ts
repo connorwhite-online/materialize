@@ -13,7 +13,7 @@ const VALID_UUID_2 = "22222222-2222-4222-8222-222222222222";
 const baseInput = {
   name: "Chess Set",
   price: "0",
-  license: "free" as const,
+  license: "cc_by" as const,
   fileIds: [VALID_UUID_1],
 };
 

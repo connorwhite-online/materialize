@@ -63,7 +63,7 @@ describe("createListingSchema", () => {
     name: "Test Model",
     description: "A great model",
     price: "9.99",
-    license: "free",
+    license: "cc_by",
     tags: "tag1, tag2, tag3",
   };
 
@@ -73,7 +73,7 @@ describe("createListingSchema", () => {
     if (result.success) {
       expect(result.data.name).toBe("Test Model");
       expect(result.data.price).toBe(999); // dollars to cents
-      expect(result.data.license).toBe("free");
+      expect(result.data.license).toBe("cc_by");
       expect(result.data.tags).toEqual(["tag1", "tag2", "tag3"]);
     }
   });
@@ -128,10 +128,25 @@ describe("createListingSchema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("accepts all valid licenses", () => {
-    for (const license of ["free", "personal", "commercial"]) {
+  it("accepts all valid CC licenses", () => {
+    for (const license of [
+      "cc0",
+      "cc_by",
+      "cc_by_sa",
+      "cc_by_nd",
+      "cc_by_nc",
+      "cc_by_nc_sa",
+      "cc_by_nc_nd",
+    ]) {
       const result = createListingSchema.safeParse({ ...validData, license });
       expect(result.success).toBe(true);
+    }
+  });
+
+  it("rejects legacy license values now that the enum is CC-only", () => {
+    for (const license of ["free", "personal", "commercial"]) {
+      const result = createListingSchema.safeParse({ ...validData, license });
+      expect(result.success).toBe(false);
     }
   });
 

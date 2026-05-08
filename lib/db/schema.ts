@@ -15,7 +15,23 @@ import {
 } from "drizzle-orm/pg-core";
 
 // Enums
+//
+// `license` carries seven Creative Commons variants plus three
+// legacy values (`free`, `personal`, `commercial`) that predate the
+// CC switch. Postgres enums don't support DROP VALUE, so the legacy
+// values stay in the type — migration 0012 backfills every row to a
+// CC equivalent, and the upload + edit forms only offer CC ids
+// going forward, so legacy values shouldn't appear on new rows.
+// `LEGACY_LICENSE_MAP` in `lib/licenses.ts` handles display of any
+// straggler.
 export const licenseEnum = pgEnum("license", [
+  "cc0",
+  "cc_by",
+  "cc_by_sa",
+  "cc_by_nd",
+  "cc_by_nc",
+  "cc_by_nc_sa",
+  "cc_by_nc_nd",
   "free",
   "personal",
   "commercial",
@@ -113,7 +129,7 @@ export const files = pgTable("files", {
   slug: text("slug").notNull().unique(),
   price: integer("price").notNull().default(0), // cents, 0 = free
   currency: text("currency").notNull().default("USD"),
-  license: licenseEnum("license").notNull().default("free"),
+  license: licenseEnum("license").notNull().default("cc_by"),
   status: fileStatusEnum("status").notNull().default("draft"),
   tags: text("tags").array(),
   recommendedMaterialId: text("recommended_material_id"), // from our materials metadata
@@ -161,7 +177,7 @@ export const projects = pgTable("projects", {
   slug: text("slug").notNull().unique(),
   price: integer("price").notNull().default(0), // cents, 0 = free
   currency: text("currency").notNull().default("USD"),
-  license: licenseEnum("license").notNull().default("free"),
+  license: licenseEnum("license").notNull().default("cc_by"),
   status: fileStatusEnum("status").notNull().default("draft"),
   visibility: visibilityEnum("visibility").notNull().default("public"),
   tags: text("tags").array(),
@@ -506,6 +522,49 @@ export const collectionItems = pgTable("collection_items", {
     sql`(${table.fileId} IS NOT NULL AND ${table.projectId} IS NULL) OR (${table.fileId} IS NULL AND ${table.projectId} IS NOT NULL)`
   ),
 ]);
+
+// Per-download log — one row per successful file download. The hot
+// `files.downloadCount` counter remains the source of truth for the
+// running total (cheap to read on listing pages); this table is for
+// "who downloaded and when" (the file detail activity stream, future
+// per-creator audit views).
+//
+// userId is nullable because free files allow anon downloads
+// (entitlement check returns true regardless of `userId`). On user
+// deletion we keep the row but null the FK so creators can still see
+// historical download volume; the activity stream renders nulls as
+// "Anonymous".
+//
+// fileAssetId is nullable for the same reason — cascading file
+// deletion takes the row, but if a single asset gets removed (e.g.
+// the creator swaps out an STL), we keep the historical fact that a
+// download happened.
+
+export const fileDownloads = pgTable(
+  "file_downloads",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    fileId: uuid("file_id")
+      .notNull()
+      .references(() => files.id, { onDelete: "cascade" }),
+    fileAssetId: uuid("file_asset_id").references(() => fileAssets.id, {
+      onDelete: "set null",
+    }),
+    userId: text("user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("file_downloads_file_id_created_at_idx").on(
+      table.fileId,
+      table.createdAt
+    ),
+    index("file_downloads_user_id_idx").on(table.userId),
+  ]
+);
 
 // Part photos — real-world images of printed parts
 
