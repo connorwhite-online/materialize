@@ -88,6 +88,50 @@ export async function updateEmailNotificationsEnabled(
   }
 }
 
+const ALLOWED_PREF_TYPES = new Set([
+  "comment_on_listing",
+  "reply_to_comment",
+  "make_on_file",
+  "print_on_file",
+]);
+
+/**
+ * Toggle a single notification type's email pref. Reads the current
+ * jsonb map, sets the requested key, and writes back. Anything outside
+ * the known type set is rejected so the caller can't poison the column
+ * with arbitrary keys.
+ */
+export async function updateEmailNotificationPref(
+  type: string,
+  enabled: boolean
+): Promise<{ ok: true } | { error: string }> {
+  const { userId } = await auth();
+  if (!userId) return { error: "Unauthorized" };
+  if (!ALLOWED_PREF_TYPES.has(type)) return { error: "Unknown event type" };
+
+  try {
+    const [current] = await db
+      .select({ prefs: users.emailNotificationPrefs })
+      .from(users)
+      .where(eq(users.id, userId));
+    const next = {
+      ...(current?.prefs ?? {}),
+      [type]: enabled,
+    };
+
+    await db
+      .update(users)
+      .set({ emailNotificationPrefs: next })
+      .where(eq(users.id, userId));
+
+    revalidatePath("/dashboard/settings");
+    return { ok: true };
+  } catch (error) {
+    logError("updateEmailNotificationPref", error);
+    return { error: "Failed to save. Please try again." };
+  }
+}
+
 export async function updateSocialLinks(linksJson: string) {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");

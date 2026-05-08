@@ -50,6 +50,7 @@ export default async function SettingsPage() {
 
       <EmailNotificationsSetting
         initial={user?.emailNotificationsEnabled ?? true}
+        initialPrefs={user?.emailNotificationPrefs ?? null}
       />
 
       <div className="border-t border-border pt-6">

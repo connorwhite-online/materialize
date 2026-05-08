@@ -127,6 +127,13 @@
       "when": 1778276471047,
       "tag": "0017_careful_scarlet_witch",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1778279075807,
+      "tag": "0018_mighty_karnak",
+      "breakpoints": true
     }
   ]
 }

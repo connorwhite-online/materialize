@@ -1,10 +1,10 @@
 import "server-only";
 
-import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { notifications, users } from "@/lib/db/schema";
+import { notifications } from "@/lib/db/schema";
 import { logError } from "@/lib/logger";
 import { sendNotificationEmail } from "./email";
+import { shouldSendEmail } from "./email-prefs";
 import type {
   CommentOnListingPayload,
   MakeOnFilePayload,
@@ -50,17 +50,11 @@ async function insert(
     logError(`notify(${type})`, error);
   }
 
-  // Email side-effect — opt-in via the user's pref. Look up the row
-  // we just touched to read the toggle; if it's off, skip the send.
+  // Email side-effect — opt-in via the user's prefs (master switch
+  // + per-type override). `shouldSendEmail` rolls both checks into a
+  // single round trip.
   try {
-    const [recipient] = await db
-      .select({
-        id: users.id,
-        emailEnabled: users.emailNotificationsEnabled,
-      })
-      .from(users)
-      .where(eq(users.id, recipientId));
-    if (recipient?.emailEnabled) {
+    if (await shouldSendEmail(recipientId, type)) {
       // Don't await — email send is best-effort. Errors logged inside.
       void sendNotificationEmail(recipientId, type, payload);
     }
