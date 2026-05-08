@@ -8,6 +8,7 @@ import type {
   CommentOnListingPayload,
   MakeOnFilePayload,
   NotificationType,
+  PrintOnFilePayload,
   ReplyToCommentPayload,
 } from "./types";
 
@@ -28,6 +29,7 @@ export async function sendNotificationEmail(
     | CommentOnListingPayload
     | ReplyToCommentPayload
     | MakeOnFilePayload
+    | PrintOnFilePayload
 ) {
   try {
     const clerk = await clerkClient();
@@ -45,7 +47,12 @@ export async function sendNotificationEmail(
     const subject = `Materialize — ${headline}`;
     const href = buildHref(type, payload);
     const settingsUrl = `${APP_URL}/dashboard/settings`;
-    const snippet = "snippet" in payload ? payload.snippet ?? null : null;
+    // Comment-style payloads carry a `snippet`; print payloads carry a
+    // `materialLabel` which we surface in the email body via that
+    // same slot so the user gets one extra detail above the CTA.
+    let snippet: string | null = null;
+    if ("snippet" in payload) snippet = payload.snippet ?? null;
+    else if ("materialLabel" in payload) snippet = payload.materialLabel;
 
     await sendEmail({
       to: email,
@@ -64,6 +71,7 @@ function buildHeadline(
     | CommentOnListingPayload
     | ReplyToCommentPayload
     | MakeOnFilePayload
+    | PrintOnFilePayload
 ): string {
   const actor =
     payload.actor.displayName || payload.actor.username || "Someone";
@@ -76,6 +84,8 @@ function buildHeadline(
       return `${actor} replied to your comment on ${listing}`;
     case "make_on_file":
       return `${actor} shared a make of your ${targetWord} ${listing}`;
+    case "print_on_file":
+      return `${actor} just printed your ${targetWord} ${listing}`;
   }
 }
 
@@ -85,6 +95,7 @@ function buildHref(
     | CommentOnListingPayload
     | ReplyToCommentPayload
     | MakeOnFilePayload
+    | PrintOnFilePayload
 ): string {
   const base =
     payload.listing.kind === "file"
@@ -92,6 +103,12 @@ function buildHref(
       : `${APP_URL}/projects/${payload.listing.slug}`;
   if (type === "make_on_file") {
     return `${base}#make-${(payload as MakeOnFilePayload).makeId}`;
+  }
+  if (type === "print_on_file") {
+    // Link the creator to the order detail page rather than the file
+    // page — the meaningful action from a "someone printed your file"
+    // email is reviewing the order.
+    return `${APP_URL}/dashboard/orders/${(payload as PrintOnFilePayload).printOrderId}`;
   }
   const commentId =
     type === "comment_on_listing"

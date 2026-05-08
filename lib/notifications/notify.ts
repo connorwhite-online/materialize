@@ -9,6 +9,7 @@ import type {
   CommentOnListingPayload,
   MakeOnFilePayload,
   NotificationType,
+  PrintOnFilePayload,
   ReplyToCommentPayload,
 } from "./types";
 
@@ -36,6 +37,7 @@ async function insert(
     | CommentOnListingPayload
     | ReplyToCommentPayload
     | MakeOnFilePayload
+    | PrintOnFilePayload
 ) {
   if (recipientId === actorId) return;
   try {
@@ -96,4 +98,11 @@ export async function notifyMakeOnFile(
   payload: MakeOnFilePayload
 ) {
   return insert(recipientId, payload.actor.id, "make_on_file", payload);
+}
+
+export async function notifyPrintOnFile(
+  recipientId: string,
+  payload: PrintOnFilePayload
+) {
+  return insert(recipientId, payload.actor.id, "print_on_file", payload);
 }

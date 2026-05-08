@@ -5,6 +5,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { createOrder } from "@/lib/craftcloud/client";
 import { logError } from "@/lib/logger";
+import { notifyPrintOrderPlaced } from "@/lib/notifications/print-order";
 
 /**
  * Fires after a successful Stripe `checkout.session.completed`
@@ -133,7 +134,7 @@ export async function handlePrintOrderPayment(
   // Conditional write — only swap our sentinel for the real id.
   // Belt-and-suspenders: if a parallel actor (e.g. operator manually
   // editing the row) has already moved past us, leave their state alone.
-  await db
+  const placed = await db
     .update(printOrders)
     .set({ craftCloudOrderId: ccOrderId, status: "ordered" })
     .where(
@@ -141,7 +142,17 @@ export async function handlePrintOrderPayment(
         eq(printOrders.id, printOrderId),
         eq(printOrders.craftCloudOrderId, sentinel)
       )
-    );
+    )
+    .returning({ id: printOrders.id });
+
+  // Fire creator notifications iff WE were the writer (sentinel still
+  // matched). Otherwise a parallel worker already ran or is running
+  // through this same path and would notify on its own. Helper
+  // swallows its own errors so a downstream blip can't roll back the
+  // order placement we just committed.
+  if (placed.length > 0) {
+    await notifyPrintOrderPlaced(printOrderId);
+  }
 }
 
 async function releaseClaim(

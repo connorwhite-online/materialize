@@ -17,16 +17,22 @@ import {
 import type {
   CommentOnListingPayload,
   MakeOnFilePayload,
+  PrintOnFilePayload,
   ReplyToCommentPayload,
 } from "@/lib/notifications/types";
 
 export type NotificationItem = {
   id: string;
-  type: "comment_on_listing" | "reply_to_comment" | "make_on_file";
+  type:
+    | "comment_on_listing"
+    | "reply_to_comment"
+    | "make_on_file"
+    | "print_on_file";
   payload:
     | CommentOnListingPayload
     | ReplyToCommentPayload
-    | MakeOnFilePayload;
+    | MakeOnFilePayload
+    | PrintOnFilePayload;
   readAt: Date | string | null;
   createdAt: Date | string;
 };
@@ -228,9 +234,14 @@ function NotificationRow({
   const { actor, listing } = notification.payload;
   const href = buildHref(notification);
   const message = buildMessage(notification);
-  const snippet = "snippet" in notification.payload
-    ? notification.payload.snippet
-    : null;
+  // Comment-style payloads carry a `snippet`; print payloads carry
+  // `materialLabel` which we surface in the same slot.
+  let snippet: string | null = null;
+  if ("snippet" in notification.payload) {
+    snippet = notification.payload.snippet ?? null;
+  } else if ("materialLabel" in notification.payload) {
+    snippet = notification.payload.materialLabel;
+  }
   const isUnread = !notification.readAt;
 
   return (
@@ -298,6 +309,11 @@ function buildHref(n: NotificationItem): string {
   if (n.type === "make_on_file") {
     return `${base}#make-${(n.payload as MakeOnFilePayload).makeId}`;
   }
+  if (n.type === "print_on_file") {
+    // Link to the order detail page — the relevant action from this
+    // event is reviewing the order, not visiting the file again.
+    return `/dashboard/orders/${(n.payload as PrintOnFilePayload).printOrderId}`;
+  }
   // For comments + replies, anchor to the comment id so the listing
   // page can scroll to it (fragment is harmless if the page doesn't
   // expose a matching anchor yet).
@@ -316,5 +332,7 @@ function buildMessage(n: NotificationItem): string {
       return "replied to your comment";
     case "make_on_file":
       return "shared a make";
+    case "print_on_file":
+      return "just printed";
   }
 }

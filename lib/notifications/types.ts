@@ -15,7 +15,8 @@
 export type NotificationType =
   | "comment_on_listing"
   | "reply_to_comment"
-  | "make_on_file";
+  | "make_on_file"
+  | "print_on_file";
 
 interface ActorSnapshot {
   /** User id of whoever triggered the event. */
@@ -58,10 +59,21 @@ export interface MakeOnFilePayload {
   snippet: string | null;
 }
 
+export interface PrintOnFilePayload {
+  /** Buyer who placed the order. */
+  actor: ActorSnapshot;
+  listing: ListingRef; // always kind: 'file'
+  /** ID of the printOrders row, used for the deep-link to the order detail. */
+  printOrderId: string;
+  /** Resolved material display string, e.g. "PLA Black". Null if the catalog lookup missed. */
+  materialLabel: string | null;
+}
+
 export type NotificationPayload =
   | (CommentOnListingPayload & { type: "comment_on_listing" })
   | (ReplyToCommentPayload & { type: "reply_to_comment" })
-  | (MakeOnFilePayload & { type: "make_on_file" });
+  | (MakeOnFilePayload & { type: "make_on_file" })
+  | (PrintOnFilePayload & { type: "print_on_file" });
 
 /**
  * Trim a comment body or caption to a short preview safe for the
