@@ -2,12 +2,14 @@
 
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-import { filePhotos, files } from "@/lib/db/schema";
+import { filePhotos, files, users } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { deleteObject } from "@/lib/storage";
 import { logError } from "@/lib/logger";
 import { userHasUsedFile } from "@/lib/entitlement";
+import { notifyMakeOnFile } from "@/lib/notifications/notify";
+import { makeSnippet } from "@/lib/notifications/types";
 
 const MAX_CAPTION_LENGTH = 500;
 
@@ -107,7 +109,12 @@ export async function addFileMake(params: {
     // — owners aren't the typical poster, but they can also share a
     // make of their own work without restriction.
     const [file] = await db
-      .select({ id: files.id, slug: files.slug })
+      .select({
+        id: files.id,
+        slug: files.slug,
+        name: files.name,
+        ownerId: files.userId,
+      })
       .from(files)
       .where(eq(files.id, params.fileId));
     if (!file) return { error: "File not found" };
@@ -137,6 +144,28 @@ export async function addFileMake(params: {
         kind: "make",
       })
       .returning();
+
+    // Notify the file owner that someone posted a make of their work.
+    // Self-events (owner posts their own make) are skipped inside the
+    // notify helper. Pull the actor's identity inline since the make
+    // table doesn't carry user fields.
+    const [actor] = await db
+      .select({
+        id: users.id,
+        username: users.username,
+        displayName: users.displayName,
+        avatarUrl: users.avatarUrl,
+      })
+      .from(users)
+      .where(eq(users.id, userId));
+    if (actor) {
+      await notifyMakeOnFile(file.ownerId, {
+        actor,
+        listing: { kind: "file", name: file.name, slug: file.slug },
+        makeId: photo.id,
+        snippet: trimmedCaption ? makeSnippet(trimmedCaption) : null,
+      });
+    }
 
     revalidatePath(`/files/${file.slug}`);
     return { photoId: photo.id };

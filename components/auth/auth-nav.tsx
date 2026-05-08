@@ -7,7 +7,17 @@ import { UserMenu } from "./user-menu";
 import { useAuthModal } from "./auth-modal";
 import { CartButton } from "@/components/print/cart-button";
 
-export function AuthNav() {
+interface Props {
+  /**
+   * Server-rendered notification bell slot. Only meaningful for
+   * authed users; anon viewers ignore it. Threaded as a slot so the
+   * server-side data fetch (auth + DB query) can happen outside this
+   * client component.
+   */
+  notificationsSlot?: React.ReactNode;
+}
+
+export function AuthNav({ notificationsSlot }: Props = {}) {
   const { user, isLoaded, isSignedIn } = useUser();
   const { openAuth } = useAuthModal();
   const pathname = usePathname();
@@ -27,6 +37,7 @@ export function AuthNav() {
     return (
       <div className="flex items-center gap-2">
         <CartButton />
+        {notificationsSlot}
         {!onOwnProfile && <UserMenu />}
       </div>
     );

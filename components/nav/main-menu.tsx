@@ -173,7 +173,14 @@ export function MainMenuTrigger() {
  * At nav+ the page header is hidden because everything the header
  * carried lives here now.
  */
-export function MainMenuSidebar() {
+interface MainMenuSidebarProps {
+  /** Server-rendered notification bell, threaded into SidebarUserBlock. */
+  notificationsSlot?: React.ReactNode;
+}
+
+export function MainMenuSidebar({
+  notificationsSlot,
+}: MainMenuSidebarProps = {}) {
   const pathname = usePathname();
 
   return (
@@ -221,7 +228,7 @@ export function MainMenuSidebar() {
         })}
       </nav>
       <div className="mt-auto">
-        <SidebarUserBlock />
+        <SidebarUserBlock notificationsSlot={notificationsSlot} />
       </div>
     </aside>
   );

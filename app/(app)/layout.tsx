@@ -5,6 +5,7 @@ import {
   MainMenuSidebar,
   MainMenuTrigger,
 } from "@/components/nav/main-menu";
+import { NotificationBellServer } from "@/components/notifications/notification-bell-server";
 
 /**
  * Progressive-blur layer table for the mobile header backdrop.
@@ -149,10 +150,10 @@ export default function AppLayout({
           </div>
           <div className="relative mx-auto flex h-16 max-w-7xl items-center justify-between px-4">
             <MainMenuTrigger />
-            <AuthNav />
+            <AuthNav notificationsSlot={<NotificationBellServer />} />
           </div>
         </header>
-        <MainMenuSidebar />
+        <MainMenuSidebar notificationsSlot={<NotificationBellServer />} />
         <main className="flex-1">{children}</main>
         <CartPanel />
       </div>

@@ -18,7 +18,16 @@ import { useAuthModal } from "./auth-modal";
  * block IS the profile link. The cart icon still rides along when
  * populated, sitting above the user row.
  */
-export function SidebarUserBlock() {
+interface Props {
+  /**
+   * Server-rendered notification bell slot. Sits above the user
+   * profile row alongside the cart icon. Server-rendered so the
+   * count + recent items are pre-fetched without a client round-trip.
+   */
+  notificationsSlot?: React.ReactNode;
+}
+
+export function SidebarUserBlock({ notificationsSlot }: Props = {}) {
   const { user, isLoaded, isSignedIn } = useUser();
   const { openAuth } = useAuthModal();
 
@@ -37,7 +46,10 @@ export function SidebarUserBlock() {
     const profileHref = user.username ? `/u/${user.username}` : "/";
     return (
       <div className="flex flex-col gap-1.5">
-        <CartButton />
+        <div className="flex items-center gap-1">
+          <CartButton />
+          {notificationsSlot}
+        </div>
         <Link
           href={profileHref}
           aria-label="Your profile"

@@ -9,12 +9,18 @@ import {
   projectComments,
   files,
   projects,
+  users,
 } from "@/lib/db/schema";
 import {
   postCommentSchema,
   editCommentSchema,
 } from "@/lib/validations/comment";
 import { logError } from "@/lib/logger";
+import {
+  notifyCommentOnListing,
+  notifyReplyToComment,
+} from "@/lib/notifications/notify";
+import { makeSnippet } from "@/lib/notifications/types";
 
 // "file" or "project" — narrows which table + listing FK we touch.
 // Centralizing this constant lets the page integration pass it once
@@ -55,20 +61,41 @@ export async function postComment(
       };
     }
 
+    // Pull the actor's identity once. We denormalize it into any
+    // notification payload we end up emitting below — saves a join
+    // later and survives later renames in the bell preview.
+    const [actor] = await db
+      .select({
+        id: users.id,
+        username: users.username,
+        displayName: users.displayName,
+        avatarUrl: users.avatarUrl,
+      })
+      .from(users)
+      .where(eq(users.id, userId));
+    if (!actor) return { error: "User not found" };
+
     if (target === "file") {
       // Verify the listing exists (and grab the slug for revalidate).
       const [file] = await db
-        .select({ id: files.id, slug: files.slug })
+        .select({
+          id: files.id,
+          slug: files.slug,
+          name: files.name,
+          ownerId: files.userId,
+        })
         .from(files)
         .where(eq(files.id, targetId));
       if (!file) return { error: "File not found" };
 
+      let parentAuthorId: string | null = null;
       if (parsed.data.parentId) {
         const [parent] = await db
           .select({
             id: fileComments.id,
             parentId: fileComments.parentId,
             fileId: fileComments.fileId,
+            authorId: fileComments.userId,
           })
           .from(fileComments)
           .where(eq(fileComments.id, parsed.data.parentId));
@@ -78,6 +105,7 @@ export async function postComment(
         if (parent.parentId !== null) {
           return { error: "Replies can't be nested further" };
         }
+        parentAuthorId = parent.authorId;
       }
 
       const [row] = await db
@@ -90,22 +118,67 @@ export async function postComment(
         })
         .returning({ id: fileComments.id });
 
+      // Notification side-effects. The notify helpers swallow their
+      // own errors and skip self-events, so we don't have to guard
+      // those cases here.
+      const listing = {
+        kind: "file" as const,
+        name: file.name,
+        slug: file.slug,
+      };
+      const snippet = makeSnippet(parsed.data.body);
+      if (parsed.data.parentId && parentAuthorId) {
+        // Reply: notify the parent author. If they happen to be the
+        // listing owner, also send the listing-comment notification
+        // (different inbox entry; the listing-owner cares about both
+        // identity-flavors of "someone is talking on my page").
+        await notifyReplyToComment(parentAuthorId, {
+          actor,
+          listing,
+          commentId: row.id,
+          parentCommentId: parsed.data.parentId,
+          snippet,
+        });
+        if (file.ownerId !== parentAuthorId) {
+          await notifyCommentOnListing(file.ownerId, {
+            actor,
+            listing,
+            commentId: row.id,
+            snippet,
+          });
+        }
+      } else {
+        await notifyCommentOnListing(file.ownerId, {
+          actor,
+          listing,
+          commentId: row.id,
+          snippet,
+        });
+      }
+
       revalidatePath(`/files/${file.slug}`);
       return { ok: true, commentId: row.id };
     }
 
     const [project] = await db
-      .select({ id: projects.id, slug: projects.slug })
+      .select({
+        id: projects.id,
+        slug: projects.slug,
+        name: projects.name,
+        ownerId: projects.userId,
+      })
       .from(projects)
       .where(eq(projects.id, targetId));
     if (!project) return { error: "Project not found" };
 
+    let parentAuthorId: string | null = null;
     if (parsed.data.parentId) {
       const [parent] = await db
         .select({
           id: projectComments.id,
           parentId: projectComments.parentId,
           projectId: projectComments.projectId,
+          authorId: projectComments.userId,
         })
         .from(projectComments)
         .where(eq(projectComments.id, parsed.data.parentId));
@@ -115,6 +188,7 @@ export async function postComment(
       if (parent.parentId !== null) {
         return { error: "Replies can't be nested further" };
       }
+      parentAuthorId = parent.authorId;
     }
 
     const [row] = await db
@@ -126,6 +200,37 @@ export async function postComment(
         body: parsed.data.body,
       })
       .returning({ id: projectComments.id });
+
+    const listing = {
+      kind: "project" as const,
+      name: project.name,
+      slug: project.slug,
+    };
+    const snippet = makeSnippet(parsed.data.body);
+    if (parsed.data.parentId && parentAuthorId) {
+      await notifyReplyToComment(parentAuthorId, {
+        actor,
+        listing,
+        commentId: row.id,
+        parentCommentId: parsed.data.parentId,
+        snippet,
+      });
+      if (project.ownerId !== parentAuthorId) {
+        await notifyCommentOnListing(project.ownerId, {
+          actor,
+          listing,
+          commentId: row.id,
+          snippet,
+        });
+      }
+    } else {
+      await notifyCommentOnListing(project.ownerId, {
+        actor,
+        listing,
+        commentId: row.id,
+        snippet,
+      });
+    }
 
     revalidatePath(`/projects/${project.slug}`);
     return { ok: true, commentId: row.id };

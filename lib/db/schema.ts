@@ -570,6 +570,48 @@ export const projectBomItems = pgTable(
   ]
 );
 
+// Notifications — recipient-keyed events about activity on the
+// recipient's listings (their files / projects / comments). Single
+// table with a `type` discriminator + JSON payload rather than a
+// table per event source — keeps the schema small and lets us add
+// new event types (purchases, follows, etc.) without migrations.
+//
+// Payload is denormalized at insert time (actor name, listing name,
+// snippet, deep-link slugs). The bell renders directly from these
+// fields without joining; that means a notification keeps rendering
+// even after the source comment is deleted, the listing is renamed,
+// or the actor changes their handle. Trade-off: a renamed listing
+// still shows the old name in old notifications. Acceptable.
+//
+// Indexes: (user_id, created_at) for the bell's "newest N" feed,
+// (user_id, read_at) for the unread count and "mark all read" path.
+
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // Free-form text + CHECK so we can introduce new types without
+    // running an enum migration. Known types are documented in
+    // `lib/notifications/types.ts`.
+    type: text("type").notNull(),
+    payload: jsonb("payload").notNull(),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("notifications_user_created_idx").on(
+      table.userId,
+      table.createdAt
+    ),
+    index("notifications_user_read_idx").on(table.userId, table.readAt),
+  ]
+);
+
 // Comments — public discussion on a file or project listing.
 //
 // Two parallel tables (one per target type) instead of one polymorphic
