@@ -8,6 +8,8 @@ import { UserAvatar } from "@/components/auth/user-avatar";
 import { Pencil } from "@/components/icons/pencil";
 import { Trash } from "@/components/icons/trash";
 import { CommentForm } from "./comment-form";
+import { DeletePhotoButton } from "@/components/photos/delete-photo-button";
+import { PhotoLightbox } from "@/components/photos/photo-lightbox";
 import {
   deleteComment,
   editComment,
@@ -32,6 +34,19 @@ export type CommentRow = {
   };
 };
 
+export type PhotoPost = {
+  id: string;
+  caption: string | null;
+  downloadUrl: string;
+  createdAt: Date | string;
+  author: {
+    id: string;
+    username: string | null;
+    displayName: string | null;
+    avatarUrl: string | null;
+  };
+};
+
 interface Props {
   target: CommentTarget;
   targetId: string;
@@ -41,21 +56,42 @@ interface Props {
    * `createdAt asc` so threads read top-down.
    */
   comments: CommentRow[];
+  /**
+   * Photo posts (community make photos) interleaved with top-level
+   * text comments by createdAt. Replies still nest under their
+   * parent text comment; photo posts have no replies in v1.
+   */
+  photoPosts?: PhotoPost[];
   ownerId: string;
   viewerId: string | null;
   /** When true, show composer; otherwise show sign-in CTA. */
   isSignedIn: boolean;
   signInRedirect: string;
+  /**
+   * When true, the composer surfaces an "attach photo" affordance —
+   * posting with a photo routes through addFileMake instead of
+   * postComment. File detail only.
+   */
+  acceptPhoto?: boolean;
+  /** Required when acceptPhoto is on — destination fileId. */
+  fileId?: string;
 }
+
+type FeedItem =
+  | { kind: "comment"; data: CommentRow; replies: CommentRow[] }
+  | { kind: "photo"; data: PhotoPost };
 
 export function CommentsSection({
   target,
   targetId,
   comments,
+  photoPosts = [],
   ownerId,
   viewerId,
   isSignedIn,
   signInRedirect,
+  acceptPhoto = false,
+  fileId,
 }: Props) {
   const topLevel = comments.filter((c) => c.parentId === null);
   const repliesByParent = new Map<string, CommentRow[]>();
@@ -67,6 +103,22 @@ export function CommentsSection({
     }
   }
 
+  // Interleave top-level text comments with photo posts by createdAt
+  // ascending so the conversation reads top-down (matches the
+  // existing comment ordering).
+  const items: FeedItem[] = [
+    ...topLevel.map<FeedItem>((c) => ({
+      kind: "comment",
+      data: c,
+      replies: repliesByParent.get(c.id) ?? [],
+    })),
+    ...photoPosts.map<FeedItem>((p) => ({ kind: "photo", data: p })),
+  ].sort((a, b) => {
+    const aT = new Date(a.data.createdAt).getTime();
+    const bT = new Date(b.data.createdAt).getTime();
+    return aT - bT;
+  });
+
   return (
     <div className="space-y-5">
       {isSignedIn ? (
@@ -74,6 +126,8 @@ export function CommentsSection({
           target={target}
           targetId={targetId}
           placeholder="Share thoughts on this listing…"
+          acceptPhoto={acceptPhoto}
+          fileId={fileId}
         />
       ) : (
         <Link
@@ -84,25 +138,119 @@ export function CommentsSection({
         </Link>
       )}
 
-      {topLevel.length === 0 ? (
+      {items.length === 0 ? (
         <p className="py-6 text-center text-sm text-muted-foreground">
           No comments yet.
         </p>
       ) : (
         <div className="space-y-5">
-          {topLevel.map((c) => (
-            <CommentThread
-              key={c.id}
-              target={target}
-              targetId={targetId}
-              comment={c}
-              replies={repliesByParent.get(c.id) ?? []}
-              ownerId={ownerId}
-              viewerId={viewerId}
-              canReply={isSignedIn}
-            />
-          ))}
+          {items.map((item) =>
+            item.kind === "comment" ? (
+              <CommentThread
+                key={`c-${item.data.id}`}
+                target={target}
+                targetId={targetId}
+                comment={item.data}
+                replies={item.replies}
+                ownerId={ownerId}
+                viewerId={viewerId}
+                canReply={isSignedIn}
+              />
+            ) : (
+              <PhotoPostRow
+                key={`p-${item.data.id}`}
+                photo={item.data}
+                ownerId={ownerId}
+                viewerId={viewerId}
+              />
+            )
+          )}
         </div>
+      )}
+    </div>
+  );
+}
+
+function PhotoPostRow({
+  photo,
+  ownerId,
+  viewerId,
+}: {
+  photo: PhotoPost;
+  ownerId: string;
+  viewerId: string | null;
+}) {
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const canDelete =
+    viewerId !== null && (viewerId === photo.author.id || viewerId === ownerId);
+  const name = photo.author.displayName || photo.author.username || "Anonymous";
+
+  return (
+    <div
+      id={`make-${photo.id}`}
+      className="flex scroll-mt-24 items-start gap-3"
+    >
+      <UserAvatar
+        seed={photo.author.username || photo.author.id}
+        imageUrl={photo.author.avatarUrl}
+        displayName={name}
+        className="h-8 w-8 shrink-0"
+      />
+      <div className="flex-1 min-w-0 space-y-1.5">
+        <div className="flex items-baseline gap-2">
+          {photo.author.username ? (
+            <Link
+              href={`/u/${photo.author.username}`}
+              className="text-sm font-medium hover:underline"
+            >
+              {photo.author.displayName || photo.author.username}
+            </Link>
+          ) : (
+            <span className="text-sm font-medium">
+              {photo.author.displayName || "Anonymous"}
+            </span>
+          )}
+          <span className="text-xs text-muted-foreground">
+            {timeAgo(photo.createdAt)}
+          </span>
+        </div>
+        <div className="relative inline-block max-w-full">
+          <button
+            type="button"
+            onClick={() => setLightboxOpen(true)}
+            className="block max-w-full overflow-hidden rounded-xl border border-border bg-muted/30 transition-opacity hover:opacity-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer"
+            aria-label={photo.caption || "View photo"}
+          >
+            <img
+              src={photo.downloadUrl}
+              alt={photo.caption || ""}
+              className="block max-h-80 max-w-full object-contain"
+            />
+          </button>
+          {canDelete && <DeletePhotoButton photoId={photo.id} />}
+        </div>
+        {photo.caption && (
+          <p className="text-sm whitespace-pre-wrap break-words">
+            {photo.caption}
+          </p>
+        )}
+      </div>
+
+      {lightboxOpen && (
+        <PhotoLightbox
+          photos={[
+            {
+              id: photo.id,
+              downloadUrl: photo.downloadUrl,
+              caption: photo.caption,
+            },
+          ]}
+          index={0}
+          onClose={() => setLightboxOpen(false)}
+          onIndexChange={() => {
+            /* single photo */
+          }}
+        />
       )}
     </div>
   );

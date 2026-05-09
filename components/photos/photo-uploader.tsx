@@ -4,6 +4,7 @@ import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { ImagePlus } from "@/components/icons/image-plus";
 import { addFilePhoto, addFileMake } from "@/app/actions/photos";
+import { uploadPhotoToR2, validatePhoto } from "@/lib/photos/upload-photo";
 import { cn } from "@/lib/utils";
 
 interface PhotoUploaderProps {
@@ -30,14 +31,6 @@ interface PhotoUploaderProps {
   multiple?: boolean;
 }
 
-const MAX_PHOTO_SIZE = 10 * 1024 * 1024;
-const ACCEPTED_MIME = new Set([
-  "image/jpeg",
-  "image/jpg",
-  "image/png",
-  "image/webp",
-]);
-
 /**
  * Compact icon-only photo uploader. Three input modes:
  *   - click → opens the native file picker
@@ -63,56 +56,20 @@ export function PhotoUploader({
   const upload = useCallback(
     async (file: File) => {
       setError(null);
-      // Client-side gates so we don't waste a presign round-trip on
-      // obvious-fail uploads. The server validates again.
-      if (!ACCEPTED_MIME.has(file.type.toLowerCase())) {
-        setError("JPG, PNG, or WEBP only.");
-        return;
-      }
-      if (file.size > MAX_PHOTO_SIZE) {
-        setError("Photo exceeds 10MB.");
+      const invalid = validatePhoto(file);
+      if (invalid) {
+        setError(invalid);
         return;
       }
 
       setUploading(true);
       try {
-        const presignRes = await fetch("/api/upload/photo-presign", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            filename: file.name || "pasted-image",
-            contentType: file.type,
-            fileSize: file.size,
-          }),
-        });
-
-        if (!presignRes.ok) {
-          const data = await presignRes.json().catch(() => ({}));
-          throw new Error(
-            data.error || `Failed to get upload URL (${presignRes.status})`
-          );
-        }
-
-        const { uploadUrl, storageKey } = (await presignRes.json()) as {
-          uploadUrl: string;
-          storageKey: string;
-        };
-
-        const putRes = await fetch(uploadUrl, {
-          method: "PUT",
-          body: file,
-          headers: { "Content-Type": file.type },
-        });
-        if (!putRes.ok) {
-          throw new Error(`R2 upload failed (${putRes.status})`);
-        }
-
+        const { storageKey } = await uploadPhotoToR2(file);
         const action = kind === "make" ? addFileMake : addFilePhoto;
         const result = await action({ fileId, storageKey });
         if (result && "error" in result) {
           throw new Error(result.error);
         }
-
         // Surfacing the new photo without a hard reload — the server
         // action already revalidates the path.
         router.refresh();

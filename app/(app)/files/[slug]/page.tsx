@@ -542,30 +542,17 @@ export default async function FileDetailPage(props: {
     ? getMaterialById(file.recommendedMaterialId)
     : null;
 
-  // Unified photos feed — curator (kind='creator') + community
-  // (kind='make') sharing one chronological carousel. Newest first
-  // so the most recent activity is at the start of the row.
-  const feedPhotos: FeedPhoto[] = [
-    ...photosWithUrls.map((p) => ({
-      id: p.id,
-      downloadUrl: p.downloadUrl,
-      caption: p.caption,
-      createdAt: p.createdAt,
-      kind: "creator" as const,
-      author: null,
-    })),
-    ...makesWithUrls.map((m) => ({
-      id: m.id,
-      downloadUrl: m.downloadUrl,
-      caption: m.caption,
-      createdAt: m.createdAt,
-      kind: "make" as const,
-      author: m.author,
-    })),
-  ].sort(
-    (a, b) =>
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
+  // Curator photos carousel (kind='creator' only) — community photos
+  // are now folded into the comments thread as photo-posts so a
+  // listing's discussion reads as one stream.
+  const feedPhotos: FeedPhoto[] = photosWithUrls.map((p) => ({
+    id: p.id,
+    downloadUrl: p.downloadUrl,
+    caption: p.caption,
+    createdAt: p.createdAt,
+    kind: "creator" as const,
+    author: null,
+  }));
 
   // Primary asset drives the filename / size / preview / bounding box.
   const primaryAsset = assets[0] ?? null;
@@ -724,30 +711,32 @@ export default async function FileDetailPage(props: {
                 </p>
               </div>
 
-              {/* Photos — curator photos and community prints share
-                  one chronological carousel; the trailing slot is
-                  the photo uploader (sized to match thumbnails)
-                  routed to creator-or-make based on the viewer's
-                  role. */}
+              {/* Curator carousel — owner-only authoritative photos.
+                  Add tile leads the row, multi-select. Hidden for
+                  non-owners with no curator photos. */}
               <PhotosFeed
                 photos={feedPhotos}
                 fileId={file.id}
                 ownerId={file.userId}
                 viewerId={userId}
-                uploadAs={
-                  isOwner ? "creator" : canPostMake ? "make" : null
-                }
+                uploadAs={isOwner ? "creator" : null}
               />
 
-              {/* Comments thread + composer. */}
+              {/* Comments thread + composer. Community photos
+                  (makes) are interleaved as photo-posts; the
+                  composer accepts an optional photo attachment so
+                  a "post" can be text, a photo, or both. */}
               <CommentsSection
                 target="file"
                 targetId={file.id}
                 comments={comments}
+                photoPosts={makesWithUrls}
                 ownerId={file.userId}
                 viewerId={userId}
                 isSignedIn={!!userId}
                 signInRedirect={`/files/${slug}`}
+                acceptPhoto={canPostMake}
+                fileId={file.id}
               />
             </CardContent>
           </Card>
