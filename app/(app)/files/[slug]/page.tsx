@@ -20,6 +20,7 @@ import {
 import { eq, and, asc, desc, inArray, isNull } from "drizzle-orm";
 import { ownsLoadedFile, userHasUsedFile } from "@/lib/entitlement";
 import { Card, CardContent } from "@/components/ui/card";
+import { CollapsibleSection } from "@/components/ui/collapsible-section";
 import { Button } from "@/components/ui/button";
 import { PhotoGallery } from "@/components/photos/photo-gallery";
 import { PhotoUploader } from "@/components/photos/photo-uploader";
@@ -642,13 +643,16 @@ export default async function FileDetailPage(props: {
             </div>
           )}
 
-          {/* Description — whitespace-pre-wrap preserves the line
-              breaks the creator typed. Markdown rendering is a
-              follow-up. */}
+          {/* Description — collapsible because the section can grow
+              long enough to push the rest of the page below the
+              fold. whitespace-pre-wrap preserves the line breaks
+              the creator typed; markdown rendering is a follow-up. */}
           {file.description && (
-            <p className="whitespace-pre-wrap break-words text-muted-foreground leading-relaxed">
-              {file.description}
-            </p>
+            <CollapsibleSection title="Description">
+              <p className="whitespace-pre-wrap break-words text-muted-foreground leading-relaxed">
+                {file.description}
+              </p>
+            </CollapsibleSection>
           )}
 
           {/* Print recommendations — compact inline metadata so a

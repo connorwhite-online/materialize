@@ -14,6 +14,7 @@ import {
 } from "@/lib/db/schema";
 import { eq, and, asc } from "drizzle-orm";
 import { Card, CardContent } from "@/components/ui/card";
+import { CollapsibleSection } from "@/components/ui/collapsible-section";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -244,9 +245,11 @@ export default async function ProjectDetailPage(props: {
           )}
 
           {project.description && (
-            <p className="text-muted-foreground leading-relaxed">
-              {project.description}
-            </p>
+            <CollapsibleSection title="Description">
+              <p className="whitespace-pre-wrap break-words text-muted-foreground leading-relaxed">
+                {project.description}
+              </p>
+            </CollapsibleSection>
           )}
 
           {project.tags && project.tags.length > 0 && (
@@ -282,9 +285,16 @@ export default async function ProjectDetailPage(props: {
 
           {/* Bill of materials — sits above the files grid because
               it's part of the assembly story ("here's what you need")
-              before "and here are the parts to print". Self-hides
-              when empty. */}
-          <BomDisplay items={bomItems} />
+              before "and here are the parts to print". Hidden when
+              empty; collapsed by default since the BOM can be long. */}
+          {bomItems.length > 0 && (
+            <CollapsibleSection
+              title="Bill of Materials"
+              meta={bomItems.length}
+            >
+              <BomDisplay items={bomItems} />
+            </CollapsibleSection>
+          )}
 
           <div>
             <h2 className="text-sm font-medium mb-3">

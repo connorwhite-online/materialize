@@ -1,5 +1,3 @@
-import { Card, CardContent } from "@/components/ui/card";
-
 export type BomDisplayItem = {
   id: string;
   name: string;
@@ -10,30 +8,19 @@ export type BomDisplayItem = {
 };
 
 /**
- * Read-only Bill of Materials table on the project detail page.
- *
- * Renders nothing for an empty list — the page is responsible for
- * deciding to render this only when items exist (so we don't get a
- * "Bill of Materials\nempty" header on most projects).
+ * Read-only Bill of Materials list on the project detail page.
+ * Renders nothing for an empty list. The header (title + count) is
+ * supplied by the wrapping <CollapsibleSection> on the page —
+ * this component only owns the row layout.
  */
 export function BomDisplay({ items }: { items: BomDisplayItem[] }) {
   if (items.length === 0) return null;
   return (
-    <Card>
-      <CardContent className="p-0">
-        <div className="px-4 pt-4 pb-2 text-base font-semibold">
-          Bill of Materials
-          <span className="ml-2 text-sm font-normal text-muted-foreground tabular-nums">
-            {items.length}
-          </span>
-        </div>
-        <div className="divide-y divide-border/60">
-          {items.map((item) => (
-            <BomRow key={item.id} item={item} />
-          ))}
-        </div>
-      </CardContent>
-    </Card>
+    <div className="overflow-hidden rounded-xl border border-border divide-y divide-border/60">
+      {items.map((item) => (
+        <BomRow key={item.id} item={item} />
+      ))}
+    </div>
   );
 }
 
