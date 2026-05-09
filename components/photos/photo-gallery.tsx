@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { deleteFilePhoto } from "@/app/actions/photos";
+import { useState, useEffect, useCallback } from "react";
+import { X } from "@/components/icons/x";
+import { ChevronLeft } from "@/components/icons/chevron-left";
+import { ChevronRight } from "@/components/icons/chevron-right";
 
 interface Photo {
   id: string;
@@ -16,76 +17,176 @@ interface PhotoGalleryProps {
   isOwner: boolean;
 }
 
-export function PhotoGallery({ photos, isOwner }: PhotoGalleryProps) {
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const [deleting, setDeleting] = useState<string | null>(null);
+/**
+ * Curator photo gallery for a file. Renders as a horizontal
+ * scroll-snapping carousel of square thumbnails; clicking any
+ * thumbnail opens the lightbox at that index, where the photo is
+ * shown at its native aspect ratio over a dark backdrop.
+ *
+ * The owner-only "Remove photo" affordance has moved to a corner-X
+ * button on each card (see the photo-card delete UI added in a
+ * follow-up). This component keeps the `isOwner` prop because the
+ * delete state lives where the photos are listed, but the trash
+ * affordance itself isn't here yet.
+ */
+export function PhotoGallery({ photos, isOwner: _isOwner }: PhotoGalleryProps) {
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
   if (photos.length === 0) return null;
-
-  const selected = photos[selectedIndex];
-
-  const handleDelete = async (photoId: string) => {
-    setDeleting(photoId);
-    await deleteFilePhoto(photoId);
-    setDeleting(null);
-    if (selectedIndex >= photos.length - 1) {
-      setSelectedIndex(Math.max(0, photos.length - 2));
-    }
-  };
 
   return (
     <div className="space-y-3">
       <h2 className="text-sm font-semibold">Printed Photos</h2>
 
-      {/* Main image — capped width on desktop so a wide listing column
-          doesn't blow the photo up to viewport-height. object-contain
-          shows the full photo (no center-crop) on a soft neutral
-          backdrop, like a gallery frame. */}
-      <div className="relative mx-auto aspect-[4/3] w-full max-w-2xl overflow-hidden rounded-2xl border border-border bg-muted/30">
-        <img
-          src={selected.downloadUrl}
-          alt={selected.caption || "Printed part photo"}
-          className="absolute inset-0 h-full w-full object-contain"
-        />
-        {selected.caption && (
-          <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/60 to-transparent p-3">
-            <p className="text-white text-xs">{selected.caption}</p>
-          </div>
-        )}
+      {/* Horizontal scroll carousel. snap-x snap-mandatory keeps the
+          row honest about which thumbnail is "active" on swipe.
+          aspect-square gives every photo the same crop frame so the
+          row reads as a uniform rhythm regardless of source aspect. */}
+      <div className="flex gap-2 overflow-x-auto pb-2 snap-x snap-mandatory">
+        {photos.map((photo, i) => (
+          <button
+            key={photo.id}
+            type="button"
+            onClick={() => setLightboxIndex(i)}
+            className="relative shrink-0 aspect-square w-32 sm:w-40 snap-start overflow-hidden rounded-xl border border-border bg-muted/30 transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={photo.caption || `Photo ${i + 1}`}
+          >
+            <img
+              src={photo.downloadUrl}
+              alt={photo.caption || ""}
+              className="absolute inset-0 h-full w-full object-cover"
+            />
+          </button>
+        ))}
       </div>
 
-      {/* Thumbnails */}
+      {lightboxIndex !== null && (
+        <PhotoLightbox
+          photos={photos}
+          index={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+          onIndexChange={setLightboxIndex}
+        />
+      )}
+    </div>
+  );
+}
+
+interface LightboxProps {
+  photos: Photo[];
+  index: number;
+  onClose: () => void;
+  onIndexChange: (i: number) => void;
+}
+
+/**
+ * Fullscreen overlay that renders a single photo at its native
+ * aspect ratio. Backdrop click, Escape, or the corner X closes it;
+ * arrow keys (and on-screen chevrons when there are siblings) page
+ * through the album.
+ */
+function PhotoLightbox({
+  photos,
+  index,
+  onClose,
+  onIndexChange,
+}: LightboxProps) {
+  const photo = photos[index];
+
+  const goPrev = useCallback(() => {
+    onIndexChange(index === 0 ? photos.length - 1 : index - 1);
+  }, [index, photos.length, onIndexChange]);
+
+  const goNext = useCallback(() => {
+    onIndexChange(index === photos.length - 1 ? 0 : index + 1);
+  }, [index, photos.length, onIndexChange]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowLeft") goPrev();
+      else if (e.key === "ArrowRight") goNext();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [goPrev, goNext, onClose]);
+
+  // Lock body scroll while the lightbox is open so the page behind
+  // doesn't shift when the user uses arrow keys / scrollwheel.
+  useEffect(() => {
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, []);
+
+  if (!photo) return null;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Photo viewer"
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/85 p-4 sm:p-8"
+    >
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Close"
+        className="absolute right-4 top-4 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
+      >
+        <X size={18} />
+      </button>
+
       {photos.length > 1 && (
-        <div className="mx-auto flex max-w-2xl gap-2 overflow-x-auto">
-          {photos.map((photo, i) => (
-            <button
-              key={photo.id}
-              onClick={() => setSelectedIndex(i)}
-              className={`shrink-0 w-16 h-16 rounded-md overflow-hidden border-2 transition-colors ${
-                i === selectedIndex ? "border-primary" : "border-transparent"
-              }`}
-            >
-              <img
-                src={photo.downloadUrl}
-                alt=""
-                className="w-full h-full object-cover"
-              />
-            </button>
-          ))}
-        </div>
+        <>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              goPrev();
+            }}
+            aria-label="Previous photo"
+            className="absolute left-4 top-1/2 -translate-y-1/2 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
+          >
+            <ChevronLeft size={20} />
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              goNext();
+            }}
+            aria-label="Next photo"
+            className="absolute right-4 top-1/2 -translate-y-1/2 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
+          >
+            <ChevronRight size={20} />
+          </button>
+        </>
       )}
 
-      {/* Delete button for owner */}
-      {isOwner && selected && (
-        <Button
-          variant="ghost"
-          size="xs"
-          onClick={() => handleDelete(selected.id)}
-          disabled={deleting === selected.id}
-          className="text-destructive"
+      <img
+        src={photo.downloadUrl}
+        alt={photo.caption || ""}
+        onClick={(e) => e.stopPropagation()}
+        className="max-h-[calc(100vh-8rem)] max-w-full object-contain"
+      />
+
+      {photo.caption && (
+        <p
+          onClick={(e) => e.stopPropagation()}
+          className="mt-4 max-w-prose text-center text-sm text-white/90"
         >
-          {deleting === selected.id ? "Deleting..." : "Remove photo"}
-        </Button>
+          {photo.caption}
+        </p>
+      )}
+
+      {photos.length > 1 && (
+        <p className="mt-3 text-xs text-white/60 tabular-nums">
+          {index + 1} / {photos.length}
+        </p>
       )}
     </div>
   );
