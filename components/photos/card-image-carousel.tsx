@@ -125,7 +125,12 @@ export function CardImageCarousel({
                 goTo(i);
               }}
               className={cn(
-                "h-1.5 cursor-pointer rounded-full bg-white transition-all duration-300 ease-out",
+                // Linear easing on width so the leaving dot loses
+                // exactly as much width per frame as the new active
+                // dot gains — zero-sum, no perceived asymmetry that
+                // ease-out introduces by decelerating at the trailing
+                // edge of both transitions.
+                "h-1.5 cursor-pointer rounded-full bg-white transition-[width,opacity] duration-200 ease-linear",
                 i === activeIndex ? "w-3" : "w-1.5 opacity-60"
               )}
             />
