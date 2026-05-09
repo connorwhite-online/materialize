@@ -54,8 +54,9 @@ export async function generateMetadata(props: {
     155
   );
   const url = `/u/${username}`;
-  const images = user.avatarUrl ? [user.avatarUrl] : undefined;
 
+  // og:image / twitter:image are emitted by opengraph-image.tsx in
+  // this segment — leave them off here to avoid duplicate tags.
   return {
     title: name,
     description,
@@ -65,14 +66,12 @@ export async function generateMetadata(props: {
       title: name,
       description,
       url,
-      images,
       username: user.username ?? undefined,
     },
     twitter: {
-      card: "summary",
+      card: "summary_large_image",
       title: name,
       description,
-      images,
     },
   };
 }

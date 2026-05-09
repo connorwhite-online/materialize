@@ -60,8 +60,9 @@ export async function generateMetadata(props: {
     155
   );
   const url = `/projects/${slug}`;
-  const images = row.thumbnailUrl ? [row.thumbnailUrl] : undefined;
 
+  // og:image / twitter:image are emitted by opengraph-image.tsx in
+  // this segment — leave them off here to avoid duplicate tags.
   return {
     title: row.name,
     description,
@@ -71,14 +72,12 @@ export async function generateMetadata(props: {
       title: row.name,
       description,
       url,
-      images,
       authors: row.displayName ? [row.displayName] : undefined,
     },
     twitter: {
       card: "summary_large_image",
       title: row.name,
       description,
-      images,
     },
   };
 }

@@ -32,10 +32,9 @@ export async function generateMetadata(props: {
     155
   );
   const url = `/materials/${material.slug}`;
-  const images = material.featuredImage
-    ? [resolveCatalogImage(material.featuredImage, 1200)]
-    : undefined;
 
+  // og:image / twitter:image are emitted by opengraph-image.tsx in
+  // this segment — leave them off here to avoid duplicate tags.
   return {
     title: `${material.name} (${group.name})`,
     description,
@@ -45,13 +44,11 @@ export async function generateMetadata(props: {
       title: material.name,
       description,
       url,
-      images,
     },
     twitter: {
       card: "summary_large_image",
       title: material.name,
       description,
-      images,
     },
   };
 }
