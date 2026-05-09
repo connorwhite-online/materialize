@@ -588,25 +588,31 @@ export default async function FileDetailPage(props: {
           flaggedAt={file.flaggedAt}
         />
       )}
-      <div className="grid items-start gap-8 lg:grid-cols-3">
-        <div className="lg:col-span-2 space-y-6">
-          {/* Title + filename · size */}
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold">{file.name}</h1>
-              {verifying && <VerifyingPill />}
-            </div>
-            {primaryAsset && (
-              <p className="mt-1 text-sm text-muted-foreground">
-                {primaryAsset.originalFilename}
-                <span className="mx-1.5">·</span>
-                {formatBytes(primaryAsset.fileSize)}
-                <span className="mx-1.5">·</span>
-                <span className="uppercase">{primaryAsset.format}</span>
-              </p>
-            )}
+      <div className="flex flex-col gap-8 lg:grid lg:grid-cols-3 lg:items-start">
+        {/* Title + filename — order-1 on mobile so it always leads.
+            On desktop spans the left two columns of row 1; the
+            sidebar (action card) sits in row 1 col 3 alongside it. */}
+        <div className="order-1 lg:col-span-2">
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold">{file.name}</h1>
+            {verifying && <VerifyingPill />}
           </div>
+          {primaryAsset && (
+            <p className="mt-1 text-sm text-muted-foreground">
+              {primaryAsset.originalFilename}
+              <span className="mx-1.5">·</span>
+              {formatBytes(primaryAsset.fileSize)}
+              <span className="mx-1.5">·</span>
+              <span className="uppercase">{primaryAsset.format}</span>
+            </p>
+          )}
+        </div>
 
+        {/* Main content — order-3 on mobile (after the action card)
+            so the buyer sees price/CTA before the long preview /
+            description / comments scroll. On desktop slots into
+            row 2 cols 1-2 via auto-flow. */}
+        <div className="order-3 space-y-6 lg:col-span-2">
           {/* 3D preview */}
           {previewable && primaryAsset ? (
             <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
@@ -720,10 +726,13 @@ export default async function FileDetailPage(props: {
           />
         </div>
 
-        {/* Sidebar — sticky on lg+ so the price + actions card stays
-            in view while the user scrolls the description, photos, and
-            activity stream. Mirrors the cart pattern on /print. */}
-        <div className="space-y-4 lg:sticky lg:top-6">
+        {/* Action card — order-2 on mobile so price + Print + Download
+            sit right under the title/author info, before the buyer
+            scrolls into the preview/description. On desktop pinned
+            to col 3 spanning rows 1-2 with sticky positioning, so it
+            stays in view while the user reads the long content
+            below. */}
+        <div className="order-2 space-y-4 lg:col-start-3 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-6">
           {/* Compact action card. Top row pairs the creator identity
               (left) with owner-only edit/delete icons (right) in a
               flex row — keeps the icons aligned to the top edge of
