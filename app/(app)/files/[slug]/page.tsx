@@ -20,8 +20,7 @@ import {
 import { eq, and, asc, desc, inArray, isNull } from "drizzle-orm";
 import { ownsLoadedFile, userHasUsedFile } from "@/lib/entitlement";
 import { Card, CardContent } from "@/components/ui/card";
-import { CollapsibleSection } from "@/components/ui/collapsible-section";
-import { MarkdownProse } from "@/components/ui/markdown-prose";
+import { ExpandableDescription } from "@/components/ui/expandable-description";
 import { Button } from "@/components/ui/button";
 import { PhotoGallery } from "@/components/photos/photo-gallery";
 import { PhotoUploader } from "@/components/photos/photo-uploader";
@@ -645,15 +644,12 @@ export default async function FileDetailPage(props: {
         {/* Main content (description, photos, comments, activity) —
             order-4 on mobile, lg row 3 cols 1-2 on desktop. */}
         <div className="order-4 space-y-6 lg:col-span-2 lg:col-start-1 lg:row-start-3">
-          {/* Description — markdown-rendered so headings, lists,
-              code, and links work for documentation-style listings.
-              Plain prose still reads correctly because line breaks
-              are preserved (the paragraph override carries
-              whitespace-pre-wrap). */}
+          {/* Description — markdown-rendered, with inline expand for
+              long-form copy. Short descriptions render in full; long
+              ones collapse to a few lines with a gradient fade and
+              "Show more" toggle. */}
           {file.description && (
-            <CollapsibleSection title="Description">
-              <MarkdownProse>{file.description}</MarkdownProse>
-            </CollapsibleSection>
+            <ExpandableDescription source={file.description} />
           )}
 
           {/* Print recommendations — compact inline metadata so a

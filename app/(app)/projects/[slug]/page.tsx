@@ -15,7 +15,7 @@ import {
 import { eq, and, asc } from "drizzle-orm";
 import { Card, CardContent } from "@/components/ui/card";
 import { CollapsibleSection } from "@/components/ui/collapsible-section";
-import { MarkdownProse } from "@/components/ui/markdown-prose";
+import { ExpandableDescription } from "@/components/ui/expandable-description";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { DeleteProjectButton } from "@/components/projects/delete-project-button";
@@ -250,9 +250,7 @@ export default async function ProjectDetailPage(props: {
           )}
 
           {project.description && (
-            <CollapsibleSection title="Description">
-              <MarkdownProse>{project.description}</MarkdownProse>
-            </CollapsibleSection>
+            <ExpandableDescription source={project.description} />
           )}
 
           {/* Search tags + design-tag "Print Recommendations" card
