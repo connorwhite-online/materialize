@@ -95,7 +95,7 @@ export async function addFileMake(params: {
 }) {
   try {
     const { userId } = await auth();
-    if (!userId) return { error: "Sign in to share a make" };
+    if (!userId) return { error: "Sign in to share a photo" };
 
     const expectedPrefix = `photos/${userId}/`;
     if (
@@ -124,7 +124,7 @@ export async function addFileMake(params: {
     if (!ok) {
       return {
         error:
-          "Print or download this file first to share a make of it.",
+          "Print or download this file first to share a photo of it.",
       };
     }
 

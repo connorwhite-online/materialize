@@ -83,7 +83,7 @@ function buildHeadline(
     case "reply_to_comment":
       return `${actor} replied to your comment on ${listing}`;
     case "make_on_file":
-      return `${actor} shared a make of your ${targetWord} ${listing}`;
+      return `${actor} added a photo to your ${targetWord} ${listing}`;
     case "print_on_file":
       return `${actor} just printed your ${targetWord} ${listing}`;
   }

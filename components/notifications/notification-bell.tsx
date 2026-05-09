@@ -328,7 +328,7 @@ function buildMessage(n: NotificationItem): string {
     case "reply_to_comment":
       return "replied to your comment";
     case "make_on_file":
-      return "shared a make";
+      return "added a photo";
     case "print_on_file":
       return "just printed";
   }

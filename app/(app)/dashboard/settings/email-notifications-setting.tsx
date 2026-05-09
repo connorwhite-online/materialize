@@ -26,9 +26,9 @@ const EVENT_TYPES: Array<{
   },
   {
     key: "make_on_file",
-    label: "Makes on your files",
+    label: "Photos on your files",
     description:
-      "When someone shares a community-printed photo (make) of one of your files.",
+      "When someone adds a photo of their print to one of your files.",
   },
   {
     key: "print_on_file",

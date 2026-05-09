@@ -3,7 +3,6 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Trash } from "@/components/icons/trash";
 import { UserAvatar } from "@/components/auth/user-avatar";
@@ -33,17 +32,24 @@ interface Props {
   isSignedIn: boolean;
   /** Print page link to surface in the empty / locked state. */
   primaryAssetId: string | null;
-  /** Listing owner — gets moderation rights to delete any make. */
+  /** Listing owner — gets moderation rights to delete any photo. */
   ownerId: string;
   viewerId: string | null;
 }
 
 /**
- * Community-makes section. Sits below the curator gallery on the file
- * detail page. Posting is gated to users who have actually downloaded
- * or printed the file (`canPost`); everyone else sees the empty state
- * with a CTA pointing to the action that would unlock posting (sign in
- * or print).
+ * Photos-of-this-file feed. Renders as a bare grid above the
+ * comments thread on the file detail page (no header / Card chrome
+ * of its own) so they read as one "Discussion" surface — photos
+ * above, text comments below.
+ *
+ * Posting is gated to users who actually downloaded or printed the
+ * file. Anonymous viewers see a sign-in CTA; signed-in non-printers
+ * see a "print first" CTA pointing at the print page.
+ *
+ * The internal field/event name is still "make" (`addFileMake` /
+ * `notifyMakeOnFile`) — that's a future schema-rename concern.
+ * User-visible copy here is "photo of your print".
  */
 export function MakesSection({
   fileId,
@@ -56,63 +62,50 @@ export function MakesSection({
   viewerId,
 }: Props) {
   return (
-    <Card>
-      <CardContent className="space-y-4">
-        <div>
-          <h2 className="text-base font-semibold">
-            Makes
-            <span className="ml-2 text-sm font-normal text-muted-foreground tabular-nums">
-              {makes.length}
-            </span>
-          </h2>
+    <div className="space-y-3">
+      {canPost ? (
+        <div className="flex items-center gap-3">
+          <PhotoUploader fileId={fileId} kind="make" />
           <p className="text-xs text-muted-foreground">
-            Community-printed photos of this file.
+            Share a photo of your print
           </p>
         </div>
+      ) : !isSignedIn ? (
+        <Link
+          href={`/sign-in?redirect=${encodeURIComponent(`/files/${fileSlug}`)}`}
+          className="block rounded-xl border border-dashed border-border px-4 py-3 text-center text-sm text-muted-foreground hover:bg-muted/40 transition-colors"
+        >
+          Sign in to share a photo of your print
+        </Link>
+      ) : (
+        <div className="rounded-xl border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
+          <p>Print or download this file first to share a photo.</p>
+          {primaryAssetId && (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="mt-2"
+              render={<Link href={`/print/${primaryAssetId}`} />}
+            >
+              Print this file
+            </Button>
+          )}
+        </div>
+      )}
 
-        {canPost ? (
-          <PhotoUploader fileId={fileId} kind="make" />
-        ) : !isSignedIn ? (
-          <Link
-            href={`/sign-in?redirect=${encodeURIComponent(`/files/${fileSlug}`)}`}
-            className="block rounded-xl border border-dashed border-border px-4 py-3 text-center text-sm text-muted-foreground hover:bg-muted/40 transition-colors"
-          >
-            Sign in to share your make
-          </Link>
-        ) : (
-          <div className="rounded-xl border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
-            <p>Print or download this file first to share your make.</p>
-            {primaryAssetId && (
-              <Button
-                variant="secondary"
-                size="sm"
-                className="mt-2"
-                render={<Link href={`/print/${primaryAssetId}`} />}
-              >
-                Print this file
-              </Button>
-            )}
-          </div>
-        )}
-
-        {makes.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">
-            No makes yet. Be the first to share one.
-          </p>
-        ) : (
-          <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
-            {makes.map((m) => (
-              <MakeCard
-                key={m.id}
-                make={m}
-                viewerId={viewerId}
-                ownerId={ownerId}
-              />
-            ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+      {makes.length > 0 && (
+        <div className="grid gap-3 grid-cols-2 sm:grid-cols-3">
+          {makes.map((m) => (
+            <MakeCard
+              key={m.id}
+              make={m}
+              viewerId={viewerId}
+              ownerId={ownerId}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -127,6 +120,7 @@ function MakeCard({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [hovering, setHovering] = useState(false);
   const canDelete =
     viewerId !== null &&
     (viewerId === make.author.id || viewerId === ownerId);
@@ -143,59 +137,61 @@ function MakeCard({
   return (
     <div
       id={`make-${make.id}`}
-      className="scroll-mt-24 overflow-hidden rounded-xl border border-border bg-card"
+      className="group relative scroll-mt-24 overflow-hidden rounded-xl border border-border bg-card"
+      onMouseEnter={() => setHovering(true)}
+      onMouseLeave={() => setHovering(false)}
     >
-      <div className="relative aspect-[4/3]">
+      <div className="relative aspect-square">
         <img
           src={make.downloadUrl}
           alt={make.caption || "Community print photo"}
           className="w-full h-full object-cover"
         />
-      </div>
-      <div className="space-y-2 p-3">
-        <div className="flex items-center gap-2 min-w-0">
+        {/* Author byline overlaid on bottom — visible on hover (or
+            always on touch devices since hover is unreliable there).
+            Caption is intentionally not shown anywhere now that the
+            uploader doesn't author them. */}
+        <div
+          className={`absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/70 via-black/40 to-transparent px-2.5 py-2 transition-opacity ${
+            hovering ? "opacity-100" : "opacity-0 sm:opacity-100"
+          }`}
+        >
           <UserAvatar
             seed={make.author.username || make.author.id}
             imageUrl={make.author.avatarUrl}
             displayName={
               make.author.displayName || make.author.username || "Anonymous"
             }
-            className="h-6 w-6 shrink-0"
+            className="h-5 w-5 shrink-0 ring-1 ring-white/40"
           />
           {make.author.username ? (
             <Link
               href={`/u/${make.author.username}`}
-              className="text-xs font-medium truncate hover:underline"
+              className="truncate text-[11px] font-medium text-white hover:underline"
             >
               {make.author.displayName || make.author.username}
             </Link>
           ) : (
-            <span className="text-xs font-medium truncate">
+            <span className="truncate text-[11px] font-medium text-white">
               {make.author.displayName || "Anonymous"}
             </span>
           )}
-          <span className="ml-auto text-xs text-muted-foreground tabular-nums shrink-0">
+          <span className="ml-auto shrink-0 text-[10px] text-white/70 tabular-nums">
             {timeAgo(make.createdAt)}
           </span>
         </div>
-        {make.caption && (
-          <p className="text-xs text-muted-foreground line-clamp-3">
-            {make.caption}
-          </p>
-        )}
-        {canDelete && (
-          <button
-            type="button"
-            onClick={handleDelete}
-            disabled={pending}
-            aria-label="Delete make"
-            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-destructive transition-colors cursor-pointer disabled:opacity-50"
-          >
-            <Trash className="size-3.5" />
-            {pending ? "Deleting…" : "Delete"}
-          </button>
-        )}
       </div>
+      {canDelete && (
+        <button
+          type="button"
+          onClick={handleDelete}
+          disabled={pending}
+          aria-label="Delete photo"
+          className="absolute right-2 top-2 inline-flex items-center justify-center rounded-md bg-black/50 p-1.5 text-white opacity-0 transition-opacity hover:bg-destructive group-hover:opacity-100 focus-visible:opacity-100 disabled:opacity-50"
+        >
+          <Trash className="size-3.5" />
+        </button>
+      )}
     </div>
   );
 }
