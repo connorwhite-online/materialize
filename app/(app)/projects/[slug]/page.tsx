@@ -15,6 +15,7 @@ import {
 import { eq, and, asc } from "drizzle-orm";
 import { Card, CardContent } from "@/components/ui/card";
 import { CollapsibleSection } from "@/components/ui/collapsible-section";
+import { MarkdownProse } from "@/components/ui/markdown-prose";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { DeleteProjectButton } from "@/components/projects/delete-project-button";
@@ -250,9 +251,7 @@ export default async function ProjectDetailPage(props: {
 
           {project.description && (
             <CollapsibleSection title="Description">
-              <p className="whitespace-pre-wrap break-words text-muted-foreground leading-relaxed">
-                {project.description}
-              </p>
+              <MarkdownProse>{project.description}</MarkdownProse>
             </CollapsibleSection>
           )}
 
