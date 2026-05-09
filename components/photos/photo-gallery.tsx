@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { X } from "@/components/icons/x";
 import { ChevronLeft } from "@/components/icons/chevron-left";
 import { ChevronRight } from "@/components/icons/chevron-right";
+import { DeletePhotoButton } from "./delete-photo-button";
 
 interface Photo {
   id: string;
@@ -21,15 +22,10 @@ interface PhotoGalleryProps {
  * Curator photo gallery for a file. Renders as a horizontal
  * scroll-snapping carousel of square thumbnails; clicking any
  * thumbnail opens the lightbox at that index, where the photo is
- * shown at its native aspect ratio over a dark backdrop.
- *
- * The owner-only "Remove photo" affordance has moved to a corner-X
- * button on each card (see the photo-card delete UI added in a
- * follow-up). This component keeps the `isOwner` prop because the
- * delete state lives where the photos are listed, but the trash
- * affordance itself isn't here yet.
+ * shown at its native aspect ratio over a dark backdrop. Owners
+ * see a corner-X delete button on every thumbnail.
  */
-export function PhotoGallery({ photos, isOwner: _isOwner }: PhotoGalleryProps) {
+export function PhotoGallery({ photos, isOwner }: PhotoGalleryProps) {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
   if (photos.length === 0) return null;
@@ -44,19 +40,24 @@ export function PhotoGallery({ photos, isOwner: _isOwner }: PhotoGalleryProps) {
           row reads as a uniform rhythm regardless of source aspect. */}
       <div className="flex gap-2 overflow-x-auto pb-2 snap-x snap-mandatory">
         {photos.map((photo, i) => (
-          <button
+          <div
             key={photo.id}
-            type="button"
-            onClick={() => setLightboxIndex(i)}
-            className="relative shrink-0 aspect-square w-32 sm:w-40 snap-start overflow-hidden rounded-xl border border-border bg-muted/30 transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label={photo.caption || `Photo ${i + 1}`}
+            className="relative shrink-0 aspect-square w-32 sm:w-40 snap-start overflow-hidden rounded-xl border border-border bg-muted/30"
           >
-            <img
-              src={photo.downloadUrl}
-              alt={photo.caption || ""}
-              className="absolute inset-0 h-full w-full object-cover"
-            />
-          </button>
+            <button
+              type="button"
+              onClick={() => setLightboxIndex(i)}
+              className="absolute inset-0 cursor-pointer transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={photo.caption || `Photo ${i + 1}`}
+            >
+              <img
+                src={photo.downloadUrl}
+                alt={photo.caption || ""}
+                className="absolute inset-0 h-full w-full object-cover"
+              />
+            </button>
+            {isOwner && <DeletePhotoButton photoId={photo.id} />}
+          </div>
         ))}
       </div>
 

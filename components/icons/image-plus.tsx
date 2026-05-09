@@ -1,9 +1,9 @@
 import type { SVGProps } from "react";
 
 /**
- * Image-plus icon — a picture frame with a small "add" affordance,
- * used on the photo uploader's drop target. Stroked style;
- * currentColor so callers recolor via text-* classes.
+ * Image-plus icon — a picture frame with a small "+" mark in the
+ * top-right corner, used on the photo uploader's drop target.
+ * Stroked style; currentColor so callers recolor via text-* classes.
  */
 export function ImagePlus({
   size = 18,
@@ -32,9 +32,8 @@ export function ImagePlus({
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      <circle cx="18" cy="6" r="3" stroke="currentColor" strokeWidth={2} />
       <path
-        d="M18 4.5V7.5M16.5 6H19.5"
+        d="M18 3V9M15 6H21"
         stroke="currentColor"
         strokeWidth={2}
         strokeLinecap="round"

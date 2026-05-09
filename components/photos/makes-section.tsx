@@ -1,13 +1,11 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Trash } from "@/components/icons/trash";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { PhotoUploader } from "./photo-uploader";
-import { deleteFilePhoto } from "@/app/actions/photos";
+import { DeletePhotoButton } from "./delete-photo-button";
 import { timeAgo } from "@/lib/utils/time";
 
 export type MakeRow = {
@@ -118,21 +116,10 @@ function MakeCard({
   viewerId: string | null;
   ownerId: string;
 }) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
   const [hovering, setHovering] = useState(false);
   const canDelete =
     viewerId !== null &&
     (viewerId === make.author.id || viewerId === ownerId);
-
-  const handleDelete = () => {
-    if (pending) return;
-    startTransition(async () => {
-      const res = await deleteFilePhoto(make.id);
-      if ("error" in res) return;
-      router.refresh();
-    });
-  };
 
   return (
     <div
@@ -181,17 +168,7 @@ function MakeCard({
           </span>
         </div>
       </div>
-      {canDelete && (
-        <button
-          type="button"
-          onClick={handleDelete}
-          disabled={pending}
-          aria-label="Delete photo"
-          className="absolute right-2 top-2 inline-flex items-center justify-center rounded-md bg-black/50 p-1.5 text-white opacity-0 transition-opacity hover:bg-destructive group-hover:opacity-100 focus-visible:opacity-100 disabled:opacity-50"
-        >
-          <Trash className="size-3.5" />
-        </button>
-      )}
+      {canDelete && <DeletePhotoButton photoId={make.id} />}
     </div>
   );
 }
