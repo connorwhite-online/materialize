@@ -71,12 +71,7 @@ export function MakesSection({
         </div>
 
         {canPost ? (
-          <PhotoUploader
-            fileId={fileId}
-            kind="make"
-            label="Share your make"
-            captionPlaceholder="What did you print? (optional)"
-          />
+          <PhotoUploader fileId={fileId} kind="make" />
         ) : !isSignedIn ? (
           <Link
             href={`/sign-in?redirect=${encodeURIComponent(`/files/${fileSlug}`)}`}

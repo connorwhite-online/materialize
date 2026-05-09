@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Input } from "@/components/ui/input";
+import { ImagePlus } from "@/components/icons/image-plus";
 import { addFilePhoto, addFileMake } from "@/app/actions/photos";
+import { cn } from "@/lib/utils";
 
 interface PhotoUploaderProps {
   fileId: string;
@@ -13,10 +14,6 @@ interface PhotoUploaderProps {
    * which gates on download/print.
    */
   kind?: "creator" | "make";
-  /** Override the heading text. */
-  label?: string;
-  /** Override the caption placeholder. */
-  captionPlaceholder?: string;
 }
 
 const MAX_PHOTO_SIZE = 10 * 1024 * 1024;
@@ -27,123 +24,161 @@ const ACCEPTED_MIME = new Set([
   "image/webp",
 ]);
 
+/**
+ * Compact icon-only photo uploader. Three input modes:
+ *   - click → opens the native file picker
+ *   - drag → drop a file onto the icon
+ *   - paste → focus the icon and Cmd/Ctrl+V an image (e.g. from
+ *     a screenshot or Slack)
+ *
+ * No caption field — image-as-feedback is the unit of contribution
+ * here. Any prose discussion belongs in the comments below.
+ */
 export function PhotoUploader({
   fileId,
   kind = "creator",
-  label,
-  captionPlaceholder = "Caption (optional)",
 }: PhotoUploaderProps) {
   const router = useRouter();
   const [uploading, setUploading] = useState(false);
-  const [caption, setCaption] = useState("");
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const upload = useCallback(
+    async (file: File) => {
+      setError(null);
+      // Client-side gates so we don't waste a presign round-trip on
+      // obvious-fail uploads. The server validates again.
+      if (!ACCEPTED_MIME.has(file.type.toLowerCase())) {
+        setError("JPG, PNG, or WEBP only.");
+        return;
+      }
+      if (file.size > MAX_PHOTO_SIZE) {
+        setError("Photo exceeds 10MB.");
+        return;
+      }
 
-    setErrorMessage(null);
+      setUploading(true);
+      try {
+        const presignRes = await fetch("/api/upload/photo-presign", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename: file.name || "pasted-image",
+            contentType: file.type,
+            fileSize: file.size,
+          }),
+        });
 
-    // Client-side gates so we don't waste a presign round-trip on
-    // obvious-fail uploads. The server validates again.
-    if (!ACCEPTED_MIME.has(file.type.toLowerCase())) {
-      setErrorMessage("Only JPG, PNG, or WEBP images are accepted.");
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      return;
-    }
-    if (file.size > MAX_PHOTO_SIZE) {
-      setErrorMessage("Photo exceeds 10MB.");
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      return;
-    }
+        if (!presignRes.ok) {
+          const data = await presignRes.json().catch(() => ({}));
+          throw new Error(
+            data.error || `Failed to get upload URL (${presignRes.status})`
+          );
+        }
 
-    setUploading(true);
-    try {
-      const presignRes = await fetch("/api/upload/photo-presign", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          filename: file.name,
-          contentType: file.type,
-          fileSize: file.size,
-        }),
-      });
+        const { uploadUrl, storageKey } = (await presignRes.json()) as {
+          uploadUrl: string;
+          storageKey: string;
+        };
 
-      if (!presignRes.ok) {
-        const data = await presignRes.json().catch(() => ({}));
-        throw new Error(
-          data.error || `Failed to get upload URL (${presignRes.status})`
+        const putRes = await fetch(uploadUrl, {
+          method: "PUT",
+          body: file,
+          headers: { "Content-Type": file.type },
+        });
+        if (!putRes.ok) {
+          throw new Error(`R2 upload failed (${putRes.status})`);
+        }
+
+        const action = kind === "make" ? addFileMake : addFilePhoto;
+        const result = await action({ fileId, storageKey });
+        if (result && "error" in result) {
+          throw new Error(result.error);
+        }
+
+        // Surfacing the new photo without a hard reload — the server
+        // action already revalidates the path.
+        router.refresh();
+      } catch (err) {
+        console.error("Photo upload failed:", err);
+        setError(
+          err instanceof Error ? err.message : "Photo upload failed."
         );
+      } finally {
+        setUploading(false);
       }
+    },
+    [fileId, kind, router]
+  );
 
-      const { uploadUrl, storageKey } = (await presignRes.json()) as {
-        uploadUrl: string;
-        storageKey: string;
-      };
+  const onDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setDragOver(false);
+      if (uploading) return;
+      const file = e.dataTransfer.files?.[0];
+      if (file) void upload(file);
+    },
+    [upload, uploading]
+  );
 
-      const putRes = await fetch(uploadUrl, {
-        method: "PUT",
-        body: file,
-        headers: { "Content-Type": file.type },
-      });
-      if (!putRes.ok) {
-        throw new Error(`R2 upload failed (${putRes.status})`);
+  const onPaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      if (uploading) return;
+      for (const item of e.clipboardData.items) {
+        if (item.kind === "file" && item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (file) {
+            e.preventDefault();
+            void upload(file);
+            return;
+          }
+        }
       }
-
-      const action = kind === "make" ? addFileMake : addFilePhoto;
-      const result = await action({
-        fileId,
-        storageKey,
-        caption: caption || undefined,
-      });
-      if (result && "error" in result) {
-        throw new Error(result.error);
-      }
-
-      setCaption("");
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      // Refresh the page so the new photo / make appears immediately.
-      // The server action revalidates the path; this surfaces the
-      // re-fetched data without a full hard reload.
-      router.refresh();
-    } catch (err) {
-      console.error("Photo upload failed:", err);
-      setErrorMessage(
-        err instanceof Error ? err.message : "Photo upload failed."
-      );
-    } finally {
-      setUploading(false);
-    }
-  };
+    },
+    [upload, uploading]
+  );
 
   return (
-    <div className="space-y-2">
-      <p className="text-sm font-medium">
-        {label ?? "Add a photo of your print"}
-      </p>
-      <Input
-        placeholder={captionPlaceholder}
-        value={caption}
-        onChange={(e) => setCaption(e.target.value)}
-        maxLength={500}
+    <div className="space-y-1.5">
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={onDrop}
+        onPaste={onPaste}
+        disabled={uploading}
+        aria-label="Add photo (click, drag, or paste)"
+        title="Click, drag, or paste an image"
+        className={cn(
+          "flex h-12 w-12 cursor-pointer items-center justify-center rounded-xl border border-dashed border-border bg-muted/40 text-muted-foreground transition-colors outline-none",
+          "hover:border-foreground/40 hover:text-foreground",
+          "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
+          "disabled:cursor-not-allowed disabled:opacity-50",
+          dragOver && "border-primary bg-primary/10 text-primary",
+          uploading && "animate-pulse"
+        )}
+      >
+        <ImagePlus size={20} />
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) void upload(file);
+          // Allow re-uploading the same file by clearing the input.
+          e.target.value = "";
+        }}
+        className="hidden"
       />
-      <div className="flex gap-2">
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          onChange={handleUpload}
-          disabled={uploading}
-          className="text-sm file:mr-2 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm file:font-medium"
-        />
-      </div>
-      {uploading && (
-        <p className="text-xs text-muted-foreground">Uploading photo...</p>
-      )}
-      {errorMessage && (
-        <p className="text-xs text-destructive">{errorMessage}</p>
-      )}
+      {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   );
 }
