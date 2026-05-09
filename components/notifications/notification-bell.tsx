@@ -180,7 +180,7 @@ export function NotificationBell({
         )}
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Positioner sideOffset={8} align="end">
+        <Popover.Positioner sideOffset={8} align="end" className="isolate z-50">
           <Popover.Popup className="depth-surface w-[360px] max-w-[calc(100vw-1rem)] overflow-hidden rounded-2xl bg-card text-card-foreground ring-1 ring-foreground/10 outline-none">
             <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
               <h2 className="text-sm font-semibold">Notifications</h2>

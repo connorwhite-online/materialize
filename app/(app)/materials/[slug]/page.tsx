@@ -310,7 +310,7 @@ export default async function MaterialDetailPage(props: {
               return (
                 <Card key={fg.id} className="gap-0 py-0 overflow-hidden">
                   {fg.featuredImage && (
-                    <div className="relative aspect-[4/3] w-full bg-muted/40">
+                    <div className="relative aspect-square w-full bg-muted/40">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={resolveCatalogImage(fg.featuredImage, 480)}
