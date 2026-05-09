@@ -685,39 +685,53 @@ export default async function FileDetailPage(props: {
             </div>
           )}
 
-          {/* Part photos — owner-curated gallery. */}
-          {(photosWithUrls.length > 0 || isOwner) && (
-            <div>
-              <PhotoGallery photos={photosWithUrls} isOwner={isOwner} />
-              {isOwner && <PhotoUploader fileId={file.id} />}
-            </div>
-          )}
+          {/* Discussion — single Card hosting curator photos, the
+              community photos feed, and the text comment thread. The
+              header reads as one "Discussion" surface; readers can
+              scan photos at the top and drop into prose comments
+              below. */}
+          <Card>
+            <CardContent className="space-y-5">
+              <div>
+                <h2 className="text-base font-semibold">Discussion</h2>
+                <p className="text-xs text-muted-foreground">
+                  Photos of prints and comments from the community.
+                </p>
+              </div>
 
-          {/* Community makes — anyone who has downloaded or printed
-              the file can share theirs. Empty state lives inside the
-              component. */}
-          <MakesSection
-            fileId={file.id}
-            fileSlug={slug}
-            makes={makesWithUrls}
-            canPost={canPostMake}
-            isSignedIn={!!userId}
-            primaryAssetId={primaryAsset?.id ?? null}
-            ownerId={file.userId}
-            viewerId={userId}
-          />
+              {/* Curator gallery — owner's own photos + uploader. */}
+              {(photosWithUrls.length > 0 || isOwner) && (
+                <div className="space-y-2">
+                  <PhotoGallery photos={photosWithUrls} isOwner={isOwner} />
+                  {isOwner && <PhotoUploader fileId={file.id} />}
+                </div>
+              )}
 
-          {/* Comments — public discussion. Empty state is rendered
-              inside the component. */}
-          <CommentsSection
-            target="file"
-            targetId={file.id}
-            comments={comments}
-            ownerId={file.userId}
-            viewerId={userId}
-            isSignedIn={!!userId}
-            signInRedirect={`/files/${slug}`}
-          />
+              {/* Community photos — anyone who downloaded or printed
+                  the file can share theirs. */}
+              <MakesSection
+                fileId={file.id}
+                fileSlug={slug}
+                makes={makesWithUrls}
+                canPost={canPostMake}
+                isSignedIn={!!userId}
+                primaryAssetId={primaryAsset?.id ?? null}
+                ownerId={file.userId}
+                viewerId={userId}
+              />
+
+              {/* Comments thread + composer. */}
+              <CommentsSection
+                target="file"
+                targetId={file.id}
+                comments={comments}
+                ownerId={file.userId}
+                viewerId={userId}
+                isSignedIn={!!userId}
+                signInRedirect={`/files/${slug}`}
+              />
+            </CardContent>
+          </Card>
 
           {/* Activity stream — prints + downloads. The component
               self-hides when both are empty. */}

@@ -3,7 +3,6 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { Pencil } from "@/components/icons/pencil";
@@ -68,57 +67,44 @@ export function CommentsSection({
     }
   }
 
-  const total = comments.filter((c) => !c.deletedAt).length;
-
   return (
-    <Card>
-      <CardContent className="space-y-5">
-        <div className="flex items-baseline justify-between">
-          <h2 className="text-base font-semibold">
-            Comments
-            <span className="ml-2 text-sm font-normal text-muted-foreground tabular-nums">
-              {total}
-            </span>
-          </h2>
+    <div className="space-y-5">
+      {isSignedIn ? (
+        <CommentForm
+          target={target}
+          targetId={targetId}
+          placeholder="Share thoughts on this listing…"
+        />
+      ) : (
+        <Link
+          href={`/sign-in?redirect=${encodeURIComponent(signInRedirect)}`}
+          className="block rounded-xl border border-dashed border-border px-4 py-3 text-center text-sm text-muted-foreground hover:bg-muted/40 transition-colors"
+        >
+          Sign in to comment
+        </Link>
+      )}
+
+      {topLevel.length === 0 ? (
+        <p className="py-6 text-center text-sm text-muted-foreground">
+          No comments yet.
+        </p>
+      ) : (
+        <div className="space-y-5">
+          {topLevel.map((c) => (
+            <CommentThread
+              key={c.id}
+              target={target}
+              targetId={targetId}
+              comment={c}
+              replies={repliesByParent.get(c.id) ?? []}
+              ownerId={ownerId}
+              viewerId={viewerId}
+              canReply={isSignedIn}
+            />
+          ))}
         </div>
-
-        {isSignedIn ? (
-          <CommentForm
-            target={target}
-            targetId={targetId}
-            placeholder="Share thoughts on this listing…"
-          />
-        ) : (
-          <Link
-            href={`/sign-in?redirect=${encodeURIComponent(signInRedirect)}`}
-            className="block rounded-xl border border-dashed border-border px-4 py-3 text-center text-sm text-muted-foreground hover:bg-muted/40 transition-colors"
-          >
-            Sign in to comment
-          </Link>
-        )}
-
-        {topLevel.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">
-            No comments yet.
-          </p>
-        ) : (
-          <div className="space-y-5">
-            {topLevel.map((c) => (
-              <CommentThread
-                key={c.id}
-                target={target}
-                targetId={targetId}
-                comment={c}
-                replies={repliesByParent.get(c.id) ?? []}
-                ownerId={ownerId}
-                viewerId={viewerId}
-                canReply={isSignedIn}
-              />
-            ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+      )}
+    </div>
   );
 }
 

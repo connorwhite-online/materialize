@@ -304,17 +304,24 @@ export default async function ProjectDetailPage(props: {
             </div>
           </div>
 
-          {/* Comments — public discussion. Empty state is rendered
-              inside the component. */}
-          <CommentsSection
-            target="project"
-            targetId={project.id}
-            comments={comments}
-            ownerId={project.userId}
-            viewerId={userId}
-            isSignedIn={!!userId}
-            signInRedirect={`/projects/${slug}`}
-          />
+          {/* Comments — public discussion. Wrapped in a Card here
+              because CommentsSection itself renders bare (the file
+              detail page combines it with photos under a single
+              "Discussion" Card). */}
+          <Card>
+            <CardContent className="space-y-5">
+              <h2 className="text-base font-semibold">Comments</h2>
+              <CommentsSection
+                target="project"
+                targetId={project.id}
+                comments={comments}
+                ownerId={project.userId}
+                viewerId={userId}
+                isSignedIn={!!userId}
+                signInRedirect={`/projects/${slug}`}
+              />
+            </CardContent>
+          </Card>
         </div>
 
         {/* Action card — order-2 mobile (between title and main), col-3
