@@ -25,10 +25,41 @@ const playground = localFont({
   display: "swap",
 });
 
+// Site-wide defaults. Per-page `generateMetadata` overrides title,
+// description, and og:image; everything else (twitter card type,
+// metadataBase, default site name) cascades from here.
+//
+// `metadataBase` is the absolute origin Next uses to resolve relative
+// og:image / twitter:image URLs. Reads from NEXT_PUBLIC_APP_URL in
+// prod / preview and falls back to localhost for dev — without this
+// Next emits a warning + relative URLs that no scraper resolves.
+const APP_URL =
+  process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+
+const SITE_NAME = "Materialize";
+const SITE_DESCRIPTION =
+  "A marketplace for 3D print files with integrated on-demand printing";
+
 export const metadata: Metadata = {
-  title: "Materialize",
-  description:
-    "A marketplace for 3D print files with integrated on-demand printing",
+  metadataBase: new URL(APP_URL),
+  title: {
+    default: SITE_NAME,
+    template: `%s · ${SITE_NAME}`,
+  },
+  description: SITE_DESCRIPTION,
+  applicationName: SITE_NAME,
+  openGraph: {
+    type: "website",
+    siteName: SITE_NAME,
+    title: SITE_NAME,
+    description: SITE_DESCRIPTION,
+    url: APP_URL,
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: SITE_NAME,
+    description: SITE_DESCRIPTION,
+  },
 };
 
 // Tell the browser the soft keyboard should overlay our layout

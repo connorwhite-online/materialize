@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
@@ -63,6 +64,60 @@ function formatBytes(bytes: number) {
   const kb = bytes / 1024;
   if (kb < 1024) return `${kb.toFixed(1)} KB`;
   return `${(kb / 1024).toFixed(1)} MB`;
+}
+
+function truncate(s: string, n: number) {
+  return s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s;
+}
+
+export async function generateMetadata(props: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await props.params;
+  const [row] = await db
+    .select({
+      name: files.name,
+      description: files.description,
+      thumbnailUrl: files.thumbnailUrl,
+      status: files.status,
+      displayName: users.displayName,
+      username: users.username,
+    })
+    .from(files)
+    .innerJoin(users, eq(files.userId, users.id))
+    .where(eq(files.slug, slug));
+
+  if (!row || row.status !== "published") {
+    return { title: "Not found", robots: { index: false, follow: false } };
+  }
+
+  const creator = row.displayName || row.username || "a Materialize creator";
+  const description = truncate(
+    row.description?.trim() || `3D printable file by ${creator}.`,
+    155
+  );
+  const url = `/files/${slug}`;
+  const images = row.thumbnailUrl ? [row.thumbnailUrl] : undefined;
+
+  return {
+    title: row.name,
+    description,
+    alternates: { canonical: url },
+    openGraph: {
+      type: "article",
+      title: row.name,
+      description,
+      url,
+      images,
+      authors: row.displayName ? [row.displayName] : undefined,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: row.name,
+      description,
+      images,
+    },
+  };
 }
 
 export default async function FileDetailPage(props: {

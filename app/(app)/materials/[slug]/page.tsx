@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,6 +10,51 @@ import {
   findMaterialBySlug,
   type CatalogMaterial,
 } from "@/lib/craftcloud/catalog";
+
+function truncate(s: string, n: number) {
+  return s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s;
+}
+
+export async function generateMetadata(props: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await props.params;
+  const hit = await findMaterialBySlug(slug);
+  if (!hit) {
+    return { title: "Not found", robots: { index: false, follow: false } };
+  }
+  const { material, group } = hit;
+
+  const description = truncate(
+    material.descriptionShort?.trim() ||
+      material.description?.trim() ||
+      `${material.name} — a ${group.name} 3D printing material on Materialize.`,
+    155
+  );
+  const url = `/materials/${material.slug}`;
+  const images = material.featuredImage
+    ? [resolveCatalogImage(material.featuredImage, 1200)]
+    : undefined;
+
+  return {
+    title: `${material.name} (${group.name})`,
+    description,
+    alternates: { canonical: url },
+    openGraph: {
+      type: "article",
+      title: material.name,
+      description,
+      url,
+      images,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: material.name,
+      description,
+      images,
+    },
+  };
+}
 
 export default async function MaterialDetailPage(props: {
   params: Promise<{ slug: string }>;

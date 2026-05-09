@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
@@ -26,6 +27,61 @@ import {
 import { userOwnsProject } from "@/lib/entitlement";
 import { DESIGN_TAG_LABELS } from "@/lib/validations/file";
 import { swallow } from "@/lib/utils/swallow";
+
+function truncate(s: string, n: number) {
+  return s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s;
+}
+
+export async function generateMetadata(props: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await props.params;
+  const [row] = await db
+    .select({
+      name: projects.name,
+      description: projects.description,
+      thumbnailUrl: projects.thumbnailUrl,
+      status: projects.status,
+      visibility: projects.visibility,
+      displayName: users.displayName,
+      username: users.username,
+    })
+    .from(projects)
+    .innerJoin(users, eq(projects.userId, users.id))
+    .where(eq(projects.slug, slug));
+
+  if (!row || row.status !== "published" || row.visibility !== "public") {
+    return { title: "Not found", robots: { index: false, follow: false } };
+  }
+
+  const creator = row.displayName || row.username || "a Materialize creator";
+  const description = truncate(
+    row.description?.trim() || `A 3D-print project by ${creator}.`,
+    155
+  );
+  const url = `/projects/${slug}`;
+  const images = row.thumbnailUrl ? [row.thumbnailUrl] : undefined;
+
+  return {
+    title: row.name,
+    description,
+    alternates: { canonical: url },
+    openGraph: {
+      type: "article",
+      title: row.name,
+      description,
+      url,
+      images,
+      authors: row.displayName ? [row.displayName] : undefined,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: row.name,
+      description,
+      images,
+    },
+  };
+}
 
 export default async function ProjectDetailPage(props: {
   params: Promise<{ slug: string }>;
