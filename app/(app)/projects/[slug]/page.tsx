@@ -15,7 +15,6 @@ import {
 import { eq, and, asc } from "drizzle-orm";
 import { Card, CardContent } from "@/components/ui/card";
 import { CollapsibleSection } from "@/components/ui/collapsible-section";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { DeleteProjectButton } from "@/components/projects/delete-project-button";
@@ -26,7 +25,6 @@ import {
   type CommentRow,
 } from "@/components/comments/comments-section";
 import { userOwnsProject } from "@/lib/entitlement";
-import { DESIGN_TAG_LABELS } from "@/lib/validations/file";
 import { swallow } from "@/lib/utils/swallow";
 
 function truncate(s: string, n: number) {
@@ -215,18 +213,24 @@ export default async function ProjectDetailPage(props: {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
-      <div className="grid gap-8 lg:grid-cols-3">
-        <div className="lg:col-span-2 space-y-6">
-          <div>
-            <h1 className="text-2xl font-bold">{project.name}</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Project
-              <span className="mx-1.5">·</span>
-              {bundledFiles.length}{" "}
-              {bundledFiles.length === 1 ? "file" : "files"}
-            </p>
-          </div>
+      <div className="flex flex-col gap-8 lg:grid lg:grid-cols-3 lg:items-start">
+        {/* Title — order-1 mobile, col-span-2 row-1 desktop. The
+            action card slots between this and the main flow on
+            mobile (order-2) so the buyer sees price/Purchase
+            before the long file grid + comments. */}
+        <div className="order-1 lg:col-span-2">
+          <h1 className="text-2xl font-bold">{project.name}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Project
+            <span className="mx-1.5">·</span>
+            {bundledFiles.length}{" "}
+            {bundledFiles.length === 1 ? "file" : "files"}
+          </p>
+        </div>
 
+        {/* Main content — order-3 on mobile, row 2 cols 1-2 on
+            desktop via auto-flow. */}
+        <div className="order-3 space-y-6 lg:col-span-2">
           {project.thumbnailUrl ? (
             <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -252,36 +256,10 @@ export default async function ProjectDetailPage(props: {
             </CollapsibleSection>
           )}
 
-          {project.tags && project.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {project.tags.map((tag) => (
-                <Badge key={tag} variant="secondary" className="text-xs">
-                  {tag}
-                </Badge>
-              ))}
-            </div>
-          )}
-
-          {project.designTags && project.designTags.length > 0 && (
-            <Card>
-              <CardContent className="p-4">
-                <p className="text-xs font-medium text-muted-foreground mb-2">
-                  Print Recommendations
-                </p>
-                <div className="flex flex-wrap gap-1">
-                  {project.designTags.map((tag) => (
-                    <Badge
-                      key={tag}
-                      variant="outline"
-                      className="text-[10px]"
-                    >
-                      {DESIGN_TAG_LABELS[tag] || tag}
-                    </Badge>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          )}
+          {/* Search tags + design-tag "Print Recommendations" card
+              intentionally don't render publicly — they're indexing
+              metadata, not creator-facing copy. Same as the file
+              detail page. */}
 
           {/* Bill of materials — sits above the files grid because
               it's part of the assembly story ("here's what you need")
@@ -342,7 +320,10 @@ export default async function ProjectDetailPage(props: {
           />
         </div>
 
-        <div className="space-y-4">
+        {/* Action card — order-2 mobile (between title and main), col-3
+            spanning rows 1-2 on desktop with sticky positioning so it
+            stays in view while the user scrolls comments / file grid. */}
+        <div className="order-2 space-y-4 lg:col-start-3 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-6">
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
