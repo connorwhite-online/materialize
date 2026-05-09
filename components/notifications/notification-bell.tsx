@@ -47,7 +47,6 @@ interface Props {
 }
 
 const VISIBLE_LIMIT = 20;
-const POLL_INTERVAL_MS = 30_000;
 
 /**
  * Notification bell with dropdown.
@@ -102,63 +101,61 @@ export function NotificationBell({
     });
   }, [open, recent, router]);
 
-  // Poll for new notifications while the tab is visible. Pauses
-  // entirely when hidden so a backgrounded tab doesn't keep hitting
-  // the API. On regaining visibility we fire one immediate fetch so
-  // the user sees fresh state without a 30s wait.
+  // Subscribe to /api/notifications/stream — server pushes a new
+  // snapshot whenever the user's recent list or unread count changes.
+  // The stream auto-closes after ~25s server-side; EventSource then
+  // reconnects automatically. We close the connection while the tab
+  // is hidden so a backgrounded tab doesn't hold a connection (and
+  // billable compute) open, and reopen on visibility.
   useEffect(() => {
+    if (typeof window === "undefined" || typeof EventSource === "undefined") {
+      return;
+    }
+    let es: EventSource | null = null;
     let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
 
-    const poll = async () => {
-      if (cancelled) return;
-      try {
-        const res = await fetch("/api/notifications/recent", {
-          credentials: "same-origin",
-          cache: "no-store",
-        });
-        if (!res.ok) return;
-        const data = (await res.json()) as {
-          unreadCount: number;
-          recent: NotificationItem[];
-        };
-        if (cancelled) return;
-        setUnreadCount(data.unreadCount);
-        setRecent(data.recent);
-      } catch {
-        // Network blips are silent — next interval will retry.
-      }
+    const open = () => {
+      if (cancelled || es) return;
+      if (typeof document !== "undefined" && document.hidden) return;
+      es = new EventSource("/api/notifications/stream", {
+        withCredentials: true,
+      });
+      es.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data) as {
+            unreadCount: number;
+            recent: NotificationItem[];
+          };
+          setUnreadCount(data.unreadCount);
+          setRecent(data.recent);
+        } catch {
+          // Malformed frame — skip; next snapshot will overwrite.
+        }
+      };
+      // EventSource auto-reconnects on transport errors using the
+      // server-supplied `retry:` field, so no explicit handler needed.
     };
 
-    const schedule = () => {
-      if (timer) clearTimeout(timer);
-      if (typeof document !== "undefined" && document.hidden) return;
-      timer = setTimeout(async () => {
-        await poll();
-        schedule();
-      }, POLL_INTERVAL_MS);
+    const close = () => {
+      if (es) {
+        es.close();
+        es = null;
+      }
     };
 
     const onVisibility = () => {
       if (typeof document === "undefined") return;
-      if (document.hidden) {
-        if (timer) {
-          clearTimeout(timer);
-          timer = null;
-        }
-      } else {
-        // Just became visible: fetch immediately, then resume cadence.
-        poll().then(schedule);
-      }
+      if (document.hidden) close();
+      else open();
     };
 
     document.addEventListener("visibilitychange", onVisibility);
-    schedule();
+    open();
 
     return () => {
       cancelled = true;
       document.removeEventListener("visibilitychange", onVisibility);
-      if (timer) clearTimeout(timer);
+      close();
     };
   }, []);
 
