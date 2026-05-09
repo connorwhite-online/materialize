@@ -14,6 +14,13 @@ interface PhotoUploaderProps {
    * which gates on download/print.
    */
   kind?: "creator" | "make";
+  /**
+   * 'sm' (default) — compact 48×48 dashed square for empty / standalone
+   * placement.
+   * 'lg' — fills the parent (designed for an aspect-square slot at the
+   * end of a photo carousel so it sits flush with the thumbnails).
+   */
+  size?: "sm" | "lg";
 }
 
 const MAX_PHOTO_SIZE = 10 * 1024 * 1024;
@@ -37,6 +44,7 @@ const ACCEPTED_MIME = new Set([
 export function PhotoUploader({
   fileId,
   kind = "creator",
+  size = "sm",
 }: PhotoUploaderProps) {
   const router = useRouter();
   const [uploading, setUploading] = useState(false);
@@ -140,8 +148,9 @@ export function PhotoUploader({
     [upload, uploading]
   );
 
+  const isLarge = size === "lg";
   return (
-    <div className="space-y-1.5">
+    <div className={cn("space-y-1.5", isLarge && "h-full w-full")}>
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
@@ -156,7 +165,10 @@ export function PhotoUploader({
         aria-label="Add photo (click, drag, or paste)"
         title="Click, drag, or paste an image"
         className={cn(
-          "flex h-12 w-12 cursor-pointer items-center justify-center rounded-xl border border-dashed border-border bg-muted/40 text-muted-foreground transition-colors outline-none",
+          "cursor-pointer rounded-xl border border-dashed border-border bg-muted/40 text-muted-foreground transition-colors outline-none flex items-center justify-center",
+          isLarge
+            ? "h-full w-full flex-col gap-2"
+            : "h-12 w-12",
           "hover:border-foreground/40 hover:text-foreground",
           "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
           "disabled:cursor-not-allowed disabled:opacity-50",
@@ -164,7 +176,8 @@ export function PhotoUploader({
           uploading && "animate-pulse"
         )}
       >
-        <ImagePlus size={20} />
+        <ImagePlus size={isLarge ? 28 : 20} />
+        {isLarge && <span className="text-xs font-medium">Add photo</span>}
       </button>
       <input
         ref={inputRef}

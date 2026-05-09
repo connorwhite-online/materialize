@@ -63,9 +63,11 @@ export function DeletePhotoButton({
           e.stopPropagation();
           setOpen(true);
         }}
-        // Dark-red glyph on a soft red wash. Sized small so it
-        // doesn't dominate the thumbnail.
-        className="absolute right-2 top-2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-destructive/15 text-destructive ring-1 ring-destructive/30 transition-colors hover:bg-destructive/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive cursor-pointer"
+        // Dark-red glyph on a translucent red wash with a subtle
+        // backdrop blur — the blur lifts the X off whatever's behind
+        // it so it stays legible over busy photos. Pinned tight to
+        // the corner of the parent rather than inset.
+        className="absolute right-1 top-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-destructive/20 text-destructive ring-1 ring-destructive/30 backdrop-blur-md transition-colors hover:bg-destructive/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive cursor-pointer"
       >
         <X size={14} />
       </button>

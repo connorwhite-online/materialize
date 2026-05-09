@@ -22,9 +22,10 @@ import { ownsLoadedFile, userHasUsedFile } from "@/lib/entitlement";
 import { Card, CardContent } from "@/components/ui/card";
 import { ExpandableDescription } from "@/components/ui/expandable-description";
 import { Button } from "@/components/ui/button";
-import { PhotoGallery } from "@/components/photos/photo-gallery";
-import { PhotoUploader } from "@/components/photos/photo-uploader";
-import { MakesSection } from "@/components/photos/makes-section";
+import {
+  PhotosFeed,
+  type FeedPhoto,
+} from "@/components/photos/photos-feed";
 import { DeleteFileButton } from "@/components/files/delete-file-button";
 import { EditFileButton } from "@/components/files/edit-file-button";
 import { FileThumbnailGenerator } from "@/components/files/file-thumbnail-generator";
@@ -165,9 +166,8 @@ export default async function FileDetailPage(props: {
     .from(fileAssets)
     .where(eq(fileAssets.fileId, file.id));
 
-  // Curator gallery photos — `kind = 'creator'`. Community-made photos
-  // (`kind = 'make'`) live in the same table but render in the Makes
-  // section below; we filter here so the gallery stays curator-only.
+  // Curator gallery photos — `kind = 'creator'`. Mapped into the
+  // unified PhotosFeed shape below alongside community photos.
   const photos = await db
     .select()
     .from(filePhotos)
@@ -178,8 +178,8 @@ export default async function FileDetailPage(props: {
   const photosWithUrls = await Promise.all(
     photos.map(async (photo) => ({
       id: photo.id,
-      storageKey: photo.storageKey,
       caption: photo.caption,
+      createdAt: photo.createdAt,
       downloadUrl: await generateDownloadUrl(photo.storageKey, 3600),
     }))
   );
@@ -542,6 +542,31 @@ export default async function FileDetailPage(props: {
     ? getMaterialById(file.recommendedMaterialId)
     : null;
 
+  // Unified photos feed — curator (kind='creator') + community
+  // (kind='make') sharing one chronological carousel. Newest first
+  // so the most recent activity is at the start of the row.
+  const feedPhotos: FeedPhoto[] = [
+    ...photosWithUrls.map((p) => ({
+      id: p.id,
+      downloadUrl: p.downloadUrl,
+      caption: p.caption,
+      createdAt: p.createdAt,
+      kind: "creator" as const,
+      author: null,
+    })),
+    ...makesWithUrls.map((m) => ({
+      id: m.id,
+      downloadUrl: m.downloadUrl,
+      caption: m.caption,
+      createdAt: m.createdAt,
+      kind: "make" as const,
+      author: m.author,
+    })),
+  ].sort(
+    (a, b) =>
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+
   // Primary asset drives the filename / size / preview / bounding box.
   const primaryAsset = assets[0] ?? null;
   const PREVIEWABLE = new Set(["stl", "obj", "3mf"]);
@@ -699,25 +724,19 @@ export default async function FileDetailPage(props: {
                 </p>
               </div>
 
-              {/* Curator gallery — owner's own photos + uploader. */}
-              {(photosWithUrls.length > 0 || isOwner) && (
-                <div className="space-y-2">
-                  <PhotoGallery photos={photosWithUrls} isOwner={isOwner} />
-                  {isOwner && <PhotoUploader fileId={file.id} />}
-                </div>
-              )}
-
-              {/* Community photos — anyone who downloaded or printed
-                  the file can share theirs. */}
-              <MakesSection
+              {/* Photos — curator photos and community prints share
+                  one chronological carousel; the trailing slot is
+                  the photo uploader (sized to match thumbnails)
+                  routed to creator-or-make based on the viewer's
+                  role. */}
+              <PhotosFeed
+                photos={feedPhotos}
                 fileId={file.id}
-                fileSlug={slug}
-                makes={makesWithUrls}
-                canPost={canPostMake}
-                isSignedIn={!!userId}
-                primaryAssetId={primaryAsset?.id ?? null}
                 ownerId={file.userId}
                 viewerId={userId}
+                uploadAs={
+                  isOwner ? "creator" : canPostMake ? "make" : null
+                }
               />
 
               {/* Comments thread + composer. */}
