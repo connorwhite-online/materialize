@@ -84,6 +84,20 @@ export function PhotosFeed({
   return (
     <>
       <div className="flex gap-2 overflow-x-auto pb-2 snap-x snap-mandatory">
+        {/* Add-tile sits first so the affordance is the first thing
+            the eye lands on instead of being chased to the end of a
+            potentially-long carousel. Multi-select so an owner can
+            drop a stack of build photos in one go. */}
+        {uploadAs && (
+          <div className="shrink-0 aspect-square w-32 sm:w-40 snap-start">
+            <PhotoUploader
+              fileId={fileId}
+              kind={uploadAs}
+              size="lg"
+              multiple
+            />
+          </div>
+        )}
         {photos.map((photo, i) => {
           const canDelete =
             viewerId !== null &&
@@ -100,12 +114,6 @@ export function PhotosFeed({
             />
           );
         })}
-
-        {uploadAs && (
-          <div className="shrink-0 aspect-square w-32 sm:w-40 snap-start">
-            <PhotoUploader fileId={fileId} kind={uploadAs} size="lg" />
-          </div>
-        )}
       </div>
 
       {lightboxIndex !== null && (

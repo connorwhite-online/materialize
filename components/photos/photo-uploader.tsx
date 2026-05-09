@@ -17,10 +17,17 @@ interface PhotoUploaderProps {
   /**
    * 'sm' (default) — compact 48×48 dashed square for empty / standalone
    * placement.
-   * 'lg' — fills the parent (designed for an aspect-square slot at the
-   * end of a photo carousel so it sits flush with the thumbnails).
+   * 'lg' — fills the parent (designed for an aspect-square slot at
+   * the start of a photo carousel so it sits flush with the
+   * thumbnails).
    */
   size?: "sm" | "lg";
+  /**
+   * Allow selecting / dropping multiple images at once. Each image
+   * is uploaded sequentially so the resulting filePhotos rows stay
+   * in the order the user picked them.
+   */
+  multiple?: boolean;
 }
 
 const MAX_PHOTO_SIZE = 10 * 1024 * 1024;
@@ -45,6 +52,7 @@ export function PhotoUploader({
   fileId,
   kind = "creator",
   size = "sm",
+  multiple = false,
 }: PhotoUploaderProps) {
   const router = useRouter();
   const [uploading, setUploading] = useState(false);
@@ -120,15 +128,28 @@ export function PhotoUploader({
     [fileId, kind, router]
   );
 
+  const uploadAll = useCallback(
+    async (files: File[]) => {
+      // Sequential so the resulting filePhotos rows preserve the
+      // order the user picked them. Errors on one don't abort the
+      // rest — each shows its own message via setError.
+      for (const f of files) {
+        await upload(f);
+      }
+    },
+    [upload]
+  );
+
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
       setDragOver(false);
       if (uploading) return;
-      const file = e.dataTransfer.files?.[0];
-      if (file) void upload(file);
+      const files = Array.from(e.dataTransfer.files);
+      if (files.length === 0) return;
+      void uploadAll(multiple ? files : files.slice(0, 1));
     },
-    [upload, uploading]
+    [uploadAll, uploading, multiple]
   );
 
   const onPaste = useCallback(
@@ -183,10 +204,11 @@ export function PhotoUploader({
         ref={inputRef}
         type="file"
         accept="image/jpeg,image/png,image/webp"
+        multiple={multiple}
         onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) void upload(file);
-          // Allow re-uploading the same file by clearing the input.
+          const files = Array.from(e.target.files || []);
+          if (files.length > 0) void uploadAll(files);
+          // Allow re-uploading the same file(s) by clearing the input.
           e.target.value = "";
         }}
         className="hidden"
