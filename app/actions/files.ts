@@ -326,6 +326,34 @@ export async function updateFileListing(fileId: string, formData: FormData) {
       return { error: parsed.error.flatten().fieldErrors };
     }
 
+    // Optional cover override — points at one of THIS file's
+    // curator photos. Empty / missing means "use the auto-captured
+    // thumbnail" (column reset to null). Validate the photo really
+    // belongs to this file so a stray uuid from another listing
+    // can't be aliased in.
+    const rawCoverPhotoId = formData.get("coverPhotoId");
+    let nextCoverPhotoId: string | null = null;
+    if (typeof rawCoverPhotoId === "string" && rawCoverPhotoId !== "") {
+      const [cover] = await db
+        .select({ id: filePhotos.id })
+        .from(filePhotos)
+        .where(
+          and(
+            eq(filePhotos.id, rawCoverPhotoId),
+            eq(filePhotos.fileId, fileId),
+            eq(filePhotos.kind, "creator")
+          )
+        );
+      if (!cover) {
+        return {
+          error: {
+            coverPhotoId: ["Cover photo doesn't belong to this file."],
+          },
+        };
+      }
+      nextCoverPhotoId = cover.id;
+    }
+
     await db
       .update(files)
       .set({
@@ -338,6 +366,7 @@ export async function updateFileListing(fileId: string, formData: FormData) {
         recommendedMaterialId: parsed.data.recommendedMaterialId,
         designTags: parsed.data.designTags,
         minWallThickness: parsed.data.minWallThickness,
+        coverPhotoId: nextCoverPhotoId,
       })
       .where(eq(files.id, fileId));
 

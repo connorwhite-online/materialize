@@ -1,6 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-import { files } from "@/lib/db/schema";
+import { files, filePhotos } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
 import { logError } from "@/lib/logger";
@@ -33,6 +33,7 @@ export async function GET(
         thumbnailUrl: files.thumbnailUrl,
         status: files.status,
         userId: files.userId,
+        coverPhotoId: files.coverPhotoId,
       })
       .from(files)
       .where(eq(files.id, fileId));
@@ -48,7 +49,25 @@ export async function GET(
       }
     }
 
-    const storageKey = `thumbnails/${fileId}.webp`;
+    // Cover override — when the creator picked one of their curator
+    // photos as the cover, redirect to that photo's signed URL
+    // instead of the auto-captured thumbnail. The storage key for
+    // photos lives on filePhotos; lookup is gated by fileId match
+    // so a leaked photo id from another listing can't be aliased.
+    let storageKey = `thumbnails/${fileId}.webp`;
+    if (file.coverPhotoId) {
+      const [cover] = await db
+        .select({
+          storageKey: filePhotos.storageKey,
+          fileId: filePhotos.fileId,
+        })
+        .from(filePhotos)
+        .where(eq(filePhotos.id, file.coverPhotoId));
+      if (cover && cover.fileId === fileId) {
+        storageKey = cover.storageKey;
+      }
+    }
+
     // Short-lived — 1 hour is plenty for an image that gets loaded
     // and cached by the browser immediately.
     const signed = await generateDownloadUrl(storageKey, 60 * 60);

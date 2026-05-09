@@ -141,6 +141,13 @@
       "when": 1778313487205,
       "tag": "0019_notifications_listen",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1778348952364,
+      "tag": "0020_files_cover_photo",
+      "breakpoints": true
     }
   ]
 }

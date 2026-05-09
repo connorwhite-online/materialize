@@ -159,6 +159,13 @@ export const files = pgTable("files", {
   downloadCount: integer("download_count").notNull().default(0),
   viewCount: integer("view_count").notNull().default(0),
   thumbnailUrl: text("thumbnail_url"),
+  // Optional override for the cover image — points at one of the
+  // file's curator photos (filePhotos with kind='creator'). The
+  // thumbnails route prefers this when set, falling back to the
+  // auto-captured thumbnail at thumbnails/{fileId}.webp otherwise.
+  // FK declared in the migration with ON DELETE SET NULL so the
+  // column self-clears if the picked photo is deleted.
+  coverPhotoId: uuid("cover_photo_id"),
   // Set when a deferred check (e.g. async geometry-hash dedup) finds
   // something that should pull this listing out of public view. The
   // server action that detects the collision flips status -> archived

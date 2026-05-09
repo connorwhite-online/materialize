@@ -142,6 +142,7 @@ export default async function FileDetailPage(props: {
       minWallThickness: files.minWallThickness,
       visibility: files.visibility,
       thumbnailUrl: files.thumbnailUrl,
+      coverPhotoId: files.coverPhotoId,
       downloadCount: files.downloadCount,
       viewCount: files.viewCount,
       createdAt: files.createdAt,
@@ -798,7 +799,12 @@ export default async function FileDetailPage(props: {
                         recommendedMaterialId: file.recommendedMaterialId,
                         designTags: file.designTags,
                         minWallThickness: file.minWallThickness,
+                        coverPhotoId: file.coverPhotoId,
                       }}
+                      photos={photosWithUrls.map((p) => ({
+                        id: p.id,
+                        downloadUrl: p.downloadUrl,
+                      }))}
                       hasBuyers={ownerBuyerCount > 0}
                       trigger={
                         <Button

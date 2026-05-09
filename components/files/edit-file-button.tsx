@@ -46,7 +46,15 @@ interface EditFileButtonProps {
     recommendedMaterialId: string | null;
     designTags: string[] | null;
     minWallThickness: number | null; // 0.1mm units
+    /** Currently-set cover photo id (null = use auto-captured thumbnail). */
+    coverPhotoId: string | null;
   };
+  /**
+   * The file's curator photos — drives the cover-image picker.
+   * Empty array means there's nothing to pick from yet, so the
+   * picker is hidden and the auto-thumbnail is implicit.
+   */
+  photos: Array<{ id: string; downloadUrl: string }>;
   hasBuyers: boolean;
   /**
    * Optional custom trigger element. Lets the call site swap in an
@@ -68,6 +76,7 @@ function resolveLicense(raw: string | undefined): LicenseId {
 export function EditFileButton({
   fileId,
   initial,
+  photos,
   hasBuyers,
   trigger,
 }: EditFileButtonProps) {
@@ -97,6 +106,11 @@ export function EditFileButton({
   const [minWallThicknessMm, setMinWallThicknessMm] = useState(
     initial.minWallThickness ? (initial.minWallThickness / 10).toString() : ""
   );
+  // Empty string = auto thumbnail (no override); otherwise the
+  // selected curator photo's id.
+  const [coverPhotoId, setCoverPhotoId] = useState<string>(
+    initial.coverPhotoId ?? ""
+  );
 
   const reset = () => {
     setName(initial.name);
@@ -110,6 +124,7 @@ export function EditFileButton({
     setMinWallThicknessMm(
       initial.minWallThickness ? (initial.minWallThickness / 10).toString() : ""
     );
+    setCoverPhotoId(initial.coverPhotoId ?? "");
     setSubmitError(null);
   };
 
@@ -140,6 +155,7 @@ export function EditFileButton({
     if (minWallThicknessMm) {
       formData.set("minWallThickness", minWallThicknessMm);
     }
+    formData.set("coverPhotoId", coverPhotoId);
 
     startTransition(async () => {
       const result = (await updateFileListing(fileId, formData)) as
@@ -212,6 +228,57 @@ export function EditFileButton({
               maxLength={5000}
             />
           </div>
+
+          {photos.length > 0 && (
+            <div className="space-y-1.5">
+              <Label className="text-xs">Cover image</Label>
+              <p className="text-[11px] text-muted-foreground">
+                Pick which photo represents this file in browse and
+                profile views. Default is the auto-captured 3D
+                thumbnail.
+              </p>
+              <div className="flex gap-2 overflow-x-auto pb-1 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setCoverPhotoId("")}
+                  aria-pressed={coverPhotoId === ""}
+                  className={`relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border-2 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                    coverPhotoId === ""
+                      ? "border-primary"
+                      : "border-border hover:border-foreground/30"
+                  }`}
+                >
+                  <img
+                    src={`/api/thumbnails/${fileId}`}
+                    alt="Auto-captured thumbnail"
+                    className="absolute inset-0 h-full w-full object-cover"
+                  />
+                  <span className="absolute inset-x-0 bottom-0 bg-black/60 py-0.5 text-center text-[9px] font-medium uppercase tracking-wide text-white">
+                    Auto
+                  </span>
+                </button>
+                {photos.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setCoverPhotoId(p.id)}
+                    aria-pressed={coverPhotoId === p.id}
+                    className={`h-16 w-16 shrink-0 overflow-hidden rounded-lg border-2 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                      coverPhotoId === p.id
+                        ? "border-primary"
+                        : "border-border hover:border-foreground/30"
+                    }`}
+                  >
+                    <img
+                      src={p.downloadUrl}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <Label htmlFor="edit-tags" className="text-xs">
