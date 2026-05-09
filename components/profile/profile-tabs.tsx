@@ -5,24 +5,41 @@ import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
 
-type Tab = "library" | "orders" | "earnings" | "comments";
+type Tab = "library" | "orders" | "earnings" | "notifications";
 
 interface ProfileTabsProps {
   username: string;
   activeTab: Tab;
   isOwner: boolean;
+  /** Unread count drives the dot indicator on the Notifications tab. */
+  unreadNotifications?: number;
 }
 
-export function ProfileTabs({ username, activeTab, isOwner }: ProfileTabsProps) {
+export function ProfileTabs({
+  username,
+  activeTab,
+  isOwner,
+  unreadNotifications = 0,
+}: ProfileTabsProps) {
   const router = useRouter();
   const [, startTransition] = useTransition();
   // Local state for instant UI updates; URL syncs in the background
   const [localTab, setLocalTab] = useState<Tab>(activeTab);
 
-  const tabs: Array<{ key: Tab; label: string; ownerOnly?: boolean }> = [
+  const tabs: Array<{
+    key: Tab;
+    label: string;
+    ownerOnly?: boolean;
+    showDot?: boolean;
+  }> = [
     { key: "library", label: "Library" },
     { key: "orders", label: "Orders", ownerOnly: true },
-    { key: "comments", label: "Comments", ownerOnly: true },
+    {
+      key: "notifications",
+      label: "Notifications",
+      ownerOnly: true,
+      showDot: unreadNotifications > 0,
+    },
     { key: "earnings", label: "Earnings", ownerOnly: true },
   ];
 
@@ -58,7 +75,15 @@ export function ProfileTabs({ username, activeTab, isOwner }: ProfileTabsProps) 
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
-              {tab.label}
+              <span className="inline-flex items-center gap-1.5">
+                {tab.label}
+                {tab.showDot && (
+                  <span
+                    aria-label="Unread"
+                    className="size-1.5 rounded-full bg-primary"
+                  />
+                )}
+              </span>
               {active && (
                 <motion.div
                   layoutId="profile-tab-underline"

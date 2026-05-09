@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useUser } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
 import { CartButton } from "@/components/print/cart-button";
-import { UserAvatar } from "./user-avatar";
+import { AvatarWithUnreadDot } from "./avatar-with-unread-dot";
 import { useAuthModal } from "./auth-modal";
 
 /**
@@ -16,18 +16,20 @@ import { useAuthModal } from "./auth-modal";
  *
  * The Profile entry that used to live in the nav list is gone -- this
  * block IS the profile link. The cart icon still rides along when
- * populated, sitting above the user row.
+ * populated, sitting above the user row. An unread-notification dot
+ * pips the avatar's top-right when there are unseen notifications;
+ * the full inbox lives at /u/<username>?tab=notifications.
  */
 interface Props {
   /**
-   * Server-rendered notification bell slot. Sits above the user
-   * profile row alongside the cart icon. Server-rendered so the
-   * count + recent items are pre-fetched without a client round-trip.
+   * Server-fetched unread notification count for the current authed
+   * user. Drives the dot indicator on the avatar; gets overridden by
+   * SSE pushes once the page hydrates.
    */
-  notificationsSlot?: React.ReactNode;
+  initialUnreadCount: number;
 }
 
-export function SidebarUserBlock({ notificationsSlot }: Props = {}) {
+export function SidebarUserBlock({ initialUnreadCount }: Props) {
   const { user, isLoaded, isSignedIn } = useUser();
   const { openAuth } = useAuthModal();
 
@@ -46,20 +48,18 @@ export function SidebarUserBlock({ notificationsSlot }: Props = {}) {
     const profileHref = user.username ? `/u/${user.username}` : "/";
     return (
       <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-1">
-          <CartButton />
-          {notificationsSlot}
-        </div>
+        <CartButton />
         <Link
           href={profileHref}
           aria-label="Your profile"
           className="flex items-center gap-2 rounded-xl p-1.5 transition-colors hover:bg-muted/50"
         >
-          <UserAvatar
+          <AvatarWithUnreadDot
+            initialUnreadCount={initialUnreadCount}
             seed={user.username || user.id}
             imageUrl={user.hasImage ? user.imageUrl : null}
             displayName={displayName}
-            className="h-8 w-8 shrink-0"
+            className="h-8 w-8"
           />
           <div className="min-w-0 flex-1 leading-tight">
             <p className="truncate text-sm font-medium">{displayName}</p>

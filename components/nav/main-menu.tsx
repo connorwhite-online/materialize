@@ -174,13 +174,11 @@ export function MainMenuTrigger() {
  * carried lives here now.
  */
 interface MainMenuSidebarProps {
-  /** Server-rendered notification bell, threaded into SidebarUserBlock. */
-  notificationsSlot?: React.ReactNode;
+  /** Server-fetched unread notification count for the dot indicator. */
+  initialUnreadCount: number;
 }
 
-export function MainMenuSidebar({
-  notificationsSlot,
-}: MainMenuSidebarProps = {}) {
+export function MainMenuSidebar({ initialUnreadCount }: MainMenuSidebarProps) {
   const pathname = usePathname();
 
   return (
@@ -228,7 +226,7 @@ export function MainMenuSidebar({
         })}
       </nav>
       <div className="mt-auto">
-        <SidebarUserBlock notificationsSlot={notificationsSlot} />
+        <SidebarUserBlock initialUnreadCount={initialUnreadCount} />
       </div>
     </aside>
   );

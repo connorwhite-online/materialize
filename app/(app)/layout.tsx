@@ -5,7 +5,7 @@ import {
   MainMenuSidebar,
   MainMenuTrigger,
 } from "@/components/nav/main-menu";
-import { NotificationBellServer } from "@/components/notifications/notification-bell-server";
+import { getMyUnreadNotificationCount } from "@/lib/notifications/queries";
 
 /**
  * Progressive-blur layer table for the mobile header backdrop.
@@ -69,11 +69,15 @@ const NAV_BLUR_LAYERS: Array<{ blur: number; mask: string }> = [
   },
 ];
 
-export default function AppLayout({
+export default async function AppLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Server-fetch the unread count once per request; the dot indicator
+  // on the sidebar avatar uses this as its initial value and the SSE
+  // stream picks up the live updates afterwards.
+  const initialUnreadCount = await getMyUnreadNotificationCount();
   return (
     <CartProvider>
       {/*
@@ -150,10 +154,10 @@ export default function AppLayout({
           </div>
           <div className="relative mx-auto flex h-16 max-w-7xl items-center justify-between px-4">
             <MainMenuTrigger />
-            <AuthNav notificationsSlot={<NotificationBellServer />} />
+            <AuthNav />
           </div>
         </header>
-        <MainMenuSidebar notificationsSlot={<NotificationBellServer />} />
+        <MainMenuSidebar initialUnreadCount={initialUnreadCount} />
         <main className="flex-1">{children}</main>
         <CartPanel />
       </div>

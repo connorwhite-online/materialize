@@ -12,7 +12,8 @@ import { ProfileTabs } from "@/components/profile/profile-tabs";
 import { LibraryTab } from "@/components/profile/library-tab";
 import { OrdersTab } from "@/components/profile/orders-tab";
 import { EarningsTab } from "@/components/profile/earnings-tab";
-import { CommentsInboxTab } from "@/components/profile/comments-inbox-tab";
+import { NotificationsTab } from "@/components/profile/notifications-tab";
+import { getMyUnreadNotificationCount } from "@/lib/notifications/queries";
 
 const PLATFORM_LABELS: Record<string, string> = {
   twitter: "X / Twitter",
@@ -23,7 +24,7 @@ const PLATFORM_LABELS: Record<string, string> = {
   website: "Website",
 };
 
-type Tab = "library" | "orders" | "earnings" | "comments";
+type Tab = "library" | "orders" | "earnings" | "notifications";
 
 function truncate(s: string, n: number) {
   return s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s;
@@ -94,24 +95,31 @@ export default async function ProfilePage(props: {
   if (!user) notFound();
 
   const isOwner = userId === user.id;
-  // Accept the legacy "files" key as an alias for the merged library view.
+  // Accept the legacy "comments" key as an alias for "notifications" so
+  // any old bookmarks land on the inbox instead of bouncing to Library.
   const rawTab = searchParams.tab;
   const activeTab: Tab =
-    rawTab === "orders" ||
-    rawTab === "earnings" ||
-    rawTab === "comments"
+    rawTab === "orders" || rawTab === "earnings"
       ? rawTab
-      : "library";
+      : rawTab === "notifications" || rawTab === "comments"
+        ? "notifications"
+        : "library";
 
   // Guard owner-only tabs
   if (
     !isOwner &&
     (activeTab === "orders" ||
       activeTab === "earnings" ||
-      activeTab === "comments")
+      activeTab === "notifications")
   ) {
     redirect(`/u/${username}`);
   }
+
+  // Owner-only — drives the dot on the Notifications tab. Skipped for
+  // anon viewers and non-owners since the tab itself is hidden then.
+  const unreadNotifications = isOwner
+    ? await getMyUnreadNotificationCount()
+    : 0;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
@@ -179,15 +187,20 @@ export default async function ProfilePage(props: {
       )}
 
       {/* Tabs */}
-      <ProfileTabs username={username} activeTab={activeTab} isOwner={isOwner} />
+      <ProfileTabs
+        username={username}
+        activeTab={activeTab}
+        isOwner={isOwner}
+        unreadNotifications={unreadNotifications}
+      />
 
       <div className="mt-6">
         {activeTab === "library" && (
           <LibraryTab userId={user.id} isOwner={isOwner} />
         )}
         {activeTab === "orders" && isOwner && <OrdersTab userId={user.id} />}
-        {activeTab === "comments" && isOwner && (
-          <CommentsInboxTab userId={user.id} />
+        {activeTab === "notifications" && isOwner && (
+          <NotificationsTab userId={user.id} />
         )}
         {activeTab === "earnings" && isOwner && <EarningsTab userId={user.id} />}
       </div>
