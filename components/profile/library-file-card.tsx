@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ThumbnailCapture } from "@/components/viewer/thumbnail-capture";
+import { CardImageCarousel } from "@/components/photos/card-image-carousel";
 
 export interface LibraryFileCardItem {
   id: string;
@@ -14,6 +15,13 @@ export interface LibraryFileCardItem {
   visibility: string;
   source: "owned" | "purchased";
   thumbnailUrl: string | null;
+  /**
+   * Curator photo ids beyond the cover. The card carousel renders
+   * the cover (via thumbnailUrl) first, then resolves these via
+   * /api/thumbnails/{fileId}?photoId={id}. Empty when the file has
+   * no curator photos other than the cover (or none at all).
+   */
+  additionalPhotoIds: string[];
   primaryAssetId: string | null;
   primaryFormat: string | null;
   dimensions: [number, number, number] | null;
@@ -149,12 +157,15 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
           className="relative aspect-square w-full overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted/60 to-muted/30"
         >
           {thumbnailUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={thumbnailUrl}
+            <CardImageCarousel
+              images={[
+                thumbnailUrl,
+                ...item.additionalPhotoIds.map(
+                  (id) => `/api/thumbnails/${item.id}?photoId=${id}`
+                ),
+              ]}
               alt=""
-              loading="lazy"
-              className="h-full w-full object-cover"
+              size="sm"
             />
           ) : capturing ? (
             <div className="flex h-full w-full items-center justify-center">

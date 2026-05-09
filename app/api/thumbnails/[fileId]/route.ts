@@ -12,13 +12,22 @@ import { logError } from "@/lib/logger";
  * each time they load the image — working around S3's 7-day
  * max-expiration limit without re-writing the DB row.
  *
+ * Two access patterns:
+ *   - GET /api/thumbnails/{fileId}                 → the cover
+ *     (auto-captured thumbnail by default, or the curator photo
+ *     pointed at by files.coverPhotoId when set)
+ *   - GET /api/thumbnails/{fileId}?photoId={id}    → a specific
+ *     curator photo. Used by card carousels to surface additional
+ *     author-uploaded images without pre-signing URLs server-side.
+ *     The photoId must belong to this file or the route 404s.
+ *
  * Published thumbnails are public (this is how browse/search show
  * previews to anon visitors). For unpublished files (drafts), the
  * thumbnail is gated to the owner so a leaked fileId can't surface
  * work-in-progress artwork.
  */
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ fileId: string }> }
 ) {
   try {
@@ -26,6 +35,9 @@ export async function GET(
     if (!fileId) {
       return new Response("Missing fileId", { status: 400 });
     }
+
+    const url = new URL(request.url);
+    const requestedPhotoId = url.searchParams.get("photoId");
 
     const [file] = await db
       .select({
@@ -49,13 +61,26 @@ export async function GET(
       }
     }
 
-    // Cover override — when the creator picked one of their curator
-    // photos as the cover, redirect to that photo's signed URL
-    // instead of the auto-captured thumbnail. The storage key for
-    // photos lives on filePhotos; lookup is gated by fileId match
-    // so a leaked photo id from another listing can't be aliased.
     let storageKey = `thumbnails/${fileId}.webp`;
-    if (file.coverPhotoId) {
+
+    // Specific photo requested — verify it belongs to this file and
+    // redirect to its storage key.
+    if (requestedPhotoId) {
+      const [photo] = await db
+        .select({
+          storageKey: filePhotos.storageKey,
+          fileId: filePhotos.fileId,
+        })
+        .from(filePhotos)
+        .where(eq(filePhotos.id, requestedPhotoId));
+      if (!photo || photo.fileId !== fileId) {
+        return new Response("Not found", { status: 404 });
+      }
+      storageKey = photo.storageKey;
+    } else if (file.coverPhotoId) {
+      // Default cover — when the creator picked one of their curator
+      // photos as the cover, redirect to that photo's signed URL
+      // instead of the auto-captured thumbnail.
       const [cover] = await db
         .select({
           storageKey: filePhotos.storageKey,

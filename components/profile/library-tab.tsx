@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import {
   files,
   fileAssets,
+  filePhotos,
   collections,
   collectionItems,
   purchases,
@@ -78,6 +79,7 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
             price: files.price,
             visibility: files.visibility,
             thumbnailUrl: files.thumbnailUrl,
+            coverPhotoId: files.coverPhotoId,
             creatorUsername: users.username,
             creatorDisplayName: users.displayName,
           })
@@ -99,6 +101,7 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
             price: number;
             visibility: string;
             thumbnailUrl: string | null;
+            coverPhotoId: string | null;
             creatorUsername: string | null;
             creatorDisplayName: string | null;
           }>
@@ -180,6 +183,7 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
 
   const [
     assetRows,
+    photoRows,
     collectionItemRows,
     purchasedCounts,
     ownedProjectLinks,
@@ -204,6 +208,26 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
             geometryData: typeof fileAssets.geometryData._.data;
             createdAt: Date;
           }>
+        ),
+    // Curator photos (kind='creator') for every file in view, used
+    // by the card carousel. One IN-array fetch keeps the cost
+    // proportional to total photo count rather than file count.
+    allFileIds.length > 0
+      ? db
+          .select({
+            id: filePhotos.id,
+            fileId: filePhotos.fileId,
+          })
+          .from(filePhotos)
+          .where(
+            and(
+              inArray(filePhotos.fileId, allFileIds),
+              eq(filePhotos.kind, "creator")
+            )
+          )
+          .orderBy(filePhotos.sortOrder)
+      : Promise.resolve(
+          [] as Array<{ id: string; fileId: string | null }>
         ),
     collectionIds.length > 0
       ? db
@@ -230,6 +254,14 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
           .where(inArray(projectFiles.projectId, ownedProjectIds))
       : Promise.resolve([] as Array<{ fileId: string }>),
   ]);
+
+  const photoIdsByFileId = new Map<string, string[]>();
+  for (const row of photoRows) {
+    if (!row.fileId) continue;
+    const arr = photoIdsByFileId.get(row.fileId) ?? [];
+    arr.push(row.id);
+    photoIdsByFileId.set(row.fileId, arr);
+  }
 
   const primaryAssetByFileId = new Map<
     string,
@@ -262,6 +294,10 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
 
   const purchasedItems: LibraryItem[] = purchasedRows.map((r) => {
     const asset = primaryAssetByFileId.get(r.id);
+    const allPhotos = photoIdsByFileId.get(r.id) ?? [];
+    const additionalPhotoIds = r.coverPhotoId
+      ? allPhotos.filter((id) => id !== r.coverPhotoId)
+      : allPhotos;
     return {
       id: r.id,
       name: r.name,
@@ -270,6 +306,7 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
       visibility: r.visibility,
       source: "purchased" as const,
       thumbnailUrl: r.thumbnailUrl,
+      additionalPhotoIds,
       primaryAssetId: asset?.id ?? null,
       primaryFormat: asset?.format ?? null,
       dimensions: asset?.dimensions ?? null,
@@ -318,6 +355,10 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
     .filter((f) => !fileIdsInOwnedProjects.has(f.id))
     .map((f) => {
       const asset = primaryAssetByFileId.get(f.id);
+      const allPhotos = photoIdsByFileId.get(f.id) ?? [];
+      const additionalPhotoIds = f.coverPhotoId
+        ? allPhotos.filter((id) => id !== f.coverPhotoId)
+        : allPhotos;
       return {
         id: f.id,
         name: f.name,
@@ -326,6 +367,7 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
         visibility: f.visibility,
         source: "owned" as const,
         thumbnailUrl: f.thumbnailUrl,
+        additionalPhotoIds,
         primaryAssetId: asset?.id ?? null,
         primaryFormat: asset?.format ?? null,
         dimensions: asset?.dimensions ?? null,

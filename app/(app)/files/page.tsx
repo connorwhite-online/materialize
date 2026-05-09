@@ -1,18 +1,20 @@
 import { db } from "@/lib/db";
 import {
   files,
+  filePhotos,
   users,
   projects,
   projectFiles,
   collections,
   collectionItems,
 } from "@/lib/db/schema";
-import { eq, desc, ilike, and, or, sql } from "drizzle-orm";
+import { eq, desc, ilike, and, or, sql, inArray } from "drizzle-orm";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { BrowseSearchBar } from "@/components/browse/browse-search-bar";
+import { CardImageCarousel } from "@/components/photos/card-image-carousel";
 import { Download } from "@/components/icons/download";
 import { formatCompactCount } from "@/lib/utils/format-count";
 
@@ -27,6 +29,50 @@ const MAX_QUERY_LENGTH = 100;
 
 function escapeLikePattern(input: string): string {
   return input.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
+/**
+ * Batch-fetch curator photos for a set of file ids, returning a
+ * fileId → additionalPhotoIds map (cover photo excluded). Single
+ * IN-array query keeps cost proportional to total photo count
+ * rather than file count.
+ */
+async function fetchAdditionalPhotosByFile(
+  rows: Array<{ id: string; coverPhotoId: string | null }>
+): Promise<Map<string, string[]>> {
+  const ids = rows.map((r) => r.id);
+  if (ids.length === 0) return new Map();
+  const photos = await db
+    .select({ id: filePhotos.id, fileId: filePhotos.fileId })
+    .from(filePhotos)
+    .where(
+      and(
+        inArray(filePhotos.fileId, ids),
+        eq(filePhotos.kind, "creator")
+      )
+    )
+    .orderBy(filePhotos.sortOrder);
+
+  const grouped = new Map<string, string[]>();
+  for (const p of photos) {
+    if (!p.fileId) continue;
+    const arr = grouped.get(p.fileId) ?? [];
+    arr.push(p.id);
+    grouped.set(p.fileId, arr);
+  }
+
+  // Strip the cover photo id from each list so the carousel's
+  // first slot (the cover via /api/thumbnails/{id}) doesn't
+  // duplicate.
+  const result = new Map<string, string[]>();
+  for (const row of rows) {
+    const all = grouped.get(row.id) ?? [];
+    result.set(
+      row.id,
+      row.coverPhotoId ? all.filter((id) => id !== row.coverPhotoId) : all
+    );
+  }
+  return result;
 }
 
 export default async function BrowsePage(props: {
@@ -52,6 +98,7 @@ export default async function BrowsePage(props: {
         slug: files.slug,
         price: files.price,
         thumbnailUrl: files.thumbnailUrl,
+        coverPhotoId: files.coverPhotoId,
         downloadCount: files.downloadCount,
         username: users.username,
         displayName: users.displayName,
@@ -67,18 +114,24 @@ export default async function BrowsePage(props: {
       .orderBy(desc(files.createdAt))
       .limit(PER_SECTION);
 
+    const photosByFile = await fetchAdditionalPhotosByFile(recentFiles);
+    const recentWithPhotos: FileRow[] = recentFiles.map((f) => ({
+      ...f,
+      additionalPhotoIds: photosByFile.get(f.id) ?? [],
+    }));
+
     return (
       <div className="mx-auto max-w-7xl px-4 py-6">
         <div className="flex justify-center">
           <BrowseSearchBar />
         </div>
         <div className="mt-8">
-          {recentFiles.length === 0 ? (
+          {recentWithPhotos.length === 0 ? (
             <p className="text-center text-sm text-muted-foreground">
               No files published yet
             </p>
           ) : (
-            <FileGrid files={recentFiles} />
+            <FileGrid files={recentWithPhotos} />
           )}
         </div>
       </div>
@@ -95,6 +148,7 @@ export default async function BrowsePage(props: {
         slug: files.slug,
         price: files.price,
         thumbnailUrl: files.thumbnailUrl,
+        coverPhotoId: files.coverPhotoId,
         downloadCount: files.downloadCount,
         username: users.username,
         displayName: users.displayName,
@@ -181,6 +235,12 @@ export default async function BrowsePage(props: {
       .limit(PER_SECTION),
   ]);
 
+  const photosByFile = await fetchAdditionalPhotosByFile(fileRows);
+  const fileRowsWithPhotos: FileRow[] = fileRows.map((f) => ({
+    ...f,
+    additionalPhotoIds: photosByFile.get(f.id) ?? [],
+  }));
+
   const totalHits =
     fileRows.length +
     projectRows.length +
@@ -231,9 +291,9 @@ export default async function BrowsePage(props: {
             </Section>
           )}
 
-          {fileRows.length > 0 && (
+          {fileRowsWithPhotos.length > 0 && (
             <Section title="Files">
-              <FileGrid files={fileRows} />
+              <FileGrid files={fileRowsWithPhotos} />
             </Section>
           )}
         </div>
@@ -265,6 +325,8 @@ interface FileRow {
   slug: string;
   price: number;
   thumbnailUrl: string | null;
+  coverPhotoId: string | null;
+  additionalPhotoIds: string[];
   downloadCount: number;
   username: string | null;
   displayName: string | null;
@@ -276,14 +338,17 @@ function FileGrid({ files }: { files: FileRow[] }) {
       {files.map((file) => (
         <Link key={file.id} href={`/files/${file.slug}`}>
           <Card className="group gap-0 p-1 overflow-hidden transition-colors hover:border-primary/30">
-            <div className="aspect-square overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted to-muted/50">
+            <div className="relative aspect-square overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted to-muted/50">
               {file.thumbnailUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={file.thumbnailUrl}
+                <CardImageCarousel
+                  images={[
+                    file.thumbnailUrl,
+                    ...file.additionalPhotoIds.map(
+                      (id) => `/api/thumbnails/${file.id}?photoId=${id}`
+                    ),
+                  ]}
                   alt=""
-                  loading="lazy"
-                  className="h-full w-full object-cover"
+                  size="sm"
                 />
               )}
             </div>
