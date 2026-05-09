@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { eq, and, desc, isNull, count } from "drizzle-orm";
+import { Client } from "@neondatabase/serverless";
 import { db } from "@/lib/db";
 import { notifications } from "@/lib/db/schema";
 import { logError } from "@/lib/logger";
@@ -11,7 +12,6 @@ export const maxDuration = 60;
 
 const RECENT_LIMIT = 20;
 const STREAM_TTL_MS = 25_000;
-const POLL_INTERVAL_MS = 5_000;
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const RECONNECT_HINT_MS = 3_000;
 
@@ -29,21 +29,28 @@ type Snapshot = { unreadCount: number; recent: NotificationRow[] };
  * Server-sent events stream powering the notification bell. Replaced
  * the prior 30s client polling at /api/notifications/recent.
  *
- * Design tradeoff — Neon's HTTP driver doesn't support LISTEN/NOTIFY,
- * so we emulate "real-time" by polling the DB internally on a tight
- * cadence (POLL_INTERVAL_MS) and pushing a snapshot only when it
- * changes. That increases DB load relative to the old once-per-30s
- * client polling but in exchange gives ~5s push latency and a single
- * persistent HTTP connection per tab. When traffic justifies it the
- * upgrade path is Upstash Redis pub/sub (or a separate Neon WS
- * connection running LISTEN), with the notify*() helpers in
- * lib/notifications/notify.ts publishing on insert.
+ * Push transport is Postgres LISTEN/NOTIFY over Neon's WebSocket
+ * driver: a trigger on `notifications` (migration 0019) fires
+ * `pg_notify('notifications', '{userId, id}')` on every insert, and
+ * this handler holds a WS session running `LISTEN notifications` for
+ * the lifetime of the stream. When an event matching the authed
+ * userId arrives we re-fetch the snapshot once and push it.
  *
- * The stream auto-closes after STREAM_TTL_MS so each connection has a
- * predictable lifetime; the browser EventSource auto-reconnects within
- * RECONNECT_HINT_MS. The fingerprint check (snapshotKey) avoids
- * pushing identical snapshots — heartbeats keep proxies from idling
- * the connection out.
+ * Re-fetch (instead of relaying the row from the NOTIFY payload)
+ * keeps the channel payload tiny — the bell needs a count plus the
+ * top-20 ordered by createdAt, which is cheaper to recompute via
+ * the existing indexed query than to thread through every
+ * notify*() call site.
+ *
+ * Cross-tab read-state sync (mark-read in tab A → tab B updates) is
+ * NOT handled by the trigger, which fires only on INSERT. The other
+ * tab catches up on its next reconnect (within RECONNECT_HINT_MS +
+ * STREAM_TTL_MS). Acceptable for v1; can be tightened later by
+ * having the mark-read server actions call pg_notify themselves.
+ *
+ * The stream auto-closes after STREAM_TTL_MS so each connection has
+ * a predictable lifetime; the browser EventSource auto-reconnects
+ * via the server-supplied retry: hint.
  */
 async function loadSnapshot(userId: string): Promise<Snapshot> {
   const [recent, countRows] = await Promise.all([
@@ -72,24 +79,16 @@ async function loadSnapshot(userId: string): Promise<Snapshot> {
   };
 }
 
-// Fingerprint: latest createdAt + length + unreadCount. Catches new
-// arrivals (createdAt advances) and read-state flips (unreadCount
-// changes) without serializing the full payload.
-function snapshotKey(s: Snapshot): string {
-  if (s.recent.length === 0) return `0|0|${s.unreadCount}`;
-  const top = s.recent[0].createdAt;
-  const ts = top instanceof Date ? top.getTime() : new Date(top).getTime();
-  return `${ts}|${s.recent.length}|${s.unreadCount}`;
-}
-
 export async function GET() {
   const { userId } = await auth();
-  if (!userId) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  if (!userId) return new Response("Unauthorized", { status: 401 });
+
+  const dbUrl = process.env.DATABASE_URL;
+  if (!dbUrl) return new Response("Misconfigured", { status: 500 });
 
   const encoder = new TextEncoder();
   let cancelled = false;
+  let listener: Client | null = null;
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -101,43 +100,69 @@ export async function GET() {
           cancelled = true;
         }
       };
-
       const sendSnapshot = (snap: Snapshot) =>
         send(`data: ${JSON.stringify(snap)}\n\n`);
       const sendHeartbeat = () => send(`: keepalive\n\n`);
 
-      // Hint the client to reconnect ~3s after we close. Sent once
-      // up-front; the field is sticky for the lifetime of the
-      // EventSource on the browser side.
+      // Sticky retry hint for the EventSource — used only if the
+      // connection drops abnormally; clean closures still race the
+      // browser reconnect heuristic.
       send(`retry: ${RECONNECT_HINT_MS}\n\n`);
 
-      let lastKey = "";
+      let lastEmitAt = Date.now();
+
       try {
         const initial = await loadSnapshot(userId);
-        lastKey = snapshotKey(initial);
         sendSnapshot(initial);
+        lastEmitAt = Date.now();
       } catch (error) {
         logError("api/notifications/stream initial", error);
       }
 
-      let lastEmitAt = Date.now();
-      const startedAt = Date.now();
+      // Coalesce concurrent NOTIFY events: if a re-fetch is already
+      // in-flight, skip — by the time it resolves, its snapshot
+      // already reflects whatever just arrived.
+      let pushPending = false;
 
-      while (!cancelled && Date.now() - startedAt < STREAM_TTL_MS) {
-        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-        if (cancelled) break;
-        try {
-          const snap = await loadSnapshot(userId);
-          const key = snapshotKey(snap);
-          if (key !== lastKey) {
-            sendSnapshot(snap);
-            lastKey = key;
-            lastEmitAt = Date.now();
-            continue;
+      try {
+        listener = new Client(dbUrl);
+        await listener.connect();
+        listener.on("notification", async (msg) => {
+          if (cancelled) return;
+          if (msg.channel !== "notifications") return;
+          let payload: { userId?: string } | null = null;
+          try {
+            payload = msg.payload ? JSON.parse(msg.payload) : null;
+          } catch {
+            payload = null;
           }
-        } catch (error) {
-          logError("api/notifications/stream tick", error);
-        }
+          if (!payload || payload.userId !== userId) return;
+          if (pushPending) return;
+          pushPending = true;
+          try {
+            const snap = await loadSnapshot(userId);
+            if (!cancelled) {
+              sendSnapshot(snap);
+              lastEmitAt = Date.now();
+            }
+          } catch (error) {
+            logError("api/notifications/stream push", error);
+          } finally {
+            pushPending = false;
+          }
+        });
+        await listener.query("LISTEN notifications");
+      } catch (error) {
+        // If LISTEN setup fails we keep the stream alive on
+        // heartbeats only — the next reconnect cycle retries the
+        // whole flow, including the initial snapshot.
+        logError("api/notifications/stream listen-setup", error);
+      }
+
+      const startedAt = Date.now();
+      while (!cancelled && Date.now() - startedAt < STREAM_TTL_MS) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        if (cancelled) break;
         if (Date.now() - lastEmitAt >= HEARTBEAT_INTERVAL_MS) {
           sendHeartbeat();
           lastEmitAt = Date.now();
@@ -145,13 +170,23 @@ export async function GET() {
       }
 
       try {
+        await listener?.end();
+      } catch {
+        // Already closed — ignore.
+      }
+      try {
         controller.close();
       } catch {
         // Already closed by the client side — fine.
       }
     },
-    cancel() {
+    async cancel() {
       cancelled = true;
+      try {
+        await listener?.end();
+      } catch {
+        // Already closed — ignore.
+      }
     },
   });
 

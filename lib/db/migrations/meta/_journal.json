@@ -134,6 +134,13 @@
       "when": 1778279075807,
       "tag": "0018_mighty_karnak",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1778313487205,
+      "tag": "0019_notifications_listen",
+      "breakpoints": true
     }
   ]
 }
