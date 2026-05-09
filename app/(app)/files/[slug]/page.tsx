@@ -590,32 +590,39 @@ export default async function FileDetailPage(props: {
           flaggedAt={file.flaggedAt}
         />
       )}
-      <div className="flex flex-col gap-8 lg:grid lg:grid-cols-3 lg:items-start">
-        {/* Title + filename — order-1 on mobile so it always leads.
-            On desktop spans the left two columns of row 1; the
-            sidebar (action card) sits in row 1 col 3 alongside it. */}
-        <div className="order-1 lg:col-span-2">
+      <div className="flex flex-col gap-6 lg:grid lg:grid-cols-3 lg:items-start lg:gap-8">
+        {/* Title + filename · filesize · bounding-box. The format
+            badge that used to live here was duplicative — the
+            original filename already carries the extension. */}
+        <div className="order-1 space-y-1 lg:col-span-2">
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-bold">{file.name}</h1>
             {verifying && <VerifyingPill />}
           </div>
           {primaryAsset && (
-            <p className="mt-1 text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               {primaryAsset.originalFilename}
               <span className="mx-1.5">·</span>
               {formatBytes(primaryAsset.fileSize)}
-              <span className="mx-1.5">·</span>
-              <span className="uppercase">{primaryAsset.format}</span>
+            </p>
+          )}
+          {dims && (
+            <p className="flex flex-wrap items-center gap-2 pt-1 text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">Bounding box</span>
+              <span className="font-mono">
+                {dims.x.toFixed(1)} × {dims.y.toFixed(1)} × {dims.z.toFixed(1)} mm
+              </span>
             </p>
           )}
         </div>
 
-        {/* Main content — order-3 on mobile (after the action card)
-            so the buyer sees price/CTA before the long preview /
-            description / comments scroll. On desktop slots into
-            row 2 cols 1-2 via auto-flow. */}
-        <div className="order-3 space-y-6 lg:col-span-2">
-          {/* 3D preview */}
+        {/* 3D preview — order-2 on mobile so it sits right under the
+            title block, with the action card slotting in below it
+            (order-3) before the buyer scrolls into the long
+            description / discussion. On desktop pinned to row 2
+            cols 1-2 via explicit placement, so it doesn't fight
+            with the row-spanning action card. */}
+        <div className="order-2 lg:col-span-2 lg:col-start-1 lg:row-start-2">
           {previewable && primaryAsset ? (
             <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
               <OrderModelPreview
@@ -633,17 +640,11 @@ export default async function FileDetailPage(props: {
               </span>
             </div>
           )}
+        </div>
 
-          {/* Bounding box */}
-          {dims && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <span className="font-medium text-foreground">Bounding box</span>
-              <span className="font-mono">
-                {dims.x.toFixed(1)} × {dims.y.toFixed(1)} × {dims.z.toFixed(1)} mm
-              </span>
-            </div>
-          )}
-
+        {/* Main content (description, photos, comments, activity) —
+            order-4 on mobile, lg row 3 cols 1-2 on desktop. */}
+        <div className="order-4 space-y-6 lg:col-span-2 lg:col-start-1 lg:row-start-3">
           {/* Description — markdown-rendered so headings, lists,
               code, and links work for documentation-style listings.
               Plain prose still reads correctly because line breaks
@@ -730,13 +731,12 @@ export default async function FileDetailPage(props: {
           />
         </div>
 
-        {/* Action card — order-2 on mobile so price + Print + Download
-            sit right under the title/author info, before the buyer
-            scrolls into the preview/description. On desktop pinned
-            to col 3 spanning rows 1-2 with sticky positioning, so it
-            stays in view while the user reads the long content
-            below. */}
-        <div className="order-2 space-y-4 lg:col-start-3 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-6">
+        {/* Action card — order-3 on mobile so price + Print + Download
+            sit right under the 3D preview (the buyer's focal point)
+            before the long description / discussion scroll. On desktop
+            pinned to col 3 spanning all three rows with sticky
+            positioning so it stays in view while the user scrolls. */}
+        <div className="order-3 space-y-4 lg:col-start-3 lg:row-start-1 lg:row-span-3 lg:sticky lg:top-6">
           {/* Compact action card. Top row pairs the creator identity
               (left) with owner-only edit/delete icons (right) in a
               flex row — keeps the icons aligned to the top edge of
