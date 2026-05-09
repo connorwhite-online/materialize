@@ -10,6 +10,7 @@ import { Trash } from "@/components/icons/trash";
 import { CommentForm } from "./comment-form";
 import { DeletePhotoButton } from "@/components/photos/delete-photo-button";
 import { PhotoLightbox } from "@/components/photos/photo-lightbox";
+import { MarkdownProse } from "@/components/ui/markdown-prose";
 import {
   deleteComment,
   editComment,
@@ -391,9 +392,7 @@ function CommentRow({
             onDone={() => setEditing(false)}
           />
         ) : (
-          <p className="text-sm whitespace-pre-wrap break-words">
-            {comment.body}
-          </p>
+          <MarkdownProse>{comment.body}</MarkdownProse>
         )}
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           {canReply && onReply && (

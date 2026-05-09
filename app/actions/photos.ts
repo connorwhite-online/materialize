@@ -176,6 +176,66 @@ export async function addFileMake(params: {
 }
 
 /**
+ * Upload an image referenced inline by a comment body. Same gates as
+ * `addFileMake` (signed-in viewer who has actually used the file)
+ * but writes `kind = 'inline'` so the row stays out of the legacy
+ * "makes" feed — the image surfaces only via the comment's
+ * `![](/api/thumbnails/...?photoId=...)` markdown.
+ *
+ * Notification deliberately not fired here — the postComment that
+ * follows raises its own comment notification; firing both would
+ * double-ping the file owner for one post.
+ */
+export async function addInlineCommentPhoto(params: {
+  fileId: string;
+  storageKey: string;
+}) {
+  try {
+    const { userId } = await auth();
+    if (!userId) return { error: "Sign in to attach a photo" };
+
+    const expectedPrefix = `photos/${userId}/`;
+    if (
+      typeof params.storageKey !== "string" ||
+      !params.storageKey.startsWith(expectedPrefix)
+    ) {
+      return { error: "Invalid storage key" };
+    }
+
+    const [file] = await db
+      .select({ id: files.id, slug: files.slug })
+      .from(files)
+      .where(eq(files.id, params.fileId));
+    if (!file) return { error: "File not found" };
+
+    const ok = await userHasUsedFile(userId, file.id);
+    if (!ok) {
+      return {
+        error:
+          "Print or download this file first to attach a photo.",
+      };
+    }
+
+    const [photo] = await db
+      .insert(filePhotos)
+      .values({
+        fileId: file.id,
+        userId,
+        storageKey: params.storageKey,
+        caption: null,
+        sortOrder: 0,
+        kind: "inline",
+      })
+      .returning();
+
+    return { photoId: photo.id };
+  } catch (error) {
+    logError("addInlineCommentPhoto", error);
+    return { error: "Failed to attach photo" };
+  }
+}
+
+/**
  * Delete a photo (creator or make). The author can always remove their
  * own; the file owner can additionally remove any photo on their file
  * (moderation against off-topic makes).

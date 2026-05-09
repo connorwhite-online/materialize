@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ImagePlus } from "@/components/icons/image-plus";
 import { X } from "@/components/icons/x";
 import { postComment, type CommentTarget } from "@/app/actions/comments";
-import { addFileMake } from "@/app/actions/photos";
+import { addInlineCommentPhoto } from "@/app/actions/photos";
 import {
   uploadPhotoToR2,
   validatePhoto,
@@ -108,26 +108,32 @@ export function CommentForm({
     setError(null);
     startTransition(async () => {
       try {
+        let finalBody = trimmed;
         if (attachedFile && acceptPhoto && fileId) {
           const { storageKey } = await uploadPhotoToR2(attachedFile);
-          const res = await addFileMake({
+          const photoRes = await addInlineCommentPhoto({
             fileId,
             storageKey,
-            caption: trimmed || undefined,
           });
-          if (res && "error" in res) {
-            setError(res.error ?? "Couldn't post photo.");
+          if (photoRes && "error" in photoRes) {
+            setError(photoRes.error ?? "Couldn't upload photo.");
             return;
           }
-        } else {
-          const res = await postComment(target, targetId, {
-            body: trimmed,
-            parentId,
-          });
-          if ("error" in res) {
-            setError(res.error);
-            return;
-          }
+          // Splice the image as markdown into the body. The
+          // /api/thumbnails/{fileId}?photoId=... URL pattern is
+          // already used by card carousels and resolves to a fresh
+          // signed URL on each load, so the comment stays valid
+          // forever without re-signing.
+          const imageMd = `![](/api/thumbnails/${fileId}?photoId=${photoRes.photoId})`;
+          finalBody = trimmed ? `${trimmed}\n\n${imageMd}` : imageMd;
+        }
+        const res = await postComment(target, targetId, {
+          body: finalBody,
+          parentId,
+        });
+        if ("error" in res) {
+          setError(res.error);
+          return;
         }
         setBody("");
         clearAttachment();

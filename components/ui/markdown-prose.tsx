@@ -3,13 +3,15 @@ import remarkGfm from "remark-gfm";
 
 /**
  * Renders markdown source as styled prose. Used for file + project
- * descriptions where the creator may have authored documentation
- * (links, lists, code blocks) rather than a single paragraph.
+ * descriptions and discussion comments — anywhere a user-authored
+ * body may want bold, italic, links, lists, code, or inline images.
  *
  * Safety — react-markdown does NOT pass raw HTML through by default,
- * so untrusted input can't inject `<script>` etc. Images are
- * intentionally not rendered (the photo gallery is the right surface
- * for visuals); see the `img` override below.
+ * so untrusted input can't inject `<script>` etc. Inline images are
+ * rendered (post-attached comment images use markdown image syntax
+ * pointing at our own /api/thumbnails URLs); the image renderer
+ * caps at a sensible max-height so a tall photo doesn't blow out
+ * the column.
  */
 export function MarkdownProse({ children }: { children: string }) {
   return (
@@ -96,10 +98,15 @@ export function MarkdownProse({ children }: { children: string }) {
           td: ({ children }) => (
             <td className="border border-border px-2 py-1">{children}</td>
           ),
-          // Images are not rendered — the photo gallery is the right
-          // surface for visuals, and inlining unknown remote images
-          // adds an ad-hoc DMCA + privacy attack surface.
-          img: () => null,
+          img: ({ src, alt }) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={typeof src === "string" ? src : undefined}
+              alt={alt || ""}
+              loading="lazy"
+              className="my-3 block max-h-80 max-w-full rounded-xl border border-border object-contain"
+            />
+          ),
         }}
       >
         {children}
