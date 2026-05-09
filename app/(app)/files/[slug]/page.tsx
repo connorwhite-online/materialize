@@ -697,23 +697,14 @@ export default async function FileDetailPage(props: {
             </div>
           )}
 
-          {/* Discussion — single Card hosting curator photos, the
-              community photos feed, and the text comment thread. The
-              header reads as one "Discussion" surface; readers can
-              scan photos at the top and drop into prose comments
-              below. */}
-          <Card>
-            <CardContent className="space-y-5">
-              <div>
-                <h2 className="text-base font-semibold">Discussion</h2>
-                <p className="text-xs text-muted-foreground">
-                  Photos of prints and comments from the community.
-                </p>
-              </div>
-
-              {/* Curator carousel — owner-only authoritative photos.
-                  Add tile leads the row, multi-select. Hidden for
-                  non-owners with no curator photos. */}
+          {/* Curator carousel — owner-only authoritative photos.
+              Sits between the description and the Discussion card so
+              the creator's reference shots are clearly attributed to
+              them, separate from the community discussion below.
+              Hidden for non-owners with no curator photos. */}
+          {(feedPhotos.length > 0 || isOwner) && (
+            <div className="space-y-2">
+              <h2 className="text-sm font-semibold">Photos</h2>
               <PhotosFeed
                 photos={feedPhotos}
                 fileId={file.id}
@@ -721,11 +712,16 @@ export default async function FileDetailPage(props: {
                 viewerId={userId}
                 uploadAs={isOwner ? "creator" : null}
               />
+            </div>
+          )}
 
-              {/* Comments thread + composer. Community photos
-                  (makes) are interleaved as photo-posts; the
-                  composer accepts an optional photo attachment so
-                  a "post" can be text, a photo, or both. */}
+          {/* Discussion — text comments interleaved with community
+              photos (commenter posts). Composer accepts an optional
+              photo attachment so a "post" can be text, a photo, or
+              both. */}
+          <Card>
+            <CardContent className="space-y-5">
+              <h2 className="text-base font-semibold">Discussion</h2>
               <CommentsSection
                 target="file"
                 targetId={file.id}
