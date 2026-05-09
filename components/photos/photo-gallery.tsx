@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { deleteFilePhoto } from "@/app/actions/photos";
 
@@ -38,25 +37,26 @@ export function PhotoGallery({ photos, isOwner }: PhotoGalleryProps) {
     <div className="space-y-3">
       <h2 className="text-sm font-semibold">Printed Photos</h2>
 
-      {/* Main image */}
-      <Card className="overflow-hidden">
-        <div className="relative aspect-[4/3]">
-          <img
-            src={selected.downloadUrl}
-            alt={selected.caption || "Printed part photo"}
-            className="w-full h-full object-cover"
-          />
-          {selected.caption && (
-            <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/60 to-transparent p-3">
-              <p className="text-white text-xs">{selected.caption}</p>
-            </div>
-          )}
-        </div>
-      </Card>
+      {/* Main image — capped width on desktop so a wide listing column
+          doesn't blow the photo up to viewport-height. object-contain
+          shows the full photo (no center-crop) on a soft neutral
+          backdrop, like a gallery frame. */}
+      <div className="relative mx-auto aspect-[4/3] w-full max-w-2xl overflow-hidden rounded-2xl border border-border bg-muted/30">
+        <img
+          src={selected.downloadUrl}
+          alt={selected.caption || "Printed part photo"}
+          className="absolute inset-0 h-full w-full object-contain"
+        />
+        {selected.caption && (
+          <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/60 to-transparent p-3">
+            <p className="text-white text-xs">{selected.caption}</p>
+          </div>
+        )}
+      </div>
 
       {/* Thumbnails */}
       {photos.length > 1 && (
-        <div className="flex gap-2 overflow-x-auto">
+        <div className="mx-auto flex max-w-2xl gap-2 overflow-x-auto">
           {photos.map((photo, i) => (
             <button
               key={photo.id}

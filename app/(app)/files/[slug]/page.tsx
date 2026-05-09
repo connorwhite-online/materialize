@@ -19,9 +19,7 @@ import {
 } from "@/lib/db/schema";
 import { eq, and, asc, desc, inArray, isNull } from "drizzle-orm";
 import { ownsLoadedFile, userHasUsedFile } from "@/lib/entitlement";
-import { DESIGN_TAG_LABELS } from "@/lib/validations/file";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PhotoGallery } from "@/components/photos/photo-gallery";
 import { PhotoUploader } from "@/components/photos/photo-uploader";
@@ -638,67 +636,46 @@ export default async function FileDetailPage(props: {
             </div>
           )}
 
-          {/* Description */}
+          {/* Description — whitespace-pre-wrap preserves the line
+              breaks the creator typed. Markdown rendering is a
+              follow-up. */}
           {file.description && (
-            <p className="text-muted-foreground leading-relaxed">
+            <p className="whitespace-pre-wrap break-words text-muted-foreground leading-relaxed">
               {file.description}
             </p>
           )}
 
-          {/* Tags */}
-          {file.tags && file.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {file.tags.map((tag) => (
-                <Badge key={tag} variant="secondary" className="text-xs">
-                  {tag}
-                </Badge>
-              ))}
+          {/* Print recommendations — compact inline metadata so a
+              listing with only a recommended material doesn't get a
+              giant card. Search tags + design tags intentionally
+              don't render publicly; they're indexing/filtering
+              metadata, not creator-facing copy. */}
+          {(recommendedMaterial || file.minWallThickness) && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
+              {recommendedMaterial && (
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="text-muted-foreground/80">Recommended:</span>
+                  <span
+                    className="h-3 w-3 rounded-sm border border-border"
+                    style={{ backgroundColor: recommendedMaterial.color }}
+                  />
+                  <span className="font-medium text-foreground">
+                    {recommendedMaterial.name}
+                  </span>
+                  <span className="text-muted-foreground/80">
+                    · {recommendedMaterial.method}
+                  </span>
+                </span>
+              )}
+              {file.minWallThickness && (
+                <span>
+                  {recommendedMaterial && (
+                    <span className="mr-3 text-muted-foreground/40">·</span>
+                  )}
+                  Min wall {(file.minWallThickness / 10).toFixed(1)}mm
+                </span>
+              )}
             </div>
-          )}
-
-          {/* Print recommendations */}
-          {(recommendedMaterial ||
-            (file.designTags && file.designTags.length > 0)) && (
-            <Card>
-              <CardContent className="p-4">
-                <p className="text-xs font-medium text-muted-foreground mb-2">
-                  Print Recommendations from Creator
-                </p>
-                {recommendedMaterial && (
-                  <div className="flex items-center gap-2 mb-2">
-                    <div
-                      className="h-6 w-6 rounded border border-border shrink-0"
-                      style={{ backgroundColor: recommendedMaterial.color }}
-                    />
-                    <span className="text-sm font-medium">
-                      {recommendedMaterial.name}
-                    </span>
-                    <Badge variant="outline" className="text-[10px]">
-                      {recommendedMaterial.method}
-                    </Badge>
-                  </div>
-                )}
-                {file.designTags && file.designTags.length > 0 && (
-                  <div className="flex flex-wrap gap-1">
-                    {file.designTags.map((tag) => (
-                      <Badge
-                        key={tag}
-                        variant="outline"
-                        className="text-[10px]"
-                      >
-                        {DESIGN_TAG_LABELS[tag] || tag}
-                      </Badge>
-                    ))}
-                  </div>
-                )}
-                {file.minWallThickness && (
-                  <p className="text-xs text-muted-foreground mt-2">
-                    Min. wall thickness:{" "}
-                    {(file.minWallThickness / 10).toFixed(1)}mm
-                  </p>
-                )}
-              </CardContent>
-            </Card>
           )}
 
           {/* Part photos — owner-curated gallery. */}
