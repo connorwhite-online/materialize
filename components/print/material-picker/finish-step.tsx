@@ -4,8 +4,23 @@ import { useEffect, useMemo, useRef } from "react";
 import { ChevronRight } from "@/components/icons/chevron-right";
 import type { EnrichedQuote } from "./types";
 
+interface ShippingLite {
+  vendorId: string;
+  price: number;
+}
+
 interface FinishStepProps {
   quotes: EnrichedQuote[];
+  /**
+   * Shipping options from the same /v5/price snapshot. Used to sort
+   * finish cards by total cost (production*qty + cheapest shipping)
+   * instead of production alone — see vendor-step for the same
+   * rationale. The "from $X" displayed on each card is still
+   * single-unit production cost.
+   */
+  shipping: ShippingLite[];
+  /** Stable quantity anchor for the total-cost sort. */
+  sortQuantity: number;
   materialId: string;
   onPick: (finishGroupId: string) => void;
   onBack: () => void;
@@ -16,6 +31,8 @@ interface FinishCard {
   finishGroupName: string;
   finishGroupImage: string | null;
   cheapest: number;
+  /** Min total (production*qty + shipping) across this finish — sort key. */
+  cheapestTotal: number;
   configCount: number;
   colorCount: number;
 }
@@ -28,16 +45,29 @@ interface FinishCard {
  */
 export function FinishStep({
   quotes,
+  shipping,
+  sortQuantity,
   materialId,
   onPick,
   onBack,
 }: FinishStepProps) {
   const { materialName, cards } = useMemo(() => {
+    const cheapestShippingByVendor = new Map<string, number>();
+    for (const s of shipping) {
+      const current = cheapestShippingByVendor.get(s.vendorId);
+      if (current === undefined || s.price < current) {
+        cheapestShippingByVendor.set(s.vendorId, s.price);
+      }
+    }
+    const totalCost = (q: { price: number; vendorId: string }) =>
+      q.price * sortQuantity + (cheapestShippingByVendor.get(q.vendorId) ?? 0);
+
     const materialQuotes = quotes.filter((q) => q.materialId === materialId);
     const materialName = materialQuotes[0]?.materialName ?? "Material";
 
     const byFinish = new Map<string, FinishCard & { colors: Set<string> }>();
     for (const q of materialQuotes) {
+      const total = totalCost(q);
       const existing = byFinish.get(q.finishGroupId);
       if (!existing) {
         byFinish.set(q.finishGroupId, {
@@ -45,6 +75,7 @@ export function FinishStep({
           finishGroupName: q.finishGroupName,
           finishGroupImage: q.finishGroupImage,
           cheapest: q.price,
+          cheapestTotal: total,
           configCount: 1,
           colorCount: 0,
           colors: new Set([q.color]),
@@ -53,6 +84,7 @@ export function FinishStep({
         existing.configCount++;
         existing.colors.add(q.color);
         if (q.price < existing.cheapest) existing.cheapest = q.price;
+        if (total < existing.cheapestTotal) existing.cheapestTotal = total;
       }
     }
 
@@ -62,13 +94,14 @@ export function FinishStep({
         finishGroupName: c.finishGroupName,
         finishGroupImage: c.finishGroupImage,
         cheapest: c.cheapest,
+        cheapestTotal: c.cheapestTotal,
         configCount: c.configCount,
         colorCount: c.colors.size,
       }))
-      .sort((a, b) => a.cheapest - b.cheapest);
+      .sort((a, b) => a.cheapestTotal - b.cheapestTotal);
 
     return { materialName, cards };
-  }, [quotes, materialId]);
+  }, [quotes, shipping, sortQuantity, materialId]);
 
   // If the selected material only has one finish group, skip this
   // step entirely — there's no decision for the user to make. We

@@ -106,6 +106,16 @@ interface QuoteConfiguratorProps {
 type CheckoutStep = "configure" | "address" | "processing";
 type LoadingPhase = "uploading" | "quoting" | "done" | "timeout";
 
+// Sort anchor threshold — the picker re-ranks vendor/finish/material
+// lists when total cost (production*qty + shipping) shifts. Re-running
+// that on every quantity keystroke would feel jittery, so the picker
+// holds a stable anchor and only bumps it when the user moves the
+// quantity by more than this many units. 5 is small enough that a
+// meaningful jump (1 → 10 units) re-ranks promptly, large enough that
+// stepping the input from 1 → 4 doesn't shuffle the cards under the
+// user's cursor.
+const RERANK_QUANTITY_DELTA = 5;
+
 export function QuoteConfigurator({
   fileAssetId,
   draftMode,
@@ -141,6 +151,16 @@ export function QuoteConfigurator({
   const [selectedShipping, setSelectedShipping] =
     useState<ShippingOption | null>(null);
   const [quantity, setQuantity] = useState(1);
+  // Quantity-at-last-rerank anchor for the picker's sort. Drifts
+  // behind the live quantity until the user has moved by more than
+  // RERANK_QUANTITY_DELTA, then snaps to the new quantity and the
+  // picker re-ranks. See the constant's docstring for rationale.
+  const [sortQuantity, setSortQuantity] = useState(1);
+  useEffect(() => {
+    if (Math.abs(quantity - sortQuantity) > RERANK_QUANTITY_DELTA) {
+      setSortQuantity(quantity);
+    }
+  }, [quantity, sortQuantity]);
 
   // Region drives which country + currency we ask CraftCloud for
   // quotes in. Persisted to localStorage so the user's pick survives
@@ -930,6 +950,7 @@ export function QuoteConfigurator({
           <MaterialPicker
             quotes={quotes}
             shipping={shipping}
+            sortQuantity={sortQuantity}
             quotesLoading={loadingPhase === "quoting"}
             quotesPartial={loadingPhase === "timeout"}
             viableMaterials={viableMaterials}

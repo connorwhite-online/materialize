@@ -7,8 +7,23 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ChevronRight } from "@/components/icons/chevron-right";
 import type { EnrichedQuote, OptimisticMaterial } from "./types";
 
+interface ShippingLite {
+  vendorId: string;
+  price: number;
+}
+
 interface MaterialStepProps {
   quotes: EnrichedQuote[];
+  /**
+   * Shipping options from the same /v5/price snapshot. Used as a
+   * tiebreaker after CraftCloud's editorial sortIndex — within a
+   * tied sortIndex the cheaper-by-total card leads, so US vendors
+   * with low shipping aren't dropped below tariff-heavy EU options
+   * just because their production is more expensive.
+   */
+  shipping: ShippingLite[];
+  /** Stable quantity anchor for the total-cost tiebreaker. */
+  sortQuantity: number;
   quotesLoading: boolean;
   /**
    * True when polling exited at the hard ceiling without seeing the
@@ -57,6 +72,8 @@ interface MaterialCard {
    * push the user into a finish step with no quotes to enumerate).
    */
   cheapest: number | null;
+  /** Min total (production*qty + shipping) — sort tiebreaker. Null until a quote arrives. */
+  cheapestTotal: number | null;
   fastestFast: number | null;
   fastestSlow: number | null;
   configCount: number;
@@ -82,6 +99,8 @@ const POPULAR_LIMIT = 6;
  */
 export function MaterialStep({
   quotes,
+  shipping,
+  sortQuantity,
   quotesLoading,
   quotesPartial = false,
   materialScoped = false,
@@ -92,6 +111,16 @@ export function MaterialStep({
 }: MaterialStepProps) {
   const { groups, cardsByGroup, popularCards, totalCards } = useMemo(() => {
     const byMaterial = new Map<string, MaterialCard>();
+
+    const cheapestShippingByVendor = new Map<string, number>();
+    for (const s of shipping) {
+      const current = cheapestShippingByVendor.get(s.vendorId);
+      if (current === undefined || s.price < current) {
+        cheapestShippingByVendor.set(s.vendorId, s.price);
+      }
+    }
+    const totalCost = (q: { price: number; vendorId: string }) =>
+      q.price * sortQuantity + (cheapestShippingByVendor.get(q.vendorId) ?? 0);
 
     // Seed the map with optimistic placeholders for every viable
     // material — these stay visible regardless of whether a quote
@@ -109,6 +138,7 @@ export function MaterialStep({
           materialImage: m.image,
           materialSortIndex: m.sortIndex,
           cheapest: null,
+          cheapestTotal: null,
           fastestFast: null,
           fastestSlow: null,
           configCount: 0,
@@ -117,6 +147,7 @@ export function MaterialStep({
     }
 
     for (const q of quotes) {
+      const total = totalCost(q);
       const existing = byMaterial.get(q.materialId);
       if (!existing || existing.cheapest === null) {
         byMaterial.set(q.materialId, {
@@ -127,6 +158,7 @@ export function MaterialStep({
           materialImage: q.materialImage,
           materialSortIndex: q.materialSortIndex,
           cheapest: q.price,
+          cheapestTotal: total,
           fastestFast: q.productionTimeFast,
           fastestSlow: q.productionTimeSlow,
           configCount: 1,
@@ -138,23 +170,27 @@ export function MaterialStep({
           existing.fastestFast = q.productionTimeFast;
           existing.fastestSlow = q.productionTimeSlow;
         }
+        if (existing.cheapestTotal === null || total < existing.cheapestTotal) {
+          existing.cheapestTotal = total;
+        }
       }
     }
 
-    // Sort by sortIndex first (popularity), price as tiebreaker. Within
-    // a group section the user reads top-to-bottom expecting the most
-    // common pick first; price is the natural disambiguator only when
+    // Sort by sortIndex first (popularity), total cost as tiebreaker.
+    // Within a group section the user reads top-to-bottom expecting
+    // the most common pick first; total cost (production*qty +
+    // cheapest shipping) is the natural disambiguator only when
     // CraftCloud's curation hasn't said anything. Skeleton cards
-    // (cheapest === null) sort with their peers by sortIndex; ties
-    // among unpriced cards stay in insertion order, which is fine.
+    // (cheapestTotal === null) sort with their peers by sortIndex;
+    // ties among unpriced cards stay in insertion order, which is fine.
     const cards = Array.from(byMaterial.values()).sort((a, b) => {
       if (a.materialSortIndex !== b.materialSortIndex) {
         return a.materialSortIndex - b.materialSortIndex;
       }
-      if (a.cheapest === null && b.cheapest === null) return 0;
-      if (a.cheapest === null) return 1;
-      if (b.cheapest === null) return -1;
-      return a.cheapest - b.cheapest;
+      if (a.cheapestTotal === null && b.cheapestTotal === null) return 0;
+      if (a.cheapestTotal === null) return 1;
+      if (b.cheapestTotal === null) return -1;
+      return a.cheapestTotal - b.cheapestTotal;
     });
 
     // Top-N popular across all groups. Skip the section entirely when
@@ -196,7 +232,7 @@ export function MaterialStep({
       });
 
     return { groups, cardsByGroup, popularCards, totalCards: cards.length };
-  }, [quotes, viableMaterials]);
+  }, [quotes, shipping, sortQuantity, viableMaterials]);
 
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
 
