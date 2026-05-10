@@ -5,10 +5,10 @@ import { sanitizeFilename } from "../presign/route";
 import { logError } from "@/lib/logger";
 
 /**
- * Presign for circuit / wiring uploads attached to a project. Phase 1
- * accepts image diagrams only (PNG/SVG/JPG/WEBP); subsequent phases
- * widen this to Fritzing `.fzz`, KiCad `.kicad_sch`/`.kicad_pcb`, and
- * Gerber zips.
+ * Presign for circuit / wiring uploads attached to a project. Accepts
+ * image diagrams (PNG/SVG/JPG/WEBP) and KiCad source files
+ * (.kicad_sch / .kicad_pcb / .kicad_pro). Fritzing `.fzz` and Gerber
+ * zips will hook into this same route later.
  *
  * Storage rooted at `circuits/<userId>/<nanoid>/...` so it can't
  * collide with the photo or model-file prefixes and the server action
@@ -21,6 +21,16 @@ const ACCEPTED_CIRCUIT_TYPES: Record<string, string> = {
   "image/webp": "webp",
   "image/svg+xml": "svg",
 };
+
+// Source files don't have registered browser MIME types — browsers
+// send `application/octet-stream` (or an empty type) and we accept
+// based on extension instead. Mapped to a normalized extension to
+// keep the storage key tidy.
+const ACCEPTED_CIRCUIT_EXTENSIONS = new Set([
+  "kicad_sch",
+  "kicad_pcb",
+  "kicad_pro",
+]);
 
 // 20MB ceiling. Hobby wiring diagrams are small, but Fritzing source
 // files (phase 2) can run several MB and Gerber zips (phase 3) up to
@@ -60,17 +70,33 @@ export async function POST(request: Request) {
     }
 
     const ct = (contentType ?? "").toLowerCase();
-    const ext = ACCEPTED_CIRCUIT_TYPES[ct];
-    if (!ext) {
+    const lowerName = filename.toLowerCase();
+    const filenameExt = lowerName.split(".").pop() ?? "";
+
+    // Images: validated by their declared content-type.
+    // KiCad sources: validated by file extension since browsers don't
+    // register MIME types for these — content-type is typically
+    // `application/octet-stream` or "" depending on platform.
+    const imageExt = ACCEPTED_CIRCUIT_TYPES[ct];
+    const isKicad = ACCEPTED_CIRCUIT_EXTENSIONS.has(filenameExt);
+    if (!imageExt && !isKicad) {
       return Response.json(
-        { error: "Unsupported format. Accepted: JPG, PNG, WEBP, SVG" },
+        {
+          error:
+            "Unsupported format. Accepted: JPG/PNG/WEBP/SVG image or .kicad_sch / .kicad_pcb / .kicad_pro",
+        },
         { status: 400 }
       );
     }
 
+    // Force octet-stream for source files so the R2 signed PUT
+    // doesn't reject a mismatch between the PUT content-type and the
+    // presign — and so subsequent GETs serve as a plain download
+    // rather than the browser trying to render the bytes.
+    const signedContentType = imageExt ? ct : "application/octet-stream";
     const safeName = sanitizeFilename(filename);
     const storageKey = `circuits/${userId}/${nanoid()}/${safeName}`;
-    const uploadUrl = await generateUploadUrl(storageKey, ct);
+    const uploadUrl = await generateUploadUrl(storageKey, signedContentType);
 
     return Response.json({ uploadUrl, storageKey });
   } catch (error) {

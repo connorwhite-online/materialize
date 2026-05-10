@@ -1,9 +1,8 @@
 /**
  * Client-side helper for the circuit / wiring upload — presign with
  * /api/upload/circuit-presign, then PUT the bytes at the returned R2
- * URL. Phase 1 accepts only image diagrams; the validation here will
- * widen as later phases accept source files (Fritzing .fzz, KiCad
- * .kicad_*, Gerber zips).
+ * URL. Accepts image diagrams and KiCad source files; Fritzing .fzz
+ * and Gerber zips will hook in via the same helper later.
  *
  * Returns the storageKey on success; throws on failure with a
  * human-readable message.
@@ -16,6 +15,20 @@ export const ACCEPTED_CIRCUIT_IMAGE_MIME = new Set([
   "image/webp",
   "image/svg+xml",
 ]);
+export const ACCEPTED_KICAD_EXTENSIONS = [
+  ".kicad_sch",
+  ".kicad_pcb",
+  ".kicad_pro",
+];
+
+function lowerExtension(name: string): string {
+  const i = name.lastIndexOf(".");
+  return i === -1 ? "" : name.slice(i).toLowerCase();
+}
+
+export function isKicadFile(file: File): boolean {
+  return ACCEPTED_KICAD_EXTENSIONS.includes(lowerExtension(file.name));
+}
 
 export function validateCircuitImage(file: File): string | null {
   if (!ACCEPTED_CIRCUIT_IMAGE_MIME.has(file.type.toLowerCase())) {
@@ -27,15 +40,33 @@ export function validateCircuitImage(file: File): string | null {
   return null;
 }
 
+export function validateCircuitKicad(file: File): string | null {
+  if (!isKicadFile(file)) {
+    return "Pick a .kicad_sch, .kicad_pcb, or .kicad_pro file.";
+  }
+  if (file.size > MAX_CIRCUIT_SIZE) {
+    return "File exceeds 20MB.";
+  }
+  return null;
+}
+
 export async function uploadCircuitToR2(
   file: File
 ): Promise<{ storageKey: string }> {
+  // For source files (.kicad_*) browsers leave file.type empty —
+  // normalize to octet-stream so the presign signs and the PUT
+  // sends the same content-type and R2's signature check passes.
+  const kicad = isKicadFile(file);
+  const contentType = kicad
+    ? "application/octet-stream"
+    : file.type || "application/octet-stream";
+
   const presignRes = await fetch("/api/upload/circuit-presign", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       filename: file.name || "circuit",
-      contentType: file.type,
+      contentType,
       fileSize: file.size,
     }),
   });
@@ -52,7 +83,7 @@ export async function uploadCircuitToR2(
   const putRes = await fetch(uploadUrl, {
     method: "PUT",
     body: file,
-    headers: { "Content-Type": file.type },
+    headers: { "Content-Type": contentType },
   });
   if (!putRes.ok) {
     throw new Error(`Upload failed (${putRes.status})`);

@@ -1,10 +1,25 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useState } from "react";
 import { X } from "@/components/icons/x";
 import { ChevronLeft } from "@/components/icons/chevron-left";
 import { ChevronRight } from "@/components/icons/chevron-right";
 import type { CircuitTile } from "./circuit-gallery";
+
+// KiCanvas web component — loaded the first time a KiCad tile is
+// opened. Idempotent so flipping through tiles doesn't append the
+// script repeatedly. Hoisted module-level so it survives unmounts.
+let kicanvasLoaded = false;
+function loadKiCanvasOnce() {
+  if (typeof document === "undefined") return;
+  if (kicanvasLoaded) return;
+  kicanvasLoaded = true;
+  const script = document.createElement("script");
+  script.type = "module";
+  script.src = "https://kicanvas.org/kicanvas/kicanvas.js";
+  script.async = true;
+  document.head.appendChild(script);
+}
 
 interface Props {
   circuits: CircuitTile[];
@@ -52,6 +67,19 @@ export function CircuitLightbox({
       document.body.style.overflow = previous;
     };
   }, []);
+
+  // Kick off the KiCanvas script load eagerly the first time a KiCad
+  // tile is the current one. The web component renders nothing until
+  // the script has registered the custom element; the lazy load keeps
+  // image-only galleries from paying the cost.
+  useEffect(() => {
+    if (
+      circuit &&
+      (circuit.kind === "kicad_sch" || circuit.kind === "kicad_pcb")
+    ) {
+      loadKiCanvasOnce();
+    }
+  }, [circuit]);
 
   if (!circuit) return null;
 
@@ -115,6 +143,17 @@ export function CircuitLightbox({
             // serial / usb let the user flash a Wokwi sim to real
             // hardware via Web Serial — meaningful for kit projects.
           />
+        ) : (circuit.kind === "kicad_sch" || circuit.kind === "kicad_pcb") &&
+          circuit.sourceUrl ? (
+          <KiCanvasViewer
+            src={circuit.sourceUrl}
+            title={
+              circuit.caption ||
+              (circuit.kind === "kicad_sch"
+                ? "KiCad schematic"
+                : "KiCad PCB")
+            }
+          />
         ) : (
           <img
             src={circuit.previewUrl}
@@ -139,6 +178,17 @@ export function CircuitLightbox({
             Open on wokwi.com →
           </a>
         )}
+
+        {(circuit.kind === "kicad_sch" || circuit.kind === "kicad_pcb") &&
+          circuit.sourceUrl && (
+            <a
+              href={circuit.sourceUrl}
+              download
+              className="mt-2 text-xs text-white/60 underline-offset-2 hover:text-white hover:underline"
+            >
+              Download source →
+            </a>
+          )}
       </div>
 
       {circuits.length > 1 && (
@@ -146,6 +196,58 @@ export function CircuitLightbox({
           {index + 1} / {circuits.length}
         </p>
       )}
+    </div>
+  );
+}
+
+/**
+ * KiCanvas web-component wrapper. The `<kicanvas-embed>` custom
+ * element is defined by kicanvas.js (loaded lazily by
+ * loadKiCanvasOnce). Until the script registers the element, the
+ * browser renders an inert `<kicanvas-embed>` tag — a "Loading…"
+ * fallback layered behind it covers that gap.
+ *
+ * `controls="basic"` enables the layer picker / zoom controls. The
+ * theme is left at KiCanvas's default which renders well on the
+ * lightbox's dark backdrop.
+ */
+function KiCanvasViewer({ src, title }: { src: string; title: string }) {
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.customElements?.get("kicanvas-embed")) {
+      setLoaded(true);
+      return;
+    }
+    let cancelled = false;
+    const tick = () => {
+      if (cancelled) return;
+      if (window.customElements?.get("kicanvas-embed")) {
+        setLoaded(true);
+      } else {
+        setTimeout(tick, 100);
+      }
+    };
+    tick();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return (
+    <div className="relative h-[70vh] w-[min(90vw,1100px)] overflow-hidden rounded-lg border border-white/10 bg-white">
+      {!loaded && (
+        <div className="absolute inset-0 flex items-center justify-center text-xs text-zinc-500">
+          Loading KiCanvas…
+        </div>
+      )}
+      {/* eslint-disable-next-line @typescript-eslint/ban-ts-comment */}
+      {/* @ts-expect-error kicanvas-embed is a custom element not in JSX types */}
+      <kicanvas-embed
+        src={src}
+        controls="basic"
+        title={title}
+        style={{ width: "100%", height: "100%" }}
+      />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { CircuitUploader } from "./circuit-uploader";
 import { DeleteCircuitButton } from "./delete-circuit-button";
 import { AddWokwiDialog } from "./add-wokwi-dialog";
+import { AddKiCadButton } from "./add-kicad-button";
 import { CircuitLightbox } from "./circuit-lightbox";
 
 export type CircuitTile = {
@@ -21,6 +22,13 @@ export type CircuitTile = {
    * we iframe in the lightbox. Null for all other kinds today.
    */
   externalUrl: string | null;
+  /**
+   * Same-origin URL where the raw source bytes live, populated for
+   * kinds whose preview is rendered client-side (KiCad → KiCanvas,
+   * Fritzing → fzz extractor). Null for image kinds whose preview is
+   * the whole asset.
+   */
+  sourceUrl: string | null;
   kind:
     | "image"
     | "fritzing"
@@ -59,8 +67,9 @@ export function CircuitGallery({ projectId, circuits, canManage }: Props) {
             Add a wiring diagram so builders can wire up the electronics.
           </p>
         </div>
-        <div>
+        <div className="flex flex-wrap items-center gap-2">
           <AddWokwiDialog projectId={projectId} />
+          <AddKiCadButton projectId={projectId} />
         </div>
       </div>
     );
@@ -86,8 +95,9 @@ export function CircuitGallery({ projectId, circuits, canManage }: Props) {
       </div>
 
       {canManage && (
-        <div className="mt-2">
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           <AddWokwiDialog projectId={projectId} />
+          <AddKiCadButton projectId={projectId} />
         </div>
       )}
 

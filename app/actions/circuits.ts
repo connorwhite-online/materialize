@@ -159,6 +159,73 @@ export async function addProjectCircuitWokwi(params: {
   }
 }
 
+/**
+ * Add a KiCad source file (schematic, PCB, or project bundle) to a
+ * project. No preview is captured at upload time — the lightbox
+ * renders the schematic / PCB live through KiCanvas, which streams
+ * the source bytes from /api/circuits/{id}/source on demand.
+ *
+ * The kind argument distinguishes schematic vs PCB so the gallery
+ * tile can label the placeholder accurately ("KiCad schematic" vs
+ * "KiCad PCB") even before the lightbox is opened.
+ */
+export async function addProjectCircuitKicad(params: {
+  projectId: string;
+  storageKey: string;
+  kind: "kicad_sch" | "kicad_pcb";
+  originalFilename: string;
+  caption?: string;
+}) {
+  try {
+    const { userId } = await auth();
+    if (!userId) return { error: "Unauthorized" };
+
+    const expectedPrefix = `circuits/${userId}/`;
+    if (
+      typeof params.storageKey !== "string" ||
+      !params.storageKey.startsWith(expectedPrefix)
+    ) {
+      return { error: "Invalid storage key" };
+    }
+    if (params.kind !== "kicad_sch" && params.kind !== "kicad_pcb") {
+      return { error: "Invalid kind" };
+    }
+
+    const project = await loadOwnedProject(userId, params.projectId);
+    if (!project) return { error: "Project not found" };
+
+    const trimmedCaption = params.caption?.trim().slice(0, MAX_CAPTION_LENGTH);
+
+    const existing = await db
+      .select({ sortOrder: projectCircuits.sortOrder })
+      .from(projectCircuits)
+      .where(eq(projectCircuits.projectId, params.projectId));
+    const maxOrder = existing.reduce(
+      (max, e) => Math.max(max, e.sortOrder),
+      -1
+    );
+
+    const [row] = await db
+      .insert(projectCircuits)
+      .values({
+        projectId: project.id,
+        kind: params.kind,
+        sourceStorageKey: params.storageKey,
+        previewStorageKey: null,
+        originalFilename: params.originalFilename,
+        caption: trimmedCaption || null,
+        sortOrder: maxOrder + 1,
+      })
+      .returning();
+
+    revalidatePath(`/projects/${project.slug}`);
+    return { circuitId: row.id };
+  } catch (error) {
+    logError("addProjectCircuitKicad", error);
+    return { error: "Failed to add KiCad file" };
+  }
+}
+
 export async function deleteProjectCircuit(circuitId: string) {
   try {
     const { userId } = await auth();
