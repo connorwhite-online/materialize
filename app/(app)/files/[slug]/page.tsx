@@ -50,6 +50,7 @@ import { findMaterialConfig } from "@/lib/craftcloud/catalog";
 import { generateDownloadUrl } from "@/lib/storage";
 import { PRINTED_STATUSES } from "@/lib/print-statuses";
 import { swallow } from "@/lib/utils/swallow";
+import { fileJsonLd } from "@/lib/seo/json-ld";
 
 async function buildMaterialLabel(configId: string | null): Promise<string | null> {
   if (!configId) return null;
@@ -587,8 +588,36 @@ export default async function FileDetailPage(props: {
     !!primaryAsset &&
     previewable;
 
+  // JSON-LD — only emitted for the public, indexable form of the
+  // listing. Hiding it for drafts / archived listings keeps Google
+  // from building a knowledge graph entry that vanishes when the
+  // owner publishes / unpublishes.
+  const jsonLd =
+    file.status === "published"
+      ? fileJsonLd({
+          slug: file.slug,
+          name: file.name,
+          description: file.description,
+          thumbnailUrl: file.thumbnailUrl,
+          license: file.license,
+          price: file.price,
+          createdAt: file.createdAt,
+          author: {
+            username: file.username,
+            displayName: file.displayName,
+            avatarUrl: file.avatarUrl,
+          },
+        })
+      : null;
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
+      {jsonLd && (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        />
+      )}
       {needsThumbnail && primaryAsset && (
         <FileThumbnailGenerator
           fileId={file.id}

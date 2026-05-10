@@ -14,6 +14,7 @@ import { OrdersTab } from "@/components/profile/orders-tab";
 import { EarningsTab } from "@/components/profile/earnings-tab";
 import { NotificationsTab } from "@/components/profile/notifications-tab";
 import { getMyUnreadNotificationCount } from "@/lib/notifications/queries";
+import { profilePageJsonLd } from "@/lib/seo/json-ld";
 
 const PLATFORM_LABELS: Record<string, string> = {
   twitter: "X / Twitter",
@@ -121,8 +122,21 @@ export default async function ProfilePage(props: {
     ? await getMyUnreadNotificationCount()
     : 0;
 
+  const jsonLd = profilePageJsonLd({
+    username: user.username,
+    displayName: user.displayName,
+    avatarUrl: user.avatarUrl,
+    bio: user.bio,
+  });
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
+      {jsonLd && (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        />
+      )}
       {/* Profile header */}
       <div className="flex items-start gap-6">
         <UserAvatar

@@ -28,6 +28,7 @@ import {
   type CircuitTile,
 } from "@/components/circuits/circuit-gallery";
 import { Code } from "@/components/icons/code";
+import { projectJsonLd } from "@/lib/seo/json-ld";
 import {
   CommentsSection,
   type CommentRow,
@@ -245,8 +246,37 @@ export default async function ProjectDetailPage(props: {
     ownerBuyerCount = buyerRows.length;
   }
 
+  // JSON-LD for crawlers — emitted only for the public, indexable
+  // form (published + public). Mirrors the gate used for the page-
+  // level visibility check above so Google never sees a graph entry
+  // for a draft or private project.
+  const jsonLd =
+    project.status === "published" && project.visibility === "public"
+      ? projectJsonLd({
+          slug: project.slug,
+          name: project.name,
+          description: project.description,
+          thumbnailUrl: project.thumbnailUrl,
+          license: project.license,
+          price: project.price,
+          createdAt: project.createdAt,
+          author: {
+            username: project.username,
+            displayName: project.displayName,
+            avatarUrl: project.avatarUrl,
+          },
+          fileSlugs: bundledFiles.map((f) => f.slug),
+        })
+      : null;
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
+      {jsonLd && (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        />
+      )}
       <div className="flex flex-col gap-8 lg:grid lg:grid-cols-3 lg:items-start">
         {/* Title — order-1 mobile, col-span-2 row-1 desktop. The
             action card slots between this and the main flow on
