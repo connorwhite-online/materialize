@@ -1,0 +1,61 @@
+import { auth } from "@clerk/nextjs/server";
+import { db } from "@/lib/db";
+import { projectCircuits, projects } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+import { generateDownloadUrl } from "@/lib/storage";
+import { logError } from "@/lib/logger";
+
+/**
+ * Redirects to a freshly signed R2 URL for a circuit's preview image
+ * — same indirection pattern as /api/thumbnails/[fileId]. The page
+ * embeds `<img src="/api/circuits/{id}/preview">` and the browser
+ * gets a short-lived signed URL on each load, so the public listing
+ * doesn't depend on long-lived S3 URLs.
+ *
+ * Visibility mirrors the project: the preview is public if the
+ * project is `published` AND `visibility = 'public'`; otherwise only
+ * the project owner can fetch it. Keeps draft / private circuit
+ * diagrams from leaking via a stolen circuitId.
+ */
+export async function GET(
+  _request: Request,
+  context: { params: Promise<{ circuitId: string }> }
+) {
+  try {
+    const { circuitId } = await context.params;
+    if (!circuitId) {
+      return new Response("Missing circuitId", { status: 400 });
+    }
+
+    const [row] = await db
+      .select({
+        previewStorageKey: projectCircuits.previewStorageKey,
+        projectStatus: projects.status,
+        projectVisibility: projects.visibility,
+        projectUserId: projects.userId,
+      })
+      .from(projectCircuits)
+      .innerJoin(projects, eq(projectCircuits.projectId, projects.id))
+      .where(eq(projectCircuits.id, circuitId));
+
+    if (!row || !row.previewStorageKey) {
+      return new Response("Not found", { status: 404 });
+    }
+
+    const publicProject =
+      row.projectStatus === "published" &&
+      row.projectVisibility === "public";
+    if (!publicProject) {
+      const { userId } = await auth();
+      if (!userId || userId !== row.projectUserId) {
+        return new Response("Not found", { status: 404 });
+      }
+    }
+
+    const signed = await generateDownloadUrl(row.previewStorageKey, 60 * 60);
+    return Response.redirect(signed, 302);
+  } catch (error) {
+    logError("api/circuits/[circuitId]/preview", error);
+    return new Response("Failed to resolve preview", { status: 500 });
+  }
+}

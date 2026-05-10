@@ -8,6 +8,7 @@ import {
   projectFiles,
   projectComments,
   projectBomItems,
+  projectCircuits,
   files,
   users,
   purchases,
@@ -22,6 +23,10 @@ import { DeleteProjectButton } from "@/components/projects/delete-project-button
 import { BomDisplay } from "@/components/projects/bom-display";
 import { EditBomDialog } from "@/components/projects/edit-bom-dialog";
 import { EditProjectDialog } from "@/components/projects/edit-project-dialog";
+import {
+  CircuitGallery,
+  type CircuitTile,
+} from "@/components/circuits/circuit-gallery";
 import { Code } from "@/components/icons/code";
 import {
   CommentsSection,
@@ -144,6 +149,31 @@ export default async function ProjectDetailPage(props: {
 
   const canDownload = await userOwnsProject(userId, project.id);
 
+  // Circuit / wiring diagrams — paired with the BOM as the "how
+  // it goes together electrically" half of the assembly story.
+  // Empty + non-owner → the section header is skipped entirely;
+  // owner sees an inline uploader to seed the first one.
+  const circuitRows = await swallow(
+    db
+      .select({
+        id: projectCircuits.id,
+        kind: projectCircuits.kind,
+        caption: projectCircuits.caption,
+        previewStorageKey: projectCircuits.previewStorageKey,
+      })
+      .from(projectCircuits)
+      .where(eq(projectCircuits.projectId, project.id))
+      .orderBy(asc(projectCircuits.sortOrder))
+  );
+  const circuits: CircuitTile[] = circuitRows
+    .filter((row) => row.previewStorageKey)
+    .map((row) => ({
+      id: row.id,
+      kind: row.kind,
+      caption: row.caption,
+      previewUrl: `/api/circuits/${row.id}/preview`,
+    }));
+
   // BOM — the project's bill of materials, in display order. Empty
   // for most projects; the page only renders the section when items
   // exist (progressive disclosure).
@@ -261,10 +291,30 @@ export default async function ProjectDetailPage(props: {
               metadata, not creator-facing copy. Same as the file
               detail page. */}
 
-          {/* Bill of materials — sits above the files grid because
-              it's part of the assembly story ("here's what you need")
-              before "and here are the parts to print". Hidden when
-              empty; collapsed by default since the BOM can be long. */}
+          {/* Wiring / circuit diagrams — the visual half of the
+              assembly story. Sits above the BOM because builders
+              typically read it left-to-right (what does it do? how
+              do I wire it? what do I need to buy?). Owners always
+              see this region (uploader inline when empty); non-
+              owners only see it once a diagram exists. */}
+          {(circuits.length > 0 || isOwner) && (
+            <CollapsibleSection
+              title="Wiring"
+              meta={circuits.length || undefined}
+              defaultOpen
+            >
+              <CircuitGallery
+                projectId={project.id}
+                circuits={circuits}
+                canManage={isOwner}
+              />
+            </CollapsibleSection>
+          )}
+
+          {/* Bill of materials — sits below wiring because the BOM
+              answers "what do I need to buy" after the user has seen
+              the diagram. Hidden when empty; collapsed by default
+              since the BOM can be long. */}
           {bomItems.length > 0 && (
             <CollapsibleSection
               title="Bill of Materials"

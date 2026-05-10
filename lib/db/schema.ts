@@ -63,6 +63,21 @@ export const purchaseStatusEnum = pgEnum("purchase_status", [
 
 export const visibilityEnum = pgEnum("visibility", ["public", "private"]);
 
+// Kinds of circuit/wiring assets that can be attached to a project.
+// `image` is the catch-all hobby format (PNG/SVG/JPG diagram); the
+// remaining values are scaffolding for the next two phases —
+// Fritzing extraction, KiCanvas embed of `.kicad_*`, and Wokwi link
+// embeds. Gerber zips come last (full PCB-tier). Surfacing the enum
+// up here so future migrations only have to ADD VALUE.
+export const projectCircuitKindEnum = pgEnum("project_circuit_kind", [
+  "image",
+  "fritzing",
+  "kicad_sch",
+  "kicad_pcb",
+  "gerber",
+  "wokwi_url",
+]);
+
 export const printOrderStatusEnum = pgEnum("print_order_status", [
   "quoting",
   "cart_created",
@@ -594,6 +609,47 @@ export const projectBomItems = pgTable(
   },
   (table) => [
     index("project_bom_items_project_id_sort_idx").on(
+      table.projectId,
+      table.sortOrder
+    ),
+  ]
+);
+
+// Circuit / wiring assets — paired with the BOM, this is the "how
+// it goes together electrically" half of an assembly story. Phase 1
+// here is image uploads only (PNG/SVG/JPG diagrams), but the
+// schema accommodates Fritzing source files, KiCad schematic / PCB
+// files, Gerber zips, and Wokwi links so subsequent phases don't
+// need migrations.
+//
+// `sourceStorageKey` — R2 key for the uploaded source (the .fzz, the
+// .kicad_sch, the gerber zip, or for image-kind the diagram itself).
+// `previewStorageKey` — R2 key for a render the page can `<img>` at.
+//   For `image` rows it's the same as sourceStorageKey. For source
+//   formats, this is the auto-extracted thumb (Fritzing breadboard
+//   SVG, KiCad page render, etc.) or a manual fallback the owner
+//   uploaded alongside.
+// `externalUrl` — for `wokwi_url` rows; null otherwise.
+export const projectCircuits = pgTable(
+  "project_circuits",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    kind: projectCircuitKindEnum("kind").notNull(),
+    sourceStorageKey: text("source_storage_key"),
+    previewStorageKey: text("preview_storage_key"),
+    externalUrl: text("external_url"),
+    originalFilename: text("original_filename"),
+    caption: text("caption"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("project_circuits_project_id_sort_idx").on(
       table.projectId,
       table.sortOrder
     ),
