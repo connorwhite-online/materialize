@@ -30,6 +30,13 @@ function countryNameFromCode(code: string | null | undefined): string | null {
 interface VendorStepProps {
   quotes: EnrichedQuote[];
   shipping: ShippingLite[];
+  /**
+   * Quantity used to weight production cost in the sort score —
+   * `price * sortQuantity + cheapestShipping`. Held by the parent
+   * as a stable anchor that doesn't track every keystroke of the
+   * qty input.
+   */
+  sortQuantity: number;
   materialId: string;
   finishGroupId: string;
   selectedQuote: EnrichedQuote | null;
@@ -53,6 +60,7 @@ interface VendorStepProps {
 export function VendorStep({
   quotes,
   shipping,
+  sortQuantity,
   materialId,
   finishGroupId,
   selectedQuote,
@@ -81,6 +89,16 @@ export function VendorStep({
       const materialName = filtered[0]?.materialName ?? "Material";
       const finishGroupName = filtered[0]?.finishGroupName ?? "Finish";
 
+      // Total cost the buyer actually pays drives the rank. A US
+      // vendor's quote with high production but low domestic shipping
+      // can outrank an EU quote that's cheaper to make but expensive
+      // to ship into the US — sorting by `q.price` alone hid those
+      // wins. Shipping defaults to 0 for vendors whose shipping option
+      // hasn't landed yet in this poll snapshot; the next snapshot
+      // will reorder them once their shipping arrives.
+      const totalCost = (q: EnrichedQuote) =>
+        q.price * sortQuantity + (cheapestShippingByVendor.get(q.vendorId) ?? 0);
+
       const byColor = new Map<string, EnrichedQuote[]>();
       for (const q of filtered) {
         const list = byColor.get(q.color) ?? [];
@@ -88,21 +106,34 @@ export function VendorStep({
         byColor.set(q.color, list);
       }
 
+      // Swatch label still shows the cheapest single-unit production
+      // price ("$X per part starting at"). Sorting uses total — so
+      // the cheapest-by-total color leads the rail even if a different
+      // color has lower production but worse shipping.
       const cheapestPerColor = new Map<string, number>();
+      const cheapestTotalPerColor = new Map<string, number>();
       const colors = Array.from(byColor.entries())
         .map(([name, qs]) => {
-          qs.sort((a, b) => a.price - b.price);
-          cheapestPerColor.set(name, qs[0].price);
+          qs.sort((a, b) => totalCost(a) - totalCost(b));
+          cheapestPerColor.set(
+            name,
+            qs.reduce((min, q) => (q.price < min ? q.price : min), qs[0].price)
+          );
+          cheapestTotalPerColor.set(name, totalCost(qs[0]));
           return {
             name,
             colorCode: qs[0].colorCode,
             quotes: qs,
           };
         })
-        .sort((a, b) => cheapestPerColor.get(a.name)! - cheapestPerColor.get(b.name)!);
+        .sort(
+          (a, b) =>
+            cheapestTotalPerColor.get(a.name)! -
+            cheapestTotalPerColor.get(b.name)!
+        );
 
       return { materialName, finishGroupName, colors, cheapestPerColor };
-    }, [quotes, materialId, finishGroupId]);
+    }, [quotes, materialId, finishGroupId, sortQuantity, cheapestShippingByVendor]);
 
   const [activeColor, setActiveColor] = useState<string>(
     selectedQuote?.color ?? colors[0]?.name ?? ""

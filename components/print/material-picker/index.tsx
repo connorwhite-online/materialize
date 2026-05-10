@@ -20,9 +20,21 @@ interface MaterialPickerProps {
   /**
    * Shipping options returned by the same /v5/price call as the
    * quotes. The vendor step uses these to compute a per-vendor
-   * "cheapest shipping" badge under each price.
+   * "cheapest shipping" badge under each price; all three steps
+   * use them to sort by total cost (production + shipping) instead
+   * of production alone, which would otherwise bury US vendors
+   * (high production, low domestic shipping) below EU vendors
+   * (low production, high tariff-inflated shipping).
    */
   shipping: ShippingLite[];
+  /**
+   * Quantity used to weight production cost in the sort score —
+   * `price * sortQuantity + cheapestShipping`. Held by the parent
+   * as a stable anchor that only updates when the live quantity
+   * has moved by more than the rerank delta, so typing 1 → 4 in the
+   * qty input doesn't shuffle every card under the user's cursor.
+   */
+  sortQuantity: number;
   /** True while the /v5/price request is still in flight. */
   quotesLoading: boolean;
   /**
@@ -61,6 +73,7 @@ interface MaterialPickerProps {
 export function MaterialPicker({
   quotes,
   shipping,
+  sortQuantity,
   quotesLoading,
   quotesPartial = false,
   viableMaterials = null,
@@ -106,6 +119,8 @@ export function MaterialPicker({
     return (
       <MaterialStep
         quotes={quotes}
+        shipping={shipping}
+        sortQuantity={sortQuantity}
         quotesLoading={quotesLoading}
         quotesPartial={quotesPartial}
         materialScoped={!!preselectMaterialId}
@@ -125,6 +140,8 @@ export function MaterialPicker({
     return (
       <FinishStep
         quotes={quotes}
+        shipping={shipping}
+        sortQuantity={sortQuantity}
         materialId={materialId}
         onPick={(id) => {
           setFinishGroupId(id);
@@ -153,6 +170,7 @@ export function MaterialPicker({
       <VendorStep
         quotes={quotes}
         shipping={shipping}
+        sortQuantity={sortQuantity}
         materialId={materialId}
         finishGroupId={finishGroupId}
         selectedQuote={selectedQuote}
