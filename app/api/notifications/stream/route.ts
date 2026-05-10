@@ -42,11 +42,13 @@ type Snapshot = { unreadCount: number; recent: NotificationRow[] };
  * the existing indexed query than to thread through every
  * notify*() call site.
  *
- * Cross-tab read-state sync (mark-read in tab A → tab B updates) is
- * NOT handled by the trigger, which fires only on INSERT. The other
- * tab catches up on its next reconnect (within RECONNECT_HINT_MS +
- * STREAM_TTL_MS). Acceptable for v1; can be tightened later by
- * having the mark-read server actions call pg_notify themselves.
+ * Cross-tab read-state sync is also wired in: the mark-read server
+ * actions in app/actions/notifications.ts call pg_notify on the
+ * same `notifications` channel after every successful read mutation
+ * (with no `id` in the payload, signaling a generic snapshot
+ * refresh). Other tabs / devices belonging to the same user get the
+ * updated unread count in the same one-round-trip the trigger uses
+ * for new inserts.
  *
  * The stream auto-closes after STREAM_TTL_MS so each connection has
  * a predictable lifetime; the browser EventSource auto-reconnects
