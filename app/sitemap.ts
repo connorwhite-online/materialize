@@ -1,17 +1,21 @@
 import type { MetadataRoute } from "next";
 import { getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
+import { db } from "@/lib/db";
+import { files, projects, users } from "@/lib/db/schema";
+import { and, eq, isNotNull } from "drizzle-orm";
+import { logError } from "@/lib/logger";
 
 /**
  * Sitemap for crawlers and agent discovery.
  *
- * The marketplace browser surfaces (/, /materials, /files) plus
- * one entry per material slug from the live CraftCloud catalog.
- * Per-file user listings aren't included — there are too many,
- * they churn often, and a public marketplace listing index is
- * already linked from /files.
+ * Static surfaces (/, /materials, /files) + CraftCloud material
+ * slugs + every public, published file / project / profile in the
+ * database. Daily revalidate keeps it fresh without a write-time
+ * sitemap-rebuild step; for the sizes we're at, regenerating the
+ * full list on a 24h cadence is fine.
  *
- * Revalidates daily — material catalog changes infrequently and the
- * upstream catalog already caches for 24h.
+ * If we cross the 50,000-URL-per-sitemap limit we'll split into a
+ * sitemap index — far away today.
  */
 
 export const revalidate = 86_400;
@@ -54,5 +58,79 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     materialEntries = [];
   }
 
-  return [...staticEntries, ...materialEntries];
+  // Marketplace listings. The page-level visibility check on
+  // /files/[slug] and /projects/[slug] gates non-owners on
+  // `status === 'published'`, plus visibility = 'public' for
+  // projects. Mirror that here so the sitemap only ever points at
+  // pages that won't 404 for the crawler.
+  let fileEntries: MetadataRoute.Sitemap = [];
+  let projectEntries: MetadataRoute.Sitemap = [];
+  let profileEntries: MetadataRoute.Sitemap = [];
+
+  try {
+    const rows = await db
+      .select({
+        slug: files.slug,
+        updatedAt: files.updatedAt,
+      })
+      .from(files)
+      .where(eq(files.status, "published"));
+    fileEntries = rows.map((r) => ({
+      url: `${APP_URL}/files/${r.slug}`,
+      lastModified: r.updatedAt ?? now,
+      changeFrequency: "weekly",
+      priority: 0.6,
+    }));
+  } catch (e) {
+    logError("sitemap:files", e);
+  }
+
+  try {
+    const rows = await db
+      .select({
+        slug: projects.slug,
+        updatedAt: projects.updatedAt,
+      })
+      .from(projects)
+      .where(
+        and(
+          eq(projects.status, "published"),
+          eq(projects.visibility, "public")
+        )
+      );
+    projectEntries = rows.map((r) => ({
+      url: `${APP_URL}/projects/${r.slug}`,
+      lastModified: r.updatedAt ?? now,
+      changeFrequency: "weekly",
+      priority: 0.6,
+    }));
+  } catch (e) {
+    logError("sitemap:projects", e);
+  }
+
+  try {
+    const rows = await db
+      .select({
+        username: users.username,
+        updatedAt: users.updatedAt,
+      })
+      .from(users)
+      .where(isNotNull(users.username));
+    profileEntries = rows.map((r) => ({
+      url: `${APP_URL}/u/${r.username}`,
+      lastModified: r.updatedAt ?? now,
+      changeFrequency: "weekly",
+      priority: 0.5,
+    }));
+  } catch (e) {
+    logError("sitemap:users", e);
+  }
+
+  return [
+    ...staticEntries,
+    ...materialEntries,
+    ...fileEntries,
+    ...projectEntries,
+    ...profileEntries,
+  ];
 }
