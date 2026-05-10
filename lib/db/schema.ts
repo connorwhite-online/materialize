@@ -210,6 +210,11 @@ export const projects = pgTable("projects", {
   tags: text("tags").array(),
   designTags: text("design_tags").array(),
   thumbnailUrl: text("thumbnail_url"),
+  // Optional pointer to the project's source code / firmware repo
+  // (GitHub, GitLab, Codeberg, etc.). Kit-style projects (a printed
+  // enclosure + microcontroller + custom firmware) need a place to
+  // surface the code without us hosting it ourselves.
+  repoUrl: text("repo_url"),
   downloadCount: integer("download_count").notNull().default(0),
   viewCount: integer("view_count").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true })

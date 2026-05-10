@@ -51,6 +51,16 @@ export const createProjectSchema = z.object({
     }),
   designTags: z.array(z.enum(DESIGN_TAG_OPTIONS)).optional(),
   thumbnailUrl: z.string().url().optional(),
+  // Optional pointer to the project's source code / firmware repo.
+  // Empty string from a form should resolve to undefined so the
+  // database column stays NULL rather than holding "".
+  repoUrl: z
+    .string()
+    .trim()
+    .url("Must be a valid URL")
+    .max(500)
+    .optional()
+    .or(z.literal("").transform(() => undefined)),
   fileIds: z
     .array(z.string().uuid())
     .min(1, "At least one file is required")

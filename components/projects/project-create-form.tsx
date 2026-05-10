@@ -86,6 +86,25 @@ export function ProjectCreateForm({
             <Label htmlFor="tags">Tags</Label>
             <Input id="tags" name="tags" placeholder="board game, chess" />
           </div>
+          <div>
+            <Label htmlFor="repoUrl">Code repository (optional)</Label>
+            <Input
+              id="repoUrl"
+              name="repoUrl"
+              type="url"
+              inputMode="url"
+              placeholder="https://github.com/your/repo"
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Link the firmware or source repo for builders to clone — useful
+              for kits with custom electronics.
+            </p>
+            {errors?.repoUrl && (
+              <p className="mt-1 text-xs text-destructive">
+                {errors.repoUrl[0]}
+              </p>
+            )}
+          </div>
         </CardContent>
       </Card>
 

@@ -57,6 +57,7 @@ export async function createProject(formData: FormData) {
     tags: formData.get("tags") || undefined,
     designTags: designTagValues.length > 0 ? designTagValues : undefined,
     thumbnailUrl: formData.get("thumbnailUrl") || undefined,
+    repoUrl: formData.get("repoUrl") || undefined,
     fileIds: fileIdValues,
   });
 
@@ -88,6 +89,7 @@ export async function createProject(formData: FormData) {
         tags: parsed.data.tags,
         designTags: parsed.data.designTags,
         thumbnailUrl: parsed.data.thumbnailUrl,
+        repoUrl: parsed.data.repoUrl,
         status: "published",
       })
       .returning();
@@ -134,6 +136,11 @@ export async function updateProject(projectId: string, formData: FormData) {
       tags: formData.get("tags") || undefined,
       designTags: designTagValues.length > 0 ? designTagValues : undefined,
       thumbnailUrl: formData.get("thumbnailUrl") || undefined,
+      // Empty submission means "clear the repo URL" — explicit null so
+      // the validator sees an empty string and resolves it to undefined,
+      // and the update below writes null.
+      repoUrl:
+        formData.has("repoUrl") ? formData.get("repoUrl") || "" : undefined,
     });
 
     if (!parsed.success) {
@@ -151,6 +158,12 @@ export async function updateProject(projectId: string, formData: FormData) {
         tags: parsed.data.tags,
         designTags: parsed.data.designTags,
         thumbnailUrl: parsed.data.thumbnailUrl,
+        // Only touch repoUrl if the caller actually submitted the field.
+        // Posting an empty string clears it (validator → undefined → null
+        // here); omitting it entirely leaves the existing value alone.
+        ...(formData.has("repoUrl")
+          ? { repoUrl: parsed.data.repoUrl ?? null }
+          : {}),
       })
       .where(eq(projects.id, projectId));
 

@@ -21,6 +21,8 @@ import { Separator } from "@/components/ui/separator";
 import { DeleteProjectButton } from "@/components/projects/delete-project-button";
 import { BomDisplay } from "@/components/projects/bom-display";
 import { EditBomDialog } from "@/components/projects/edit-bom-dialog";
+import { EditProjectDialog } from "@/components/projects/edit-project-dialog";
+import { Code } from "@/components/icons/code";
 import {
   CommentsSection,
   type CommentRow,
@@ -101,6 +103,7 @@ export default async function ProjectDetailPage(props: {
       tags: projects.tags,
       designTags: projects.designTags,
       thumbnailUrl: projects.thumbnailUrl,
+      repoUrl: projects.repoUrl,
       downloadCount: projects.downloadCount,
       createdAt: projects.createdAt,
       userId: projects.userId,
@@ -375,6 +378,26 @@ export default async function ProjectDetailPage(props: {
                 </>
               )}
 
+              {project.repoUrl && (
+                <>
+                  <Separator className="my-4" />
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    render={
+                      <a
+                        href={project.repoUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <Code size={14} />
+                        View code
+                      </a>
+                    }
+                  />
+                </>
+              )}
+
               <Separator className="my-4" />
 
               <div className="text-sm text-muted-foreground space-y-1">
@@ -386,6 +409,15 @@ export default async function ProjectDetailPage(props: {
                 <>
                   <Separator className="my-4" />
                   <div className="space-y-2">
+                    <EditProjectDialog
+                      projectId={project.id}
+                      initial={{
+                        name: project.name,
+                        description: project.description,
+                        tags: project.tags,
+                        repoUrl: project.repoUrl,
+                      }}
+                    />
                     <EditBomDialog
                       projectId={project.id}
                       initial={bomItems.map((it) => ({
