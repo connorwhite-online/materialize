@@ -81,7 +81,7 @@ export function PhotosFeed({
 
   return (
     <>
-      <div className="flex gap-2 overflow-x-auto pb-2 snap-x snap-mandatory">
+      <div className="flex gap-2 overflow-x-auto snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {/* Add-tile sits first so the affordance is the first thing
             the eye lands on instead of being chased to the end of a
             potentially-long carousel. Multi-select so an owner can

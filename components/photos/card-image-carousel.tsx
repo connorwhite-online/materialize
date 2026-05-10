@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { motion } from "motion/react";
 import { ChevronLeft } from "@/components/icons/chevron-left";
 import { ChevronRight } from "@/components/icons/chevron-right";
 import { cn } from "@/lib/utils";
@@ -113,10 +114,20 @@ export function CardImageCarousel({
         )}
         <div className="pointer-events-auto flex items-center gap-1 rounded-full bg-black/45 px-2 py-1.5 backdrop-blur-md">
           {images.map((_, i) => (
-            <button
+            <motion.button
               key={i}
               type="button"
               role="tab"
+              layout
+              transition={{
+                // Spring keeps the leaving and incoming dots locked
+                // to one physics simulation — width gained equals
+                // width lost at every frame, no easing-curve drift.
+                type: "spring",
+                stiffness: 500,
+                damping: 35,
+                mass: 0.5,
+              }}
               aria-selected={i === activeIndex}
               aria-label={`Image ${i + 1}`}
               onClick={(e) => {
