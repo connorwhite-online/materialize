@@ -22,6 +22,33 @@ import { logError } from "@/lib/logger";
 
 const MAX_CAPTION_LENGTH = 500;
 
+/**
+ * Parse a Wokwi project URL into its canonical embed shape. Accepts:
+ *   - https://wokwi.com/projects/123456789
+ *   - https://wokwi.com/projects/123456789/share/<token>
+ *   - https://wokwi.com/share/<token>
+ * Returns the URL we should store (the public project URL) on
+ * success, or null if the URL doesn't look like a Wokwi link.
+ *
+ * Plain helper — file is "use server" so it cannot be exported, but
+ * the addProjectCircuitWokwi action below is the only caller.
+ */
+function normalizeWokwiUrl(raw: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw.trim());
+  } catch {
+    return null;
+  }
+  if (parsed.hostname !== "wokwi.com" && parsed.hostname !== "www.wokwi.com") {
+    return null;
+  }
+  parsed.search = "";
+  parsed.hash = "";
+  parsed.hostname = "wokwi.com";
+  return parsed.toString();
+}
+
 async function loadOwnedProject(userId: string, projectId: string) {
   const [project] = await db
     .select({ id: projects.id, slug: projects.slug })
@@ -82,6 +109,53 @@ export async function addProjectCircuitImage(params: {
   } catch (error) {
     logError("addProjectCircuitImage", error);
     return { error: "Failed to add diagram" };
+  }
+}
+
+export async function addProjectCircuitWokwi(params: {
+  projectId: string;
+  url: string;
+  caption?: string;
+}) {
+  try {
+    const { userId } = await auth();
+    if (!userId) return { error: "Unauthorized" };
+
+    const normalized = normalizeWokwiUrl(params.url);
+    if (!normalized) {
+      return { error: "Paste a Wokwi project URL (wokwi.com/projects/…)" };
+    }
+
+    const project = await loadOwnedProject(userId, params.projectId);
+    if (!project) return { error: "Project not found" };
+
+    const trimmedCaption = params.caption?.trim().slice(0, MAX_CAPTION_LENGTH);
+
+    const existing = await db
+      .select({ sortOrder: projectCircuits.sortOrder })
+      .from(projectCircuits)
+      .where(eq(projectCircuits.projectId, params.projectId));
+    const maxOrder = existing.reduce(
+      (max, e) => Math.max(max, e.sortOrder),
+      -1
+    );
+
+    const [row] = await db
+      .insert(projectCircuits)
+      .values({
+        projectId: project.id,
+        kind: "wokwi_url",
+        externalUrl: normalized,
+        caption: trimmedCaption || null,
+        sortOrder: maxOrder + 1,
+      })
+      .returning();
+
+    revalidatePath(`/projects/${project.slug}`);
+    return { circuitId: row.id };
+  } catch (error) {
+    logError("addProjectCircuitWokwi", error);
+    return { error: "Failed to add Wokwi link" };
   }
 }
 

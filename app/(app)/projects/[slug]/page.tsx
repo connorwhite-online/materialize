@@ -161,18 +161,26 @@ export default async function ProjectDetailPage(props: {
         kind: projectCircuits.kind,
         caption: projectCircuits.caption,
         previewStorageKey: projectCircuits.previewStorageKey,
+        externalUrl: projectCircuits.externalUrl,
       })
       .from(projectCircuits)
       .where(eq(projectCircuits.projectId, project.id))
       .orderBy(asc(projectCircuits.sortOrder))
   );
+  // Filter out malformed rows: every row must either have a preview
+  // (image kinds) or an external URL (wokwi_url) to render something.
+  // Future source-file kinds (kicad / fritzing / gerber) will also
+  // require one of the two before they pass this gate.
   const circuits: CircuitTile[] = circuitRows
-    .filter((row) => row.previewStorageKey)
+    .filter((row) => row.previewStorageKey || row.externalUrl)
     .map((row) => ({
       id: row.id,
       kind: row.kind,
       caption: row.caption,
-      previewUrl: `/api/circuits/${row.id}/preview`,
+      externalUrl: row.externalUrl,
+      previewUrl: row.previewStorageKey
+        ? `/api/circuits/${row.id}/preview`
+        : "",
     }));
 
   // BOM — the project's bill of materials, in display order. Empty
