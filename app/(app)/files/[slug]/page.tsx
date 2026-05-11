@@ -52,6 +52,7 @@ import { PRINTED_STATUSES } from "@/lib/print-statuses";
 import { swallow } from "@/lib/utils/swallow";
 import { fileJsonLd } from "@/lib/seo/json-ld";
 import { PurchaseButton } from "@/components/purchase/purchase-button";
+import { PayoutSetupWarning } from "@/components/payouts/payout-setup-warning";
 
 async function buildMaterialLabel(configId: string | null): Promise<string | null> {
   if (!configId) return null;
@@ -154,6 +155,7 @@ export default async function FileDetailPage(props: {
       username: users.username,
       displayName: users.displayName,
       avatarUrl: users.avatarUrl,
+      ownerOnboarded: users.stripeOnboardingComplete,
     })
     .from(files)
     .innerJoin(users, eq(files.userId, users.id))
@@ -913,10 +915,15 @@ export default async function FileDetailPage(props: {
                     Download
                   </Button>
                 ) : file.price > 0 ? (
-                  <PurchaseButton
-                    fileId={file.id}
-                    priceCents={file.price}
-                  />
+                  <>
+                    {isOwner && !file.ownerOnboarded && (
+                      <PayoutSetupWarning />
+                    )}
+                    <PurchaseButton
+                      fileId={file.id}
+                      priceCents={file.price}
+                    />
+                  </>
                 ) : null}
               </div>
             </CardContent>

@@ -1,72 +1,70 @@
-# Deferred — Paid file & project purchases
+# Paid file & project purchases — what shipped, what's left
 
-The `Purchase` buttons on `/files/[slug]` and `/projects/[slug]` are
-currently static stubs. The full flow requires more than a button
-wire-up; documenting the gap here so we don't ship something half-baked.
+The four-phase plan in this doc was shipped in
+[commits 0a7fc30 + c24e34e](#):
 
-## What's missing
+- **Phase A** — Stripe Connect Express onboarding + payouts settings
+  page at `/dashboard/settings/payouts`.
+- **Phase B** — `createListingCheckoutSession` server action +
+  `<PurchaseButton>` component on file and project detail pages,
+  routing funds via `transfer_data.destination` with a 3%
+  `application_fee_amount`.
+- **Phase C** — Webhook `listing_purchase` branch +
+  `handleListingPurchase` that inserts the `purchases` row.
+- **Phase D** — `purchase_on_listing` notification through the bell
+  inbox, email template, and email-pref opt-out.
 
-1. **Stripe Connect onboarding** — `users.stripeAccountId` and
-   `users.stripeOnboardingComplete` columns exist but nothing writes
-   to them. Creators can't currently onboard to receive payouts.
-   Without this, a paid checkout has nowhere to send the creator's
-   cut (the marketplace's whole point).
+The `purchases` table is the entitlement source of truth — the
+download routes, file/project detail pages, and earnings tab all
+consult it via `userOwnsFile` / `userOwnsProject`, so paid downloads
+unlock immediately on checkout completion. Earnings tab also sums
+`purchases.creatorPayout`; it'll start showing real numbers the
+moment the first paid sale clears.
 
-2. **Connected-account checkout session** — server action that
-   creates a Stripe Checkout session with `application_fee_amount`
-   for the platform's cut and routes to the creator's connected
-   account. Today's `lib/stripe/handle-print-order-payment.ts` is
-   print-order-specific and doesn't handle file/project purchases.
+## Still deferred
 
-3. **Stripe webhook `purchases` row insert** — the current
-   `app/api/webhooks/stripe/route.ts` handler only branches on
-   sessions with `printOrderId` metadata. A separate path for
-   sessions tagged with `fileId` / `projectId` is needed; on
-   `checkout.session.completed` it should insert a `purchases`
-   row (the table already exists) with `status='completed'`,
-   `creatorPayout` calculated from the Stripe `application_fee_amount`,
-   and `stripePaymentIntentId` populated.
+These were intentionally not bundled with the v1 ship:
 
-4. **Buyer-facing wiring** — replace the stub `Purchase` buttons on
-   `app/(app)/files/[slug]/page.tsx` and
-   `app/(app)/projects/[slug]/page.tsx` with calls to the checkout
-   action, then redirect to the Stripe-hosted page. Post-checkout
-   success URL probably routes through `/dashboard/orders` to surface
-   the completed purchase.
+### Refunds
 
-5. **Purchase-on-listing notification** — once `purchases` row inserts
-   are real, fire a `purchase_on_listing` notification to the creator.
-   `notifyPrintOrderPlaced` is the closest existing template; copy
-   the shape into `lib/notifications/purchase.ts` and hook into the
-   webhook handler.
+Stripe's `charge.refunded` webhook isn't handled. A refunded
+purchase keeps `status='completed'` and the buyer keeps access. The
+fix:
 
-## Approximate scope
+1. Listen for `charge.refunded` (or `refund.created`) in the
+   webhook router.
+2. Look up the `purchases` row by `stripePaymentIntentId`, flip
+   `status` to `'refunded'`.
+3. The entitlement helpers already filter on `status='completed'`,
+   so access drops with no further changes.
 
-3–5 days end to end, ideally tackled in 4 staged commits:
+Optional but nice: a `refund_on_listing` notification type so the
+creator sees the chargeback in their bell. Reuses
+`PurchaseOnListingPayload` with a different headline.
 
-- (a) Stripe Connect Express onboarding flow + `/dashboard/settings/payouts`
-- (b) Checkout session action + Purchase button wire-up + redirect
-- (c) Webhook handler branch + `purchases` row insert
-- (d) Purchase notification + earnings tab now surfaces real data
+### Pre-flight gate on the create / edit forms
 
-## Why we paused
+Today a creator can set `price > 0` on a listing without having
+finished payout onboarding. The Purchase button still shows for
+buyers, but the action gracefully returns an error so checkout
+fails fast. Better UX: warn the creator at create / edit time
+("Set up payouts before publishing this paid listing") with a link
+to `/dashboard/settings/payouts`. Half-day add.
 
-Tried to wire the Purchase buttons in a single afternoon and realized
-(1) was missing — would have required either a half-baked "you owe
-the creator" IOU model or a "we'll forward payments manually"
-workaround, both of which create real liability rather than just bad
-UX. Better to do this as a deliberate project than a tacked-on
-follow-on.
+### Refund-aware earnings tab
 
-## What's already there
+Earnings sums `creatorPayout` for `status='completed'` only, which
+is correct, but no negative line item shows up if a refund happens.
+After refunds land, the earnings list should show refunds inline
+(negative amounts) so the creator's mental model matches their
+Stripe dashboard.
 
-- `purchases` table — `id, buyerId, fileId|projectId (xor), amount,
-  serviceFee, creatorPayout, stripePaymentIntentId, status` — ready
-  to receive rows.
-- `lib/entitlement.ts:userOwnsFile` — already checks for completed
-  `purchases` rows, so the rest of the app (download routes, file
-  detail entitlement) will start respecting paid purchases as soon
-  as we're inserting rows.
-- Earnings tab (`components/profile/earnings-tab.tsx`) already sums
-  `purchases.creatorPayout` and renders it; will show real numbers
-  the day the webhook starts inserting rows.
+### Disconnect handling
+
+If a creator deauthorizes their Stripe connection, `account.updated`
+will flip `charges_enabled` to false and we set
+`stripeOnboardingComplete` to false (already wired). What we don't
+do: surface a banner on `/dashboard/settings/payouts` explaining
+"Stripe says your connection was revoked — reconnect to start
+receiving payouts again." Right now they just see "Onboarding
+incomplete" with no context.

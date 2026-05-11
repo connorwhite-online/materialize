@@ -32,6 +32,7 @@ import {
 import { Code } from "@/components/icons/code";
 import { projectJsonLd } from "@/lib/seo/json-ld";
 import { PurchaseButton } from "@/components/purchase/purchase-button";
+import { PayoutSetupWarning } from "@/components/payouts/payout-setup-warning";
 import {
   CommentsSection,
   type CommentRow,
@@ -125,6 +126,7 @@ export default async function ProjectDetailPage(props: {
       username: users.username,
       displayName: users.displayName,
       avatarUrl: users.avatarUrl,
+      ownerOnboarded: users.stripeOnboardingComplete,
     })
     .from(projects)
     .innerJoin(users, eq(projects.userId, users.id))
@@ -571,6 +573,11 @@ export default async function ProjectDetailPage(props: {
                   <p className="text-2xl font-bold">
                     ${(project.price / 100).toFixed(2)}
                   </p>
+                  {isOwner && !project.ownerOnboarded && (
+                    <div className="mt-3">
+                      <PayoutSetupWarning />
+                    </div>
+                  )}
                   {canDownload ? (
                     <p className="text-xs text-muted-foreground mt-3">
                       Download files individually below.
