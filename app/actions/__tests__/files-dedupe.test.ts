@@ -35,8 +35,14 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("@/lib/db/schema", () => ({
-  files: { id: "id", userId: "user_id", slug: "slug" },
-  fileAssets: { id: "id", fileId: "file_id", contentHash: "content_hash" },
+  files: { id: "id", userId: "user_id", slug: "slug", name: "name" },
+  fileAssets: {
+    id: "id",
+    fileId: "file_id",
+    contentHash: "content_hash",
+    originalFilename: "original_filename",
+    fileSize: "file_size",
+  },
   collections: { id: "id" },
   collectionItems: { collectionId: "collection_id" },
   filePhotos: { id: "id" },
@@ -76,10 +82,24 @@ describe("createDraftFileForPrint self-dedupe", () => {
     innerJoinResults = [];
   });
 
+  // After the dedup widening, every call to createDraftFileForPrint
+  // can run up to three innerJoin queries in order:
+  //   1. same-user byte-hash match
+  //   2. same-user (filename, size) match (fallback when byte hash misses)
+  //   3. cross-user byte-hash match (anti-piracy)
+  // Tests below seed innerJoinResults to control which queries hit.
+
   it("returns the existing asset when the user already owns a matching hash", async () => {
-    // Self-dedupe query returns a hit — cross-user query never runs.
+    // Byte-hash self-dedupe wins on the first try; nothing else runs.
     innerJoinResults = [
-      [{ assetId: "existing-asset-id", fileSlug: "existing-slug" }],
+      [
+        {
+          assetId: "existing-asset-id",
+          fileId: "existing-file-id",
+          fileSlug: "existing-slug",
+          fileName: "Existing",
+        },
+      ],
     ];
 
     const result = await createDraftFileForPrint(baseParams);
@@ -91,9 +111,32 @@ describe("createDraftFileForPrint self-dedupe", () => {
     expect(mockInsertValues).not.toHaveBeenCalled();
   });
 
-  it("inserts a new row when neither query matches", async () => {
-    // 1st call = self-dedupe (empty), 2nd call = anti-piracy (empty)
-    innerJoinResults = [[], []];
+  it("falls back to (filename, size) match when byte hash misses", async () => {
+    // Byte-hash empty, filename+size hits.
+    innerJoinResults = [
+      [],
+      [
+        {
+          assetId: "filename-hit-asset-id",
+          fileId: "filename-hit-file-id",
+          fileSlug: "filename-hit-slug",
+          fileName: "Existing",
+        },
+      ],
+    ];
+
+    const result = await createDraftFileForPrint(baseParams);
+
+    expect(result).toEqual({
+      fileAssetId: "filename-hit-asset-id",
+      fileSlug: "filename-hit-slug",
+    });
+    expect(mockInsertValues).not.toHaveBeenCalled();
+  });
+
+  it("inserts a new row when no self-dedupe and no cross-user collision", async () => {
+    // Byte-hash self empty, filename+size self empty, anti-piracy empty.
+    innerJoinResults = [[], [], []];
 
     const result = await createDraftFileForPrint(baseParams);
 
@@ -102,8 +145,8 @@ describe("createDraftFileForPrint self-dedupe", () => {
   });
 
   it("still rejects cross-user duplicates (anti-piracy unchanged)", async () => {
-    // Self-dedupe empty, anti-piracy hit
-    innerJoinResults = [[], [{ id: "other-users-asset" }]];
+    // Both self-dedupe queries empty, anti-piracy fires last.
+    innerJoinResults = [[], [], [{ id: "other-users-asset" }]];
 
     const result = await createDraftFileForPrint(baseParams);
 

@@ -94,6 +94,74 @@ async function computeByteHashOnly(
   }
 }
 
+// Same-user dedup: returns the existing file/asset matching THIS
+// user's upload, or null. Used by both createFileListing (to surface
+// an error) and createDraftFileForPrint (to silently reuse). Two
+// signals:
+//   1. Byte hash equal — strongest signal, only set when both
+//      uploads got a non-null hash computed.
+//   2. (originalFilename, fileSize) match — fallback for the case
+//      where either upload's contentHash is null (computeByteHashOnly
+//      failed on a transient R2/network blip) or the bytes differ
+//      slightly between two exports of the same model. False
+//      positives are rare within a single user's library; if
+//      someone genuinely has two different files with identical name
+//      and size, the upload form has an "Edit listing instead?"
+//      escape hatch the wrapper surfaces.
+async function findExistingSameUserAsset(params: {
+  userId: string;
+  byteHash: string | null;
+  originalFilename: string;
+  fileSize: number;
+}): Promise<
+  | { assetId: string; fileId: string; fileSlug: string; fileName: string }
+  | null
+> {
+  const { userId, byteHash, originalFilename, fileSize } = params;
+  if (byteHash) {
+    const [hit] = await db
+      .select({
+        assetId: fileAssets.id,
+        fileId: files.id,
+        fileSlug: files.slug,
+        fileName: files.name,
+      })
+      .from(fileAssets)
+      .innerJoin(files, eq(fileAssets.fileId, files.id))
+      .where(
+        and(
+          eq(files.userId, userId),
+          eq(fileAssets.contentHash, byteHash)
+        )
+      )
+      .limit(1);
+    if (hit) return hit;
+  }
+  // Filename + size fallback. Restricted to non-empty filenames so we
+  // never match on an empty-string default.
+  if (originalFilename && fileSize > 0) {
+    const [hit] = await db
+      .select({
+        assetId: fileAssets.id,
+        fileId: files.id,
+        fileSlug: files.slug,
+        fileName: files.name,
+      })
+      .from(fileAssets)
+      .innerJoin(files, eq(fileAssets.fileId, files.id))
+      .where(
+        and(
+          eq(files.userId, userId),
+          eq(fileAssets.originalFilename, originalFilename),
+          eq(fileAssets.fileSize, fileSize)
+        )
+      )
+      .limit(1);
+    if (hit) return hit;
+  }
+  return null;
+}
+
 // Sync cross-user byte-hash check, run before INSERT. The strongest
 // dedup signal and the cheapest to compute, so it stays inline.
 async function checkByteHashCollision(
@@ -180,13 +248,35 @@ export async function createFileListing(formData: FormData) {
     const byteHashes = await Promise.all(
       incomingAssets.map((a) => computeByteHashOnly(a.storageKey))
     );
-    for (const hash of byteHashes) {
-      if (!hash) continue;
-      if (await checkByteHashCollision(hash, userId)) {
+    for (let i = 0; i < incomingAssets.length; i++) {
+      const hash = byteHashes[i];
+      const asset = incomingAssets[i];
+      // Cross-user check — strict, since this is the anti-theft gate.
+      if (hash && (await checkByteHashCollision(hash, userId))) {
         return {
           error: {
             name: [
               "This file has already been listed by another creator. Re-uploading others' files is not permitted.",
+            ],
+          },
+        };
+      }
+      // Same-user check — protects against the user accidentally
+      // re-uploading a file they already have in their library
+      // (e.g., dragging the same STL in twice across two different
+      // upload paths). Surface an error pointing at the existing
+      // listing so they can edit it instead of creating a duplicate.
+      const existing = await findExistingSameUserAsset({
+        userId,
+        byteHash: hash,
+        originalFilename: asset.originalFilename,
+        fileSize: asset.fileSize,
+      });
+      if (existing) {
+        return {
+          error: {
+            name: [
+              `You've already uploaded this file as "${existing.fileName}". Edit that listing instead at /files/${existing.fileSlug}.`,
             ],
           },
         };
@@ -663,32 +753,28 @@ export async function createDraftFileForPrint(params: {
     // happens deferred via after() below.
     const byteHash = await computeByteHashOnly(params.storageKey);
 
-    if (byteHash) {
-      // Self-dedupe: if this user already owns an asset with the
-      // same byte hash, reuse the existing library row.
-      const [existing] = await db
-        .select({ assetId: fileAssets.id, fileSlug: files.slug })
-        .from(fileAssets)
-        .innerJoin(files, eq(fileAssets.fileId, files.id))
-        .where(
-          and(
-            eq(files.userId, userId),
-            eq(fileAssets.contentHash, byteHash)
-          )
-        )
-        .limit(1);
-      if (existing) {
-        await releaseR2();
-        return { fileAssetId: existing.assetId, fileSlug: existing.fileSlug };
-      }
+    // Self-dedupe: byte hash exact match OR (filename, size) match
+    // when byte hash misses. Print is implicit ("get me a quote"),
+    // so a silent reuse of the existing library row is the right
+    // UX — the user doesn't care that two storage keys exist, they
+    // care about getting to the quote configurator on a fileAsset.
+    const existing = await findExistingSameUserAsset({
+      userId,
+      byteHash,
+      originalFilename: params.originalFilename,
+      fileSize: params.fileSize,
+    });
+    if (existing) {
+      await releaseR2();
+      return { fileAssetId: existing.assetId, fileSlug: existing.fileSlug };
+    }
 
-      if (await checkByteHashCollision(byteHash, userId)) {
-        await releaseR2();
-        return {
-          error:
-            "This file has already been listed by another creator. Re-uploading others' files is not permitted.",
-        };
-      }
+    if (byteHash && (await checkByteHashCollision(byteHash, userId))) {
+      await releaseR2();
+      return {
+        error:
+          "This file has already been listed by another creator. Re-uploading others' files is not permitted.",
+      };
     }
 
     const name = deriveListingName(params.originalFilename);
