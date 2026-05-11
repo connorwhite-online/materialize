@@ -189,10 +189,10 @@ export default async function FileDetailPage(props: {
     }))
   );
 
-  // Community makes — joined to users for poster identity. R2 URLs
+  // Community builds — joined to users for poster identity. R2 URLs
   // are signed at request time same as curator photos. Limit to 60 so
-  // a popular file doesn't push 500 makes through the page.
-  const makeRows = await db
+  // a popular file doesn't push 500 builds through the page.
+  const buildRows = await db
     .select({
       id: filePhotos.id,
       storageKey: filePhotos.storageKey,
@@ -206,12 +206,12 @@ export default async function FileDetailPage(props: {
     .from(filePhotos)
     .innerJoin(users, eq(filePhotos.userId, users.id))
     .where(
-      and(eq(filePhotos.fileId, file.id), eq(filePhotos.kind, "make"))
+      and(eq(filePhotos.fileId, file.id), eq(filePhotos.kind, "build"))
     )
     .orderBy(desc(filePhotos.createdAt))
     .limit(60);
-  const makesWithUrls = await Promise.all(
-    makeRows.map(async (row) => ({
+  const buildsWithUrls = await Promise.all(
+    buildRows.map(async (row) => ({
       id: row.id,
       caption: row.caption,
       createdAt: row.createdAt,
@@ -226,10 +226,10 @@ export default async function FileDetailPage(props: {
   );
 
   const isOwner = viewerIsOwner;
-  // Gates the "Share your make" affordance. Owners can also share —
+  // Gates the "Share your build" affordance. Owners can also share —
   // they're a user too — but we still call the helper to be uniform.
   // The helper returns false for anon viewers without a roundtrip.
-  const canPostMake = await userHasUsedFile(userId, file.id);
+  const canPostBuild = await userHasUsedFile(userId, file.id);
   const canDownload = await ownsLoadedFile(userId, {
     id: file.id,
     price: file.price,
@@ -760,12 +760,12 @@ export default async function FileDetailPage(props: {
                 target="file"
                 targetId={file.id}
                 comments={comments}
-                photoPosts={makesWithUrls}
+                photoPosts={buildsWithUrls}
                 ownerId={file.userId}
                 viewerId={userId}
                 isSignedIn={!!userId}
                 signInRedirect={`/files/${slug}`}
-                acceptPhoto={canPostMake}
+                acceptPhoto={canPostBuild}
               />
             </CardContent>
           </Card>

@@ -8,15 +8,15 @@ import { revalidatePath } from "next/cache";
 import { deleteObject } from "@/lib/storage";
 import { logError } from "@/lib/logger";
 import { userHasUsedFile } from "@/lib/entitlement";
-import { notifyMakeOnFile } from "@/lib/notifications/notify";
+import { notifyBuildOnFile } from "@/lib/notifications/notify";
 import { makeSnippet } from "@/lib/notifications/types";
 
 const MAX_CAPTION_LENGTH = 500;
 
 /**
  * Add a curator gallery photo. File-owner-only — used by the existing
- * PhotoUploader on the file detail page. The community-makes counterpart
- * is `addFileMake` below; same R2 prefix, same caption rules, but a
+ * PhotoUploader on the file detail page. The community-builds counterpart
+ * is `addFileBuild` below; same R2 prefix, same caption rules, but a
  * different ownership check and a different `kind`.
  */
 export async function addFilePhoto(params: {
@@ -80,15 +80,15 @@ export async function addFilePhoto(params: {
 }
 
 /**
- * Add a community "make" photo. Gated to users who have actually used
+ * Add a community "build" photo. Gated to users who have actually used
  * the file (downloaded OR printed in a non-failure status). The file
  * owner can also post — they're a "user" too, just with their own copy.
  *
  * Same R2 prefix as creator photos (`photos/<userId>/...`) so cleanup
- * stays uniform; the row's `kind = 'make'` is what separates this from
+ * stays uniform; the row's `kind = 'build'` is what separates this from
  * the curator gallery.
  */
-export async function addFileMake(params: {
+export async function addFileBuild(params: {
   fileId: string;
   storageKey: string;
   caption?: string;
@@ -137,18 +137,18 @@ export async function addFileMake(params: {
         userId,
         storageKey: params.storageKey,
         caption: trimmedCaption || null,
-        // Makes don't compete with curator photos for sortOrder; the
+        // Builds don't compete with curator photos for sortOrder; the
         // listing query orders by createdAt descending, so any value
         // here is fine.
         sortOrder: 0,
-        kind: "make",
+        kind: "build",
       })
       .returning();
 
-    // Notify the file owner that someone posted a make of their work.
-    // Self-events (owner posts their own make) are skipped inside the
-    // notify helper. Pull the actor's identity inline since the make
-    // table doesn't carry user fields.
+    // Notify the file owner that someone posted a build of their work.
+    // Self-events (owner posts their own build) are skipped inside the
+    // notify helper. Pull the actor's identity inline since the build
+    // row doesn't carry user fields.
     const [actor] = await db
       .select({
         id: users.id,
@@ -159,10 +159,10 @@ export async function addFileMake(params: {
       .from(users)
       .where(eq(users.id, userId));
     if (actor) {
-      await notifyMakeOnFile(file.ownerId, {
+      await notifyBuildOnFile(file.ownerId, {
         actor,
         listing: { kind: "file", name: file.name, slug: file.slug },
-        makeId: photo.id,
+        buildId: photo.id,
         snippet: trimmedCaption ? makeSnippet(trimmedCaption) : null,
       });
     }
@@ -170,16 +170,16 @@ export async function addFileMake(params: {
     revalidatePath(`/files/${file.slug}`);
     return { photoId: photo.id };
   } catch (error) {
-    logError("addFileMake", error);
-    return { error: "Failed to share make" };
+    logError("addFileBuild", error);
+    return { error: "Failed to share build" };
   }
 }
 
 /**
  * Upload an image referenced inline by a comment body. Same gates as
- * `addFileMake` (signed-in viewer who has actually used the file)
- * but writes `kind = 'inline'` so the row stays out of the legacy
- * "makes" feed — the image surfaces only via the comment's
+ * `addFileBuild` (signed-in viewer who has actually used the file)
+ * but writes `kind = 'inline'` so the row stays out of the build
+ * feed — the image surfaces only via the comment's
  * `![](/api/thumbnails/...?photoId=...)` markdown.
  *
  * Notification deliberately not fired here — the postComment that

@@ -12,8 +12,8 @@ export type FeedPhoto = {
   downloadUrl: string;
   caption: string | null;
   createdAt: Date | string;
-  /** "creator" = listing-owner curator photo; "make" = community print. */
-  kind: "creator" | "make";
+  /** "creator" = listing-owner curator photo; "build" = community print. */
+  kind: "creator" | "build";
   /**
    * Author for community photos. Null for creator photos — the byline
    * is implicit (they're posted by the listing owner who's already
@@ -41,7 +41,7 @@ interface PhotosFeedProps {
    * undefined) to hide the uploader for viewers who can't post —
    * anon visitors and signed-in non-printers.
    */
-  uploadAs?: "creator" | "make" | null;
+  uploadAs?: "creator" | "build" | null;
 }
 
 /**
@@ -153,10 +153,10 @@ function PhotoThumb({
   targetType,
 }: PhotoThumbProps) {
   // Anchor for direct deep-links coming from the bell ("added a
-  // photo" notifications point at #make-<id>). Only set on community
+  // photo" notifications point at #build-<id>). Only set on community
   // photos for backward compatibility with the existing notification
   // payload shape.
-  const id = photo.kind === "make" ? `make-${photo.id}` : undefined;
+  const id = photo.kind === "build" ? `build-${photo.id}` : undefined;
 
   return (
     <div
@@ -180,7 +180,7 @@ function PhotoThumb({
           photos render bare since the byline is implicit in the
           listing's action card. pointer-events-none so the click
           falls through to the lightbox-opening button. */}
-      {photo.kind === "make" && photo.author && (
+      {photo.kind === "build" && photo.author && (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-gradient-to-t from-black/70 via-black/40 to-transparent px-2 py-1.5">
           <UserAvatar
             seed={photo.author.username || photo.author.id}

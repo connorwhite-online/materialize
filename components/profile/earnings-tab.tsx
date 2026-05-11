@@ -26,7 +26,7 @@ import { timeAgo } from "@/lib/utils/time";
  * "Earnings" today is just file/project sales (creatorPayout column on
  * `purchases`). Until we wire paid file checkout, that number stays at
  * $0 for every user — so we surface the engagement metrics we *do*
- * have alongside it: prints / makes / comments / downloads on the
+ * have alongside it: prints / builds / comments / downloads on the
  * creator's listings. Once paid sales ship, the top stat becomes
  * meaningful and the rest stay useful.
  *
@@ -67,7 +67,7 @@ export async function EarningsTab({ userId }: { userId: string }) {
     printTotalItems,
     fileCommentTotal,
     projectCommentTotal,
-    makeTotal,
+    buildTotal,
   ] = await Promise.all([
     swallow(
       db
@@ -237,7 +237,7 @@ export async function EarningsTab({ userId }: { userId: string }) {
             .where(
               and(
                 inArray(filePhotos.fileId, fileIds),
-                eq(filePhotos.kind, "make")
+                eq(filePhotos.kind, "build")
               )
             )
         ),
@@ -285,7 +285,7 @@ export async function EarningsTab({ userId }: { userId: string }) {
   const commentsTotal =
     Number(fileCommentTotal[0]?.value ?? 0) +
     Number(projectCommentTotal[0]?.value ?? 0);
-  const makes = Number(makeTotal[0]?.value ?? 0);
+  const builds = Number(buildTotal[0]?.value ?? 0);
   const hasStripe = user?.stripeOnboardingComplete;
 
   return (
@@ -408,8 +408,8 @@ export async function EarningsTab({ userId }: { userId: string }) {
             hint="On your files + projects"
           />
           <StatCard
-            label="Makes"
-            value={makes}
+            label="Builds"
+            value={builds}
             href={null}
             hint="Community-printed photos"
           />

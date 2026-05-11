@@ -193,9 +193,9 @@ export default async function ProjectDetailPage(props: {
     }))
   );
 
-  // Community "makes" — interleaved with comments below. Limit 60 so
+  // Community "builds" — interleaved with comments below. Limit 60 so
   // a popular project doesn't push hundreds through the page.
-  const makeRows = await swallow(
+  const buildRows = await swallow(
     db
       .select({
         id: projectPhotos.id,
@@ -212,14 +212,14 @@ export default async function ProjectDetailPage(props: {
       .where(
         and(
           eq(projectPhotos.projectId, project.id),
-          eq(projectPhotos.kind, "make")
+          eq(projectPhotos.kind, "build")
         )
       )
       .orderBy(desc(projectPhotos.createdAt))
       .limit(60)
   );
-  const makesWithUrls: PhotoPost[] = await Promise.all(
-    makeRows.map(async (row) => ({
+  const buildsWithUrls: PhotoPost[] = await Promise.all(
+    buildRows.map(async (row) => ({
       id: row.id,
       caption: row.caption,
       createdAt: row.createdAt,
@@ -233,10 +233,10 @@ export default async function ProjectDetailPage(props: {
     }))
   );
 
-  // Gate for project makes / inline-comment photos. Same shape as the
-  // file detail page's `canPostMake`. Owner is always covered because
+  // Gate for project builds / inline-comment photos. Same shape as the
+  // file detail page's `canPostBuild`. Owner is always covered because
   // `userOwnsProject` returns true for the creator's own project.
-  const canPostMake = await userOwnsProject(userId, project.id);
+  const canPostBuild = await userOwnsProject(userId, project.id);
 
   // Circuit / wiring diagrams — paired with the BOM as the "how
   // it goes together electrically" half of the assembly story.
@@ -530,12 +530,12 @@ export default async function ProjectDetailPage(props: {
                 target="project"
                 targetId={project.id}
                 comments={comments}
-                photoPosts={makesWithUrls}
+                photoPosts={buildsWithUrls}
                 ownerId={project.userId}
                 viewerId={userId}
                 isSignedIn={!!userId}
                 signInRedirect={`/projects/${slug}`}
-                acceptPhoto={!!userId && canPostMake}
+                acceptPhoto={!!userId && canPostBuild}
               />
             </CardContent>
           </Card>

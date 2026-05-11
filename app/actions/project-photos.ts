@@ -3,14 +3,12 @@
 /**
  * Project-side photo actions — mirrors app/actions/photos.ts onto
  * the projects table. Same R2 prefix (`photos/<userId>/...`), same
- * caption rules, same 'creator' / 'make' / 'inline' kind taxonomy.
+ * caption rules, same 'creator' / 'build' / 'inline' kind taxonomy.
  *
- * One intentional divergence from the file side: project "makes"
- * don't fire a notification yet. The deferred event-type rename
- * (make_on_file → make_on_listing) is where that gets unified;
- * notifying on a project-make today would either double the event-
- * type matrix or shoehorn a project listing into the make_on_file
- * payload. Better to wait.
+ * One intentional divergence from the file side: project "builds"
+ * don't fire a notification yet. Adding a `build_on_project` event
+ * type alongside `build_on_file` would be the natural extension
+ * when project-build activity is worth surfacing in the inbox.
  */
 
 import { auth } from "@clerk/nextjs/server";
@@ -84,13 +82,13 @@ export async function addProjectPhoto(params: {
 }
 
 /**
- * Add a community "make" photo to a project. Gated to the project's
+ * Add a community "build" photo to a project. Gated to the project's
  * owner plus anyone with a completed purchase of the project. Free
  * projects: every signed-in user qualifies (userOwnsProject returns
- * true for free projects), which is the same shape the make gate
+ * true for free projects), which is the same shape the build gate
  * takes for free files.
  */
-export async function addProjectMake(params: {
+export async function addProjectBuild(params: {
   projectId: string;
   storageKey: string;
   caption?: string;
@@ -128,26 +126,26 @@ export async function addProjectMake(params: {
         userId,
         storageKey: params.storageKey,
         caption: trimmedCaption || null,
-        // Makes don't compete with curator photos for sortOrder; the
+        // Builds don't compete with curator photos for sortOrder; the
         // listing query orders by createdAt asc when interleaving
         // with comments, so any value here is fine.
         sortOrder: 0,
-        kind: "make",
+        kind: "build",
       })
       .returning();
 
     revalidatePath(`/projects/${project.slug}`);
     return { photoId: photo.id };
   } catch (error) {
-    logError("addProjectMake", error);
-    return { error: "Failed to share make" };
+    logError("addProjectBuild", error);
+    return { error: "Failed to share build" };
   }
 }
 
 /**
  * Upload an image referenced inline by a project comment body. Same
- * gates as `addProjectMake` (project owner or buyer) but writes
- * `kind = 'inline'` so the row stays out of the makes feed — the
+ * gates as `addProjectBuild` (project owner or buyer) but writes
+ * `kind = 'inline'` so the row stays out of the builds feed — the
  * image surfaces only via the comment's `![](url)` markdown.
  *
  * No notification — the postComment that follows raises its own

@@ -25,10 +25,10 @@ const EVENT_TYPES: Array<{
     description: "When someone replies to a comment you posted.",
   },
   {
-    key: "make_on_file",
-    label: "Photos on your files",
+    key: "build_on_file",
+    label: "Builds of your files",
     description:
-      "When someone adds a photo of their print to one of your files.",
+      "When someone shares a photo of a print of one of your files.",
   },
   {
     key: "print_on_file",

@@ -142,7 +142,7 @@ export const users = pgTable("users", {
   emailNotificationPrefs: jsonb("email_notification_prefs").$type<{
     comment_on_listing?: boolean;
     reply_to_comment?: boolean;
-    make_on_file?: boolean;
+    build_on_file?: boolean;
     print_on_file?: boolean;
   }>(),
   createdAt: timestamp("created_at", { withTimezone: true })
@@ -849,14 +849,14 @@ export const fileDownloads = pgTable(
 // Two flavors share the table:
 //   - `kind = 'creator'` — owner-curated gallery shots (default,
 //     preserves existing behavior).
-//   - `kind = 'make'` — community build photos posted by a user who
-//     has downloaded or printed the file. The Thingiverse "makes"
-//     concept. Posters can have userId != fileId.userId.
+//   - `kind = 'build'` — community build photos posted by a user who
+//     has downloaded or printed the file. Posters can have userId
+//     != fileId.userId.
 //
 // Sharing one table is the "v1 keep it simple" choice: when a real
-// `Make` model with material/printer/settings/multiple-photos is
-// needed, we'll graduate to a `file_makes` parent + photos as
-// children, and migrate `kind='make'` rows over.
+// `Build` model with material/printer/settings/multiple-photos is
+// needed, we'll graduate to a `file_builds` parent + photos as
+// children, and migrate `kind='build'` rows over.
 
 export const filePhotos = pgTable("file_photos", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -869,11 +869,11 @@ export const filePhotos = pgTable("file_photos", {
   storageKey: text("storage_key").notNull(),
   caption: text("caption"),
   sortOrder: integer("sort_order").notNull().default(0),
-  // 'creator' (curator gallery) or 'make' (community post). Free-form
-  // text + CHECK constraint instead of an enum so we can add new
-  // kinds without an enum migration. Index covers the
-  // `WHERE kind = 'creator'` and `WHERE kind = 'make'` paths used by
-  // the file detail page (creator gallery vs makes section render).
+  // 'creator' (curator gallery), 'build' (community post), or
+  // 'inline' (image attached to a comment). Free-form text + CHECK
+  // constraint instead of an enum so we can add new kinds without an
+  // enum migration. Index covers the `WHERE kind = 'creator'` and
+  // `WHERE kind = 'build'` paths used by the file detail page.
   kind: text("kind").notNull().default("creator"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
@@ -887,12 +887,12 @@ export const filePhotos = pgTable("file_photos", {
   ),
   check(
     "file_photos_kind_check",
-    sql`${table.kind} IN ('creator', 'make', 'inline')`
+    sql`${table.kind} IN ('creator', 'build', 'inline')`
   ),
 ]);
 
 // Project photos — the project-side counterpart to `file_photos`.
-// Same `kind` semantics (`creator` / `make` / `inline`), same storage
+// Same `kind` semantics (`creator` / `build` / `inline`), same storage
 // shape (R2 prefix `photos/<userId>/...`), same composer flows. Kept
 // in a separate table rather than polymorphic-targeting `file_photos`
 // because the cover-photo FK + cascade-on-listing-delete is far
@@ -927,7 +927,7 @@ export const projectPhotos = pgTable("project_photos", {
   ),
   check(
     "project_photos_kind_check",
-    sql`${table.kind} IN ('creator', 'make', 'inline')`
+    sql`${table.kind} IN ('creator', 'build', 'inline')`
   ),
 ]);
 

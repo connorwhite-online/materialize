@@ -7,7 +7,7 @@ import { sendNotificationEmail } from "./email";
 import { shouldSendEmail } from "./email-prefs";
 import type {
   CommentOnListingPayload,
-  MakeOnFilePayload,
+  BuildOnFilePayload,
   NotificationType,
   PrintOnFilePayload,
   PurchaseOnListingPayload,
@@ -39,7 +39,7 @@ async function insert(
   payload:
     | CommentOnListingPayload
     | ReplyToCommentPayload
-    | MakeOnFilePayload
+    | BuildOnFilePayload
     | PrintOnFilePayload
     | PurchaseOnListingPayload
     | RefundOnListingPayload
@@ -92,11 +92,11 @@ export async function notifyReplyToComment(
   );
 }
 
-export async function notifyMakeOnFile(
+export async function notifyBuildOnFile(
   recipientId: string,
-  payload: MakeOnFilePayload
+  payload: BuildOnFilePayload
 ) {
-  return insert(recipientId, payload.actor.id, "make_on_file", payload);
+  return insert(recipientId, payload.actor.id, "build_on_file", payload);
 }
 
 export async function notifyPrintOnFile(

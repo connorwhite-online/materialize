@@ -15,7 +15,7 @@
 export type NotificationType =
   | "comment_on_listing"
   | "reply_to_comment"
-  | "make_on_file"
+  | "build_on_file"
   | "print_on_file"
   | "purchase_on_listing"
   | "refund_on_listing";
@@ -53,11 +53,11 @@ export interface ReplyToCommentPayload {
   snippet: string;
 }
 
-export interface MakeOnFilePayload {
+export interface BuildOnFilePayload {
   actor: ActorSnapshot;
   listing: ListingRef; // always kind: 'file'
-  makeId: string;
-  /** Caption snippet if the make has one, else null. */
+  buildId: string;
+  /** Caption snippet if the build has one, else null. */
   snippet: string | null;
 }
 
@@ -95,7 +95,7 @@ export interface RefundOnListingPayload {
 export type NotificationPayload =
   | (CommentOnListingPayload & { type: "comment_on_listing" })
   | (ReplyToCommentPayload & { type: "reply_to_comment" })
-  | (MakeOnFilePayload & { type: "make_on_file" })
+  | (BuildOnFilePayload & { type: "build_on_file" })
   | (PrintOnFilePayload & { type: "print_on_file" })
   | (PurchaseOnListingPayload & { type: "purchase_on_listing" })
   | (RefundOnListingPayload & { type: "refund_on_listing" });

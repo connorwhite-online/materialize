@@ -8,7 +8,7 @@ import type { NotificationType } from "./types";
 export type EmailPrefMap = {
   comment_on_listing?: boolean;
   reply_to_comment?: boolean;
-  make_on_file?: boolean;
+  build_on_file?: boolean;
   print_on_file?: boolean;
   purchase_on_listing?: boolean;
   refund_on_listing?: boolean;

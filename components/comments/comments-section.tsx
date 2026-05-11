@@ -185,7 +185,7 @@ function PhotoPostRow({
 
   return (
     <div
-      id={`make-${photo.id}`}
+      id={`build-${photo.id}`}
       className="flex scroll-mt-24 items-start gap-3"
     >
       <UserAvatar

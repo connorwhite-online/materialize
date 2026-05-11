@@ -3,10 +3,10 @@
 import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { ImagePlus } from "@/components/icons/image-plus";
-import { addFilePhoto, addFileMake } from "@/app/actions/photos";
+import { addFilePhoto, addFileBuild } from "@/app/actions/photos";
 import {
   addProjectPhoto,
-  addProjectMake,
+  addProjectBuild,
 } from "@/app/actions/project-photos";
 import { uploadPhotoToR2, validatePhoto } from "@/lib/photos/upload-photo";
 import { cn } from "@/lib/utils";
@@ -16,11 +16,11 @@ interface PhotoUploaderProps {
   targetId: string;
   /**
    * 'creator' — owner's curator gallery (default; existing behavior).
-   * 'make' — community build photo. Routes through the make-flavored
+   * 'build' — community build photo. Routes through the build-flavored
    * action, which gates on download/print for files and on
    * ownership/purchase for projects.
    */
-  kind?: "creator" | "make";
+  kind?: "creator" | "build";
   /**
    * 'sm' (default) — compact 48×48 dashed square for empty / standalone
    * placement.
@@ -79,13 +79,13 @@ export function PhotoUploader({
           if (targetType === "file" && kind === "creator") {
             return addFilePhoto({ fileId: targetId, storageKey });
           }
-          if (targetType === "file" && kind === "make") {
-            return addFileMake({ fileId: targetId, storageKey });
+          if (targetType === "file" && kind === "build") {
+            return addFileBuild({ fileId: targetId, storageKey });
           }
           if (targetType === "project" && kind === "creator") {
             return addProjectPhoto({ projectId: targetId, storageKey });
           }
-          return addProjectMake({ projectId: targetId, storageKey });
+          return addProjectBuild({ projectId: targetId, storageKey });
         })();
         if (result && "error" in result) {
           throw new Error(result.error);

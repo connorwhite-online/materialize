@@ -91,7 +91,7 @@ export async function updateEmailNotificationsEnabled(
 const ALLOWED_PREF_TYPES = new Set([
   "comment_on_listing",
   "reply_to_comment",
-  "make_on_file",
+  "build_on_file",
   "print_on_file",
 ]);
 

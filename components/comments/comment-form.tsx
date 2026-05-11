@@ -40,7 +40,7 @@ interface Props {
  * on, the user can pick (or drag, or paste) one image; the textarea
  * becomes its caption. Posting takes one of two paths:
  *
- *   - photo attached → upload to R2, addFileMake({fileId, storageKey,
+ *   - photo attached → upload to R2, addFileBuild({fileId, storageKey,
  *     caption: trimmedBody || undefined}). Renders as a photo post
  *     interleaved into the comment thread.
  *   - text only → postComment(target, targetId, {body, parentId}) —

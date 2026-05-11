@@ -169,6 +169,13 @@
       "when": 1778500200000,
       "tag": "0023_project_photos",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1778500300000,
+      "tag": "0024_rename_makes_to_builds",
+      "breakpoints": true
     }
   ]
 }

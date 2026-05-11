@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import { NotificationsTabActions } from "./notifications-tab-actions";
 import type {
   CommentOnListingPayload,
-  MakeOnFilePayload,
+  BuildOnFilePayload,
   NotificationType,
   PrintOnFilePayload,
   PurchaseOnListingPayload,
@@ -23,7 +23,7 @@ const INBOX_LIMIT = 100;
 type Payload =
   | CommentOnListingPayload
   | ReplyToCommentPayload
-  | MakeOnFilePayload
+  | BuildOnFilePayload
   | PrintOnFilePayload
   | PurchaseOnListingPayload
   | RefundOnListingPayload;
@@ -157,8 +157,8 @@ function buildHref(n: Row): string {
     listing.kind === "file"
       ? `/files/${listing.slug}`
       : `/projects/${listing.slug}`;
-  if (n.type === "make_on_file") {
-    return `${base}#make-${(n.payload as MakeOnFilePayload).makeId}`;
+  if (n.type === "build_on_file") {
+    return `${base}#build-${(n.payload as BuildOnFilePayload).buildId}`;
   }
   if (n.type === "print_on_file") {
     return `/dashboard/orders/${(n.payload as PrintOnFilePayload).printOrderId}`;
@@ -182,7 +182,7 @@ function buildMessage(n: Row): string {
       return "commented";
     case "reply_to_comment":
       return "replied to your comment";
-    case "make_on_file":
+    case "build_on_file":
       return "added a photo";
     case "print_on_file":
       return "just printed";

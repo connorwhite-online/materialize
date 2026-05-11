@@ -7,7 +7,7 @@
  *
  * Used by:
  *   - the file detail activity stream (PrintActivity rows)
- *   - the makes-gate entitlement helper (a user can post a "make" for
+ *   - the builds-gate entitlement helper (a user can post a "build" for
  *     a file iff they've downloaded it OR have a print order in this
  *     state set)
  */

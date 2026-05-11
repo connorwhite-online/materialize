@@ -6,7 +6,7 @@ import { NotificationEmail } from "@/lib/email/templates/notification";
 import { logError } from "@/lib/logger";
 import type {
   CommentOnListingPayload,
-  MakeOnFilePayload,
+  BuildOnFilePayload,
   NotificationType,
   PrintOnFilePayload,
   PurchaseOnListingPayload,
@@ -17,7 +17,7 @@ import type {
 type AnyEmailPayload =
   | CommentOnListingPayload
   | ReplyToCommentPayload
-  | MakeOnFilePayload
+  | BuildOnFilePayload
   | PrintOnFilePayload
   | PurchaseOnListingPayload
   | RefundOnListingPayload;
@@ -95,7 +95,7 @@ function buildHeadline(
       return `${actor} commented on your ${targetWord} ${listing}`;
     case "reply_to_comment":
       return `${actor} replied to your comment on ${listing}`;
-    case "make_on_file":
+    case "build_on_file":
       return `${actor} added a photo to your ${targetWord} ${listing}`;
     case "print_on_file":
       return `${actor} just printed your ${targetWord} ${listing}`;
@@ -114,8 +114,8 @@ function buildHref(
     payload.listing.kind === "file"
       ? `${APP_URL}/files/${payload.listing.slug}`
       : `${APP_URL}/projects/${payload.listing.slug}`;
-  if (type === "make_on_file") {
-    return `${base}#make-${(payload as MakeOnFilePayload).makeId}`;
+  if (type === "build_on_file") {
+    return `${base}#build-${(payload as BuildOnFilePayload).buildId}`;
   }
   if (type === "print_on_file") {
     // Link the creator to the order detail page rather than the file

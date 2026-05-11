@@ -13,7 +13,7 @@ import { logError } from "@/lib/logger";
  * Access patterns:
  *   - GET /api/thumbnails/projects/{projectId}                 → cover
  *   - GET /api/thumbnails/projects/{projectId}?photoId={id}    → a
- *     specific curator/make photo on the project. Used by card
+ *     specific curator/build photo on the project. Used by card
  *     carousels to surface additional author-uploaded images.
  *
  * Visibility: public when the project is `published` + `public`;
