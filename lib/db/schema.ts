@@ -230,6 +230,12 @@ export const projects = pgTable("projects", {
   // enclosure + microcontroller + custom firmware) need a place to
   // surface the code without us hosting it ourselves.
   repoUrl: text("repo_url"),
+  // Curator-picked cover image. Null = use the legacy thumbnailUrl
+  // (auto-captured or first uploaded photo). Resolved via the
+  // /api/thumbnails/projects/{id} route which JOINs to the picked
+  // photo and signs a fresh R2 URL on each request. Mirrors the
+  // pattern on files.cover_photo_id.
+  coverPhotoId: uuid("cover_photo_id"),
   downloadCount: integer("download_count").notNull().default(0),
   viewCount: integer("view_count").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true })
@@ -879,7 +885,50 @@ export const filePhotos = pgTable("file_photos", {
     table.kind,
     table.createdAt
   ),
-  check("file_photos_kind_check", sql`${table.kind} IN ('creator', 'make')`),
+  check(
+    "file_photos_kind_check",
+    sql`${table.kind} IN ('creator', 'make', 'inline')`
+  ),
+]);
+
+// Project photos — the project-side counterpart to `file_photos`.
+// Same `kind` semantics (`creator` / `make` / `inline`), same storage
+// shape (R2 prefix `photos/<userId>/...`), same composer flows. Kept
+// in a separate table rather than polymorphic-targeting `file_photos`
+// because the cover-photo FK + cascade-on-listing-delete is far
+// simpler when each listing kind has its own photos table.
+//
+// CHECK constraint mirrors file_photos with the wider kind set —
+// 'inline' is permitted for comment-attached photos that get spliced
+// into the comment body as markdown rather than showing in the
+// curator gallery.
+
+export const projectPhotos = pgTable("project_photos", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  storageKey: text("storage_key").notNull(),
+  caption: text("caption"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  kind: text("kind").notNull().default("creator"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+}, (table) => [
+  index("project_photos_project_id_idx").on(table.projectId),
+  index("project_photos_project_kind_created_idx").on(
+    table.projectId,
+    table.kind,
+    table.createdAt
+  ),
+  check(
+    "project_photos_kind_check",
+    sql`${table.kind} IN ('creator', 'make', 'inline')`
+  ),
 ]);
 
 // Personal Access Tokens — the agent-facing auth surface for the MCP

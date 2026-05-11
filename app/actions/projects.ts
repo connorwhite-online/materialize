@@ -17,6 +17,7 @@ import { db } from "@/lib/db";
 import {
   projects,
   projectFiles,
+  projectPhotos,
   files,
   purchases,
 } from "@/lib/db/schema";
@@ -147,6 +148,37 @@ export async function updateProject(projectId: string, formData: FormData) {
       return { error: parsed.error.flatten().fieldErrors };
     }
 
+    // Optional cover override — same shape as files.ts. Empty / missing
+    // resets the column to null (use the legacy thumbnailUrl). Validate
+    // that the chosen photo belongs to THIS project and is a curator-
+    // kind row so a buyer's photo can't be selected as cover.
+    const rawCoverPhotoId = formData.get("coverPhotoId");
+    let coverPhotoUpdate: { coverPhotoId: string | null } | null = null;
+    if (formData.has("coverPhotoId")) {
+      if (typeof rawCoverPhotoId === "string" && rawCoverPhotoId !== "") {
+        const [cover] = await db
+          .select({ id: projectPhotos.id })
+          .from(projectPhotos)
+          .where(
+            and(
+              eq(projectPhotos.id, rawCoverPhotoId),
+              eq(projectPhotos.projectId, projectId),
+              eq(projectPhotos.kind, "creator")
+            )
+          );
+        if (!cover) {
+          return {
+            error: {
+              coverPhotoId: ["Cover photo doesn't belong to this project."],
+            },
+          };
+        }
+        coverPhotoUpdate = { coverPhotoId: cover.id };
+      } else {
+        coverPhotoUpdate = { coverPhotoId: null };
+      }
+    }
+
     await db
       .update(projects)
       .set({
@@ -164,6 +196,7 @@ export async function updateProject(projectId: string, formData: FormData) {
         ...(formData.has("repoUrl")
           ? { repoUrl: parsed.data.repoUrl ?? null }
           : {}),
+        ...(coverPhotoUpdate ?? {}),
       })
       .where(eq(projects.id, projectId));
 
