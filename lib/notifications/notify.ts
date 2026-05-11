@@ -10,8 +10,10 @@ import type {
   MakeOnFilePayload,
   NotificationType,
   PrintOnFilePayload,
+  PurchaseOnListingPayload,
   ReplyToCommentPayload,
 } from "./types";
+export type { PurchaseSnippet } from "./types";
 
 /**
  * Insert a notification + fire the corresponding email if the
@@ -38,6 +40,7 @@ async function insert(
     | ReplyToCommentPayload
     | MakeOnFilePayload
     | PrintOnFilePayload
+    | PurchaseOnListingPayload
 ) {
   if (recipientId === actorId) return;
   try {
@@ -99,4 +102,16 @@ export async function notifyPrintOnFile(
   payload: PrintOnFilePayload
 ) {
   return insert(recipientId, payload.actor.id, "print_on_file", payload);
+}
+
+export async function notifyPurchaseOnListing(
+  recipientId: string,
+  payload: PurchaseOnListingPayload
+) {
+  return insert(
+    recipientId,
+    payload.actor.id,
+    "purchase_on_listing",
+    payload
+  );
 }

@@ -10,6 +10,7 @@ export type EmailPrefMap = {
   reply_to_comment?: boolean;
   make_on_file?: boolean;
   print_on_file?: boolean;
+  purchase_on_listing?: boolean;
 };
 
 /**

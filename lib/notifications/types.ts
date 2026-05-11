@@ -16,7 +16,8 @@ export type NotificationType =
   | "comment_on_listing"
   | "reply_to_comment"
   | "make_on_file"
-  | "print_on_file";
+  | "print_on_file"
+  | "purchase_on_listing";
 
 interface ActorSnapshot {
   /** User id of whoever triggered the event. */
@@ -69,11 +70,26 @@ export interface PrintOnFilePayload {
   materialLabel: string | null;
 }
 
+export interface PurchaseSnippet {
+  /** Amount the buyer paid, in the smallest currency unit. */
+  amountCents: number;
+  /** ISO-4217 currency code (today always USD). */
+  currency: string;
+}
+
+export interface PurchaseOnListingPayload {
+  /** Buyer who completed the Stripe checkout. */
+  actor: ActorSnapshot;
+  listing: ListingRef; // either kind
+  snippet: PurchaseSnippet;
+}
+
 export type NotificationPayload =
   | (CommentOnListingPayload & { type: "comment_on_listing" })
   | (ReplyToCommentPayload & { type: "reply_to_comment" })
   | (MakeOnFilePayload & { type: "make_on_file" })
-  | (PrintOnFilePayload & { type: "print_on_file" });
+  | (PrintOnFilePayload & { type: "print_on_file" })
+  | (PurchaseOnListingPayload & { type: "purchase_on_listing" });
 
 /**
  * Trim a comment body or caption to a short preview safe for the

@@ -13,6 +13,7 @@ import type {
   MakeOnFilePayload,
   NotificationType,
   PrintOnFilePayload,
+  PurchaseOnListingPayload,
   ReplyToCommentPayload,
 } from "@/lib/notifications/types";
 
@@ -22,7 +23,8 @@ type Payload =
   | CommentOnListingPayload
   | ReplyToCommentPayload
   | MakeOnFilePayload
-  | PrintOnFilePayload;
+  | PrintOnFilePayload
+  | PurchaseOnListingPayload;
 
 type Row = {
   id: string;
@@ -159,6 +161,12 @@ function buildHref(n: Row): string {
   if (n.type === "print_on_file") {
     return `/dashboard/orders/${(n.payload as PrintOnFilePayload).printOrderId}`;
   }
+  if (n.type === "purchase_on_listing") {
+    // Sales activity rolls up on the earnings tab — point there
+    // rather than back at the listing page the creator already
+    // knows.
+    return `/dashboard/earnings`;
+  }
   const commentId =
     n.type === "comment_on_listing"
       ? (n.payload as CommentOnListingPayload).commentId
@@ -176,15 +184,21 @@ function buildMessage(n: Row): string {
       return "added a photo";
     case "print_on_file":
       return "just printed";
+    case "purchase_on_listing":
+      return "bought";
   }
 }
 
 function pickSnippet(n: Row): string | null {
+  if (n.type === "purchase_on_listing") {
+    const p = n.payload as PurchaseOnListingPayload;
+    return `$${(p.snippet.amountCents / 100).toFixed(2)} ${p.snippet.currency}`;
+  }
   if ("snippet" in n.payload) {
-    return n.payload.snippet ?? null;
+    return (n.payload as { snippet: string | null }).snippet ?? null;
   }
   if ("materialLabel" in n.payload) {
-    return n.payload.materialLabel;
+    return (n.payload as { materialLabel: string | null }).materialLabel;
   }
   return null;
 }

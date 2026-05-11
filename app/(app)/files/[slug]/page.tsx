@@ -51,6 +51,7 @@ import { generateDownloadUrl } from "@/lib/storage";
 import { PRINTED_STATUSES } from "@/lib/print-statuses";
 import { swallow } from "@/lib/utils/swallow";
 import { fileJsonLd } from "@/lib/seo/json-ld";
+import { PurchaseButton } from "@/components/purchase/purchase-button";
 
 async function buildMaterialLabel(configId: string | null): Promise<string | null> {
   if (!configId) return null;
@@ -912,9 +913,10 @@ export default async function FileDetailPage(props: {
                     Download
                   </Button>
                 ) : file.price > 0 ? (
-                  <Button variant="secondary" className="w-full">
-                    Purchase
-                  </Button>
+                  <PurchaseButton
+                    fileId={file.id}
+                    priceCents={file.price}
+                  />
                 ) : null}
               </div>
             </CardContent>

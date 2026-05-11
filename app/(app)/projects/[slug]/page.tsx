@@ -31,6 +31,7 @@ import {
 } from "@/components/circuits/circuit-gallery";
 import { Code } from "@/components/icons/code";
 import { projectJsonLd } from "@/lib/seo/json-ld";
+import { PurchaseButton } from "@/components/purchase/purchase-button";
 import {
   CommentsSection,
   type CommentRow,
@@ -575,7 +576,11 @@ export default async function ProjectDetailPage(props: {
                       Download files individually below.
                     </p>
                   ) : (
-                    <Button className="w-full mt-3">Purchase</Button>
+                    <PurchaseButton
+                      projectId={project.id}
+                      priceCents={project.price}
+                      className="mt-3"
+                    />
                   )}
                 </>
               ) : (

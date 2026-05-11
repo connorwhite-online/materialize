@@ -4,6 +4,7 @@ import { users, webhookEventsProcessed } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { getStripe } from "@/lib/stripe";
 import { handlePrintOrderPayment } from "@/lib/stripe/handle-print-order-payment";
+import { handleListingPurchase } from "@/lib/stripe/handle-listing-purchase";
 import { logError } from "@/lib/logger";
 import type Stripe from "stripe";
 
@@ -95,6 +96,20 @@ export async function POST(request: Request) {
         // Return 500 so Stripe retries — the user paid, we MUST place the order
         return Response.json(
           { error: "Failed to process order" },
+          { status: 500 }
+        );
+      }
+    }
+
+    if (session.metadata?.type === "listing_purchase") {
+      try {
+        await handleListingPurchase(session);
+      } catch (error) {
+        logError("stripe-webhook-listing-purchase", error);
+        // 500 so Stripe retries — the buyer paid, we MUST record the
+        // purchases row so entitlement checks start returning true.
+        return Response.json(
+          { error: "Failed to record purchase" },
           { status: 500 }
         );
       }
