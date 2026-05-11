@@ -358,7 +358,7 @@ export function FileMetadataForm({
                                 <span>
                                   {meta.shortName} — {meta.name}
                                 </span>
-                                <span className="text-[11px] text-muted-foreground leading-tight">
+                                <span className="whitespace-normal text-[11px] text-muted-foreground leading-tight">
                                   {meta.summary}
                                 </span>
                               </div>

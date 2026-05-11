@@ -159,7 +159,7 @@ export function ProjectCreateForm({
                             <span>
                               {meta.shortName} — {meta.name}
                             </span>
-                            <span className="text-[11px] leading-tight text-muted-foreground">
+                            <span className="whitespace-normal text-[11px] leading-tight text-muted-foreground">
                               {meta.summary}
                             </span>
                           </div>

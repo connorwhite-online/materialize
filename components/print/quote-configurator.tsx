@@ -122,13 +122,29 @@ export function QuoteConfigurator({
   filename,
   format,
   hasCachedModel,
-  geometryData,
+  geometryData: initialGeometryData,
   preselectMaterialId,
   onAddedToCart,
   rightAnnex,
   headerSlot,
 }: QuoteConfiguratorProps) {
   const isDraft = !!draftMode;
+
+  // Geometry can arrive two ways:
+  //   (a) baked into the server render via the `geometryData` prop —
+  //       happens for any fileAsset whose CraftCloud model + dims have
+  //       already been cached on a previous visit;
+  //   (b) returned by CraftCloud's upload response inside
+  //       `ensureModelUploaded` — happens for a freshly uploaded asset
+  //       whose first quote run is THIS one.
+  // (a) is read-only, (b) writes to local state so the bounding-box
+  // and dimensions-text panels render immediately without a refresh.
+  const [geometryData, setGeometryData] = useState(initialGeometryData);
+  // Keep state in sync when the parent re-mounts us with new server
+  // data — e.g. router.refresh() after the cache-model POST resolves.
+  useEffect(() => {
+    if (initialGeometryData) setGeometryData(initialGeometryData);
+  }, [initialGeometryData]);
 
   const [loadingPhase, setLoadingPhase] = useState<LoadingPhase | null>(
     // In draft mode the model is already on CraftCloud — skip straight
@@ -254,6 +270,25 @@ export function QuoteConfigurator({
     // coordinates — defaulting to mm for old rows that predate the
     // file_assets.file_unit column.
     const model = await uploadToCraftCloud(downloadUrl, fname, fileUnit ?? "mm");
+
+    // Surface the dimensions we just got back BEFORE persisting them
+    // server-side — the bounding box overlay, the dimensions-text
+    // line, and the optimistic material filter all key off this
+    // state and the user would otherwise see them blank until a
+    // hard refresh. The follow-up POST below caches the same data
+    // for next time.
+    const dims = model.dimensions;
+    const vol = model.volume;
+    if (dims) {
+      // Hoist into locals so the narrowing survives into the
+      // setState updater closure — `model.dimensions` would widen
+      // back to {x,y,z} | null inside the nested function.
+      setGeometryData((prev) => ({
+        ...(prev ?? {}),
+        dimensions: dims,
+        volume: vol ?? prev?.volume,
+      }));
+    }
 
     // Cache the modelId on our server
     await fetch("/api/craftcloud/cache-model", {
