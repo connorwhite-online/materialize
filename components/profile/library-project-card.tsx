@@ -36,7 +36,7 @@ export function LibraryProjectCard({ item }: LibraryProjectCardProps) {
     ),
   ];
   const hasAnyImage = !!item.thumbnailUrl || item.additionalPhotoIds.length > 0;
-  const isHidden = item.visibility === "private" && item.source === "owned";
+  const isPrivate = item.visibility === "private" && item.source === "owned";
   return (
     <Link href={`/projects/${item.slug}`} className="block">
       <Card className="overflow-hidden transition-colors hover:border-primary/30">
@@ -49,11 +49,11 @@ export function LibraryProjectCard({ item }: LibraryProjectCardProps) {
             </div>
           )}
 
-          {/* Hidden overlay — same chrome as the file card. */}
-          {isHidden && (
+          {/* Private overlay — same chrome as the file card. */}
+          {isPrivate && (
             <div className="pointer-events-none absolute left-1.5 top-1.5">
               <span className="inline-flex items-center rounded-md bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-white backdrop-blur-md ring-1 ring-white/10">
-                Hidden
+                Private
               </span>
             </div>
           )}

@@ -142,7 +142,7 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
     []
   );
 
-  const isHidden =
+  const isPrivate =
     item.source === "owned" && isOwner && item.visibility === "private";
   const isPurchased = item.source === "purchased";
   const hasPrice = item.source === "owned" && item.price > 0;
@@ -176,11 +176,11 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
           {/* Status badges overlay the thumbnail top-left so they
               read at a glance without taking up footer real estate.
               Backdrop-blur keeps them legible over any image. */}
-          {(isHidden || isFlagged) && (
+          {(isPrivate || isFlagged) && (
             <div className="pointer-events-none absolute left-1.5 top-1.5 flex flex-wrap items-center gap-1">
-              {isHidden && (
+              {isPrivate && (
                 <span className="inline-flex items-center rounded-md bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-white backdrop-blur-md ring-1 ring-white/10">
-                  Hidden
+                  Private
                 </span>
               )}
               {isFlagged && (
@@ -202,6 +202,9 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
                 ? `by ${item.creatorDisplayName || item.creatorUsername}`
                 : "—"}
           </p>
+          {/* isPrivate / isFlagged intentionally omitted from this
+              row — they surface in the top-left overlay above so the
+              status reads at thumb-glance instead of footer-glance. */}
           {(hasPrice || isPurchased) && (
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {hasPrice && (
