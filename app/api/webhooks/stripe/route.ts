@@ -94,7 +94,15 @@ export async function POST(request: Request) {
     }
   }
 
-  if (isHandled) {
+  // Three event families flow through this router and each has a
+  // different `data.object` shape. The branching below keeps each
+  // cast scoped to the branch that uses it instead of one top-level
+  // cast — a Checkout.Session cast is correct only for paidCheckout /
+  // asyncSuccess / billingSetup; Charge for chargeRefunded; Account
+  // for accountUpdated.
+  const isSessionEvent = isPaidCheckout || isAsyncSuccess || isBillingSetup;
+
+  if (isSessionEvent) {
     const session = event.data.object as Stripe.Checkout.Session;
     const printOrderId = session.metadata?.printOrderId;
 
@@ -122,44 +130,6 @@ export async function POST(request: Request) {
           { error: "Failed to record purchase" },
           { status: 500 }
         );
-      }
-    }
-
-    if (isChargeRefunded) {
-      const charge = event.data.object as Stripe.Charge;
-      try {
-        await handleListingRefund(charge);
-      } catch (error) {
-        logError("stripe-webhook-listing-refund", error);
-        // 500 so Stripe retries — entitlement should drop promptly
-        // once a refund clears. Note: refunds for non-listing charges
-        // (print orders) silently no-op inside the handler; this
-        // 500 only fires for genuine DB failures.
-        return Response.json(
-          { error: "Failed to record refund" },
-          { status: 500 }
-        );
-      }
-    }
-
-    if (isAccountUpdated) {
-      // Find the user whose stripeAccountId matches and reconcile
-      // the cached onboardingComplete flag. We treat
-      // charges_enabled as the canonical signal — payouts_enabled
-      // sometimes lags by a day while bank verification clears.
-      const account = event.data.object as Stripe.Account;
-      const onboarded = account.charges_enabled === true;
-      try {
-        await db
-          .update(users)
-          .set({ stripeOnboardingComplete: onboarded })
-          .where(eq(users.stripeAccountId, account.id));
-      } catch (error) {
-        logError("stripe-webhook-account-updated", error);
-        // Don't 500 — Stripe will keep retrying account.updated as
-        // long as the account state matters, so the worst case is
-        // we miss one of many updates. We log and let the next
-        // delivery (or refreshStripePayoutStatus call) reconcile.
       }
     }
 
@@ -198,11 +168,52 @@ export async function POST(request: Request) {
         }
       }
     }
+  }
 
-    // Mark the event processed only after the handler succeeded (or
-    // was correctly no-op'd because metadata didn't match a known
-    // shape). ON CONFLICT DO NOTHING absorbs the rare double-insert
-    // when two near-simultaneous deliveries both pass the SELECT.
+  if (isChargeRefunded) {
+    const charge = event.data.object as Stripe.Charge;
+    try {
+      await handleListingRefund(charge);
+    } catch (error) {
+      logError("stripe-webhook-listing-refund", error);
+      // 500 so Stripe retries — entitlement should drop promptly
+      // once a refund clears. Note: refunds for non-listing charges
+      // (print orders) silently no-op inside the handler; this
+      // 500 only fires for genuine DB failures.
+      return Response.json(
+        { error: "Failed to record refund" },
+        { status: 500 }
+      );
+    }
+  }
+
+  if (isAccountUpdated) {
+    // Find the user whose stripeAccountId matches and reconcile
+    // the cached onboardingComplete flag. We treat
+    // charges_enabled as the canonical signal — payouts_enabled
+    // sometimes lags by a day while bank verification clears.
+    const account = event.data.object as Stripe.Account;
+    const onboarded = account.charges_enabled === true;
+    try {
+      await db
+        .update(users)
+        .set({ stripeOnboardingComplete: onboarded })
+        .where(eq(users.stripeAccountId, account.id));
+    } catch (error) {
+      logError("stripe-webhook-account-updated", error);
+      // Don't 500 — Stripe will keep retrying account.updated as
+      // long as the account state matters, so the worst case is
+      // we miss one of many updates. We log and let the next
+      // delivery (or refreshStripePayoutStatus call) reconcile.
+    }
+  }
+
+  if (isHandled) {
+    // Mark the event processed only after every handler that fires
+    // succeeded (or was correctly no-op'd because metadata didn't
+    // match a known shape). ON CONFLICT DO NOTHING absorbs the
+    // rare double-insert when two near-simultaneous deliveries
+    // both pass the dedup SELECT above.
     try {
       await db
         .insert(webhookEventsProcessed)
