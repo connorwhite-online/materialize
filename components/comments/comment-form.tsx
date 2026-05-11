@@ -8,6 +8,7 @@ import { ImagePlus } from "@/components/icons/image-plus";
 import { X } from "@/components/icons/x";
 import { postComment, type CommentTarget } from "@/app/actions/comments";
 import { addInlineCommentPhoto } from "@/app/actions/photos";
+import { addInlineProjectCommentPhoto } from "@/app/actions/project-photos";
 import {
   uploadPhotoToR2,
   validatePhoto,
@@ -26,17 +27,11 @@ interface Props {
   placeholder?: string;
   autoFocus?: boolean;
   /**
-   * Allow attaching a single photo. Top-level posts on file detail
-   * only — projects don't carry photo posts, and reply forms don't
-   * either.
+   * Allow attaching a single photo. Top-level posts only — reply
+   * forms don't carry attachments because the visual delta of a
+   * threaded photo-reply isn't worth the extra UI surface.
    */
   acceptPhoto?: boolean;
-  /**
-   * The fileId — required when `acceptPhoto` is on, since posting a
-   * photo routes through addFileMake which writes to filePhotos
-   * for this listing.
-   */
-  fileId?: string;
 }
 
 /**
@@ -63,7 +58,6 @@ export function CommentForm({
   placeholder = "Share your thoughts…",
   autoFocus = false,
   acceptPhoto = false,
-  fileId,
 }: Props) {
   const router = useRouter();
   const [body, setBody] = useState("");
@@ -109,22 +103,33 @@ export function CommentForm({
     startTransition(async () => {
       try {
         let finalBody = trimmed;
-        if (attachedFile && acceptPhoto && fileId) {
+        if (attachedFile && acceptPhoto) {
           const { storageKey } = await uploadPhotoToR2(attachedFile);
-          const photoRes = await addInlineCommentPhoto({
-            fileId,
-            storageKey,
-          });
+          const photoRes =
+            target === "project"
+              ? await addInlineProjectCommentPhoto({
+                  projectId: targetId,
+                  storageKey,
+                })
+              : await addInlineCommentPhoto({
+                  fileId: targetId,
+                  storageKey,
+                });
           if (photoRes && "error" in photoRes) {
             setError(photoRes.error ?? "Couldn't upload photo.");
             return;
           }
           // Splice the image as markdown into the body. The
-          // /api/thumbnails/{fileId}?photoId=... URL pattern is
-          // already used by card carousels and resolves to a fresh
-          // signed URL on each load, so the comment stays valid
-          // forever without re-signing.
-          const imageMd = `![](/api/thumbnails/${fileId}?photoId=${photoRes.photoId})`;
+          // /api/thumbnails/{id}?photoId=... URL pattern resolves to
+          // a fresh signed URL on each load, so the comment stays
+          // valid forever without re-signing. Project comments route
+          // through /api/thumbnails/projects/{id} since the storage
+          // key lives on projectPhotos, not filePhotos.
+          const thumbBase =
+            target === "project"
+              ? `/api/thumbnails/projects/${targetId}`
+              : `/api/thumbnails/${targetId}`;
+          const imageMd = `![](${thumbBase}?photoId=${photoRes.photoId})`;
           finalBody = trimmed ? `${trimmed}\n\n${imageMd}` : imageMd;
         }
         const res = await postComment(target, targetId, {

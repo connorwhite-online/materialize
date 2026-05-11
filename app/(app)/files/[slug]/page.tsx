@@ -737,7 +737,8 @@ export default async function FileDetailPage(props: {
               <h2 className="text-sm font-semibold">Photos</h2>
               <PhotosFeed
                 photos={feedPhotos}
-                fileId={file.id}
+                targetType="file"
+                targetId={file.id}
                 ownerId={file.userId}
                 viewerId={userId}
                 uploadAs={isOwner ? "creator" : null}
@@ -762,7 +763,6 @@ export default async function FileDetailPage(props: {
                 isSignedIn={!!userId}
                 signInRedirect={`/files/${slug}`}
                 acceptPhoto={canPostMake}
-                fileId={file.id}
               />
             </CardContent>
           </Card>

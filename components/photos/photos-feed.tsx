@@ -29,7 +29,10 @@ export type FeedPhoto = {
 
 interface PhotosFeedProps {
   photos: FeedPhoto[];
-  fileId: string;
+  /** Which kind of listing the feed is attached to. Drives both the
+   * upload routing (file vs project actions) and the delete routing. */
+  targetType: "file" | "project";
+  targetId: string;
   /** Listing owner; can delete any photo on the listing. */
   ownerId: string;
   viewerId: string | null;
@@ -53,7 +56,8 @@ interface PhotosFeedProps {
  */
 export function PhotosFeed({
   photos,
-  fileId,
+  targetType,
+  targetId,
   ownerId,
   viewerId,
   uploadAs,
@@ -69,7 +73,12 @@ export function PhotosFeed({
   if (photos.length === 0 && uploadAs) {
     return (
       <div className="flex items-center gap-3">
-        <PhotoUploader fileId={fileId} kind={uploadAs} size="sm" />
+        <PhotoUploader
+          targetType={targetType}
+          targetId={targetId}
+          kind={uploadAs}
+          size="sm"
+        />
         <p className="text-xs text-muted-foreground">
           {uploadAs === "creator"
             ? "Add a photo of this part"
@@ -89,7 +98,8 @@ export function PhotosFeed({
         {uploadAs && (
           <div className="shrink-0 aspect-square w-32 sm:w-40 snap-start">
             <PhotoUploader
-              fileId={fileId}
+              targetType={targetType}
+              targetId={targetId}
               kind={uploadAs}
               size="lg"
               multiple
@@ -109,6 +119,7 @@ export function PhotosFeed({
               index={i}
               onOpen={setLightboxIndex}
               canDelete={canDelete}
+              targetType={targetType}
             />
           );
         })}
@@ -131,9 +142,16 @@ interface PhotoThumbProps {
   index: number;
   onOpen: (index: number) => void;
   canDelete: boolean;
+  targetType: "file" | "project";
 }
 
-function PhotoThumb({ photo, index, onOpen, canDelete }: PhotoThumbProps) {
+function PhotoThumb({
+  photo,
+  index,
+  onOpen,
+  canDelete,
+  targetType,
+}: PhotoThumbProps) {
   // Anchor for direct deep-links coming from the bell ("added a
   // photo" notifications point at #make-<id>). Only set on community
   // photos for backward compatibility with the existing notification
@@ -185,7 +203,9 @@ function PhotoThumb({ photo, index, onOpen, canDelete }: PhotoThumbProps) {
         </div>
       )}
 
-      {canDelete && <DeletePhotoButton photoId={photo.id} />}
+      {canDelete && (
+        <DeletePhotoButton photoId={photo.id} targetType={targetType} />
+      )}
     </div>
   );
 }

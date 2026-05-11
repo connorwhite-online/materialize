@@ -23,6 +23,14 @@ interface Props {
     description: string | null;
     tags: string[] | null;
     repoUrl: string | null;
+    coverPhotoId: string | null;
+    /**
+     * Curator photos that are eligible to be picked as the cover.
+     * The form omits the picker entirely when this list is empty —
+     * a project with no curator photos can only fall back to the
+     * legacy thumbnail.
+     */
+    photos: Array<{ id: string; downloadUrl: string }>;
   };
 }
 
@@ -39,9 +47,18 @@ export function EditProjectDialog({ projectId, initial }: Props) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [errors, setErrors] = useState<Record<string, string[]> | null>(null);
+  // Empty string = auto thumbnail (no override); otherwise the selected
+  // curator photo's id. Mirrors edit-file-button.tsx.
+  const [coverPhotoId, setCoverPhotoId] = useState<string>(
+    initial.coverPhotoId ?? ""
+  );
 
   const handleSubmit = (formData: FormData) => {
     setErrors(null);
+    // Always include the cover field so the server action knows the
+    // user actually opened the dialog and made a decision (empty
+    // string clears, populated string picks).
+    formData.set("coverPhotoId", coverPhotoId);
     startTransition(async () => {
       const res = await updateProject(projectId, formData);
       if (res && "error" in res) {
@@ -120,6 +137,60 @@ export function EditProjectDialog({ projectId, initial }: Props) {
               </p>
             )}
           </div>
+
+          {initial.photos.length > 0 && (
+            <div className="space-y-1.5">
+              <Label className="text-xs">Cover image</Label>
+              <p className="text-[11px] text-muted-foreground">
+                Pick which photo represents this project in browse and
+                profile views. Default falls back to the auto thumbnail.
+              </p>
+              <div className="flex gap-2 overflow-x-auto pb-1 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setCoverPhotoId("")}
+                  aria-pressed={coverPhotoId === ""}
+                  className={`relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border-2 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                    coverPhotoId === ""
+                      ? "border-primary"
+                      : "border-border hover:border-foreground/30"
+                  }`}
+                >
+                  {/* Falls back to the bg gradient when no thumbnail
+                      exists — the "Auto" label still applies. */}
+                  <div className="absolute inset-0 bg-gradient-to-br from-muted/60 to-muted/30" />
+                  <span className="absolute inset-x-0 bottom-0 bg-black/60 py-0.5 text-center text-[9px] font-medium uppercase tracking-wide text-white">
+                    Auto
+                  </span>
+                </button>
+                {initial.photos.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setCoverPhotoId(p.id)}
+                    aria-pressed={coverPhotoId === p.id}
+                    className={`h-16 w-16 shrink-0 overflow-hidden rounded-lg border-2 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                      coverPhotoId === p.id
+                        ? "border-primary"
+                        : "border-border hover:border-foreground/30"
+                    }`}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={p.downloadUrl}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
+                  </button>
+                ))}
+              </div>
+              {errors?.coverPhotoId && (
+                <p className="mt-1 text-xs text-destructive">
+                  {errors.coverPhotoId[0]}
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="flex justify-end gap-2 pt-2">
             <Button

@@ -13,9 +13,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { X } from "@/components/icons/x";
 import { deleteFilePhoto } from "@/app/actions/photos";
+import { deleteProjectPhoto } from "@/app/actions/project-photos";
 
 interface Props {
   photoId: string;
+  /** Which listing the photo belongs to — routes to the right delete
+   * action. Defaults to "file" so the existing file-page call sites
+   * don't need to be touched. */
+  targetType?: "file" | "project";
   /** Optional aria label override (e.g. "Delete photo"). */
   ariaLabel?: string;
 }
@@ -33,6 +38,7 @@ interface Props {
  */
 export function DeletePhotoButton({
   photoId,
+  targetType = "file",
   ariaLabel = "Delete photo",
 }: Props) {
   const router = useRouter();
@@ -42,7 +48,10 @@ export function DeletePhotoButton({
   const handleConfirm = () => {
     if (pending) return;
     startTransition(async () => {
-      const res = await deleteFilePhoto(photoId);
+      const res =
+        targetType === "project"
+          ? await deleteProjectPhoto(photoId)
+          : await deleteFilePhoto(photoId);
       if ("error" in res) {
         // Surfacing the error inside the dialog isn't worth the
         // wiring for a delete-photo action that effectively never

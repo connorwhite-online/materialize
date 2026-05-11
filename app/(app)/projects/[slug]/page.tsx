@@ -9,11 +9,13 @@ import {
   projectComments,
   projectBomItems,
   projectCircuits,
+  projectPhotos,
   files,
   users,
   purchases,
 } from "@/lib/db/schema";
-import { eq, and, asc } from "drizzle-orm";
+import { eq, and, asc, desc } from "drizzle-orm";
+import { generateDownloadUrl } from "@/lib/storage";
 import { Card, CardContent } from "@/components/ui/card";
 import { CollapsibleSection } from "@/components/ui/collapsible-section";
 import { ExpandableDescription } from "@/components/ui/expandable-description";
@@ -32,7 +34,12 @@ import { projectJsonLd } from "@/lib/seo/json-ld";
 import {
   CommentsSection,
   type CommentRow,
+  type PhotoPost,
 } from "@/components/comments/comments-section";
+import {
+  PhotosFeed,
+  type FeedPhoto,
+} from "@/components/photos/photos-feed";
 import { userOwnsProject } from "@/lib/entitlement";
 import { swallow } from "@/lib/utils/swallow";
 
@@ -110,6 +117,7 @@ export default async function ProjectDetailPage(props: {
       designTags: projects.designTags,
       thumbnailUrl: projects.thumbnailUrl,
       repoUrl: projects.repoUrl,
+      coverPhotoId: projects.coverPhotoId,
       downloadCount: projects.downloadCount,
       createdAt: projects.createdAt,
       userId: projects.userId,
@@ -149,6 +157,83 @@ export default async function ProjectDetailPage(props: {
     .orderBy(asc(projectFiles.position));
 
   const canDownload = await userOwnsProject(userId, project.id);
+
+  // Curator gallery photos for the project — the owner's
+  // hand-picked images that aren't the cover. Same shape as the file
+  // detail page, mapped through PhotosFeed. Both queries are
+  // swallow()ed so a Neon hiccup never 500s the listing.
+  const curatorRows = await swallow(
+    db
+      .select({
+        id: projectPhotos.id,
+        caption: projectPhotos.caption,
+        createdAt: projectPhotos.createdAt,
+        storageKey: projectPhotos.storageKey,
+      })
+      .from(projectPhotos)
+      .where(
+        and(
+          eq(projectPhotos.projectId, project.id),
+          eq(projectPhotos.kind, "creator")
+        )
+      )
+      .orderBy(asc(projectPhotos.sortOrder))
+  );
+  const curatorPhotos: FeedPhoto[] = await Promise.all(
+    curatorRows.map(async (row) => ({
+      id: row.id,
+      caption: row.caption,
+      createdAt: row.createdAt,
+      kind: "creator" as const,
+      author: null,
+      downloadUrl: await generateDownloadUrl(row.storageKey, 3600),
+    }))
+  );
+
+  // Community "makes" — interleaved with comments below. Limit 60 so
+  // a popular project doesn't push hundreds through the page.
+  const makeRows = await swallow(
+    db
+      .select({
+        id: projectPhotos.id,
+        storageKey: projectPhotos.storageKey,
+        caption: projectPhotos.caption,
+        createdAt: projectPhotos.createdAt,
+        authorId: users.id,
+        authorUsername: users.username,
+        authorDisplayName: users.displayName,
+        authorAvatarUrl: users.avatarUrl,
+      })
+      .from(projectPhotos)
+      .innerJoin(users, eq(projectPhotos.userId, users.id))
+      .where(
+        and(
+          eq(projectPhotos.projectId, project.id),
+          eq(projectPhotos.kind, "make")
+        )
+      )
+      .orderBy(desc(projectPhotos.createdAt))
+      .limit(60)
+  );
+  const makesWithUrls: PhotoPost[] = await Promise.all(
+    makeRows.map(async (row) => ({
+      id: row.id,
+      caption: row.caption,
+      createdAt: row.createdAt,
+      downloadUrl: await generateDownloadUrl(row.storageKey, 3600),
+      author: {
+        id: row.authorId,
+        username: row.authorUsername,
+        displayName: row.authorDisplayName,
+        avatarUrl: row.authorAvatarUrl,
+      },
+    }))
+  );
+
+  // Gate for project makes / inline-comment photos. Same shape as the
+  // file detail page's `canPostMake`. Owner is always covered because
+  // `userOwnsProject` returns true for the creator's own project.
+  const canPostMake = await userOwnsProject(userId, project.id);
 
   // Circuit / wiring diagrams — paired with the BOM as the "how
   // it goes together electrically" half of the assembly story.
@@ -309,25 +394,55 @@ export default async function ProjectDetailPage(props: {
         {/* Main content — order-3 on mobile, row 2 cols 1-2 on
             desktop via auto-flow. */}
         <div className="order-3 space-y-6 lg:col-span-2">
-          {project.thumbnailUrl ? (
-            <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={project.thumbnailUrl}
-                alt=""
-                className="w-full h-full object-cover"
-              />
-            </div>
-          ) : (
-            <div className="aspect-[4/3] rounded-2xl bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center">
-              <span className="text-xs text-muted-foreground/50">
-                No cover image
-              </span>
-            </div>
-          )}
+          {(() => {
+            // Resolve the cover in priority order:
+            //   1. coverPhotoId pick from the edit dialog → proxy
+            //      route that signs a fresh R2 URL on each load
+            //   2. legacy thumbnailUrl column (full URL set at
+            //      project create time)
+            //   3. placeholder
+            const coverSrc = project.coverPhotoId
+              ? `/api/thumbnails/projects/${project.id}`
+              : project.thumbnailUrl;
+            return coverSrc ? (
+              <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={coverSrc}
+                  alt=""
+                  className="w-full h-full object-cover"
+                />
+              </div>
+            ) : (
+              <div className="aspect-[4/3] rounded-2xl bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center">
+                <span className="text-xs text-muted-foreground/50">
+                  No cover image
+                </span>
+              </div>
+            );
+          })()}
 
           {project.description && (
             <ExpandableDescription source={project.description} />
+          )}
+
+          {/* Curator photos — the project's gallery, separate from
+              the cover image. Mirrors the file detail page: section
+              renders for non-owners only when at least one photo
+              exists, while owners always see the section with an
+              inline uploader to seed the first one. */}
+          {(curatorPhotos.length > 0 || isOwner) && (
+            <div className="space-y-2">
+              <h2 className="text-sm font-semibold">Photos</h2>
+              <PhotosFeed
+                photos={curatorPhotos}
+                targetType="project"
+                targetId={project.id}
+                ownerId={project.userId}
+                viewerId={userId}
+                uploadAs={isOwner ? "creator" : null}
+              />
+            </div>
           )}
 
           {/* Search tags + design-tag "Print Recommendations" card
@@ -407,15 +522,17 @@ export default async function ProjectDetailPage(props: {
               "Discussion" Card). */}
           <Card>
             <CardContent className="space-y-5">
-              <h2 className="text-base font-semibold">Comments</h2>
+              <h2 className="text-base font-semibold">Discussion</h2>
               <CommentsSection
                 target="project"
                 targetId={project.id}
                 comments={comments}
+                photoPosts={makesWithUrls}
                 ownerId={project.userId}
                 viewerId={userId}
                 isSignedIn={!!userId}
                 signInRedirect={`/projects/${slug}`}
+                acceptPhoto={!!userId && canPostMake}
               />
             </CardContent>
           </Card>
@@ -510,6 +627,11 @@ export default async function ProjectDetailPage(props: {
                         description: project.description,
                         tags: project.tags,
                         repoUrl: project.repoUrl,
+                        coverPhotoId: project.coverPhotoId,
+                        photos: curatorPhotos.map((p) => ({
+                          id: p.id,
+                          downloadUrl: p.downloadUrl,
+                        })),
                       }}
                     />
                     <EditBomDialog

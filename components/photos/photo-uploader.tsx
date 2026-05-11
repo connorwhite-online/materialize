@@ -4,15 +4,21 @@ import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { ImagePlus } from "@/components/icons/image-plus";
 import { addFilePhoto, addFileMake } from "@/app/actions/photos";
+import {
+  addProjectPhoto,
+  addProjectMake,
+} from "@/app/actions/project-photos";
 import { uploadPhotoToR2, validatePhoto } from "@/lib/photos/upload-photo";
 import { cn } from "@/lib/utils";
 
 interface PhotoUploaderProps {
-  fileId: string;
+  targetType: "file" | "project";
+  targetId: string;
   /**
    * 'creator' — owner's curator gallery (default; existing behavior).
-   * 'make' — community build photo. Routes through `addFileMake`,
-   * which gates on download/print.
+   * 'make' — community build photo. Routes through the make-flavored
+   * action, which gates on download/print for files and on
+   * ownership/purchase for projects.
    */
   kind?: "creator" | "make";
   /**
@@ -42,7 +48,8 @@ interface PhotoUploaderProps {
  * here. Any prose discussion belongs in the comments below.
  */
 export function PhotoUploader({
-  fileId,
+  targetType,
+  targetId,
   kind = "creator",
   size = "sm",
   multiple = false,
@@ -65,8 +72,21 @@ export function PhotoUploader({
       setUploading(true);
       try {
         const { storageKey } = await uploadPhotoToR2(file);
-        const action = kind === "make" ? addFileMake : addFilePhoto;
-        const result = await action({ fileId, storageKey });
+        // Route to the action that matches both the listing kind and
+        // the upload role. Four combinations; the table here makes it
+        // hard to miss one.
+        const result = await (async () => {
+          if (targetType === "file" && kind === "creator") {
+            return addFilePhoto({ fileId: targetId, storageKey });
+          }
+          if (targetType === "file" && kind === "make") {
+            return addFileMake({ fileId: targetId, storageKey });
+          }
+          if (targetType === "project" && kind === "creator") {
+            return addProjectPhoto({ projectId: targetId, storageKey });
+          }
+          return addProjectMake({ projectId: targetId, storageKey });
+        })();
         if (result && "error" in result) {
           throw new Error(result.error);
         }
@@ -82,7 +102,7 @@ export function PhotoUploader({
         setUploading(false);
       }
     },
-    [fileId, kind, router]
+    [targetType, targetId, kind, router]
   );
 
   const uploadAll = useCallback(

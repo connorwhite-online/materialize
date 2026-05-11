@@ -70,12 +70,11 @@ interface Props {
   signInRedirect: string;
   /**
    * When true, the composer surfaces an "attach photo" affordance —
-   * posting with a photo routes through addFileMake instead of
-   * postComment. File detail only.
+   * posting with a photo routes through the addInline*CommentPhoto
+   * action for the appropriate target type. Works on both file and
+   * project detail pages.
    */
   acceptPhoto?: boolean;
-  /** Required when acceptPhoto is on — destination fileId. */
-  fileId?: string;
 }
 
 type FeedItem =
@@ -92,7 +91,6 @@ export function CommentsSection({
   isSignedIn,
   signInRedirect,
   acceptPhoto = false,
-  fileId,
 }: Props) {
   const topLevel = comments.filter((c) => c.parentId === null);
   const repliesByParent = new Map<string, CommentRow[]>();
@@ -128,7 +126,6 @@ export function CommentsSection({
           targetId={targetId}
           placeholder="Share thoughts on this listing…"
           acceptPhoto={acceptPhoto}
-          fileId={fileId}
         />
       ) : (
         <Link
