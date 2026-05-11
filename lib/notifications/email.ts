@@ -10,6 +10,7 @@ import type {
   NotificationType,
   PrintOnFilePayload,
   PurchaseOnListingPayload,
+  RefundOnListingPayload,
   ReplyToCommentPayload,
 } from "./types";
 
@@ -18,7 +19,8 @@ type AnyEmailPayload =
   | ReplyToCommentPayload
   | MakeOnFilePayload
   | PrintOnFilePayload
-  | PurchaseOnListingPayload;
+  | PurchaseOnListingPayload
+  | RefundOnListingPayload;
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
@@ -55,11 +57,14 @@ export async function sendNotificationEmail(
     // `materialLabel` which we surface in the email body via that
     // same slot so the user gets one extra detail above the CTA.
     let snippet: string | null = null;
-    if (type === "purchase_on_listing") {
-      const p = payload as PurchaseOnListingPayload;
-      // Format the amount as the email's "snippet" slot — the template
-      // surfaces it under the headline as a small detail line.
-      snippet = `$${(p.snippet.amountCents / 100).toFixed(2)} ${p.snippet.currency}`;
+    if (type === "purchase_on_listing" || type === "refund_on_listing") {
+      const p = payload as
+        | PurchaseOnListingPayload
+        | RefundOnListingPayload;
+      // Format the amount as the email's "snippet" slot. Refunds
+      // get a leading minus to read as a negative in the inbox.
+      const sign = type === "refund_on_listing" ? "-" : "";
+      snippet = `${sign}$${(p.snippet.amountCents / 100).toFixed(2)} ${p.snippet.currency}`;
     } else if ("snippet" in payload) {
       snippet = (payload as { snippet: string | null }).snippet ?? null;
     } else if ("materialLabel" in payload) {
@@ -96,6 +101,8 @@ function buildHeadline(
       return `${actor} just printed your ${targetWord} ${listing}`;
     case "purchase_on_listing":
       return `${actor} bought your ${targetWord} ${listing}`;
+    case "refund_on_listing":
+      return `Refund issued on your ${targetWord} ${listing}`;
   }
 }
 
@@ -116,11 +123,11 @@ function buildHref(
     // email is reviewing the order.
     return `${APP_URL}/dashboard/orders/${(payload as PrintOnFilePayload).printOrderId}`;
   }
-  if (type === "purchase_on_listing") {
-    // Sales activity lives on the earnings tab. Surfacing one sale
-    // alone isn't actionable — sending the creator to their full
-    // sales view is more useful than the listing page they already
-    // know about.
+  if (type === "purchase_on_listing" || type === "refund_on_listing") {
+    // Sales activity (including refunds) lives on the earnings tab.
+    // Surfacing one event alone isn't actionable — sending the
+    // creator to their full sales view is more useful than the
+    // listing page they already know about.
     return `${APP_URL}/dashboard/earnings`;
   }
   const commentId =

@@ -11,6 +11,7 @@ export type EmailPrefMap = {
   make_on_file?: boolean;
   print_on_file?: boolean;
   purchase_on_listing?: boolean;
+  refund_on_listing?: boolean;
 };
 
 /**

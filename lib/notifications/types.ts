@@ -17,7 +17,8 @@ export type NotificationType =
   | "reply_to_comment"
   | "make_on_file"
   | "print_on_file"
-  | "purchase_on_listing";
+  | "purchase_on_listing"
+  | "refund_on_listing";
 
 interface ActorSnapshot {
   /** User id of whoever triggered the event. */
@@ -84,12 +85,20 @@ export interface PurchaseOnListingPayload {
   snippet: PurchaseSnippet;
 }
 
+export interface RefundOnListingPayload {
+  /** Buyer whose purchase was refunded. */
+  actor: ActorSnapshot;
+  listing: ListingRef;
+  snippet: PurchaseSnippet;
+}
+
 export type NotificationPayload =
   | (CommentOnListingPayload & { type: "comment_on_listing" })
   | (ReplyToCommentPayload & { type: "reply_to_comment" })
   | (MakeOnFilePayload & { type: "make_on_file" })
   | (PrintOnFilePayload & { type: "print_on_file" })
-  | (PurchaseOnListingPayload & { type: "purchase_on_listing" });
+  | (PurchaseOnListingPayload & { type: "purchase_on_listing" })
+  | (RefundOnListingPayload & { type: "refund_on_listing" });
 
 /**
  * Trim a comment body or caption to a short preview safe for the

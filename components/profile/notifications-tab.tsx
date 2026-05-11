@@ -14,6 +14,7 @@ import type {
   NotificationType,
   PrintOnFilePayload,
   PurchaseOnListingPayload,
+  RefundOnListingPayload,
   ReplyToCommentPayload,
 } from "@/lib/notifications/types";
 
@@ -24,7 +25,8 @@ type Payload =
   | ReplyToCommentPayload
   | MakeOnFilePayload
   | PrintOnFilePayload
-  | PurchaseOnListingPayload;
+  | PurchaseOnListingPayload
+  | RefundOnListingPayload;
 
 type Row = {
   id: string;
@@ -161,10 +163,10 @@ function buildHref(n: Row): string {
   if (n.type === "print_on_file") {
     return `/dashboard/orders/${(n.payload as PrintOnFilePayload).printOrderId}`;
   }
-  if (n.type === "purchase_on_listing") {
-    // Sales activity rolls up on the earnings tab — point there
-    // rather than back at the listing page the creator already
-    // knows.
+  if (n.type === "purchase_on_listing" || n.type === "refund_on_listing") {
+    // Sales activity (including refunds) rolls up on the earnings
+    // tab — point there rather than back at the listing page the
+    // creator already knows.
     return `/dashboard/earnings`;
   }
   const commentId =
@@ -186,13 +188,19 @@ function buildMessage(n: Row): string {
       return "just printed";
     case "purchase_on_listing":
       return "bought";
+    case "refund_on_listing":
+      return "was refunded for";
   }
 }
 
 function pickSnippet(n: Row): string | null {
-  if (n.type === "purchase_on_listing") {
-    const p = n.payload as PurchaseOnListingPayload;
-    return `$${(p.snippet.amountCents / 100).toFixed(2)} ${p.snippet.currency}`;
+  if (n.type === "purchase_on_listing" || n.type === "refund_on_listing") {
+    const p = n.payload as
+      | PurchaseOnListingPayload
+      | RefundOnListingPayload;
+    // Refunds render as negative so the inbox glance matches Stripe.
+    const sign = n.type === "refund_on_listing" ? "-" : "";
+    return `${sign}$${(p.snippet.amountCents / 100).toFixed(2)} ${p.snippet.currency}`;
   }
   if ("snippet" in n.payload) {
     return (n.payload as { snippet: string | null }).snippet ?? null;

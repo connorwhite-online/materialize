@@ -11,6 +11,7 @@ import type {
   NotificationType,
   PrintOnFilePayload,
   PurchaseOnListingPayload,
+  RefundOnListingPayload,
   ReplyToCommentPayload,
 } from "./types";
 export type { PurchaseSnippet } from "./types";
@@ -41,6 +42,7 @@ async function insert(
     | MakeOnFilePayload
     | PrintOnFilePayload
     | PurchaseOnListingPayload
+    | RefundOnListingPayload
 ) {
   if (recipientId === actorId) return;
   try {
@@ -112,6 +114,18 @@ export async function notifyPurchaseOnListing(
     recipientId,
     payload.actor.id,
     "purchase_on_listing",
+    payload
+  );
+}
+
+export async function notifyRefundOnListing(
+  recipientId: string,
+  payload: RefundOnListingPayload
+) {
+  return insert(
+    recipientId,
+    payload.actor.id,
+    "refund_on_listing",
     payload
   );
 }

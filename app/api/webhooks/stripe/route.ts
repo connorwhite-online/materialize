@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { getStripe } from "@/lib/stripe";
 import { handlePrintOrderPayment } from "@/lib/stripe/handle-print-order-payment";
 import { handleListingPurchase } from "@/lib/stripe/handle-listing-purchase";
+import { handleListingRefund } from "@/lib/stripe/handle-listing-refund";
 import { logError } from "@/lib/logger";
 import type Stripe from "stripe";
 
@@ -62,8 +63,17 @@ export async function POST(request: Request) {
   // reflect reality even if they closed the tab before the
   // refresh-on-return query ran.
   const isAccountUpdated = event.type === "account.updated";
+  // `charge.refunded` fires for both full and partial refunds; the
+  // inner handler gates on the full-refund case and no-ops otherwise.
+  // We route every `charge.refunded` here unconditionally so the
+  // dedup table records the event id either way.
+  const isChargeRefunded = event.type === "charge.refunded";
   const isHandled =
-    isPaidCheckout || isAsyncSuccess || isBillingSetup || isAccountUpdated;
+    isPaidCheckout ||
+    isAsyncSuccess ||
+    isBillingSetup ||
+    isAccountUpdated ||
+    isChargeRefunded;
 
   // Defense-in-depth dedup — the inner handlePrintOrderPayment also
   // claims atomically against the printOrders row, but recording the
@@ -110,6 +120,23 @@ export async function POST(request: Request) {
         // purchases row so entitlement checks start returning true.
         return Response.json(
           { error: "Failed to record purchase" },
+          { status: 500 }
+        );
+      }
+    }
+
+    if (isChargeRefunded) {
+      const charge = event.data.object as Stripe.Charge;
+      try {
+        await handleListingRefund(charge);
+      } catch (error) {
+        logError("stripe-webhook-listing-refund", error);
+        // 500 so Stripe retries — entitlement should drop promptly
+        // once a refund clears. Note: refunds for non-listing charges
+        // (print orders) silently no-op inside the handler; this
+        // 500 only fires for genuine DB failures.
+        return Response.json(
+          { error: "Failed to record refund" },
           { status: 500 }
         );
       }
