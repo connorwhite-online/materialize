@@ -6,6 +6,7 @@ import {
   refreshStripePayoutStatus,
 } from "@/app/actions/payouts";
 import { PayoutActions } from "./payout-actions";
+import { PayoutStatusBanner } from "./payout-status-banner";
 
 export default async function PayoutsSettingsPage({
   searchParams,
@@ -16,13 +17,15 @@ export default async function PayoutsSettingsPage({
   if (!userId) return null;
 
   const sp = await searchParams;
-  // Returning from Stripe-hosted onboarding — refresh proactively so
-  // the page reflects the latest charges_enabled / payouts_enabled
-  // flags without waiting for the account.updated webhook to land.
+  // Always pull the live status for connected accounts so we can
+  // surface the "Stripe needs more info" banner accurately. Anon
+  // and not-yet-connected users skip the round trip — the cached
+  // version is a strict subset.
+  const cached = await getStripePayoutStatus();
   const status =
-    sp.status === "return"
+    cached.connected || sp.status === "return"
       ? await refreshStripePayoutStatus()
-      : await getStripePayoutStatus();
+      : cached;
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-8 space-y-6">
@@ -49,6 +52,8 @@ export default async function PayoutsSettingsPage({
           you left off with the button below.
         </div>
       )}
+
+      <PayoutStatusBanner status={status} />
 
       <div className="rounded-lg border border-border p-4 space-y-4">
         <div>

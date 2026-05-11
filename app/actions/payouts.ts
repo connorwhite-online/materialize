@@ -36,6 +36,37 @@ type StatusResult = {
   onboarded: boolean;
   chargesEnabled: boolean;
   payoutsEnabled: boolean;
+  /**
+   * True once the creator has finished the Stripe-hosted onboarding
+   * form. Distinguishes "never started onboarding" from "submitted but
+   * Stripe needs more info" — both have `onboarded === false` but the
+   * UX is different.
+   */
+  detailsSubmitted: boolean;
+  /**
+   * Stripe's machine-readable reason charges are off, when applicable.
+   * Common values: `requirements.past_due`, `requirements.pending_verification`,
+   * `rejected.fraud`, `rejected.terms_of_service`, `listed`, `under_review`.
+   * Null when the account is healthy or when we don't have an account
+   * record yet.
+   */
+  disabledReason: string | null;
+  /**
+   * Count of outstanding `requirements.currently_due` items — when
+   * positive, the creator needs to revisit Stripe's hosted onboarding
+   * to clear them.
+   */
+  pendingRequirements: number;
+};
+
+const EMPTY_STATUS: StatusResult = {
+  connected: false,
+  onboarded: false,
+  chargesEnabled: false,
+  payoutsEnabled: false,
+  detailsSubmitted: false,
+  disabledReason: null,
+  pendingRequirements: 0,
 };
 
 /**
@@ -47,14 +78,7 @@ type StatusResult = {
  */
 export async function getStripePayoutStatus(): Promise<StatusResult> {
   const { userId } = await auth();
-  if (!userId) {
-    return {
-      connected: false,
-      onboarded: false,
-      chargesEnabled: false,
-      payoutsEnabled: false,
-    };
-  }
+  if (!userId) return EMPTY_STATUS;
   const [row] = await db
     .select({
       stripeAccountId: users.stripeAccountId,
@@ -62,15 +86,24 @@ export async function getStripePayoutStatus(): Promise<StatusResult> {
     })
     .from(users)
     .where(eq(users.id, userId));
+  const connected = !!row?.stripeAccountId;
+  const onboarded = !!row?.onboardingComplete;
   return {
-    connected: !!row?.stripeAccountId,
-    onboarded: !!row?.onboardingComplete,
+    connected,
+    onboarded,
     // Without a fresh Stripe lookup we can't tell whether charges /
     // payouts are individually enabled; treat the cached
     // onboardingComplete as a proxy. refreshStripePayoutStatus
     // re-syncs both flags from Stripe directly.
-    chargesEnabled: !!row?.onboardingComplete,
-    payoutsEnabled: !!row?.onboardingComplete,
+    chargesEnabled: onboarded,
+    payoutsEnabled: onboarded,
+    // Same proxy logic for detailsSubmitted: we don't store it, so
+    // assume onboarded ⇒ details submitted. The refresh call pulls
+    // the live value when accuracy matters (i.e. when we're about
+    // to show a "needs more info" banner).
+    detailsSubmitted: onboarded,
+    disabledReason: null,
+    pendingRequirements: 0,
   };
 }
 
@@ -146,14 +179,7 @@ export async function createStripePayoutOnboardingLink(): Promise<
  */
 export async function refreshStripePayoutStatus(): Promise<StatusResult> {
   const { userId } = await auth();
-  if (!userId) {
-    return {
-      connected: false,
-      onboarded: false,
-      chargesEnabled: false,
-      payoutsEnabled: false,
-    };
-  }
+  if (!userId) return EMPTY_STATUS;
 
   const [user] = await db
     .select({
@@ -162,20 +188,17 @@ export async function refreshStripePayoutStatus(): Promise<StatusResult> {
     })
     .from(users)
     .where(eq(users.id, userId));
-  if (!user?.stripeAccountId) {
-    return {
-      connected: false,
-      onboarded: false,
-      chargesEnabled: false,
-      payoutsEnabled: false,
-    };
-  }
+  if (!user?.stripeAccountId) return EMPTY_STATUS;
 
   try {
     const stripe = getStripe();
     const account = await stripe.accounts.retrieve(user.stripeAccountId);
     const chargesEnabled = account.charges_enabled === true;
     const payoutsEnabled = account.payouts_enabled === true;
+    const detailsSubmitted = account.details_submitted === true;
+    const disabledReason = account.requirements?.disabled_reason ?? null;
+    const pendingRequirements =
+      account.requirements?.currently_due?.length ?? 0;
     // Treat charges_enabled as the gate for "can sell" since
     // payouts_enabled also requires payouts setup which Stripe
     // sometimes lags on. The webhook listens for the explicit
@@ -192,14 +215,21 @@ export async function refreshStripePayoutStatus(): Promise<StatusResult> {
       onboarded: newOnboarded,
       chargesEnabled,
       payoutsEnabled,
+      detailsSubmitted,
+      disabledReason,
+      pendingRequirements,
     };
   } catch (error) {
     logError("refreshStripePayoutStatus", error);
+    const onboarded = !!user.onboardingComplete;
     return {
       connected: true,
-      onboarded: !!user.onboardingComplete,
-      chargesEnabled: !!user.onboardingComplete,
-      payoutsEnabled: !!user.onboardingComplete,
+      onboarded,
+      chargesEnabled: onboarded,
+      payoutsEnabled: onboarded,
+      detailsSubmitted: onboarded,
+      disabledReason: null,
+      pendingRequirements: 0,
     };
   }
 }
