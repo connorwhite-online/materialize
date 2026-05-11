@@ -5,6 +5,7 @@ import {
   users,
   projects,
   projectFiles,
+  projectPhotos,
   collections,
   collectionItems,
 } from "@/lib/db/schema";
@@ -64,6 +65,41 @@ async function fetchAdditionalPhotosByFile(
   // Strip the cover photo id from each list so the carousel's
   // first slot (the cover via /api/thumbnails/{id}) doesn't
   // duplicate.
+  const result = new Map<string, string[]>();
+  for (const row of rows) {
+    const all = grouped.get(row.id) ?? [];
+    result.set(
+      row.id,
+      row.coverPhotoId ? all.filter((id) => id !== row.coverPhotoId) : all
+    );
+  }
+  return result;
+}
+
+/** Project-side mirror of `fetchAdditionalPhotosByFile`. */
+async function fetchAdditionalPhotosByProject(
+  rows: Array<{ id: string; coverPhotoId: string | null }>
+): Promise<Map<string, string[]>> {
+  const ids = rows.map((r) => r.id);
+  if (ids.length === 0) return new Map();
+  const photos = await db
+    .select({ id: projectPhotos.id, projectId: projectPhotos.projectId })
+    .from(projectPhotos)
+    .where(
+      and(
+        inArray(projectPhotos.projectId, ids),
+        eq(projectPhotos.kind, "creator")
+      )
+    )
+    .orderBy(projectPhotos.sortOrder);
+
+  const grouped = new Map<string, string[]>();
+  for (const p of photos) {
+    if (!p.projectId) continue;
+    const arr = grouped.get(p.projectId) ?? [];
+    arr.push(p.id);
+    grouped.set(p.projectId, arr);
+  }
   const result = new Map<string, string[]>();
   for (const row of rows) {
     const all = grouped.get(row.id) ?? [];
@@ -170,6 +206,7 @@ export default async function BrowsePage(props: {
         slug: projects.slug,
         name: projects.name,
         thumbnailUrl: projects.thumbnailUrl,
+        coverPhotoId: projects.coverPhotoId,
         creatorUsername: users.username,
         creatorDisplayName: users.displayName,
         fileCount: sql<number>`cast(count(${projectFiles.fileId}) as int)`,
@@ -235,10 +272,17 @@ export default async function BrowsePage(props: {
       .limit(PER_SECTION),
   ]);
 
-  const photosByFile = await fetchAdditionalPhotosByFile(fileRows);
+  const [photosByFile, photosByProject] = await Promise.all([
+    fetchAdditionalPhotosByFile(fileRows),
+    fetchAdditionalPhotosByProject(projectRows),
+  ]);
   const fileRowsWithPhotos: FileRow[] = fileRows.map((f) => ({
     ...f,
     additionalPhotoIds: photosByFile.get(f.id) ?? [],
+  }));
+  const projectRowsWithPhotos: ProjectRow[] = projectRows.map((p) => ({
+    ...p,
+    additionalPhotoIds: photosByProject.get(p.id) ?? [],
   }));
 
   const totalHits =
@@ -271,10 +315,10 @@ export default async function BrowsePage(props: {
             </Section>
           )}
 
-          {projectRows.length > 0 && (
+          {projectRowsWithPhotos.length > 0 && (
             <Section title="Projects">
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-                {projectRows.map((p) => (
+                {projectRowsWithPhotos.map((p) => (
                   <ProjectCard key={p.id} project={p} />
                 ))}
               </div>
@@ -394,20 +438,27 @@ interface ProjectRow {
   creatorUsername: string | null;
   creatorDisplayName: string | null;
   fileCount: number;
+  additionalPhotoIds: string[];
 }
 
 function ProjectCard({ project }: { project: ProjectRow }) {
+  const hasAnyImage =
+    !!project.thumbnailUrl || project.additionalPhotoIds.length > 0;
   return (
     <Link href={`/projects/${project.slug}`}>
       <Card className="group gap-0 p-1 overflow-hidden transition-colors hover:border-primary/30">
-        <div className="aspect-square overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted to-muted/50">
-          {project.thumbnailUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={project.thumbnailUrl}
+        <div className="relative aspect-square overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted to-muted/50">
+          {hasAnyImage ? (
+            <CardImageCarousel
+              images={[
+                `/api/thumbnails/projects/${project.id}`,
+                ...project.additionalPhotoIds.map(
+                  (id) =>
+                    `/api/thumbnails/projects/${project.id}?photoId=${id}`
+                ),
+              ]}
               alt=""
-              loading="lazy"
-              className="h-full w-full object-cover"
+              size="sm"
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground/60">

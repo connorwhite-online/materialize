@@ -9,6 +9,7 @@ import {
   users,
   projects,
   projectFiles,
+  projectPhotos,
 } from "@/lib/db/schema";
 import { eq, and, desc, inArray, sql } from "drizzle-orm";
 import { Button } from "@/components/ui/button";
@@ -125,6 +126,7 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
         price: projects.price,
         visibility: projects.visibility,
         thumbnailUrl: projects.thumbnailUrl,
+        coverPhotoId: projects.coverPhotoId,
         fileCount: sql<number>`cast(count(${projectFiles.fileId}) as int)`,
       })
       .from(projects)
@@ -141,6 +143,7 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
             price: projects.price,
             visibility: projects.visibility,
             thumbnailUrl: projects.thumbnailUrl,
+            coverPhotoId: projects.coverPhotoId,
           })
           .from(purchases)
           .innerJoin(projects, eq(purchases.projectId, projects.id))
@@ -158,6 +161,7 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
             price: number;
             visibility: string;
             thumbnailUrl: string | null;
+            coverPhotoId: string | null;
           }>
         ),
   ]);
@@ -181,12 +185,17 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
   const ownedProjectIds = ownedProjects.map((p) => p.id);
   const purchasedProjectIds = rawPurchasedProjects.map((p) => p.id);
 
+  // Combined project id set for the photo batch fetch — both
+  // collections (owned + purchased) feed the card carousels.
+  const allProjectIds = [...ownedProjectIds, ...purchasedProjectIds];
+
   const [
     assetRows,
     photoRows,
     collectionItemRows,
     purchasedCounts,
     ownedProjectLinks,
+    projectPhotoRows,
   ] = await Promise.all([
     allFileIds.length > 0
       ? db
@@ -253,7 +262,42 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
           .from(projectFiles)
           .where(inArray(projectFiles.projectId, ownedProjectIds))
       : Promise.resolve([] as Array<{ fileId: string }>),
+    // Curator photos for every project in view — feeds the card
+    // carousel the same way photoRows does for files.
+    allProjectIds.length > 0
+      ? db
+          .select({
+            id: projectPhotos.id,
+            projectId: projectPhotos.projectId,
+          })
+          .from(projectPhotos)
+          .where(
+            and(
+              inArray(projectPhotos.projectId, allProjectIds),
+              eq(projectPhotos.kind, "creator")
+            )
+          )
+          .orderBy(projectPhotos.sortOrder)
+      : Promise.resolve(
+          [] as Array<{ id: string; projectId: string }>
+        ),
   ]);
+
+  const photoIdsByProjectId = new Map<string, string[]>();
+  for (const row of projectPhotoRows) {
+    if (!row.projectId) continue;
+    const arr = photoIdsByProjectId.get(row.projectId) ?? [];
+    arr.push(row.id);
+    photoIdsByProjectId.set(row.projectId, arr);
+  }
+
+  function additionalProjectPhotos(
+    projectId: string,
+    coverPhotoId: string | null
+  ): string[] {
+    const all = photoIdsByProjectId.get(projectId) ?? [];
+    return coverPhotoId ? all.filter((id) => id !== coverPhotoId) : all;
+  }
 
   const photoIdsByFileId = new Map<string, string[]>();
   for (const row of photoRows) {
@@ -328,6 +372,7 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
       source: "purchased" as const,
       thumbnailUrl: p.thumbnailUrl,
       fileCount: purchasedCountMap.get(p.id) ?? 0,
+      additionalPhotoIds: additionalProjectPhotos(p.id, p.coverPhotoId),
     })
   );
 
@@ -348,6 +393,7 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
       source: "owned" as const,
       thumbnailUrl: p.thumbnailUrl,
       fileCount: p.fileCount,
+      additionalPhotoIds: additionalProjectPhotos(p.id, p.coverPhotoId),
     })
   );
 
