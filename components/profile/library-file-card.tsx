@@ -172,6 +172,24 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
               <span className="h-5 w-5 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-muted-foreground/70" />
             </div>
           ) : null}
+
+          {/* Status badges overlay the thumbnail top-left so they
+              read at a glance without taking up footer real estate.
+              Backdrop-blur keeps them legible over any image. */}
+          {(isHidden || isFlagged) && (
+            <div className="pointer-events-none absolute left-1.5 top-1.5 flex flex-wrap items-center gap-1">
+              {isHidden && (
+                <span className="inline-flex items-center rounded-md bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-white backdrop-blur-md ring-1 ring-white/10">
+                  Hidden
+                </span>
+              )}
+              {isFlagged && (
+                <span className="inline-flex items-center rounded-md bg-destructive/85 px-1.5 py-0.5 text-[10px] font-medium text-destructive-foreground backdrop-blur-md ring-1 ring-destructive/30">
+                  Flagged
+                </span>
+              )}
+            </div>
+          )}
         </div>
         <CardContent className="px-2 py-2">
           <h3 className="truncate text-sm font-medium transition-colors group-hover:text-primary">
@@ -184,7 +202,7 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
                 ? `by ${item.creatorDisplayName || item.creatorUsername}`
                 : "—"}
           </p>
-          {(hasPrice || isPurchased || isHidden || isFlagged) && (
+          {(hasPrice || isPurchased) && (
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {hasPrice && (
                 <Badge variant="secondary" className="text-[10px]">
@@ -194,16 +212,6 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
               {isPurchased && (
                 <Badge variant="secondary" className="text-[10px]">
                   Purchased
-                </Badge>
-              )}
-              {isHidden && (
-                <Badge variant="outline" className="text-[10px]">
-                  Hidden
-                </Badge>
-              )}
-              {isFlagged && (
-                <Badge variant="destructive" className="text-[10px]">
-                  Flagged
                 </Badge>
               )}
             </div>
