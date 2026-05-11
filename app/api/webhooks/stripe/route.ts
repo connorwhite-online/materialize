@@ -54,7 +54,15 @@ export async function POST(request: Request) {
     (event.data.object as Stripe.Checkout.Session).mode === "setup" &&
     (event.data.object as Stripe.Checkout.Session).metadata?.type ===
       "billing_setup";
-  const isHandled = isPaidCheckout || isAsyncSuccess || isBillingSetup;
+  // Connect Express onboarding completion comes through as
+  // `account.updated` on the connected account — Stripe flips
+  // charges_enabled / payouts_enabled to true once KYC passes.
+  // Re-syncing here makes the creator's payouts settings page
+  // reflect reality even if they closed the tab before the
+  // refresh-on-return query ran.
+  const isAccountUpdated = event.type === "account.updated";
+  const isHandled =
+    isPaidCheckout || isAsyncSuccess || isBillingSetup || isAccountUpdated;
 
   // Defense-in-depth dedup — the inner handlePrintOrderPayment also
   // claims atomically against the printOrders row, but recording the
@@ -89,6 +97,27 @@ export async function POST(request: Request) {
           { error: "Failed to process order" },
           { status: 500 }
         );
+      }
+    }
+
+    if (isAccountUpdated) {
+      // Find the user whose stripeAccountId matches and reconcile
+      // the cached onboardingComplete flag. We treat
+      // charges_enabled as the canonical signal — payouts_enabled
+      // sometimes lags by a day while bank verification clears.
+      const account = event.data.object as Stripe.Account;
+      const onboarded = account.charges_enabled === true;
+      try {
+        await db
+          .update(users)
+          .set({ stripeOnboardingComplete: onboarded })
+          .where(eq(users.stripeAccountId, account.id));
+      } catch (error) {
+        logError("stripe-webhook-account-updated", error);
+        // Don't 500 — Stripe will keep retrying account.updated as
+        // long as the account state matters, so the worst case is
+        // we miss one of many updates. We log and let the next
+        // delivery (or refreshStripePayoutStatus call) reconcile.
       }
     }
 

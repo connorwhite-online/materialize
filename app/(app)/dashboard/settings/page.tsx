@@ -84,6 +84,21 @@ export default async function SettingsPage() {
       </div>
 
       <div className="border-t border-border pt-6">
+        <Link
+          href="/dashboard/settings/payouts"
+          className="flex items-center justify-between text-sm transition-colors hover:text-foreground"
+        >
+          <div>
+            <div className="font-medium">Payouts</div>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Receive payments for paid files and projects
+            </p>
+          </div>
+          <span className="text-muted-foreground">→</span>
+        </Link>
+      </div>
+
+      <div className="border-t border-border pt-6">
         <SignOutButton />
       </div>
     </div>
