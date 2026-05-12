@@ -15,7 +15,26 @@ import {
   registerUploadForUser,
   listFilesForUser,
   deleteFileForUser,
+  updateFileForUser,
+  addFilePhotoForUser,
+  setFileCoverPhotoForUser,
+  requestPhotoUploadUrlForUser,
+  requestCircuitUploadUrlForUser,
 } from "@/lib/mcp/internal/files";
+import {
+  createProjectForUser,
+  listProjectsForUser,
+  getProjectForUser,
+  updateProjectForUser,
+  deleteProjectForUser,
+  setProjectBomForUser,
+  addProjectCircuitImageForUser,
+  addProjectCircuitKicadForUser,
+  addProjectCircuitWokwiForUser,
+  deleteProjectCircuitForUser,
+  addProjectPhotoForUser,
+  setProjectCoverPhotoForUser,
+} from "@/lib/mcp/internal/projects";
 import { getQuoteForUser } from "@/lib/mcp/internal/quotes";
 import {
   createAgentInitiatedOrder,
@@ -23,6 +42,8 @@ import {
   listOrdersForUser,
 } from "@/lib/mcp/internal/orders";
 import { sendOrderConfirmationEmail } from "@/lib/mcp/email";
+import { LICENSE_ENUM_VALUES } from "@/lib/licenses";
+import { DESIGN_TAG_OPTIONS } from "@/lib/validations/file";
 
 function appUrl(): string {
   return process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
@@ -263,22 +284,40 @@ const handler = createMcpHandler(
       }
     );
 
+    // Shared Zod sub-schema for file metadata. Used by both
+    // materialize_register_upload (set at create time) and
+    // materialize_update_file (edit existing). All fields optional;
+    // omitted fields preserve their existing value on update or
+    // default sensibly on create.
+    const fileMetadataSchema = z.object({
+      name: z.string().min(1).max(200).optional(),
+      description: z.string().max(5000).nullable().optional(),
+      priceCents: z.number().int().min(0).optional(),
+      license: z.enum(LICENSE_ENUM_VALUES).optional(),
+      visibility: z.enum(["public", "private"]).optional(),
+      tags: z.array(z.string().min(1).max(32)).max(20).optional(),
+      designTags: z.array(z.enum(DESIGN_TAG_OPTIONS)).optional(),
+      recommendedMaterialId: z.string().max(100).optional(),
+      minWallThicknessMm: z.number().min(0).max(100).optional(),
+    });
+
     server.registerTool(
       "materialize_register_upload",
       {
         title: "Register an uploaded model",
         description:
-          "After PUTting the file to the URL returned by materialize_request_upload_url, register the upload to receive a fileAssetId. The CraftCloud model upload runs in the background; you may need to wait a few seconds before quoting.",
+          "After PUTting the file to the URL returned by materialize_request_upload_url, register the upload to receive a fileAssetId + fileId. Optionally pass `metadata` to set name, description, license, price, tags, and visibility at create time — otherwise the file lands with name derived from the filename, license=cc_by, price=0, and your default upload visibility. The CraftCloud model upload runs in the background; you may need to wait a few seconds before quoting.",
         inputSchema: {
           storageKey: z.string().min(1),
           originalFilename: z.string().min(1),
           format: z.enum(["stl", "obj", "3mf", "step", "amf"]),
           fileSize: z.number().int().min(1),
           fileUnit: z.enum(["mm", "cm", "in"]).optional(),
+          metadata: fileMetadataSchema.optional(),
         },
       },
       async (
-        { storageKey, originalFilename, format, fileSize, fileUnit },
+        { storageKey, originalFilename, format, fileSize, fileUnit, metadata },
         extra
       ) => {
         try {
@@ -291,10 +330,44 @@ const handler = createMcpHandler(
             format,
             fileSize,
             fileUnit,
+            metadata,
           });
           if ("error" in result) {
             return errorResult({
               code: "register_failed",
+              message: result.error,
+            });
+          }
+          return jsonResult(result);
+        } catch (err) {
+          return scopeOrInternal(err);
+        }
+      }
+    );
+
+    server.registerTool(
+      "materialize_update_file",
+      {
+        title: "Update a file listing's metadata",
+        description:
+          "Edit a file the user owns — change name, description, license, price, tags, recommended material, visibility. Pass only the fields you want to update.",
+        inputSchema: {
+          fileId: z.string().uuid(),
+          metadata: fileMetadataSchema,
+        },
+      },
+      async ({ fileId, metadata }, extra) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "files:write");
+          const result = await updateFileForUser({
+            userId: auth.userId,
+            fileId,
+            metadata,
+          });
+          if ("error" in result) {
+            return errorResult({
+              code: "update_failed",
               message: result.error,
             });
           }
@@ -350,6 +423,581 @@ const handler = createMcpHandler(
             });
           }
           return jsonResult({ deleted: true });
+        } catch (err) {
+          return scopeOrInternal(err);
+        }
+      }
+    );
+
+    /* -------------------- Photos (files + projects) -------------------- */
+
+    server.registerTool(
+      "materialize_request_photo_upload_url",
+      {
+        title: "Request a presigned upload URL for a photo",
+        description:
+          "Get a presigned R2 URL for a photo (JPG/PNG/WEBP/SVG, up to 20MB). After PUTting the bytes, pass the returned storageKey into materialize_add_file_photo or materialize_add_project_photo.",
+        inputSchema: {
+          filename: z.string().min(1),
+          sizeBytes: z.number().int().min(1).max(20 * 1024 * 1024),
+          contentType: z.string().optional(),
+        },
+      },
+      async ({ filename, sizeBytes, contentType }, extra) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "files:write");
+          const result = await requestPhotoUploadUrlForUser({
+            userId: auth.userId,
+            filename,
+            sizeBytes,
+            contentType,
+          });
+          if ("error" in result) {
+            return errorResult({
+              code: "invalid_input",
+              message: result.error,
+            });
+          }
+          return jsonResult(result);
+        } catch (err) {
+          return scopeOrInternal(err);
+        }
+      }
+    );
+
+    server.registerTool(
+      "materialize_add_file_photo",
+      {
+        title: "Attach a curator photo to a file",
+        description:
+          "Adds an already-uploaded photo (use materialize_request_photo_upload_url first) to a file's curator gallery. Owner-only.",
+        inputSchema: {
+          fileId: z.string().uuid(),
+          storageKey: z.string().min(1),
+          caption: z.string().max(500).optional(),
+        },
+      },
+      async ({ fileId, storageKey, caption }, extra) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "files:write");
+          const result = await addFilePhotoForUser({
+            userId: auth.userId,
+            fileId,
+            storageKey,
+            caption,
+          });
+          if ("error" in result) {
+            return errorResult({
+              code: "add_photo_failed",
+              message: result.error,
+            });
+          }
+          return jsonResult(result);
+        } catch (err) {
+          return scopeOrInternal(err);
+        }
+      }
+    );
+
+    server.registerTool(
+      "materialize_set_file_cover_photo",
+      {
+        title: "Set a file's cover photo",
+        description:
+          "Pick one of the file's curator photos to serve as the cover image (shown on cards, profile, OG previews). Pass photoId=null to revert to the auto-captured 3D thumbnail.",
+        inputSchema: {
+          fileId: z.string().uuid(),
+          photoId: z.string().uuid().nullable(),
+        },
+      },
+      async ({ fileId, photoId }, extra) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "files:write");
+          const result = await setFileCoverPhotoForUser({
+            userId: auth.userId,
+            fileId,
+            photoId,
+          });
+          if ("error" in result) {
+            return errorResult({
+              code: "set_cover_failed",
+              message: result.error,
+            });
+          }
+          return jsonResult({ ok: true });
+        } catch (err) {
+          return scopeOrInternal(err);
+        }
+      }
+    );
+
+    /* -------------------- Projects -------------------- */
+
+    const projectMetadataSchema = z.object({
+      name: z.string().min(1).max(200).optional(),
+      description: z.string().max(5000).nullable().optional(),
+      priceCents: z.number().int().min(0).optional(),
+      license: z.enum(LICENSE_ENUM_VALUES).optional(),
+      visibility: z.enum(["public", "private"]).optional(),
+      tags: z.array(z.string().min(1).max(32)).max(20).optional(),
+      repoUrl: z.string().url().max(500).nullable().optional(),
+    });
+
+    server.registerTool(
+      "materialize_create_project",
+      {
+        title: "Create a project bundling one or more files",
+        description:
+          "Create a project that bundles N existing files the agent owns. Projects can carry a BOM, wiring diagrams, a firmware repo URL, and curator photos — set those via the followup tools (materialize_set_project_bom, materialize_add_project_circuit_*, materialize_add_project_photo).",
+        inputSchema: {
+          name: z.string().min(1).max(200),
+          fileIds: z.array(z.string().uuid()).min(1).max(50),
+          description: z.string().max(5000).nullable().optional(),
+          priceCents: z.number().int().min(0).optional(),
+          license: z.enum(LICENSE_ENUM_VALUES).optional(),
+          visibility: z.enum(["public", "private"]).optional(),
+          tags: z.array(z.string().min(1).max(32)).max(20).optional(),
+          repoUrl: z
+            .string()
+            .url()
+            .max(500)
+            .nullable()
+            .optional()
+            .describe(
+              "Optional firmware / source repo URL. Surfaces as a 'View code' button on the project page."
+            ),
+        },
+      },
+      async (input, extra) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "projects:write");
+          const result = await createProjectForUser({
+            userId: auth.userId,
+            ...input,
+          });
+          if ("error" in result) {
+            return errorResult({
+              code: "create_project_failed",
+              message: result.error,
+            });
+          }
+          return jsonResult(result);
+        } catch (err) {
+          return scopeOrInternal(err);
+        }
+      }
+    );
+
+    server.registerTool(
+      "materialize_list_projects",
+      {
+        title: "List your projects",
+        description:
+          "Returns projects owned by the agent's user, newest first. Default limit 100.",
+        inputSchema: {
+          limit: z.number().int().min(1).max(200).optional(),
+        },
+      },
+      async ({ limit }, extra) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "projects:read");
+          const projects = await listProjectsForUser(auth.userId, limit ?? 100);
+          return jsonResult({ projects });
+        } catch (err) {
+          return scopeOrInternal(err);
+        }
+      }
+    );
+
+    server.registerTool(
+      "materialize_get_project",
+      {
+        title: "Get a project's full detail",
+        description:
+          "Returns project metadata, bundled files, BOM line items, circuit diagrams (image / KiCad / Wokwi), and the repo URL.",
+        inputSchema: { projectId: z.string().uuid() },
+      },
+      async ({ projectId }, extra) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "projects:read");
+          const result = await getProjectForUser({
+            userId: auth.userId,
+            projectId,
+          });
+          if ("error" in result) {
+            return errorResult({
+              code: "not_found",
+              message: result.error,
+            });
+          }
+          return jsonResult(result);
+        } catch (err) {
+          return scopeOrInternal(err);
+        }
+      }
+    );
+
+    server.registerTool(
+      "materialize_update_project",
+      {
+        title: "Update a project's metadata",
+        description:
+          "Edit name, description, license, price, tags, visibility, or the firmware repo URL. Pass only the fields you want to update.",
+        inputSchema: {
+          projectId: z.string().uuid(),
+          metadata: projectMetadataSchema,
+        },
+      },
+      async ({ projectId, metadata }, extra) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "projects:write");
+          const result = await updateProjectForUser({
+            userId: auth.userId,
+            projectId,
+            metadata,
+          });
+          if ("error" in result) {
+            return errorResult({
+              code: "update_project_failed",
+              message: result.error,
+            });
+          }
+          return jsonResult(result);
+        } catch (err) {
+          return scopeOrInternal(err);
+        }
+      }
+    );
+
+    server.registerTool(
+      "materialize_delete_project",
+      {
+        title: "Delete a project",
+        description:
+          "Delete a project and its BOM + circuit diagrams + project-photos. The bundled files themselves are not deleted.",
+        inputSchema: { projectId: z.string().uuid() },
+      },
+      async ({ projectId }, extra) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "projects:write");
+          const result = await deleteProjectForUser({
+            userId: auth.userId,
+            projectId,
+          });
+          if ("error" in result) {
+            return errorResult({
+              code: "delete_project_failed",
+              message: result.error,
+            });
+          }
+          return jsonResult({ deleted: true });
+        } catch (err) {
+          return scopeOrInternal(err);
+        }
+      }
+    );
+
+    server.registerTool(
+      "materialize_set_project_bom",
+      {
+        title: "Replace a project's Bill of Materials",
+        description:
+          "Bulk-replace the BOM line items on a project. Items list the parts a builder needs beyond the printed model (screws, electronics, magnets, wire, etc.). Pass an empty array to clear the BOM.",
+        inputSchema: {
+          projectId: z.string().uuid(),
+          items: z
+            .array(
+              z.object({
+                name: z.string().min(1).max(200),
+                quantity: z.number().positive(),
+                unit: z.string().max(32).nullable().optional(),
+                notes: z.string().max(500).nullable().optional(),
+                sourceUrl: z.string().url().max(500).nullable().optional(),
+              })
+            )
+            .max(200),
+        },
+      },
+      async ({ projectId, items }, extra) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "projects:write");
+          const result = await setProjectBomForUser({
+            userId: auth.userId,
+            projectId,
+            items,
+          });
+          if ("error" in result) {
+            return errorResult({
+              code: "set_bom_failed",
+              message: result.error,
+            });
+          }
+          return jsonResult(result);
+        } catch (err) {
+          return scopeOrInternal(err);
+        }
+      }
+    );
+
+    /* -------------------- Project circuits / wiring -------------------- */
+
+    server.registerTool(
+      "materialize_request_circuit_upload_url",
+      {
+        title: "Request a presigned upload URL for a wiring diagram",
+        description:
+          "Get a presigned R2 URL for a circuit asset. Accepts image diagrams (JPG/PNG/WEBP/SVG) or KiCad source files (.kicad_sch / .kicad_pcb / .kicad_pro), up to 20MB. After PUT, call materialize_add_project_circuit_image or materialize_add_project_circuit_kicad with the storageKey.",
+        inputSchema: {
+          filename: z.string().min(1),
+          sizeBytes: z.number().int().min(1).max(20 * 1024 * 1024),
+          contentType: z.string().optional(),
+        },
+      },
+      async ({ filename, sizeBytes, contentType }, extra) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "projects:write");
+          const result = await requestCircuitUploadUrlForUser({
+            userId: auth.userId,
+            filename,
+            sizeBytes,
+            contentType,
+          });
+          if ("error" in result) {
+            return errorResult({
+              code: "invalid_input",
+              message: result.error,
+            });
+          }
+          return jsonResult(result);
+        } catch (err) {
+          return scopeOrInternal(err);
+        }
+      }
+    );
+
+    server.registerTool(
+      "materialize_add_project_circuit_image",
+      {
+        title: "Attach an image wiring diagram to a project",
+        description:
+          "Add an already-uploaded image (JPG/PNG/WEBP/SVG) as a circuit / wiring diagram on the project. Use materialize_request_circuit_upload_url first to get a storageKey.",
+        inputSchema: {
+          projectId: z.string().uuid(),
+          storageKey: z.string().min(1),
+          originalFilename: z.string().max(200).optional(),
+          caption: z.string().max(500).optional(),
+        },
+      },
+      async (
+        { projectId, storageKey, originalFilename, caption },
+        extra
+      ) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "projects:write");
+          const result = await addProjectCircuitImageForUser({
+            userId: auth.userId,
+            projectId,
+            storageKey,
+            originalFilename,
+            caption,
+          });
+          if ("error" in result) {
+            return errorResult({
+              code: "add_circuit_failed",
+              message: result.error,
+            });
+          }
+          return jsonResult(result);
+        } catch (err) {
+          return scopeOrInternal(err);
+        }
+      }
+    );
+
+    server.registerTool(
+      "materialize_add_project_circuit_kicad",
+      {
+        title: "Attach a KiCad source file to a project",
+        description:
+          "Add an already-uploaded .kicad_sch or .kicad_pcb file as a circuit on the project. The lightbox on the project page renders these live via KiCanvas. Use materialize_request_circuit_upload_url first.",
+        inputSchema: {
+          projectId: z.string().uuid(),
+          storageKey: z.string().min(1),
+          kind: z.enum(["kicad_sch", "kicad_pcb"]),
+          originalFilename: z.string().min(1).max(200),
+          caption: z.string().max(500).optional(),
+        },
+      },
+      async (
+        { projectId, storageKey, kind, originalFilename, caption },
+        extra
+      ) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "projects:write");
+          const result = await addProjectCircuitKicadForUser({
+            userId: auth.userId,
+            projectId,
+            storageKey,
+            kind,
+            originalFilename,
+            caption,
+          });
+          if ("error" in result) {
+            return errorResult({
+              code: "add_circuit_failed",
+              message: result.error,
+            });
+          }
+          return jsonResult(result);
+        } catch (err) {
+          return scopeOrInternal(err);
+        }
+      }
+    );
+
+    server.registerTool(
+      "materialize_add_project_circuit_wokwi",
+      {
+        title: "Embed a Wokwi simulation into a project",
+        description:
+          "Attach a wokwi.com project URL as an interactive circuit embed. No upload needed — Wokwi hosts the sketch; we just iframe it from the project page.",
+        inputSchema: {
+          projectId: z.string().uuid(),
+          url: z
+            .string()
+            .url()
+            .describe("Public Wokwi URL, e.g. https://wokwi.com/projects/123456789"),
+          caption: z.string().max(500).optional(),
+        },
+      },
+      async ({ projectId, url, caption }, extra) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "projects:write");
+          const result = await addProjectCircuitWokwiForUser({
+            userId: auth.userId,
+            projectId,
+            url,
+            caption,
+          });
+          if ("error" in result) {
+            return errorResult({
+              code: "add_circuit_failed",
+              message: result.error,
+            });
+          }
+          return jsonResult(result);
+        } catch (err) {
+          return scopeOrInternal(err);
+        }
+      }
+    );
+
+    server.registerTool(
+      "materialize_delete_project_circuit",
+      {
+        title: "Remove a circuit / diagram from a project",
+        description:
+          "Delete a circuit row by id. R2 cleanup is best-effort.",
+        inputSchema: { circuitId: z.string().uuid() },
+      },
+      async ({ circuitId }, extra) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "projects:write");
+          const result = await deleteProjectCircuitForUser({
+            userId: auth.userId,
+            circuitId,
+          });
+          if ("error" in result) {
+            return errorResult({
+              code: "delete_circuit_failed",
+              message: result.error,
+            });
+          }
+          return jsonResult({ deleted: true });
+        } catch (err) {
+          return scopeOrInternal(err);
+        }
+      }
+    );
+
+    /* -------------------- Project photos -------------------- */
+
+    server.registerTool(
+      "materialize_add_project_photo",
+      {
+        title: "Attach a curator photo to a project",
+        description:
+          "Adds an already-uploaded photo (use materialize_request_photo_upload_url first) to the project's curator gallery. Owner-only.",
+        inputSchema: {
+          projectId: z.string().uuid(),
+          storageKey: z.string().min(1),
+          caption: z.string().max(500).optional(),
+        },
+      },
+      async ({ projectId, storageKey, caption }, extra) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "projects:write");
+          const result = await addProjectPhotoForUser({
+            userId: auth.userId,
+            projectId,
+            storageKey,
+            caption,
+          });
+          if ("error" in result) {
+            return errorResult({
+              code: "add_photo_failed",
+              message: result.error,
+            });
+          }
+          return jsonResult(result);
+        } catch (err) {
+          return scopeOrInternal(err);
+        }
+      }
+    );
+
+    server.registerTool(
+      "materialize_set_project_cover_photo",
+      {
+        title: "Set a project's cover photo",
+        description:
+          "Pick one of the project's curator photos as the cover image. Pass photoId=null to revert to the legacy thumbnailUrl.",
+        inputSchema: {
+          projectId: z.string().uuid(),
+          photoId: z.string().uuid().nullable(),
+        },
+      },
+      async ({ projectId, photoId }, extra) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "projects:write");
+          const result = await setProjectCoverPhotoForUser({
+            userId: auth.userId,
+            projectId,
+            photoId,
+          });
+          if ("error" in result) {
+            return errorResult({
+              code: "set_cover_failed",
+              message: result.error,
+            });
+          }
+          return jsonResult({ ok: true });
         } catch (err) {
           return scopeOrInternal(err);
         }

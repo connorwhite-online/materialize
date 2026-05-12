@@ -6,17 +6,108 @@ import { after } from "next/server";
 import { db } from "@/lib/db";
 import {
   fileAssets,
+  filePhotos,
   files,
   printOrders,
   printOrderItems,
   users,
 } from "@/lib/db/schema";
-import { generateUploadUrl, objectExists } from "@/lib/storage";
+import { deleteObject, generateUploadUrl, objectExists } from "@/lib/storage";
 import { uploadModel } from "@/lib/craftcloud/client";
 import { logError } from "@/lib/logger";
+import { LICENSE_ENUM_VALUES, type LicenseId } from "@/lib/licenses";
+import { DESIGN_TAG_OPTIONS } from "@/lib/validations/file";
 
 const SUPPORTED_FORMATS = ["stl", "obj", "3mf", "step", "amf"] as const;
 export type SupportedFormat = (typeof SUPPORTED_FORMATS)[number];
+
+const SUPPORTED_DESIGN_TAGS = DESIGN_TAG_OPTIONS;
+export type SupportedDesignTag = (typeof SUPPORTED_DESIGN_TAGS)[number];
+
+/**
+ * Optional metadata an agent can attach to a fresh upload or apply
+ * later via updateFileForUser. Mirrors the form fields on the
+ * web upload sheet. All optional — defaults match the web's
+ * "drop a file and save to library" path.
+ */
+export interface FileMetadataInput {
+  name?: string;
+  description?: string | null;
+  /** Price in cents. 0 = free. */
+  priceCents?: number;
+  license?: LicenseId;
+  visibility?: "public" | "private";
+  /** Comma-free list — already split into tags. */
+  tags?: string[];
+  /** Subset of DESIGN_TAG_OPTIONS. */
+  designTags?: SupportedDesignTag[];
+  /** Materialize internal material id (lib/materials/), not CraftCloud. */
+  recommendedMaterialId?: string;
+  /** Millimeters; persisted as 0.1mm units server-side. */
+  minWallThicknessMm?: number;
+}
+
+function normalizeMetadata(
+  meta: FileMetadataInput | undefined
+): Partial<{
+  name: string;
+  description: string | null;
+  price: number;
+  license: LicenseId;
+  visibility: "public" | "private";
+  tags: string[];
+  designTags: string[];
+  recommendedMaterialId: string | null;
+  minWallThickness: number;
+  status: "draft" | "published";
+}> {
+  if (!meta) return {};
+  const out: ReturnType<typeof normalizeMetadata> = {};
+  if (typeof meta.name === "string" && meta.name.trim()) {
+    out.name = meta.name.trim().slice(0, 200);
+  }
+  if (meta.description !== undefined) {
+    out.description = meta.description ? meta.description.slice(0, 5000) : null;
+  }
+  if (typeof meta.priceCents === "number" && meta.priceCents >= 0) {
+    out.price = Math.round(meta.priceCents);
+  }
+  if (
+    meta.license &&
+    (LICENSE_ENUM_VALUES as readonly string[]).includes(meta.license)
+  ) {
+    out.license = meta.license;
+  }
+  if (meta.visibility === "public" || meta.visibility === "private") {
+    out.visibility = meta.visibility;
+    // Status follows visibility on first publish — public listings are
+    // immediately published, private listings stay drafts.
+    out.status = meta.visibility === "public" ? "published" : "draft";
+  }
+  if (Array.isArray(meta.tags)) {
+    out.tags = meta.tags
+      .map((t) => String(t).trim().slice(0, 32))
+      .filter(Boolean)
+      .slice(0, 20);
+  }
+  if (Array.isArray(meta.designTags)) {
+    out.designTags = meta.designTags.filter((t) =>
+      (SUPPORTED_DESIGN_TAGS as readonly string[]).includes(t)
+    );
+  }
+  if (meta.recommendedMaterialId !== undefined) {
+    out.recommendedMaterialId = meta.recommendedMaterialId
+      ? String(meta.recommendedMaterialId).slice(0, 100)
+      : null;
+  }
+  if (
+    typeof meta.minWallThicknessMm === "number" &&
+    meta.minWallThicknessMm >= 0
+  ) {
+    out.minWallThickness = Math.round(meta.minWallThicknessMm * 10);
+  }
+  return out;
+}
 
 const SUPPORTED_UNITS = ["mm", "cm", "in"] as const;
 export type SupportedUnit = (typeof SUPPORTED_UNITS)[number];
@@ -87,10 +178,19 @@ export interface RegisterUploadInput {
   format: SupportedFormat;
   fileSize: number;
   fileUnit?: SupportedUnit;
+  /**
+   * Optional listing metadata. When omitted, the file lands with the
+   * same defaults as the print page's draft path: name derived from
+   * the filename, license=free, price=0, visibility from the user's
+   * defaultUploadVisibility setting.
+   */
+  metadata?: FileMetadataInput;
 }
 
 export interface RegisterUploadResult {
   fileAssetId: string;
+  fileId: string;
+  fileSlug: string;
   craftCloudModelId: string | null;
   warnings: string[];
 }
@@ -116,7 +216,8 @@ export async function registerUploadForUser(
   }
 
   try {
-    const name = deriveListingName(input.originalFilename);
+    const meta = normalizeMetadata(input.metadata);
+    const name = meta.name ?? deriveListingName(input.originalFilename);
     const slug = buildListingSlug(name);
 
     const [pref] = await db
@@ -124,7 +225,10 @@ export async function registerUploadForUser(
       .from(users)
       .where(eq(users.id, input.userId))
       .limit(1);
-    const visibility = pref?.defaultUploadVisibility ?? "private";
+    const fallbackVisibility = pref?.defaultUploadVisibility ?? "private";
+    const visibility = meta.visibility ?? fallbackVisibility;
+    const status =
+      meta.status ?? (visibility === "public" ? "published" : "draft");
 
     const [fileRow] = await db
       .insert(files)
@@ -132,9 +236,14 @@ export async function registerUploadForUser(
         userId: input.userId,
         name,
         slug,
-        price: 0,
-        license: "free",
-        status: visibility === "public" ? "published" : "draft",
+        description: meta.description ?? null,
+        price: meta.price ?? 0,
+        license: meta.license ?? "cc_by",
+        tags: meta.tags ?? null,
+        designTags: meta.designTags ?? null,
+        recommendedMaterialId: meta.recommendedMaterialId ?? null,
+        minWallThickness: meta.minWallThickness ?? null,
+        status,
         visibility,
       })
       .returning();
@@ -160,12 +269,255 @@ export async function registerUploadForUser(
       })
     );
 
-    return { fileAssetId: asset.id, craftCloudModelId: null, warnings: [] };
+    return {
+      fileAssetId: asset.id,
+      fileId: fileRow.id,
+      fileSlug: fileRow.slug,
+      craftCloudModelId: null,
+      warnings: [],
+    };
   } catch (error) {
     logError("registerUploadForUser", error);
     return { error: "Failed to register upload" };
   }
 }
+
+/**
+ * Update an existing file listing's metadata. Pass only the fields
+ * you want to change; unspecified fields stay untouched. Used by
+ * the materialize_update_file MCP tool when the agent wants to set
+ * a description, change the price, or flip private → public after
+ * the initial upload.
+ */
+export async function updateFileForUser(params: {
+  userId: string;
+  fileId: string;
+  metadata: FileMetadataInput;
+}): Promise<
+  | { fileId: string; slug: string }
+  | { error: string }
+> {
+  const [row] = await db
+    .select({ id: files.id, userId: files.userId, slug: files.slug })
+    .from(files)
+    .where(eq(files.id, params.fileId))
+    .limit(1);
+  if (!row || row.userId !== params.userId) {
+    return { error: "File not found" };
+  }
+  const meta = normalizeMetadata(params.metadata);
+  if (Object.keys(meta).length === 0) {
+    return { fileId: row.id, slug: row.slug };
+  }
+  await db.update(files).set(meta).where(eq(files.id, row.id));
+  return { fileId: row.id, slug: row.slug };
+}
+
+/**
+ * Attach a curator-gallery photo to a file the agent owns. The bytes
+ * must already be in R2 under the user's `photos/<userId>/` prefix
+ * (use requestPhotoUploadUrlForUser first). Mirrors the web's
+ * addFilePhoto action.
+ */
+export async function addFilePhotoForUser(params: {
+  userId: string;
+  fileId: string;
+  storageKey: string;
+  caption?: string;
+}): Promise<{ photoId: string } | { error: string }> {
+  const expected = `photos/${params.userId}/`;
+  if (!params.storageKey.startsWith(expected)) {
+    return { error: "Storage key does not match this user's photos prefix" };
+  }
+  const [file] = await db
+    .select({ id: files.id, slug: files.slug })
+    .from(files)
+    .where(and(eq(files.id, params.fileId), eq(files.userId, params.userId)))
+    .limit(1);
+  if (!file) return { error: "File not found" };
+
+  // Append at the end of the curator carousel.
+  const existing = await db
+    .select({ sortOrder: filePhotos.sortOrder })
+    .from(filePhotos)
+    .where(eq(filePhotos.fileId, file.id));
+  const maxOrder = existing.reduce(
+    (max, e) => Math.max(max, e.sortOrder),
+    -1
+  );
+
+  const trimmedCaption = params.caption?.trim().slice(0, 500);
+
+  const [photo] = await db
+    .insert(filePhotos)
+    .values({
+      fileId: file.id,
+      userId: params.userId,
+      storageKey: params.storageKey,
+      caption: trimmedCaption || null,
+      sortOrder: maxOrder + 1,
+      kind: "creator",
+    })
+    .returning();
+
+  return { photoId: photo.id };
+}
+
+/**
+ * Pick one of the file's curator photos as the cover image. Pass
+ * `null` to revert to the auto-captured thumbnail.
+ */
+export async function setFileCoverPhotoForUser(params: {
+  userId: string;
+  fileId: string;
+  photoId: string | null;
+}): Promise<{ ok: true } | { error: string }> {
+  const [file] = await db
+    .select({ id: files.id, userId: files.userId })
+    .from(files)
+    .where(eq(files.id, params.fileId))
+    .limit(1);
+  if (!file || file.userId !== params.userId) {
+    return { error: "File not found" };
+  }
+  if (params.photoId !== null) {
+    const [photo] = await db
+      .select({
+        id: filePhotos.id,
+        fileId: filePhotos.fileId,
+        kind: filePhotos.kind,
+      })
+      .from(filePhotos)
+      .where(eq(filePhotos.id, params.photoId))
+      .limit(1);
+    if (
+      !photo ||
+      photo.fileId !== params.fileId ||
+      photo.kind !== "creator"
+    ) {
+      return { error: "Photo doesn't belong to this file" };
+    }
+  }
+  await db
+    .update(files)
+    .set({ coverPhotoId: params.photoId })
+    .where(eq(files.id, params.fileId));
+  return { ok: true };
+}
+
+/**
+ * Presign for photo uploads (curator photos on files or projects,
+ * build photos, etc.). The storage key returned is rooted at
+ * `photos/<userId>/...` so the same prefix-check the web actions
+ * use will accept it.
+ */
+export async function requestPhotoUploadUrlForUser(params: {
+  userId: string;
+  filename: string;
+  sizeBytes: number;
+  contentType?: string;
+}): Promise<
+  | { uploadUrl: string; storageKey: string; expiresAt: string }
+  | { error: string }
+> {
+  const maxBytes = 20 * 1024 * 1024;
+  if (params.sizeBytes <= 0 || params.sizeBytes > maxBytes) {
+    return {
+      error: `Photo size must be between 1 byte and ${maxBytes} bytes`,
+    };
+  }
+  const ct = (params.contentType ?? "image/jpeg").toLowerCase();
+  if (
+    ![
+      "image/jpeg",
+      "image/jpg",
+      "image/png",
+      "image/webp",
+      "image/svg+xml",
+    ].includes(ct)
+  ) {
+    return { error: "Unsupported photo content type" };
+  }
+  const safeName = sanitizeFilename(params.filename);
+  const storageKey = `photos/${params.userId}/${nanoid()}/${safeName}`;
+  const expiresIn = 3600;
+  const uploadUrl = await generateUploadUrl(storageKey, ct, expiresIn);
+  return {
+    uploadUrl,
+    storageKey,
+    expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(),
+  };
+}
+
+/**
+ * Presign for circuit / wiring uploads attached to a project. The
+ * storage key is rooted at `circuits/<userId>/...` so the web's
+ * project-side server actions accept it. Accepts both image
+ * diagrams and KiCad source files; the underlying object is the
+ * same shape (R2 PUT), only the add-circuit action differs.
+ */
+export async function requestCircuitUploadUrlForUser(params: {
+  userId: string;
+  filename: string;
+  sizeBytes: number;
+  contentType?: string;
+}): Promise<
+  | { uploadUrl: string; storageKey: string; expiresAt: string }
+  | { error: string }
+> {
+  const maxBytes = 20 * 1024 * 1024;
+  if (params.sizeBytes <= 0 || params.sizeBytes > maxBytes) {
+    return {
+      error: `Upload must be between 1 byte and ${maxBytes} bytes`,
+    };
+  }
+  const ct = (params.contentType ?? "application/octet-stream").toLowerCase();
+  // Same accept-list as the web's circuit-presign route (kicad files
+  // arrive as octet-stream because browsers don't have a MIME for
+  // them and the agent will set the same on their PUT).
+  const isImage = [
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/webp",
+    "image/svg+xml",
+  ].includes(ct);
+  const lowerName = params.filename.toLowerCase();
+  const isKicad =
+    lowerName.endsWith(".kicad_sch") ||
+    lowerName.endsWith(".kicad_pcb") ||
+    lowerName.endsWith(".kicad_pro");
+  if (!isImage && !isKicad) {
+    return {
+      error:
+        "Unsupported circuit upload — accepted: image/* or .kicad_sch / .kicad_pcb / .kicad_pro",
+    };
+  }
+  const signedContentType = isImage ? ct : "application/octet-stream";
+  const safeName = sanitizeFilename(params.filename);
+  const storageKey = `circuits/${params.userId}/${nanoid()}/${safeName}`;
+  const expiresIn = 3600;
+  const uploadUrl = await generateUploadUrl(
+    storageKey,
+    signedContentType,
+    expiresIn
+  );
+  return {
+    uploadUrl,
+    storageKey,
+    expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(),
+  };
+}
+
+/** Cleanup helper used by project circuit/photo add tools on error. */
+async function bestEffortDeleteR2(key: string) {
+  try {
+    await deleteObject(key);
+  } catch (e) {
+    logError("bestEffortDeleteR2", e);
+  }
+}
+export { bestEffortDeleteR2 };
 
 async function uploadAssetToCraftCloud(params: {
   assetId: string;
@@ -215,6 +567,12 @@ function buildListingSlug(name: string): string {
 
 export interface AgentFileSummary {
   fileAssetId: string;
+  /** The parent listing's id — pass into materialize_create_project, etc. */
+  fileId: string;
+  /** Public slug for /files/[slug] deep links. */
+  slug: string;
+  /** Display name on the listing — separate from `filename`. */
+  name: string;
   filename: string;
   format: string;
   sizeBytes: number;
@@ -222,6 +580,10 @@ export interface AgentFileSummary {
   uploadedAt: string;
   craftCloudModelId: string | null;
   dimensions: { x: number; y: number; z: number } | null;
+  status: string;
+  visibility: string;
+  priceCents: number;
+  license: string;
 }
 
 export async function listFilesForUser(
@@ -230,6 +592,13 @@ export async function listFilesForUser(
   const rows = await db
     .select({
       assetId: fileAssets.id,
+      fileId: files.id,
+      slug: files.slug,
+      name: files.name,
+      status: files.status,
+      visibility: files.visibility,
+      price: files.price,
+      license: files.license,
       originalFilename: fileAssets.originalFilename,
       format: fileAssets.format,
       fileSize: fileAssets.fileSize,
@@ -245,6 +614,9 @@ export async function listFilesForUser(
 
   return rows.map((r) => ({
     fileAssetId: r.assetId,
+    fileId: r.fileId,
+    slug: r.slug,
+    name: r.name,
     filename: r.originalFilename,
     format: r.format,
     sizeBytes: r.fileSize,
@@ -252,6 +624,10 @@ export async function listFilesForUser(
     uploadedAt: r.createdAt.toISOString(),
     craftCloudModelId: r.craftCloudModelId,
     dimensions: r.geometryData?.dimensions ?? null,
+    status: r.status,
+    visibility: r.visibility,
+    priceCents: r.price,
+    license: r.license,
   }));
 }
 

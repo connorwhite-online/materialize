@@ -17,7 +17,7 @@ The wedge: expose the existing print pipeline as an MCP (Model Context Protocol)
 ## 3. Non-goals (v1)
 
 - Unattended purchasing with stored payment methods. (Designed for, not built.)
-- Agents creating marketplace listings or selling models. Selling stays human-only for now.
+- ~~Agents creating marketplace listings or selling models. Selling stays human-only for now.~~ **Lifted.** Agents can now upload full kits — files with metadata, projects bundling those files, BOM line items, wiring diagrams (image / KiCad / Wokwi), firmware repo URLs, and curator photos. See §6.5 Projects + §6.6 Photos/Circuits.
 - Streaming progress for prints. Polling is fine; CraftCloud doesn't push status anyway.
 - A parallel agent-optimized web surface (separate `/agent` mirror site). The MCP server *is* the agent surface; existing HTML stays as-is, with a small `llms.txt` + JSON-LD pass for discovery (see §10).
 
@@ -227,6 +227,53 @@ output: {
 input: { since?: string; status?: OrderStatus[]; limit?: number }
 output: { orders: Array<GetOrderOutput>; nextCursor?: string }
 ```
+
+### 6.5 Projects + BOM + firmware repo
+
+Scope: `projects:read`, `projects:write`.
+
+**`materialize_create_project`** — bundle N existing files into a
+project listing. Accepts name + fileIds plus all the listing
+metadata (description, license, price, tags, visibility) and the
+optional `repoUrl` for the "View code" button on the project page.
+
+**`materialize_list_projects` / `materialize_get_project`** — read
+ownership + the full content surface (files, BOM, circuits, repo).
+
+**`materialize_update_project`** — edit metadata + repoUrl on an
+existing project. Pass only the fields you're changing.
+
+**`materialize_delete_project`** — cascade-delete the project. Does
+NOT delete the bundled files (they stay in the user's library).
+
+**`materialize_set_project_bom`** — bulk-replace BOM line items in
+one call (matches the web editor's behavior). Each item has name,
+quantity, optional unit/notes/sourceUrl. Pass `items: []` to clear.
+
+### 6.6 Photos + circuits (wiring diagrams)
+
+Both surfaces share a two-step upload pattern: request a presign,
+PUT bytes, then call the add-* tool with the storageKey.
+
+**Photos** (file curator gallery + project curator gallery):
+- `materialize_request_photo_upload_url` → R2 URL under
+  `photos/<userId>/`. Accepts JPG/PNG/WEBP/SVG up to 20MB.
+- `materialize_add_file_photo` / `materialize_add_project_photo`
+  attaches the uploaded photo to the listing.
+- `materialize_set_file_cover_photo` / `materialize_set_project_cover_photo`
+  picks one of the curator photos as the cover; `null` reverts to
+  the auto-thumbnail.
+
+**Circuits** (project wiring diagrams — image, KiCad, or Wokwi):
+- `materialize_request_circuit_upload_url` → R2 URL under
+  `circuits/<userId>/`. Accepts image/* up to 20MB OR
+  `.kicad_sch` / `.kicad_pcb` / `.kicad_pro` files.
+- `materialize_add_project_circuit_image` — image-kind diagram.
+- `materialize_add_project_circuit_kicad` — KiCad source (rendered
+  live in the lightbox via KiCanvas).
+- `materialize_add_project_circuit_wokwi` — no upload needed; pass
+  a public wokwi.com URL and we iframe-embed it.
+- `materialize_delete_project_circuit` — remove a diagram by id.
 
 ## 7. Confirmation flow
 
