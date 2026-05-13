@@ -145,117 +145,173 @@ export default async function ProjectDetailPage(props: {
     notFound();
   }
 
-  const bundledFiles = await db
-    .select({
-      id: files.id,
-      name: files.name,
-      slug: files.slug,
-      thumbnailUrl: files.thumbnailUrl,
-      price: files.price,
-      position: projectFiles.position,
-    })
-    .from(projectFiles)
-    .innerJoin(files, eq(projectFiles.fileId, files.id))
-    .where(eq(projectFiles.projectId, project.id))
-    .orderBy(asc(projectFiles.position));
-
-  const canDownload = await userOwnsProject(userId, project.id);
-
-  // Curator gallery photos for the project — the owner's
-  // hand-picked images that aren't the cover. Same shape as the file
-  // detail page, mapped through PhotosFeed. Both queries are
-  // swallow()ed so a Neon hiccup never 500s the listing.
-  const curatorRows = await swallow(
+  // Seven independent reads — fan out in one roundtrip. Photo URL
+  // signing has to wait on its row fetch and is handled separately
+  // below. `userOwnsProject` is called once and reused for both the
+  // download gate and the build-post gate — same query, same answer.
+  const [
+    bundledFiles,
+    ownsProject,
+    curatorRows,
+    buildRows,
+    circuitRows,
+    bomItems,
+    commentRows,
+  ] = await Promise.all([
     db
       .select({
-        id: projectPhotos.id,
-        caption: projectPhotos.caption,
-        createdAt: projectPhotos.createdAt,
-        storageKey: projectPhotos.storageKey,
+        id: files.id,
+        name: files.name,
+        slug: files.slug,
+        thumbnailUrl: files.thumbnailUrl,
+        price: files.price,
+        position: projectFiles.position,
       })
-      .from(projectPhotos)
-      .where(
-        and(
-          eq(projectPhotos.projectId, project.id),
-          eq(projectPhotos.kind, "creator")
+      .from(projectFiles)
+      .innerJoin(files, eq(projectFiles.fileId, files.id))
+      .where(eq(projectFiles.projectId, project.id))
+      .orderBy(asc(projectFiles.position)),
+    userOwnsProject(userId, project.id),
+    // Curator gallery photos for the project — the owner's
+    // hand-picked images that aren't the cover. Same shape as the
+    // file detail page, mapped through PhotosFeed. swallow()ed so a
+    // Neon hiccup never 500s the listing.
+    swallow(
+      db
+        .select({
+          id: projectPhotos.id,
+          caption: projectPhotos.caption,
+          createdAt: projectPhotos.createdAt,
+          storageKey: projectPhotos.storageKey,
+        })
+        .from(projectPhotos)
+        .where(
+          and(
+            eq(projectPhotos.projectId, project.id),
+            eq(projectPhotos.kind, "creator")
+          )
         )
-      )
-      .orderBy(asc(projectPhotos.sortOrder))
-  );
-  const curatorPhotos: FeedPhoto[] = await Promise.all(
-    curatorRows.map(async (row) => ({
-      id: row.id,
-      caption: row.caption,
-      createdAt: row.createdAt,
-      kind: "creator" as const,
-      author: null,
-      downloadUrl: await generateDownloadUrl(row.storageKey, 3600),
-    }))
-  );
-
-  // Community "builds" — interleaved with comments below. Limit 60 so
-  // a popular project doesn't push hundreds through the page.
-  const buildRows = await swallow(
-    db
-      .select({
-        id: projectPhotos.id,
-        storageKey: projectPhotos.storageKey,
-        caption: projectPhotos.caption,
-        createdAt: projectPhotos.createdAt,
-        authorId: users.id,
-        authorUsername: users.username,
-        authorDisplayName: users.displayName,
-        authorAvatarUrl: users.avatarUrl,
-      })
-      .from(projectPhotos)
-      .innerJoin(users, eq(projectPhotos.userId, users.id))
-      .where(
-        and(
-          eq(projectPhotos.projectId, project.id),
-          eq(projectPhotos.kind, "build")
+        .orderBy(asc(projectPhotos.sortOrder))
+    ),
+    // Community "builds" — interleaved with comments below. Limit 60
+    // so a popular project doesn't push hundreds through the page.
+    swallow(
+      db
+        .select({
+          id: projectPhotos.id,
+          storageKey: projectPhotos.storageKey,
+          caption: projectPhotos.caption,
+          createdAt: projectPhotos.createdAt,
+          authorId: users.id,
+          authorUsername: users.username,
+          authorDisplayName: users.displayName,
+          authorAvatarUrl: users.avatarUrl,
+        })
+        .from(projectPhotos)
+        .innerJoin(users, eq(projectPhotos.userId, users.id))
+        .where(
+          and(
+            eq(projectPhotos.projectId, project.id),
+            eq(projectPhotos.kind, "build")
+          )
         )
-      )
-      .orderBy(desc(projectPhotos.createdAt))
-      .limit(60)
-  );
-  const buildsWithUrls: PhotoPost[] = await Promise.all(
-    buildRows.map(async (row) => ({
-      id: row.id,
-      caption: row.caption,
-      createdAt: row.createdAt,
-      downloadUrl: await generateDownloadUrl(row.storageKey, 3600),
-      author: {
-        id: row.authorId,
-        username: row.authorUsername,
-        displayName: row.authorDisplayName,
-        avatarUrl: row.authorAvatarUrl,
-      },
-    }))
-  );
+        .orderBy(desc(projectPhotos.createdAt))
+        .limit(60)
+    ),
+    // Circuit / wiring diagrams — paired with the BOM as the "how
+    // it goes together electrically" half of the assembly story.
+    // Empty + non-owner → the section header is skipped entirely;
+    // owner sees an inline uploader to seed the first one.
+    swallow(
+      db
+        .select({
+          id: projectCircuits.id,
+          kind: projectCircuits.kind,
+          caption: projectCircuits.caption,
+          previewStorageKey: projectCircuits.previewStorageKey,
+          sourceStorageKey: projectCircuits.sourceStorageKey,
+          externalUrl: projectCircuits.externalUrl,
+        })
+        .from(projectCircuits)
+        .where(eq(projectCircuits.projectId, project.id))
+        .orderBy(asc(projectCircuits.sortOrder))
+    ),
+    // BOM — the project's bill of materials, in display order. Empty
+    // for most projects; the page only renders the section when items
+    // exist (progressive disclosure).
+    swallow(
+      db
+        .select({
+          id: projectBomItems.id,
+          name: projectBomItems.name,
+          quantity: projectBomItems.quantity,
+          unit: projectBomItems.unit,
+          notes: projectBomItems.notes,
+          sourceUrl: projectBomItems.sourceUrl,
+        })
+        .from(projectBomItems)
+        .where(eq(projectBomItems.projectId, project.id))
+        .orderBy(asc(projectBomItems.sortOrder))
+    ),
+    // Comments — same query shape as on the file detail page. Pull
+    // every row (top-level + replies) ordered chronologically; the
+    // renderer splits into threads via parentId. swallow() so a
+    // transient Neon blip doesn't 500 the page.
+    swallow(
+      db
+        .select({
+          id: projectComments.id,
+          parentId: projectComments.parentId,
+          body: projectComments.body,
+          deletedAt: projectComments.deletedAt,
+          createdAt: projectComments.createdAt,
+          updatedAt: projectComments.updatedAt,
+          authorId: users.id,
+          authorUsername: users.username,
+          authorDisplayName: users.displayName,
+          authorAvatarUrl: users.avatarUrl,
+        })
+        .from(projectComments)
+        .innerJoin(users, eq(projectComments.userId, users.id))
+        .where(eq(projectComments.projectId, project.id))
+        .orderBy(asc(projectComments.createdAt))
+        .limit(500)
+    ),
+  ]);
+  const canDownload = ownsProject;
+  // Gate for project builds / inline-comment photos. Owner is always
+  // covered because `userOwnsProject` returns true for the creator's
+  // own project — so reuse the same answer instead of querying twice.
+  const canPostBuild = ownsProject;
 
-  // Gate for project builds / inline-comment photos. Same shape as the
-  // file detail page's `canPostBuild`. Owner is always covered because
-  // `userOwnsProject` returns true for the creator's own project.
-  const canPostBuild = await userOwnsProject(userId, project.id);
-
-  // Circuit / wiring diagrams — paired with the BOM as the "how
-  // it goes together electrically" half of the assembly story.
-  // Empty + non-owner → the section header is skipped entirely;
-  // owner sees an inline uploader to seed the first one.
-  const circuitRows = await swallow(
-    db
-      .select({
-        id: projectCircuits.id,
-        kind: projectCircuits.kind,
-        caption: projectCircuits.caption,
-        previewStorageKey: projectCircuits.previewStorageKey,
-        sourceStorageKey: projectCircuits.sourceStorageKey,
-        externalUrl: projectCircuits.externalUrl,
-      })
-      .from(projectCircuits)
-      .where(eq(projectCircuits.projectId, project.id))
-      .orderBy(asc(projectCircuits.sortOrder))
-  );
+  // Sign R2 URLs for both photo galleries in parallel.
+  const [curatorPhotos, buildsWithUrls]: [FeedPhoto[], PhotoPost[]] =
+    await Promise.all([
+      Promise.all(
+        curatorRows.map(async (row) => ({
+          id: row.id,
+          caption: row.caption,
+          createdAt: row.createdAt,
+          kind: "creator" as const,
+          author: null,
+          downloadUrl: await generateDownloadUrl(row.storageKey, 3600),
+        }))
+      ),
+      Promise.all(
+        buildRows.map(async (row) => ({
+          id: row.id,
+          caption: row.caption,
+          createdAt: row.createdAt,
+          downloadUrl: await generateDownloadUrl(row.storageKey, 3600),
+          author: {
+            id: row.authorId,
+            username: row.authorUsername,
+            displayName: row.authorDisplayName,
+            avatarUrl: row.authorAvatarUrl,
+          },
+        }))
+      ),
+    ]);
   // Filter out malformed rows: every row must carry something
   // renderable — a preview image (image kinds), a source file the
   // lightbox can render live (kicad / fritzing / gerber), or an
@@ -277,48 +333,6 @@ export default async function ProjectDetailPage(props: {
         : null,
     }));
 
-  // BOM — the project's bill of materials, in display order. Empty
-  // for most projects; the page only renders the section when items
-  // exist (progressive disclosure).
-  const bomItems = await swallow(
-    db
-      .select({
-        id: projectBomItems.id,
-        name: projectBomItems.name,
-        quantity: projectBomItems.quantity,
-        unit: projectBomItems.unit,
-        notes: projectBomItems.notes,
-        sourceUrl: projectBomItems.sourceUrl,
-      })
-      .from(projectBomItems)
-      .where(eq(projectBomItems.projectId, project.id))
-      .orderBy(asc(projectBomItems.sortOrder))
-  );
-
-  // Comments — same query shape as on the file detail page. Pull every
-  // row (top-level + replies) ordered chronologically; the renderer
-  // splits into threads via parentId. swallow() so a transient Neon
-  // blip doesn't 500 the page.
-  const commentRows = await swallow(
-    db
-      .select({
-        id: projectComments.id,
-        parentId: projectComments.parentId,
-        body: projectComments.body,
-        deletedAt: projectComments.deletedAt,
-        createdAt: projectComments.createdAt,
-        updatedAt: projectComments.updatedAt,
-        authorId: users.id,
-        authorUsername: users.username,
-        authorDisplayName: users.displayName,
-        authorAvatarUrl: users.avatarUrl,
-      })
-      .from(projectComments)
-      .innerJoin(users, eq(projectComments.userId, users.id))
-      .where(eq(projectComments.projectId, project.id))
-      .orderBy(asc(projectComments.createdAt))
-      .limit(500)
-  );
   const comments: CommentRow[] = commentRows.map((row) => ({
     id: row.id,
     parentId: row.parentId,

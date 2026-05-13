@@ -3,7 +3,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { cartItems, fileAssets, files } from "@/lib/db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, count } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { addToCartSchema } from "@/lib/validations/print";
 import { logError } from "@/lib/logger";
@@ -216,12 +216,15 @@ export async function getCartItemCount(): Promise<number> {
     const { userId } = await auth();
     if (!userId) return 0;
 
-    const rows = await db
-      .select({ id: cartItems.id })
+    // Use COUNT(*) instead of pulling every id back. Called from the
+    // cart-count nav context on every page render — the count helper
+    // returns a single integer instead of N uuids over the wire.
+    const [row] = await db
+      .select({ count: count() })
       .from(cartItems)
       .where(eq(cartItems.userId, userId));
 
-    return rows.length;
+    return row?.count ?? 0;
   } catch (error) {
     logError("getCartItemCount", error);
     return 0;

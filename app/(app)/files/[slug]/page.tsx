@@ -166,75 +166,81 @@ export default async function FileDetailPage(props: {
   const viewerIsOwner = userId === file.userId;
   if (file.status !== "published" && !viewerIsOwner) notFound();
 
-  const assets = await db
-    .select()
-    .from(fileAssets)
-    .where(eq(fileAssets.fileId, file.id));
+  // These five reads only depend on file.id / userId and don't
+  // depend on each other — fan them out in one roundtrip instead of
+  // five sequential awaits. Photo URL signing still has to wait for
+  // its row fetch, so it runs after.
+  const [assets, photos, buildRows, canPostBuild, canDownload] =
+    await Promise.all([
+      db.select().from(fileAssets).where(eq(fileAssets.fileId, file.id)),
+      db
+        .select()
+        .from(filePhotos)
+        .where(
+          and(eq(filePhotos.fileId, file.id), eq(filePhotos.kind, "creator"))
+        )
+        .orderBy(asc(filePhotos.sortOrder)),
+      // Community builds — joined to users for poster identity. R2
+      // URLs are signed at request time same as curator photos. Limit
+      // to 60 so a popular file doesn't push 500 builds through the
+      // page.
+      db
+        .select({
+          id: filePhotos.id,
+          storageKey: filePhotos.storageKey,
+          caption: filePhotos.caption,
+          createdAt: filePhotos.createdAt,
+          authorId: users.id,
+          authorUsername: users.username,
+          authorDisplayName: users.displayName,
+          authorAvatarUrl: users.avatarUrl,
+        })
+        .from(filePhotos)
+        .innerJoin(users, eq(filePhotos.userId, users.id))
+        .where(
+          and(eq(filePhotos.fileId, file.id), eq(filePhotos.kind, "build"))
+        )
+        .orderBy(desc(filePhotos.createdAt))
+        .limit(60),
+      // Gates the "Share your build" affordance. Owners can also
+      // share — they're a user too — but we still call the helper to
+      // be uniform. The helper returns false for anon viewers without
+      // a roundtrip.
+      userHasUsedFile(userId, file.id),
+      ownsLoadedFile(userId, {
+        id: file.id,
+        price: file.price,
+        userId: file.userId,
+      }),
+    ]);
 
-  // Curator gallery photos — `kind = 'creator'`. Mapped into the
-  // unified PhotosFeed shape below alongside community photos.
-  const photos = await db
-    .select()
-    .from(filePhotos)
-    .where(and(eq(filePhotos.fileId, file.id), eq(filePhotos.kind, "creator")))
-    .orderBy(asc(filePhotos.sortOrder));
-
-  // Generate download URLs for photos
-  const photosWithUrls = await Promise.all(
-    photos.map(async (photo) => ({
-      id: photo.id,
-      caption: photo.caption,
-      createdAt: photo.createdAt,
-      downloadUrl: await generateDownloadUrl(photo.storageKey, 3600),
-    }))
-  );
-
-  // Community builds — joined to users for poster identity. R2 URLs
-  // are signed at request time same as curator photos. Limit to 60 so
-  // a popular file doesn't push 500 builds through the page.
-  const buildRows = await db
-    .select({
-      id: filePhotos.id,
-      storageKey: filePhotos.storageKey,
-      caption: filePhotos.caption,
-      createdAt: filePhotos.createdAt,
-      authorId: users.id,
-      authorUsername: users.username,
-      authorDisplayName: users.displayName,
-      authorAvatarUrl: users.avatarUrl,
-    })
-    .from(filePhotos)
-    .innerJoin(users, eq(filePhotos.userId, users.id))
-    .where(
-      and(eq(filePhotos.fileId, file.id), eq(filePhotos.kind, "build"))
-    )
-    .orderBy(desc(filePhotos.createdAt))
-    .limit(60);
-  const buildsWithUrls = await Promise.all(
-    buildRows.map(async (row) => ({
-      id: row.id,
-      caption: row.caption,
-      createdAt: row.createdAt,
-      downloadUrl: await generateDownloadUrl(row.storageKey, 3600),
-      author: {
-        id: row.authorId,
-        username: row.authorUsername,
-        displayName: row.authorDisplayName,
-        avatarUrl: row.authorAvatarUrl,
-      },
-    }))
-  );
+  // Sign R2 URLs in parallel for both gallery sources.
+  const [photosWithUrls, buildsWithUrls] = await Promise.all([
+    Promise.all(
+      photos.map(async (photo) => ({
+        id: photo.id,
+        caption: photo.caption,
+        createdAt: photo.createdAt,
+        downloadUrl: await generateDownloadUrl(photo.storageKey, 3600),
+      }))
+    ),
+    Promise.all(
+      buildRows.map(async (row) => ({
+        id: row.id,
+        caption: row.caption,
+        createdAt: row.createdAt,
+        downloadUrl: await generateDownloadUrl(row.storageKey, 3600),
+        author: {
+          id: row.authorId,
+          username: row.authorUsername,
+          displayName: row.authorDisplayName,
+          avatarUrl: row.authorAvatarUrl,
+        },
+      }))
+    ),
+  ]);
 
   const isOwner = viewerIsOwner;
-  // Gates the "Share your build" affordance. Owners can also share —
-  // they're a user too — but we still call the helper to be uniform.
-  // The helper returns false for anon viewers without a roundtrip.
-  const canPostBuild = await userHasUsedFile(userId, file.id);
-  const canDownload = await ownsLoadedFile(userId, {
-    id: file.id,
-    price: file.price,
-    userId: file.userId,
-  });
 
   // Owner needs to know whether deleting will hard-delete or soft-
   // archive. Soft-archive triggers when ANY of the following references

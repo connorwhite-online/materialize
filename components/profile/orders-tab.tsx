@@ -44,51 +44,105 @@ const STATUS_VARIANT: Record<
 export async function OrdersTab({ userId }: { userId: string }) {
   // Drafts (`cart_created`) surface separately as a "Carts" section
   // with Resume / Discard actions — they're not real orders yet.
-  const draftsRaw = await db
-    .select({
-      id: printOrders.id,
-      material: printOrders.material,
-      vendor: printOrders.vendor,
-      vendorName: printOrders.vendorName,
-      totalPrice: printOrders.totalPrice,
-      serviceFee: printOrders.serviceFee,
-      fileAssetId: printOrders.fileAssetId,
-      fileName: files.name,
-    })
-    .from(printOrders)
-    .leftJoin(fileAssets, eq(printOrders.fileAssetId, fileAssets.id))
-    .leftJoin(files, eq(fileAssets.fileId, files.id))
-    .where(
-      and(
-        eq(printOrders.userId, userId),
-        eq(printOrders.status, "cart_created")
+  // Same-user filter on both → fan them out in one roundtrip.
+  const [draftsRaw, ordersRaw] = await Promise.all([
+    db
+      .select({
+        id: printOrders.id,
+        material: printOrders.material,
+        vendor: printOrders.vendor,
+        vendorName: printOrders.vendorName,
+        totalPrice: printOrders.totalPrice,
+        serviceFee: printOrders.serviceFee,
+        fileAssetId: printOrders.fileAssetId,
+        fileName: files.name,
+      })
+      .from(printOrders)
+      .leftJoin(fileAssets, eq(printOrders.fileAssetId, fileAssets.id))
+      .leftJoin(files, eq(fileAssets.fileId, files.id))
+      .where(
+        and(
+          eq(printOrders.userId, userId),
+          eq(printOrders.status, "cart_created")
+        )
       )
-    )
-    .orderBy(desc(printOrders.createdAt));
+      .orderBy(desc(printOrders.createdAt)),
+    db
+      .select({
+        id: printOrders.id,
+        status: printOrders.status,
+        totalPrice: printOrders.totalPrice,
+        serviceFee: printOrders.serviceFee,
+        material: printOrders.material,
+        vendor: printOrders.vendor,
+        vendorName: printOrders.vendorName,
+        fileAssetId: printOrders.fileAssetId,
+        fileName: files.name,
+        createdAt: printOrders.createdAt,
+      })
+      .from(printOrders)
+      .leftJoin(fileAssets, eq(printOrders.fileAssetId, fileAssets.id))
+      .leftJoin(files, eq(fileAssets.fileId, files.id))
+      .where(
+        and(
+          eq(printOrders.userId, userId),
+          ne(printOrders.status, "cart_created")
+        )
+      )
+      .orderBy(desc(printOrders.createdAt)),
+  ]);
 
-  // Multi-item drafts have fileAssetId=null on the printOrders row —
-  // the real files live in printOrderItems. Pull the first item per
-  // order (by createdAt asc) so the card can show its filename
+  // Multi-item drafts/orders have fileAssetId=null on the printOrders
+  // row — the real files live in printOrderItems. Pull the first item
+  // per order (by createdAt asc) so the card can show its filename
   // instead of the "3D Print" fallback, plus a count for the extras.
+  // Drafts and orders backfill identical shapes; fan their two
+  // inArray lookups out in parallel.
   const multiItemIds = draftsRaw
     .filter((d) => !d.fileAssetId)
     .map((d) => d.id);
+  const multiItemOrderIds = ordersRaw
+    .filter((o) => !o.fileAssetId)
+    .map((o) => o.id);
 
-  const multiItemMeta = multiItemIds.length
-    ? await db
-        .select({
-          printOrderId: printOrderItems.printOrderId,
-          materialConfigId: printOrderItems.materialConfigId,
-          fileName: files.name,
-          originalFilename: fileAssets.originalFilename,
-          createdAt: printOrderItems.createdAt,
-        })
-        .from(printOrderItems)
-        .innerJoin(fileAssets, eq(printOrderItems.fileAssetId, fileAssets.id))
-        .leftJoin(files, eq(fileAssets.fileId, files.id))
-        .where(inArray(printOrderItems.printOrderId, multiItemIds))
-        .orderBy(asc(printOrderItems.createdAt))
-    : [];
+  const [multiItemMeta, multiItemOrderMeta] = await Promise.all([
+    multiItemIds.length
+      ? db
+          .select({
+            printOrderId: printOrderItems.printOrderId,
+            materialConfigId: printOrderItems.materialConfigId,
+            fileName: files.name,
+            originalFilename: fileAssets.originalFilename,
+            createdAt: printOrderItems.createdAt,
+          })
+          .from(printOrderItems)
+          .innerJoin(
+            fileAssets,
+            eq(printOrderItems.fileAssetId, fileAssets.id)
+          )
+          .leftJoin(files, eq(fileAssets.fileId, files.id))
+          .where(inArray(printOrderItems.printOrderId, multiItemIds))
+          .orderBy(asc(printOrderItems.createdAt))
+      : Promise.resolve([]),
+    multiItemOrderIds.length
+      ? db
+          .select({
+            printOrderId: printOrderItems.printOrderId,
+            materialConfigId: printOrderItems.materialConfigId,
+            fileName: files.name,
+            originalFilename: fileAssets.originalFilename,
+            createdAt: printOrderItems.createdAt,
+          })
+          .from(printOrderItems)
+          .innerJoin(
+            fileAssets,
+            eq(printOrderItems.fileAssetId, fileAssets.id)
+          )
+          .leftJoin(files, eq(fileAssets.fileId, files.id))
+          .where(inArray(printOrderItems.printOrderId, multiItemOrderIds))
+          .orderBy(asc(printOrderItems.createdAt))
+      : Promise.resolve([]),
+  ]);
 
   // Group by printOrderId: { firstName, count, firstMaterial }
   const multiItemByOrder = new Map<
@@ -134,54 +188,7 @@ export async function OrdersTab({ userId }: { userId: string }) {
     };
   });
 
-  const ordersRaw = await db
-    .select({
-      id: printOrders.id,
-      status: printOrders.status,
-      totalPrice: printOrders.totalPrice,
-      serviceFee: printOrders.serviceFee,
-      material: printOrders.material,
-      vendor: printOrders.vendor,
-      vendorName: printOrders.vendorName,
-      fileAssetId: printOrders.fileAssetId,
-      fileName: files.name,
-      createdAt: printOrders.createdAt,
-    })
-    .from(printOrders)
-    .leftJoin(fileAssets, eq(printOrders.fileAssetId, fileAssets.id))
-    .leftJoin(files, eq(fileAssets.fileId, files.id))
-    .where(
-      and(
-        eq(printOrders.userId, userId),
-        ne(printOrders.status, "cart_created")
-      )
-    )
-    .orderBy(desc(printOrders.createdAt));
-
-  // Same multi-item backfill as drafts: for orders with no direct
-  // fileAssetId, pull the first printOrderItems row so the card can
-  // show a filename instead of "3D Print". Cheaper than doing it
-  // per-card because it batches all ids into one query.
-  const multiItemOrderIds = ordersRaw
-    .filter((o) => !o.fileAssetId)
-    .map((o) => o.id);
-
-  const multiItemOrderMeta = multiItemOrderIds.length
-    ? await db
-        .select({
-          printOrderId: printOrderItems.printOrderId,
-          materialConfigId: printOrderItems.materialConfigId,
-          fileName: files.name,
-          originalFilename: fileAssets.originalFilename,
-          createdAt: printOrderItems.createdAt,
-        })
-        .from(printOrderItems)
-        .innerJoin(fileAssets, eq(printOrderItems.fileAssetId, fileAssets.id))
-        .leftJoin(files, eq(fileAssets.fileId, files.id))
-        .where(inArray(printOrderItems.printOrderId, multiItemOrderIds))
-        .orderBy(asc(printOrderItems.createdAt))
-    : [];
-
+  // ordersRaw + multiItemOrderMeta resolved alongside drafts above.
   const multiItemByOrderId = new Map<
     string,
     { firstName: string | null; count: number; firstMaterial: string | null }
