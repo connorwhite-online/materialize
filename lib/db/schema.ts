@@ -152,7 +152,12 @@ export const users = pgTable("users", {
     .notNull()
     .defaultNow()
     .$onUpdate(() => new Date()),
-});
+}, (table) => [
+  // Stripe `account.updated` webhook (in `app/api/webhooks/stripe/
+  // route.ts`) looks up the user by stripeAccountId only — without
+  // this every Connect account event scans the full users table.
+  index("users_stripe_account_id_idx").on(table.stripeAccountId),
+]);
 
 export const files = pgTable("files", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -342,6 +347,10 @@ export const purchases = pgTable("purchases", {
   index("purchases_buyer_id_idx").on(table.buyerId),
   index("purchases_file_id_idx").on(table.fileId),
   index("purchases_project_id_idx").on(table.projectId),
+  // Stripe webhooks (`handleListingPurchase`, `handleListingRefund`)
+  // look up the row by PaymentIntent id only — without this index
+  // every event scans the full purchases table.
+  index("purchases_stripe_payment_intent_idx").on(table.stripePaymentIntentId),
   check(
     "purchases_target_exactly_one",
     sql`(${table.fileId} IS NOT NULL AND ${table.projectId} IS NULL) OR (${table.fileId} IS NULL AND ${table.projectId} IS NOT NULL)`
