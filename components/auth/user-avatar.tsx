@@ -23,7 +23,7 @@ export function UserAvatar({
   const gradient = getAvatarGradient(seed);
 
   return (
-    <div className={cn("relative inline-block h-8 w-8", className)}>
+    <div className={cn("relative block h-8 w-8", className)}>
       <Avatar className="h-full w-full">
         {imageUrl && <AvatarImage src={imageUrl} alt={displayName || ""} />}
         <AvatarFallback
