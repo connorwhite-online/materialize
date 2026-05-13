@@ -8,6 +8,7 @@ function makeQuote(id: string, materialId = "mat-1"): EnrichedQuote {
     vendorId: "v-1",
     vendorName: "Test Vendor",
     vendorCountryCode: "US",
+    vendorStateCode: "CA",
     modelId: "m-1",
     materialConfigId: id,
     quantity: 1,

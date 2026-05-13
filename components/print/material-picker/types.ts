@@ -11,12 +11,21 @@ export interface EnrichedQuote {
   vendorId: string;
   vendorName: string;
   /**
-   * ISO-3166-1 alpha-2 country code of the vendor. Null when
-   * CraftCloud's provider directory doesn't publish one for a
-   * given vendor — the vendor card then just hides the country
-   * line.
+   * ISO-3166-1 alpha-2 country code of the vendor's primary
+   * production location (CraftCloud's `production.default.code`).
+   * Null when not published — the vendor card then hides the
+   * country / state line entirely.
    */
   vendorCountryCode: string | null;
+  /**
+   * Subnational code paired with `vendorCountryCode` — usually a
+   * US state when the country is `US`, but CraftCloud also
+   * populates it for CA provinces, MX states, etc. ISO 3166-2
+   * style without the country prefix. Null when CraftCloud
+   * doesn't publish one (common for non-US, non-CA, non-MX
+   * vendors).
+   */
+  vendorStateCode: string | null;
   modelId: string;
   materialConfigId: string;
   printingMethodId?: string | null;

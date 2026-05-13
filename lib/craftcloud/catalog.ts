@@ -101,13 +101,31 @@ export interface Provider {
   name: string;
   description?: string;
   /**
-   * ISO-3166-1 alpha-2 country code of the vendor's headquarters /
-   * primary manufacturing location. Optional because CraftCloud
-   * doesn't publish it for every provider; when present we render
-   * it below the vendor name on the quote card so users can see
-   * where the part is shipping from.
+   * Manufacturing location, keyed by purpose. `default` is the
+   * canonical production address; `origin` (rarely populated) maps
+   * alternate origins by routing code. We only read `default` —
+   * `name` is the rendered country name and `code` is the
+   * ISO-3166-1 alpha-2.
    */
-  countryCode?: string;
+  production?: {
+    default?: {
+      name: string;
+      code: string;
+      originalName?: string;
+    };
+    origin?: Record<
+      string,
+      { name: string; code: string; originalName?: string }
+    >;
+  };
+  /**
+   * Subnational code (ISO 3166-2 style without the country prefix).
+   * Examples observed in the wild: `TX`, `CA`, `BC`, `ON`, `JAL`.
+   * Present on every provider record but often null. We pair it
+   * with `production.default.code` to render "Texas, United States"
+   * and equivalents below the vendor name on the quote card.
+   */
+  stateCode?: string | null;
 }
 
 /** Thin lookup indexes built once per catalog fetch. */

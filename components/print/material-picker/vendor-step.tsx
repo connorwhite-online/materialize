@@ -27,6 +27,51 @@ function countryNameFromCode(code: string | null | undefined): string | null {
   }
 }
 
+/**
+ * Pair a state code with its country to resolve a region name —
+ * Intl.DisplayNames understands ISO 3166-2 subdivisions (e.g.
+ * `US-TX` → "Texas", `CA-BC` → "British Columbia"). Falls back to
+ * the raw state code if the runtime / locale doesn't have the
+ * subdivision in its CLDR dataset.
+ */
+function stateNameFromCode(
+  stateCode: string | null | undefined,
+  countryCode: string | null | undefined
+): string | null {
+  if (!stateCode) return null;
+  if (!countryCode) return stateCode;
+  try {
+    const dn = new Intl.DisplayNames(["en"], { type: "region" });
+    const resolved = dn.of(
+      `${countryCode.toUpperCase()}-${stateCode.toUpperCase()}`
+    );
+    // DisplayNames returns the input unchanged when it can't
+    // resolve — detect and fall back to the bare state code so
+    // we don't render "US-TX" as a state label.
+    if (!resolved || resolved.includes("-")) return stateCode;
+    return resolved;
+  } catch {
+    return stateCode;
+  }
+}
+
+/**
+ * Compose the location line under the vendor name. Examples:
+ *   US + TX  → "Texas, United States"
+ *   CA + BC  → "British Columbia, Canada"
+ *   AU + —   → "Australia"
+ *   —  + —   → null  (line hides)
+ */
+function vendorLocationLabel(
+  countryCode: string | null | undefined,
+  stateCode: string | null | undefined
+): string | null {
+  const country = countryNameFromCode(countryCode);
+  const state = stateNameFromCode(stateCode, countryCode);
+  if (state && country) return `${state}, ${country}`;
+  return state || country;
+}
+
 interface VendorStepProps {
   quotes: EnrichedQuote[];
   shipping: ShippingLite[];
@@ -231,11 +276,14 @@ export function VendorStep({
                     {quote.vendorName}
                   </p>
                   {(() => {
-                    const country = countryNameFromCode(quote.vendorCountryCode);
-                    if (!country) return null;
+                    const location = vendorLocationLabel(
+                      quote.vendorCountryCode,
+                      quote.vendorStateCode
+                    );
+                    if (!location) return null;
                     return (
                       <p className="truncate text-[11px] text-muted-foreground">
-                        {country}
+                        {location}
                       </p>
                     );
                   })()}
