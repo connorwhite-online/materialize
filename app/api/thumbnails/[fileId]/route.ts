@@ -54,7 +54,8 @@ export async function GET(
       return new Response("Not found", { status: 404 });
     }
 
-    if (file.status !== "published") {
+    const isDraft = file.status !== "published";
+    if (isDraft) {
       const { userId } = await auth();
       if (!userId || userId !== file.userId) {
         return new Response("Not found", { status: 404 });
@@ -97,7 +98,19 @@ export async function GET(
     // and cached by the browser immediately.
     const signed = await generateDownloadUrl(storageKey, 60 * 60);
 
-    return Response.redirect(signed, 302);
+    // Cache the 302 itself so repeat navigations don't re-pay the DB
+    // lookup + signing on every paint. Window is well below the signed
+    // URL's 1h lifetime so we never serve an expired Location. Drafts
+    // use `private` so a CDN can't fan the redirect out to non-owners.
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: signed,
+        "Cache-Control": isDraft
+          ? "private, max-age=60"
+          : "public, max-age=300",
+      },
+    });
   } catch (error) {
     logError("api/thumbnails/[fileId]", error);
     return new Response("Failed to resolve thumbnail", { status: 500 });

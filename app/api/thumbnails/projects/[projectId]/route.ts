@@ -108,7 +108,20 @@ export async function GET(
     }
 
     const signed = await generateDownloadUrl(storageKey, 60 * 60);
-    return Response.redirect(signed, 302);
+
+    // Cache the 302 itself so repeat navigations don't re-pay the DB
+    // lookup + signing on every paint. Window is well below the signed
+    // URL's 1h lifetime. Non-public projects use `private` so a CDN
+    // can't fan the redirect out to non-owners.
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: signed,
+        "Cache-Control": publicListing
+          ? "public, max-age=300"
+          : "private, max-age=60",
+      },
+    });
   } catch (error) {
     logError("api/thumbnails/projects/[projectId]", error);
     return new Response("Failed to resolve thumbnail", { status: 500 });

@@ -53,7 +53,20 @@ export async function GET(
     }
 
     const signed = await generateDownloadUrl(row.previewStorageKey, 60 * 60);
-    return Response.redirect(signed, 302);
+
+    // Cache the 302 itself so repeat paints (carousels, in-list
+    // previews) don't re-pay the DB lookup + signing on every render.
+    // Window is well below the signed URL's 1h lifetime. Non-public
+    // projects use `private` so a CDN can't fan it out to non-owners.
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: signed,
+        "Cache-Control": publicProject
+          ? "public, max-age=300"
+          : "private, max-age=60",
+      },
+    });
   } catch (error) {
     logError("api/circuits/[circuitId]/preview", error);
     return new Response("Failed to resolve preview", { status: 500 });
