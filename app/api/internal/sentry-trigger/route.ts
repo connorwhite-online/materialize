@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual as nodeTimingSafeEqual } from "node:crypto";
 import { logError } from "@/lib/logger";
 
 /**
@@ -5,60 +6,112 @@ import { logError } from "@/lib/logger";
  *
  * Flow:
  *   1. Sentry alert fires.
- *   2. Sentry posts the event JSON here. We validate a shared
- *      secret header (configured in Sentry's webhook UI as
- *      `X-Sentry-Trigger-Secret`).
- *   3. We extract the event id + the full payload and dispatch
- *      the `sentry-fixer` GitHub Action with both as inputs.
+ *   2. Sentry POSTs the event JSON here. We accept two auth modes:
+ *      - **HMAC mode** (Sentry's native Internal Integration path):
+ *        verify the `Sentry-Hook-Signature` header against an
+ *        HMAC-SHA-256 of the raw body, keyed by the integration's
+ *        Client Secret in `SENTRY_INTEGRATION_CLIENT_SECRET`.
+ *      - **Shared-header mode** (manual triggers / providers that
+ *        let you set custom headers): match `X-Sentry-Trigger-Secret`
+ *        against `SENTRY_TRIGGER_SECRET`.
+ *      Either path works; at least one must be configured.
+ *   3. Extract the event id + the full payload and dispatch the
+ *      `sentry-fixer` GitHub Action with both as inputs.
  *   4. The Action runs scripts/sentry-fixer.ts on a fresh
- *      ubuntu-latest runner. Wall-clock for the actual agent
- *      work lives there, not here — Vercel functions have a
- *      60s cap which is far too short.
+ *      ubuntu-latest runner. Wall-clock for the actual agent work
+ *      lives there, not here — Vercel functions have a 60s cap
+ *      which is far too short.
  *
  * Why GitHub Actions instead of an in-Vercel runner:
- *   - Wall-clock: Vercel's 60s cap doesn't fit a 5-30 minute
- *     agent session.
- *   - Isolation: a fresh checkout per run is closer to what
- *     a human engineer would do than reusing function state.
- *   - Tooling: Playwright browsers, Stripe sandbox calls,
- *     Neon DB branching all live in CI naturally.
+ *   - Wall-clock: Vercel's 60s cap doesn't fit a 5-30 minute agent
+ *     session.
+ *   - Isolation: a fresh checkout per run is closer to what a human
+ *     engineer would do than reusing function state.
+ *   - Tooling: Playwright browsers, Stripe sandbox calls, Neon DB
+ *     branching all live in CI naturally.
  *
  * Env required:
- *   SENTRY_TRIGGER_SECRET   — shared secret matching what
- *     Sentry posts in `X-Sentry-Trigger-Secret`
- *   GITHUB_DISPATCH_TOKEN   — PAT with `actions:write` scope on
- *     the repo
- *   GITHUB_REPO             — `owner/repo` (e.g. "connor/materialize")
- *
- * Future upgrade: switch the simple shared-secret validation to
- * full HMAC-SHA-256 verification via `sentry-hook-signature`
- * (the header Sentry's internal-integrations webhook sends). The
- * upgrade path is documented in docs/observability.md.
+ *   At least one of:
+ *     SENTRY_INTEGRATION_CLIENT_SECRET — the Client Secret on a
+ *       Sentry Internal Integration; we HMAC-verify
+ *       `Sentry-Hook-Signature` against it.
+ *     SENTRY_TRIGGER_SECRET — shared secret matching what the
+ *       webhook sender posts in `X-Sentry-Trigger-Secret`. Useful
+ *       for manual triggers or webhook providers that let you set
+ *       a custom header.
+ *   Plus:
+ *     GITHUB_DISPATCH_TOKEN — PAT with `actions:write` scope on
+ *       the repo.
+ *     GITHUB_REPO — `owner/repo` (e.g. "connor/materialize").
  */
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const expectedSecret = process.env.SENTRY_TRIGGER_SECRET;
-  if (!expectedSecret) {
+  const sharedSecret = process.env.SENTRY_TRIGGER_SECRET;
+  const hmacSecret = process.env.SENTRY_INTEGRATION_CLIENT_SECRET;
+  if (!sharedSecret && !hmacSecret) {
     return Response.json(
       {
         error:
-          "SENTRY_TRIGGER_SECRET not configured — webhook is wired but inert",
+          "Neither SENTRY_INTEGRATION_CLIENT_SECRET nor SENTRY_TRIGGER_SECRET configured — webhook is wired but inert",
       },
       { status: 503 }
     );
   }
 
-  const provided = request.headers.get("x-sentry-trigger-secret");
-  if (!provided || !timingSafeEqual(provided, expectedSecret)) {
+  // Read the raw body ONCE — HMAC verification needs the exact
+  // bytes Sentry signed, so we can't parse JSON first and then
+  // re-stringify (key order, whitespace changes break the
+  // signature).
+  const rawBody = await request.text();
+
+  // Try HMAC first — that's the Sentry-native path. Fall back to
+  // the shared header if HMAC isn't configured or the signature
+  // doesn't match.
+  let authed = false;
+
+  if (hmacSecret) {
+    const provided = request.headers.get("sentry-hook-signature");
+    if (provided) {
+      const computed = createHmac("sha256", hmacSecret)
+        .update(rawBody)
+        .digest("hex");
+      // node:crypto's timingSafeEqual requires equal-length Buffers.
+      // A length mismatch can't be a valid signature anyway.
+      if (provided.length === computed.length) {
+        try {
+          if (
+            nodeTimingSafeEqual(
+              Buffer.from(provided, "utf8"),
+              Buffer.from(computed, "utf8")
+            )
+          ) {
+            authed = true;
+          }
+        } catch {
+          // Buffer length mismatch from utf8 encoding shouldn't
+          // happen for hex strings, but guard anyway.
+        }
+      }
+    }
+  }
+
+  if (!authed && sharedSecret) {
+    const provided = request.headers.get("x-sentry-trigger-secret");
+    if (provided && constantTimeStringEqual(provided, sharedSecret)) {
+      authed = true;
+    }
+  }
+
+  if (!authed) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
   let event: { event_id?: string; id?: string } & Record<string, unknown>;
   try {
-    event = (await request.json()) as typeof event;
+    event = JSON.parse(rawBody) as typeof event;
   } catch {
     return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
@@ -129,12 +182,13 @@ export async function POST(request: Request) {
 }
 
 /**
- * Constant-time string compare to defeat timing oracles on the
- * shared secret check. Length mismatch returns false immediately
- * — that's not a timing leak because the secret length isn't
- * itself secret (the user picks it and stores it in env).
+ * Constant-time string compare for the shared-secret path. We use
+ * a hand-rolled version (instead of node:crypto's timingSafeEqual)
+ * because we want to short-circuit on length mismatch — the secret
+ * length isn't itself secret (the user picks it and stores it in
+ * env), so leaking it via timing is fine.
  */
-function timingSafeEqual(a: string, b: string): boolean {
+function constantTimeStringEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let mismatch = 0;
   for (let i = 0; i < a.length; i++) {

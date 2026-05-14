@@ -107,17 +107,40 @@ Sentry alert fires
 
 ### Sentry side (one-time)
 
-1. Pick a strong random shared secret. Either:
-   ```bash
-   echo 'SENTRY_TRIGGER_SECRET="'"$(openssl rand -hex 32)"'"' >> .env.local
+Sentry's modern Internal Integrations don't let you add custom headers to
+outbound webhooks — they sign them with HMAC-SHA-256 against the integration's
+**Client Secret** instead. Our trigger route accepts both auth modes:
+
+- **HMAC mode** (Sentry-native): `Sentry-Hook-Signature` verified against
+  `SENTRY_INTEGRATION_CLIENT_SECRET`. This is what Sentry's UI gives you.
+- **Shared-header mode** (manual / alternate providers): `X-Sentry-Trigger-Secret`
+  matched against `SENTRY_TRIGGER_SECRET`. Useful for manual `curl` triggers,
+  webhook providers that allow custom headers, or load testing.
+
+At least one must be set; both can be set side-by-side without conflict.
+
+**For Sentry's Internal Integration:**
+
+1. In Sentry: **Settings → Custom Integrations → Create New Integration →
+   Internal**.
+2. Set the **Webhook URL** to `https://www.materialize.cc/api/internal/sentry-trigger`.
+3. Under **Webhooks**, check `Issues` (so `issue.created` deliveries fire).
+4. Permissions: `Issue & Event → Read` is sufficient.
+5. Save. Sentry shows you a **Client Secret** — copy it.
+6. Add it to Vercel env (Production + Preview):
    ```
-   …or generate elsewhere. Add the same value to Vercel project env.
-2. In Sentry: **Settings → Integrations → Webhooks → Add Webhook** (or use an
-   Alert rule's "Trigger a webhook" action). Set:
-   - URL: `https://materialize.cc/api/internal/sentry-trigger`
-   - Headers: `X-Sentry-Trigger-Secret: <your secret>`
-   - Events: `issue.created` (or whatever issue lifecycle event you want to
-     fire on — start narrow)
+   SENTRY_INTEGRATION_CLIENT_SECRET=<client secret from Sentry>
+   ```
+
+**Optionally also set the shared secret for manual triggers:**
+
+```bash
+echo 'SENTRY_TRIGGER_SECRET="'"$(openssl rand -hex 32)"'"' >> .env.local
+```
+
+Mirror to Vercel. Then you can `curl` the trigger route with
+`-H "X-Sentry-Trigger-Secret: <value>"` to fire a synthetic event without
+needing to wire it through Sentry's UI.
 
 ### GitHub side (one-time)
 
