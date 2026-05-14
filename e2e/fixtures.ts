@@ -186,9 +186,13 @@ export async function createStripeOnboardedAccount(): Promise<string> {
   ) {
     throw new Error("Refusing to mint Connect accounts against a non-test key");
   }
+  // Cast to any — the pinned apiVersion isn't in the SDK's union
+  // of allowed API versions, and Stripe v22 no longer exports the
+  // namespace symbol the wider cast used to land on. Matches the
+  // same workaround in scripts/test-payouts-flow.ts.
   const stripe = new Stripe(secretKey, {
     apiVersion: "2025-09-30.clover",
-  } as Stripe.StripeConfig);
+  } as unknown as ConstructorParameters<typeof Stripe>[1]);
 
   const rand = Math.random().toString(36).slice(2, 8);
   const account = await stripe.accounts.create({
