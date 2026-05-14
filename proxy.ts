@@ -35,6 +35,9 @@ const isPublicRoute = createRouteMatcher([
   // Sentry wiring smoke probe. The route itself enforces a
   // secret-header check + non-production gate.
   "/api/internal/sentry-test",
+  // Sentry-fixer webhook. Posts arrive without a Clerk session;
+  // the route validates a shared secret header.
+  "/api/internal/sentry-trigger",
   // Discovery surfaces for crawlers + AI agents.
   "/llms.txt",
   "/llms-full.txt",

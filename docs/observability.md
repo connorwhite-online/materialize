@@ -88,3 +88,62 @@ circuits before the secret check).
   automatically.
 - Performance traces (`tracesSampleRate`) are at 10% in prod, 100% in dev. If
   free-tier event volume becomes a constraint, tune the prod rate down.
+
+## Sentry-fixer agent loop (Phase 3)
+
+Once Sentry is wired, the self-healing pipeline activates:
+
+```
+Sentry alert fires
+  → POST /api/internal/sentry-trigger (validates X-Sentry-Trigger-Secret)
+  → dispatches the `sentry-fixer` GitHub Action with the event JSON
+  → fresh CI runner installs deps + Playwright, then runs
+    scripts/sentry-fixer.ts which spawns a Claude Agent SDK session
+  → session reproduces the bug, writes a regression test, fixes
+    the root cause, runs full gates (tsc + vitest + playwright),
+    pushes the branch fix/sentry-<event_id>
+  → human reviews the PR and merges
+```
+
+### Sentry side (one-time)
+
+1. Pick a strong random shared secret. Either:
+   ```bash
+   echo 'SENTRY_TRIGGER_SECRET="'"$(openssl rand -hex 32)"'"' >> .env.local
+   ```
+   …or generate elsewhere. Add the same value to Vercel project env.
+2. In Sentry: **Settings → Integrations → Webhooks → Add Webhook** (or use an
+   Alert rule's "Trigger a webhook" action). Set:
+   - URL: `https://materialize.cc/api/internal/sentry-trigger`
+   - Headers: `X-Sentry-Trigger-Secret: <your secret>`
+   - Events: `issue.created` (or whatever issue lifecycle event you want to
+     fire on — start narrow)
+
+### GitHub side (one-time)
+
+3. Generate a fine-grained PAT with `actions:write` scope on the materialize
+   repo. Vercel env:
+   ```
+   GITHUB_DISPATCH_TOKEN=<the PAT>
+   GITHUB_REPO=<owner>/materialize
+   ```
+4. In the materialize repo's settings → Secrets and variables → Actions, add:
+   - `ANTHROPIC_API_KEY` — the agent SDK bills against this
+   - `DATABASE_URL`, `CLERK_SECRET_KEY`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`,
+     `STRIPE_SECRET_KEY` — the agent's e2e tests need these to run
+
+### Costs + caveats
+
+- Every fixer run bills Claude tokens. A typical session uses ~$0.50–$5
+  depending on how many turns it takes to reproduce + fix. Hard timeout at
+  30 minutes inside `scripts/sentry-fixer.ts`.
+- The agent NEVER opens PRs and NEVER merges. It pushes a branch; a human
+  reviews. Forbidden paths (schema, payouts, webhook handlers, proxy) are
+  enforced both in the prompt and via SDK `disallowedTools`.
+- The agent's `cwd` is the CI runner's checkout — not a worktree on the prod
+  DB. Tests run against `DATABASE_URL` from the secrets store; that's
+  whatever Neon branch you wire up. v1 reuses the dev branch for simplicity;
+  spinning a per-event Neon branch is a future upgrade.
+- Manual replay: any Sentry event JSON can be pasted into the workflow's
+  `sentry_event` input from the Actions tab. Useful for retrying or for
+  testing the loop on synthetic events.

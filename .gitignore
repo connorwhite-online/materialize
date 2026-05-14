@@ -16,6 +16,10 @@
 /playwright-report/
 /playwright/.cache/
 
+# sentry-fixer agent session output (summary.md, intermediate
+# artifacts). Each run uploads .agent-out as a workflow artifact.
+/.agent-out/
+
 # next.js
 /.next/
 /out/
