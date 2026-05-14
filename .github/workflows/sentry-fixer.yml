@@ -76,11 +76,20 @@ jobs:
         # The shell `${VAR:+...}` syntax means "if VAR is set + non-
         # empty"; if OAuth isn't set, we fall through to API key.
         run: |
+          # Strip whitespace + newlines from the auth tokens before
+          # the SDK uses them. Pasted secrets often carry a trailing
+          # \n from terminal output; HTTP headers can't contain
+          # whitespace and the SDK rejects them with a cryptic
+          # "Header has invalid value" error.
           if [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            CLAUDE_CODE_OAUTH_TOKEN="$(printf '%s' "$CLAUDE_CODE_OAUTH_TOKEN" | tr -d '[:space:]')"
+            export CLAUDE_CODE_OAUTH_TOKEN
             unset ANTHROPIC_API_KEY
-            echo "[auth] using CLAUDE_CODE_OAUTH_TOKEN"
+            echo "[auth] using CLAUDE_CODE_OAUTH_TOKEN (len=${#CLAUDE_CODE_OAUTH_TOKEN})"
           elif [ -n "$ANTHROPIC_API_KEY" ]; then
-            echo "[auth] using ANTHROPIC_API_KEY"
+            ANTHROPIC_API_KEY="$(printf '%s' "$ANTHROPIC_API_KEY" | tr -d '[:space:]')"
+            export ANTHROPIC_API_KEY
+            echo "[auth] using ANTHROPIC_API_KEY (len=${#ANTHROPIC_API_KEY})"
           else
             echo "::error::Neither CLAUDE_CODE_OAUTH_TOKEN nor ANTHROPIC_API_KEY is set"
             exit 1
