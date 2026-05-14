@@ -174,9 +174,10 @@ needing to wire it through Sentry's UI.
 - Every fixer run bills Claude tokens. A typical session uses ~$0.50–$5
   depending on how many turns it takes to reproduce + fix. Hard timeout at
   30 minutes inside `scripts/sentry-fixer.ts`.
-- The agent NEVER opens PRs and NEVER merges. It pushes a branch; a human
-  reviews. Forbidden paths (schema, payouts, webhook handlers, proxy) are
-  enforced both in the prompt and via SDK `disallowedTools`.
+- The agent opens a PR via `gh pr create` after pushing the branch; it
+  NEVER merges. A human reviews and merges. Forbidden paths (schema,
+  payouts, webhook handlers, proxy) are enforced in the prompt — the agent
+  must escalate (write a summary, stop) rather than touch those files.
 - The agent's `cwd` is the CI runner's checkout — not a worktree on the prod
   DB. Tests run against `DATABASE_URL` from the secrets store; that's
   whatever Neon branch you wire up. v1 reuses the dev branch for simplicity;

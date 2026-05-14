@@ -202,14 +202,29 @@ ${
      regression test you just added)
    - npx vitest run (must pass)
 
-5. Commit + push a branch named fix/sentry-${event.event_id ?? "unknown"}.
-   Do NOT open a PR — a human reviews and merges.
+5. Commit + push a branch named fix/sentry-${event.event_id ?? "unknown"},
+   then open a pull request against main. Use \`gh pr create\` — the
+   workflow runs with a GITHUB_TOKEN that has pull-requests:write
+   scope, no extra auth needed. PR body must include:
 
-6. When done, write a summary to .agent-out/summary.md with:
+   - The Sentry event id at the top.
+   - One-paragraph root cause description.
+   - "Reproduction" section linking to the regression test you added.
+   - "Files changed" list (just the production files, not the new test).
+   - "Verification" section listing the gates you ran and their results.
+   - A footer noting this PR was opened by the sentry-fixer agent and
+     requires human review before merge.
+
+   Do NOT merge the PR. A human reviews and merges.
+
+6. When done, write the same content to .agent-out/summary.md so the
+   workflow artifact preserves a copy independent of the PR. The
+   summary should answer:
    - Was the bug reproduced? (yes/no, and how)
    - Root cause description (one paragraph)
    - Files changed
    - How verified
+   - PR URL (from \`gh pr create\`'s output)
 
 # Workflow
 
