@@ -13,6 +13,7 @@ import path from "node:path";
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { eq } from "drizzle-orm";
+import { createClerkClient } from "@clerk/backend";
 import * as schema from "../lib/db/schema";
 
 function ensureEnv() {
@@ -95,4 +96,54 @@ export async function deletePaidFileFixture(
   // deletes are safer than relying on cascade order.
   await db.delete(schema.files).where(eq(schema.files.id, fixture.fileId));
   await db.delete(schema.users).where(eq(schema.users.id, fixture.creatorId));
+}
+
+export interface ClerkTestUserFixture {
+  /** Clerk user id — same value `auth()` returns inside the app. */
+  userId: string;
+  email: string;
+  password: string;
+}
+
+/**
+ * Create a real Clerk user via the Backend API for a single test
+ * run. We use the `+clerk_test` local-part convention which makes
+ * the address a Clerk-recognized test email (no real inbox
+ * required). Password is randomized per run to avoid any
+ * collision with other test users.
+ *
+ * Pair with `deleteClerkTestUser()` in afterAll so we don't
+ * accumulate users in the Clerk dashboard.
+ */
+export async function createClerkTestUser(): Promise<ClerkTestUserFixture> {
+  ensureEnv();
+  const secretKey = process.env.CLERK_SECRET_KEY;
+  if (!secretKey) throw new Error("CLERK_SECRET_KEY not set");
+  const clerk = createClerkClient({ secretKey });
+  const stamp = Date.now();
+  const rand = Math.random().toString(36).slice(2, 10);
+  const email = `e2e+clerk_test+${stamp}_${rand}@example.com`;
+  // 16-char random password with mixed character classes —
+  // satisfies Clerk's default password complexity rules.
+  const password = `Te$t${Math.random().toString(36).slice(2, 10)}Aa1!`;
+  const user = await clerk.users.createUser({
+    emailAddress: [email],
+    password,
+  });
+  return { userId: user.id, email, password };
+}
+
+export async function deleteClerkTestUser(
+  fixture: ClerkTestUserFixture
+): Promise<void> {
+  ensureEnv();
+  const secretKey = process.env.CLERK_SECRET_KEY;
+  if (!secretKey) return;
+  const clerk = createClerkClient({ secretKey });
+  try {
+    await clerk.users.deleteUser(fixture.userId);
+  } catch {
+    // Best-effort cleanup — if the user is already gone we
+    // don't care.
+  }
 }
