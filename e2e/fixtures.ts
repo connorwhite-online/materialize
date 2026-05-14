@@ -14,6 +14,7 @@ import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { eq } from "drizzle-orm";
 import { createClerkClient } from "@clerk/backend";
+import Stripe from "stripe";
 import * as schema from "../lib/db/schema";
 
 function ensureEnv() {
@@ -45,13 +46,18 @@ export interface PaidFileFixture {
 }
 
 /**
- * Insert a creator + paid published file. `stripeOnboardingComplete`
- * defaults to `false` so the checkout-gate test can assert on the
- * "creator hasn't enabled payouts yet" error path without needing
- * a real Stripe Connect account.
+ * Insert a creator + paid published file.
+ *
+ * - `onboarded: false` (default) leaves stripeAccountId null —
+ *   the checkout-gate test asserts on "creator hasn't enabled
+ *   payouts yet" without needing a real Connect account.
+ * - `stripeAccountId` (set) marks the creator as onboarded and
+ *   plumbs a real Stripe Connect acct id into the row. Use
+ *   `createStripeOnboardedAccount()` to mint one.
  */
 export async function createPaidFileFixture(opts?: {
   onboarded?: boolean;
+  stripeAccountId?: string;
 }): Promise<PaidFileFixture> {
   const db = getDb();
   const stamp = Date.now();
@@ -59,12 +65,17 @@ export async function createPaidFileFixture(opts?: {
   const creatorId = `e2e_creator_${stamp}_${rand}`;
   const slug = `e2e-paid-${stamp}-${rand}`;
 
+  const onboarded = !!(opts?.onboarded || opts?.stripeAccountId);
+  const acctId =
+    opts?.stripeAccountId ??
+    (opts?.onboarded ? `acct_fake_${rand}` : null);
+
   await db.insert(schema.users).values({
     id: creatorId,
     username: `e2e_${stamp}_${rand}`,
     displayName: "E2E Test Creator",
-    stripeAccountId: opts?.onboarded ? `acct_fake_${rand}` : null,
-    stripeOnboardingComplete: !!opts?.onboarded,
+    stripeAccountId: acctId,
+    stripeOnboardingComplete: onboarded,
   });
 
   const [file] = await db
@@ -146,4 +157,104 @@ export async function deleteClerkTestUser(
     // Best-effort cleanup — if the user is already gone we
     // don't care.
   }
+}
+
+/**
+ * Mint a Stripe Connect account that can receive destination
+ * charges in the sandbox — equivalent shape to what the prod app
+ * Express-onboards a real creator into. The prod path uses
+ * `type: "express"`, but Express accounts disallow programmatic
+ * TOS acceptance, so for tests we create a platform-controlled
+ * account whose destination-charge mechanics are identical.
+ *
+ * Polls until `capabilities.transfers === "active"` (test-mode
+ * trigger addresses clear instantly in practice). Throws if the
+ * activation doesn't complete in ~15s.
+ *
+ * Returns just the account id; tests pair it with
+ * `createPaidFileFixture({ stripeAccountId })`. Stripe artifacts
+ * are intentionally left in the sandbox after teardown — they're
+ * useful for dashboard inspection and cost nothing.
+ */
+export async function createStripeOnboardedAccount(): Promise<string> {
+  ensureEnv();
+  const secretKey = process.env.STRIPE_SECRET_KEY;
+  if (!secretKey) throw new Error("STRIPE_SECRET_KEY not set");
+  if (
+    !secretKey.startsWith("sk_test_") &&
+    !secretKey.includes("test")
+  ) {
+    throw new Error("Refusing to mint Connect accounts against a non-test key");
+  }
+  const stripe = new Stripe(secretKey, {
+    apiVersion: "2025-09-30.clover",
+  } as Stripe.StripeConfig);
+
+  const rand = Math.random().toString(36).slice(2, 8);
+  const account = await stripe.accounts.create({
+    controller: {
+      stripe_dashboard: { type: "none" },
+      fees: { payer: "application" },
+      losses: { payments: "application" },
+      requirement_collection: "application",
+    },
+    country: "US",
+    email: `e2e+${rand}@materialize.test`,
+    capabilities: {
+      transfers: { requested: true },
+      card_payments: { requested: true },
+    },
+    business_type: "individual",
+    business_profile: {
+      mcc: "5734",
+      url: "https://materialize.cc",
+      product_description: "3D printable files",
+    },
+  });
+
+  await stripe.accounts.update(
+    account.id,
+    {
+      individual: {
+        first_name: "E2E",
+        last_name: "Creator",
+        email: `e2e+${rand}@materialize.test`,
+        phone: "+18005550175",
+        ssn_last_4: "0000",
+        id_number: "000000000",
+        dob: { day: 1, month: 1, year: 1990 },
+        address: {
+          line1: "address_full_match",
+          city: "San Francisco",
+          state: "CA",
+          postal_code: "94103",
+          country: "US",
+        },
+      },
+      tos_acceptance: {
+        date: Math.floor(Date.now() / 1000),
+        ip: "127.0.0.1",
+        service_agreement: "full",
+      },
+    } as Stripe.AccountUpdateParams
+  );
+
+  // Poll for capability activation.
+  let refreshed = await stripe.accounts.retrieve(account.id);
+  for (
+    let i = 0;
+    i < 30 && refreshed.capabilities?.transfers !== "active";
+    i++
+  ) {
+    await new Promise((r) => setTimeout(r, 500));
+    refreshed = await stripe.accounts.retrieve(account.id);
+  }
+  if (refreshed.capabilities?.transfers !== "active") {
+    throw new Error(
+      `Stripe Connect transfers capability did not activate; requirements: ${JSON.stringify(
+        refreshed.requirements
+      )}`
+    );
+  }
+  return account.id;
 }

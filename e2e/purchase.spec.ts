@@ -5,6 +5,7 @@ import {
   deletePaidFileFixture,
   createClerkTestUser,
   deleteClerkTestUser,
+  createStripeOnboardedAccount,
   type PaidFileFixture,
   type ClerkTestUserFixture,
 } from "./fixtures";
@@ -101,5 +102,59 @@ test.describe("authed purchase gate — creator not onboarded", () => {
     // creation call.
     expect(page.url()).toContain(`/files/${fixture.slug}`);
     expect(page.url()).not.toContain("checkout.stripe.com");
+  });
+});
+
+test.describe("authed purchase happy path — redirects to Stripe", () => {
+  let fixture: PaidFileFixture;
+  let buyer: ClerkTestUserFixture;
+
+  test.beforeAll(async () => {
+    // Spin up a real Connect-onboarded account in the sandbox so
+    // createListingCheckoutSession's destination-charge path
+    // succeeds. ~3-5s; the slowest piece of the suite.
+    const stripeAccountId = await createStripeOnboardedAccount();
+    fixture = await createPaidFileFixture({ stripeAccountId });
+    buyer = await createClerkTestUser();
+  });
+
+  test.afterAll(async () => {
+    if (fixture) await deletePaidFileFixture(fixture);
+    if (buyer) await deleteClerkTestUser(buyer);
+    // Stripe Connect account intentionally left in the sandbox —
+    // it's free, useful for inspection, and Stripe's API doesn't
+    // expose a clean delete for controller-managed accounts.
+  });
+
+  test("signed-in buyer is redirected to checkout.stripe.com", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await clerk.signIn({
+      page,
+      signInParams: {
+        strategy: "email_code",
+        identifier: buyer.email,
+      },
+    });
+
+    await page.goto(`/files/${fixture.slug}`);
+
+    const buyButton = page.getByRole("button", { name: /^Purchase · \$/i });
+    await expect(buyButton).toBeVisible();
+
+    // PurchaseButton calls `window.location.href = res.url` on
+    // success. We wait for the off-domain navigation but don't
+    // need the Stripe-hosted page to fully load — asserting on
+    // the URL alone proves the server action minted a session
+    // and the button followed it.
+    const stripeNavigation = page.waitForURL(
+      /^https:\/\/checkout\.stripe\.com\//,
+      { timeout: 15_000 }
+    );
+    await buyButton.click();
+    await stripeNavigation;
+
+    expect(page.url()).toMatch(/^https:\/\/checkout\.stripe\.com\//);
   });
 });
