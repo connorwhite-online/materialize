@@ -36,8 +36,10 @@ const nextConfig: NextConfig = {
 export default withSentryConfig(nextConfig, {
   org: process.env.SENTRY_ORG,
   project: process.env.SENTRY_PROJECT,
-  // Only upload source maps when the auth token is present —
-  // a fresh checkout without secrets shouldn't fail the build.
+  // Explicit instead of letting the SDK fish for the env var —
+  // makes the dependency discoverable in source. Build still
+  // succeeds without it; only source map upload is skipped.
+  authToken: process.env.SENTRY_AUTH_TOKEN,
   silent: !process.env.CI,
   widenClientFileUpload: true,
   // Same-origin tunnel for client error reports. Keeps ad-blockers

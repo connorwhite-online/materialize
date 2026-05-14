@@ -17,6 +17,9 @@ if (dsn) {
     release: process.env.VERCEL_GIT_COMMIT_SHA,
     environment: process.env.VERCEL_ENV ?? process.env.NODE_ENV,
     tracesSampleRate: process.env.NODE_ENV === "production" ? 0.1 : 1.0,
+    // Sentry Logs correlation — see the server config for context.
+    // Edge runtime doesn't support `includeLocalVariables`.
+    enableLogs: true,
     sendDefaultPii: false,
     beforeSend: scrubPiiFromEvent,
     ignoreErrors: [
