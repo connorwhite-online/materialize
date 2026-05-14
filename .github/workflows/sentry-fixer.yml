@@ -36,12 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      # Auth: prefer the subscription-backed OAuth token; fall
-      # through to the metered API key if OAuth isn't configured.
-      # The SDK picks up whichever is present. Both can coexist —
-      # if both are set, the SDK prefers the OAuth token.
-      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      # App secrets needed for the agent's e2e tests.
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
@@ -73,9 +68,28 @@ jobs:
       - name: Run agent
         # Pipe the event JSON over stdin to dodge shell-escaping.
         # Streaming stdout becomes the workflow log + audit trail.
-        run: echo "$SENTRY_EVENT" | npx tsx scripts/sentry-fixer.ts
+        #
+        # Auth selection: the SDK prefers ANTHROPIC_API_KEY when both
+        # auth env vars are present. We invert that here — if the
+        # subscription-backed OAuth token is configured, use ONLY
+        # that and explicitly unset ANTHROPIC_API_KEY for this step.
+        # The shell `${VAR:+...}` syntax means "if VAR is set + non-
+        # empty"; if OAuth isn't set, we fall through to API key.
+        run: |
+          if [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            unset ANTHROPIC_API_KEY
+            echo "[auth] using CLAUDE_CODE_OAUTH_TOKEN"
+          elif [ -n "$ANTHROPIC_API_KEY" ]; then
+            echo "[auth] using ANTHROPIC_API_KEY"
+          else
+            echo "::error::Neither CLAUDE_CODE_OAUTH_TOKEN nor ANTHROPIC_API_KEY is set"
+            exit 1
+          fi
+          echo "$SENTRY_EVENT" | npx tsx scripts/sentry-fixer.ts
         env:
           SENTRY_EVENT: ${{ inputs.sentry_event }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
       - name: Upload agent summary
         if: always()
