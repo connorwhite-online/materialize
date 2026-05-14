@@ -51,5 +51,9 @@ export default withSentryConfig(nextConfig, {
   sourcemaps: {
     deleteSourcemapsAfterUpload: true,
   },
-  disableLogger: true,
+  // `disableLogger` used to live here but is deprecated; the
+  // documented replacement (`webpack.treeshake.removeDebugLogging`)
+  // is webpack-only and we're on Turbopack, so there's nothing
+  // equivalent to flip. The SDK's own debug logging stays at its
+  // default verbosity, which is fine.
 });

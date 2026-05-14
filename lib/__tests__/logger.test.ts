@@ -83,4 +83,21 @@ describe("logError", () => {
     const message = consoleSpy.mock.calls[0][1] as string;
     expect(message).toBe("null");
   });
+
+  it("doesn't crash on circular-reference objects", () => {
+    // Some real-world payloads (e.g. nested error chains, Stripe
+    // SDK error objects with self-references) can carry cycles.
+    // JSON.stringify throws on those — the safe fallback must
+    // keep logError running so the underlying bug still surfaces.
+    type Circular = { self?: Circular; name: string };
+    const obj: Circular = { name: "loop" };
+    obj.self = obj;
+
+    expect(() => logError("circular.context", obj)).not.toThrow();
+    const message = consoleSpy.mock.calls[0][1] as string;
+    // The exact fallback value isn't load-bearing — what matters
+    // is that the call didn't throw and SOMETHING got logged.
+    expect(typeof message).toBe("string");
+    expect(message.length).toBeGreaterThan(0);
+  });
 });

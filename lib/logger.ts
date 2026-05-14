@@ -1,9 +1,22 @@
+/**
+ * `JSON.stringify` throws on circular references. The error path
+ * is the worst place to throw, so wrap and fall back to `String()`
+ * — `[object Object]` is still better than crashing logError().
+ */
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 export function logError(context: string, error: unknown) {
   const message =
     error instanceof Error
       ? error.message
       : typeof error === "object" && error !== null
-        ? JSON.stringify(error)
+        ? safeStringify(error)
         : String(error);
   const stack = error instanceof Error ? error.stack : undefined;
   console.error(`[${context}]`, message, stack ? `\n${stack}` : "");
