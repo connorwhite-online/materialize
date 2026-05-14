@@ -109,24 +109,33 @@ export async function POST(request: Request) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let event: { event_id?: string; id?: string } & Record<string, unknown>;
+  let rawEvent: Record<string, unknown>;
   try {
-    event = JSON.parse(rawBody) as typeof event;
+    rawEvent = JSON.parse(rawBody) as Record<string, unknown>;
   } catch {
     return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  // Sentry's webhook payload nests the event inside an `event`
-  // property when sent via the alert-rule webhook; internal-
-  // integration payloads put it at the top level. Accept both.
-  const flattened =
-    typeof (event as { event?: unknown }).event === "object" &&
-    (event as { event?: unknown }).event !== null
-      ? ((event as { event: Record<string, unknown> }).event)
-      : event;
+  // Normalize the many shapes Sentry uses to deliver event/issue
+  // info. Across alert-rule webhooks, Internal Integration issue
+  // hooks, and our own manual triggers, the actionable payload
+  // turns up in one of these spots:
+  //
+  //   - top-level (manual curl with a flat event object)
+  //   - { event: {...} } (alert-rule webhook)
+  //   - { data: { issue: {...} } } (Internal Integration issue hook)
+  //   - { data: { event: {...} } } (Internal Integration event hook)
+  //
+  // The flattened payload is what we hand the agent — the prompt
+  // builder reads stack frames, message, tags, etc. off it. If
+  // Sentry delivered just issue metadata (no full event), we still
+  // pass enough for the agent to grep the codebase for the
+  // culprit string and the issue title.
+  const flattened = extractEventLike(rawEvent);
   const eventId =
     (flattened.event_id as string | undefined) ??
     (flattened.id as string | undefined) ??
+    (flattened.shortId as string | undefined) ??
     "unknown";
 
   const repo = process.env.GITHUB_REPO;
@@ -179,6 +188,35 @@ export async function POST(request: Request) {
     logError("sentry-trigger.dispatch", err);
     return Response.json({ error: "Dispatch errored" }, { status: 500 });
   }
+}
+
+/**
+ * Walk a Sentry webhook payload down to the most informative
+ * event-like object. Returns the inner payload (with all the
+ * fields the agent's prompt builder cares about) instead of the
+ * outer envelope. If multiple envelope shapes are present (e.g.
+ * both `event` and `data.issue`), prefer whichever has the most
+ * actionable detail.
+ *
+ * Falls back to the original object if none of the known wrappers
+ * are present — manually-crafted test events come in flat.
+ */
+function extractEventLike(
+  payload: Record<string, unknown>
+): Record<string, unknown> {
+  // Internal Integration sends issue + event under `data`
+  const data = isObject(payload.data) ? payload.data : null;
+  if (data) {
+    if (isObject(data.event)) return data.event;
+    if (isObject(data.issue)) return data.issue;
+  }
+  // Alert-rule webhook nests under `event`
+  if (isObject(payload.event)) return payload.event;
+  return payload;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**

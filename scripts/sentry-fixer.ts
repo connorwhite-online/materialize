@@ -60,6 +60,8 @@ interface SentryBreadcrumb {
 
 interface SentryEvent {
   event_id?: string;
+  id?: string;
+  shortId?: string;
   message?: string;
   level?: string;
   release?: string;
@@ -75,6 +77,20 @@ interface SentryEvent {
   };
   exception?: { values?: SentryException[] };
   breadcrumbs?: { values?: SentryBreadcrumb[] } | SentryBreadcrumb[];
+  // Issue-shaped fields — present when the trigger payload was a
+  // Sentry "issue.created" notification rather than a full event.
+  // The webhook only carries issue metadata in that case; full
+  // event details (stack frames, breadcrumbs) live on the
+  // permalink and require a follow-up Sentry API call to fetch.
+  title?: string;
+  culprit?: string;
+  permalink?: string;
+  metadata?: {
+    type?: string;
+    value?: string;
+    filename?: string;
+    function?: string;
+  };
 }
 
 async function readEventFromStdin(): Promise<string> {
@@ -124,6 +140,16 @@ function buildPrompt(event: SentryEvent): string {
   const breadcrumbs = Array.isArray(event.breadcrumbs)
     ? event.breadcrumbs
     : event.breadcrumbs?.values ?? [];
+  // Issue-shaped payloads (from Sentry's "issue.created" webhook)
+  // don't carry exception frames — only metadata. Fall back to
+  // those fields so the prompt is still actionable.
+  const issueTitle = event.title;
+  const culprit = event.culprit;
+  const metaType = event.metadata?.type;
+  const metaValue = event.metadata?.value;
+  const metaFile = event.metadata?.filename;
+  const metaFn = event.metadata?.function;
+  const permalink = event.permalink;
 
   return `A Sentry event fired in production on the materialize repo. Your job is
 to reproduce the failure locally, write a regression test that
@@ -131,16 +157,21 @@ demonstrates it, and fix the root cause.
 
 # Event
 
-ID:          ${event.event_id ?? "(unknown)"}
+ID:          ${event.event_id ?? event.id ?? event.shortId ?? "(unknown)"}
 Level:       ${event.level ?? "error"}
 Release:     ${event.release ?? "(unknown)"}
 Environment: ${event.environment ?? "(unknown)"}
 Timestamp:   ${event.timestamp ?? "(unknown)"}
+${permalink ? `Permalink:   ${permalink}` : ""}
+${issueTitle ? `Title:       ${issueTitle}` : ""}
+${culprit ? `Culprit:     ${culprit}  ← grep this string in the codebase to find the call site` : ""}
 
 ## Exception
 
-Type:        ${ex?.type ?? "(no type)"}
-Message:     ${ex?.value ?? event.message ?? "(no message)"}
+Type:        ${ex?.type ?? metaType ?? "(no type)"}
+Message:     ${ex?.value ?? event.message ?? metaValue ?? issueTitle ?? "(no message)"}
+${metaFile ? `File:        ${metaFile}` : ""}
+${metaFn ? `Function:    ${metaFn}` : ""}
 
 ## In-app stack (last 10 frames, deepest first)
 
