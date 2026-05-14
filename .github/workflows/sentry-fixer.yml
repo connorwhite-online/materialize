@@ -1,0 +1,84 @@
+name: sentry-fixer
+
+# Triggered by the /api/internal/sentry-trigger Vercel route when a
+# Sentry alert fires. The route validates the Sentry webhook
+# signature and then dispatches this workflow with the full event
+# JSON as input.
+#
+# Also runnable manually from the Actions tab — paste a Sentry
+# event JSON into the `sentry_event` input and the workflow will
+# behave identically. Useful for retrying failed runs or replaying
+# historical events.
+#
+# Costs $$ on every run — Claude Agent SDK calls bill against the
+# repo's ANTHROPIC_API_KEY secret. The 30-minute hard cap inside
+# scripts/sentry-fixer.ts is the second line of defense; the
+# `timeout-minutes` here is the outer fence.
+
+on:
+  workflow_dispatch:
+    inputs:
+      sentry_event:
+        description: Sentry event payload as JSON
+        required: true
+        type: string
+      event_id:
+        description: Sentry event id (used to name the branch)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # The agent commits + pushes its fix branch. Default
+          # GITHUB_TOKEN scoped by `permissions:` above.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Configure git for the agent
+        run: |
+          git config user.name "sentry-fixer[bot]"
+          git config user.email "sentry-fixer@users.noreply.github.com"
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run agent
+        # Pipe the event JSON over stdin to dodge shell-escaping.
+        # Streaming stdout becomes the workflow log + audit trail.
+        run: echo "$SENTRY_EVENT" | npx tsx scripts/sentry-fixer.ts
+        env:
+          SENTRY_EVENT: ${{ inputs.sentry_event }}
+
+      - name: Upload agent summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentry-fixer-${{ inputs.event_id }}
+          path: |
+            .agent-out/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 14
