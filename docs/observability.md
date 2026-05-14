@@ -150,10 +150,24 @@ needing to wire it through Sentry's UI.
    GITHUB_DISPATCH_TOKEN=<the PAT>
    GITHUB_REPO=<owner>/materialize
    ```
-4. In the materialize repo's settings → Secrets and variables → Actions, add:
-   - `ANTHROPIC_API_KEY` — the agent SDK bills against this
-   - `DATABASE_URL`, `CLERK_SECRET_KEY`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`,
-     `STRIPE_SECRET_KEY` — the agent's e2e tests need these to run
+4. In the materialize repo's settings → Secrets and variables → Actions, add
+   ONE of these two auth options (or both — the workflow prefers OAuth):
+
+   **Option A (recommended): subscription-backed OAuth token.**
+   Bills against your Claude Pro/Max plan's included usage rather than
+   metered API tokens. Run `claude setup-token` on your laptop, copy the
+   output, and add as `CLAUDE_CODE_OAUTH_TOKEN`. Subject to the
+   subscription's rate limits — burst-heavy runs (10+ in a 5-hour window)
+   may hit 429s.
+
+   **Option B: metered API key.**
+   Pay-per-token, no rate limits beyond billing. Generate at
+   console.anthropic.com → Settings → API Keys, add as `ANTHROPIC_API_KEY`.
+   Typical run costs $0.20–$5 depending on session length.
+
+   Also add the application secrets the agent's e2e tests need:
+   `DATABASE_URL`, `CLERK_SECRET_KEY`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`,
+   `STRIPE_SECRET_KEY`.
 
 ### Costs + caveats
 

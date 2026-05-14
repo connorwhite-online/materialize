@@ -36,6 +36,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
+      # Auth: prefer the subscription-backed OAuth token; fall
+      # through to the metered API key if OAuth isn't configured.
+      # The SDK picks up whichever is present. Both can coexist —
+      # if both are set, the SDK prefers the OAuth token.
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
