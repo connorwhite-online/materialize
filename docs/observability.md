@@ -1,0 +1,90 @@
+# Observability — Sentry wiring
+
+We use [Sentry](https://sentry.io) for production error monitoring. The SDK is
+wired but inert until the env vars below are set; a fresh checkout builds and
+runs without touching Sentry.
+
+## Why this exists
+
+Two reasons, in order of importance:
+
+1. **Production bugs are invisible without it.** Vercel's built-in logs are
+   per-deploy and don't aggregate across instances; an exception in a server
+   action shows up as one line in one log stream and disappears. Sentry
+   surfaces every uncaught throw as a structured event with stack + breadcrumbs
+   + request context.
+
+2. **It's the input to the self-healing loop.** The autonomous fixer workflow
+   (see `docs/agent-fixer.md`, TBD) is triggered by Sentry webhook on new
+   issues. Without structured events with stable signatures, the loop has
+   nothing to react to.
+
+## What's instrumented
+
+- `instrumentation.ts` initializes Sentry on the server runtime and forwards
+  request errors via `Sentry.captureRequestError`.
+- `instrumentation-client.ts` initializes Sentry in the browser and wires
+  router-transition tracing.
+- `sentry.server.config.ts` / `sentry.edge.config.ts` hold runtime-specific
+  config (sample rates, ignored noise, PII scrubbing).
+- `lib/logger.ts` — every existing `logError(context, error)` call site fans
+  out to `Sentry.captureException` automatically. No need to sprinkle
+  `captureException` calls throughout the codebase; tagging the context string
+  preserves the per-call-site signature.
+- `lib/observability/scrub-pii.ts` — `beforeSend` hook redacts emails, phone
+  numbers, auth headers, and Clerk session cookies before events leave the
+  process. Clerk userIds are kept (they're opaque and useful for reproducing).
+
+## Required env vars
+
+Add these to `.env.local` (dev) and to Vercel project env (preview + prod):
+
+| Var | Where to get it | When it's used |
+|---|---|---|
+| `NEXT_PUBLIC_SENTRY_DSN` | Sentry project settings → Client Keys | Runtime — every event |
+| `SENTRY_AUTH_TOKEN` | Sentry user settings → Auth Tokens (scopes: `project:releases`, `org:read`) | Build — source-map upload |
+| `SENTRY_ORG` | Your Sentry org slug | Build — source-map upload |
+| `SENTRY_PROJECT` | The project slug | Build — source-map upload |
+| `SENTRY_TEST_SECRET` | Anything random | Dev only — gates `/api/internal/sentry-test` |
+
+The `SENTRY_AUTH_TOKEN` / `SENTRY_ORG` / `SENTRY_PROJECT` triple is only used
+by `withSentryConfig` to upload source maps at build time. Without them, builds
+still succeed but production stacks render against the minified JS.
+
+## Smoke-test the wiring
+
+1. Set the env vars above in `.env.local`.
+2. `npm run dev`.
+3. From another terminal:
+
+   ```bash
+   curl -H "x-sentry-test-secret: $SENTRY_TEST_SECRET" \
+     http://localhost:3000/api/internal/sentry-test
+   ```
+
+4. Within ~30s, a new event titled "Sentry wiring smoke test fired at …"
+   appears in the Sentry dashboard, tagged `context=sentry-test`.
+
+If it doesn't appear, check:
+
+- The dev server console — `[sentry-test]` line should be present (logger
+  fired) but the Sentry SDK might be initializing without a DSN.
+- `NEXT_PUBLIC_SENTRY_DSN` is exposed to the runtime (the `NEXT_PUBLIC_`
+  prefix matters).
+- The Sentry project's data-residency region matches what your DSN points at.
+
+The route is disabled in production (`NODE_ENV === "production"` short-
+circuits before the secret check).
+
+## What's *not* yet wired
+
+- Sentry Session Replay — extra paid SKU, would add ~30 KB to every page.
+  Defer until breadcrumbs alone become insufficient for reproducing client
+  bugs.
+- `Sentry.setUser({ id })` is not automatically attached per request. There's
+  a helper at `lib/observability/set-sentry-user.ts` that callers can invoke
+  at the top of an authed server action; a follow-up will hook it into a
+  shared middleware-style helper so every authed code path is tagged
+  automatically.
+- Performance traces (`tracesSampleRate`) are at 10% in prod, 100% in dev. If
+  free-tier event volume becomes a constraint, tune the prod rate down.

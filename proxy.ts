@@ -28,6 +28,13 @@ const isPublicRoute = createRouteMatcher([
   // does its own bearer-token auth via withMcpAuth — Clerk session
   // cookies are not relevant here.
   "/api/mcp(.*)",
+  // Sentry SDK tunnels client error reports through this same-
+  // origin route so ad-blockers don't drop them. No Clerk session
+  // expected. Configured in next.config.ts → tunnelRoute.
+  "/api/monitoring/(.*)",
+  // Sentry wiring smoke probe. The route itself enforces a
+  // secret-header check + non-production gate.
+  "/api/internal/sentry-test",
   // Discovery surfaces for crawlers + AI agents.
   "/llms.txt",
   "/llms-full.txt",

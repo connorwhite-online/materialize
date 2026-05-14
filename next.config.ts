@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
   turbopack: {
@@ -24,4 +25,29 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["@neondatabase/serverless"],
 };
 
-export default nextConfig;
+/**
+ * `withSentryConfig` does two things at build time when its env
+ * vars are set: uploads source maps so Sentry stack traces resolve
+ * to original TypeScript instead of the Vercel-built JS, and tunnels
+ * client error reports through a same-origin route so ad-blockers
+ * don't drop them. Both are no-ops when SENTRY_AUTH_TOKEN is unset,
+ * so unconfigured environments still build cleanly.
+ */
+export default withSentryConfig(nextConfig, {
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  // Only upload source maps when the auth token is present —
+  // a fresh checkout without secrets shouldn't fail the build.
+  silent: !process.env.CI,
+  widenClientFileUpload: true,
+  // Same-origin tunnel for client error reports. Keeps ad-blockers
+  // from silently dropping events.
+  tunnelRoute: "/api/monitoring/tunnel",
+  // Source maps go to Sentry but get deleted from the build
+  // output afterwards — they're not served from the deployment,
+  // only resolved server-side when Sentry renders a stack.
+  sourcemaps: {
+    deleteSourcemapsAfterUpload: true,
+  },
+  disableLogger: true,
+});

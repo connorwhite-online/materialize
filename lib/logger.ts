@@ -2,6 +2,29 @@ export function logError(context: string, error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   const stack = error instanceof Error ? error.stack : undefined;
   console.error(`[${context}]`, message, stack ? `\n${stack}` : "");
+
+  // Fan out to Sentry. Every existing `logError` call site now
+  // also produces a structured event in the dashboard — no need
+  // to sprinkle captureException calls throughout the codebase.
+  //
+  // Lazy-required so this module stays usable from edge contexts
+  // and test setups that mock @/lib/logger without dragging in
+  // the Sentry SDK. No-op when DSN isn't configured.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Sentry = require("@sentry/nextjs") as typeof import("@sentry/nextjs");
+    Sentry.withScope((scope) => {
+      scope.setTag("context", context);
+      if (error instanceof Error) {
+        Sentry.captureException(error);
+      } else {
+        Sentry.captureMessage(`${context}: ${message}`, "error");
+      }
+    });
+  } catch {
+    // Sentry not installed or failed to load — skip silently. The
+    // console.error above already preserved the signal.
+  }
 }
 
 /**
