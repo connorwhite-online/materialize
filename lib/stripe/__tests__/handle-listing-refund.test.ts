@@ -12,7 +12,9 @@ let buyerRow: Record<string, unknown> | null = null;
 
 const mockUpdateSet = vi.fn();
 const mockUpdateWhere = vi.fn();
-const mockNotifyRefundOnListing = vi.fn(async () => {});
+const mockNotifyRefundOnListing = vi.fn(
+  async (_recipientId: string, _payload: unknown) => {}
+);
 
 type SelectIntent = "purchase" | "listing" | "user";
 let nextSelectIntent: SelectIntent = "purchase";

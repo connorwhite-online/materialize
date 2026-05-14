@@ -144,6 +144,84 @@ export async function createClerkTestUser(): Promise<ClerkTestUserFixture> {
   return { userId: user.id, email, password };
 }
 
+/**
+ * Insert / upsert a row in our `users` table for a Clerk user so
+ * authed UI flows render correctly. Our app doesn't get a DB row
+ * for a Clerk user until they take an action that triggers an
+ * upsert (e.g. `setUsername`); tests that need an authed visit
+ * to render correctly have to seed the row themselves.
+ *
+ * Returns the username used so callers can navigate to
+ * `/u/<username>` directly.
+ */
+export async function seedAppUserForClerkId(
+  clerkUserId: string,
+  opts?: { displayName?: string }
+): Promise<{ username: string }> {
+  const db = getDb();
+  const rand = Math.random().toString(36).slice(2, 8);
+  const username = `e2e_authed_${rand}`;
+  await db
+    .insert(schema.users)
+    .values({
+      id: clerkUserId,
+      username,
+      displayName: opts?.displayName ?? "E2E Authed Buyer",
+    })
+    .onConflictDoUpdate({
+      target: schema.users.id,
+      set: { username },
+    });
+  return { username };
+}
+
+export interface OwnedFileFixture {
+  ownerId: string;
+  fileId: string;
+  slug: string;
+  name: string;
+}
+
+/**
+ * Insert a published, public, owned file for a pre-existing user
+ * (e.g. one returned from createClerkTestUser + seedAppUserForClerkId).
+ * No Stripe coupling — `price: 0`, free download. Use the paid
+ * variant in createPaidFileFixture when you need the purchase path.
+ */
+export async function createOwnedFileFixture(
+  ownerId: string
+): Promise<OwnedFileFixture> {
+  const db = getDb();
+  const rand = Math.random().toString(36).slice(2, 8);
+  const slug = `e2e-owned-${rand}`;
+  const name = `E2E Owned File ${rand}`;
+  const [file] = await db
+    .insert(schema.files)
+    .values({
+      userId: ownerId,
+      name,
+      slug,
+      price: 0,
+      currency: "USD",
+      status: "published",
+      visibility: "public",
+    })
+    .returning();
+  return { ownerId, fileId: file.id, slug, name };
+}
+
+export async function deleteOwnedFileFixture(
+  fixture: OwnedFileFixture
+): Promise<void> {
+  const db = getDb();
+  await db.delete(schema.files).where(eq(schema.files.id, fixture.fileId));
+}
+
+export async function deleteAppUserRow(userId: string): Promise<void> {
+  const db = getDb();
+  await db.delete(schema.users).where(eq(schema.users.id, userId));
+}
+
 export async function deleteClerkTestUser(
   fixture: ClerkTestUserFixture
 ): Promise<void> {

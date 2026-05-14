@@ -16,7 +16,9 @@ let buyerRow: Record<string, unknown> | null = null;
 
 // Spies to assert what the handler tried to write.
 const mockInsertValues = vi.fn();
-const mockNotifyPurchaseOnListing = vi.fn(async () => {});
+const mockNotifyPurchaseOnListing = vi.fn(
+  async (_recipientId: string, _payload: unknown) => {}
+);
 
 // Distinguishes which table each chained select is reading from —
 // the handler does three reads (purchases, target listing, buyer)
