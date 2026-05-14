@@ -113,5 +113,25 @@ export function scrubPiiFromEvent(
     });
   }
 
+  // exception values — the Error.message of each captured exception.
+  // Call sites that embed user-supplied strings in error messages
+  // (e.g. `new Error(\`User ${email} not found\`)`) would otherwise
+  // expose PII directly in the Sentry event's primary message field.
+  if (Array.isArray(event.exception?.values)) {
+    event.exception!.values = event.exception!.values.map((ex) => {
+      if (typeof ex.value === "string") {
+        return { ...ex, value: redactEmails(ex.value) };
+      }
+      return ex;
+    });
+  }
+
+  // top-level message — used by captureMessage() calls (non-Error
+  // paths through logError). Same risk: the message string is
+  // assembled from context that might include a user email.
+  if (typeof event.message === "string") {
+    event.message = redactEmails(event.message);
+  }
+
   return event;
 }
