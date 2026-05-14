@@ -143,6 +143,8 @@ function CircuitThumb({ circuit, index, onOpen, canDelete }: ThumbProps) {
           <img
             src={circuit.previewUrl}
             alt={circuit.caption || ""}
+            loading="lazy"
+            decoding="async"
             className="absolute inset-0 h-full w-full object-contain bg-white dark:bg-zinc-900"
           />
         ) : (

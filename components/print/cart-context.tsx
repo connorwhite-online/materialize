@@ -6,6 +6,7 @@ import {
   useState,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   type ReactNode,
 } from "react";
@@ -275,28 +276,52 @@ export function CartProvider({ children }: { children: ReactNode }) {
     }
   }, [localItems, refresh]);
 
+  // Memoize the context value so consumers (cart button in the
+  // nav, cart panel, quote configurator) don't re-render every
+  // time CartProvider re-renders for an unrelated reason. The
+  // callbacks are already useCallback'd above; this collapses the
+  // whole value to a stable reference until one of these deps
+  // actually changes.
+  const value = useMemo<CartContextValue>(
+    () => ({
+      items,
+      localItems,
+      itemCount,
+      isOpen,
+      loading,
+      materializing,
+      open,
+      close,
+      addItem,
+      addLocalItem,
+      removeItem,
+      removeLocalItem,
+      updateQuantity,
+      updateLocalItemQuantity,
+      materializeLocalItems,
+      refresh,
+    }),
+    [
+      items,
+      localItems,
+      itemCount,
+      isOpen,
+      loading,
+      materializing,
+      open,
+      close,
+      addItem,
+      addLocalItem,
+      removeItem,
+      removeLocalItem,
+      updateQuantity,
+      updateLocalItemQuantity,
+      materializeLocalItems,
+      refresh,
+    ]
+  );
+
   return (
-    <CartContext.Provider
-      value={{
-        items,
-        localItems,
-        itemCount,
-        isOpen,
-        loading,
-        materializing,
-        open,
-        close,
-        addItem,
-        addLocalItem,
-        removeItem,
-        removeLocalItem,
-        updateQuantity,
-        updateLocalItemQuantity,
-        materializeLocalItems,
-        refresh,
-      }}
-    >
-      {children}
-    </CartContext.Provider>
+    <CartContext.Provider value={value}>{children}</CartContext.Provider>
   );
 }

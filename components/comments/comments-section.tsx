@@ -222,6 +222,8 @@ function PhotoPostRow({
             <img
               src={photo.downloadUrl}
               alt={photo.caption || ""}
+              loading="lazy"
+              decoding="async"
               className="block max-h-80 max-w-full object-contain"
             />
           </button>
