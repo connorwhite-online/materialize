@@ -80,5 +80,10 @@ jobs:
           path: |
             .agent-out/
             test-results/
+          # `.agent-out/` is a dot-prefixed directory; upload-artifact
+          # treats those as hidden and skips them by default. The
+          # smoke run on 2026-05-14 surfaced this — agent wrote the
+          # summary fine but the artifact was empty.
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 14
