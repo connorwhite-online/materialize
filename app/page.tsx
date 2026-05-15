@@ -1,7 +1,7 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { AuthNav } from "@/components/auth/auth-nav";
-import { HeroShowcase } from "@/components/home/hero-showcase";
+import { HeroShowcase } from "@/components/home/hero-showcase-lazy";
 import { HeroWordmark } from "@/components/home/hero-wordmark";
 import { HomeBottomBar } from "@/components/home/home-bottom-bar";
 

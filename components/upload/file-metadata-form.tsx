@@ -31,8 +31,25 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { UploadPreview } from "./upload-preview";
+import dynamic from "next/dynamic";
 import { OwnerPicker } from "@/components/orgs/owner-picker";
+
+// UploadPreview pulls three.js + @react-three/fiber + drei. Any caller
+// that statically imports this form (home-bottom-bar, upload-dialog,
+// picked-file-actions) inherits that cost — and at least the home
+// page renders the dialog lazily, so the eager chunk pull was a real
+// regression on TTI. Lazy-loading UploadPreview here cuts the three.js
+// dependency off the critical path for every consumer. The form
+// itself stays static; only the 3D viewport is deferred. ssr:false is
+// safe because UploadPreview already depends on browser-only APIs
+// (Canvas, blob URLs) and was never server-rendered anyway.
+const UploadPreview = dynamic(
+  () => import("./upload-preview").then((m) => m.UploadPreview),
+  {
+    ssr: false,
+    loading: () => <div className="h-full w-full" aria-hidden />,
+  }
+);
 
 interface FileMetadataFormProps {
   /** In-memory file picked by the user — uploaded to R2 on form submit. */
