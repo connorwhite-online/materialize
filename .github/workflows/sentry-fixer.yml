@@ -100,11 +100,22 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           # gh CLI reads GH_TOKEN / GITHUB_TOKEN from env to
-          # authenticate. actions/checkout persists the token to
-          # .git/config for git push, but doesn't export it for
-          # subsequent steps — we have to wire it explicitly here so
-          # the agent can `gh pr create` after pushing its branch.
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # authenticate.
+          #
+          # GITHUB_TOKEN (the workflow's auto-injected token) can push
+          # branches but is blocked by GitHub's "GitHub Actions is not
+          # permitted to create or approve pull requests" policy when
+          # the agent runs `gh pr create`. The org-level setting that
+          # would let it bypass this is sometimes auto-disabled or
+          # overridden by parent-org policy.
+          #
+          # GH_PAT is a fine-grained personal access token (scoped:
+          # pull-requests: read+write on this repo only) and is NOT
+          # subject to that policy. We prefer it for the agent's
+          # `gh` calls; fall back to GITHUB_TOKEN when it's not
+          # configured (agent can still push branches; PR creation
+          # may fail, in which case the workflow log will say so).
+          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload agent summary
