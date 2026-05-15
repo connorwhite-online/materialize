@@ -52,7 +52,9 @@ if (dsn) {
       // when a browser tab closes mid-request — stack trace is
       // 100% Node internals, no in-app frame to fix. First
       // surfaced via Sentry event on 2026-05-15 and confirmed
-      // not actionable.
+      // not actionable. Belt-and-suspenders guard alongside the
+      // onRequestError filter in instrumentation.ts and the
+      // isConnectionAbort early-return in lib/logger.ts.
       /^aborted$/,
       /socket hang up/i,
       // Transient network errors during outbound calls (Stripe,
