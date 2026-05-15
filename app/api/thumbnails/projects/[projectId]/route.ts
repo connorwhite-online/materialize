@@ -36,8 +36,8 @@ export async function GET(
 ) {
   try {
     const { projectId } = await context.params;
-    if (!projectId) {
-      return new Response("Missing projectId", { status: 400 });
+    if (!projectId || !UUID_RE.test(projectId)) {
+      return new Response("Invalid projectId", { status: 400 });
     }
 
     // Reject non-UUID segments before they reach Postgres (same pattern
@@ -48,6 +48,9 @@ export async function GET(
 
     const url = new URL(request.url);
     const requestedPhotoId = url.searchParams.get("photoId");
+    if (requestedPhotoId && !UUID_RE.test(requestedPhotoId)) {
+      return new Response("Invalid photoId", { status: 400 });
+    }
 
     const [project] = await db
       .select({

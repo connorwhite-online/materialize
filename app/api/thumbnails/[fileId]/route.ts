@@ -7,10 +7,10 @@ import { logError } from "@/lib/logger";
 
 /**
  * Matches a canonical UUID v4 string (case-insensitive).
- * Used to reject malformed fileId segments before they reach the DB —
- * Postgres throws "invalid input syntax for type uuid" for any string
- * that isn't exactly this shape, which was previously surfacing as a
- * 500 + Sentry event (sentry 7484237159).
+ * Used to reject malformed fileId/photoId segments before they reach
+ * the DB — Postgres throws "invalid input syntax for type uuid" for
+ * any string that isn't exactly this shape, which was previously
+ * surfacing as a 500 + Sentry event (sentry 7484237159).
  */
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -48,21 +48,19 @@ export async function GET(
 ) {
   try {
     const { fileId } = await context.params;
-    if (!fileId) {
-      return new Response("Missing fileId", { status: 400 });
-    }
-
-    // Guard: reject non-UUID segments before they reach Postgres.
-    // Without this check, a malformed id (e.g. a truncated UUID such as
-    // "ba14f9ed-106b-46e3-8") causes Postgres to throw
-    // "invalid input syntax for type uuid" — previously caught by the
-    // outer try-catch and returned as a 500 with a Sentry event fired.
-    if (!UUID_RE.test(fileId)) {
+    // Reject missing / non-UUID segments before they reach Postgres.
+    // Without this, a malformed id (e.g. truncated "ba14f9ed-106b-46e3-8")
+    // throws "invalid input syntax for type uuid" → 500 + Sentry noise.
+    // 404 (not 400) so scrapers can't fingerprint the route.
+    if (!fileId || !UUID_RE.test(fileId)) {
       return new Response("Not found", { status: 404 });
     }
 
     const url = new URL(request.url);
     const requestedPhotoId = url.searchParams.get("photoId");
+    if (requestedPhotoId && !UUID_RE.test(requestedPhotoId)) {
+      return new Response("Not found", { status: 404 });
+    }
 
     const [file] = await db
       .select({

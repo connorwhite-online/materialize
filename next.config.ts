@@ -21,6 +21,10 @@ const nextConfig: NextConfig = {
      * path, which is the correct behaviour — the `photoId` values are
      * opaque DB UUIDs that users cannot enumerate from the outside.
      *
+     * Providing `localPatterns` replaces the default entirely (not
+     * merges), so we re-state the default rule for every other local
+     * image path so static assets / icons keep optimizing.
+     *
      * See: https://nextjs.org/docs/messages/next-image-unconfigured-localpatterns
      * Sentry: 7484236094
      */
@@ -29,6 +33,7 @@ const nextConfig: NextConfig = {
         pathname: "/api/thumbnails/**",
         // No `search` property → allows any (or no) query string.
       },
+      { pathname: "/**", search: "" },
     ],
     remotePatterns: [
       {

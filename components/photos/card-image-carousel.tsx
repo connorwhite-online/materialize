@@ -66,16 +66,10 @@ export function CardImageCarousel({
 
   if (images.length === 0) return null;
 
-  // next/image's optimizer rejects local URLs containing a query
-  // string (the validator forbids `?` in `url=`). The thumbnail proxy
-  // accepts both `/api/thumbnails/{fileId}` (cover, optimizable) and
-  // `/api/thumbnails/{fileId}?photoId={id}` (additional photos, the
-  // exact pattern the optimizer trips on). For now we route the
-  // query-string variants around the optimizer with `unoptimized` so
-  // the carousel just renders the bytes as-is; the cover still gets
-  // AVIF/WebP transcoding and srcset. A path-style refactor of the
-  // photoId route would unblock full optimization here too.
-  const useOptimizer = (src: string) => !src.includes("?");
+  // next.config.ts widens `images.localPatterns` for /api/thumbnails/**
+  // so both `?photoId=…` and bare-cover URLs satisfy the optimizer's
+  // src allowlist — no per-instance `unoptimized` escape hatch needed
+  // for the carousel anymore.
   const carouselSizes =
     size === "lg"
       ? "(min-width: 1024px) 50vw, 100vw"
@@ -91,7 +85,6 @@ export function CardImageCarousel({
           alt={alt}
           fill
           sizes={carouselSizes}
-          unoptimized={!useOptimizer(images[0])}
           className="object-cover"
         />
       </div>
@@ -114,7 +107,6 @@ export function CardImageCarousel({
               alt={alt}
               fill
               sizes={carouselSizes}
-              unoptimized={!useOptimizer(src)}
               className="object-cover"
             />
           </div>
