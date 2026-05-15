@@ -248,39 +248,61 @@ export async function createFileListing(formData: FormData) {
     const byteHashes = await Promise.all(
       incomingAssets.map((a) => computeByteHashOnly(a.storageKey))
     );
-    for (let i = 0; i < incomingAssets.length; i++) {
-      const hash = byteHashes[i];
-      const asset = incomingAssets[i];
-      // Cross-user check — strict, since this is the anti-theft gate.
-      if (hash && (await checkByteHashCollision(hash, userId))) {
-        return {
-          error: {
-            name: [
-              "This file has already been listed by another creator. Re-uploading others' files is not permitted.",
-            ],
-          },
-        };
-      }
-      // Same-user check — protects against the user accidentally
-      // re-uploading a file they already have in their library
-      // (e.g., dragging the same STL in twice across two different
-      // upload paths). Surface an error pointing at the existing
-      // listing so they can edit it instead of creating a duplicate.
-      const existing = await findExistingSameUserAsset({
-        userId,
-        byteHash: hash,
-        originalFilename: asset.originalFilename,
-        fileSize: asset.fileSize,
-      });
-      if (existing) {
-        return {
-          error: {
-            name: [
-              `You've already uploaded this file as "${existing.fileName}". Edit that listing instead at /files/${existing.fileSlug}.`,
-            ],
-          },
-        };
-      }
+
+    // Run the two collision lookups for every asset in parallel
+    // (within each asset they're independent; across assets they
+    // share no state). For single-asset uploads — ~90% of cases —
+    // this is the same shape as the prior serial loop. For multi-
+    // asset uploads it cuts wall-clock from 2N queries serial to 2
+    // batched roundtrips.
+    //
+    // To preserve the original serial-order error semantics
+    // (report the first listed asset's failure first), we collect
+    // each asset's result into a typed slot and then walk the
+    // array in order, returning the first non-null finding.
+    type CollisionFinding =
+      | { kind: "cross-user" }
+      | { kind: "same-user"; fileName: string; fileSlug: string };
+    const findings: Array<CollisionFinding | null> = await Promise.all(
+      incomingAssets.map(async (asset, i): Promise<CollisionFinding | null> => {
+        const hash = byteHashes[i];
+        if (hash && (await checkByteHashCollision(hash, userId))) {
+          return { kind: "cross-user" };
+        }
+        const existing = await findExistingSameUserAsset({
+          userId,
+          byteHash: hash,
+          originalFilename: asset.originalFilename,
+          fileSize: asset.fileSize,
+        });
+        if (existing) {
+          return {
+            kind: "same-user",
+            fileName: existing.fileName,
+            fileSlug: existing.fileSlug,
+          };
+        }
+        return null;
+      })
+    );
+    const firstFinding = findings.find((f) => f !== null);
+    if (firstFinding?.kind === "cross-user") {
+      return {
+        error: {
+          name: [
+            "This file has already been listed by another creator. Re-uploading others' files is not permitted.",
+          ],
+        },
+      };
+    }
+    if (firstFinding?.kind === "same-user") {
+      return {
+        error: {
+          name: [
+            `You've already uploaded this file as "${firstFinding.fileName}". Edit that listing instead at /files/${firstFinding.fileSlug}.`,
+          ],
+        },
+      };
     }
 
     const slug = buildListingSlug(parsed.data.name, nanoid(6));

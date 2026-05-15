@@ -13,7 +13,7 @@ import "server-only";
  *     `circuits/<userId>/` prefix.
  */
 
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, count, desc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
 import {
@@ -232,16 +232,23 @@ export async function listProjectsForUser(
 
   if (rows.length === 0) return [];
 
-  // Batch fetch file counts for all listed projects.
+  // Batch fetch file counts for all listed projects. Group the
+  // aggregation on the DB side instead of pulling every
+  // (projectId, fileId) row back — at N projects with M files
+  // each that's the difference between N*M rows over the wire
+  // and just N.
   const projectIds = rows.map((r) => r.id);
   const countRows = await db
-    .select({ projectId: projectFiles.projectId, fileId: projectFiles.fileId })
+    .select({
+      projectId: projectFiles.projectId,
+      count: count(projectFiles.fileId),
+    })
     .from(projectFiles)
-    .where(inArray(projectFiles.projectId, projectIds));
-  const countByProject = new Map<string, number>();
-  for (const cr of countRows) {
-    countByProject.set(cr.projectId, (countByProject.get(cr.projectId) ?? 0) + 1);
-  }
+    .where(inArray(projectFiles.projectId, projectIds))
+    .groupBy(projectFiles.projectId);
+  const countByProject = new Map<string, number>(
+    countRows.map((r) => [r.projectId, r.count])
+  );
 
   return rows.map((r) => ({
     projectId: r.id,

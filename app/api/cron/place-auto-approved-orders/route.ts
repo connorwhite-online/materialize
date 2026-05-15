@@ -64,17 +64,38 @@ export async function GET(request: Request) {
       )
       .returning({ id: printOrders.id });
 
+    // Worker pool of CONCURRENCY against CraftCloud — same pattern
+    // as sweep-fingerprint-stragglers/route.ts. Strictly serial used
+    // to be the safe default (one CraftCloud failure surfaces before
+    // we trigger the next call), but the handler is already
+    // idempotent and self-logs, so the safety argument was thin.
+    // Bounded parallel keeps CraftCloud rate-limit pressure under
+    // control while letting a backlog of 20+ orders drain inside the
+    // function's wall-clock budget instead of timing out.
+    const CONCURRENCY = 4;
     let placed = 0;
     let failed = 0;
-    for (const { id } of claimed) {
-      try {
-        await handlePrintOrderPayment(id);
-        placed += 1;
-      } catch (error) {
-        logError("cron/place-auto-approved-orders.handler", error);
-        failed += 1;
+    let idx = 0;
+    async function worker() {
+      while (true) {
+        const i = idx++;
+        if (i >= claimed.length) return;
+        const { id } = claimed[i];
+        try {
+          await handlePrintOrderPayment(id);
+          placed += 1;
+        } catch (error) {
+          logError("cron/place-auto-approved-orders.handler", error);
+          failed += 1;
+        }
       }
     }
+    await Promise.all(
+      Array.from(
+        { length: Math.min(CONCURRENCY, claimed.length) },
+        () => worker()
+      )
+    );
 
     const result = { claimed: claimed.length, placed, failed };
     console.log("[cron/place-auto-approved-orders] swept", result);
