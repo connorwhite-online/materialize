@@ -6,6 +6,16 @@ import { generateDownloadUrl } from "@/lib/storage";
 import { logError } from "@/lib/logger";
 
 /**
+ * Matches a canonical UUID v4 string (case-insensitive).
+ * Used to reject malformed fileId segments before they reach the DB —
+ * Postgres throws "invalid input syntax for type uuid" for any string
+ * that isn't exactly this shape, which was previously surfacing as a
+ * 500 + Sentry event (sentry 7484237159).
+ */
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
  * Redirects to a freshly signed R2 URL for the file's thumbnail. The
  * files.thumbnailUrl column stores `/api/thumbnails/{fileId}` as a
  * stable reference so that browsers get a short-lived presigned URL
@@ -34,6 +44,15 @@ export async function GET(
     const { fileId } = await context.params;
     if (!fileId) {
       return new Response("Missing fileId", { status: 400 });
+    }
+
+    // Guard: reject non-UUID segments before they reach Postgres.
+    // Without this check, a malformed id (e.g. a truncated UUID such as
+    // "ba14f9ed-106b-46e3-8") causes Postgres to throw
+    // "invalid input syntax for type uuid" — previously caught by the
+    // outer try-catch and returned as a 500 with a Sentry event fired.
+    if (!UUID_RE.test(fileId)) {
+      return new Response("Not found", { status: 404 });
     }
 
     const url = new URL(request.url);
