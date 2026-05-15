@@ -11,11 +11,121 @@ function safeStringify(value: unknown): string {
   }
 }
 
+/**
+ * Keys in a context object that we promote to Sentry *tags* (not
+ * just extras) so the dashboard can filter / group by them.
+ *
+ * Tag cardinality matters — Sentry indexes every distinct value
+ * per tag, and unbounded tag dimensions get expensive fast. Keep
+ * this list to domain ids that have natural cardinality bounds
+ * (users, listings, orders) rather than open strings (URLs,
+ * messages). Add sparingly.
+ */
+const PROMOTE_TO_TAG = new Set<string>([
+  // Identity
+  "userId",
+  "buyerId",
+  "creatorId",
+  "ownerUserId",
+  // Domain entities
+  "fileId",
+  "fileAssetId",
+  "projectId",
+  "listingId",
+  "orderId",
+  "printOrderId",
+  "purchaseId",
+  "cartItemId",
+  "vendorId",
+  "materialConfigId",
+  // External system ids
+  "stripeAccountId",
+  "stripePaymentIntentId",
+  "stripeSessionId",
+  "craftCloudOrderId",
+  // Status / error codes — useful for "all 404s" style queries
+  "status",
+  "statusCode",
+  "code",
+  "errorCode",
+]);
+
+/**
+ * Coerce a primitive (string / number / boolean) to a Sentry tag
+ * value. Sentry tags must be strings; we reject objects/arrays
+ * (they belong in `extras` not `tags`) and skip null/undefined
+ * (they'd just show as empty).
+ */
+function tagValue(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return null;
+}
+
+/**
+ * Pure function — given a context string and an error/payload,
+ * compute the Sentry scope enrichment we'd apply. Exposed so the
+ * logic is testable without mocking the Sentry SDK; `logError`
+ * below is the only real caller.
+ */
+export interface SentryEnrichment {
+  /** Tags to set on the scope. `context` is always included. */
+  tags: Record<string, string>;
+  /** Extras to set on the scope (queryable, not indexed). */
+  extras: Record<string, unknown>;
+}
+
+export function buildSentryEnrichment(
+  context: string,
+  error: unknown
+): SentryEnrichment {
+  const tags: Record<string, string> = { context };
+  const extras: Record<string, unknown> = {};
+
+  // Plain-object payload — the common shape for `logError(ctx, { …fields })`.
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    !(error instanceof Error)
+  ) {
+    const obj = error as Record<string, unknown>;
+    for (const key of Object.keys(obj)) {
+      extras[key] = obj[key];
+      if (!PROMOTE_TO_TAG.has(key)) continue;
+      const v = tagValue(obj[key]);
+      if (v !== null) tags[key] = v;
+    }
+  }
+
+  // Error with a structured cause — `new Error(msg, { cause: {...} })`.
+  if (
+    error instanceof Error &&
+    typeof error.cause === "object" &&
+    error.cause !== null
+  ) {
+    const causeObj = error.cause as Record<string, unknown>;
+    extras.cause = causeObj;
+    for (const key of Object.keys(causeObj)) {
+      if (!PROMOTE_TO_TAG.has(key)) continue;
+      const v = tagValue(causeObj[key]);
+      if (v !== null) tags[key] = v;
+    }
+  }
+
+  return { tags, extras };
+}
+
 export function logError(context: string, error: unknown) {
+  const isPlainObject =
+    typeof error === "object" &&
+    error !== null &&
+    !(error instanceof Error);
   const message =
     error instanceof Error
       ? error.message
-      : typeof error === "object" && error !== null
+      : isPlainObject
         ? safeStringify(error)
         : String(error);
   const stack = error instanceof Error ? error.stack : undefined;
@@ -31,8 +141,10 @@ export function logError(context: string, error: unknown) {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const Sentry = require("@sentry/nextjs") as typeof import("@sentry/nextjs");
+    const { tags, extras } = buildSentryEnrichment(context, error);
     Sentry.withScope((scope) => {
-      scope.setTag("context", context);
+      for (const [k, v] of Object.entries(tags)) scope.setTag(k, v);
+      if (Object.keys(extras).length > 0) scope.setExtras(extras);
       if (error instanceof Error) {
         Sentry.captureException(error);
       } else {

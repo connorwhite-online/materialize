@@ -17,7 +17,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  * also flows into Sentry.captureMessage(), so the assertion is equivalent.
  */
 
-import { logError } from "@/lib/logger";
+import { logError, buildSentryEnrichment } from "@/lib/logger";
 
 describe("logError", () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
@@ -99,5 +99,81 @@ describe("logError", () => {
     // is that the call didn't throw and SOMETHING got logged.
     expect(typeof message).toBe("string");
     expect(message.length).toBeGreaterThan(0);
+  });
+});
+
+describe("buildSentryEnrichment", () => {
+  it("always includes the context tag", () => {
+    const { tags } = buildSentryEnrichment("checkout.create", null);
+    expect(tags.context).toBe("checkout.create");
+  });
+
+  it("promotes allowlisted domain ids to tags", () => {
+    const { tags, extras } = buildSentryEnrichment("checkout.create", {
+      orderId: "ord_123",
+      buyerId: "user_abc",
+      vendorId: "vendor-xyz",
+      message: "free-form text",
+    });
+    // Allowlisted fields become tags (filterable / groupable).
+    expect(tags.orderId).toBe("ord_123");
+    expect(tags.buyerId).toBe("user_abc");
+    expect(tags.vendorId).toBe("vendor-xyz");
+    // Free-form text is NOT in the allowlist → extras only.
+    expect(tags.message).toBeUndefined();
+    // Every field appears in extras regardless of allowlist.
+    expect(extras.orderId).toBe("ord_123");
+    expect(extras.message).toBe("free-form text");
+  });
+
+  it("coerces numeric / boolean tag values to strings", () => {
+    const { tags } = buildSentryEnrichment("api.craftcloud", {
+      status: 503,
+      code: 0,
+      // booleans should also become strings
+      errorCode: true,
+    });
+    expect(tags.status).toBe("503");
+    expect(tags.code).toBe("0");
+    expect(tags.errorCode).toBe("true");
+  });
+
+  it("ignores object/array values for tag promotion (extras only)", () => {
+    const { tags, extras } = buildSentryEnrichment("upload", {
+      // Nested objects can't become tag values; they go in extras.
+      fileId: { nested: "something" },
+      // Arrays similarly.
+      orderId: ["a", "b"],
+    });
+    expect(tags.fileId).toBeUndefined();
+    expect(tags.orderId).toBeUndefined();
+    expect(extras.fileId).toEqual({ nested: "something" });
+    expect(extras.orderId).toEqual(["a", "b"]);
+  });
+
+  it("unwraps Error.cause when it carries structured fields", () => {
+    // `new Error(msg, { cause })` is the modern pattern for
+    // attaching diagnostic context to an Error. logError should
+    // surface the cause's fields just like a plain-object payload.
+    const err = new Error("upstream failed", {
+      cause: { orderId: "ord_cause", status: 500, retries: 3 },
+    });
+    const { tags, extras } = buildSentryEnrichment("worker.tick", err);
+    expect(tags.orderId).toBe("ord_cause");
+    expect(tags.status).toBe("500");
+    expect(extras.cause).toEqual({
+      orderId: "ord_cause",
+      status: 500,
+      retries: 3,
+    });
+  });
+
+  it("returns empty extras for non-object errors", () => {
+    expect(
+      buildSentryEnrichment("ctx", new Error("plain")).extras
+    ).toEqual({});
+    expect(buildSentryEnrichment("ctx", "string error").extras).toEqual({});
+    expect(buildSentryEnrichment("ctx", null).extras).toEqual({});
+    expect(buildSentryEnrichment("ctx", undefined).extras).toEqual({});
   });
 });
