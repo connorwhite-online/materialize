@@ -177,3 +177,55 @@ describe("buildSentryEnrichment", () => {
     expect(buildSentryEnrichment("ctx", undefined).extras).toEqual({});
   });
 });
+
+/**
+ * Regression tests for Sentry event 7483761588:
+ *   "Error: aborted" fired from node:_http_server → abortIncoming
+ *
+ * Root cause: logError() forwarded every error to Sentry including the
+ * benign Node.js HTTP abort that fires when a client disconnects mid-
+ * request (user navigated away, closed tab, network dropped).  The error
+ * has no in-app stack frames and is not an application bug; sending it
+ * to Sentry just adds noise.
+ *
+ * Fix: isConnectionAbort() detects both Error('aborted') and AbortError
+ * and returns early from logError() before touching console or Sentry.
+ */
+describe("connection-abort suppression (Sentry event 7483761588)", () => {
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleSpy.mockRestore();
+  });
+
+  it("does NOT call console.error for the Node.js HTTP abort Error('aborted')", () => {
+    // This is the exact error thrown by node:_http_server → abortIncoming
+    // when the client disconnects while a server action is in-flight.
+    logError("createPrintOrder", new Error("aborted"));
+    expect(consoleSpy).not.toHaveBeenCalled();
+  });
+
+  it("does NOT call console.error for an AbortController AbortError", () => {
+    // Client-side abort signals (e.g. user navigates away during fetch)
+    // produce DOMException with name 'AbortError' — same treatment.
+    const err = new DOMException("Aborted", "AbortError");
+    logError("createPrintOrder", err);
+    expect(consoleSpy).not.toHaveBeenCalled();
+  });
+
+  it("DOES call console.error for real application errors", () => {
+    // Sanity-check: ordinary errors must still be reported.
+    logError("createPrintOrder", new Error("CraftCloud 500"));
+    expect(consoleSpy).toHaveBeenCalledOnce();
+  });
+
+  it("DOES call console.error when message is 'abort' (not 'aborted')", () => {
+    // 'abort' is not the Node.js HTTP abort string — don't over-suppress.
+    logError("createPrintOrder", new Error("abort"));
+    expect(consoleSpy).toHaveBeenCalledOnce();
+  });
+});

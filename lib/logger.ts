@@ -12,6 +12,27 @@ function safeStringify(value: unknown): string {
 }
 
 /**
+ * True for errors that signal an HTTP connection abort, not an
+ * application bug:
+ *
+ *  - `Error("aborted")` — emitted by Node.js `node:_http_server`
+ *    via `abortIncoming` when the client disconnects while the
+ *    server is still processing a request (user navigated away,
+ *    closed the tab, network dropped). Sentry event 7483761588.
+ *  - `DOMException("AbortError")` — thrown by the Fetch API (and
+ *    our own `wait()` helper in poll-quotes.ts) when an
+ *    AbortController signal fires.
+ *
+ * Neither represents a real application failure; both are routine
+ * browser behaviour. Logging them to Sentry creates noise without
+ * actionable signal.
+ */
+function isConnectionAbort(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.message === "aborted" || error.name === "AbortError";
+}
+
+/**
  * Keys in a context object that we promote to Sentry *tags* (not
  * just extras) so the dashboard can filter / group by them.
  *
@@ -118,6 +139,14 @@ export function buildSentryEnrichment(
 }
 
 export function logError(context: string, error: unknown) {
+  // Connection-abort errors are benign (client navigated away, network
+  // dropped, tab closed). Skip console + Sentry entirely so they don't
+  // pollute the error dashboard with non-actionable events. The
+  // ignoreErrors filter in sentry.server.config.ts catches the same
+  // class at the SDK layer as a backstop; this early-return saves the
+  // round-trip in addition to suppressing the console noise.
+  if (isConnectionAbort(error)) return;
+
   const isPlainObject =
     typeof error === "object" &&
     error !== null &&
