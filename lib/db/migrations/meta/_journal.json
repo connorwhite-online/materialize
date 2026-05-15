@@ -183,6 +183,13 @@
       "when": 1778500400000,
       "tag": "0025_stripe_lookup_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1778500500000,
+      "tag": "0026_pg_trgm_search_indexes",
+      "breakpoints": true
     }
   ]
 }
