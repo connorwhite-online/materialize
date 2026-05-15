@@ -1,6 +1,7 @@
 "use client";
 
 import { lazy, Suspense, useState, useRef, useEffect } from "react";
+import Image from "next/image";
 
 const ModelViewer = lazy(() =>
   import("./model-viewer").then((mod) => ({ default: mod.ModelViewer }))
@@ -45,17 +46,17 @@ export function ModelCardPreview({
     return (
       <div
         ref={ref}
-        className="aspect-square rounded-md bg-muted overflow-hidden cursor-pointer"
+        className="relative aspect-square rounded-md bg-muted overflow-hidden cursor-pointer"
         onMouseEnter={() => {
           if (isVisible && modelUrl && format) setShowViewer(true);
         }}
       >
-        <img
+        <Image
           src={thumbnailUrl}
           alt=""
-          loading="lazy"
-          decoding="async"
-          className="h-full w-full object-cover"
+          fill
+          sizes="(min-width: 1024px) 25vw, (min-width: 640px) 33vw, 50vw"
+          className="object-cover"
         />
       </div>
     );

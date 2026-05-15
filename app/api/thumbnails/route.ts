@@ -9,10 +9,11 @@ import { logError } from "@/lib/logger";
  * Uploads a captured thumbnail to R2 and stores a stable relative
  * URL (`/api/thumbnails/{fileId}`) in the files row.
  *
- * The GET handler in `app/api/thumbnails/[fileId]/route.ts` redirects
- * each request to a freshly signed short-lived R2 URL, which works
- * around S3 presigned URLs' 7-day maximum expiration. `<img>` tags
- * follow the redirect transparently.
+ * The GET handler in `app/api/thumbnails/[fileId]/route.ts` streams
+ * the bytes back through this origin after signing a fresh R2 URL
+ * server-side, which works around S3 presigned URLs' 7-day maximum
+ * expiration AND is consumable by next/image's optimizer (which
+ * does not follow redirects).
  */
 export async function POST(request: Request) {
   try {

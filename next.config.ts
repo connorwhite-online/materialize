@@ -43,6 +43,13 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "staticmap.openstreetmap.de",
       },
+      {
+        // CraftCloud's CDN — used for material catalog featured
+        // images (resolveCatalogImage in search-results-panel and
+        // friends).
+        protocol: "https",
+        hostname: "res.cloudinary.com",
+      },
     ],
   },
   serverExternalPackages: ["@neondatabase/serverless"],

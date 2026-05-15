@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import Image from "next/image";
 import { ThumbnailCapture } from "./thumbnail-capture";
 
 interface FileThumbnailProps {
@@ -53,12 +54,15 @@ export function FileThumbnail({
   // Has thumbnail — just show it
   if (url) {
     return (
-      <div className={`${className} overflow-hidden rounded-lg bg-muted`}>
-        <img
+      <div
+        className={`${className} relative overflow-hidden rounded-lg bg-muted`}
+      >
+        <Image
           src={url}
           alt=""
-          className="w-full h-full object-cover"
-          loading="lazy"
+          fill
+          sizes="(min-width: 1024px) 25vw, (min-width: 640px) 33vw, 50vw"
+          className="object-cover"
         />
       </div>
     );

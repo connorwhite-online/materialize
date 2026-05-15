@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import Image from "next/image";
 import { motion } from "motion/react";
 import { ChevronLeft } from "@/components/icons/chevron-left";
 import { ChevronRight } from "@/components/icons/chevron-right";
@@ -65,16 +66,33 @@ export function CardImageCarousel({
 
   if (images.length === 0) return null;
 
+  // next/image's optimizer rejects local URLs containing a query
+  // string (the validator forbids `?` in `url=`). The thumbnail proxy
+  // accepts both `/api/thumbnails/{fileId}` (cover, optimizable) and
+  // `/api/thumbnails/{fileId}?photoId={id}` (additional photos, the
+  // exact pattern the optimizer trips on). For now we route the
+  // query-string variants around the optimizer with `unoptimized` so
+  // the carousel just renders the bytes as-is; the cover still gets
+  // AVIF/WebP transcoding and srcset. A path-style refactor of the
+  // photoId route would unblock full optimization here too.
+  const useOptimizer = (src: string) => !src.includes("?");
+  const carouselSizes =
+    size === "lg"
+      ? "(min-width: 1024px) 50vw, 100vw"
+      : "(min-width: 1024px) 25vw, (min-width: 640px) 33vw, 50vw";
+
   // Single-image fast path — render plainly without the scroll
   // gymnastics or controls.
   if (images.length === 1) {
     return (
       <div className={cn("relative h-full w-full overflow-hidden", className)}>
-        <img
+        <Image
           src={images[0]}
           alt={alt}
-          loading="lazy"
-          className="absolute inset-0 h-full w-full object-cover"
+          fill
+          sizes={carouselSizes}
+          unoptimized={!useOptimizer(images[0])}
+          className="object-cover"
         />
       </div>
     );
@@ -91,11 +109,13 @@ export function CardImageCarousel({
             key={i}
             className="relative h-full w-full shrink-0 snap-start snap-always"
           >
-            <img
+            <Image
               src={src}
               alt={alt}
-              loading={i === 0 ? "eager" : "lazy"}
-              className="absolute inset-0 h-full w-full object-cover"
+              fill
+              sizes={carouselSizes}
+              unoptimized={!useOptimizer(src)}
+              className="object-cover"
             />
           </div>
         ))}

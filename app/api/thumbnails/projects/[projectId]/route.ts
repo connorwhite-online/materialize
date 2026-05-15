@@ -10,9 +10,15 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * Redirects to a freshly signed R2 URL for a project's thumbnail.
- * Mirrors /api/thumbnails/[fileId] but joined against projectPhotos
- * for the cover override.
+ * Streams the bytes of a project's thumbnail (after signing a
+ * short-lived R2 URL server-side). Mirrors /api/thumbnails/[fileId]
+ * but joined against projectPhotos for the cover override.
+ *
+ * Streaming, rather than 302ing to the signed URL, is what makes
+ * the route consumable by next/image's optimizer — the optimizer
+ * does not follow redirects and 400s on them. See the matching
+ * comment in /api/thumbnails/[fileId]/route.ts for the longer
+ * rationale.
  *
  * Access patterns:
  *   - GET /api/thumbnails/projects/{projectId}                 → cover
@@ -119,19 +125,41 @@ export async function GET(
 
     const signed = await generateDownloadUrl(storageKey, 60 * 60);
 
-    // Cache the 302 itself so repeat navigations don't re-pay the DB
-    // lookup + signing on every paint. Window is well below the signed
-    // URL's 1h lifetime. Non-public projects use `private` so a CDN
-    // can't fan the redirect out to non-owners.
-    return new Response(null, {
-      status: 302,
+    const upstream = await fetch(signed, {
       headers: {
-        Location: signed,
-        "Cache-Control": publicListing
-          ? "public, max-age=300"
-          : "private, max-age=60",
+        ...(request.headers.get("if-none-match")
+          ? { "If-None-Match": request.headers.get("if-none-match") as string }
+          : {}),
       },
     });
+
+    if (upstream.status === 304) {
+      return new Response(null, { status: 304 });
+    }
+    if (!upstream.ok || !upstream.body) {
+      logError("api/thumbnails/projects/[projectId].upstream", {
+        status: upstream.status,
+        statusText: upstream.statusText,
+        projectId,
+        storageKey,
+      });
+      return new Response("Upstream fetch failed", { status: 502 });
+    }
+
+    const contentType =
+      upstream.headers.get("content-type") ?? "application/octet-stream";
+    const headers: Record<string, string> = {
+      "Content-Type": contentType,
+      "Cache-Control": publicListing
+        ? "public, max-age=300, stale-while-revalidate=600"
+        : "private, max-age=60",
+    };
+    const upstreamEtag = upstream.headers.get("etag");
+    if (upstreamEtag) headers.ETag = upstreamEtag;
+    const upstreamLength = upstream.headers.get("content-length");
+    if (upstreamLength) headers["Content-Length"] = upstreamLength;
+
+    return new Response(upstream.body, { status: 200, headers });
   } catch (error) {
     logError("api/thumbnails/projects/[projectId]", error);
     return new Response("Failed to resolve thumbnail", { status: 500 });

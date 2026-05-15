@@ -16,11 +16,17 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * Redirects to a freshly signed R2 URL for the file's thumbnail. The
- * files.thumbnailUrl column stores `/api/thumbnails/{fileId}` as a
- * stable reference so that browsers get a short-lived presigned URL
- * each time they load the image — working around S3's 7-day
- * max-expiration limit without re-writing the DB row.
+ * Returns the file's thumbnail bytes (streamed through the origin
+ * after a server-side fetch of a freshly signed R2 URL). The
+ * `files.thumbnailUrl` column stores `/api/thumbnails/{fileId}` as a
+ * stable reference so the DB row never has to be re-written when S3's
+ * 7-day signing limit elapses. Streaming bytes — rather than 302ing
+ * to the signed URL — is what lets next/image's optimizer fetch the
+ * source (the optimizer rejects redirect responses as "not a valid
+ * image" and silently 400s). The optimizer then caches its AVIF/WebP
+ * outputs in `.next/cache/images`, so the cost of streaming through
+ * the origin is amortized to roughly "once per optimizer cache
+ * lifetime per (fileId × size × format) triple."
  *
  * Two access patterns:
  *   - GET /api/thumbnails/{fileId}                 → the cover
@@ -113,23 +119,59 @@ export async function GET(
       }
     }
 
-    // Short-lived — 1 hour is plenty for an image that gets loaded
-    // and cached by the browser immediately.
+    // Short-lived — we're going to use the URL immediately to fetch
+    // the bytes; the client never sees it.
     const signed = await generateDownloadUrl(storageKey, 60 * 60);
 
-    // Cache the 302 itself so repeat navigations don't re-pay the DB
-    // lookup + signing on every paint. Window is well below the signed
-    // URL's 1h lifetime so we never serve an expired Location. Drafts
-    // use `private` so a CDN can't fan the redirect out to non-owners.
-    return new Response(null, {
-      status: 302,
+    // Stream the R2 bytes back through this origin so next/image's
+    // optimizer (which doesn't follow redirects) can consume them.
+    // Forwarding If-None-Match would be nice but our signed URLs
+    // include unique query strings per call, so ETags from R2 are
+    // stable across signings — pass it through when present.
+    const upstream = await fetch(signed, {
       headers: {
-        Location: signed,
-        "Cache-Control": isDraft
-          ? "private, max-age=60"
-          : "public, max-age=300",
+        ...(request.headers.get("if-none-match")
+          ? { "If-None-Match": request.headers.get("if-none-match") as string }
+          : {}),
       },
     });
+
+    if (upstream.status === 304) {
+      return new Response(null, { status: 304 });
+    }
+    if (!upstream.ok || !upstream.body) {
+      logError("api/thumbnails/[fileId].upstream", {
+        status: upstream.status,
+        statusText: upstream.statusText,
+        fileId,
+        storageKey,
+      });
+      return new Response("Upstream fetch failed", { status: 502 });
+    }
+
+    // Preserve the upstream content-type (R2 stores `.webp` thumbnails
+    // but curator photos may be jpeg/png/webp). Default to image/webp
+    // for the auto-captured path which is always .webp.
+    const contentType =
+      upstream.headers.get("content-type") ??
+      (storageKey.endsWith(".webp") ? "image/webp" : "application/octet-stream");
+
+    const headers: Record<string, string> = {
+      "Content-Type": contentType,
+      // Drafts are owner-gated above so they must not enter shared
+      // caches. Published thumbnails are public — let edge + browser
+      // hold onto them for a few minutes; the optimizer cache holds
+      // them much longer downstream of that.
+      "Cache-Control": isDraft
+        ? "private, max-age=60"
+        : "public, max-age=300, stale-while-revalidate=600",
+    };
+    const upstreamEtag = upstream.headers.get("etag");
+    if (upstreamEtag) headers.ETag = upstreamEtag;
+    const upstreamLength = upstream.headers.get("content-length");
+    if (upstreamLength) headers["Content-Length"] = upstreamLength;
+
+    return new Response(upstream.body, { status: 200, headers });
   } catch (error) {
     logError("api/thumbnails/[fileId]", error);
     return new Response("Failed to resolve thumbnail", { status: 500 });

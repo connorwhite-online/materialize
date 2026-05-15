@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { PhotoUploader } from "./photo-uploader";
 import { DeletePhotoButton } from "./delete-photo-button";
@@ -169,12 +170,12 @@ function PhotoThumb({
         className="absolute inset-0 cursor-pointer transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         aria-label={photo.caption || `Photo ${index + 1}`}
       >
-        <img
+        <Image
           src={photo.downloadUrl}
           alt={photo.caption || ""}
-          loading="lazy"
-          decoding="async"
-          className="absolute inset-0 h-full w-full object-cover"
+          fill
+          sizes="(min-width: 640px) 160px, 128px"
+          className="object-cover"
         />
       </button>
 

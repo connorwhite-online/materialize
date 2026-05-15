@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import type {
@@ -131,14 +132,14 @@ function FileCard({
       onClick={onNavigate}
       className="group flex w-28 shrink-0 flex-col gap-1.5"
     >
-      <div className="aspect-square overflow-hidden rounded-lg border border-border bg-muted/60">
+      <div className="relative aspect-square overflow-hidden rounded-lg border border-border bg-muted/60">
         {hit.thumbnailUrl && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <Image
             src={hit.thumbnailUrl}
             alt=""
-            loading="lazy"
-            className="h-full w-full object-cover transition-transform group-hover:scale-105"
+            fill
+            sizes="112px"
+            className="object-cover transition-transform group-hover:scale-105"
           />
         )}
       </div>
@@ -167,14 +168,14 @@ function ProjectCard({
       onClick={onNavigate}
       className="group flex w-28 shrink-0 flex-col gap-1.5"
     >
-      <div className="aspect-square overflow-hidden rounded-lg border border-border bg-muted/60">
+      <div className="relative aspect-square overflow-hidden rounded-lg border border-border bg-muted/60">
         {hit.thumbnailUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <Image
             src={hit.thumbnailUrl}
             alt=""
-            loading="lazy"
-            className="h-full w-full object-cover transition-transform group-hover:scale-105"
+            fill
+            sizes="112px"
+            className="object-cover transition-transform group-hover:scale-105"
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-[10px] text-muted-foreground/60">
@@ -239,14 +240,14 @@ function MaterialCard({
       onClick={onNavigate}
       className="group flex w-28 shrink-0 flex-col gap-1.5"
     >
-      <div className="aspect-square overflow-hidden rounded-lg border border-border bg-muted/60">
+      <div className="relative aspect-square overflow-hidden rounded-lg border border-border bg-muted/60">
         {hit.featuredImage && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <Image
             src={resolveCatalogImage(hit.featuredImage)}
             alt=""
-            loading="lazy"
-            className="h-full w-full object-cover transition-transform group-hover:scale-105"
+            fill
+            sizes="112px"
+            className="object-cover transition-transform group-hover:scale-105"
           />
         )}
       </div>
