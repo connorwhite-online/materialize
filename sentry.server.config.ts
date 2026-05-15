@@ -42,10 +42,27 @@ if (dsn) {
     sendDefaultPii: false,
     beforeSend: scrubPiiFromEvent,
     // Bury noisy framework errors that don't represent real bugs.
+    // Every captured event triggers the sentry-fixer agent loop —
+    // false positives here cost real agent runs.
     ignoreErrors: [
       // Next's NEXT_NOT_FOUND / NEXT_REDIRECT throw to control
       // flow — not actual exceptions.
       /^NEXT_(NOT_FOUND|REDIRECT|HTTP_ERROR_FALLBACK)/,
+      // Client-disconnect noise from node:_http_server. Fires
+      // when a browser tab closes mid-request — stack trace is
+      // 100% Node internals, no in-app frame to fix. First
+      // surfaced via Sentry event on 2026-05-15 and confirmed
+      // not actionable.
+      /^aborted$/,
+      /socket hang up/i,
+      // Transient network errors during outbound calls (Stripe,
+      // CraftCloud, R2). Real failures will re-fire on retry; one-
+      // off connection resets aren't actionable.
+      /ECONNRESET/,
+      /ECONNREFUSED/,
+      /ETIMEDOUT/,
+      /Connection closed/i,
+      /client disconnect/i,
     ],
   });
 }

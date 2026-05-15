@@ -29,7 +29,22 @@ if (dsn) {
       // Browser noise — quota-exceeded from LocalStorage,
       // ResizeObserver loop notifications, etc.
       "ResizeObserver loop limit exceeded",
+      "ResizeObserver loop completed with undelivered notifications",
       "Non-Error promise rejection captured",
+      // Fetch aborts (navigation cancels in-flight request) and
+      // network failures that aren't actionable from app code.
+      // Real failures will re-fire on the user's next attempt; one-
+      // off network blips dominate the noise floor otherwise.
+      /^AbortError/,
+      /The user aborted a request/,
+      /Failed to fetch/,
+      /NetworkError when attempting to fetch/,
+      /Load failed/, // Safari's stand-in for "Failed to fetch"
+      // Browser extensions injecting scripts that throw — never
+      // our code, never actionable.
+      /chrome-extension:/,
+      /moz-extension:/,
+      /safari-extension:/,
     ],
   });
 }

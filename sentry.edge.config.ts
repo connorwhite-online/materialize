@@ -22,8 +22,18 @@ if (dsn) {
     enableLogs: true,
     sendDefaultPii: false,
     beforeSend: scrubPiiFromEvent,
+    // See sentry.server.config.ts for the rationale on each
+    // pattern. Edge runtime can hit most of the same network
+    // / disconnect noise paths.
     ignoreErrors: [
       /^NEXT_(NOT_FOUND|REDIRECT|HTTP_ERROR_FALLBACK)/,
+      /^aborted$/,
+      /socket hang up/i,
+      /ECONNRESET/,
+      /ECONNREFUSED/,
+      /ETIMEDOUT/,
+      /Connection closed/i,
+      /client disconnect/i,
     ],
   });
 }
