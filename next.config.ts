@@ -7,6 +7,29 @@ const nextConfig: NextConfig = {
     root: path.join(__dirname),
   },
   images: {
+    /**
+     * Next.js 16 breaking change: when `localPatterns` is absent the
+     * framework defaults to `[{ pathname: "**", search: "" }]`, which
+     * blocks ALL local image URLs that carry a query string from the
+     * built-in image-optimisation pipeline (`/_next/image`).
+     *
+     * Our thumbnail routes use query strings for photo selection:
+     *   /api/thumbnails/{fileId}?photoId={photoId}
+     *   /api/thumbnails/projects/{projectId}?photoId={photoId}
+     *
+     * Omitting `search` from a pattern allows any query string for that
+     * path, which is the correct behaviour — the `photoId` values are
+     * opaque DB UUIDs that users cannot enumerate from the outside.
+     *
+     * See: https://nextjs.org/docs/messages/next-image-unconfigured-localpatterns
+     * Sentry: 7484236094
+     */
+    localPatterns: [
+      {
+        pathname: "/api/thumbnails/**",
+        // No `search` property → allows any (or no) query string.
+      },
+    ],
     remotePatterns: [
       {
         protocol: "https",
