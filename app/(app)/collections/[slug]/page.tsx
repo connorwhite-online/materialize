@@ -10,6 +10,8 @@ import {
   users,
 } from "@/lib/db/schema";
 import { eq, and, isNotNull, inArray, sql } from "drizzle-orm";
+import { auth } from "@clerk/nextjs/server";
+import { isOrgMember } from "@/lib/authorization";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
@@ -43,20 +45,37 @@ export default async function CollectionPage(props: {
 }) {
   const { slug } = await props.params;
 
+  const { userId: viewerId } = await auth();
+
+  // Pull the row without a visibility filter so we can apply the
+  // org-aware access check below. Private personal collections are
+  // owner-only; private org collections are visible to every org
+  // member.
   const [collection] = await db
     .select({
       id: collections.id,
       name: collections.name,
       description: collections.description,
       visibility: collections.visibility,
+      userId: collections.userId,
+      organizationId: collections.organizationId,
       creatorUsername: users.username,
       creatorDisplayName: users.displayName,
     })
     .from(collections)
     .innerJoin(users, eq(collections.userId, users.id))
-    .where(and(eq(collections.slug, slug), eq(collections.visibility, "public")));
+    .where(eq(collections.slug, slug));
 
   if (!collection) notFound();
+
+  if (collection.visibility !== "public") {
+    const viewerCanSee =
+      !!viewerId &&
+      (viewerId === collection.userId ||
+        (collection.organizationId !== null &&
+          (await isOrgMember(viewerId, collection.organizationId)).member));
+    if (!viewerCanSee) notFound();
+  }
 
   const [fileRows, projectRows] = await Promise.all([
     db

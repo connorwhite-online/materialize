@@ -10,6 +10,7 @@ import {
 import { eq, and, sql } from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
 import { ownsLoadedFile } from "@/lib/entitlement";
+import { isOrgMember } from "@/lib/authorization";
 import { NextRequest } from "next/server";
 import {
   buildWatermarkToken,
@@ -31,11 +32,20 @@ const FORMAT_MIME: Record<string, string> = {
 // token in the header without making the watermark column nullable.
 async function resolvePurchaseId(
   userId: string | null,
-  file: { id: string; price: number; userId: string }
+  file: { id: string; price: number; userId: string; organizationId: string | null }
 ): Promise<string> {
   if (file.price === 0) return `free:${file.id}`;
   if (!userId) return `anon:${file.id}`;
   if (file.userId === userId) return `creator:${userId}:${file.id}`;
+  // Org member downloading their own team's file — same shape as
+  // the creator branch so the watermark attribution stays clean
+  // instead of falling through to the "unknown" synthetic id.
+  if (
+    file.organizationId &&
+    (await isOrgMember(userId, file.organizationId)).member
+  ) {
+    return `org:${file.organizationId}:${userId}:${file.id}`;
+  }
 
   const [direct] = await db
     .select({ id: purchases.id })

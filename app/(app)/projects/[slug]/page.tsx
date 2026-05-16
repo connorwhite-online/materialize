@@ -43,6 +43,7 @@ import {
   type FeedPhoto,
 } from "@/components/photos/photos-feed";
 import { userOwnsProject } from "@/lib/entitlement";
+import { isOrgMember } from "@/lib/authorization";
 import { swallow } from "@/lib/utils/swallow";
 
 function truncate(s: string, n: number) {
@@ -123,6 +124,7 @@ export default async function ProjectDetailPage(props: {
       downloadCount: projects.downloadCount,
       createdAt: projects.createdAt,
       userId: projects.userId,
+      organizationId: projects.organizationId,
       username: users.username,
       displayName: users.displayName,
       avatarUrl: users.avatarUrl,
@@ -133,11 +135,14 @@ export default async function ProjectDetailPage(props: {
     .where(eq(projects.slug, slug));
 
   if (!project) notFound();
-  const isOwner = userId === project.userId;
-  // Owner sees their own project regardless of status/visibility.
-  // Non-owners need both: the project must be published AND public.
-  // (Skipping the visibility check let private published projects leak
-  // to anyone with the slug.)
+  // "Owner" here means write-access for visibility purposes — covers
+  // the personal owner AND any member of the org that owns the
+  // project. Same shape as the file detail page.
+  const isOwner =
+    !!userId &&
+    (userId === project.userId ||
+      (project.organizationId !== null &&
+        (await isOrgMember(userId, project.organizationId)).member));
   if (
     !isOwner &&
     (project.status !== "published" || project.visibility !== "public")

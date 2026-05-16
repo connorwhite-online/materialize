@@ -19,6 +19,7 @@ import {
 } from "@/lib/db/schema";
 import { eq, and, asc, desc, inArray, isNull } from "drizzle-orm";
 import { ownsLoadedFile, userHasUsedFile } from "@/lib/entitlement";
+import { isOrgMember } from "@/lib/authorization";
 import { Card, CardContent } from "@/components/ui/card";
 import { ExpandableDescription } from "@/components/ui/expandable-description";
 import { Button } from "@/components/ui/button";
@@ -152,6 +153,7 @@ export default async function FileDetailPage(props: {
       flaggedReason: files.flaggedReason,
       flaggedAt: files.flaggedAt,
       userId: files.userId,
+      organizationId: files.organizationId,
       username: users.username,
       displayName: users.displayName,
       avatarUrl: users.avatarUrl,
@@ -161,10 +163,19 @@ export default async function FileDetailPage(props: {
     .innerJoin(users, eq(files.userId, users.id))
     .where(eq(files.slug, slug));
 
-  // Visible to anyone if published; visible to owner regardless of status.
+  // Visible to anyone if published & public; visible to writers
+  // (creator or org member) regardless of status / visibility. The
+  // "writer" branch covers org-private drafts so any team member can
+  // see them, not just the original uploader.
   if (!file) notFound();
-  const viewerIsOwner = userId === file.userId;
-  if (file.status !== "published" && !viewerIsOwner) notFound();
+  const viewerCanWrite =
+    !!userId &&
+    (userId === file.userId ||
+      (file.organizationId !== null &&
+        (await isOrgMember(userId, file.organizationId)).member));
+  const viewerIsOwner = viewerCanWrite;
+  if (file.status !== "published" && !viewerCanWrite) notFound();
+  if (file.visibility === "private" && !viewerCanWrite) notFound();
 
   // These five reads only depend on file.id / userId and don't
   // depend on each other — fan them out in one roundtrip instead of
@@ -211,6 +222,7 @@ export default async function FileDetailPage(props: {
         id: file.id,
         price: file.price,
         userId: file.userId,
+        organizationId: file.organizationId,
       }),
     ]);
 

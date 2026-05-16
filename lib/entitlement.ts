@@ -4,6 +4,7 @@ import {
   files,
   fileAssets,
   fileDownloads,
+  organizationMembers,
   printOrders,
   printOrderItems,
   projects,
@@ -14,9 +15,38 @@ import { eq, and, inArray, sql } from "drizzle-orm";
 import { PRINTED_STATUSES } from "@/lib/print-statuses";
 
 /**
+ * Internal helper — does the viewer belong to the given org? Returns
+ * false for anonymous viewers or null orgs without a DB roundtrip.
+ *
+ * Inlined here (rather than imported from lib/authorization) because
+ * entitlement.ts is on the file-download / page-render hot path and
+ * we want a single-purpose query that hits the
+ * organization_members_org_user_uniq index.
+ */
+async function viewerIsOrgMember(
+  userId: string | null,
+  organizationId: string | null
+): Promise<boolean> {
+  if (!userId || !organizationId) return false;
+  const [row] = await db
+    .select({ id: organizationMembers.id })
+    .from(organizationMembers)
+    .where(
+      and(
+        eq(organizationMembers.userId, userId),
+        eq(organizationMembers.organizationId, organizationId)
+      )
+    )
+    .limit(1);
+  return !!row;
+}
+
+/**
  * Does the viewer own this file? "Own" means any of:
  *   - the file is free (price === 0)
  *   - viewer is the file's creator
+ *   - viewer is a member of the org that owns the file (org-owned
+ *     rows treat every member as a co-creator for entitlement purposes)
  *   - viewer has a completed purchase row pointing at this fileId
  *   - viewer has a completed purchase row for ANY project that contains
  *     this file (project ownership transitively grants its files)
@@ -33,7 +63,12 @@ export async function userOwnsFile(
   fileId: string
 ): Promise<boolean> {
   const [file] = await db
-    .select({ id: files.id, price: files.price, userId: files.userId })
+    .select({
+      id: files.id,
+      price: files.price,
+      userId: files.userId,
+      organizationId: files.organizationId,
+    })
     .from(files)
     .where(eq(files.id, fileId));
   if (!file) return false;
@@ -44,14 +79,22 @@ export async function userOwnsFile(
  * Same logic as `userOwnsFile` but takes the already-loaded file row,
  * skipping the initial `files` SELECT. Use this when the caller has
  * just looked up the file by slug for an unrelated reason.
+ *
+ * The optional `organizationId` field, when set, opts every member
+ * of that org into the "creator" branch of the entitlement check.
+ * Callers that omit the field (legacy code paths that haven't been
+ * updated) get the original user-only behavior.
  */
 export async function ownsLoadedFile(
   userId: string | null,
-  file: { id: string; price: number; userId: string }
+  file: { id: string; price: number; userId: string; organizationId?: string | null }
 ): Promise<boolean> {
   if (file.price === 0) return true;
   if (!userId) return false;
   if (file.userId === userId) return true;
+  if (file.organizationId && (await viewerIsOrgMember(userId, file.organizationId))) {
+    return true;
+  }
 
   const [direct] = await db
     .select({ id: purchases.id })
@@ -86,20 +129,31 @@ export async function ownsLoadedFile(
 /**
  * Same shape for projects — simpler since there's no transitive
  * relation. A project is owned if it's free, the viewer created it,
- * or the viewer has a completed purchase of it.
+ * the viewer is a member of the org that owns it, or the viewer has
+ * a completed purchase of it.
  */
 export async function userOwnsProject(
   userId: string | null,
   projectId: string
 ): Promise<boolean> {
   const [project] = await db
-    .select({ price: projects.price, userId: projects.userId })
+    .select({
+      price: projects.price,
+      userId: projects.userId,
+      organizationId: projects.organizationId,
+    })
     .from(projects)
     .where(eq(projects.id, projectId));
   if (!project) return false;
   if (project.price === 0) return true;
   if (!userId) return false;
   if (project.userId === userId) return true;
+  if (
+    project.organizationId &&
+    (await viewerIsOrgMember(userId, project.organizationId))
+  ) {
+    return true;
+  }
 
   const [purchase] = await db
     .select({ id: purchases.id })
