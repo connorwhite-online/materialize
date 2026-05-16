@@ -43,6 +43,14 @@ import { logError } from "@/lib/logger";
  *     GITHUB_DISPATCH_TOKEN — PAT with `actions:write` scope on
  *       the repo.
  *     GITHUB_REPO — `owner/repo` (e.g. "connor/materialize").
+ *
+ * Env optional:
+ *   SENTRY_TRIGGER_ENVIRONMENT — comma-separated allowlist of Sentry
+ *     environments that should dispatch a fix. Defaults to
+ *     `production`, which is the only deploy we want a real agent
+ *     run for. Set to `*` to disable filtering entirely (every event
+ *     dispatches regardless of environment tag). Events with no
+ *     environment field are skipped under the default.
  */
 
 export const dynamic = "force-dynamic";
@@ -138,6 +146,29 @@ export async function POST(request: Request) {
     (flattened.shortId as string | undefined) ??
     "unknown";
 
+  // Skip events from environments the agent shouldn't touch. The
+  // default is production-only because a fresh agent run costs
+  // real money + opens a real PR; dev errors should stay in the
+  // local terminal where the engineer can deal with them
+  // directly. `*` disables filtering for anyone running staging
+  // or preview triage. Events with no environment field are
+  // skipped under the default — Sentry's SDK populates the field
+  // automatically for real events, so absence is a signal the
+  // payload came from a hand-crafted test rather than a deploy.
+  const environment = readEnvironment(flattened);
+  const decision = decideEnvironmentDispatch(
+    environment,
+    process.env.SENTRY_TRIGGER_ENVIRONMENT
+  );
+  if (!decision.dispatch) {
+    return Response.json({
+      skipped: decision.reason,
+      environment: environment ?? null,
+      allowed: decision.allowed,
+      eventId,
+    });
+  }
+
   const repo = process.env.GITHUB_REPO;
   const token = process.env.GITHUB_DISPATCH_TOKEN;
   if (!repo || !token) {
@@ -191,6 +222,65 @@ export async function POST(request: Request) {
 }
 
 /**
+ * Read the environment tag off a flattened Sentry event. Sentry
+ * populates this from `Sentry.init({ environment })` — see
+ * `sentry.server.config.ts:25` where we set it from
+ * `VERCEL_ENV ?? NODE_ENV`. Returns null when missing or empty so
+ * the caller can apply its own default.
+ */
+export function readEnvironment(
+  flattened: Record<string, unknown>
+): string | null {
+  const raw = flattened.environment;
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  return trimmed.length === 0 ? null : trimmed;
+}
+
+export type EnvironmentDispatchDecision =
+  | { dispatch: true; allowed: string[] | "*" }
+  | {
+      dispatch: false;
+      allowed: string[] | "*";
+      reason: "non-allowed-environment" | "missing-environment";
+    };
+
+/**
+ * Resolve the SENTRY_TRIGGER_ENVIRONMENT config into a dispatch
+ * decision for one event.
+ *
+ * - `*` (wildcard) — always dispatch, even for events with no
+ *   environment tag.
+ * - missing config — defaults to `["production"]`.
+ * - comma-separated list — case-insensitive exact match against
+ *   `event.environment`.
+ *
+ * Returning a structured decision instead of a bare boolean lets
+ * the route surface "why was this skipped?" in the response body,
+ * which is what we read in tests and in the Sentry delivery log.
+ */
+export function decideEnvironmentDispatch(
+  environment: string | null,
+  rawConfig: string | undefined
+): EnvironmentDispatchDecision {
+  const config = rawConfig?.trim();
+  if (config === "*") {
+    return { dispatch: true, allowed: "*" };
+  }
+  const allowed = (config && config.length > 0 ? config : "production")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.length > 0);
+  if (!environment) {
+    return { dispatch: false, allowed, reason: "missing-environment" };
+  }
+  if (allowed.includes(environment.toLowerCase())) {
+    return { dispatch: true, allowed };
+  }
+  return { dispatch: false, allowed, reason: "non-allowed-environment" };
+}
+
+/**
  * Walk a Sentry webhook payload down to the most informative
  * event-like object. Returns the inner payload (with all the
  * fields the agent's prompt builder cares about) instead of the
@@ -201,7 +291,7 @@ export async function POST(request: Request) {
  * Falls back to the original object if none of the known wrappers
  * are present — manually-crafted test events come in flat.
  */
-function extractEventLike(
+export function extractEventLike(
   payload: Record<string, unknown>
 ): Record<string, unknown> {
   // Internal Integration sends issue + event under `data`
