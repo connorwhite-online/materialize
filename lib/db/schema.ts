@@ -102,6 +102,80 @@ export const printOrderStatusEnum = pgEnum("print_order_status", [
 
 // Tables
 
+// Organizations — GitHub-style team accounts. The source of truth for
+// org records and memberships is Clerk Organizations; the rows here
+// are a local mirror, kept in sync by `organization.*` and
+// `organizationMembership.*` events in
+// `app/api/webhooks/clerk/route.ts`. The mirror exists so that:
+//
+//   - Ownership queries (`WHERE organization_id = ?`) and member
+//     joins stay in SQL on the hot path instead of round-tripping to
+//     Clerk on every page render.
+//   - The auth helper in `lib/authorization.ts` can resolve
+//     "is this user allowed to write to this resource?" with a single
+//     query that covers both user-owned and org-owned rows.
+//   - Org profile pages have a stable slug to route on.
+//
+// Resources owned by an org carry `organizationId` set; user-owned
+// rows leave it null. The existing `userId` column on those resources
+// still tracks who created the row (for attribution / audit), but the
+// org becomes the owner for permission purposes when both are set.
+// The unified write check lives in `lib/authorization.ts`.
+
+export const organizations = pgTable("organizations", {
+  id: text("id").primaryKey(), // Clerk org id (org_…)
+  // URL-safe handle, mirrored from Clerk. Routed at `/o/[slug]`,
+  // parallel to `/u/[username]`. Unique across all orgs.
+  slug: text("slug").notNull().unique(),
+  name: text("name").notNull(),
+  imageUrl: text("image_url"),
+  // Free-form description shown on the org profile page. Not part of
+  // the Clerk record — owners edit it via our settings UI and we keep
+  // it in our DB so the profile page can render it without an extra
+  // Clerk roundtrip.
+  bio: text("bio"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+}, (table) => [
+  index("organizations_slug_idx").on(table.slug),
+]);
+
+// Org membership mirror — also kept in sync from Clerk webhooks. Role
+// is stored as plain text (not a pgEnum) so we can absorb Clerk
+// custom roles without an enum migration; `lib/authorization.ts`
+// treats anything other than "admin" as "member" for write-gating.
+// The webhook strips Clerk's `org:` role prefix on the way in
+// (`org:admin` -> `admin`).
+
+export const organizationMembers = pgTable("organization_members", {
+  id: text("id").primaryKey(), // Clerk membership id
+  organizationId: text("organization_id")
+    .notNull()
+    .references(() => organizations.id, { onDelete: "cascade" }),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  role: text("role").notNull().default("member"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+}, (table) => [
+  uniqueIndex("organization_members_org_user_uniq").on(
+    table.organizationId,
+    table.userId
+  ),
+  index("organization_members_user_idx").on(table.userId),
+]);
+
 export const users = pgTable("users", {
   id: text("id").primaryKey(), // Clerk user ID
   username: text("username").unique(),
@@ -164,6 +238,16 @@ export const files = pgTable("files", {
   userId: text("user_id")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
+  // Nullable. When set, the row is owned by an organization; the
+  // `userId` above is preserved as the creator (who uploaded), but
+  // `lib/authorization.ts` resolves write access against org
+  // membership instead of equality against `userId`. Existing rows
+  // and ad-hoc personal uploads leave this null. Cascade on org
+  // delete mirrors the user-delete cascade above.
+  organizationId: text("organization_id").references(
+    () => organizations.id,
+    { onDelete: "cascade" }
+  ),
   name: text("name").notNull(),
   description: text("description"),
   slug: text("slug").notNull().unique(),
@@ -203,6 +287,7 @@ export const files = pgTable("files", {
     .$onUpdate(() => new Date()),
 }, (table) => [
   index("files_user_id_idx").on(table.userId),
+  index("files_organization_id_idx").on(table.organizationId),
   index("files_status_idx").on(table.status),
   index("files_slug_idx").on(table.slug),
   index("files_flagged_at_idx").on(table.flaggedAt),
@@ -219,6 +304,13 @@ export const projects = pgTable("projects", {
   userId: text("user_id")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
+  // Nullable org owner — same semantics as files.organizationId. When
+  // set, all org members can read/write the project regardless of who
+  // created it. See lib/authorization.ts.
+  organizationId: text("organization_id").references(
+    () => organizations.id,
+    { onDelete: "cascade" }
+  ),
   name: text("name").notNull(),
   description: text("description"),
   slug: text("slug").notNull().unique(),
@@ -252,6 +344,7 @@ export const projects = pgTable("projects", {
     .$onUpdate(() => new Date()),
 }, (table) => [
   index("projects_user_id_idx").on(table.userId),
+  index("projects_organization_id_idx").on(table.organizationId),
   index("projects_status_idx").on(table.status),
   index("projects_slug_idx").on(table.slug),
 ]);
@@ -362,6 +455,15 @@ export const printOrders = pgTable("print_orders", {
   userId: text("user_id")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
+  // Nullable. When set, the order was placed on behalf of an
+  // organization — any member can see it on the org's orders tab.
+  // Personal orders (the existing default) leave it null. The owning
+  // `userId` above remains the buyer-of-record for the Stripe session
+  // and the email confirmations, even on org-attributed orders.
+  organizationId: text("organization_id").references(
+    () => organizations.id,
+    { onDelete: "set null" }
+  ),
   // Nullable: legacy single-item orders have this set directly;
   // multi-item orders (Phase 1+) leave it null and use printOrderItems.
   fileAssetId: uuid("file_asset_id")
@@ -452,6 +554,7 @@ export const printOrders = pgTable("print_orders", {
     .$onUpdate(() => new Date()),
 }, (table) => [
   index("print_orders_user_id_idx").on(table.userId),
+  index("print_orders_organization_id_idx").on(table.organizationId),
   uniqueIndex("print_orders_confirmation_token_uniq").on(
     table.confirmationToken
   ),
@@ -541,6 +644,11 @@ export const collections = pgTable("collections", {
   userId: text("user_id")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
+  // Nullable org owner — same semantics as files.organizationId.
+  organizationId: text("organization_id").references(
+    () => organizations.id,
+    { onDelete: "cascade" }
+  ),
   name: text("name").notNull(),
   slug: text("slug").notNull().unique(),
   description: text("description"),
@@ -555,6 +663,7 @@ export const collections = pgTable("collections", {
     .$onUpdate(() => new Date()),
 }, (table) => [
   index("collections_user_id_idx").on(table.userId),
+  index("collections_organization_id_idx").on(table.organizationId),
   index("collections_slug_idx").on(table.slug),
 ]);
 

@@ -58,6 +58,11 @@ import { redirect } from "next/navigation";
 import { nanoid } from "nanoid";
 import { createListingSchema } from "@/lib/validations/file";
 import {
+  canWriteCollection,
+  canWriteFile,
+  resolveOwnerForCreate,
+} from "@/lib/authorization";
+import {
   isIncomingAsset,
   type IncomingAsset,
 } from "@/lib/validations/incoming-asset";
@@ -182,6 +187,23 @@ async function checkByteHashCollision(
 export async function createFileListing(formData: FormData) {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
+
+  // Optional owner attribution — if the upload form's owner picker
+  // selected an organization, we record this row as org-owned so
+  // every member can read/write it. Empty/missing means "personal".
+  // resolveOwnerForCreate re-verifies viewer membership server-side
+  // so a tampered hidden input can't plant content under an org the
+  // user isn't actually in.
+  const rawOrgIdForCreate = formData.get("organizationId");
+  const requestedOrgId =
+    typeof rawOrgIdForCreate === "string" && rawOrgIdForCreate.length > 0
+      ? rawOrgIdForCreate
+      : null;
+  const ownerResolution = await resolveOwnerForCreate(userId, requestedOrgId);
+  if (!ownerResolution.ok) {
+    return { error: { name: ["You're not a member of that organization."] } };
+  }
+  const organizationId = ownerResolution.organizationId;
 
   // Design tags come as multiple form values
   const designTagValues = formData.getAll("designTags") as string[];
@@ -316,6 +338,7 @@ export async function createFileListing(formData: FormData) {
       .insert(files)
       .values({
         userId,
+        organizationId,
         name: parsed.data.name,
         description: parsed.data.description,
         slug,
@@ -376,18 +399,21 @@ export async function createFileListing(formData: FormData) {
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-|-$/g, "")}-${nanoid(6)}`;
+      // Inherit the file's owner — an org-attributed upload that
+      // creates a brand-new collection puts that collection under the
+      // same org. Otherwise it's personal.
       const [created] = await db
         .insert(collections)
-        .values({ userId, name: newCollectionName, slug })
+        .values({ userId, organizationId, name: newCollectionName, slug })
         .returning({ id: collections.id });
       targetCollectionId = created.id;
     } else if (rawCollectionId && rawCollectionId !== "none") {
-      // Verify ownership before linking
-      const [owned] = await db
-        .select({ id: collections.id })
-        .from(collections)
-        .where(and(eq(collections.id, rawCollectionId), eq(collections.userId, userId)));
-      if (owned) targetCollectionId = owned.id;
+      // Verify the viewer can write to this collection. Covers both
+      // personal collections (user-owned) and collections owned by an
+      // org the viewer belongs to — the unified check lives in
+      // lib/authorization.ts.
+      const check = await canWriteCollection(userId, rawCollectionId);
+      if (check.ok) targetCollectionId = check.resource.id;
     }
 
     if (targetCollectionId) {
@@ -412,12 +438,12 @@ export async function updateFileListing(fileId: string, formData: FormData) {
   if (!userId) throw new Error("Unauthorized");
 
   try {
-    const [file] = await db
-      .select()
-      .from(files)
-      .where(and(eq(files.id, fileId), eq(files.userId, userId)));
-
-    if (!file) throw new Error("Not found");
+    // Unified write check — passes for the personal owner OR any
+    // member of the org that owns the file. Same shape will absorb a
+    // project_collaborators check later without touching this caller.
+    const access = await canWriteFile(userId, fileId);
+    if (!access.ok) throw new Error("Not found");
+    const file = access.resource;
 
     const designTagValues = formData.getAll("designTags") as string[];
 
@@ -497,10 +523,13 @@ export async function publishFileListing(fileId: string) {
     const { userId } = await auth();
     if (!userId) throw new Error("Unauthorized");
 
+    const access = await canWriteFile(userId, fileId);
+    if (!access.ok) return;
+
     await db
       .update(files)
       .set({ status: "published" })
-      .where(and(eq(files.id, fileId), eq(files.userId, userId)));
+      .where(eq(files.id, fileId));
 
     revalidatePath("/dashboard/uploads");
     revalidatePath("/files");
@@ -514,10 +543,13 @@ export async function archiveFileListing(fileId: string) {
     const { userId } = await auth();
     if (!userId) throw new Error("Unauthorized");
 
+    const access = await canWriteFile(userId, fileId);
+    if (!access.ok) return;
+
     await db
       .update(files)
       .set({ status: "archived" })
-      .where(and(eq(files.id, fileId), eq(files.userId, userId)));
+      .where(eq(files.id, fileId));
 
     revalidatePath("/dashboard/uploads");
     revalidatePath("/files");
@@ -562,16 +594,9 @@ export async function deleteFileListing(
     const { userId } = await auth();
     if (!userId) return { error: "Unauthorized" };
 
-    const [file] = await db
-      .select({
-        id: files.id,
-        slug: files.slug,
-        userId: files.userId,
-      })
-      .from(files)
-      .where(and(eq(files.id, fileId), eq(files.userId, userId)));
-
-    if (!file) return { error: "File not found" };
+    const access = await canWriteFile(userId, fileId);
+    if (!access.ok) return { error: "File not found" };
+    const file = access.resource;
 
     const directBuyers = await db
       .select({ id: purchases.id })
@@ -869,12 +894,9 @@ export async function toggleFileVisibility(fileId: string) {
     const { userId } = await auth();
     if (!userId) throw new Error("Unauthorized");
 
-    const [file] = await db
-      .select({ visibility: files.visibility })
-      .from(files)
-      .where(and(eq(files.id, fileId), eq(files.userId, userId)));
-
-    if (!file) return { error: "File not found" };
+    const access = await canWriteFile(userId, fileId);
+    if (!access.ok) return { error: "File not found" };
+    const file = access.resource;
 
     const newVisibility = file.visibility === "public" ? "private" : "public";
 
