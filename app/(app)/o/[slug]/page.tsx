@@ -194,8 +194,8 @@ export default async function OrganizationProfilePage(props: {
           )}
           {!isMember && (
             <p className="mt-2 text-xs text-muted-foreground">
-              You're viewing the public profile. Members see this org's
-              private files, projects, and collections too.
+              You&apos;re viewing the public profile. Members see this
+              org&apos;s private files, projects, and collections too.
             </p>
           )}
         </div>

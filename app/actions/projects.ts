@@ -18,7 +18,6 @@ import {
   projects,
   projectFiles,
   projectPhotos,
-  files,
   purchases,
 } from "@/lib/db/schema";
 import { eq, and, inArray, sql } from "drizzle-orm";

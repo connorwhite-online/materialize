@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useOrganization, useOrganizationList, useUser } from "@clerk/nextjs";
 import {
   Select,
@@ -26,9 +26,10 @@ interface OwnerPickerProps {
    */
   label?: string;
   /**
-   * Optional fixed default. Defaults to the user's currently active
-   * org if any — so a user who switched into an org via the nav
-   * automatically creates new content under that org.
+   * Optional fixed default. When omitted, the picker defaults to
+   * whatever org the viewer has active in Clerk — so a user who
+   * switched into an org via the nav automatically creates new
+   * content under that org.
    */
   defaultOrgId?: string | null;
 }
@@ -44,6 +45,13 @@ interface OwnerPickerProps {
  * truth: when a non-personal option is picked, we ask Clerk to
  * `setActive` on the matching membership so the rest of the app
  * (nav switcher, scoped queries, etc.) sees the change.
+ *
+ * The active-org sync is derived rather than effect-driven: when the
+ * user hasn't touched the picker yet (override === null), the
+ * displayed value tracks `organization` straight from Clerk's hook.
+ * Once the user makes a manual selection we lock it in via the
+ * `override` state so a downstream `setActive` doesn't fight a fresh
+ * user choice on the next render.
  */
 export function OwnerPicker({
   name = "organizationId",
@@ -57,22 +65,19 @@ export function OwnerPicker({
   });
 
   const memberships = userMemberships?.data ?? [];
-  // `defaultOrgId` wins; otherwise fall back to whatever org the
-  // user has active. Both can be null / undefined, in which case we
-  // default to personal.
-  const initial =
-    defaultOrgId !== undefined
-      ? defaultOrgId
-      : organization?.id ?? null;
-  const [value, setValue] = useState<string>(initial ?? PERSONAL_VALUE);
+  const [override, setOverride] = useState<string | null>(null);
 
-  // If the user switches their active org elsewhere in the app
-  // while this form is mounted, sync the local select state so the
-  // visible owner matches the rest of the chrome.
-  useEffect(() => {
-    if (defaultOrgId !== undefined) return;
-    setValue(organization?.id ?? PERSONAL_VALUE);
-  }, [organization?.id, defaultOrgId]);
+  // Render-time resolution order:
+  //   1. Manual selection wins (locks in once the user touches the
+  //      picker; survives later changes to Clerk's active org).
+  //   2. `defaultOrgId` if the caller supplied one.
+  //   3. Whichever org is currently active in Clerk.
+  //   4. Personal as the final fallback.
+  const value =
+    override ??
+    (defaultOrgId !== undefined
+      ? defaultOrgId ?? PERSONAL_VALUE
+      : organization?.id ?? PERSONAL_VALUE);
 
   if (!userLoaded || !user) {
     // Auth still settling — render the hidden input only so the
@@ -89,7 +94,7 @@ export function OwnerPicker({
   const handleChange = (next: string | null) => {
     // Base UI's Select can emit null on clear; collapse to personal.
     const resolved = next ?? PERSONAL_VALUE;
-    setValue(resolved);
+    setOverride(resolved);
     // Best-effort sync with the rest of the chrome. We don't await
     // it — the form submission carries the value via the hidden
     // input regardless. Failures here just mean the nav switcher

@@ -149,7 +149,6 @@ export async function addFileToCollection(collectionId: string, fileId: string) 
 
     const access = await canWriteCollection(userId, collectionId);
     if (!access.ok) return { error: "Collection not found" };
-    const collection = access.resource;
 
     await db.insert(collectionItems).values({
       collectionId,
@@ -207,7 +206,6 @@ export async function removeFileFromCollection(collectionId: string, fileId: str
 
     const access = await canWriteCollection(userId, collectionId);
     if (!access.ok) return { error: "Collection not found" };
-    const collection = access.resource;
 
     await db
       .delete(collectionItems)
