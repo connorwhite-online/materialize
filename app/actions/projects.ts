@@ -18,7 +18,6 @@ import {
   projects,
   projectFiles,
   projectPhotos,
-  files,
   purchases,
 } from "@/lib/db/schema";
 import { eq, and, inArray, sql } from "drizzle-orm";
@@ -32,19 +31,29 @@ import {
 } from "@/lib/validations/project";
 import { buildListingSlug } from "@/lib/filenames";
 import { logError, isRedirectError } from "@/lib/logger";
-
-async function assertUserOwnsAllFiles(userId: string, fileIds: string[]) {
-  if (fileIds.length === 0) return false;
-  const owned = await db
-    .select({ id: files.id })
-    .from(files)
-    .where(and(inArray(files.id, fileIds), eq(files.userId, userId)));
-  return owned.length === fileIds.length;
-}
+import {
+  canWriteProject,
+  resolveOwnerForCreate,
+  viewerCanAttachAllFiles,
+} from "@/lib/authorization";
 
 export async function createProject(formData: FormData) {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
+
+  // Optional org owner from the create form's owner picker. Resolved
+  // against viewer membership server-side so a tampered value can't
+  // attribute the project to an arbitrary org. See lib/authorization.ts.
+  const rawOrgIdForCreate = formData.get("organizationId");
+  const requestedOrgId =
+    typeof rawOrgIdForCreate === "string" && rawOrgIdForCreate.length > 0
+      ? rawOrgIdForCreate
+      : null;
+  const ownerResolution = await resolveOwnerForCreate(userId, requestedOrgId);
+  if (!ownerResolution.ok) {
+    return { error: { name: ["You're not a member of that organization."] } };
+  }
+  const organizationId = ownerResolution.organizationId;
 
   const designTagValues = formData.getAll("designTags") as string[];
   const fileIdValues = formData.getAll("fileIds") as string[];
@@ -66,7 +75,11 @@ export async function createProject(formData: FormData) {
     return { error: parsed.error.flatten().fieldErrors };
   }
 
-  if (!(await assertUserOwnsAllFiles(userId, parsed.data.fileIds))) {
+  // Files can be attached if the viewer owns them OR they belong to
+  // an org the viewer is in. This means an org-owned project can
+  // bundle files from any of the org's members without a separate
+  // transfer step.
+  if (!(await viewerCanAttachAllFiles(userId, parsed.data.fileIds))) {
     return {
       error: { fileIds: ["One or more files are not yours."] },
     };
@@ -81,6 +94,7 @@ export async function createProject(formData: FormData) {
       .insert(projects)
       .values({
         userId,
+        organizationId,
         name: parsed.data.name,
         description: parsed.data.description,
         slug,
@@ -119,12 +133,9 @@ export async function updateProject(projectId: string, formData: FormData) {
   if (!userId) throw new Error("Unauthorized");
 
   try {
-    const [project] = await db
-      .select()
-      .from(projects)
-      .where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
-
-    if (!project) return { error: { name: ["Not found"] } };
+    const access = await canWriteProject(userId, projectId);
+    if (!access.ok) return { error: { name: ["Not found"] } };
+    const project = access.resource;
 
     const designTagValues = formData.getAll("designTags") as string[];
 
@@ -225,13 +236,11 @@ export async function addFilesToProject(
     const sanitized = Array.from(new Set(fileIds));
     if (sanitized.length === 0) return { success: true };
 
-    const [project] = await db
-      .select({ id: projects.id, slug: projects.slug })
-      .from(projects)
-      .where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
-    if (!project) return { error: "Project not found" };
+    const access = await canWriteProject(userId, projectId);
+    if (!access.ok) return { error: "Project not found" };
+    const project = access.resource;
 
-    if (!(await assertUserOwnsAllFiles(userId, sanitized))) {
+    if (!(await viewerCanAttachAllFiles(userId, sanitized))) {
       return { error: "One or more files are not yours." };
     }
 
@@ -290,11 +299,9 @@ export async function removeFileFromProject(
     const { userId } = await auth();
     if (!userId) return { error: "Unauthorized" };
 
-    const [project] = await db
-      .select({ id: projects.id, slug: projects.slug })
-      .from(projects)
-      .where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
-    if (!project) return { error: "Project not found" };
+    const access = await canWriteProject(userId, projectId);
+    if (!access.ok) return { error: "Project not found" };
+    const project = access.resource;
 
     await db
       .delete(projectFiles)
@@ -322,11 +329,9 @@ export async function reorderProjectFiles(
     const { userId } = await auth();
     if (!userId) return { error: "Unauthorized" };
 
-    const [project] = await db
-      .select({ id: projects.id, slug: projects.slug })
-      .from(projects)
-      .where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
-    if (!project) return { error: "Project not found" };
+    const access = await canWriteProject(userId, projectId);
+    if (!access.ok) return { error: "Project not found" };
+    const project = access.resource;
 
     // Dedupe + cap to MAX_PROJECT_FILES so a malicious caller can't
     // submit a giant ordered list. Keep first occurrence ordering.
@@ -375,10 +380,13 @@ export async function publishProject(projectId: string) {
     const { userId } = await auth();
     if (!userId) throw new Error("Unauthorized");
 
+    const access = await canWriteProject(userId, projectId);
+    if (!access.ok) return;
+
     await db
       .update(projects)
       .set({ status: "published" })
-      .where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
+      .where(eq(projects.id, projectId));
 
     revalidatePath("/dashboard");
   } catch (error) {
@@ -391,10 +399,13 @@ export async function archiveProject(projectId: string) {
     const { userId } = await auth();
     if (!userId) throw new Error("Unauthorized");
 
+    const access = await canWriteProject(userId, projectId);
+    if (!access.ok) return;
+
     await db
       .update(projects)
       .set({ status: "archived" })
-      .where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
+      .where(eq(projects.id, projectId));
 
     revalidatePath("/dashboard");
   } catch (error) {
@@ -421,16 +432,9 @@ export async function deleteProject(
     const { userId } = await auth();
     if (!userId) return { error: "Unauthorized" };
 
-    const [project] = await db
-      .select({
-        id: projects.id,
-        slug: projects.slug,
-        userId: projects.userId,
-      })
-      .from(projects)
-      .where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
-
-    if (!project) return { error: "Project not found" };
+    const access = await canWriteProject(userId, projectId);
+    if (!access.ok) return { error: "Project not found" };
+    const project = access.resource;
 
     const buyerRows = await db
       .select({ id: purchases.id })
@@ -472,12 +476,9 @@ export async function toggleProjectVisibility(projectId: string) {
     const { userId } = await auth();
     if (!userId) throw new Error("Unauthorized");
 
-    const [project] = await db
-      .select({ visibility: projects.visibility })
-      .from(projects)
-      .where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
-
-    if (!project) return { error: "Project not found" };
+    const access = await canWriteProject(userId, projectId);
+    if (!access.ok) return { error: "Project not found" };
+    const project = access.resource;
 
     const newVisibility =
       project.visibility === "public" ? "private" : "public";

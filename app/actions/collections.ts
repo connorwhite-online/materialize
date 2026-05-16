@@ -2,12 +2,21 @@
 
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-import { collections, collectionItems, projects } from "@/lib/db/schema";
-import { eq, and, desc } from "drizzle-orm";
+import {
+  collections,
+  collectionItems,
+  organizationMembers,
+  projects,
+} from "@/lib/db/schema";
+import { eq, and, desc, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { logError } from "@/lib/logger";
+import {
+  canWriteCollection,
+  resolveOwnerForCreate,
+} from "@/lib/authorization";
 
 const collectionSchema = z.object({
   name: z.string().min(1, "Name is required").max(100),
@@ -23,16 +32,47 @@ const collectionSchema = z.object({
     ),
 });
 
+/**
+ * Lists every collection the viewer can add things to — personal
+ * collections AND collections owned by any org the viewer is a member
+ * of. Used by the "Add to collection" dropdown in upload flows; the
+ * dropdown shows them all so a user can drop a new upload into either
+ * personal or team-shared curation lists in one click.
+ */
 export async function listMyCollections(): Promise<
-  Array<{ id: string; name: string }>
+  Array<{ id: string; name: string; organizationId: string | null }>
 > {
   try {
     const { userId } = await auth();
     if (!userId) return [];
+    const myOrgIds = (
+      await db
+        .select({ organizationId: organizationMembers.organizationId })
+        .from(organizationMembers)
+        .where(eq(organizationMembers.userId, userId))
+    ).map((r) => r.organizationId);
+
+    const ownerFilter =
+      myOrgIds.length > 0
+        ? or(
+            eq(collections.userId, userId),
+            // drizzle's `inArray` would work but `or` keeps the SQL
+            // symmetrical with the userId branch and the planner can
+            // hit the same composite index either way.
+            ...myOrgIds.map((orgId) =>
+              eq(collections.organizationId, orgId)
+            )
+          )
+        : eq(collections.userId, userId);
+
     const rows = await db
-      .select({ id: collections.id, name: collections.name })
+      .select({
+        id: collections.id,
+        name: collections.name,
+        organizationId: collections.organizationId,
+      })
       .from(collections)
-      .where(eq(collections.userId, userId))
+      .where(ownerFilter)
       .orderBy(desc(collections.updatedAt));
     return rows;
   } catch (error) {
@@ -44,6 +84,17 @@ export async function listMyCollections(): Promise<
 export async function createCollection(formData: FormData) {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
+
+  const rawOrgIdForCreate = formData.get("organizationId");
+  const requestedOrgId =
+    typeof rawOrgIdForCreate === "string" && rawOrgIdForCreate.length > 0
+      ? rawOrgIdForCreate
+      : null;
+  const ownerResolution = await resolveOwnerForCreate(userId, requestedOrgId);
+  if (!ownerResolution.ok) {
+    return { error: { name: ["You're not a member of that organization."] } };
+  }
+  const organizationId = ownerResolution.organizationId;
 
   const parsed = collectionSchema.safeParse({
     name: formData.get("name"),
@@ -66,6 +117,7 @@ export async function createCollection(formData: FormData) {
       .insert(collections)
       .values({
         userId,
+        organizationId,
         name: parsed.data.name,
         description: parsed.data.description,
         visibility: parsed.data.visibility ?? "public",
@@ -95,12 +147,8 @@ export async function addFileToCollection(collectionId: string, fileId: string) 
     const { userId } = await auth();
     if (!userId) return { error: "Unauthorized" };
 
-    const [collection] = await db
-      .select()
-      .from(collections)
-      .where(and(eq(collections.id, collectionId), eq(collections.userId, userId)));
-
-    if (!collection) return { error: "Collection not found" };
+    const access = await canWriteCollection(userId, collectionId);
+    if (!access.ok) return { error: "Collection not found" };
 
     await db.insert(collectionItems).values({
       collectionId,
@@ -124,13 +172,9 @@ export async function addProjectToCollection(
     const { userId } = await auth();
     if (!userId) return { error: "Unauthorized" };
 
-    const [collection] = await db
-      .select()
-      .from(collections)
-      .where(
-        and(eq(collections.id, collectionId), eq(collections.userId, userId))
-      );
-    if (!collection) return { error: "Collection not found" };
+    const access = await canWriteCollection(userId, collectionId);
+    if (!access.ok) return { error: "Collection not found" };
+    const collection = access.resource;
 
     // Verify project exists (any user's published project can be
     // collected — same as files. Visibility check happens at render).
@@ -160,12 +204,8 @@ export async function removeFileFromCollection(collectionId: string, fileId: str
     const { userId } = await auth();
     if (!userId) return { error: "Unauthorized" };
 
-    const [collection] = await db
-      .select()
-      .from(collections)
-      .where(and(eq(collections.id, collectionId), eq(collections.userId, userId)));
-
-    if (!collection) return { error: "Collection not found" };
+    const access = await canWriteCollection(userId, collectionId);
+    if (!access.ok) return { error: "Collection not found" };
 
     await db
       .delete(collectionItems)
@@ -192,13 +232,9 @@ export async function removeProjectFromCollection(
     const { userId } = await auth();
     if (!userId) return { error: "Unauthorized" };
 
-    const [collection] = await db
-      .select()
-      .from(collections)
-      .where(
-        and(eq(collections.id, collectionId), eq(collections.userId, userId))
-      );
-    if (!collection) return { error: "Collection not found" };
+    const access = await canWriteCollection(userId, collectionId);
+    if (!access.ok) return { error: "Collection not found" };
+    const collection = access.resource;
 
     await db
       .delete(collectionItems)
@@ -232,13 +268,9 @@ export async function updateCollection(
     const { userId } = await auth();
     if (!userId) return { error: "Unauthorized" };
 
-    const [collection] = await db
-      .select({ id: collections.id, slug: collections.slug })
-      .from(collections)
-      .where(
-        and(eq(collections.id, collectionId), eq(collections.userId, userId))
-      );
-    if (!collection) return { error: "Collection not found" };
+    const access = await canWriteCollection(userId, collectionId);
+    if (!access.ok) return { error: "Collection not found" };
+    const collection = access.resource;
 
     const parsed = updateCollectionSchema.safeParse({
       name: formData.get("name"),
@@ -272,12 +304,9 @@ export async function toggleCollectionVisibility(collectionId: string) {
     const { userId } = await auth();
     if (!userId) return { error: "Unauthorized" };
 
-    const [collection] = await db
-      .select()
-      .from(collections)
-      .where(and(eq(collections.id, collectionId), eq(collections.userId, userId)));
-
-    if (!collection) return { error: "Collection not found" };
+    const access = await canWriteCollection(userId, collectionId);
+    if (!access.ok) return { error: "Collection not found" };
+    const collection = access.resource;
 
     const newVisibility = collection.visibility === "public" ? "private" : "public";
 
@@ -299,9 +328,12 @@ export async function deleteCollection(collectionId: string) {
     const { userId } = await auth();
     if (!userId) return { error: "Unauthorized" };
 
+    const access = await canWriteCollection(userId, collectionId);
+    if (!access.ok) return { error: "Collection not found" };
+
     await db
       .delete(collections)
-      .where(and(eq(collections.id, collectionId), eq(collections.userId, userId)));
+      .where(eq(collections.id, collectionId));
 
     revalidatePath("/dashboard/uploads");
     return { success: true };

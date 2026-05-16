@@ -45,9 +45,25 @@ vi.mock("@/lib/db", () => ({
         mockFrom(...args);
         mockSelect();
         return {
-          where: () => [
-            { id: "test-file-id", userId: "test-user-id", slug: "test-slug" },
-          ],
+          // Bare .where() — `canWriteFile` calls .limit(1) after,
+          // so we make the returned array chainable. The same path
+          // serves the legacy direct `where()` callers that consume
+          // the array directly via destructuring.
+          where: () => {
+            const row = {
+              id: "test-file-id",
+              userId: "test-user-id",
+              slug: "test-slug",
+              organizationId: null as string | null,
+              visibility: "public" as const,
+              status: "published" as const,
+              price: 0,
+            };
+            const arr: typeof row[] = [row];
+            return Object.assign(arr, {
+              limit: () => arr,
+            });
+          },
           innerJoin: () => ({
             where: () => {
               // Dedup checks — no collisions. Both with and without

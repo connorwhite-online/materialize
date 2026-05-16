@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { createCollection } from "@/app/actions/collections";
+import { OwnerPicker } from "@/components/orgs/owner-picker";
 
 interface NewCollectionDialogProps {
   open: boolean;
@@ -56,11 +57,15 @@ export function NewCollectionDialog({
     onOpenChange(false);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (pending) return;
     setError(null);
-    const formData = new FormData();
+    // Serialize the live <form> so OwnerPicker's hidden input lands
+    // in the payload alongside the controlled fields. We still set
+    // the controlled fields explicitly since their values live in
+    // React state, not the DOM input.
+    const formData = new FormData(e.currentTarget);
     formData.set("name", name);
     formData.set("description", description);
     formData.set("visibility", visibility);
@@ -100,6 +105,7 @@ export function NewCollectionDialog({
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
+          <OwnerPicker label="Create as" />
           <div className="space-y-1.5">
             <Label htmlFor="new-collection-name" className="text-xs">
               Name

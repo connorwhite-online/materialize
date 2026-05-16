@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { createProject } from "@/app/actions/projects";
+import { OwnerPicker } from "@/components/orgs/owner-picker";
 import {
   LICENSES,
   LICENSE_ORDER,
@@ -66,6 +67,8 @@ export function ProjectCreateForm({
           <CardTitle className="text-base">Project details</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <OwnerPicker label="Create as" />
+
           <div>
             <Label htmlFor="name">Name</Label>
             <Input id="name" name="name" required placeholder="Chess Set" />

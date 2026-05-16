@@ -32,6 +32,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { UploadPreview } from "./upload-preview";
+import { OwnerPicker } from "@/components/orgs/owner-picker";
 
 interface FileMetadataFormProps {
   /** In-memory file picked by the user — uploaded to R2 on form submit. */
@@ -215,6 +216,11 @@ export function FileMetadataForm({
           <CardTitle className="text-base">Details</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* "Create as" selector — picks personal vs. an org owner.
+              Renders only when the user has org memberships; falls
+              through to a hidden personal value otherwise. */}
+          <OwnerPicker label="Create as" />
+
           <div>
             <Label htmlFor="name">Name</Label>
             <Input id="name" name="name" required placeholder="My 3D Model" />
