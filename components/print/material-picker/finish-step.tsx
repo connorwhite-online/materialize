@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
+import Image from "next/image";
 import { ChevronRight } from "@/components/icons/chevron-right";
 import type { EnrichedQuote } from "./types";
 
@@ -147,14 +148,14 @@ export function FinishStep({
             onClick={() => onPick(card.finishGroupId)}
             className="flex items-start gap-3 rounded-xl border border-border bg-card p-3 text-left transition-colors hover:border-primary/40"
           >
-            <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border bg-muted/60">
+            <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border bg-muted/60">
               {card.finishGroupImage && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
+                <Image
                   src={resolveCatalogImage(card.finishGroupImage)}
                   alt=""
-                  loading="lazy"
-                  className="h-full w-full object-cover"
+                  fill
+                  sizes="56px"
+                  className="object-cover"
                 />
               )}
             </div>

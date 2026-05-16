@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Image from "next/image";
 import { AnimatePresence, motion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -461,14 +462,14 @@ function MaterialCardButton({
       // clipped on the right edge.
       className="flex w-full min-w-0 items-start gap-3 rounded-xl border border-border bg-card p-3 text-left transition-colors enabled:hover:border-primary/40 disabled:cursor-default"
     >
-      <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-muted/60">
+      <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-muted/60">
         {card.materialImage && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <Image
             src={resolveCatalogImage(card.materialImage)}
             alt=""
-            loading="lazy"
-            className="h-full w-full object-cover"
+            fill
+            sizes="56px"
+            className="object-cover"
           />
         )}
       </div>
