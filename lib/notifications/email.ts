@@ -5,8 +5,9 @@ import { sendEmail } from "@/lib/email/client";
 import { NotificationEmail } from "@/lib/email/templates/notification";
 import { logError } from "@/lib/logger";
 import type {
-  CommentOnListingPayload,
   BuildOnFilePayload,
+  CollaboratorAddedToProjectPayload,
+  CommentOnListingPayload,
   NotificationType,
   PrintOnFilePayload,
   PurchaseOnListingPayload,
@@ -20,7 +21,8 @@ type AnyEmailPayload =
   | BuildOnFilePayload
   | PrintOnFilePayload
   | PurchaseOnListingPayload
-  | RefundOnListingPayload;
+  | RefundOnListingPayload
+  | CollaboratorAddedToProjectPayload;
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
@@ -103,6 +105,8 @@ function buildHeadline(
       return `${actor} bought your ${targetWord} ${listing}`;
     case "refund_on_listing":
       return `Refund issued on your ${targetWord} ${listing}`;
+    case "collaborator_added_to_project":
+      return `${actor} added you as a collaborator on ${listing}`;
   }
 }
 
@@ -129,6 +133,11 @@ function buildHref(
     // creator to their full sales view is more useful than the
     // listing page they already know about.
     return `${APP_URL}/dashboard/earnings`;
+  }
+  if (type === "collaborator_added_to_project") {
+    // Land straight on the project page — that's the whole point of
+    // the invite.
+    return base;
   }
   const commentId =
     type === "comment_on_listing"

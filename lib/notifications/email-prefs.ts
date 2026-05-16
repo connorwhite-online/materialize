@@ -12,6 +12,7 @@ export type EmailPrefMap = {
   print_on_file?: boolean;
   purchase_on_listing?: boolean;
   refund_on_listing?: boolean;
+  collaborator_added_to_project?: boolean;
 };
 
 /**

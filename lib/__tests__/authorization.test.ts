@@ -27,6 +27,12 @@ let orgMembersRows: Array<{
   role: string;
 }> = [];
 let orgsRows: Array<{ id: string; slug: string; name: string; imageUrl: string | null }> = [];
+let projectCollabRows: Array<{
+  id: string;
+  projectId: string;
+  userId: string;
+  role: string;
+}> = [];
 
 function chainable<T>(arr: T[]) {
   return Object.assign(arr, { limit: () => arr });
@@ -44,6 +50,8 @@ vi.mock("@/lib/db", () => ({
             if (table.__name === "organization_members")
               return chainable(orgMembersRows);
             if (table.__name === "organizations") return chainable(orgsRows);
+            if (table.__name === "project_collaborators")
+              return chainable(projectCollabRows);
             return chainable([] as unknown[]);
           },
           innerJoin: () => handler,
@@ -87,12 +95,20 @@ vi.mock("@/lib/db/schema", () => ({
     role: "role",
   },
   organizations: { __name: "organizations", id: "id", slug: "slug" },
+  projectCollaborators: {
+    __name: "project_collaborators",
+    id: "id",
+    projectId: "project_id",
+    userId: "user_id",
+    role: "role",
+  },
 }));
 
 import {
   canWriteFile,
   canWriteProject,
   isOrgMember,
+  isProjectCollaborator,
   resolveOwnerForCreate,
   viewerCanAttachAllFiles,
 } from "../authorization";
@@ -103,6 +119,7 @@ beforeEach(() => {
   collectionsRows = [];
   orgMembersRows = [];
   orgsRows = [];
+  projectCollabRows = [];
 });
 
 describe("isOrgMember", () => {
@@ -267,5 +284,69 @@ describe("viewerCanAttachAllFiles", () => {
     filesRows = [{ id: "f1", userId: "user_1", organizationId: null }];
     const result = await viewerCanAttachAllFiles("user_1", ["f1", "f2-missing"]);
     expect(result).toBe(false);
+  });
+});
+
+describe("isProjectCollaborator", () => {
+  it("returns false for anonymous viewers without a DB hit", async () => {
+    const result = await isProjectCollaborator(null, "proj_1");
+    expect(result).toEqual({ collaborator: false, role: null });
+  });
+
+  it("returns true with role when the row exists", async () => {
+    projectCollabRows = [
+      { id: "pc_1", projectId: "proj_1", userId: "user_1", role: "editor" },
+    ];
+    const result = await isProjectCollaborator("user_1", "proj_1");
+    expect(result).toEqual({ collaborator: true, role: "editor" });
+  });
+
+  it("returns false when the user is not a collaborator", async () => {
+    projectCollabRows = [];
+    const result = await isProjectCollaborator("user_1", "proj_1");
+    expect(result.collaborator).toBe(false);
+  });
+});
+
+describe("canWriteProject collaborator branch", () => {
+  it("allows a project collaborator when owner / org checks fail", async () => {
+    projectsRows = [
+      { id: "proj_1", userId: "user_owner", organizationId: null },
+    ];
+    projectCollabRows = [
+      { id: "pc_1", projectId: "proj_1", userId: "user_guest", role: "editor" },
+    ];
+    const result = await canWriteProject("user_guest", "proj_1");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.viaOrg).toBe(false);
+      expect(result.viaCollaborator).toBe(true);
+    }
+  });
+
+  it("prefers the owner branch over collaborator (no viaCollaborator flag for owner)", async () => {
+    projectsRows = [
+      { id: "proj_1", userId: "user_owner", organizationId: null },
+    ];
+    projectCollabRows = [
+      // Even if a stale collaborator row exists for the owner, the
+      // user-equality check fires first.
+      { id: "pc_1", projectId: "proj_1", userId: "user_owner", role: "editor" },
+    ];
+    const result = await canWriteProject("user_owner", "proj_1");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.viaCollaborator).toBeFalsy();
+    }
+  });
+
+  it("rejects a non-collaborator stranger on a personal project", async () => {
+    projectsRows = [
+      { id: "proj_1", userId: "user_owner", organizationId: null },
+    ];
+    projectCollabRows = [];
+    const result = await canWriteProject("user_stranger", "proj_1");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("forbidden");
   });
 });

@@ -190,6 +190,8 @@ function buildMessage(n: Row): string {
       return "bought";
     case "refund_on_listing":
       return "was refunded for";
+    case "collaborator_added_to_project":
+      return "added you as a collaborator on";
   }
 }
 

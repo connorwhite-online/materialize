@@ -218,6 +218,7 @@ export const users = pgTable("users", {
     reply_to_comment?: boolean;
     build_on_file?: boolean;
     print_on_file?: boolean;
+    collaborator_added_to_project?: boolean;
   }>(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
@@ -367,6 +368,58 @@ export const projectFiles = pgTable("project_files", {
   uniqueIndex("project_files_project_file_uniq").on(
     table.projectId,
     table.fileId
+  ),
+]);
+
+// Per-project ad-hoc collaborators. Orthogonal to org ownership:
+// an org-owned project ALREADY grants write access to every org
+// member; this table lets the owner pull in an outside user (a
+// freelancer, a teammate from another org, a friend helping on a
+// personal project) without going through the full org-membership
+// flow.
+//
+// Authorization branch lives in `lib/authorization.ts.canWriteProject`
+// — a viewer passes if any of: user_id equality, org membership of
+// the owning org, OR a row in this table. Read entitlement
+// (lib/entitlement.ts.userOwnsProject) follows the same shape so a
+// collaborator can download project files transitively.
+//
+// V1 is direct-add: the project owner picks a username and the
+// collaborator immediately gains access (plus a notification). No
+// invite/accept ceremony — we can graduate to that when there's
+// demand, mirroring how org invites already work.
+
+export const projectCollaborators = pgTable("project_collaborators", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  // Role is plain text + a CHECK (declared in the migration) so we
+  // can add future roles (viewer, maintainer) without an enum
+  // migration. canWriteProject treats anything other than "viewer"
+  // as a write-capable collaborator.
+  role: text("role").notNull().default("editor"),
+  // Audit trail — who added this collaborator. Useful when an owner
+  // wants to know "who invited Bob to this project" and for
+  // surfacing the inviter on the notification email later.
+  addedBy: text("added_by")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+}, (table) => [
+  uniqueIndex("project_collaborators_project_user_uniq").on(
+    table.projectId,
+    table.userId
+  ),
+  index("project_collaborators_user_idx").on(table.userId),
+  check(
+    "project_collaborators_role_check",
+    sql`${table.role} IN ('editor', 'viewer')`
   ),
 ]);
 

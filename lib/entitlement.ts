@@ -7,6 +7,7 @@ import {
   organizationMembers,
   printOrders,
   printOrderItems,
+  projectCollaborators,
   projects,
   projectFiles,
   purchases,
@@ -96,6 +97,24 @@ export async function ownsLoadedFile(
     return true;
   }
 
+  // Project-collaborator transitive read access: if the viewer is a
+  // collaborator on ANY project that bundles this file, they get
+  // download access to it. Mirrors the existing "buyer of project
+  // also gets files" branch below — same join shape, different
+  // membership table.
+  const [viaCollaboration] = await db
+    .select({ id: projectCollaborators.id })
+    .from(projectCollaborators)
+    .innerJoin(projectFiles, eq(projectFiles.projectId, projectCollaborators.projectId))
+    .where(
+      and(
+        eq(projectCollaborators.userId, userId),
+        eq(projectFiles.fileId, file.id)
+      )
+    )
+    .limit(1);
+  if (viaCollaboration) return true;
+
   const [direct] = await db
     .select({ id: purchases.id })
     .from(purchases)
@@ -154,6 +173,20 @@ export async function userOwnsProject(
   ) {
     return true;
   }
+
+  // Direct collaborator on this specific project — full download
+  // access. Same shape as the org-member branch above.
+  const [collaboration] = await db
+    .select({ id: projectCollaborators.id })
+    .from(projectCollaborators)
+    .where(
+      and(
+        eq(projectCollaborators.userId, userId),
+        eq(projectCollaborators.projectId, projectId)
+      )
+    )
+    .limit(1);
+  if (collaboration) return true;
 
   const [purchase] = await db
     .select({ id: purchases.id })

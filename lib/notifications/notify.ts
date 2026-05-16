@@ -6,8 +6,9 @@ import { logError } from "@/lib/logger";
 import { sendNotificationEmail } from "./email";
 import { shouldSendEmail } from "./email-prefs";
 import type {
-  CommentOnListingPayload,
   BuildOnFilePayload,
+  CollaboratorAddedToProjectPayload,
+  CommentOnListingPayload,
   NotificationType,
   PrintOnFilePayload,
   PurchaseOnListingPayload,
@@ -43,6 +44,7 @@ async function insert(
     | PrintOnFilePayload
     | PurchaseOnListingPayload
     | RefundOnListingPayload
+    | CollaboratorAddedToProjectPayload
 ) {
   if (recipientId === actorId) return;
   try {
@@ -126,6 +128,18 @@ export async function notifyRefundOnListing(
     recipientId,
     payload.actor.id,
     "refund_on_listing",
+    payload
+  );
+}
+
+export async function notifyCollaboratorAddedToProject(
+  recipientId: string,
+  payload: CollaboratorAddedToProjectPayload
+) {
+  return insert(
+    recipientId,
+    payload.actor.id,
+    "collaborator_added_to_project",
     payload
   );
 }
