@@ -11,16 +11,18 @@ export function AuthNav() {
   const { user, isLoaded, isSignedIn } = useUser();
   const { openAuth } = useAuthModal();
   const pathname = usePathname();
-  // Hide the org switcher chip entirely when the viewer has no org
-  // memberships AND can't create one — Clerk renders an empty/
-  // distracting "Personal account" pill otherwise. `userMemberships`
-  // is populated lazily; treat undefined as "still loading".
-  const { userMemberships, createOrganization } = useOrganizationList({
+  // Only render Clerk's <OrganizationSwitcher /> once the viewer is
+  // actually a member of at least one org. Without this guard Clerk
+  // falls back to a "Personal account" pill that looks nothing like
+  // the rest of the chrome (default purple avatar, distinct
+  // typography) and is pure noise for the common case where someone
+  // hasn't created a team yet. Users who want to create their first
+  // org go through /o/new, which renders Clerk's hosted
+  // <CreateOrganization /> on its own.
+  const { userMemberships } = useOrganizationList({
     userMemberships: { infinite: false },
   });
   const hasOrgs = (userMemberships?.data?.length ?? 0) > 0;
-  const canCreateOrg = !!createOrganization;
-  const showSwitcher = hasOrgs || canCreateOrg;
 
   if (!isLoaded) {
     return <div className="h-8 w-8" />;
@@ -36,11 +38,13 @@ export function AuthNav() {
       !!user?.username && pathname === `/u/${user.username}`;
     return (
       <div className="flex items-center gap-2">
-        {showSwitcher && (
-          // Clerk's switcher handles "create org", "switch org",
-          // and the org settings link. We point its "afterSelect"
-          // callbacks at our routes so the slug shows up in the URL
-          // instead of bouncing through Clerk's hosted pages.
+        {hasOrgs && (
+          // Clerk's switcher handles "switch org" and the org settings
+          // link. We point afterSelect at our routes so the slug shows
+          // up in the URL instead of bouncing through Clerk's hosted
+          // pages. Creating a NEW org happens through /o/new, not
+          // through the switcher's create-modal — keeps the trigger
+          // chip lean once someone is in team mode.
           <OrganizationSwitcher
             hidePersonal={false}
             afterCreateOrganizationUrl={(org) => `/o/${org.slug}`}
