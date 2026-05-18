@@ -44,7 +44,16 @@ export async function UserProfileView({
   handle: string;
   searchParams: { tab?: string; welcome?: string; payment?: string };
 }) {
-  const { userId } = await auth();
+  // auth() can throw "Clerk: auth() was called but Clerk can't detect
+  // usage of clerkMiddleware()" when the proxy context is not set up
+  // (Sentry 7488668107).  Profile pages are publicly viewable, so
+  // falling back to anonymous (userId = null) is correct.
+  let userId: string | null = null;
+  try {
+    ({ userId } = await auth());
+  } catch {
+    // proxy context absent — treat as anonymous visitor
+  }
   const showWelcome =
     searchParams.welcome === "1" && searchParams.payment === "success";
 

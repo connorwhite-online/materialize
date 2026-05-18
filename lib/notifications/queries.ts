@@ -12,9 +12,24 @@ import { swallow } from "@/lib/utils/swallow";
  * indistinguishable from "no unread" in the UI, which is fine for a
  * passive dot indicator. The SSE stream is the source of truth once
  * the page has hydrated.
+ *
+ * auth() is wrapped in try/catch because in Next.js 16 + Clerk v7 the
+ * function throws "auth() was called but Clerk can't detect usage of
+ * clerkMiddleware()" when the proxy context is not wired up for a
+ * request (Sentry 7488668107). Callers such as app/(app)/layout.tsx
+ * invoke this on every route — a crash here 500s the entire page.
+ * The documented intent ("returns 0 … on transient failure") already
+ * covers this case; the try/catch enforces it.
  */
 export async function getMyUnreadNotificationCount(): Promise<number> {
-  const { userId } = await auth();
+  let userId: string | null;
+  try {
+    ({ userId } = await auth());
+  } catch {
+    // auth() can throw when the Clerk proxy context is absent.
+    // Treat as anonymous — no unread count available.
+    return 0;
+  }
   if (!userId) return 0;
 
   const rows = await swallow(
