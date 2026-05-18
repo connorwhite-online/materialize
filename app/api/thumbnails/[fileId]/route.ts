@@ -58,6 +58,13 @@ export async function GET(
 
     const url = new URL(request.url);
     const requestedPhotoId = url.searchParams.get("photoId");
+    // `?original=1` forces the auto-captured 3D thumbnail regardless
+    // of cover_photo_id. Without this escape hatch, /api/thumbnails/{id}
+    // always serves the picked cover once one is set, which makes the
+    // auto-captured image unreachable — including from the cover
+    // picker's "Auto" tile, which then renders the cover photo and
+    // visually duplicates the curator tile next to it.
+    const forceOriginal = url.searchParams.get("original") === "1";
     if (requestedPhotoId && !UUID_RE.test(requestedPhotoId)) {
       return new Response("Not found", { status: 404 });
     }
@@ -88,8 +95,13 @@ export async function GET(
     let storageKey = `thumbnails/${fileId}.webp`;
 
     // Specific photo requested — verify it belongs to this file and
-    // redirect to its storage key.
-    if (requestedPhotoId) {
+    // redirect to its storage key. `forceOriginal` wins over both
+    // requestedPhotoId and coverPhotoId — explicit intent to fetch
+    // the auto-captured asset.
+    if (forceOriginal) {
+      // storageKey already set to the auto-captured path above; skip
+      // both branches below.
+    } else if (requestedPhotoId) {
       const [photo] = await db
         .select({
           storageKey: filePhotos.storageKey,

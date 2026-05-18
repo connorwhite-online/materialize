@@ -249,7 +249,7 @@ export function EditFileButton({
                   }`}
                 >
                   <img
-                    src={`/api/thumbnails/${fileId}`}
+                    src={`/api/thumbnails/${fileId}?original=1`}
                     alt="Auto-captured thumbnail"
                     className="absolute inset-0 h-full w-full object-cover"
                   />
