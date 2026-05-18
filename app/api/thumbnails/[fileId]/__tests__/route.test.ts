@@ -95,11 +95,12 @@ describe("GET /api/thumbnails/[fileId]", () => {
       expect(mockDbWhere).not.toHaveBeenCalled();
     });
 
-    it("returns 400 for an empty fileId without querying the DB", async () => {
+    it("returns 404 for an empty fileId without querying the DB", async () => {
       const { req, context } = makeRequest("");
       const res = await GET(req, context);
 
-      expect(res.status).toBe(400);
+      // Use 404 (not 400) so scrapers can't fingerprint the route shape.
+      expect(res.status).toBe(404);
       expect(mockDbWhere).not.toHaveBeenCalled();
     });
   });
@@ -116,9 +117,25 @@ describe("GET /api/thumbnails/[fileId]", () => {
       expect(mockDbWhere).toHaveBeenCalled();
     });
 
-    it("returns 302 redirect for a published file with a thumbnail", async () => {
-      // First call: files lookup; second: would be filePhotos (skipped if
-      // no coverPhotoId). Use a chainable mock so consecutive calls work.
+    it("streams upstream bytes for a published file with a thumbnail", async () => {
+      // The route fetches the signed R2 URL server-side and pipes the
+      // response body back through this origin (rather than 302ing) so
+      // next/image's optimizer can consume it — the optimizer rejects
+      // redirect responses. Stub global fetch to return a fake R2
+      // response.
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(
+          new Response("FAKE_WEBP_BYTES", {
+            status: 200,
+            headers: {
+              "Content-Type": "image/webp",
+              "Content-Length": "15",
+              ETag: '"abc123"',
+            },
+          })
+        );
+
       mockDbWhere
         .mockResolvedValueOnce([
           {
@@ -129,15 +146,21 @@ describe("GET /api/thumbnails/[fileId]", () => {
             coverPhotoId: null,
           },
         ])
-        // No further DB calls for the happy path without coverPhotoId.
         .mockResolvedValue([]);
 
       const { req, context } = makeRequest("ba14f9ed-106b-46e3-8abc-123456789012");
       const res = await GET(req, context);
 
-      expect(res.status).toBe(302);
-      expect(res.headers.get("Location")).toBe("https://r2.example.com/signed-url");
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Content-Type")).toBe("image/webp");
       expect(res.headers.get("Cache-Control")).toMatch(/public/);
+      expect(res.headers.get("ETag")).toBe('"abc123"');
+      expect(fetchSpy).toHaveBeenCalledWith(
+        "https://r2.example.com/signed-url",
+        expect.any(Object)
+      );
+
+      fetchSpy.mockRestore();
     });
   });
 });
