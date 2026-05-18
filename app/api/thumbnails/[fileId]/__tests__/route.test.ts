@@ -47,8 +47,8 @@ vi.mock("@/lib/logger", () => ({
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
-function makeRequest(fileId: string, photoId?: string) {
-  const qs = photoId ? `?photoId=${photoId}` : "";
+function makeRequest(fileId: string, query?: string) {
+  const qs = query ? `?${query}` : "";
   const req = new Request(`http://localhost/api/thumbnails/${fileId}${qs}`);
   const context = { params: Promise.resolve({ fileId }) };
   return { req, context };
@@ -58,6 +58,7 @@ function makeRequest(fileId: string, photoId?: string) {
 
 // Import AFTER mocks are registered so vi.mock hoisting takes effect.
 import { GET } from "../route";
+import { generateDownloadUrl } from "@/lib/storage";
 
 describe("GET /api/thumbnails/[fileId]", () => {
   beforeEach(() => {
@@ -159,6 +160,51 @@ describe("GET /api/thumbnails/[fileId]", () => {
         "https://r2.example.com/signed-url",
         expect.any(Object)
       );
+
+      fetchSpy.mockRestore();
+    });
+
+    it("?original=1 pins to the auto-captured key even when a cover is set", async () => {
+      // Regression: the cover picker's "Auto" tile was rendering the
+      // current cover photo (visually duplicating the curator-photo
+      // tile next to it) because /api/thumbnails/{fileId} falls
+      // through to coverPhotoId when no query is present. ?original=1
+      // is the escape hatch the picker uses to fetch just the
+      // auto-captured asset; this test guards both the bypass AND
+      // that we don't waste a DB call looking up the cover row.
+      const fileId = "ba14f9ed-106b-46e3-8abc-123456789012";
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(
+          new Response("FAKE_WEBP_BYTES", {
+            status: 200,
+            headers: { "Content-Type": "image/webp" },
+          })
+        );
+
+      mockDbWhere.mockResolvedValueOnce([
+        {
+          id: fileId,
+          thumbnailUrl: `/api/thumbnails/${fileId}`,
+          status: "published",
+          userId: "user-1",
+          coverPhotoId: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+        },
+      ]);
+
+      const { req, context } = makeRequest(fileId, "original=1");
+      const res = await GET(req, context);
+
+      expect(res.status).toBe(200);
+      // The whole point: signing happens against the auto path, not
+      // the cover photo's storageKey.
+      expect(vi.mocked(generateDownloadUrl)).toHaveBeenCalledWith(
+        `thumbnails/${fileId}.webp`,
+        expect.any(Number)
+      );
+      // And the cover-photo lookup is skipped — only the files row
+      // should have been queried.
+      expect(mockDbWhere).toHaveBeenCalledTimes(1);
 
       fetchSpy.mockRestore();
     });
