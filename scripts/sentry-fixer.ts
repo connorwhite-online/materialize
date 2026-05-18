@@ -32,9 +32,17 @@
  *     fails and a human picks it up.
  */
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 
 const AGENT_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+
+/**
+ * How recently a prior PR for this issue counts as "still in flight."
+ * Anything older has either landed (so the error wouldn't be firing
+ * unless the fix regressed) or got abandoned (re-trying is fine).
+ */
+const DUP_LOOKBACK_DAYS = 7;
 
 interface SentryFrame {
   filename?: string;
@@ -132,6 +140,84 @@ function formatTags(
   return tags;
 }
 
+interface ExistingPr {
+  number: number;
+  state: string;
+  title: string;
+  url: string;
+  updatedAt: string;
+}
+
+/**
+ * Look for in-flight or recently-merged work that already addresses
+ * this Sentry issue. Searches PR titles + bodies + branch names for:
+ *   - the per-occurrence event_id (32-char hex)
+ *   - the issue-level id (numeric — Sentry groups by fingerprint,
+ *     so multiple occurrences share this and the bot's prior PR
+ *     will mention it)
+ *
+ * Returns matches updated within DUP_LOOKBACK_DAYS. Beyond that
+ * window, prior work has either landed (and would have stopped the
+ * error firing) or stalled, and a fresh attempt is the right move.
+ *
+ * Silent fall-through on `gh` errors — better to do a duplicate run
+ * than to skip a legitimately fresh issue because gh hiccupped.
+ *
+ * Tokenization caveat: `gh pr list --search` splits the term on
+ * non-alphanumerics and matches any token, so short or dashed ids
+ * (e.g. shortId "MATERIALIZE-WEB-PLATFORM-7" → matches "MATERIALIZE"
+ * → every PR mentioning the project) cause false positives. We only
+ * accept ids that look like opaque hex blobs or long numeric ids;
+ * shortId is intentionally excluded.
+ */
+const ID_PATTERN = /^(?:[a-f0-9]{16,}|[0-9]{6,})$/i;
+
+function findExistingPRs(event: SentryEvent): ExistingPr[] {
+  const ids = [event.event_id, event.id].filter(
+    (s): s is string =>
+      typeof s === "string" && s.length > 0 && ID_PATTERN.test(s)
+  );
+  if (ids.length === 0) return [];
+
+  const cutoff = Date.now() - DUP_LOOKBACK_DAYS * 24 * 3600 * 1000;
+  const seen = new Map<number, ExistingPr>();
+
+  for (const id of ids) {
+    let stdout: string;
+    try {
+      stdout = execFileSync(
+        "gh",
+        [
+          "pr",
+          "list",
+          "--state",
+          "all",
+          "--search",
+          id,
+          "--limit",
+          "10",
+          "--json",
+          "number,state,title,url,updatedAt",
+        ],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
+      );
+    } catch (err) {
+      console.warn(
+        `[sentry-fixer] gh search for "${id}" failed:`,
+        (err as Error).message
+      );
+      continue;
+    }
+    const matches = JSON.parse(stdout) as ExistingPr[];
+    for (const pr of matches) {
+      if (new Date(pr.updatedAt).getTime() < cutoff) continue;
+      if (!seen.has(pr.number)) seen.set(pr.number, pr);
+    }
+  }
+
+  return [...seen.values()];
+}
+
 function buildPrompt(event: SentryEvent): string {
   const ex = event.exception?.values?.[0];
   const frames = ex?.stacktrace?.frames ?? [];
@@ -226,14 +312,23 @@ ${
    If the fix lives in one of those files, STOP and document the
    escalation in .agent-out/summary.md.
 
-4. Run the full gate before pushing:
+4. Before EDITING any production file, run \`git log -10 --oneline -- <path>\`.
+   If recent (<7d) commits reference a Sentry event id OTHER than yours
+   (look for "sentry-<digits>" or "Sentry <digits>" in the commit
+   message), STOP and escalate to .agent-out/summary.md. Two
+   independent runs touching the same file races branches into each
+   other and is harder to untangle than a re-fire. The pre-flight
+   check upstream of this prompt already filtered same-issue
+   duplicates; what's left is cross-issue collisions.
+
+5. Run the full gate before pushing:
    - npx tsc --noEmit (must be clean except the line-anchored
      filter — see AGENTS.md for what's allowed)
    - npx playwright test (full suite must pass, including the
      regression test you just added)
    - npx vitest run (must pass)
 
-5. Commit + push a branch named fix/sentry-${event.event_id ?? "unknown"},
+6. Commit + push a branch named fix/sentry-${event.event_id ?? "unknown"},
    then open a pull request against main. Use \`gh pr create\` — the
    workflow runs with a GITHUB_TOKEN that has pull-requests:write
    scope, no extra auth needed. PR body must include:
@@ -248,7 +343,7 @@ ${
 
    Do NOT merge the PR. A human reviews and merges.
 
-6. When done, write the same content to .agent-out/summary.md so the
+7. When done, write the same content to .agent-out/summary.md so the
    workflow artifact preserves a copy independent of the PR. The
    summary should answer:
    - Was the bug reproduced? (yes/no, and how)
@@ -288,10 +383,34 @@ async function main() {
     `[sentry-fixer] event=${event.event_id ?? "?"} release=${event.release ?? "?"}`
   );
 
-  const prompt = buildPrompt(event);
-
   // Output dir for the agent to write its summary into. Gitignored.
   fs.mkdirSync(".agent-out", { recursive: true });
+
+  // Pre-flight: skip if a recent PR already targets this issue. Two
+  // sentry-fixer runs racing each other into the same file is worse
+  // than missing a duplicate occurrence — the human reviewer
+  // catches the latter; the former silently strands one branch.
+  // Override with SENTRY_FIXER_SKIP_DUP_CHECK=1 for intentional re-runs.
+  if (process.env.SENTRY_FIXER_SKIP_DUP_CHECK !== "1") {
+    const existing = findExistingPRs(event);
+    if (existing.length > 0) {
+      const lines = existing.map(
+        (pr) => `  #${pr.number} (${pr.state}) ${pr.title} — ${pr.url}`
+      );
+      console.log(
+        `[sentry-fixer] skipping — existing PR(s) for this issue:\n${lines.join("\n")}`
+      );
+      fs.writeFileSync(
+        ".agent-out/summary.md",
+        `# Skipped: duplicate of existing PR\n\nSentry event \`${
+          event.event_id ?? event.id ?? "(unknown)"
+        }\` is already being addressed by:\n\n${lines.join("\n")}\n\nRe-run with \`SENTRY_FIXER_SKIP_DUP_CHECK=1\` if this is intentional.\n`
+      );
+      return;
+    }
+  }
+
+  const prompt = buildPrompt(event);
 
   const abort = new AbortController();
   const timeout = setTimeout(() => {
