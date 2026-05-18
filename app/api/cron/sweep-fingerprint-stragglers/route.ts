@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { fileAssets, files } from "@/lib/db/schema";
-import { and, eq, inArray, isNull, lt } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, ne } from "drizzle-orm";
 import { logError } from "@/lib/logger";
 import { fingerprintAndPersistAsset } from "@/lib/hashing/fingerprint-asset";
 import type { MeshFormat } from "@/lib/hashing/mesh-fingerprint";
@@ -70,7 +70,12 @@ export async function GET(request: Request) {
         and(
           isNull(fileAssets.geometryHash),
           inArray(fileAssets.format, ["stl", "obj", "3mf"]),
-          lt(fileAssets.createdAt, cutoff)
+          lt(fileAssets.createdAt, cutoff),
+          // Skip rows whose parent listing has been archived — the
+          // R2 object is likely already gone, and the fetch would
+          // 404 every sweep (see fingerprintAndPersistAsset.fetch
+          // noise in Sentry).
+          ne(files.status, "archived")
         )
       )
       .limit(STRAGGLER_LIMIT);

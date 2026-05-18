@@ -43,10 +43,22 @@ export async function fingerprintAndPersistAsset(params: {
     const downloadUrl = await generateDownloadUrl(storageKey, 300);
     const res = await fetch(downloadUrl);
     if (!res.ok || !res.body) {
-      logError("fingerprintAndPersistAsset.fetch", {
-        assetId,
-        status: res.status,
-      });
+      // 404 is a known, non-actionable state: the asset row exists
+      // but its R2 object is gone (user deleted the listing before
+      // fingerprint ran, abandoned upload, etc.). Demote to warn so
+      // it stops paging Sentry. Real fetch failures (5xx, network)
+      // still go through logError.
+      if (res.status === 404) {
+        console.warn("[fingerprintAndPersistAsset.fetch] 404", {
+          assetId,
+          storageKey,
+        });
+      } else {
+        logError("fingerprintAndPersistAsset.fetch", {
+          assetId,
+          status: res.status,
+        });
+      }
       return;
     }
     const fp = await fingerprintFromStream(res.body, format, fileUnit);
