@@ -29,7 +29,7 @@ export default async function NewOrganizationPage() {
       </div>
       <CreateOrganization
         routing="hash"
-        afterCreateOrganizationUrl={(org) => `/o/${org.slug}`}
+        afterCreateOrganizationUrl={(org) => `/${org.slug}`}
       />
     </div>
   );

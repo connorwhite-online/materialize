@@ -23,7 +23,7 @@ export default async function SettingsPage() {
     <div className="mx-auto max-w-2xl px-4 py-8 space-y-8">
       {user?.username && (
         <Link
-          href={`/u/${user.username}`}
+          href={`/${user.username}`}
           className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           <ChevronLeft size={16} />

@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { organizationMembers, organizations, users } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
 import { logError } from "@/lib/logger";
+import { buildUniqueHandle, validateHandle } from "@/lib/handles/validate";
 
 // Strip Clerk's "org:" role prefix. Clerk ships roles as `org:admin`
 // and `org:member`; our DB column stores the bare segment. Anything
@@ -83,25 +84,43 @@ export async function POST(req: Request) {
     // Organization lifecycle — mirror into our local `organizations`
     // table so SQL joins (auth helper, profile pages, dashboards) can
     // resolve org names + slugs without a Clerk round-trip.
+    //
+    // Slug collision dance: with the unified `/[handle]` namespace
+    // an incoming Clerk slug can collide with a reserved word, an
+    // existing username, or another org. We can't reject the Clerk-
+    // side write — Clerk is the source of truth — so we mirror under
+    // a suffixed local slug and log a warning. The org admin can
+    // rename inside Clerk to get the URL they actually wanted; the
+    // webhook re-fires and converges.
     if (
       event.type === "organization.created" ||
       event.type === "organization.updated"
     ) {
       const { id, name, slug, image_url, has_image } = event.data;
       const imageUrl = has_image ? image_url : null;
+      const conflict = await validateHandle(slug, { ignoreOrgId: id });
+      const localSlug = conflict ? await buildUniqueHandle(slug, { ignoreOrgId: id }) : slug;
+      if (conflict) {
+        logError("clerkWebhook.orgSlugCollision", {
+          orgId: id,
+          clerkSlug: slug,
+          localSlug,
+          reason: conflict,
+        });
+      }
       await db
         .insert(organizations)
         .values({
           id,
           name,
-          slug,
+          slug: localSlug,
           imageUrl,
         })
         .onConflictDoUpdate({
           target: organizations.id,
           set: {
             name,
-            slug,
+            slug: localSlug,
             imageUrl,
             updatedAt: new Date(),
           },
@@ -131,20 +150,29 @@ export async function POST(req: Request) {
       const userId = public_user_data.user_id;
       // Defensive upsert on the organization row in case the
       // membership event lands before its parent org.created (we
-      // don't control Clerk's webhook delivery order).
+      // don't control Clerk's webhook delivery order). Same slug-
+      // collision guard as the org.* branch above.
+      const conflict = await validateHandle(organization.slug, {
+        ignoreOrgId: organization.id,
+      });
+      const localSlug = conflict
+        ? await buildUniqueHandle(organization.slug, {
+            ignoreOrgId: organization.id,
+          })
+        : organization.slug;
       await db
         .insert(organizations)
         .values({
           id: organization.id,
           name: organization.name,
-          slug: organization.slug,
+          slug: localSlug,
           imageUrl: organization.has_image ? organization.image_url : null,
         })
         .onConflictDoUpdate({
           target: organizations.id,
           set: {
             name: organization.name,
-            slug: organization.slug,
+            slug: localSlug,
             updatedAt: new Date(),
           },
         });

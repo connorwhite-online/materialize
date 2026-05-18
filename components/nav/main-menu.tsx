@@ -96,7 +96,7 @@ export function MainMenuTrigger() {
   const pathname = usePathname();
   const { user, isLoaded } = useUser();
   const ownProfilePath =
-    isLoaded && user?.username ? `/u/${user.username}` : null;
+    isLoaded && user?.username ? `/${user.username}` : null;
   const label = getPageLabel(pathname, ownProfilePath);
   return (
     <div className="nav:hidden">

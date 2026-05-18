@@ -16,7 +16,7 @@ export default async function HomePage() {
   if (userId) {
     const user = await currentUser();
     if (user?.username) {
-      redirect(`/u/${user.username}`);
+      redirect(`/${user.username}`);
     }
     redirect("/onboarding");
   }

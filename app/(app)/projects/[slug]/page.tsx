@@ -577,7 +577,7 @@ export default async function ProjectDetailPage(props: {
                 )}
                 <div>
                   <Link
-                    href={`/u/${project.username}`}
+                    href={`/${project.username}`}
                     className="font-medium text-sm hover:underline"
                   >
                     {project.displayName || project.username}
@@ -680,7 +680,7 @@ export default async function ProjectDetailPage(props: {
                       projectName={project.name}
                       hasBuyers={ownerBuyerCount > 0}
                       buyerCount={ownerBuyerCount}
-                      redirectTo={`/u/${project.username}`}
+                      redirectTo={`/${project.username}`}
                     />
                   </div>
                 </>

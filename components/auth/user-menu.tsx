@@ -14,7 +14,7 @@ export function UserMenu() {
   if (!isLoaded || !user) return null;
 
   // Username might not be set yet if onboarding wasn't completed
-  const profileHref = user.username ? `/u/${user.username}` : "/";
+  const profileHref = user.username ? `/${user.username}` : "/";
   const displayName =
     user.fullName || user.username || user.primaryEmailAddress?.emailAddress;
 

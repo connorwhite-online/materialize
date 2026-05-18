@@ -117,7 +117,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       .from(users)
       .where(isNotNull(users.username));
     profileEntries = rows.map((r) => ({
-      url: `${APP_URL}/u/${r.username}`,
+      url: `${APP_URL}/${r.username}`,
       lastModified: r.updatedAt ?? now,
       changeFrequency: "weekly",
       priority: 0.5,

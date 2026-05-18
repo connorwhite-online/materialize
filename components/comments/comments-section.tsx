@@ -198,7 +198,7 @@ function PhotoPostRow({
         <div className="flex items-baseline gap-2">
           {photo.author.username ? (
             <Link
-              href={`/u/${photo.author.username}`}
+              href={`/${photo.author.username}`}
               className="text-sm font-medium hover:underline"
             >
               {photo.author.displayName || photo.author.username}
@@ -369,7 +369,7 @@ function CommentRow({
         <div className="flex items-baseline gap-2">
           {comment.author.username ? (
             <Link
-              href={`/u/${comment.author.username}`}
+              href={`/${comment.author.username}`}
               className="text-sm font-medium hover:underline"
             >
               {comment.author.displayName || comment.author.username}

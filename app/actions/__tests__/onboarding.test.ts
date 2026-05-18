@@ -1,16 +1,28 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // DB mock — select() is the existence check, insert() writes
-// the username row. Both get swapped per test via the closure
-// variables below.
+// the username row. `dbSelectWhere` returns the rows for the
+// USERS-table lookup; the unified handle validator also queries
+// organizations, which we always treat as empty here (no collision
+// with org slugs in any of these cases).
 let dbSelectWhere: () => unknown[] = () => [];
 const mockInsertValues = vi.fn();
+
+function chainable<T>(arr: T[]) {
+  return Object.assign(arr, { limit: () => arr });
+}
 
 vi.mock("@/lib/db", () => ({
   db: {
     select: () => ({
-      from: () => ({
-        where: (...args: unknown[]) => dbSelectWhere.apply(null, args as []),
+      from: (table: { __name?: string }) => ({
+        where: (...args: unknown[]) => {
+          // Organizations lookup (from validateHandle) — never a
+          // collision in these tests; let the chainable .limit() ride
+          // on an empty array.
+          if (table?.__name === "organizations") return chainable([]);
+          return chainable(dbSelectWhere.apply(null, args as []));
+        },
       }),
     }),
     insert: () => ({
@@ -25,7 +37,8 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("@/lib/db/schema", () => ({
-  users: { id: "id", username: "username" },
+  users: { __name: "users", id: "id", username: "username" },
+  organizations: { __name: "organizations", id: "id", slug: "slug" },
 }));
 
 vi.mock("@/lib/logger", () => ({

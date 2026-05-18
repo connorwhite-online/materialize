@@ -45,7 +45,7 @@ export function SidebarUserBlock({ initialUnreadCount }: Props) {
       user.username ||
       user.primaryEmailAddress?.emailAddress ||
       "Profile";
-    const profileHref = user.username ? `/u/${user.username}` : "/";
+    const profileHref = user.username ? `/${user.username}` : "/";
     return (
       <div className="flex flex-col gap-1.5">
         <CartButton />

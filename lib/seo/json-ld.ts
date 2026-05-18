@@ -33,7 +33,7 @@ type PersonInput = {
  * Google can reconcile the same person across pages.
  */
 export function personJsonLd(person: PersonInput) {
-  const profileUrl = person.username ? abs(`/u/${person.username}`) : undefined;
+  const profileUrl = person.username ? abs(`/${person.username}`) : undefined;
   return {
     "@type": "Person",
     ...(profileUrl ? { "@id": profileUrl } : {}),
@@ -47,7 +47,7 @@ export function personJsonLd(person: PersonInput) {
 
 export function profilePageJsonLd(person: PersonInput) {
   if (!person.username) return null;
-  const profileUrl = abs(`/u/${person.username}`);
+  const profileUrl = abs(`/${person.username}`);
   return {
     "@context": "https://schema.org",
     "@type": "ProfilePage",

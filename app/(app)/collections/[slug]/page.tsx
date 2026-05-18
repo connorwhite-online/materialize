@@ -171,7 +171,7 @@ export default async function CollectionPage(props: {
         <p className="mt-2 text-sm text-muted-foreground">
           by{" "}
           <Link
-            href={`/u/${collection.creatorUsername}`}
+            href={`/${collection.creatorUsername}`}
             className="hover:underline"
           >
             {collection.creatorDisplayName || collection.creatorUsername}

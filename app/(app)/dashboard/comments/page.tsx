@@ -8,5 +8,5 @@ export default async function CommentsRedirect() {
   const user = await currentUser();
   if (!user) redirect("/");
   if (!user.username) redirect("/onboarding");
-  redirect(`/u/${user.username}?tab=comments`);
+  redirect(`/${user.username}?tab=comments`);
 }

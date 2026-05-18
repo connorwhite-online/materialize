@@ -268,7 +268,7 @@ function UserCard({
 }) {
   return (
     <Link
-      href={`/u/${hit.username}`}
+      href={`/${hit.username}`}
       onClick={onNavigate}
       className="group flex w-28 shrink-0 flex-col items-center gap-1.5"
     >
