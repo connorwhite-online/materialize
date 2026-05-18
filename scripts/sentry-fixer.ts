@@ -146,7 +146,11 @@ interface ExistingPr {
   title: string;
   url: string;
   updatedAt: string;
+  headRefName: string;
 }
+
+/** Lines of `gh pr diff` we attach to the prompt for loose matches. */
+const RELATED_PR_DIFF_LINE_CAP = 200;
 
 /**
  * Look for in-flight or recently-merged work that already addresses
@@ -197,7 +201,7 @@ function findExistingPRs(event: SentryEvent): ExistingPr[] {
           "--limit",
           "10",
           "--json",
-          "number,state,title,url,updatedAt",
+          "number,state,title,url,updatedAt,headRefName",
         ],
         { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
       );
@@ -218,7 +222,59 @@ function findExistingPRs(event: SentryEvent): ExistingPr[] {
   return [...seen.values()];
 }
 
-function buildPrompt(event: SentryEvent): string {
+/**
+ * "Exact" = the PR's branch is literally fix/sentry-<strongest_id>.
+ * The strongest id is event_id (per-occurrence) when present, else
+ * the issue id (only one available on issue-webhook payloads). This
+ * mirrors the agent's own branch-naming fallback chain so the same
+ * input deterministically produces the same branch name.
+ *
+ * Crucially, we do NOT match `event.event_id` against a branch named
+ * after `event.id` — that's the "same issue, new occurrence" case
+ * where a previous fix may or may not cover the new stack, which is
+ * a loose match (handled below by attaching the existing PR diff to
+ * the prompt for the agent to evaluate).
+ */
+function isExactMatch(pr: ExistingPr, event: SentryEvent): boolean {
+  const strongestId = event.event_id ?? event.id;
+  return Boolean(strongestId) && pr.headRefName === `fix/sentry-${strongestId}`;
+}
+
+/**
+ * Pull a truncated diff for a loose-match PR so the agent can decide
+ * between extending the existing branch and opening a coordinated
+ * follow-up. Capped at RELATED_PR_DIFF_LINE_CAP lines — the agent
+ * does not need to understand every line to make the coordination
+ * call, and an oversized diff burns context without proportionate
+ * value.
+ */
+function fetchPrDiffSummary(prNumber: number): string {
+  try {
+    const diff = execFileSync("gh", ["pr", "diff", String(prNumber)], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    const lines = diff.split("\n");
+    if (lines.length <= RELATED_PR_DIFF_LINE_CAP) return diff;
+    return (
+      lines.slice(0, RELATED_PR_DIFF_LINE_CAP).join("\n") +
+      `\n... [truncated — diff has ${lines.length} lines; full diff at the PR url]`
+    );
+  } catch (err) {
+    return `(failed to fetch diff: ${(err as Error).message})`;
+  }
+}
+
+interface RelatedPrContext {
+  pr: ExistingPr;
+  diff: string;
+}
+
+function buildPrompt(
+  event: SentryEvent,
+  relatedPrs: RelatedPrContext[] = []
+): string {
   const ex = event.exception?.values?.[0];
   const frames = ex?.stacktrace?.frames ?? [];
   const appFrames = frames.filter((f) => f.in_app !== false).slice(-10);
@@ -290,7 +346,34 @@ ${
     )
     .join("\n") || "(no breadcrumbs)"
 }
+${
+  relatedPrs.length > 0
+    ? `
+# Existing related work
 
+The pre-flight check found ${relatedPrs.length} PR(s) matching this
+Sentry issue id (but NOT exactly your event_id — those would have
+caused this run to skip entirely). Read each diff before deciding
+what to do. See Rule 5 for the decision tree.
+
+${relatedPrs
+  .map(
+    ({ pr, diff }) =>
+      `## PR #${pr.number} (${pr.state}) — ${pr.title}
+URL:     ${pr.url}
+Branch:  ${pr.headRefName}
+Updated: ${pr.updatedAt}
+
+### Truncated diff (first ${RELATED_PR_DIFF_LINE_CAP} lines)
+
+\`\`\`diff
+${diff}
+\`\`\`
+`
+  )
+  .join("\n")}`
+    : ""
+}
 # Rules
 
 1. Reproduce the failure FIRST. Write a Playwright spec under
@@ -321,14 +404,40 @@ ${
    check upstream of this prompt already filtered same-issue
    duplicates; what's left is cross-issue collisions.
 
-5. Run the full gate before pushing:
+5. If the "Existing related work" section above is present, the
+   pre-flight check found PR(s) that touch this Sentry issue but
+   aren't on your event_id's branch. Pick exactly one of:
+
+   a. EXTEND — the existing PR is on the right track but doesn't
+      cover the stack/scenario in your event. Check out its branch
+      (\`git checkout <headRefName>\`), add your reproduction test
+      + the missing piece of the fix, push to the same branch. Do
+      NOT open a second PR — comment on the existing one with your
+      event id and what you added.
+
+   b. SUPERSEDE — the existing PR's approach is wrong or stale.
+      Open your own \`fix/sentry-<event_id>\` branch and PR as
+      usual; the PR body MUST link the superseded PR and explain
+      in one paragraph why a new approach is needed. Tag the
+      author as a reviewer.
+
+   c. ESCALATE (default when EXTEND vs SUPERSEDE is not obvious
+      from a single read of the existing diff) — do NOT edit any
+      production file. Write the situation to .agent-out/summary.md
+      including the existing PR url, your event_id, and what you
+      need a human to decide. Then exit cleanly.
+
+   Default toward ESCALATE. A human spending 5 minutes triaging is
+   cheaper than a stacked branch you got wrong.
+
+6. Run the full gate before pushing:
    - npx tsc --noEmit (must be clean except the line-anchored
      filter — see AGENTS.md for what's allowed)
    - npx playwright test (full suite must pass, including the
      regression test you just added)
    - npx vitest run (must pass)
 
-6. Commit + push a branch named fix/sentry-${event.event_id ?? "unknown"},
+7. Commit + push a branch named fix/sentry-${event.event_id ?? event.id ?? "unknown"},
    then open a pull request against main. Use \`gh pr create\` — the
    workflow runs with a GITHUB_TOKEN that has pull-requests:write
    scope, no extra auth needed. PR body must include:
@@ -343,7 +452,7 @@ ${
 
    Do NOT merge the PR. A human reviews and merges.
 
-7. When done, write the same content to .agent-out/summary.md so the
+8. When done, write the same content to .agent-out/summary.md so the
    workflow artifact preserves a copy independent of the PR. The
    summary should answer:
    - Was the bug reproduced? (yes/no, and how)
@@ -386,19 +495,24 @@ async function main() {
   // Output dir for the agent to write its summary into. Gitignored.
   fs.mkdirSync(".agent-out", { recursive: true });
 
-  // Pre-flight: skip if a recent PR already targets this issue. Two
-  // sentry-fixer runs racing each other into the same file is worse
-  // than missing a duplicate occurrence — the human reviewer
-  // catches the latter; the former silently strands one branch.
-  // Override with SENTRY_FIXER_SKIP_DUP_CHECK=1 for intentional re-runs.
+  // Pre-flight: classify existing PRs as exact (same event_id's
+  // branch — true duplicate, skip) or loose (issue overlap but
+  // distinct event — pass to the agent as context so it can choose
+  // to extend, supersede, or escalate). Override with
+  // SENTRY_FIXER_SKIP_DUP_CHECK=1 to bypass the whole gate.
+  let relatedPrs: RelatedPrContext[] = [];
   if (process.env.SENTRY_FIXER_SKIP_DUP_CHECK !== "1") {
     const existing = findExistingPRs(event);
-    if (existing.length > 0) {
-      const lines = existing.map(
-        (pr) => `  #${pr.number} (${pr.state}) ${pr.title} — ${pr.url}`
+    const exact = existing.filter((pr) => isExactMatch(pr, event));
+    const loose = existing.filter((pr) => !isExactMatch(pr, event));
+
+    if (exact.length > 0) {
+      const lines = exact.map(
+        (pr) =>
+          `  #${pr.number} (${pr.state}) [${pr.headRefName}] ${pr.title} — ${pr.url}`
       );
       console.log(
-        `[sentry-fixer] skipping — existing PR(s) for this issue:\n${lines.join("\n")}`
+        `[sentry-fixer] skipping — exact-branch match(es) for this event:\n${lines.join("\n")}`
       );
       fs.writeFileSync(
         ".agent-out/summary.md",
@@ -408,9 +522,31 @@ async function main() {
       );
       return;
     }
+
+    if (loose.length > 0) {
+      console.log(
+        `[sentry-fixer] ${loose.length} loose match(es) — attaching to prompt for agent coordination:`
+      );
+      for (const pr of loose) {
+        console.log(`  #${pr.number} (${pr.state}) ${pr.title} — ${pr.url}`);
+      }
+      relatedPrs = loose.map((pr) => ({
+        pr,
+        diff: fetchPrDiffSummary(pr.number),
+      }));
+    }
   }
 
-  const prompt = buildPrompt(event);
+  const prompt = buildPrompt(event, relatedPrs);
+
+  // Dry-run hook for tests: print the resolved prompt and skip the
+  // agent session entirely. No API spend, no side effects beyond
+  // .agent-out/.
+  if (process.env.SENTRY_FIXER_DRY_RUN === "1") {
+    console.log("[sentry-fixer] DRY_RUN — printing prompt and exiting");
+    console.log("\n=== PROMPT ===\n" + prompt + "\n=== END PROMPT ===\n");
+    return;
+  }
 
   const abort = new AbortController();
   const timeout = setTimeout(() => {
