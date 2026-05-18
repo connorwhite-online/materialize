@@ -15,10 +15,12 @@
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import {
+  projectCollaborators,
   projects,
   projectFiles,
   projectPhotos,
   purchases,
+  users,
 } from "@/lib/db/schema";
 import { eq, and, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -36,6 +38,7 @@ import {
   resolveOwnerForCreate,
   viewerCanAttachAllFiles,
 } from "@/lib/authorization";
+import { notifyCollaboratorAddedToProject } from "@/lib/notifications/notify";
 
 export async function createProject(formData: FormData) {
   const { userId } = await auth();
@@ -493,6 +496,198 @@ export async function toggleProjectVisibility(projectId: string) {
   } catch (error) {
     logError("toggleProjectVisibility", error);
     return { error: "Failed to update visibility" };
+  }
+}
+
+// ─── Project collaborators ───────────────────────────────────────────
+//
+// V1 is direct-add by username: the project owner (or any org member
+// of an org-owned project) types a teammate's @handle and they get
+// immediate write access plus a notification. Collaborators
+// themselves CANNOT invite more collaborators — that's deliberately
+// owner/org-member-only via the `viaCollaborator` flag from
+// canWriteProject. Same shape GitHub uses for outside collaborators.
+//
+// A future invite/accept flow would slot in here without breaking the
+// public surface: add a `status` column ("invited" | "active"), have
+// addProjectCollaborator insert "invited" + send a notification with
+// an accept link, and gate canWriteProject on `status = active`.
+
+export async function addProjectCollaborator(
+  projectId: string,
+  username: string
+) {
+  try {
+    const { userId } = await auth();
+    if (!userId) return { error: "Unauthorized" };
+
+    // Only owners / org members can add collaborators — a collaborator
+    // can't grow the access list further on their own. The
+    // `viaCollaborator` flag is what distinguishes the two.
+    const access = await canWriteProject(userId, projectId);
+    if (!access.ok || access.viaCollaborator) {
+      return { error: "You don't have permission to add collaborators." };
+    }
+    const project = access.resource;
+
+    const handle = username.trim().replace(/^@/, "").toLowerCase();
+    if (!handle) return { error: "Enter a username." };
+
+    const [target] = await db
+      .select({
+        id: users.id,
+        username: users.username,
+        displayName: users.displayName,
+        avatarUrl: users.avatarUrl,
+      })
+      .from(users)
+      .where(eq(users.username, handle))
+      .limit(1);
+    if (!target) {
+      return { error: `No user found with the handle @${handle}.` };
+    }
+    if (target.id === project.userId) {
+      // The creator already has full access — adding them as a
+      // "collaborator" would be a no-op row that confuses the UI.
+      return { error: "That user is the project owner." };
+    }
+
+    const inserted = await db
+      .insert(projectCollaborators)
+      .values({
+        projectId,
+        userId: target.id,
+        addedBy: userId,
+      })
+      // No-op on duplicate (the unique index would otherwise throw).
+      // Returning empty means "row already existed" — surface a
+      // friendly message rather than a generic failure.
+      .onConflictDoNothing({
+        target: [projectCollaborators.projectId, projectCollaborators.userId],
+      })
+      .returning({ id: projectCollaborators.id });
+
+    if (inserted.length === 0) {
+      return { error: "Already a collaborator." };
+    }
+
+    // Best-effort notification. The action returns success regardless
+    // of email/notification delivery — that matches the comment /
+    // build notify posture elsewhere in the codebase.
+    const [actor] = await db
+      .select({
+        id: users.id,
+        username: users.username,
+        displayName: users.displayName,
+        avatarUrl: users.avatarUrl,
+      })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (actor) {
+      void notifyCollaboratorAddedToProject(target.id, {
+        actor: {
+          id: actor.id,
+          username: actor.username,
+          displayName: actor.displayName,
+          avatarUrl: actor.avatarUrl,
+        },
+        listing: {
+          kind: "project",
+          name: project.name,
+          slug: project.slug,
+        },
+      });
+    }
+
+    revalidatePath(`/projects/${project.slug}`);
+    return {
+      success: true,
+      collaborator: {
+        id: target.id,
+        username: target.username,
+        displayName: target.displayName,
+        avatarUrl: target.avatarUrl,
+      },
+    };
+  } catch (error) {
+    logError("addProjectCollaborator", error);
+    return { error: "Failed to add collaborator." };
+  }
+}
+
+export async function removeProjectCollaborator(
+  projectId: string,
+  collaboratorUserId: string
+) {
+  try {
+    const { userId } = await auth();
+    if (!userId) return { error: "Unauthorized" };
+
+    const access = await canWriteProject(userId, projectId);
+    if (!access.ok) return { error: "Project not found" };
+    const project = access.resource;
+
+    // Two paths to removal: an owner / org member can remove anyone;
+    // a collaborator can remove themselves but no one else.
+    if (
+      access.viaCollaborator &&
+      collaboratorUserId !== userId
+    ) {
+      return { error: "Collaborators can only remove themselves." };
+    }
+
+    await db
+      .delete(projectCollaborators)
+      .where(
+        and(
+          eq(projectCollaborators.projectId, projectId),
+          eq(projectCollaborators.userId, collaboratorUserId)
+        )
+      );
+
+    revalidatePath(`/projects/${project.slug}`);
+    return { success: true };
+  } catch (error) {
+    logError("removeProjectCollaborator", error);
+    return { error: "Failed to remove collaborator." };
+  }
+}
+
+/**
+ * Public reader for the project detail page. Returns the joined user
+ * info so the avatar row renders without a follow-up query. Open to
+ * anyone who can see the project — the detail page itself gates
+ * visibility before calling this.
+ */
+export async function listProjectCollaborators(projectId: string): Promise<
+  Array<{
+    id: string;
+    username: string | null;
+    displayName: string | null;
+    avatarUrl: string | null;
+    role: string;
+    addedAt: Date;
+  }>
+> {
+  try {
+    const rows = await db
+      .select({
+        id: users.id,
+        username: users.username,
+        displayName: users.displayName,
+        avatarUrl: users.avatarUrl,
+        role: projectCollaborators.role,
+        addedAt: projectCollaborators.createdAt,
+      })
+      .from(projectCollaborators)
+      .innerJoin(users, eq(users.id, projectCollaborators.userId))
+      .where(eq(projectCollaborators.projectId, projectId))
+      .orderBy(projectCollaborators.createdAt);
+    return rows;
+  } catch (error) {
+    logError("listProjectCollaborators", error);
+    return [];
   }
 }
 

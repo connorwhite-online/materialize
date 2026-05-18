@@ -7,6 +7,7 @@ import {
   organizationMembers,
   organizations,
   printOrders,
+  projectCollaborators,
   projects,
 } from "@/lib/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
@@ -33,7 +34,19 @@ import { and, eq, inArray } from "drizzle-orm";
 
 type Role = "admin" | "member" | (string & {});
 
-type CanWriteOk<T> = { ok: true; resource: T; viaOrg: boolean };
+type CanWriteOk<T> = {
+  ok: true;
+  resource: T;
+  viaOrg: boolean;
+  /**
+   * True when access was granted via a row in
+   * `project_collaborators` rather than user-equality or org
+   * membership. Mutually exclusive with `viaOrg`. Callers that want
+   * to differentiate "this is your repo" from "you're a guest" can
+   * key off either flag — most don't need to.
+   */
+  viaCollaborator?: boolean;
+};
 type CanWriteFail = {
   ok: false;
   reason: "unauthenticated" | "not-found" | "forbidden";
@@ -54,6 +67,34 @@ async function getMembershipOrgIds(userId: string): Promise<Set<string>> {
     .from(organizationMembers)
     .where(eq(organizationMembers.userId, userId));
   return new Set(rows.map((r) => r.organizationId));
+}
+
+/**
+ * Is the viewer a per-project collaborator on this project? Used by
+ * `canWriteProject` as the third grant branch and by
+ * `lib/entitlement.ts` as a read-access branch.
+ *
+ * Single-row fetch off the unique (project_id, user_id) index.
+ * Returns role too so callers can later distinguish "editor" vs
+ * "viewer" without a second query; today everything is editor.
+ */
+export async function isProjectCollaborator(
+  userId: string | null,
+  projectId: string
+): Promise<{ collaborator: boolean; role: Role | null }> {
+  if (!userId) return { collaborator: false, role: null };
+  const [row] = await db
+    .select({ role: projectCollaborators.role })
+    .from(projectCollaborators)
+    .where(
+      and(
+        eq(projectCollaborators.userId, userId),
+        eq(projectCollaborators.projectId, projectId)
+      )
+    )
+    .limit(1);
+  if (!row) return { collaborator: false, role: null };
+  return { collaborator: true, role: row.role as Role };
 }
 
 /**
@@ -141,7 +182,19 @@ export async function canWriteProject(viewerId: string | null, projectId: string
     .from(projects)
     .where(eq(projects.id, projectId))
     .limit(1);
-  return canWriteByOwnership(viewerId, row);
+  const base = await canWriteByOwnership(viewerId, row);
+  if (base.ok) return base;
+  // Projects have a third grant path — per-project collaborators. We
+  // only fall through to this branch when the owner / org checks both
+  // failed. `not-found` and `unauthenticated` short-circuit (no point
+  // checking collaboration when the project doesn't exist).
+  if (!base.ok && base.reason === "forbidden" && row) {
+    const { collaborator } = await isProjectCollaborator(viewerId, projectId);
+    if (collaborator) {
+      return { ok: true as const, resource: row, viaOrg: false, viaCollaborator: true };
+    }
+  }
+  return base;
 }
 
 export async function canWriteCollection(

@@ -44,6 +44,8 @@ import {
 } from "@/components/photos/photos-feed";
 import { userOwnsProject } from "@/lib/entitlement";
 import { isOrgMember } from "@/lib/authorization";
+import { listProjectCollaborators } from "@/app/actions/projects";
+import { ProjectCollaborators } from "@/components/projects/project-collaborators";
 import { swallow } from "@/lib/utils/swallow";
 
 function truncate(s: string, n: number) {
@@ -150,7 +152,7 @@ export default async function ProjectDetailPage(props: {
     notFound();
   }
 
-  // Seven independent reads — fan out in one roundtrip. Photo URL
+  // Eight independent reads — fan out in one roundtrip. Photo URL
   // signing has to wait on its row fetch and is handled separately
   // below. `userOwnsProject` is called once and reused for both the
   // download gate and the build-post gate — same query, same answer.
@@ -162,6 +164,7 @@ export default async function ProjectDetailPage(props: {
     circuitRows,
     bomItems,
     commentRows,
+    collaborators,
   ] = await Promise.all([
     db
       .select({
@@ -282,6 +285,7 @@ export default async function ProjectDetailPage(props: {
         .orderBy(asc(projectComments.createdAt))
         .limit(500)
     ),
+    listProjectCollaborators(project.id),
   ]);
   const canDownload = ownsProject;
   // Gate for project builds / inline-comment photos. Owner is always
@@ -646,6 +650,19 @@ export default async function ProjectDetailPage(props: {
                 <p className="capitalize">License: {project.license}</p>
                 <p>{bundledFiles.length} files in bundle</p>
               </div>
+
+              <Separator className="my-4" />
+              <ProjectCollaborators
+                projectId={project.id}
+                initial={collaborators.map((c) => ({
+                  id: c.id,
+                  username: c.username,
+                  displayName: c.displayName,
+                  avatarUrl: c.avatarUrl,
+                }))}
+                canManage={isOwner}
+                viewerId={userId}
+              />
 
               {isOwner && (
                 <>

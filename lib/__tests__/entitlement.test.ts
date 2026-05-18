@@ -39,7 +39,13 @@ vi.mock("@/lib/db", () => ({
             return {
               where: () =>
                 state.fileRow
-                  ? [{ price: state.fileRow.price, userId: state.fileRow.userId }]
+                  ? [
+                      {
+                        price: state.fileRow.price,
+                        userId: state.fileRow.userId,
+                        organizationId: null,
+                      },
+                    ]
                   : [],
             };
           }
@@ -51,9 +57,22 @@ vi.mock("@/lib/db", () => ({
                       {
                         price: state.projectRow.price,
                         userId: state.projectRow.userId,
+                        organizationId: null,
                       },
                     ]
                   : [],
+            };
+          }
+          if (table.__name === "organization_members") {
+            return { where: () => ({ limit: () => [] }) };
+          }
+          if (table.__name === "project_collaborators") {
+            // Both call shapes appear: bare where().limit() for the
+            // project-direct lookup, and innerJoin().where().limit()
+            // for the file-via-project-collab transitive read.
+            return {
+              where: () => ({ limit: () => [] }),
+              innerJoin: () => ({ where: () => ({ limit: () => [] }) }),
             };
           }
           if (table.__name === "purchases") {
@@ -128,6 +147,20 @@ vi.mock("@/lib/db/schema", () => ({
     __name: "project_files",
     projectId: "project_id",
     fileId: "file_id",
+  },
+  projectCollaborators: {
+    __name: "project_collaborators",
+    id: "id",
+    projectId: "project_id",
+    userId: "user_id",
+    role: "role",
+  },
+  organizationMembers: {
+    __name: "organization_members",
+    id: "id",
+    organizationId: "organization_id",
+    userId: "user_id",
+    role: "role",
   },
   purchases: {
     __name: "purchases",

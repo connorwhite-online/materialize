@@ -18,7 +18,8 @@ export type NotificationType =
   | "build_on_file"
   | "print_on_file"
   | "purchase_on_listing"
-  | "refund_on_listing";
+  | "refund_on_listing"
+  | "collaborator_added_to_project";
 
 interface ActorSnapshot {
   /** User id of whoever triggered the event. */
@@ -92,13 +93,21 @@ export interface RefundOnListingPayload {
   snippet: PurchaseSnippet;
 }
 
+export interface CollaboratorAddedToProjectPayload {
+  /** User who pulled the recipient onto the project. */
+  actor: ActorSnapshot;
+  /** Always kind: 'project' — the deep link routes to /projects/[slug]. */
+  listing: ListingRef;
+}
+
 export type NotificationPayload =
   | (CommentOnListingPayload & { type: "comment_on_listing" })
   | (ReplyToCommentPayload & { type: "reply_to_comment" })
   | (BuildOnFilePayload & { type: "build_on_file" })
   | (PrintOnFilePayload & { type: "print_on_file" })
   | (PurchaseOnListingPayload & { type: "purchase_on_listing" })
-  | (RefundOnListingPayload & { type: "refund_on_listing" });
+  | (RefundOnListingPayload & { type: "refund_on_listing" })
+  | (CollaboratorAddedToProjectPayload & { type: "collaborator_added_to_project" });
 
 /**
  * Trim a comment body or caption to a short preview safe for the
