@@ -71,6 +71,23 @@ test.describe("response headers", () => {
     expect([302, 404]).toContain(res.status());
   });
 
+  test("thumbnail route returns 404 for a malformed fileId, not a DB error (sentry 7484237159)", async ({
+    request,
+  }) => {
+    // Regression: a truncated/non-UUID fileId (e.g. "ba14f9ed-106b-46e3-8")
+    // used to be forwarded straight to Postgres, which threw
+    // "invalid input syntax for type uuid" — caught by the route's
+    // try-catch and surfaced as a 500 + Sentry event 7484237159.
+    // After the fix, the route validates the format before touching the
+    // DB and returns 404 cleanly.
+    const res = await request.get(
+      "/api/thumbnails/ba14f9ed-106b-46e3-8",
+      { maxRedirects: 0 }
+    );
+    expect(res.status()).not.toBe(500);
+    expect([400, 404]).toContain(res.status());
+  });
+
   test("cache-control on 302 redirect (when a published file exists)", async ({
     request,
   }) => {

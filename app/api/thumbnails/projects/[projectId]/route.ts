@@ -5,6 +5,10 @@ import { eq } from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
 import { logError } from "@/lib/logger";
 
+/** Same guard as in /api/thumbnails/[fileId]/route.ts — see that file for rationale. */
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Redirects to a freshly signed R2 URL for a project's thumbnail.
  * Mirrors /api/thumbnails/[fileId] but joined against projectPhotos
@@ -28,6 +32,12 @@ export async function GET(
     const { projectId } = await context.params;
     if (!projectId) {
       return new Response("Missing projectId", { status: 400 });
+    }
+
+    // Reject non-UUID segments before they reach Postgres (same pattern
+    // as /api/thumbnails/[fileId]/route.ts — sentry 7484237159).
+    if (!UUID_RE.test(projectId)) {
+      return new Response("Not found", { status: 404 });
     }
 
     const url = new URL(request.url);
