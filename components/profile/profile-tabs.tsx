@@ -52,7 +52,7 @@ export function ProfileTabs({
     // Navigate in a transition so the page content updates without
     // blocking the underline animation
     const href =
-      tab === "library" ? `/u/${username}` : `/u/${username}?tab=${tab}`;
+      tab === "library" ? `/${username}` : `/${username}?tab=${tab}`;
     startTransition(() => {
       router.push(href, { scroll: false });
     });

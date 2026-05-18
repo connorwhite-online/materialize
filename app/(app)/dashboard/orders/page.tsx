@@ -18,5 +18,5 @@ export default async function OrdersRedirect({
   if (!user.username) {
     redirect(`/onboarding?${query.toString()}`);
   }
-  redirect(`/u/${user.username}?${query.toString()}`);
+  redirect(`/${user.username}?${query.toString()}`);
 }

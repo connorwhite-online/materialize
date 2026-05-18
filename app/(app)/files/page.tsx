@@ -527,7 +527,7 @@ interface UserRow {
 function UserCard({ user }: { user: UserRow }) {
   if (!user.username) return null;
   return (
-    <Link href={`/u/${user.username}`}>
+    <Link href={`/${user.username}`}>
       <Card className="group gap-0 p-1 overflow-hidden transition-colors hover:border-primary/30">
         <div className="flex aspect-square items-center justify-center overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted to-muted/50">
           <UserAvatar

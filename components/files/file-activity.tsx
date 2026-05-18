@@ -61,7 +61,7 @@ function UserCell({ user }: { user: ActivityUser }) {
   );
   return user.username ? (
     <Link
-      href={`/u/${user.username}`}
+      href={`/${user.username}`}
       className="hover:opacity-80 transition-opacity min-w-0"
     >
       {inner}

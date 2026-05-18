@@ -8,6 +8,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { nanoid } from "nanoid";
 import { logError } from "@/lib/logger";
+import { validateHandle } from "@/lib/handles/validate";
 
 const usernameSchema = z
   .string()
@@ -29,15 +30,14 @@ export async function setUsername(
 
     const normalized = parsed.data.toLowerCase();
 
-    // Check if username already taken
-    const [existing] = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.username, normalized));
-
-    if (existing && existing.id !== userId) {
-      return { error: "Username already taken" };
-    }
+    // Unified handle check — guards against (a) reserved top-level
+    // route words, (b) other users' usernames, AND (c) existing org
+    // slugs, since the new `/[handle]` namespace shares those three.
+    // `ignoreUserId` lets the viewer keep their own current username.
+    const conflict = await validateHandle(normalized, {
+      ignoreUserId: userId,
+    });
+    if (conflict) return { error: conflict };
 
     // Update Clerk
     const clerk = await clerkClient();
@@ -95,11 +95,14 @@ export async function setUsernameFromEmail(
         ? `${base}-${nanoid(4).toLowerCase()}`
         : base;
 
-      const [existing] = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(eq(users.username, candidate));
-      if (existing && existing.id !== userId) continue;
+      // Unified collision check — the candidate also can't clash
+      // with a reserved word or an existing org slug. Otherwise an
+      // unlucky email like jane@vercel.com would derive `vercel`
+      // and steal the org slug.
+      const conflict = await validateHandle(candidate, {
+        ignoreUserId: userId,
+      });
+      if (conflict) continue;
 
       try {
         await clerk.users.updateUser(userId, { username: candidate });

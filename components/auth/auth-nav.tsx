@@ -35,7 +35,7 @@ export function AuthNav() {
     // user lands here every time `/` redirects an authed visitor to
     // /u/<their-username>, so this is the common case.
     const onOwnProfile =
-      !!user?.username && pathname === `/u/${user.username}`;
+      !!user?.username && pathname === `/${user.username}`;
     return (
       <div className="flex items-center gap-2">
         {hasOrgs && (
@@ -47,8 +47,8 @@ export function AuthNav() {
           // chip lean once someone is in team mode.
           <OrganizationSwitcher
             hidePersonal={false}
-            afterCreateOrganizationUrl={(org) => `/o/${org.slug}`}
-            afterSelectOrganizationUrl={(org) => `/o/${org.slug}`}
+            afterCreateOrganizationUrl={(org) => `/${org.slug}`}
+            afterSelectOrganizationUrl={(org) => `/${org.slug}`}
             createOrganizationMode="modal"
             organizationProfileMode="modal"
             appearance={{

@@ -814,7 +814,7 @@ export default async function FileDetailPage(props: {
             <CardContent className="space-y-4">
               <div className="flex items-start gap-2">
                 <Link
-                  href={`/u/${file.username}`}
+                  href={`/${file.username}`}
                   className="flex flex-1 min-w-0 items-center gap-2.5 hover:opacity-80 transition-opacity"
                 >
                   <UserAvatar
@@ -872,7 +872,7 @@ export default async function FileDetailPage(props: {
                       fileName={file.name}
                       hasBuyers={ownerBuyerCount > 0}
                       buyerCount={ownerBuyerCount}
-                      redirectTo={`/u/${file.username}`}
+                      redirectTo={`/${file.username}`}
                       trigger={
                         <Button
                           variant="ghost"
