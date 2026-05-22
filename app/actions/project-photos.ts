@@ -19,6 +19,7 @@ import { revalidatePath } from "next/cache";
 import { deleteObject } from "@/lib/storage";
 import { logError } from "@/lib/logger";
 import { userOwnsProject } from "@/lib/entitlement";
+import { canWriteProject } from "@/lib/authorization";
 
 const MAX_CAPTION_LENGTH = 500;
 
@@ -191,6 +192,51 @@ export async function addInlineProjectCommentPhoto(params: {
   } catch (error) {
     logError("addInlineProjectCommentPhoto", error);
     return { error: "Failed to attach photo" };
+  }
+}
+
+/**
+ * Upload an image referenced inline by a project's build guide. Owner-
+ * only (the guide is owner-authored, unlike comment photos which buyers
+ * can also attach). Writes `kind = 'inline'` so the image stays out of
+ * the curator gallery and builds feed — it surfaces only via the
+ * guide's `![](url)` markdown. Returns the photoId so the editor can
+ * splice the `/api/thumbnails/projects/{id}?photoId=` URL into the
+ * markdown body.
+ */
+export async function addProjectGuideImage(params: {
+  projectId: string;
+  storageKey: string;
+}) {
+  try {
+    const { userId } = await auth();
+    if (!userId) return { error: "Unauthorized" };
+
+    const keyError = checkStorageKey(userId, params.storageKey);
+    if (keyError) return { error: keyError };
+
+    // Same write gate as updateProjectBuildGuide — owner, org member,
+    // or collaborator. A guide author must be able to upload the images
+    // they reference in it.
+    const access = await canWriteProject(userId, params.projectId);
+    if (!access.ok) return { error: "Project not found" };
+
+    const [photo] = await db
+      .insert(projectPhotos)
+      .values({
+        projectId: params.projectId,
+        userId,
+        storageKey: params.storageKey,
+        caption: null,
+        sortOrder: 0,
+        kind: "inline",
+      })
+      .returning();
+
+    return { photoId: photo.id };
+  } catch (error) {
+    logError("addProjectGuideImage", error);
+    return { error: "Failed to upload image" };
   }
 }
 

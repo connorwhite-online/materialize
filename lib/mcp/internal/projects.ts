@@ -27,6 +27,7 @@ import {
 import { buildListingSlug } from "@/lib/filenames";
 import { logError } from "@/lib/logger";
 import { LICENSE_ENUM_VALUES, type LicenseId } from "@/lib/licenses";
+import { MAX_BUILD_GUIDE_LENGTH } from "@/lib/validations/project";
 import { bestEffortDeleteR2 } from "./files";
 
 const MAX_BOM_ITEMS = 200;
@@ -36,6 +37,9 @@ const MAX_REPO_URL = 500;
 export interface ProjectMetadataInput {
   name?: string;
   description?: string | null;
+  /** Long-form markdown build guide — the step-by-step "how to build
+   * this" doc, distinct from the short `description`. */
+  buildGuide?: string | null;
   /** Price in cents. 0 = free. */
   priceCents?: number;
   license?: LicenseId;
@@ -49,6 +53,7 @@ export interface ProjectMetadataInput {
 function normalizeProjectMeta(meta: ProjectMetadataInput | undefined): Partial<{
   name: string;
   description: string | null;
+  buildGuide: string | null;
   price: number;
   license: LicenseId;
   visibility: "public" | "private";
@@ -63,6 +68,11 @@ function normalizeProjectMeta(meta: ProjectMetadataInput | undefined): Partial<{
   }
   if (meta.description !== undefined) {
     out.description = meta.description ? meta.description.slice(0, 5000) : null;
+  }
+  if (meta.buildGuide !== undefined) {
+    out.buildGuide = meta.buildGuide
+      ? meta.buildGuide.slice(0, MAX_BUILD_GUIDE_LENGTH)
+      : null;
   }
   if (typeof meta.priceCents === "number" && meta.priceCents >= 0) {
     out.price = Math.round(meta.priceCents);
@@ -121,6 +131,7 @@ export interface CreateProjectInput {
   /** Required — defaults aren't acceptable for project names. */
   name: string;
   description?: string | null;
+  buildGuide?: string | null;
   priceCents?: number;
   license?: LicenseId;
   visibility?: "public" | "private";
@@ -153,6 +164,7 @@ export async function createProjectForUser(
     const meta = normalizeProjectMeta({
       name: input.name,
       description: input.description,
+      buildGuide: input.buildGuide,
       priceCents: input.priceCents,
       license: input.license,
       visibility: input.visibility,
@@ -170,6 +182,7 @@ export async function createProjectForUser(
         name: meta.name ?? input.name,
         slug,
         description: meta.description ?? null,
+        buildGuide: meta.buildGuide ?? null,
         price: meta.price ?? 0,
         license: meta.license ?? "cc_by",
         visibility,
@@ -266,6 +279,8 @@ export async function listProjectsForUser(
 }
 
 export interface ProjectDetail extends ProjectSummary {
+  /** Long-form markdown build guide, or null if none authored yet. */
+  buildGuide: string | null;
   files: Array<{ fileId: string; slug: string; name: string; position: number }>;
   bom: Array<{
     id: string;
@@ -300,6 +315,7 @@ export async function getProjectForUser(params: {
       slug: projects.slug,
       name: projects.name,
       description: projects.description,
+      buildGuide: projects.buildGuide,
       visibility: projects.visibility,
       status: projects.status,
       price: projects.price,
@@ -342,6 +358,7 @@ export async function getProjectForUser(params: {
     slug: row.slug,
     name: row.name,
     description: row.description,
+    buildGuide: row.buildGuide,
     visibility: row.visibility,
     status: row.status,
     priceCents: row.price,
@@ -665,6 +682,45 @@ export async function addProjectPhotoForUser(params: {
     })
     .returning();
   return { photoId: photo.id };
+}
+
+/**
+ * Register an already-uploaded image as an inline build-guide image and
+ * hand back a ready-to-embed markdown snippet. Writes `kind = 'inline'`
+ * so the image stays out of the curator gallery — it surfaces only via
+ * the `![](…)` reference the agent splices into the build guide markdown.
+ *
+ * The returned `url` is a same-origin proxy that re-signs a fresh R2
+ * link on every load, so the embedded reference never expires.
+ */
+export async function addProjectInlineImageForUser(params: {
+  userId: string;
+  projectId: string;
+  storageKey: string;
+}): Promise<
+  | { photoId: string; url: string; markdown: string }
+  | { error: string }
+> {
+  if (!params.storageKey.startsWith(`photos/${params.userId}/`)) {
+    return { error: "Storage key does not match this user's photos prefix" };
+  }
+  const project = await ownsProject(params.userId, params.projectId);
+  if (!project) return { error: "Project not found" };
+
+  const [photo] = await db
+    .insert(projectPhotos)
+    .values({
+      projectId: project.id,
+      userId: params.userId,
+      storageKey: params.storageKey,
+      caption: null,
+      sortOrder: 0,
+      kind: "inline",
+    })
+    .returning();
+
+  const url = `/api/thumbnails/projects/${project.id}?photoId=${photo.id}`;
+  return { photoId: photo.id, url, markdown: `![](${url})` };
 }
 
 export async function setProjectCoverPhotoForUser(params: {
