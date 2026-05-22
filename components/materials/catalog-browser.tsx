@@ -2,10 +2,18 @@
 
 import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ChevronRight } from "@/components/icons/chevron-right";
 import { CatalogMaterialCard } from "./catalog-material-card";
 import type { CatalogMaterial, MaterialGroup } from "@/lib/craftcloud/catalog";
+
+const ALL_GROUPS = "all";
 
 interface CatalogBrowserProps {
   groups: MaterialGroup[];
@@ -91,33 +99,37 @@ export function CatalogBrowser({ groups }: CatalogBrowserProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap gap-2">
-        <Button
-          variant={activeGroup === null ? "secondary" : "ghost"}
-          size="sm"
-          onClick={() => setActiveGroup(null)}
-        >
-          All
-          <span className="ml-1 text-xs opacity-60">
-            {sortedGroups.reduce((s, g) => s + g.materials.length, 0)}
-          </span>
-        </Button>
-        {sortedGroups.map((g) => (
-          <Button
-            key={g.id}
-            variant={activeGroup === g.id ? "secondary" : "ghost"}
-            size="sm"
-            onClick={() =>
-              setActiveGroup((prev) => (prev === g.id ? null : g.id))
-            }
-          >
-            {g.name}
+      <Select
+        value={activeGroup ?? ALL_GROUPS}
+        onValueChange={(value) =>
+          setActiveGroup(value === ALL_GROUPS ? null : value)
+        }
+      >
+        <SelectTrigger size="sm" className="min-w-48">
+          <SelectValue>
+            {(value) => {
+              if (value === ALL_GROUPS || value == null) return "All materials";
+              return sortedGroups.find((g) => g.id === value)?.name ?? "All materials";
+            }}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL_GROUPS}>
+            All materials
             <span className="ml-1 text-xs opacity-60">
-              {g.materials.length}
+              {sortedGroups.reduce((s, g) => s + g.materials.length, 0)}
             </span>
-          </Button>
-        ))}
-      </div>
+          </SelectItem>
+          {sortedGroups.map((g) => (
+            <SelectItem key={g.id} value={g.id}>
+              {g.name}
+              <span className="ml-1 text-xs opacity-60">
+                {g.materials.length}
+              </span>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
 
       {visibleGroups.length === 0 ? (
         <div className="py-12 text-center text-sm text-muted-foreground">
