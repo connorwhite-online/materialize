@@ -14,7 +14,14 @@ import { MAX_BUILD_GUIDE_LENGTH } from "@/lib/validations/project";
 interface Props {
   projectId: string;
   buildGuide: string | null;
-  /** Owner / org member / collaborator — controls the edit affordance. */
+  /**
+   * Whether to surface the inline editor. The project page passes
+   * `isOwner` (the creator or an org member) — matching its other
+   * owner-only controls (EditProjectDialog, EditBomDialog). Collaborators
+   * are authorized server-side by `updateProjectBuildGuide` /
+   * `addProjectGuideImage` (both via `canWriteProject`) but the page
+   * doesn't render the editor for them yet.
+   */
   canManage: boolean;
 }
 
