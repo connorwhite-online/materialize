@@ -1,0 +1,139 @@
+name: pr-browser-review
+
+# Fires when Vercel finishes deploying a preview for a PR. The agent
+# opens the preview URL, walks the routes the PR touched, and posts
+# a review comment back to the PR.
+#
+# Why `deployment_status` instead of `pull_request`: on `pull_request`
+# the action can race Vercel — running before the preview is built or
+# while it's still mid-rebuild. The deployment_status event is fired
+# by Vercel's GitHub integration the moment the preview is ready, so
+# there's no polling and no race.
+#
+# Costs $$ on every PR push — Claude Agent SDK calls bill against the
+# repo's CLAUDE_CODE_OAUTH_TOKEN secret (subscription-backed; metered
+# only on overflow). The 20-minute hard cap inside
+# scripts/pr-browser-review.ts is the second line of defense; the
+# `timeout-minutes` here is the outer fence.
+#
+# Skipped automatically when the deployment is for `main` (post-merge)
+# rather than a PR branch. We only want browser review on PR pushes.
+
+on:
+  deployment_status:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    # Only run for successful preview deployments on PR branches.
+    # production deploys (main) and failed/in-progress deploys don't
+    # get reviewed.
+    if: >-
+      github.event.deployment_status.state == 'success' &&
+      github.event.deployment.environment == 'Preview' &&
+      github.event.deployment.ref != 'main' &&
+      github.event.deployment.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # App secrets the agent might need to drive authed flows or
+      # match production behaviour against the preview deploy.
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+    steps:
+      - name: Resolve PR number from deployment SHA
+        id: resolve-pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEPLOY_SHA: ${{ github.event.deployment.sha }}
+        run: |
+          # The deployment_status payload doesn't carry the PR number
+          # directly — only the commit SHA. Resolve via gh API.
+          # Returns the first open PR whose head matches the SHA.
+          pr_number=$(gh api \
+            "repos/${{ github.repository }}/commits/${DEPLOY_SHA}/pulls" \
+            --jq '.[] | select(.state == "open") | .number' \
+            | head -n1)
+          if [ -z "$pr_number" ]; then
+            echo "::notice::No open PR found for SHA ${DEPLOY_SHA}; skipping review"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Resolved PR #${pr_number}"
+            echo "pr_number=${pr_number}" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout PR head
+        if: steps.resolve-pr.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.deployment.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        if: steps.resolve-pr.outputs.skip != 'true'
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install deps
+        if: steps.resolve-pr.outputs.skip != 'true'
+        run: npm ci
+
+      - name: Install Playwright browsers
+        if: steps.resolve-pr.outputs.skip != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Run agent
+        if: steps.resolve-pr.outputs.skip != 'true'
+        # Mirror the sentry-fixer auth pattern: prefer subscription
+        # OAuth, fall back to API key, hard-fail if neither is set.
+        # Strip whitespace from pasted tokens — the SDK throws
+        # cryptic header errors on trailing \n.
+        run: |
+          if [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            CLAUDE_CODE_OAUTH_TOKEN="$(printf '%s' "$CLAUDE_CODE_OAUTH_TOKEN" | tr -d '[:space:]')"
+            export CLAUDE_CODE_OAUTH_TOKEN
+            unset ANTHROPIC_API_KEY
+            echo "[auth] using CLAUDE_CODE_OAUTH_TOKEN (len=${#CLAUDE_CODE_OAUTH_TOKEN})"
+          elif [ -n "$ANTHROPIC_API_KEY" ]; then
+            ANTHROPIC_API_KEY="$(printf '%s' "$ANTHROPIC_API_KEY" | tr -d '[:space:]')"
+            export ANTHROPIC_API_KEY
+            echo "[auth] using ANTHROPIC_API_KEY (len=${#ANTHROPIC_API_KEY})"
+          else
+            echo "::error::Neither CLAUDE_CODE_OAUTH_TOKEN nor ANTHROPIC_API_KEY is set"
+            exit 1
+          fi
+          npx tsx scripts/pr-browser-review.ts
+        env:
+          PR_NUMBER: ${{ steps.resolve-pr.outputs.pr_number }}
+          PREVIEW_URL: ${{ github.event.deployment_status.environment_url || github.event.deployment_status.target_url }}
+          PR_HEAD_SHA: ${{ github.event.deployment.sha }}
+          BASE_REF: ${{ github.event.deployment.payload.base_ref || 'main' }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # gh CLI uses GH_TOKEN — needs pull-requests:write so the
+          # agent can post / edit its review comment.
+          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload agent artifacts
+        if: always() && steps.resolve-pr.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-browser-review-${{ steps.resolve-pr.outputs.pr_number }}-${{ github.event.deployment.sha }}
+          path: |
+            .agent-out/
+            test-results/
+            playwright-report/
+          # `.agent-out/` is dot-prefixed; upload-artifact treats those
+          # as hidden and skips them by default. Same gotcha hit on the
+          # sentry-fixer rollout.
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
