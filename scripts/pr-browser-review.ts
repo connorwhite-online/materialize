@@ -38,6 +38,10 @@
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import {
+  mapFilesToRoutes,
+  formatRouteImpacts,
+} from "../lib/pr-review/file-to-routes";
 
 const AGENT_TIMEOUT_MS = 20 * 60 * 1000; // 20 minutes
 const COMMENT_MARKER = "<!-- pr-browser-review:autoreview -->";
@@ -64,25 +68,52 @@ function loadContext(): RunContext {
   return { prNumber, previewUrl, prHeadSha, baseRef };
 }
 
+interface DiffSnapshot {
+  /** Raw `git diff --name-status` output, lines unchanged. */
+  rawNameStatus: string;
+  /** Just the file paths (no status letter), for the route mapper. */
+  changedPaths: string[];
+}
+
 /**
  * Snapshot of the PR's diff stats. Used to seed the prompt with the
  * touched-file list so the agent doesn't burn turns calling `gh pr
- * diff` just to bootstrap.
+ * diff` just to bootstrap. Also yields a parsed path list for the
+ * deterministic route mapper.
  */
-function snapshotChangedFiles(baseRef: string): string {
+function snapshotChangedFiles(baseRef: string): DiffSnapshot {
   try {
     const stdout = execFileSync(
       "git",
       ["diff", "--name-status", `origin/${baseRef}...HEAD`],
       { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
     );
-    return stdout.trim() || "(no changes detected)";
+    const trimmed = stdout.trim();
+    if (!trimmed) {
+      return { rawNameStatus: "(no changes detected)", changedPaths: [] };
+    }
+    const paths = trimmed
+      .split("\n")
+      .map((line) => {
+        // `git diff --name-status` lines look like "M\tpath/to/file"
+        // for modifications, "A\tpath" for adds, "R100\told\tnew"
+        // for renames. We want the post-rename path either way.
+        const parts = line.split("\t");
+        return parts[parts.length - 1] ?? "";
+      })
+      .filter(Boolean);
+    return { rawNameStatus: trimmed, changedPaths: paths };
   } catch (err) {
-    return `(git diff failed: ${(err as Error).message})`;
+    return {
+      rawNameStatus: `(git diff failed: ${(err as Error).message})`,
+      changedPaths: [],
+    };
   }
 }
 
-function buildPrompt(ctx: RunContext, changedFiles: string): string {
+function buildPrompt(ctx: RunContext, diff: DiffSnapshot): string {
+  const impacts = mapFilesToRoutes(diff.changedPaths);
+  const impactBlock = formatRouteImpacts(impacts);
   return `You're reviewing a pull request by opening its Vercel preview
 deploy and driving a real Chromium browser through the surfaces it
 changes. You don't modify code — your output is a structured PR
@@ -98,18 +129,42 @@ Preview URL:  ${ctx.previewUrl}
 ## Files changed (git diff --name-status against base)
 
 \`\`\`
-${changedFiles}
+${diff.rawNameStatus}
 \`\`\`
+
+## Pre-computed route impact (deterministic, from path parse)
+
+${impactBlock}
+
+This list is exhaustive for direct app-router file changes. It is
+NOT exhaustive for component/lib changes — for those, the diff
+column above is the source of truth and you'll need to grep for
+callers. Start with this list as your minimum scope; add to it
+based on the diff.
 
 # Your workflow
 
-1. **Scope.** Read the diff (\`gh pr diff ${ctx.prNumber}\`) and decide
-   which user-visible routes the changes can affect. A change to
-   \`app/(app)/files/[slug]/page.tsx\` means visit a sample
-   \`/files/<slug>\`; a change to \`components/print/*\` means visit
-   \`/print\` and \`/print/[fileAssetId]\`; a change purely under
-   \`lib/\` or \`scripts/\` may have no route impact — say so and
-   exit cleanly with that note.
+1. **Scope.** Start from the "Pre-computed route impact" list above —
+   those routes are derived deterministically from app-router file
+   paths and you do not need to re-derive them. For each impact:
+     - \`page\` / \`loading\` / \`error\` / \`not-found\`: visit that
+       route directly, substituting any \`[dynamic]\` segments with
+       a real value (find a published slug via \`gh pr diff\` or a
+       quick grep through the codebase / DB sample).
+     - \`layout\` / \`template\` with \`affectsSubtree: true\`: pick
+       a representative sample of child routes (2-3 is enough) and
+       visit those.
+     - \`api\`: don't visit the API directly. Grep for the path in
+       \`app/\` and \`components/\` to find callers, then visit one.
+     - \`metadata\` (opengraph-image, sitemap, robots): skip browser
+       visit, just curl the URL via Bash to verify a 200.
+
+   Then add to that list based on the diff: changes to
+   \`components/\`, \`lib/\`, or other non-route files won't show up
+   in the pre-computed list. Grep for who imports them to find the
+   routes that render them and add those to your scope. If a
+   change is purely under \`lib/\`, \`scripts/\`, or other
+   non-rendering paths, say so in the comment and exit cleanly.
 
 2. **Reproduce.** Write a throwaway Playwright spec at
    \`.agent-out/review.spec.ts\` that visits each in-scope route
@@ -255,8 +310,8 @@ async function main() {
     // and the agent can still re-run gh pr diff itself.
   }
 
-  const changedFiles = snapshotChangedFiles(ctx.baseRef);
-  const prompt = buildPrompt(ctx, changedFiles);
+  const diff = snapshotChangedFiles(ctx.baseRef);
+  const prompt = buildPrompt(ctx, diff);
 
   fs.mkdirSync(".agent-out", { recursive: true });
 
