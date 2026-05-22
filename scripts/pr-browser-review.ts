@@ -113,7 +113,7 @@ ${changedFiles}
 
 2. **Reproduce.** Write a throwaway Playwright spec at
    \`.agent-out/review.spec.ts\` that visits each in-scope route
-   against PREVIEW_URL and:
+   against the preview and:
      - asserts no uncaught console errors
      - asserts no failed (4xx/5xx) requests to the same origin (3rd
        party 4xx is noise — filter)
@@ -121,8 +121,49 @@ ${changedFiles}
      - exercises any obvious interactive bits the diff implies
        (form submits, dialog opens, etc.) — keep it shallow, this
        isn't full E2E, it's a smoke check.
-   Run it with \`npx playwright test --config=playwright.config.ts
-   .agent-out/review.spec.ts --reporter=line\`.
+
+   Use \`page.goto("/some/path")\` — the config's baseURL resolves
+   it to the preview. Run with:
+
+   \`\`\`
+   PLAYWRIGHT_BASE_URL=${ctx.previewUrl} PLAYWRIGHT_NO_WEBSERVER=1 \\
+     npx playwright test --config=playwright.config.ts \\
+     .agent-out/review.spec.ts --reporter=line
+   \`\`\`
+
+   \`PLAYWRIGHT_NO_WEBSERVER=1\` is critical — without it the config
+   tries to boot \`npm run dev\` on localhost:3000 and the run dies.
+
+   ### Authed routes
+
+   For surfaces gated by Clerk (anything under \`/dashboard\`, edit
+   dialogs, library — when the diff implies one of these), import
+   the fixtures helpers from \`../e2e/fixtures\` and the testing
+   shim from \`@clerk/testing/playwright\`:
+
+   \`\`\`ts
+   import {
+     createClerkTestUser, deleteClerkTestUser,
+     seedAppUserForClerkId, deleteAppUserRow,
+   } from "../e2e/fixtures";
+   import { clerk } from "@clerk/testing/playwright";
+
+   // beforeAll: mint a fresh test user + seed app row
+   // beforeEach: page.goto("/"); await clerk.signIn({ page,
+   //   signInParams: { strategy: "email_code", identifier: user.email } });
+   // afterAll:  deleteAppUserRow + deleteClerkTestUser
+   \`\`\`
+
+   See \`e2e/library.spec.ts\` for the full pattern.
+
+   **Hard gate before attempting any authed flow**: verify the
+   preview is wired to Clerk TEST keys, not prod. Check the env
+   value of \`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY\` exposed to this
+   workflow — if it doesn't start with \`pk_test_\`, skip authed
+   coverage entirely and note in the comment that the preview
+   appears to use production Clerk keys (creating test users
+   against prod would pollute the real user table). Anon
+   coverage still proceeds.
 
 3. **Report.** Post a single PR review comment with this exact
    markdown structure:
@@ -159,11 +200,12 @@ ${changedFiles}
 2. **Do NOT open PRs.** No \`gh pr create\` calls. The only gh
    write op you make is \`gh pr comment\` / \`gh api ... issues/comments\`.
 
-3. **Anon-only flows for now.** Authed surfaces (anything under
-   \`/dashboard\`, \`/print\` after model upload, edit dialogs) need
-   a logged-in session and that's not wired in this version. If
-   the diff is entirely authed, say so in the comment and exit
-   cleanly — do not attempt to brute-force a login.
+3. **Authed flows are gated, not forbidden.** Use the
+   \`e2e/fixtures.ts\` helpers + \`clerk.signIn\` from
+   \`@clerk/testing/playwright\` for authed routes — see the spec
+   section above. The \`pk_test_\` check is the only hard gate:
+   if it fails, skip authed and note it. Always clean up users +
+   app rows in \`afterAll\` even if assertions fail.
 
 4. **Filter noise aggressively.** Sentry/Clerk/analytics 3rd-party
    requests fail in test environments routinely; they're not
