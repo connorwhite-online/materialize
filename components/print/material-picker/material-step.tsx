@@ -5,8 +5,17 @@ import Image from "next/image";
 import { AnimatePresence, motion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ChevronRight } from "@/components/icons/chevron-right";
 import type { EnrichedQuote, OptimisticMaterial } from "./types";
+
+const ALL_GROUPS = "all";
 
 interface ShippingLite {
   vendorId: string;
@@ -363,27 +372,29 @@ export function MaterialStep({
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2">
-        <Button
-          variant={activeGroup === null ? "secondary" : "ghost"}
-          size="xs"
-          onClick={() => setActiveGroup(null)}
-        >
-          All
-        </Button>
-        {groups.map((g) => (
-          <Button
-            key={g.id}
-            variant={activeGroup === g.id ? "secondary" : "ghost"}
-            size="xs"
-            onClick={() =>
-              setActiveGroup((prev) => (prev === g.id ? null : g.id))
-            }
-          >
-            {g.name}
-          </Button>
-        ))}
-      </div>
+      <Select
+        value={activeGroup ?? ALL_GROUPS}
+        onValueChange={(value) =>
+          setActiveGroup(value === ALL_GROUPS ? null : value)
+        }
+      >
+        <SelectTrigger size="sm" className="min-w-44">
+          <SelectValue>
+            {(value) => {
+              if (value === ALL_GROUPS || value == null) return "All materials";
+              return groups.find((g) => g.id === value)?.name ?? "All materials";
+            }}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL_GROUPS}>All materials</SelectItem>
+          {groups.map((g) => (
+            <SelectItem key={g.id} value={g.id}>
+              {g.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
 
       <div className="space-y-4">
         {/* Popular shortlist — only when the user is browsing All. The
