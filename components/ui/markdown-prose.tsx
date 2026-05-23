@@ -13,7 +13,18 @@ import remarkGfm from "remark-gfm";
  * caps at a sensible max-height so a tall photo doesn't blow out
  * the column.
  */
-export function MarkdownProse({ children }: { children: string }) {
+export function MarkdownProse({
+  children,
+  imageMaxHeightClass = "max-h-80",
+}: {
+  children: string;
+  /**
+   * Tailwind max-height class applied to inline images. Defaults to a
+   * compact cap for descriptions/comments; the build guide passes a
+   * taller value so step photos read at a useful size.
+   */
+  imageMaxHeightClass?: string;
+}) {
   return (
     <div className="text-sm leading-relaxed text-muted-foreground">
       <ReactMarkdown
@@ -104,7 +115,7 @@ export function MarkdownProse({ children }: { children: string }) {
               src={typeof src === "string" ? src : undefined}
               alt={alt || ""}
               loading="lazy"
-              className="my-3 block max-h-80 max-w-full rounded-xl border border-border object-contain"
+              className={`my-3 block ${imageMaxHeightClass} max-w-full rounded-xl border border-border object-contain`}
             />
           ),
         }}

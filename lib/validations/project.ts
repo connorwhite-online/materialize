@@ -9,6 +9,10 @@ import { LICENSE_ENUM_VALUES } from "@/lib/licenses";
 export const MAX_PROJECT_FILES = 50;
 export const MAX_PROJECT_TAGS = 20;
 export const MAX_TAG_LENGTH = 32;
+// The build guide is long-form documentation (steps, photos, code
+// snippets) so it gets a far larger ceiling than the description's
+// 5000. Still bounded so a runaway paste can't write an unbounded row.
+export const MAX_BUILD_GUIDE_LENGTH = 50_000;
 // Stripe maxes line items at 999, well below this. Cents math caps
 // at ~$21M for a 32-bit signed int — ceiling at $1M as a sanity bound.
 export const MAX_PRICE_CENTS = 100_000_000;
@@ -22,6 +26,13 @@ export const createProjectSchema = z.object({
   description: z
     .string()
     .max(5000)
+    .optional()
+    .transform((val) => (val ? val.trim() || undefined : undefined)),
+  // Long-form markdown build guide. Empty/whitespace resolves to
+  // undefined so the column stays NULL rather than holding "".
+  buildGuide: z
+    .string()
+    .max(MAX_BUILD_GUIDE_LENGTH)
     .optional()
     .transform((val) => (val ? val.trim() || undefined : undefined)),
   price: z.coerce

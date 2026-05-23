@@ -25,6 +25,7 @@ import { DeleteProjectButton } from "@/components/projects/delete-project-button
 import { BomDisplay } from "@/components/projects/bom-display";
 import { EditBomDialog } from "@/components/projects/edit-bom-dialog";
 import { EditProjectDialog } from "@/components/projects/edit-project-dialog";
+import { BuildGuide } from "@/components/projects/build-guide";
 import {
   CircuitGallery,
   type CircuitTile,
@@ -113,6 +114,7 @@ export default async function ProjectDetailPage(props: {
       id: projects.id,
       name: projects.name,
       description: projects.description,
+      buildGuide: projects.buildGuide,
       slug: projects.slug,
       price: projects.price,
       license: projects.license,
@@ -475,6 +477,21 @@ export default async function ProjectDetailPage(props: {
               intentionally don't render publicly — they're indexing
               metadata, not creator-facing copy. Same as the file
               detail page. */}
+
+          {/* Build guide — the long-form "how to build this" doc.
+              Owner-authored markdown with inline step photos, distinct
+              from the short description above. Owners always see the
+              section (with the inline editor / empty-state prompt);
+              non-owners only once a guide exists. */}
+          {(project.buildGuide || isOwner) && (
+            <CollapsibleSection title="Build Guide" defaultOpen>
+              <BuildGuide
+                projectId={project.id}
+                buildGuide={project.buildGuide}
+                canManage={isOwner}
+              />
+            </CollapsibleSection>
+          )}
 
           {/* Wiring / circuit diagrams — the visual half of the
               assembly story. Sits above the BOM because builders

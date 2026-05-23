@@ -30,6 +30,7 @@ import {
   createProjectSchema,
   updateProjectSchema,
   MAX_PROJECT_FILES,
+  MAX_BUILD_GUIDE_LENGTH,
 } from "@/lib/validations/project";
 import { buildListingSlug } from "@/lib/filenames";
 import { logError, isRedirectError } from "@/lib/logger";
@@ -64,6 +65,7 @@ export async function createProject(formData: FormData) {
   const parsed = createProjectSchema.safeParse({
     name: formData.get("name"),
     description: formData.get("description") || undefined,
+    buildGuide: formData.get("buildGuide") || undefined,
     price: formData.get("price"),
     license: formData.get("license"),
     visibility: formData.get("visibility") || undefined,
@@ -100,6 +102,7 @@ export async function createProject(formData: FormData) {
         organizationId,
         name: parsed.data.name,
         description: parsed.data.description,
+        buildGuide: parsed.data.buildGuide,
         slug,
         price: parsed.data.price,
         license: parsed.data.license,
@@ -222,6 +225,48 @@ export async function updateProject(projectId: string, formData: FormData) {
     return {
       error: { name: ["Failed to update project. Please try again."] },
     };
+  }
+}
+
+/**
+ * Save the project's build guide — the long-form markdown "how to
+ * build this" doc. Split out from updateProject because the guide is
+ * authored in its own dedicated editor on the project page (not the
+ * metadata dialog) and can be very long. Pass an empty string to
+ * clear it (column resets to NULL).
+ */
+export async function updateProjectBuildGuide(
+  projectId: string,
+  buildGuide: string
+) {
+  try {
+    const { userId } = await auth();
+    if (!userId) return { error: "Unauthorized" };
+
+    const access = await canWriteProject(userId, projectId);
+    if (!access.ok) return { error: "Project not found" };
+    const project = access.resource;
+
+    if (typeof buildGuide !== "string") {
+      return { error: "Invalid build guide" };
+    }
+    if (buildGuide.length > MAX_BUILD_GUIDE_LENGTH) {
+      return {
+        error: `Build guide must be under ${MAX_BUILD_GUIDE_LENGTH} characters.`,
+      };
+    }
+    const trimmed = buildGuide.trim();
+
+    await db
+      .update(projects)
+      .set({ buildGuide: trimmed || null })
+      .where(eq(projects.id, projectId));
+
+    revalidatePath(`/projects/${project.slug}`);
+    return { success: true };
+  } catch (error) {
+    logError("updateProjectBuildGuide", error);
+    return { error: "Failed to save build guide." };
   }
 }
 

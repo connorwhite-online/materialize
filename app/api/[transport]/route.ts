@@ -33,6 +33,7 @@ import {
   addProjectCircuitWokwiForUser,
   deleteProjectCircuitForUser,
   addProjectPhotoForUser,
+  addProjectInlineImageForUser,
   setProjectCoverPhotoForUser,
 } from "@/lib/mcp/internal/projects";
 import { getQuoteForUser } from "@/lib/mcp/internal/quotes";
@@ -539,6 +540,14 @@ const handler = createMcpHandler(
     const projectMetadataSchema = z.object({
       name: z.string().min(1).max(200).optional(),
       description: z.string().max(5000).nullable().optional(),
+      buildGuide: z
+        .string()
+        .max(50_000)
+        .nullable()
+        .optional()
+        .describe(
+          "Long-form markdown build guide (steps, photos, code). Distinct from `description`. Embed images with materialize_add_project_inline_image, which returns a ready-to-paste `![](…)` snippet. Pass null to clear."
+        ),
       priceCents: z.number().int().min(0).optional(),
       license: z.enum(LICENSE_ENUM_VALUES).optional(),
       visibility: z.enum(["public", "private"]).optional(),
@@ -551,11 +560,19 @@ const handler = createMcpHandler(
       {
         title: "Create a project bundling one or more files",
         description:
-          "Create a project that bundles N existing files the agent owns. Projects can carry a BOM, wiring diagrams, a firmware repo URL, and curator photos — set those via the followup tools (materialize_set_project_bom, materialize_add_project_circuit_*, materialize_add_project_photo).",
+          "Create a project that bundles N existing files the agent owns. Projects can carry a build guide (long-form markdown how-to), a BOM, wiring diagrams, a firmware repo URL, and curator photos — set those at create time or via the followup tools (materialize_update_project, materialize_set_project_bom, materialize_add_project_circuit_*, materialize_add_project_photo, materialize_add_project_inline_image).",
         inputSchema: {
           name: z.string().min(1).max(200),
           fileIds: z.array(z.string().uuid()).min(1).max(50),
           description: z.string().max(5000).nullable().optional(),
+          buildGuide: z
+            .string()
+            .max(50_000)
+            .nullable()
+            .optional()
+            .describe(
+              "Long-form markdown build guide (steps, photos, code). Distinct from `description`. Embed images with materialize_add_project_inline_image."
+            ),
           priceCents: z.number().int().min(0).optional(),
           license: z.enum(LICENSE_ENUM_VALUES).optional(),
           visibility: z.enum(["public", "private"]).optional(),
@@ -648,7 +665,7 @@ const handler = createMcpHandler(
       {
         title: "Update a project's metadata",
         description:
-          "Edit name, description, license, price, tags, visibility, or the firmware repo URL. Pass only the fields you want to update.",
+          "Edit name, description, build guide, license, price, tags, visibility, or the firmware repo URL. Pass only the fields you want to update.",
         inputSchema: {
           projectId: z.string().uuid(),
           metadata: projectMetadataSchema,
@@ -961,6 +978,39 @@ const handler = createMcpHandler(
           if ("error" in result) {
             return errorResult({
               code: "add_photo_failed",
+              message: result.error,
+            });
+          }
+          return jsonResult(result);
+        } catch (err) {
+          return scopeOrInternal(err);
+        }
+      }
+    );
+
+    server.registerTool(
+      "materialize_add_project_inline_image",
+      {
+        title: "Register an inline image for a project's build guide",
+        description:
+          "Register an already-uploaded image (use materialize_request_photo_upload_url first to PUT the bytes and get a storageKey) as an inline build-guide image. Returns a ready-to-paste markdown `![](…)` snippet whose URL re-signs on every load (never expires). Splice the snippet into the build guide markdown, then save it via materialize_update_project. Unlike materialize_add_project_photo, the image does NOT appear in the curator gallery. Owner-only.",
+        inputSchema: {
+          projectId: z.string().uuid(),
+          storageKey: z.string().min(1),
+        },
+      },
+      async ({ projectId, storageKey }, extra) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "projects:write");
+          const result = await addProjectInlineImageForUser({
+            userId: auth.userId,
+            projectId,
+            storageKey,
+          });
+          if ("error" in result) {
+            return errorResult({
+              code: "add_inline_image_failed",
               message: result.error,
             });
           }

@@ -314,6 +314,12 @@ export const projects = pgTable("projects", {
   ),
   name: text("name").notNull(),
   description: text("description"),
+  // Long-form, markdown build guide — the step-by-step "how to build
+  // this" documentation, distinct from `description` (which only says
+  // what the thing is). Supports inline images via markdown
+  // `![](/api/thumbnails/projects/{id}?photoId={id})` URLs that resolve
+  // to freshly-signed R2 links on each load. Projects only.
+  buildGuide: text("build_guide"),
   slug: text("slug").notNull().unique(),
   price: integer("price").notNull().default(0), // cents, 0 = free
   currency: text("currency").notNull().default("USD"),
