@@ -1,0 +1,123 @@
+name: staging-smoke-tour
+
+# Scheduled walk of the revenue-critical flows against the staging
+# deploy. Catches the failure class no PR can: nothing changed in
+# code, but staging broke anyway (env var rotated, third-party API
+# drifted, credential expired, dependency CDN down).
+#
+# Quiet when green, loud on regression — the agent opens a tracking
+# issue only when a flow fails, and closes it when the tour goes
+# green again. See scripts/staging-smoke-tour.ts for the reporting
+# contract.
+#
+# REQUIRES the STAGING_URL repo variable (or secret) pointing at the
+# dedicated staging deploy. Until that's configured the workflow
+# skips every run with a notice — it never fires against a
+# nonexistent target.
+#
+# Staging env prerequisites (set on the staging Vercel project, NOT
+# here):
+#   - NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = pk_test_...  (test instance)
+#   - CLERK_SECRET_KEY                  = sk_test_...
+#   - CRAFTCLOUD_USE_MOCK=true  OR a CraftCloud sandbox account
+#   - STRIPE_SECRET_KEY = sk_test_...   (test mode)
+#   - DATABASE_URL pointing at a staging Neon branch (NOT prod)
+
+on:
+  schedule:
+    # 08:00 UTC daily — before the US workday, after overnight
+    # dependency / infra changes have settled.
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  tour:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      # STAGING_URL can be a repo variable (vars) or a secret. Prefer
+      # the variable (it's not sensitive — it's a public URL) but fall
+      # back to a secret if that's where it's configured.
+      STAGING_URL: ${{ vars.STAGING_URL || secrets.STAGING_URL }}
+      # Staging app secrets the agent needs to mint test users + drive
+      # authed flows. These are the STAGING credentials, distinct from
+      # the prod secrets the sentry-fixer uses.
+      DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+      CLERK_SECRET_KEY: ${{ secrets.STAGING_CLERK_SECRET_KEY }}
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.STAGING_CLERK_PUBLISHABLE_KEY }}
+      STRIPE_SECRET_KEY: ${{ secrets.STAGING_STRIPE_SECRET_KEY }}
+    steps:
+      - name: Guard — skip if STAGING_URL is unset
+        id: guard
+        run: |
+          if [ -z "$STAGING_URL" ]; then
+            echo "::notice::STAGING_URL is not configured — skipping the smoke tour. Set the STAGING_URL repo variable to enable it."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Touring: $STAGING_URL"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.guard.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        if: steps.guard.outputs.skip != 'true'
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install deps
+        if: steps.guard.outputs.skip != 'true'
+        run: npm ci
+
+      - name: Install Playwright browsers
+        if: steps.guard.outputs.skip != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Run tour
+        if: steps.guard.outputs.skip != 'true'
+        # Same auth pattern as sentry-fixer / pr-browser-review:
+        # prefer subscription OAuth, fall back to API key, strip
+        # whitespace from pasted tokens.
+        run: |
+          if [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            CLAUDE_CODE_OAUTH_TOKEN="$(printf '%s' "$CLAUDE_CODE_OAUTH_TOKEN" | tr -d '[:space:]')"
+            export CLAUDE_CODE_OAUTH_TOKEN
+            unset ANTHROPIC_API_KEY
+            echo "[auth] using CLAUDE_CODE_OAUTH_TOKEN (len=${#CLAUDE_CODE_OAUTH_TOKEN})"
+          elif [ -n "$ANTHROPIC_API_KEY" ]; then
+            ANTHROPIC_API_KEY="$(printf '%s' "$ANTHROPIC_API_KEY" | tr -d '[:space:]')"
+            export ANTHROPIC_API_KEY
+            echo "[auth] using ANTHROPIC_API_KEY (len=${#ANTHROPIC_API_KEY})"
+          else
+            echo "::error::Neither CLAUDE_CODE_OAUTH_TOKEN nor ANTHROPIC_API_KEY is set"
+            exit 1
+          fi
+          npx tsx scripts/staging-smoke-tour.ts
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # gh CLI needs issues:write to open/close the tracking issue.
+          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload tour artifacts
+        if: always() && steps.guard.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-smoke-tour-${{ github.run_id }}
+          path: |
+            .agent-out/
+            test-results/
+            playwright-report/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
