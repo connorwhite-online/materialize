@@ -50,5 +50,8 @@ next-env.d.ts
 # clerk configuration (can include secrets)
 /.clerk/
 
-# claude code workspace config — local-only tooling
-/.claude/
+# claude code workspace config — settings.local.json stays local,
+# but the checked-in SessionStart hook + settings.json are shared
+/.claude/*
+!/.claude/settings.json
+!/.claude/hooks/
