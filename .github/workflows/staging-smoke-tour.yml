@@ -50,6 +50,13 @@ jobs:
       CLERK_SECRET_KEY: ${{ secrets.STAGING_CLERK_SECRET_KEY }}
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.STAGING_CLERK_PUBLISHABLE_KEY }}
       STRIPE_SECRET_KEY: ${{ secrets.STAGING_STRIPE_SECRET_KEY }}
+      # If the staging deploy sits behind Vercel's protection wall,
+      # this lets Playwright bypass the 401 (consumed in
+      # playwright.config.ts as x-vercel-protection-bypass). Use the
+      # STAGING project's bypass secret. Harmless when unset — the
+      # config simply omits the header. A dedicated staging domain
+      # usually isn't protected, so this is belt-and-suspenders.
+      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.STAGING_VERCEL_AUTOMATION_BYPASS_SECRET }}
     steps:
       - name: Guard — skip if STAGING_URL is unset
         id: guard
