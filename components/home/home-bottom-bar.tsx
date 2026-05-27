@@ -297,6 +297,7 @@ export function HomeBottomBar() {
             value={query}
             onChange={handleSearchChange}
             onFocus={handleSearchFocus}
+            aria-label="Search files, materials, and creators"
             placeholder="Search files, materials, creators..."
             className="flex-1 bg-transparent px-3 py-1 text-base md:text-sm placeholder:text-muted-foreground/60 focus:outline-none"
           />

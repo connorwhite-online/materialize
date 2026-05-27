@@ -24,6 +24,7 @@ export function BrowseSearchBar({ defaultValue }: BrowseSearchBarProps) {
           type="search"
           name="q"
           defaultValue={defaultValue}
+          aria-label="Search files, creators, and projects"
           placeholder="Search files, creators, projects..."
           className="flex-1 bg-transparent px-3 py-1 text-base md:text-sm placeholder:text-muted-foreground/60 focus:outline-none"
         />
