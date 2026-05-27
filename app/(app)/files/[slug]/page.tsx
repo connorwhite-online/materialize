@@ -648,6 +648,7 @@ export default async function FileDetailPage(props: {
       )}
       {isOwner && file.flaggedReason && file.flaggedAt && (
         <ListingFlaggedBanner
+          fileId={file.id}
           reason={file.flaggedReason}
           flaggedAt={file.flaggedAt}
         />
