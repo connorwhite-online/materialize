@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { fileAssets, files } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -18,6 +19,8 @@ export default async function PrintConfigPage(props: {
   // same catalog the quote route enriches against.
   const { material: preselectMaterialId } = await props.searchParams;
 
+  const { userId } = await auth();
+
   const [asset] = await db
     .select({
       id: fileAssets.id,
@@ -28,6 +31,8 @@ export default async function PrintConfigPage(props: {
       storageKey: fileAssets.storageKey,
       craftCloudModelId: fileAssets.craftCloudModelId,
       fileName: files.name,
+      fileUserId: files.userId,
+      fileStatus: files.status,
       recommendedMaterialId: files.recommendedMaterialId,
       designTags: files.designTags,
       minWallThickness: files.minWallThickness,
@@ -37,6 +42,13 @@ export default async function PrintConfigPage(props: {
     .where(eq(fileAssets.id, fileAssetId));
 
   if (!asset) notFound();
+
+  // Owner-or-published only — mirrors the download-url / preview byte
+  // routes. Without this, any visitor could load another user's private
+  // model metadata and config UI by guessing the asset id.
+  const isOwner = userId && asset.fileUserId === userId;
+  const isPublished = asset.fileStatus === "published";
+  if (!isOwner && !isPublished) notFound();
 
   const recommendedMaterial = asset.recommendedMaterialId
     ? getMaterialById(asset.recommendedMaterialId)
