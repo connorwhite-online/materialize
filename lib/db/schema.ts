@@ -509,6 +509,42 @@ export const purchases = pgTable("purchases", {
   ),
 ]);
 
+export const disputeStatusEnum = pgEnum("dispute_status", [
+  "open",
+  "resolved",
+  "rejected",
+]);
+
+// Creator-filed disputes against an auto-archived listing (see the
+// geometry-collision flow). MVP workflow: a row lands here in `open` and
+// an email fires to the operator, who reviews and flips the status by
+// hand. No automated resolution — deliberately human-in-the-loop.
+export const disputes = pgTable("disputes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  fileId: uuid("file_id").references(() => files.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").references(() => projects.id, {
+    onDelete: "cascade",
+  }),
+  raisedByUserId: text("raised_by_user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  reason: text("reason").notNull(),
+  status: disputeStatusEnum("status").notNull().default("open"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+}, (table) => [
+  index("disputes_file_id_idx").on(table.fileId),
+  index("disputes_project_id_idx").on(table.projectId),
+  index("disputes_raised_by_idx").on(table.raisedByUserId),
+  index("disputes_status_idx").on(table.status),
+  check(
+    "disputes_target_exactly_one",
+    sql`(${table.fileId} IS NOT NULL AND ${table.projectId} IS NULL) OR (${table.fileId} IS NULL AND ${table.projectId} IS NOT NULL)`
+  ),
+]);
+
 export const printOrders = pgTable("print_orders", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: text("user_id")
@@ -604,6 +640,12 @@ export const printOrders = pgTable("print_orders", {
   autoApprovedUntil: timestamp("auto_approved_until", {
     withTimezone: true,
   }),
+  // Set when a Stripe refund attempt failed after the order was already
+  // cancelled (see cancelAutoApprovedOrder). The retry-failed-refunds cron
+  // re-attempts the refund and clears this on success, so a transient
+  // Stripe error can't leave a cancelled order silently charged. Null on
+  // every order whose refund either succeeded or was never attempted.
+  refundFailedAt: timestamp("refund_failed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
