@@ -573,9 +573,12 @@ export function QuoteConfigurator({
       return;
     }
     let cancelled = false;
+    const controller = new AbortController();
     (async () => {
       try {
-        const res = await fetch("/api/craftcloud/materials-manifest");
+        const res = await fetch("/api/craftcloud/materials-manifest", {
+          signal: controller.signal,
+        });
         if (!res.ok) return;
         const data = (await res.json()) as MaterialsManifestResponse;
         if (cancelled) return;
@@ -606,6 +609,7 @@ export function QuoteConfigurator({
     })();
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [dimsReady, dims, scopedMaterialId]);
 
