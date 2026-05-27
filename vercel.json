@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/place-auto-approved-orders",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/retry-failed-refunds",
+      "schedule": "0 * * * *"
     }
   ]
 }

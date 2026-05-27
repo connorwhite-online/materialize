@@ -387,16 +387,29 @@ export async function cancelAutoApprovedOrder(input: {
     if (order.stripeSessionId) {
       try {
         const stripe = getStripe();
-        await stripe.refunds.create({
-          payment_intent: order.stripeSessionId,
-          reason: "requested_by_customer",
-          metadata: { printOrderId: order.id, source: "agent_auto_cancel" },
-        });
+        await stripe.refunds.create(
+          {
+            payment_intent: order.stripeSessionId,
+            reason: "requested_by_customer",
+            metadata: { printOrderId: order.id, source: "agent_auto_cancel" },
+          },
+          // Deterministic key so the retry-failed-refunds cron can re-issue
+          // safely — Stripe dedupes, so a later retry can't double-refund.
+          { idempotencyKey: `agent-cancel-refund:${order.id}` }
+        );
       } catch (err) {
-        // The order is already cancelled in our DB — log the refund
-        // failure but don't roll back. The user can still get their
-        // money back via Stripe's dispute flow if needed.
+        // The order is already cancelled in our DB. Persist a marker so the
+        // retry-failed-refunds cron re-attempts the refund — a cancelled
+        // order must never be left silently charged. (CON-44)
         logError("cancelAutoApprovedOrder.refund", err);
+        try {
+          await db
+            .update(printOrders)
+            .set({ refundFailedAt: new Date() })
+            .where(eq(printOrders.id, order.id));
+        } catch (markErr) {
+          logError("cancelAutoApprovedOrder.refundMarker", markErr);
+        }
       }
     }
 
