@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useMemo, useRef, Suspense, useCallback, useEffect } from "react";
+import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { Canvas } from "@react-three/fiber";
-import { Environment } from "@react-three/drei";
+import { StudioEnvironment } from "@/components/viewer/studio-environment";
 import * as THREE from "three";
 import { HERO_MATERIALS } from "@/lib/materials";
 import { ShowcaseMesh } from "./showcase-mesh";
@@ -247,10 +247,8 @@ export function HeroShowcase() {
             <directionalLight position={[-5, -3, -5]} intensity={0.5} />
             <directionalLight position={[0, -5, 2]} intensity={0.3} />
 
-            {/* Environment isolated in its own Suspense so it doesn't block the mesh */}
-            <Suspense fallback={null}>
-              <Environment preset="studio" />
-            </Suspense>
+            {/* Procedural studio IBL — no external HDR fetch (see StudioEnvironment) */}
+            <StudioEnvironment />
 
             {/* Mesh + particles render immediately */}
             <ShowcaseMesh target={target} dragVelocityRef={dragVelocityRef} />
