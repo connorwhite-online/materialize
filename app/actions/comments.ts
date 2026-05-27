@@ -16,6 +16,7 @@ import {
   editCommentSchema,
 } from "@/lib/validations/comment";
 import { logError } from "@/lib/logger";
+import { isOrgMember } from "@/lib/authorization";
 import {
   notifyCommentOnListing,
   notifyReplyToComment,
@@ -83,10 +84,29 @@ export async function postComment(
           slug: files.slug,
           name: files.name,
           ownerId: files.userId,
+          visibility: files.visibility,
+          status: files.status,
+          organizationId: files.organizationId,
         })
         .from(files)
         .where(eq(files.id, targetId));
       if (!file) return { error: "File not found" };
+
+      // Only comment on a listing the actor can see: published + public,
+      // or one they own / co-own via its org. Blocks commenting on
+      // someone else's private or draft listing. (CON-74)
+      const fileIsWriter =
+        file.ownerId === userId ||
+        (!!file.organizationId &&
+          (await isOrgMember(userId, file.organizationId)).member);
+      if (
+        !(
+          (file.status === "published" && file.visibility === "public") ||
+          fileIsWriter
+        )
+      ) {
+        return { error: "File not found" };
+      }
 
       let parentAuthorId: string | null = null;
       if (parsed.data.parentId) {
@@ -166,10 +186,27 @@ export async function postComment(
         slug: projects.slug,
         name: projects.name,
         ownerId: projects.userId,
+        visibility: projects.visibility,
+        status: projects.status,
+        organizationId: projects.organizationId,
       })
       .from(projects)
       .where(eq(projects.id, targetId));
     if (!project) return { error: "Project not found" };
+
+    // Same visibility gate as the file branch. (CON-74)
+    const projectIsWriter =
+      project.ownerId === userId ||
+      (!!project.organizationId &&
+        (await isOrgMember(userId, project.organizationId)).member);
+    if (
+      !(
+        (project.status === "published" && project.visibility === "public") ||
+        projectIsWriter
+      )
+    ) {
+      return { error: "Project not found" };
+    }
 
     let parentAuthorId: string | null = null;
     if (parsed.data.parentId) {
