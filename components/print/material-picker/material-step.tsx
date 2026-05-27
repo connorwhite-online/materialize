@@ -277,7 +277,10 @@ export function MaterialStep({
   if (!quotesLoading && quotes.length === 0) {
     if (quotesPartial) {
       return (
-        <div className="rounded-xl border border-border bg-muted/20 p-6 text-center">
+        <div
+          role="status"
+          className="rounded-xl border border-border bg-muted/20 p-6 text-center"
+        >
           <p className="text-sm font-medium">
             Couldn&apos;t reach all vendors in time
           </p>
@@ -299,7 +302,10 @@ export function MaterialStep({
     }
     if (materialScoped) {
       return (
-        <div className="rounded-xl border border-border bg-muted/20 p-6 text-center">
+        <div
+          role="status"
+          className="rounded-xl border border-border bg-muted/20 p-6 text-center"
+        >
           <p className="text-sm font-medium">
             No vendors are quoting this material right now
           </p>
@@ -324,7 +330,10 @@ export function MaterialStep({
       );
     }
     return (
-      <div className="rounded-xl border border-border bg-muted/20 p-6 text-center">
+      <div
+        role="status"
+        className="rounded-xl border border-border bg-muted/20 p-6 text-center"
+      >
         <p className="text-sm font-medium">No quotes available for this file</p>
         <p className="mx-auto mt-1.5 max-w-sm text-xs text-muted-foreground">
           This usually means the model exceeds every vendor&apos;s print volume,
@@ -518,9 +527,13 @@ function MaterialCardButton({
  * of "something's still working" indicator the rest of the app
  * uses for slow async work.
  */
-function LoadingBar() {
+function LoadingBar({ label }: { label?: string }) {
   return (
-    <div className="relative h-0.5 w-full overflow-hidden rounded-full bg-muted">
+    <div
+      role="status"
+      aria-label={label ?? "Collecting quotes"}
+      className="relative h-0.5 w-full overflow-hidden rounded-full bg-muted"
+    >
       <div className="absolute inset-y-0 left-0 w-1/3 animate-[material-loading-bar_1.1s_ease-in-out_infinite] rounded-full bg-foreground/60" />
       <style>{`
         @keyframes material-loading-bar {
