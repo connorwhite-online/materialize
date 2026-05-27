@@ -38,6 +38,115 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 const AGENT_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
 /**
+ * Files the agent must never edit unsupervised. Mirrors the prompt's
+ * Rule 3 list. Schema/migrations need human review, payouts + stripe
+ * handlers are revenue-critical, and proxy.ts is the auth boundary.
+ *
+ * Kept as a single source of truth so the prompt copy, the editing
+ * guard, and the test that pins this contract can't drift apart.
+ * Entries ending in `/` match a whole subtree; others match the exact
+ * repo-relative path. `lib/stripe/handle-*.ts` is a glob.
+ */
+export const FORBIDDEN_PATHS = [
+  "lib/db/schema.ts",
+  "lib/db/migrations/",
+  "app/actions/payouts.ts",
+  "lib/stripe/handle-*.ts",
+  "proxy.ts",
+] as const;
+
+/**
+ * Normalize a path the agent proposed to edit into a repo-relative,
+ * forward-slash form so the guard compares apples to apples regardless
+ * of how the agent phrased it (absolute, `./`-prefixed, Windows seps).
+ */
+export function normalizeEditPath(rawPath: string): string {
+  let p = rawPath.trim().replace(/\\/g, "/");
+  // Strip a leading cwd prefix so absolute paths reduce to repo-relative.
+  const cwd = process.cwd().replace(/\\/g, "/");
+  if (p.startsWith(cwd + "/")) p = p.slice(cwd.length + 1);
+  // Drop any leading `./` or `/`.
+  p = p.replace(/^\.?\//, "");
+  return p;
+}
+
+/**
+ * True if `rawPath` resolves to one of the FORBIDDEN_PATHS. Pure —
+ * no fs access — so it's cheap to call on every proposed edit and
+ * trivial to unit test. A `lib/stripe/handle-*.ts` style entry is
+ * treated as a glob over a single path segment; a trailing `/` entry
+ * matches the whole subtree.
+ */
+export function isForbiddenPath(rawPath: string): boolean {
+  if (!rawPath) return false;
+  const p = normalizeEditPath(rawPath);
+  for (const pattern of FORBIDDEN_PATHS) {
+    if (pattern.endsWith("/")) {
+      // Subtree match: the file lives anywhere under this directory.
+      if (p === pattern.slice(0, -1) || p.startsWith(pattern)) return true;
+      continue;
+    }
+    if (pattern.includes("*")) {
+      // Glob: escape regex metachars, then turn `*` into `[^/]*` so it
+      // matches within a single path segment only.
+      const re = new RegExp(
+        "^" +
+          pattern
+            .split("*")
+            .map((s) => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
+            .join("[^/]*") +
+          "$"
+      );
+      if (re.test(p)) return true;
+      continue;
+    }
+    if (p === pattern) return true;
+  }
+  return false;
+}
+
+/**
+ * Markdown the workflow writes to .agent-out/summary.md when the fix
+ * would have to touch a forbidden file. Pure string builder so the
+ * escalation copy is testable without touching disk.
+ */
+export function buildForbiddenEscalation(
+  event: Pick<SentryEvent, "event_id" | "id">,
+  forbiddenPath: string
+): string {
+  const id = event.event_id ?? event.id ?? "(unknown)";
+  return (
+    `# Escalation: fix touches a protected file\n\n` +
+    `Sentry event \`${id}\` would require editing \`${normalizeEditPath(
+      forbiddenPath
+    )}\`, which is on the forbidden-paths list (schema, migrations, ` +
+    `payouts, stripe handlers, proxy). These need human review.\n\n` +
+    `No production files were modified. A human must decide how to ` +
+    `proceed.\n`
+  );
+}
+
+/**
+ * Wire up a hard timeout that aborts the agent session. Extracted from
+ * main() so the timeout/abort contract is unit-testable with fake
+ * timers and without standing up a real agent query. Returns the
+ * controller plus a `clear()` to cancel the pending timeout in the
+ * success path. `onTimeout` fires right before the abort so callers
+ * can log; defaults to a no-op.
+ */
+export function createTimeoutController(
+  ms: number,
+  onTimeout: () => void = () => {}
+): { controller: AbortController; clear: () => void } {
+  const controller = new AbortController();
+  const handle = setTimeout(() => {
+    onTimeout();
+    controller.abort();
+  }, ms);
+  return { controller, clear: () => clearTimeout(handle) };
+}
+
+/**
  * How recently a prior PR for this issue counts as "still in flight."
  * Anything older has either landed (so the error wouldn't be firing
  * unless the fix regressed) or got abandoned (re-trying is fine).
@@ -109,6 +218,21 @@ async function readEventFromStdin(): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+/**
+ * Parse a raw Sentry event payload. Empty input is treated as "no
+ * event" and yields an empty object (the prompt builder degrades
+ * gracefully on missing fields); malformed JSON throws a clear error.
+ * Pure — no fs / stdin — so the parse contract is unit-testable.
+ */
+export function parseEvent(raw: string): SentryEvent {
+  if (!raw) return {} as SentryEvent;
+  try {
+    return JSON.parse(raw) as SentryEvent;
+  } catch (err) {
+    throw new Error(`Could not parse Sentry event JSON: ${(err as Error).message}`);
+  }
+}
+
 function loadEvent(): SentryEvent {
   const fromArg = process.argv[2];
   let raw: string;
@@ -124,12 +248,7 @@ function loadEvent(): SentryEvent {
       "No event payload provided — pipe JSON via stdin or pass a file path"
     );
   }
-  if (!raw) return {} as SentryEvent;
-  try {
-    return JSON.parse(raw) as SentryEvent;
-  } catch (err) {
-    throw new Error(`Could not parse Sentry event JSON: ${(err as Error).message}`);
-  }
+  return parseEvent(raw);
 }
 
 function formatTags(
@@ -548,13 +667,12 @@ async function main() {
     return;
   }
 
-  const abort = new AbortController();
-  const timeout = setTimeout(() => {
-    console.error(
-      `[sentry-fixer] hard timeout at ${AGENT_TIMEOUT_MS}ms — aborting session`
+  const { controller: abort, clear: clearAgentTimeout } =
+    createTimeoutController(AGENT_TIMEOUT_MS, () =>
+      console.error(
+        `[sentry-fixer] hard timeout at ${AGENT_TIMEOUT_MS}ms — aborting session`
+      )
     );
-    abort.abort();
-  }, AGENT_TIMEOUT_MS);
 
   let assistantTurns = 0;
 
@@ -585,7 +703,7 @@ async function main() {
       console.log(JSON.stringify({ turn: assistantTurns, message }));
     }
   } finally {
-    clearTimeout(timeout);
+    clearAgentTimeout();
   }
 
   console.log(
@@ -593,7 +711,19 @@ async function main() {
   );
 }
 
-main().catch((err) => {
-  console.error("[sentry-fixer] fatal:", err);
-  process.exit(1);
-});
+/**
+ * Only run the session when invoked as a script (CLI / CI), not when
+ * the module is imported (e.g. by the unit tests that exercise the
+ * pure helpers above). `process.argv[1]` is the entrypoint path; when
+ * a test runner imports this file it points at the runner, not us.
+ */
+const invokedDirectly =
+  typeof process.argv[1] === "string" &&
+  import.meta.url === `file://${process.argv[1]}`;
+
+if (invokedDirectly) {
+  main().catch((err) => {
+    console.error("[sentry-fixer] fatal:", err);
+    process.exit(1);
+  });
+}
