@@ -319,10 +319,15 @@ export function ShippingAddressForm({
             </InputOTP>
           </div>
           {otpError && (
-            <p className="text-xs text-destructive text-center">{otpError}</p>
+            <p role="alert" className="text-xs text-destructive text-center">
+              {otpError}
+            </p>
           )}
           {(otpVerifying || isSubmitting) && (
-            <p className="text-xs text-muted-foreground text-center">
+            <p
+              role="status"
+              className="text-xs text-muted-foreground text-center"
+            >
               {isSubmitting ? "Placing your order…" : "Verifying…"}
             </p>
           )}
@@ -488,7 +493,9 @@ export function ShippingAddressForm({
       </Card>
 
       {anonMode && otpError && stage === "form" && (
-        <p className="mt-3 text-xs text-destructive">{otpError}</p>
+        <p role="alert" className="mt-3 text-xs text-destructive">
+          {otpError}
+        </p>
       )}
 
       <div className="mt-6 flex gap-3">
