@@ -1092,10 +1092,16 @@ export async function requestOrderRefund(
         ? session.payment_intent
         : session.payment_intent.id;
 
-    // Issue full refund
-    await stripe.refunds.create({
-      payment_intent: paymentIntentId,
-    });
+    // Issue full refund. The deterministic idempotency key (one refund
+    // per order) means a double-click or retry returns the existing
+    // refund instead of issuing a second one — there's no atomic status
+    // claim before this call, so the key is the dedup primitive.
+    await stripe.refunds.create(
+      {
+        payment_intent: paymentIntentId,
+      },
+      { idempotencyKey: `print-refund:${order.id}` }
+    );
 
     // Update order status
     await db

@@ -308,20 +308,28 @@ export async function createAgentInitiatedOrder(
     // an email with the confirmation link.
     try {
       const stripe = getStripe();
-      const intent = await stripe.paymentIntents.create({
-        amount: grandTotalCents,
-        currency: "usd",
-        customer: billingRow.stripeCustomerId,
-        payment_method: billingRow.defaultPaymentMethod,
-        off_session: true,
-        confirm: true,
-        metadata: {
-          printOrderId: order.id,
-          source: "agent",
-          token_id: input.initiatedByTokenId,
-          type: "print_order_auto_approved",
+      const intent = await stripe.paymentIntents.create(
+        {
+          amount: grandTotalCents,
+          currency: "usd",
+          customer: billingRow.stripeCustomerId,
+          payment_method: billingRow.defaultPaymentMethod,
+          off_session: true,
+          confirm: true,
+          metadata: {
+            printOrderId: order.id,
+            source: "agent",
+            token_id: input.initiatedByTokenId,
+            type: "print_order_auto_approved",
+          },
         },
-      });
+        // Dedupe the charge against the agent's idempotency key: a retry
+        // (the textbook agent-timeout case) returns the same PaymentIntent
+        // instead of charging the customer twice. Pairs with a unique DB
+        // constraint on (userId, agentIdempotencyKey) — proposed as a
+        // follow-up migration, see PR notes.
+        { idempotencyKey: `agent-charge:${input.idempotencyKey}` }
+      );
 
       if (intent.status === "succeeded") {
         path = "auto_approved";

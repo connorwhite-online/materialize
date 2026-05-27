@@ -387,11 +387,19 @@ export async function cancelAutoApprovedOrder(input: {
     if (order.stripeSessionId) {
       try {
         const stripe = getStripe();
-        await stripe.refunds.create({
-          payment_intent: order.stripeSessionId,
-          reason: "requested_by_customer",
-          metadata: { printOrderId: order.id, source: "agent_auto_cancel" },
-        });
+        await stripe.refunds.create(
+          {
+            payment_intent: order.stripeSessionId,
+            reason: "requested_by_customer",
+            metadata: { printOrderId: order.id, source: "agent_auto_cancel" },
+          },
+          // Deterministic key so a retry (manual or a future reconciliation
+          // sweep) can't issue a second refund. NOTE: the failure path here
+          // still only logs — it does not yet persist a retry marker, so a
+          // failed refund leaves the order cancelled-but-charged. Tracked in
+          // CON-44; needs a schema field + sweep (human review).
+          { idempotencyKey: `agent-cancel-refund:${order.id}` }
+        );
       } catch (err) {
         // The order is already cancelled in our DB — log the refund
         // failure but don't roll back. The user can still get their
