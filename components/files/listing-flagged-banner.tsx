@@ -1,4 +1,5 @@
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { DisputeButton } from "./dispute-button";
 
 const REASON_COPY: Record<
   string,
@@ -12,6 +13,7 @@ const REASON_COPY: Record<
 };
 
 interface ListingFlaggedBannerProps {
+  fileId: string;
   reason: string;
   flaggedAt: Date;
 }
@@ -24,6 +26,7 @@ interface ListingFlaggedBannerProps {
  * of-band path.
  */
 export function ListingFlaggedBanner({
+  fileId,
   reason,
   flaggedAt,
 }: ListingFlaggedBannerProps) {
@@ -41,6 +44,7 @@ export function ListingFlaggedBanner({
         <p className="mt-2 text-xs text-muted-foreground">
           Flagged {flaggedAt.toLocaleDateString()}.
         </p>
+        <DisputeButton fileId={fileId} />
       </AlertDescription>
     </Alert>
   );
