@@ -72,11 +72,36 @@ vi.mock("@/lib/db/schema", () => ({
   fileAssets: { id: "id" },
 }));
 
+// The print-ownership gate (CON-73) is unit-tested separately; default
+// to "allowed" so the order-mechanics tests stay focused.
+vi.mock("@/lib/entitlement", () => ({
+  userCanPrintAsset: vi.fn(async () => true),
+}));
+
 import { createPrintOrder, checkOrderStatus, checkCartPricing } from "../print";
+import { userCanPrintAsset } from "@/lib/entitlement";
 
 describe("createPrintOrder", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(userCanPrintAsset).mockResolvedValue(true);
+  });
+
+  it("rejects ordering an asset the user can't print (CON-73)", async () => {
+    vi.mocked(userCanPrintAsset).mockResolvedValueOnce(false);
+    const result = await createPrintOrder({
+      fileAssetId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      quoteId: "quote-1",
+      vendorId: "vendor-1",
+      materialConfigId: "pla-white",
+      shippingId: "ship-1",
+      quantity: 1,
+      materialPrice: 10,
+      shippingPrice: 5,
+      currency: "USD",
+    });
+    expect(result).toMatchObject({ error: "File not found" });
+    expect(mockCreateCart).not.toHaveBeenCalled();
   });
 
   it("creates a cart and inserts order record", async () => {

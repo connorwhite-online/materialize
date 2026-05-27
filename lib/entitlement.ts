@@ -203,6 +203,27 @@ export async function userOwnsProject(
 }
 
 /**
+ * Can this user start a print / cart line for the given file asset?
+ * Printing is allowed for the asset's owner OR any published listing
+ * (the public "Print with X" path). Blocks ordering / carting another
+ * user's private or draft asset by a guessed id. Mirrors the gate in
+ * `app/api/craftcloud/quotes/route.ts`.
+ */
+export async function userCanPrintAsset(
+  userId: string | null,
+  fileAssetId: string
+): Promise<boolean> {
+  const [row] = await db
+    .select({ fileUserId: files.userId, fileStatus: files.status })
+    .from(fileAssets)
+    .leftJoin(files, eq(fileAssets.fileId, files.id))
+    .where(eq(fileAssets.id, fileAssetId))
+    .limit(1);
+  if (!row) return false;
+  return (!!userId && row.fileUserId === userId) || row.fileStatus === "published";
+}
+
+/**
  * Has the user actually used this file? "Used" means either:
  *   - they downloaded it (a `fileDownloads` row exists with their userId)
  *   - they have a print order in PRINTED_STATUSES touching one of the

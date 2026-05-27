@@ -83,7 +83,14 @@ vi.mock("@/lib/logger", () => ({
   logError: vi.fn(),
 }));
 
+// The ownership gate (CON-73) is unit-tested separately; default to
+// "allowed" here so the cart-mechanics tests stay focused.
+vi.mock("@/lib/entitlement", () => ({
+  userCanPrintAsset: vi.fn(async () => true),
+}));
+
 import { addToCart, removeFromCart, updateCartItemQuantity, getCart } from "../cart";
+import { userCanPrintAsset } from "@/lib/entitlement";
 
 const baseParams = {
   fileAssetId: "aaaaaaaa-bbbb-4ccc-9ddd-eeeeeeeeeeee",
@@ -106,6 +113,14 @@ describe("addToCart", () => {
     upsertSet = null;
     upsertReturnsId = "new-cart-item-id";
     updatedSet = null;
+    vi.mocked(userCanPrintAsset).mockResolvedValue(true);
+  });
+
+  it("rejects carting an asset the user can't print (CON-73)", async () => {
+    vi.mocked(userCanPrintAsset).mockResolvedValueOnce(false);
+    const result = await addToCart(baseParams);
+    expect(result).toMatchObject({ error: "File not found" });
+    expect(insertedValues).toHaveLength(0);
   });
 
   it("upserts a cart item with prices in cents", async () => {
