@@ -49,6 +49,11 @@ const STABLE_POLLS_REQUIRED = 4;
 // "the session is stale, stop trying" — bubble out as a timeout so
 // the existing retry UI fires.
 const CONSECUTIVE_CLIENT_ERROR_LIMIT = 3;
+// A persistent network failure (offline, DNS, unreachable server) would
+// otherwise retry silently until HARD_CEILING_MS. Bail after a few
+// consecutive throws so the retry UI fires quickly; the counter resets on
+// any successful fetch, so a transient single blip still recovers.
+const CONSECUTIVE_NETWORK_ERROR_LIMIT = 4;
 
 /**
  * Sleep helper that rejects with an AbortError when the signal
@@ -106,6 +111,7 @@ export async function pollQuotes({
     let lastQuoteCount = 0;
     let stablePolls = 0;
     let consecutiveClientErrors = 0;
+    let consecutiveNetworkErrors = 0;
 
     while (!signal.aborted) {
       if (Date.now() - started > HARD_CEILING_MS) return "timeout";
@@ -118,10 +124,16 @@ export async function pollQuotes({
         );
       } catch (err) {
         if (isAbort(err)) return "aborted";
-        // Transient network error — retry after the interval.
+        // Persistent network failure → surface the retry UI quickly
+        // instead of spinning until the hard ceiling.
+        consecutiveNetworkErrors++;
+        if (consecutiveNetworkErrors >= CONSECUTIVE_NETWORK_ERROR_LIMIT) {
+          return "timeout";
+        }
         await wait(POLL_INTERVAL_MS, signal);
         continue;
       }
+      consecutiveNetworkErrors = 0;
 
       if (signal.aborted) return "aborted";
       if (!pollRes.ok) {

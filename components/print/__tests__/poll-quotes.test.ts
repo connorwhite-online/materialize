@@ -173,6 +173,54 @@ describe("pollQuotes", () => {
     expect(await done).toBe("complete");
   });
 
+  it("returns 'timeout' after consecutive network failures", async () => {
+    // Hard-offline case: every fetch throws (not an abort). Without the
+    // network-error counter the loop would spin until HARD_CEILING_MS.
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => {
+        throw new TypeError("Failed to fetch");
+      });
+
+    const controller = new AbortController();
+    const done = pollQuotes({
+      priceId: "p1",
+      signal: controller.signal,
+      onSnapshot: () => void 0,
+    });
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(await done).toBe("timeout");
+    expect(fetchSpy.mock.calls.length).toBeLessThanOrEqual(4);
+  });
+
+  it("resets the network-error counter when a poll succeeds", async () => {
+    // Isolated network blips interspersed with successes must never
+    // accumulate to the bail-out limit.
+    let n = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      n++;
+      if (n <= 2 || n === 4) {
+        throw new TypeError("Failed to fetch");
+      }
+      const q = makeQuote("q1");
+      return new Response(
+        JSON.stringify({ quotes: [q], shipping: [], allComplete: true }),
+        { status: 200 }
+      );
+    });
+
+    const controller = new AbortController();
+    const done = pollQuotes({
+      priceId: "p1",
+      signal: controller.signal,
+      onSnapshot: () => void 0,
+    });
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(await done).toBe("complete");
+  });
+
   it("returns 'aborted' when the signal fires", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       async () =>
