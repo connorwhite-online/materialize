@@ -1,14 +1,25 @@
 "use client";
 
-import { useState, useMemo, useRef, Suspense, useCallback, useEffect } from "react";
+import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { Canvas } from "@react-three/fiber";
-import { Environment } from "@react-three/drei";
+import { StudioEnvironment } from "@/components/viewer/studio-environment";
 import * as THREE from "three";
 import { HERO_MATERIALS } from "@/lib/materials";
 import { ShowcaseMesh } from "./showcase-mesh";
 import { ShowcaseParticles } from "./showcase-particles";
 import { MaterialCarousel } from "./material-carousel";
+import { ErrorBoundary } from "@/components/ui/error-boundary";
+
+// Inline fallback that fills the reserved canvas footprint without
+// changing the surrounding layout (see hero-showcase-lazy.tsx).
+function ShowcaseUnavailable() {
+  return (
+    <div className="flex h-full w-full items-center justify-center">
+      <p className="text-xs text-muted-foreground">Preview unavailable</p>
+    </div>
+  );
+}
 
 // Minimum horizontal drag distance (px) to register as a swipe
 const SWIPE_THRESHOLD = 30;
@@ -224,31 +235,31 @@ export function HeroShowcase() {
     >
       {/* 3D viewport — full-bleed on mobile so particles can fly off-screen */}
       <div className="relative -mx-4 w-[100vw] h-[300px] sm:mx-0 sm:w-full sm:h-[480px]">
-        <Canvas
-          camera={{ position: [0, 0, 4.5], fov: 45 }}
-          dpr={[1, 2]}
-          gl={{ antialias: true, alpha: true }}
-        >
-          {/* Lights render immediately — no Suspense */}
-          <ambientLight intensity={0.5} />
-          <directionalLight position={[5, 5, 5]} intensity={1.2} />
-          <directionalLight position={[-5, -3, -5]} intensity={0.5} />
-          <directionalLight position={[0, -5, 2]} intensity={0.3} />
+        <ErrorBoundary fallback={<ShowcaseUnavailable />}>
+          <Canvas
+            camera={{ position: [0, 0, 4.5], fov: 45 }}
+            dpr={[1, 2]}
+            gl={{ antialias: true, alpha: true }}
+          >
+            {/* Lights render immediately — no Suspense */}
+            <ambientLight intensity={0.5} />
+            <directionalLight position={[5, 5, 5]} intensity={1.2} />
+            <directionalLight position={[-5, -3, -5]} intensity={0.5} />
+            <directionalLight position={[0, -5, 2]} intensity={0.3} />
 
-          {/* Environment isolated in its own Suspense so it doesn't block the mesh */}
-          <Suspense fallback={null}>
-            <Environment preset="studio" />
-          </Suspense>
+            {/* Procedural studio IBL — no external HDR fetch (see StudioEnvironment) */}
+            <StudioEnvironment />
 
-          {/* Mesh + particles render immediately */}
-          <ShowcaseMesh target={target} dragVelocityRef={dragVelocityRef} />
-          <ShowcaseParticles
-            burstKey={burstKey}
-            direction={burstDirection}
-            intensity={burstIntensity}
-            color={particleColor}
-          />
-        </Canvas>
+            {/* Mesh + particles render immediately */}
+            <ShowcaseMesh target={target} dragVelocityRef={dragVelocityRef} />
+            <ShowcaseParticles
+              burstKey={burstKey}
+              direction={burstDirection}
+              intensity={burstIntensity}
+              color={particleColor}
+            />
+          </Canvas>
+        </ErrorBoundary>
       </div>
 
       {/* Material carousel — display-only, driven by parent state */}
