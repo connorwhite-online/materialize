@@ -1,12 +1,15 @@
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { fileAssets, files } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { logError } from "@/lib/logger";
 
 export async function POST(request: Request) {
   try {
     const { userId } = await auth();
+    if (!userId) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
     const body = (await request.json()) as {
       fileAssetId: string;
@@ -37,7 +40,7 @@ export async function POST(request: Request) {
       return Response.json({ error: "Not found" }, { status: 404 });
     }
 
-    const isOwner = userId && assetRow.fileUserId === userId;
+    const isOwner = assetRow.fileUserId === userId;
     const isPublished = assetRow.fileStatus === "published";
     if (!isOwner && !isPublished) {
       return Response.json({ error: "Forbidden" }, { status: 403 });
@@ -59,13 +62,24 @@ export async function POST(request: Request) {
         }
       : undefined;
 
+    // The owner may (re)write freely. A non-owner quoting a published
+    // listing may only *first-capture* the modelId — the `isNull` guard
+    // means they can never overwrite an already-cached value, so a third
+    // party can't repoint an established listing to attacker geometry.
     await db
       .update(fileAssets)
       .set({
         craftCloudModelId: body.modelId,
         geometryData: cleanGeometry,
       })
-      .where(eq(fileAssets.id, body.fileAssetId));
+      .where(
+        isOwner
+          ? eq(fileAssets.id, body.fileAssetId)
+          : and(
+              eq(fileAssets.id, body.fileAssetId),
+              isNull(fileAssets.craftCloudModelId)
+            )
+      );
 
     return Response.json({ cached: true });
   } catch (error) {
