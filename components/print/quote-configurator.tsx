@@ -177,6 +177,20 @@ export function QuoteConfigurator({
       setSortQuantity(quantity);
     }
   }, [quantity, sortQuantity]);
+  // Drop a shipping option that belonged to a previously-selected vendor
+  // when the user switches quotes. PriceDisplay only *hides* the stale
+  // option (it filters by selectedQuote.vendorId), but the state stays
+  // truthy and keeps checkout enabled — so without this, checkout could
+  // fire with a shippingId/price from the wrong vendor. See CON-53.
+  useEffect(() => {
+    if (
+      selectedShipping &&
+      selectedQuote &&
+      selectedShipping.vendorId !== selectedQuote.vendorId
+    ) {
+      setSelectedShipping(null);
+    }
+  }, [selectedQuote, selectedShipping]);
 
   // Region drives which country + currency we ask CraftCloud for
   // quotes in. Persisted to localStorage so the user's pick survives
