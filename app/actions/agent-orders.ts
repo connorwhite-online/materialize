@@ -1,6 +1,7 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
+import { createHash, timingSafeEqual } from "crypto";
 import { and, eq, gt, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
@@ -17,6 +18,19 @@ import { logError } from "@/lib/logger";
 import { revalidatePath } from "next/cache";
 
 const SESSION_CLAIM_PREFIX = "session_claim:";
+
+// Constant-time comparison of the emailed confirm/cancel capability token.
+// Hashing first equalizes length (timingSafeEqual throws on length mismatch)
+// and a null/absent stored token never matches.
+function confirmationTokenMatches(
+  stored: string | null | undefined,
+  provided: string | null | undefined
+): boolean {
+  if (!stored || !provided) return false;
+  const a = createHash("sha256").update(stored).digest();
+  const b = createHash("sha256").update(provided).digest();
+  return timingSafeEqual(a, b);
+}
 
 /**
  * Confirms an agent-initiated print order: flips its status from
@@ -58,7 +72,7 @@ export async function confirmAgentInitiatedOrder(input: {
     if (order.status !== "awaiting_agent_approval") {
       return { error: "This order is no longer awaiting approval" };
     }
-    if (order.confirmationToken !== input.confirmationToken) {
+    if (!confirmationTokenMatches(order.confirmationToken, input.confirmationToken)) {
       return { error: "Invalid confirmation link" };
     }
     if (
@@ -324,7 +338,7 @@ export async function cancelAutoApprovedOrder(input: {
       .limit(1);
 
     if (!order) return { error: "Order not found" };
-    if (order.confirmationToken !== input.confirmationToken) {
+    if (!confirmationTokenMatches(order.confirmationToken, input.confirmationToken)) {
       return { error: "Invalid cancel link" };
     }
     if (order.status !== "auto_approved") {
