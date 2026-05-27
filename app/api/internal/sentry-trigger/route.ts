@@ -13,7 +13,13 @@ import { logError } from "@/lib/logger";
  *        Client Secret in `SENTRY_INTEGRATION_CLIENT_SECRET`.
  *      - **Shared-header mode** (manual triggers / providers that
  *        let you set custom headers): match `X-Sentry-Trigger-Secret`
- *        against `SENTRY_TRIGGER_SECRET`.
+ *        against `SENTRY_TRIGGER_SECRET`. This mode is OFF by default
+ *        — a single static header has no replay protection, so a
+ *        leaked secret would let an attacker fire arbitrary agent
+ *        runs. It is only honored when
+ *        `SENTRY_TRIGGER_ALLOW_SHARED_SECRET` is explicitly enabled,
+ *        and only for requests inside a short freshness window
+ *        (see `X-Sentry-Trigger-Timestamp`).
  *      Either path works; at least one must be configured.
  *   3. Extract the event id + the full payload and dispatch the
  *      `sentry-fixer` GitHub Action with both as inputs.
@@ -38,13 +44,23 @@ import { logError } from "@/lib/logger";
  *     SENTRY_TRIGGER_SECRET — shared secret matching what the
  *       webhook sender posts in `X-Sentry-Trigger-Secret`. Useful
  *       for manual triggers or webhook providers that let you set
- *       a custom header.
+ *       a custom header. INERT unless
+ *       SENTRY_TRIGGER_ALLOW_SHARED_SECRET is also enabled.
  *   Plus:
  *     GITHUB_DISPATCH_TOKEN — PAT with `actions:write` scope on
  *       the repo.
  *     GITHUB_REPO — `owner/repo` (e.g. "connor/materialize").
  *
  * Env optional:
+ *   SENTRY_TRIGGER_ALLOW_SHARED_SECRET — opt-in flag that enables the
+ *     shared-header (`X-Sentry-Trigger-Secret`) auth mode. OFF by
+ *     default: with the flag unset we require HMAC and ignore the
+ *     shared header entirely, even if SENTRY_TRIGGER_SECRET is set.
+ *     Set to `1`/`true`/`yes`/`on` to enable manual `curl` triggers.
+ *     When enabled, requests must also carry a recent
+ *     `X-Sentry-Trigger-Timestamp` (see below).
+ *   SENTRY_TRIGGER_TIMESTAMP_WINDOW_SECONDS — freshness window (in
+ *     seconds) for the shared-secret replay guard. Defaults to 300.
  *   SENTRY_TRIGGER_ENVIRONMENT — comma-separated allowlist of Sentry
  *     environments that should dispatch a fix. Defaults to
  *     `production`, which is the only deploy we want a real agent
@@ -106,10 +122,33 @@ export async function POST(request: Request) {
     }
   }
 
-  if (!authed && sharedSecret) {
+  // Shared-secret fallback. OFF by default: a single static header
+  // has no replay protection, so a leaked SENTRY_TRIGGER_SECRET would
+  // let an attacker fire arbitrary agent runs. Only honor it when the
+  // operator explicitly opts in via SENTRY_TRIGGER_ALLOW_SHARED_SECRET
+  // (e.g. to keep the documented manual `curl` test path working).
+  const sharedSecretAllowed = isSharedSecretModeEnabled(
+    process.env.SENTRY_TRIGGER_ALLOW_SHARED_SECRET
+  );
+  if (!authed && sharedSecret && sharedSecretAllowed) {
     const provided = request.headers.get("x-sentry-trigger-secret");
     if (provided && constantTimeStringEqual(provided, sharedSecret)) {
-      authed = true;
+      // Even with the right secret, require a recent timestamp so a
+      // captured request can't be replayed indefinitely. The window
+      // is small but generous enough for hand-run curl commands.
+      const freshness = checkSharedSecretFreshness(
+        request.headers.get("x-sentry-trigger-timestamp"),
+        process.env.SENTRY_TRIGGER_TIMESTAMP_WINDOW_SECONDS,
+        Date.now()
+      );
+      if (freshness.ok) {
+        authed = true;
+      } else {
+        return Response.json(
+          { error: "Forbidden", reason: freshness.reason },
+          { status: 403 }
+        );
+      }
     }
   }
 
@@ -307,6 +346,77 @@ export function extractEventLike(
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Whether the shared-secret (`X-Sentry-Trigger-Secret`) auth mode is
+ * enabled. OFF unless the operator opts in, because a static header
+ * has no replay protection — by default we require HMAC. Accepts the
+ * usual truthy spellings; anything else (including unset) is false.
+ */
+export function isSharedSecretModeEnabled(
+  rawFlag: string | undefined
+): boolean {
+  if (typeof rawFlag !== "string") return false;
+  const normalized = rawFlag.trim().toLowerCase();
+  return (
+    normalized === "1" ||
+    normalized === "true" ||
+    normalized === "yes" ||
+    normalized === "on"
+  );
+}
+
+export type SharedSecretFreshness =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: "missing-timestamp" | "malformed-timestamp" | "stale-timestamp";
+    };
+
+/**
+ * Replay guard for the shared-secret path. The caller must send an
+ * `X-Sentry-Trigger-Timestamp` header (Unix seconds; milliseconds are
+ * also accepted) within `windowSeconds` of now. Without this a single
+ * captured request could be replayed forever; with it a captured
+ * request expires quickly.
+ *
+ * Defaults to a 300s window. Future timestamps are bounded by the same
+ * window so a skewed-forward clock can't grant an unbounded lifetime.
+ */
+export function checkSharedSecretFreshness(
+  rawTimestamp: string | null,
+  rawWindowSeconds: string | undefined,
+  nowMs: number
+): SharedSecretFreshness {
+  if (rawTimestamp === null || rawTimestamp.trim().length === 0) {
+    return { ok: false, reason: "missing-timestamp" };
+  }
+  const parsed = Number(rawTimestamp.trim());
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return { ok: false, reason: "malformed-timestamp" };
+  }
+  // Heuristic: values that look like milliseconds (>= ~1e12) are
+  // treated as ms; smaller values are treated as seconds.
+  const timestampMs = parsed >= 1e12 ? parsed : parsed * 1000;
+
+  const windowSeconds = parseWindowSeconds(rawWindowSeconds);
+  const windowMs = windowSeconds * 1000;
+  if (Math.abs(nowMs - timestampMs) > windowMs) {
+    return { ok: false, reason: "stale-timestamp" };
+  }
+  return { ok: true };
+}
+
+const DEFAULT_TIMESTAMP_WINDOW_SECONDS = 300;
+
+function parseWindowSeconds(raw: string | undefined): number {
+  if (typeof raw !== "string") return DEFAULT_TIMESTAMP_WINDOW_SECONDS;
+  const parsed = Number(raw.trim());
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_TIMESTAMP_WINDOW_SECONDS;
+  }
+  return parsed;
 }
 
 /**
