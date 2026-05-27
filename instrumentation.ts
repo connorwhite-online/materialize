@@ -11,6 +11,13 @@ import * as Sentry from "@sentry/nextjs";
 
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
+    // Fail fast at boot if any required server env var is missing, rather
+    // than surfacing the failure deep inside a request handler. See
+    // lib/env.ts. Edge skips this — its var set differs and the core flows
+    // (db, payments, storage, email, watermark) all run on the node runtime.
+    const { validateServerEnv } = await import("./lib/env");
+    validateServerEnv();
+
     await import("./sentry.server.config");
   }
   if (process.env.NEXT_RUNTIME === "edge") {

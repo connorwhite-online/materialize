@@ -166,6 +166,14 @@ export function QuoteConfigurator({
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
   const [selectedShipping, setSelectedShipping] =
     useState<ShippingOption | null>(null);
+  // Live mirrors of the current selection, used by the cart-pricing
+  // effect to discard a stale (slow) checkCartPricing response whose
+  // quote/vendor/shipping no longer matches what the user has picked.
+  // See the effect below (CON-55).
+  const selectedQuoteRef = useRef<Quote | null>(null);
+  const selectedShippingRef = useRef<ShippingOption | null>(null);
+  selectedQuoteRef.current = selectedQuote;
+  selectedShippingRef.current = selectedShipping;
   const [quantity, setQuantity] = useState(1);
   // Quantity-at-last-rerank anchor for the picker's sort. Drifts
   // behind the live quantity until the user has moved by more than
@@ -338,6 +346,43 @@ export function QuoteConfigurator({
   const cart = useCart();
   const [isAddingToCart, setIsAddingToCart] = useState(false);
 
+  // Single polite live region message for the quote pipeline + the
+  // quantity clamp (CON-62 / CON-64). Screen readers announce this on
+  // change; we dedupe so the repeated poll snapshots don't re-announce
+  // the same "Collecting quotes…" text on every 1.5s tick. The clamp
+  // message is set imperatively from the quantity onChange handler and
+  // is intentionally allowed to repeat (re-announce) even with the same
+  // text by clearing first when a fresh clamp fires.
+  const [statusMessage, setStatusMessage] = useState("");
+
+  // Derive the phase message from the quote pipeline and announce it
+  // only when the text actually changes. The poll loop drops a new
+  // snapshot into `quotes` every ~1.5s; without this dedupe the live
+  // region would re-fire "Collecting quotes…" on every tick.
+  const quotePhaseMessage = useMemo(() => {
+    if (loadingPhase === "uploading") return "Preparing your file…";
+    if (loadingPhase === "quoting") {
+      return quotes.length > 0
+        ? `Collecting quotes — ${quotes.length} ${quotes.length === 1 ? "option" : "options"} so far`
+        : "Collecting quotes…";
+    }
+    if (loadingPhase === "timeout") {
+      return quotes.length > 0
+        ? `Showing ${quotes.length} partial ${quotes.length === 1 ? "result" : "results"} — some vendors didn't respond in time`
+        : "No quotes available — some vendors didn't respond in time";
+    }
+    // done
+    if (quotes.length > 0) {
+      const materialCount = new Set(quotes.map((q) => q.materialId)).size;
+      return `Showing ${materialCount} ${materialCount === 1 ? "material" : "materials"}`;
+    }
+    return "No quotes available for this file";
+  }, [loadingPhase, quotes]);
+
+  useEffect(() => {
+    setStatusMessage(quotePhaseMessage);
+  }, [quotePhaseMessage]);
+
   // Vendor minimum production fee — probed via a lightweight cart
   // creation after the user picks a quote + shipping. The fee is
   // only available from CraftCloud's /v5/cart response, not in the
@@ -359,6 +404,15 @@ export function QuoteConfigurator({
     setCheckingMinimum(true);
 
     let cancelled = false;
+    // Tag this request with the quote/vendor it was issued for. On a
+    // rapid vendor switch an older, slower checkCartPricing response
+    // could otherwise land AFTER the newer one and overwrite
+    // minimumFeeInfo with the WRONG vendor's fee (which then flows
+    // into PriceDisplay's totals). We snapshot the identifiers here
+    // and bail in the .then() if the live selection no longer matches.
+    const issuedQuoteId = selectedQuote.quoteId;
+    const issuedVendorId = selectedQuote.vendorId;
+    const issuedShippingId = selectedShipping.shippingId;
 
     // Debounce — rapid shipping-option toggles would otherwise fire
     // a disposable CraftCloud cart-create per keystroke. 300ms is
@@ -367,12 +421,25 @@ export function QuoteConfigurator({
     // only pays for the final pick.
     const handle = setTimeout(() => {
       checkCartPricing({
-        quoteId: selectedQuote.quoteId,
-        vendorId: selectedQuote.vendorId,
-        shippingId: selectedShipping.shippingId,
+        quoteId: issuedQuoteId,
+        vendorId: issuedVendorId,
+        shippingId: issuedShippingId,
         currency: selectedQuote.currency as Currency,
       }).then((result) => {
         if (cancelled) return;
+        // Ignore a response whose request was issued for a quote/
+        // vendor/shipping the user has since moved away from. The
+        // effect cleanup sets `cancelled` for the synchronous
+        // re-run case, but a settimeout that already fired its
+        // fetch before the switch needs this identity guard too —
+        // its cleanup ran, but the in-flight promise still resolves.
+        if (
+          selectedQuoteRef.current?.quoteId !== issuedQuoteId ||
+          selectedQuoteRef.current?.vendorId !== issuedVendorId ||
+          selectedShippingRef.current?.shippingId !== issuedShippingId
+        ) {
+          return;
+        }
         setCheckingMinimum(false);
         if ("error" in result) return;
         setMinimumFeeInfo(result);
@@ -527,13 +594,30 @@ export function QuoteConfigurator({
     scopedMaterialId,
   ]);
 
+  // Set once the model is confirmed on CraftCloud (or known to be
+  // there already — draft mode / cached). Gates ensureModelUploaded so
+  // a quantity/region/material tweak — which recreates fetchQuotes and
+  // re-runs the init effect — does NOT re-run the CraftCloud upload
+  // (download-url + cache-model). The upload only ever needs to happen
+  // once per mount; quote refetches are cheap and expected to repeat.
+  // See CON-56.
+  const modelUploadedRef = useRef(false);
+
   useEffect(() => {
     let cancelled = false;
 
     async function init() {
       try {
-        await ensureModelUploaded();
-        if (cancelled) return;
+        // Only do the (expensive, idempotent-but-wasteful) CraftCloud
+        // upload on the first run. ensureModelUploaded itself
+        // early-returns in draft mode / when already cached, so guarding
+        // here keeps that skip intact while preventing a redundant
+        // re-upload on subsequent quantity/region changes.
+        if (!modelUploadedRef.current) {
+          await ensureModelUploaded();
+          if (cancelled) return;
+          modelUploadedRef.current = true;
+        }
         await fetchQuotes();
       } catch (err) {
         if (!cancelled) {
@@ -841,6 +925,18 @@ export function QuoteConfigurator({
 
   return (
     <div>
+      {/*
+        Single polite live region for the quote pipeline + quantity
+        clamp. Announces phase changes ("Collecting quotes…", "Showing
+        N materials", "No quotes available") and clamp feedback to
+        screen readers without stealing focus. Visually hidden — the
+        sighted equivalents live in MaterialStep's copy + loader.
+        Deduped above so the repeating poll snapshots don't re-announce
+        the same text. See CON-62 / CON-64.
+      */}
+      <div role="status" aria-live="polite" className="sr-only">
+        {statusMessage}
+      </div>
       <div className="grid items-start gap-8 lg:grid-cols-3">
         <div className="lg:col-span-2">
           {/*
@@ -921,20 +1017,35 @@ export function QuoteConfigurator({
                     min={1}
                     max={100}
                     value={quantity}
+                    aria-describedby="quantity-range-hint"
                     onChange={(e) => {
                       // Clamp to [1, 100] and reject NaN — empty/
                       // invalid text falls back to 1 so the quote
                       // pipeline never sees a non-finite number.
                       const raw = Number(e.target.value);
-                      const next = Number.isFinite(raw)
+                      const clamped = Number.isFinite(raw)
                         ? Math.min(100, Math.max(1, Math.trunc(raw)))
                         : 1;
-                      setQuantity(next);
+                      // Announce a silent clamp through the shared
+                      // status region (CON-64). Only when the typed
+                      // value was finite AND fell outside [1,100] — a
+                      // plain in-range edit shouldn't speak. Clear
+                      // first so an identical repeat clamp re-fires.
+                      if (Number.isFinite(raw) && Math.trunc(raw) !== clamped) {
+                        setStatusMessage("");
+                        setStatusMessage(
+                          `Quantity must be between 1 and 100. Adjusted to ${clamped}.`
+                        );
+                      }
+                      setQuantity(clamped);
                     }}
                     // text-base on phones (iOS auto-zooms < 16px),
                     // text-sm on md+ to match the rest of the row.
                     className="depth-raised h-10 w-20 rounded-xl border border-border bg-card px-3.5 py-1 text-base md:text-sm outline-none transition-shadow duration-200 ease-out focus-visible:shadow-[var(--shadow-raised),var(--shadow-focus-ring)]"
                   />
+                  <span id="quantity-range-hint" className="sr-only">
+                    Enter a quantity between 1 and 100.
+                  </span>
                 </div>
                 <div className="flex items-center gap-2">
                   <Label

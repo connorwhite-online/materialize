@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -32,22 +33,42 @@ export function SearchResultsPanel({
   query,
   onNavigate,
 }: SearchResultsPanelProps) {
+  const totalResults = results
+    ? results.files.length +
+      results.projects.length +
+      results.collections.length +
+      results.users.length +
+      results.materials.length
+    : 0;
+  const anyResults = totalResults > 0;
+
+  // Polite live region phrase, deduped to the search phase so the
+  // count is announced once it settles rather than on every keystroke
+  // as the debounced fetch resolves. Empty query → silent. See CON-62.
+  const liveMessage = useMemo(() => {
+    if (loading && !results) return "Searching…";
+    if (!results) return "";
+    if (!anyResults) return `No results for "${query}"`;
+    return `${totalResults} ${totalResults === 1 ? "result" : "results"} for "${query}"`;
+  }, [loading, results, anyResults, totalResults, query]);
+
+  const liveRegion = <SearchLiveRegion message={liveMessage} />;
+
   if (loading && !results) {
-    return <SearchResultsSkeleton />;
+    return (
+      <>
+        {liveRegion}
+        <SearchResultsSkeleton />
+      </>
+    );
   }
 
-  if (!results) return null;
-
-  const anyResults =
-    results.files.length > 0 ||
-    results.projects.length > 0 ||
-    results.collections.length > 0 ||
-    results.users.length > 0 ||
-    results.materials.length > 0;
+  if (!results) return liveRegion;
 
   if (!anyResults) {
     return (
       <div className="px-3 pt-2 pb-3">
+        {liveRegion}
         <p className="text-xs text-muted-foreground">
           No results for &ldquo;{query}&rdquo;
         </p>
@@ -57,6 +78,7 @@ export function SearchResultsPanel({
 
   return (
     <div className="space-y-4 px-2 pt-2 pb-3">
+      {liveRegion}
       {results.projects.length > 0 && (
         <Section title="Projects">
           {results.projects.map((hit) => (
@@ -96,6 +118,29 @@ export function SearchResultsPanel({
           ))}
         </Section>
       )}
+    </div>
+  );
+}
+
+/**
+ * Visually-hidden polite live region for search status. The panel
+ * unmounts/remounts across its loading/empty/results branches, so we
+ * keep the announced text in local state and only push a new value
+ * when it actually changes — that prevents a re-announce when the
+ * surrounding branch swaps but the phase phrase is unchanged.
+ */
+function SearchLiveRegion({ message }: { message: string }) {
+  const [announced, setAnnounced] = useState(message);
+  const lastRef = useRef(message);
+  useEffect(() => {
+    if (message !== lastRef.current) {
+      lastRef.current = message;
+      setAnnounced(message);
+    }
+  }, [message]);
+  return (
+    <div role="status" aria-live="polite" className="sr-only">
+      {announced}
     </div>
   );
 }

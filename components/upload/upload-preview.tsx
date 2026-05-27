@@ -2,12 +2,22 @@
 
 import { Suspense, useState, useEffect, useRef } from "react";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Environment } from "@react-three/drei";
+import { OrbitControls } from "@react-three/drei";
+import { StudioEnvironment } from "@/components/viewer/studio-environment";
 import * as THREE from "three";
 import { StlModel } from "@/components/viewer/loaders/stl-model";
 import { ObjModel } from "@/components/viewer/loaders/obj-model";
 import { ThreeMfModel } from "@/components/viewer/loaders/threemf-model";
 import { LoadingPreview } from "@/components/viewer/loading-preview";
+import { ErrorBoundary } from "@/components/ui/error-boundary";
+
+function PreviewUnavailable() {
+  return (
+    <div className="relative flex h-full w-full items-center justify-center">
+      <p className="text-xs text-muted-foreground">Preview unavailable</p>
+    </div>
+  );
+}
 
 interface UploadPreviewProps {
   /**
@@ -182,11 +192,12 @@ export function UploadPreview({
   const modelColor = "#888888";
 
   return (
-    <Canvas
-      camera={{ position: [0, 0, 4.5], fov: 40 }}
-      dpr={[1, 2]}
-      gl={{ antialias: true, alpha: true }}
-    >
+    <ErrorBoundary fallback={<PreviewUnavailable />}>
+      <Canvas
+        camera={{ position: [0, 0, 4.5], fov: 40 }}
+        dpr={[1, 2]}
+        gl={{ antialias: true, alpha: true }}
+      >
       {/* Three-point lighting, all subtly warm — ~3800K, just a hint
           of warmth rather than a full tungsten cast. */}
       <ambientLight intensity={0.16} color="#fff3e3" />
@@ -194,11 +205,8 @@ export function UploadPreview({
       <directionalLight position={[-6, -1, -3]} intensity={0.35} color="#fff2e0" />
       <directionalLight position={[0, 2, -6]} intensity={0.75} color="#ffefd8" />
 
-      {/* Studio IBL — neutral softbox, isolated in its own Suspense so
-          it doesn't block the mesh. */}
-      <Suspense fallback={null}>
-        <Environment preset="studio" />
-      </Suspense>
+      {/* Procedural studio IBL — no external HDR fetch (see StudioEnvironment) */}
+      <StudioEnvironment />
 
       <Suspense fallback={null}>
         <NormalizedModel onDimensions={onDimensionsComputed}>
@@ -231,6 +239,7 @@ export function UploadPreview({
         autoRotate
         autoRotateSpeed={1.5}
       />
-    </Canvas>
+      </Canvas>
+    </ErrorBoundary>
   );
 }

@@ -115,9 +115,14 @@ outbound webhooks — they sign them with HMAC-SHA-256 against the integration's
   `SENTRY_INTEGRATION_CLIENT_SECRET`. This is what Sentry's UI gives you.
 - **Shared-header mode** (manual / alternate providers): `X-Sentry-Trigger-Secret`
   matched against `SENTRY_TRIGGER_SECRET`. Useful for manual `curl` triggers,
-  webhook providers that allow custom headers, or load testing.
+  webhook providers that allow custom headers, or load testing. **OFF by
+  default** — a static header has no replay protection, so this mode is only
+  honored when `SENTRY_TRIGGER_ALLOW_SHARED_SECRET` is explicitly enabled. When
+  enabled, each request must also carry a recent `X-Sentry-Trigger-Timestamp`
+  (Unix seconds, within `SENTRY_TRIGGER_TIMESTAMP_WINDOW_SECONDS`, default 300).
 
-At least one must be set; both can be set side-by-side without conflict.
+At least one auth mode must be configured. HMAC works on its own; shared-header
+mode additionally requires `SENTRY_TRIGGER_ALLOW_SHARED_SECRET`.
 
 **For Sentry's Internal Integration:**
 
@@ -136,11 +141,24 @@ At least one must be set; both can be set side-by-side without conflict.
 
 ```bash
 echo 'SENTRY_TRIGGER_SECRET="'"$(openssl rand -hex 32)"'"' >> .env.local
+echo 'SENTRY_TRIGGER_ALLOW_SHARED_SECRET=1' >> .env.local
 ```
 
-Mirror to Vercel. Then you can `curl` the trigger route with
-`-H "X-Sentry-Trigger-Secret: <value>"` to fire a synthetic event without
-needing to wire it through Sentry's UI.
+Both are required — the secret alone is inert until the flag is set, so
+production stays HMAC-only by default. Mirror to Vercel only where you actually
+want manual triggers. Then you can `curl` the trigger route with the secret and
+a fresh timestamp:
+
+```bash
+curl -X POST https://www.materialize.cc/api/internal/sentry-trigger \
+  -H "X-Sentry-Trigger-Secret: <value>" \
+  -H "X-Sentry-Trigger-Timestamp: $(date +%s)" \
+  -H "Content-Type: application/json" \
+  -d '{"environment":"production", ...}'
+```
+
+The timestamp must be within `SENTRY_TRIGGER_TIMESTAMP_WINDOW_SECONDS` (default
+300) of the server clock, so a captured request can't be replayed later.
 
 ### GitHub side (one-time)
 

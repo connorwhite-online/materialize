@@ -9,6 +9,15 @@ import { MinusIcon, PlusIcon } from "lucide-react";
 import { StlModel } from "./loaders/stl-model";
 import { ObjModel } from "./loaders/obj-model";
 import { ThreeMfModel } from "./loaders/threemf-model";
+import { ErrorBoundary } from "@/components/ui/error-boundary";
+
+function PreviewUnavailable() {
+  return (
+    <div className="flex h-full w-full items-center justify-center bg-muted/20">
+      <p className="text-xs text-muted-foreground">Preview unavailable</p>
+    </div>
+  );
+}
 
 interface ModelViewerProps {
   modelUrl: string;
@@ -104,33 +113,35 @@ export function ModelViewer({
 
   return (
     <div className={`relative ${className || "h-full w-full"}`}>
-      <Canvas
-        camera={{ position: [0, 0, 5], fov: 45 }}
-        dpr={isPreview ? 1 : [1, 2]}
-      >
-        <Suspense fallback={<LoadingFallback />}>
-          <Stage
-            adjustCamera={1.2}
-            intensity={0.5}
-            environment="city"
-          >
-            <Center>
-              <ModelMesh
-                modelUrl={modelUrl}
-                format={format}
-                materialColor={materialColor}
-              />
-            </Center>
-          </Stage>
-        </Suspense>
-        <OrbitControls
-          ref={controlsRef}
-          enableZoom={wheelZoom}
-          enablePan={!isPreview}
-          autoRotate={isPreview}
-          autoRotateSpeed={2}
-        />
-      </Canvas>
+      <ErrorBoundary fallback={<PreviewUnavailable />}>
+        <Canvas
+          camera={{ position: [0, 0, 5], fov: 45 }}
+          dpr={isPreview ? 1 : [1, 2]}
+        >
+          <Suspense fallback={<LoadingFallback />}>
+            <Stage
+              adjustCamera={1.2}
+              intensity={0.5}
+              environment="city"
+            >
+              <Center>
+                <ModelMesh
+                  modelUrl={modelUrl}
+                  format={format}
+                  materialColor={materialColor}
+                />
+              </Center>
+            </Stage>
+          </Suspense>
+          <OrbitControls
+            ref={controlsRef}
+            enableZoom={wheelZoom}
+            enablePan={!isPreview}
+            autoRotate={isPreview}
+            autoRotateSpeed={2}
+          />
+        </Canvas>
+      </ErrorBoundary>
       {showZoomControls && (
         <div className="absolute bottom-3 left-3 flex items-center gap-0 overflow-hidden rounded-full border border-border/60 bg-background/40 backdrop-blur-md">
           <button

@@ -193,8 +193,18 @@ export async function POST(request: Request) {
     // charges_enabled as the canonical signal — payouts_enabled
     // sometimes lags by a day while bank verification clears.
     const account = event.data.object as Stripe.Account;
-    const onboarded = account.charges_enabled === true;
     try {
+      // Stripe does NOT guarantee account.updated delivery order, so
+      // the `account` object on THIS event may be stale — a delayed
+      // delivery carrying charges_enabled=false can arrive after a
+      // newer charges_enabled=true and clobber it, which then blocks
+      // checkout (app/actions/checkout.ts gates on
+      // stripeOnboardingComplete). Re-fetch the account fresh from
+      // Stripe so we always persist its current state regardless of
+      // which historical event triggered this handler.
+      const stripe = getStripe();
+      const fresh = await stripe.accounts.retrieve(account.id);
+      const onboarded = fresh.charges_enabled === true;
       await db
         .update(users)
         .set({ stripeOnboardingComplete: onboarded })
