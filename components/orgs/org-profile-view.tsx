@@ -10,7 +10,7 @@ import {
   organizations,
   projects,
 } from "@/lib/db/schema";
-import { and, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq } from "drizzle-orm";
 import { isOrgMember } from "@/lib/authorization";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -54,10 +54,10 @@ export async function OrgProfileView({ handle }: { handle: string }) {
 
   const [memberCount, fileRows, projectRows, collectionRows] = await Promise.all([
     db
-      .select({ count: organizationMembers.id })
+      .select({ count: count() })
       .from(organizationMembers)
       .where(eq(organizationMembers.organizationId, org.id))
-      .then((r) => r.length),
+      .then((r) => r[0]?.count ?? 0),
     db
       .select({
         id: files.id,
