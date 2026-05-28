@@ -71,11 +71,11 @@ jobs:
 
       - name: Checkout
         if: steps.guard.outputs.skip != 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         if: steps.guard.outputs.skip != 'true'
         with:
           node-version: "22"
@@ -118,7 +118,7 @@ jobs:
 
       - name: Upload tour artifacts
         if: always() && steps.guard.outputs.skip != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: staging-smoke-tour-${{ github.run_id }}
           path: |

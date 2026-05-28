@@ -79,12 +79,12 @@ jobs:
 
       - name: Checkout PR head
         if: steps.resolve-pr.outputs.skip != 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.deployment.sha }}
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         if: steps.resolve-pr.outputs.skip != 'true'
         with:
           node-version: "22"
@@ -133,7 +133,7 @@ jobs:
 
       - name: Upload agent artifacts
         if: always() && steps.resolve-pr.outputs.skip != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: pr-browser-review-${{ steps.resolve-pr.outputs.pr_number }}-${{ github.event.deployment.sha }}
           path: |
