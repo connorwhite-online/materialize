@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import Stripe from "stripe";
 import { db } from "@/lib/db";
@@ -426,8 +426,46 @@ const TERMINAL_STATUSES = new Set([
   "cancelled",
 ]);
 
+/**
+ * Resolve a file asset's display name: prefer the linked file's name,
+ * fall back to the original upload filename with its extension stripped.
+ * Shared by the single- and batch-lookup paths so both shape identical
+ * names.
+ */
+function pickFileName(
+  row: { name: string | null; original: string | null } | undefined
+): string | null {
+  return row?.name ?? row?.original?.replace(/\.[^.]+$/, "") ?? null;
+}
+
+/**
+ * Batch-resolve display names for many file assets in one query. Keyed
+ * by fileAssetId; ids with no row simply don't appear in the map.
+ * Lets `listOrdersForUser` avoid a per-order file lookup (CON-79).
+ */
+async function resolveFileNames(
+  assetIds: string[]
+): Promise<Map<string, string | null>> {
+  const map = new Map<string, string | null>();
+  if (assetIds.length === 0) return map;
+  const rows = await db
+    .select({
+      id: fileAssets.id,
+      name: files.name,
+      original: fileAssets.originalFilename,
+    })
+    .from(fileAssets)
+    .leftJoin(files, eq(fileAssets.fileId, files.id))
+    .where(inArray(fileAssets.id, assetIds));
+  for (const r of rows) {
+    map.set(r.id, pickFileName(r));
+  }
+  return map;
+}
+
 async function shapeOrderRow(
-  row: typeof printOrders.$inferSelect
+  row: typeof printOrders.$inferSelect,
+  fileNames?: Map<string, string | null>
 ): Promise<AgentOrderSummary> {
   const [materialEntry, providerEntry] = await Promise.all([
     row.material ? findMaterialConfig(row.material).catch(() => null) : null,
@@ -438,17 +476,22 @@ async function shapeOrderRow(
 
   let fileName: string | null = null;
   if (row.fileAssetId) {
-    const [f] = await db
-      .select({
-        name: files.name,
-        original: fileAssets.originalFilename,
-      })
-      .from(fileAssets)
-      .leftJoin(files, eq(fileAssets.fileId, files.id))
-      .where(eq(fileAssets.id, row.fileAssetId))
-      .limit(1);
-    fileName =
-      f?.name ?? f?.original?.replace(/\.[^.]+$/, "") ?? null;
+    // Batch path: caller pre-resolved every asset id in one query.
+    // Single path: fall back to a per-row lookup.
+    if (fileNames) {
+      fileName = fileNames.get(row.fileAssetId) ?? null;
+    } else {
+      const [f] = await db
+        .select({
+          name: files.name,
+          original: fileAssets.originalFilename,
+        })
+        .from(fileAssets)
+        .leftJoin(files, eq(fileAssets.fileId, files.id))
+        .where(eq(fileAssets.id, row.fileAssetId))
+        .limit(1);
+      fileName = pickFileName(f);
+    }
   }
 
   return {
@@ -507,7 +550,17 @@ export async function listOrdersForUser(params: {
     .where(eq(printOrders.userId, params.userId))
     .orderBy(desc(printOrders.createdAt))
     .limit(Math.max(1, Math.min(100, params.limit ?? 25)));
-  return Promise.all(rows.map(shapeOrderRow));
+
+  // One file query for the whole page instead of one per order (CON-79).
+  const assetIds = [
+    ...new Set(
+      rows
+        .map((r) => r.fileAssetId)
+        .filter((id): id is string => id != null)
+    ),
+  ];
+  const fileNames = await resolveFileNames(assetIds);
+  return Promise.all(rows.map((row) => shapeOrderRow(row, fileNames)));
 }
 
 void printOrderItems;
