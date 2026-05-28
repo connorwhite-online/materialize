@@ -74,33 +74,50 @@ vi.mock("@/lib/db", () => {
       }),
     };
   };
+  const insertImpl = (table: unknown) => ({
+    values: (v: Record<string, unknown>) => {
+      if (table === TOKEN_SPENDING_LEDGER) {
+        dbFixture.ledgerInserts.push(v);
+        return Promise.resolve();
+      }
+      if (table === PRINT_ORDERS) {
+        dbFixture.printOrderInserts.push(v);
+        return {
+          returning: () => Promise.resolve(dbFixture.insertPrintOrderResult),
+        };
+      }
+      return { returning: () => Promise.resolve([]) };
+    },
+  });
+  const updateImpl = (table: unknown) => ({
+    set: (s: Record<string, unknown>) => {
+      if (table === PRINT_ORDERS) {
+        dbFixture.updatePrintOrdersCalls.push({ set: s });
+      }
+      return { where: () => Promise.resolve() };
+    },
+  });
   return {
     db: {
       select: () => ({ from: (table: unknown) => handleChain(table) }),
-      insert: (table: unknown) => ({
-        values: (v: Record<string, unknown>) => {
-          if (table === TOKEN_SPENDING_LEDGER) {
-            dbFixture.ledgerInserts.push(v);
-            return Promise.resolve();
-          }
-          if (table === PRINT_ORDERS) {
-            dbFixture.printOrderInserts.push(v);
-            return {
-              returning: () =>
-                Promise.resolve(dbFixture.insertPrintOrderResult),
-            };
-          }
-          return { returning: () => Promise.resolve([]) };
+      insert: insertImpl,
+      update: updateImpl,
+      // Releasing a reservation deletes the ledger row; model that by
+      // clearing recorded ledger inserts for the ledger table.
+      delete: (table: unknown) => ({
+        where: () => {
+          if (table === TOKEN_SPENDING_LEDGER) dbFixture.ledgerInserts = [];
+          return Promise.resolve();
         },
       }),
-      update: (table: unknown) => ({
-        set: (s: Record<string, unknown>) => {
-          if (table === PRINT_ORDERS) {
-            dbFixture.updatePrintOrdersCalls.push({ set: s });
-          }
-          return { where: () => Promise.resolve() };
-        },
-      }),
+      // Budget reservation runs inside a transaction with an advisory
+      // lock + ledger read/insert; mirror db's surface on the tx.
+      transaction: async (cb: (tx: unknown) => unknown) =>
+        cb({
+          execute: () => Promise.resolve([]),
+          select: () => ({ from: (table: unknown) => handleChain(table) }),
+          insert: insertImpl,
+        }),
     },
   };
 });
@@ -123,6 +140,7 @@ vi.mock("@/lib/craftcloud/catalog", () => ({
 const evaluateMock = vi.fn();
 vi.mock("@/lib/billing/policy", () => ({
   evaluateSpendingPolicy: (...args: unknown[]) => evaluateMock(...args),
+  computePeriodStart: () => new Date(0),
 }));
 
 const paymentIntentsCreateMock = vi.fn();
@@ -252,7 +270,10 @@ describe("createAgentInitiatedOrder — feature flag on", () => {
     if ("error" in result) throw new Error(result.error);
     expect(result.path).toBe("auto_approved");
     expect(result.cancellationDeadline).toBeTruthy();
-    expect(result.remainingPeriodBudgetCents).toBe(45000);
+    // Authoritative remaining is recomputed in the reservation:
+    // 50000 budget − 0 prior spend − 5135 grand total (4500 + 500 ship
+    // + 135 service fee) = 44865.
+    expect(result.remainingPeriodBudgetCents).toBe(44865);
     expect(result.fallbackReason).toBeUndefined();
 
     // PaymentIntent created with off-session params
@@ -300,6 +321,15 @@ describe("createAgentInitiatedOrder — feature flag on", () => {
     dbFixture.selectByTable.set(USERS, [
       { stripeCustomerId: "cus_test", defaultPaymentMethod: "pm_test" },
     ]);
+    dbFixture.selectByTable.set(PERSONAL_ACCESS_TOKENS, [
+      {
+        spendingPolicy: {
+          perOrderLimitCents: 10000,
+          periodBudgetCents: 50000,
+          periodWindow: "month",
+        },
+      },
+    ]);
     evaluateMock.mockResolvedValue({
       approved: true,
       cancellationWindowMinutes: 5,
@@ -329,6 +359,15 @@ describe("createAgentInitiatedOrder — feature flag on", () => {
     dbFixture.selectByTable.set(USERS, [
       { stripeCustomerId: "cus_test", defaultPaymentMethod: "pm_test" },
     ]);
+    dbFixture.selectByTable.set(PERSONAL_ACCESS_TOKENS, [
+      {
+        spendingPolicy: {
+          perOrderLimitCents: 10000,
+          periodBudgetCents: 50000,
+          periodWindow: "month",
+        },
+      },
+    ]);
     evaluateMock.mockResolvedValue({
       approved: true,
       cancellationWindowMinutes: 5,
@@ -346,6 +385,43 @@ describe("createAgentInitiatedOrder — feature flag on", () => {
     expect(result.path).toBe("awaiting_user_approval");
     expect(result.fallbackReason).toMatch(/authentication|3-?D Secure/i);
     expect(dbFixture.updatePrintOrdersCalls).toHaveLength(0);
+  });
+
+  it("rejects via the reservation when the period budget is already consumed (CON-77)", async () => {
+    dbFixture.selectByTable.set(USERS, [
+      { stripeCustomerId: "cus_test", defaultPaymentMethod: "pm_test" },
+    ]);
+    dbFixture.selectByTable.set(PERSONAL_ACCESS_TOKENS, [
+      {
+        spendingPolicy: {
+          perOrderLimitCents: 10000,
+          periodBudgetCents: 50000,
+          periodWindow: "month",
+        },
+      },
+    ]);
+    // Prior spend leaves < grand total of headroom, so the locked
+    // re-check rejects even though the (mocked) evaluator approved —
+    // modeling two concurrent orders racing the same budget.
+    dbFixture.selectByTable.set(TOKEN_SPENDING_LEDGER, [
+      { amountCents: 48000 },
+    ]);
+    evaluateMock.mockResolvedValue({
+      approved: true,
+      cancellationWindowMinutes: 5,
+      remainingPeriodBudgetCents: 2000,
+    });
+
+    const { createAgentInitiatedOrder } = await import("../orders");
+    const result = await createAgentInitiatedOrder(baseInput);
+
+    if ("error" in result) throw new Error(result.error);
+    expect(result.path).toBe("awaiting_user_approval");
+    expect(result.fallbackReason).toMatch(/budget/i);
+    // No charge attempted, and no net ledger row (reservation rejected
+    // before the insert).
+    expect(paymentIntentsCreateMock).not.toHaveBeenCalled();
+    expect(dbFixture.ledgerInserts).toHaveLength(0);
   });
 
   it("does not attempt charge when the user has no payment method", async () => {
