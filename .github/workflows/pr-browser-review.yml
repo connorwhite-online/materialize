@@ -30,12 +30,17 @@ jobs:
   review:
     # Only run for successful preview deployments on PR branches.
     # production deploys (main) and failed/in-progress deploys don't
-    # get reviewed.
+    # get reviewed. The `preview` branch is a staging mirror of main
+    # (kept in sync by sync-preview.yml) — it deploys as a Vercel
+    # "Preview" too but never has an open PR, so exclude it to avoid a
+    # wasted trigger on every auto-sync.
     if: >-
       github.event.deployment_status.state == 'success' &&
       github.event.deployment.environment == 'Preview' &&
       github.event.deployment.ref != 'main' &&
-      github.event.deployment.ref != 'refs/heads/main'
+      github.event.deployment.ref != 'refs/heads/main' &&
+      github.event.deployment.ref != 'preview' &&
+      github.event.deployment.ref != 'refs/heads/preview'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:

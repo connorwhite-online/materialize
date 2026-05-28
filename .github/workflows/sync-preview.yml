@@ -1,0 +1,40 @@
+name: sync-preview
+
+# Keeps the `preview` branch fast-forwarded to `main` on every push.
+#
+# Why: `preview` backs the staging deploy (preview.materialize.cc) that
+# the staging-smoke-tour walks. The moment main advances, preview goes
+# stale and the tour starts testing old code. This mirrors preview to
+# main automatically so staging always reflects shipped code.
+#
+# Fast-forward only: preview must never carry commits that aren't on
+# main. If the push can't fast-forward (someone committed directly to
+# preview), the job fails loudly rather than force-overwriting work.
+#
+# If you'd rather have staging lag main for release-candidate testing,
+# disable this workflow and merge main -> preview by hand instead.
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-preview
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fast-forward preview to main
+        run: |
+          git push origin "${GITHUB_SHA}:refs/heads/preview"
