@@ -4,8 +4,9 @@ import { auth } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { projects, projectBomItems } from "@/lib/db/schema";
+import { projectBomItems } from "@/lib/db/schema";
 import { replaceBomSchema, type BomItemInput } from "@/lib/validations/bom";
+import { canWriteProject } from "@/lib/authorization";
 import { logError } from "@/lib/logger";
 
 type Result = { ok: true } | { error: string };
@@ -33,13 +34,13 @@ export async function replaceProjectBom(
       };
     }
 
-    // Owner check — only the project's creator can edit its BOM.
-    const [project] = await db
-      .select({ id: projects.id, userId: projects.userId, slug: projects.slug })
-      .from(projects)
-      .where(eq(projects.id, projectId));
-    if (!project) return { error: "Project not found" };
-    if (project.userId !== userId) return { error: "Project not found" };
+    // Owner, org members, AND per-project collaborators can all edit a
+    // project's BOM — the same write set as circuits / projects.ts.
+    // (CON-83: previously owner-only, locking out org/collab editors who
+    // had write access everywhere else.)
+    const access = await canWriteProject(userId, projectId);
+    if (!access.ok) return { error: "Project not found" };
+    const project = access.resource;
 
     await db.transaction(async (tx) => {
       await tx

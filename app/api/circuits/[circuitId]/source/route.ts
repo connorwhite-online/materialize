@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { projectCircuits, projects } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
+import { canWriteProject } from "@/lib/authorization";
 import { logError } from "@/lib/logger";
 
 /**
@@ -35,9 +36,9 @@ export async function GET(
       .select({
         sourceStorageKey: projectCircuits.sourceStorageKey,
         originalFilename: projectCircuits.originalFilename,
+        projectId: projects.id,
         projectStatus: projects.status,
         projectVisibility: projects.visibility,
-        projectUserId: projects.userId,
       })
       .from(projectCircuits)
       .innerJoin(projects, eq(projectCircuits.projectId, projects.id))
@@ -47,12 +48,16 @@ export async function GET(
       return new Response("Not found", { status: 404 });
     }
 
+    // Public published projects stream to anyone. Otherwise the read
+    // set mirrors the write set — owner, org members, and per-project
+    // collaborators — so editors of a draft project can still load the
+    // KiCanvas source. (CON-83: previously owner-only.)
     const publicProject =
       row.projectStatus === "published" &&
       row.projectVisibility === "public";
     if (!publicProject) {
       const { userId } = await auth();
-      if (!userId || userId !== row.projectUserId) {
+      if (!userId || !(await canWriteProject(userId, row.projectId)).ok) {
         return new Response("Not found", { status: 404 });
       }
     }
