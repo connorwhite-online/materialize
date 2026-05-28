@@ -41,6 +41,7 @@ import { getStripe } from "@/lib/stripe";
 import { printOrderSchema } from "@/lib/validations/print";
 import { checkoutAddressSchema } from "@/lib/validations/address";
 import { logError } from "@/lib/logger";
+import { userCanPrintAsset } from "@/lib/entitlement";
 import { dedupeShippingByShipId } from "@/lib/pricing/shipping";
 import type { Currency } from "@/lib/craftcloud/types";
 
@@ -135,6 +136,13 @@ export async function createPrintOrder(params: {
     }
 
     const data = parsed.data;
+
+    // Only the asset owner (or anyone, for a published listing) may
+    // print it — blocks ordering another user's private/draft asset by
+    // a guessed id. (CON-73)
+    if (!(await userCanPrintAsset(userId, data.fileAssetId))) {
+      return { error: "File not found" };
+    }
 
     // Create Craft Cloud cart. The v5 API only wants { id: quoteId }
     // in each entry — the quote already encodes vendor, material,

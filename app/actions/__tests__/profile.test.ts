@@ -25,11 +25,24 @@ vi.mock("@/lib/db/schema", () => ({
   users: { id: "id" },
 }));
 
+// updateProfile now validates the handle + syncs Clerk (CON-76).
+vi.mock("@/lib/handles/validate", () => ({
+  validateHandle: vi.fn(async () => null),
+}));
+vi.mock("@clerk/nextjs/server", () => ({
+  auth: vi.fn(() => Promise.resolve({ userId: "test-user-id" })),
+  clerkClient: vi.fn(() =>
+    Promise.resolve({ users: { updateUser: vi.fn() } })
+  ),
+}));
+
 import { updateProfile, updateSocialLinks } from "../profile";
+import { validateHandle } from "@/lib/handles/validate";
 
 describe("updateProfile", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(validateHandle).mockResolvedValue(null);
   });
 
   it("updates profile with valid data", async () => {
@@ -45,6 +58,32 @@ describe("updateProfile", () => {
       displayName: "Test User",
       bio: "Hello world",
     });
+  });
+
+  it("lowercases the handle before saving (CON-76)", async () => {
+    const formData = new FormData();
+    formData.set("username", "TestUser");
+    formData.set("displayName", "Test User");
+    formData.set("bio", "Hi");
+
+    await updateProfile(formData);
+
+    expect(mockUpdateSet).toHaveBeenCalledWith(
+      expect.objectContaining({ username: "testuser" })
+    );
+  });
+
+  it("returns an error when the handle is taken/reserved (CON-76)", async () => {
+    vi.mocked(validateHandle).mockResolvedValueOnce("That username is taken");
+    const formData = new FormData();
+    formData.set("username", "taken");
+    formData.set("displayName", "Test User");
+    formData.set("bio", "Hi");
+
+    const result = await updateProfile(formData);
+
+    expect(result).toMatchObject({ error: { username: ["That username is taken"] } });
+    expect(mockUpdateSet).not.toHaveBeenCalled();
   });
 
   it("returns error for invalid username", async () => {

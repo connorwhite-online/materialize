@@ -6,6 +6,7 @@ import { cartItems, fileAssets, files } from "@/lib/db/schema";
 import { eq, and, sql, count } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { addToCartSchema } from "@/lib/validations/print";
+import { userCanPrintAsset } from "@/lib/entitlement";
 import { logError } from "@/lib/logger";
 
 export type CartItemWithMeta = {
@@ -48,6 +49,13 @@ export async function addToCart(params: {
     if (!parsed.success) return { error: "Invalid cart item parameters" };
 
     const data = parsed.data;
+
+    // Only the owner of the asset (or anyone, for a published listing)
+    // may cart/print it — blocks adding another user's private/draft
+    // asset by a guessed id. (CON-73)
+    if (!(await userCanPrintAsset(userId, data.fileAssetId))) {
+      return { error: "File not found" };
+    }
 
     // Reject cart lines in a different currency than what's already
     // in the cart. CraftCloud quotes are currency-scoped and

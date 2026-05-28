@@ -1,11 +1,12 @@
 "use server";
 
-import { auth } from "@clerk/nextjs/server";
+import { auth, clerkClient } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { profileSchema, socialLinksSchema } from "@/lib/validations/file";
+import { validateHandle } from "@/lib/handles/validate";
 import { logError } from "@/lib/logger";
 
 export async function updateProfile(formData: FormData) {
@@ -23,10 +24,21 @@ export async function updateProfile(formData: FormData) {
   }
 
   try {
+    // Normalize + validate the handle the same way onboarding does:
+    // lowercase, then guard against reserved route words, other users'
+    // usernames, and existing org slugs (the `/[handle]` namespace).
+    // Keep Clerk in sync so a later Clerk webhook can't revert it. (CON-76)
+    const username = parsed.data.username.toLowerCase();
+    const conflict = await validateHandle(username, { ignoreUserId: userId });
+    if (conflict) return { error: { username: [conflict] } };
+
+    const clerk = await clerkClient();
+    await clerk.users.updateUser(userId, { username });
+
     await db
       .update(users)
       .set({
-        username: parsed.data.username,
+        username,
         displayName: parsed.data.displayName,
         bio: parsed.data.bio,
       })
