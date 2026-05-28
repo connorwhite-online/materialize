@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -131,11 +132,13 @@ export default async function MaterialDetailPage(props: {
       <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
         <div className="relative aspect-square overflow-hidden rounded-xl border border-border bg-muted/30">
           {material.featuredImage && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <Image
               src={resolveCatalogImage(material.featuredImage, 900)}
               alt={material.name}
-              className="h-full w-full object-cover"
+              fill
+              priority
+              sizes="(max-width: 768px) 100vw, 50vw"
+              className="object-cover"
             />
           )}
         </div>
@@ -311,12 +314,12 @@ export default async function MaterialDetailPage(props: {
                 <Card key={fg.id} className="gap-0 py-0 overflow-hidden">
                   {fg.featuredImage && (
                     <div className="relative aspect-square w-full bg-muted/40">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
+                      <Image
                         src={resolveCatalogImage(fg.featuredImage, 480)}
                         alt={fg.name}
-                        loading="lazy"
-                        className="h-full w-full object-cover"
+                        fill
+                        sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                        className="object-cover"
                       />
                     </div>
                   )}
