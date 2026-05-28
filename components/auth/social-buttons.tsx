@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useSignIn } from "@clerk/nextjs/legacy";
 import { Button } from "@/components/ui/button";
 
@@ -7,11 +8,23 @@ interface SocialButtonsProps {
   mode: "sign-in" | "sign-up";
 }
 
+type Strategy = "oauth_apple" | "oauth_google";
+
 export function SocialButtons({ mode }: SocialButtonsProps) {
   const { signIn } = useSignIn();
+  // On success the browser redirects away, so `pending` stays set until
+  // navigation — that's the desired "in progress" state. On failure we
+  // clear it and surface a message instead of swallowing the error.
+  const [pending, setPending] = useState<Strategy | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleOAuth = async (strategy: "oauth_apple" | "oauth_google") => {
-    if (!signIn) return;
+  const handleOAuth = async (strategy: Strategy) => {
+    if (!signIn) {
+      setError("Sign-in isn't ready yet. Please refresh and try again.");
+      return;
+    }
+    setError(null);
+    setPending(strategy);
     try {
       await signIn.authenticateWithRedirect({
         strategy,
@@ -20,6 +33,8 @@ export function SocialButtons({ mode }: SocialButtonsProps) {
       });
     } catch (err) {
       console.error("OAuth error:", err);
+      setError("Couldn't start sign-in. Please try again.");
+      setPending(null);
     }
   };
 
@@ -30,21 +45,28 @@ export function SocialButtons({ mode }: SocialButtonsProps) {
         variant="outline"
         size="xl"
         className="w-full"
+        disabled={pending !== null}
         onClick={() => handleOAuth("oauth_apple")}
       >
         <AppleIcon />
-        Continue with Apple
+        {pending === "oauth_apple" ? "Continuing…" : "Continue with Apple"}
       </Button>
       <Button
         type="button"
         variant="outline"
         size="xl"
         className="w-full"
+        disabled={pending !== null}
         onClick={() => handleOAuth("oauth_google")}
       >
         <GoogleIcon />
-        Continue with Google
+        {pending === "oauth_google" ? "Continuing…" : "Continue with Google"}
       </Button>
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
