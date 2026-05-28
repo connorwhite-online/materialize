@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import { X } from "@/components/icons/x";
 import { ChevronLeft } from "@/components/icons/chevron-left";
 import { ChevronRight } from "@/components/icons/chevron-right";
+import { useDialogFocus } from "@/lib/hooks/use-dialog-focus";
 
 export type LightboxPhoto = {
   id: string;
@@ -34,6 +35,8 @@ export function PhotoLightbox({
   onIndexChange,
 }: Props) {
   const photo = photos[index];
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialogRef);
 
   const goPrev = useCallback(() => {
     onIndexChange(index === 0 ? photos.length - 1 : index - 1);
@@ -65,11 +68,13 @@ export function PhotoLightbox({
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-label="Photo viewer"
+      tabIndex={-1}
       onClick={onClose}
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/85 p-4 sm:p-8"
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/85 p-4 outline-none sm:p-8"
     >
       <button
         type="button"
