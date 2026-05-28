@@ -3,7 +3,7 @@ import { headers } from "next/headers";
 import { WebhookEvent } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { organizationMembers, organizations, users } from "@/lib/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, lt } from "drizzle-orm";
 import { logError } from "@/lib/logger";
 import { buildUniqueHandle, validateHandle } from "@/lib/handles/validate";
 
@@ -54,6 +54,11 @@ export async function POST(req: Request) {
       const displayName = [first_name, last_name].filter(Boolean).join(" ");
       // Only store a real uploaded avatar — ignore Clerk's auto-generated placeholder
       const avatarUrl = has_image ? image_url : null;
+      // Svix doesn't guarantee delivery order. Stamp the row with the
+      // event's logical time and only apply the update when it's NEWER
+      // than what's stored, so a late-arriving stale event can't clobber
+      // fresher data. (CON-80)
+      const eventUpdatedAt = new Date(event.data.updated_at);
 
       await db
         .insert(users)
@@ -62,6 +67,7 @@ export async function POST(req: Request) {
           username: username ?? null,
           displayName: displayName || null,
           avatarUrl,
+          updatedAt: eventUpdatedAt,
         })
         .onConflictDoUpdate({
           target: users.id,
@@ -69,8 +75,9 @@ export async function POST(req: Request) {
             username: username ?? undefined,
             displayName: displayName || undefined,
             avatarUrl,
-            updatedAt: new Date(),
+            updatedAt: eventUpdatedAt,
           },
+          setWhere: lt(users.updatedAt, eventUpdatedAt),
         });
     }
 
@@ -108,6 +115,8 @@ export async function POST(req: Request) {
           reason: conflict,
         });
       }
+      // Out-of-order guard — see the user branch. (CON-80)
+      const eventUpdatedAt = new Date(event.data.updated_at);
       await db
         .insert(organizations)
         .values({
@@ -115,6 +124,7 @@ export async function POST(req: Request) {
           name,
           slug: localSlug,
           imageUrl,
+          updatedAt: eventUpdatedAt,
         })
         .onConflictDoUpdate({
           target: organizations.id,
@@ -122,8 +132,9 @@ export async function POST(req: Request) {
             name,
             slug: localSlug,
             imageUrl,
-            updatedAt: new Date(),
+            updatedAt: eventUpdatedAt,
           },
+          setWhere: lt(organizations.updatedAt, eventUpdatedAt),
         });
     }
 
@@ -160,6 +171,7 @@ export async function POST(req: Request) {
             ignoreOrgId: organization.id,
           })
         : organization.slug;
+      const orgUpdatedAt = new Date(organization.updated_at);
       await db
         .insert(organizations)
         .values({
@@ -167,14 +179,18 @@ export async function POST(req: Request) {
           name: organization.name,
           slug: localSlug,
           imageUrl: organization.has_image ? organization.image_url : null,
+          updatedAt: orgUpdatedAt,
         })
         .onConflictDoUpdate({
           target: organizations.id,
           set: {
             name: organization.name,
             slug: localSlug,
-            updatedAt: new Date(),
+            updatedAt: orgUpdatedAt,
           },
+          // Defensive upsert — don't let a stale membership event's
+          // embedded org snapshot regress a fresher org row. (CON-80)
+          setWhere: lt(organizations.updatedAt, orgUpdatedAt),
         });
       await db
         .insert(organizationMembers)
