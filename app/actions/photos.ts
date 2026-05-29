@@ -289,17 +289,24 @@ export async function updatePhotoCaption(photoId: string, caption: string) {
     }
     const trimmed = caption.trim().slice(0, MAX_CAPTION_LENGTH);
 
-    // Verify ownership via file
+    // The photo's author OR the file owner may edit the caption —
+    // matches deleteFilePhoto. Previously only the file owner could,
+    // so build authors couldn't fix their own caption while the owner
+    // could silently rewrite others'. (CON-84)
     const [photo] = await db
       .select({
         id: filePhotos.id,
+        authorId: filePhotos.userId,
         fileUserId: files.userId,
       })
       .from(filePhotos)
       .innerJoin(files, eq(filePhotos.fileId, files.id))
       .where(eq(filePhotos.id, photoId));
 
-    if (!photo || photo.fileUserId !== userId) {
+    if (
+      !photo ||
+      (photo.authorId !== userId && photo.fileUserId !== userId)
+    ) {
       return { error: "Photo not found" };
     }
 
