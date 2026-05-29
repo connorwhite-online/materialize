@@ -67,6 +67,7 @@ export function ProfileTabs({
             <button
               key={tab.key}
               type="button"
+              aria-current={active ? "page" : undefined}
               onClick={() => handleClick(tab.key)}
               className={cn(
                 "relative px-4 py-2.5 text-sm font-medium cursor-pointer transition-colors",
