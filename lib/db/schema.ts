@@ -656,6 +656,15 @@ export const printOrders = pgTable("print_orders", {
 }, (table) => [
   index("print_orders_user_id_idx").on(table.userId),
   index("print_orders_organization_id_idx").on(table.organizationId),
+  // Serves the per-minute place-auto-approved-orders cron
+  // (status='auto_approved' AND auto_approved_until<=now). The leftmost
+  // (status) prefix also covers the cleanup-stale-orders cron
+  // (status='cart_created') and files.ts' status IN (...) filter, so one
+  // composite index replaces the full-table scans on all three. (CON-78)
+  index("print_orders_status_auto_approved_until_idx").on(
+    table.status,
+    table.autoApprovedUntil
+  ),
   uniqueIndex("print_orders_confirmation_token_uniq").on(
     table.confirmationToken
   ),

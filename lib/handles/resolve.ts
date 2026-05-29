@@ -1,5 +1,6 @@
 import "server-only";
 
+import { cache } from "react";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { organizations, users } from "@/lib/db/schema";
@@ -19,12 +20,17 @@ import { organizations, users } from "@/lib/db/schema";
  * Two queries instead of a union: the users + organizations indexes
  * are both on a single text column, so each lookup is one index hit.
  * Running them in parallel keeps the worst case at one round-trip.
+ *
+ * Wrapped in `React.cache` so a single `/[handle]` render resolves the
+ * handle once even though it's read twice — `generateMetadata` and the
+ * page body both call it. The cache is per-request, so distinct handles
+ * (and distinct requests) don't share entries. (CON-86)
  */
 export type HandleResolution =
   | { kind: "user"; userId: string }
   | { kind: "org"; orgId: string };
 
-export async function resolveHandle(
+export const resolveHandle = cache(async function resolveHandle(
   rawHandle: string
 ): Promise<HandleResolution | null> {
   const handle = rawHandle.trim().toLowerCase();
@@ -52,4 +58,4 @@ export async function resolveHandle(
   if (userRow) return { kind: "user", userId: userRow.id };
   if (orgRow) return { kind: "org", orgId: orgRow.id };
   return null;
-}
+});

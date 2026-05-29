@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import {
@@ -433,12 +434,14 @@ export default async function ProjectDetailPage(props: {
               ? `/api/thumbnails/projects/${project.id}`
               : project.thumbnailUrl;
             return coverSrc ? (
-              <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
+              <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
+                <Image
                   src={coverSrc}
-                  alt=""
-                  className="w-full h-full object-cover"
+                  alt={project.name}
+                  fill
+                  priority
+                  sizes="(max-width: 1024px) 100vw, 66vw"
+                  className="object-cover"
                 />
               </div>
             ) : (

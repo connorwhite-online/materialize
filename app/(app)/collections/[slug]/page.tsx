@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { db } from "@/lib/db";
 import {
   collections,
@@ -195,13 +196,14 @@ export default async function CollectionPage(props: {
               }
             >
               <Card className="overflow-hidden transition-colors hover:border-primary/30">
-                <div className="aspect-[4/3] bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center">
+                <div className="relative aspect-[4/3] bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center">
                   {item.thumbnailUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
+                    <Image
                       src={item.thumbnailUrl}
-                      alt=""
-                      className="w-full h-full object-cover"
+                      alt={item.name}
+                      fill
+                      sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, (max-width: 1280px) 33vw, 25vw"
+                      className="object-cover"
                     />
                   ) : (
                     <span className="text-muted-foreground/40 text-sm">
