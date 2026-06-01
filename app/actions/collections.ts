@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import {
   collections,
   collectionItems,
+  files,
   organizationMembers,
   projects,
 } from "@/lib/db/schema";
@@ -149,6 +150,14 @@ export async function addFileToCollection(collectionId: string, fileId: string) 
 
     const access = await canWriteCollection(userId, collectionId);
     if (!access.ok) return { error: "Collection not found" };
+
+    // Verify the file exists before inserting (mirrors
+    // addProjectToCollection). Visibility is enforced at render. (CON-75)
+    const [file] = await db
+      .select({ id: files.id })
+      .from(files)
+      .where(eq(files.id, fileId));
+    if (!file) return { error: "File not found" };
 
     await db.insert(collectionItems).values({
       collectionId,

@@ -285,6 +285,24 @@ describe("viewerCanAttachAllFiles", () => {
     const result = await viewerCanAttachAllFiles("user_1", ["f1", "f2-missing"]);
     expect(result).toBe(false);
   });
+
+  // CON-85 — invariant guard for the collaborator transitive-download
+  // branch in entitlement.ts (`ownsLoadedFile`). That branch lets a
+  // project collaborator download any file the project bundles, which is
+  // only safe because attach is bounded to the project owner's/org's own
+  // files: the owner can never bundle (and thus never hand a collaborator)
+  // a third party's paid file. If this assertion ever flips to true, the
+  // collaborator branch becomes a paywall bypass and must be re-gated.
+  it("blocks bundling a third party's paid file — keeps collaborator downloads from leaking paywalled content (CON-85)", async () => {
+    filesRows = [
+      { id: "mine", userId: "user_1", organizationId: null },
+      // A file owned by someone the viewer has no relationship with.
+      { id: "theirs", userId: "user_stranger", organizationId: "org_theirs" },
+    ];
+    orgMembersRows = []; // viewer is in no orgs
+    const result = await viewerCanAttachAllFiles("user_1", ["mine", "theirs"]);
+    expect(result).toBe(false);
+  });
 });
 
 describe("isProjectCollaborator", () => {

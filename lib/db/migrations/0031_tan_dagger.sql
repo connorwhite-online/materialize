@@ -1,0 +1,1 @@
+CREATE INDEX "print_orders_status_auto_approved_until_idx" ON "print_orders" USING btree ("status","auto_approved_until");

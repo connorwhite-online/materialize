@@ -211,6 +211,20 @@
       "when": 1779468128936,
       "tag": "0029_project_build_guide",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1779875640651,
+      "tag": "0030_youthful_hawkeye",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1780003273413,
+      "tag": "0031_tan_dagger",
+      "breakpoints": true
     }
   ]
 }

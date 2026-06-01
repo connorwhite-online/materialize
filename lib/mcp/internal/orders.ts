@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import Stripe from "stripe";
 import { db } from "@/lib/db";
@@ -15,30 +15,13 @@ import {
 } from "@/lib/db/schema";
 import { createCart, CraftCloudApiError } from "@/lib/craftcloud/client";
 import { findMaterialConfig, findProvider } from "@/lib/craftcloud/catalog";
-import { computePeriodStart, evaluateSpendingPolicy } from "@/lib/billing/policy";
+import { evaluateSpendingPolicy } from "@/lib/billing/policy";
 import { getStripe } from "@/lib/stripe";
 import { logError } from "@/lib/logger";
 import type { Currency } from "@/lib/craftcloud/types";
 
 const SERVICE_FEE_RATE = 0.03;
 const CONFIRMATION_TTL_MS = 24 * 60 * 60 * 1000;
-
-/**
- * Delete a budget reservation (the ledger row written before charging)
- * when the charge doesn't go through, so a failed charge never counts
- * against the token's period budget. Best-effort: a failure here
- * over-counts the budget (conservative — blocks future orders rather
- * than allowing overspend), so we only log it.
- */
-async function releaseReservation(printOrderId: string): Promise<void> {
-  try {
-    await db
-      .delete(tokenSpendingLedger)
-      .where(eq(tokenSpendingLedger.printOrderId, printOrderId));
-  } catch (error) {
-    logError("createAgentInitiatedOrder.releaseReservation", error);
-  }
-}
 
 /**
  * Kill switch for the auto-approve flow. Default-off so deploying
@@ -316,120 +299,82 @@ export async function createAgentInitiatedOrder(
     isAgentBillingEnabled() &&
     evaluation.approved &&
     billingRow?.stripeCustomerId &&
-    billingRow.defaultPaymentMethod &&
-    policyRow?.spendingPolicy
+    billingRow.defaultPaymentMethod
   ) {
-    const policy = policyRow.spendingPolicy;
-
-    // Atomically RESERVE the period budget under a per-token advisory
-    // lock so two concurrent orders can't both pass the budget check
-    // and overspend (CON-77). The ledger row IS the reservation: it is
-    // inserted inside the locked transaction, making the budget re-check
-    // + ledger write atomic (CON-81). The charge happens OUTSIDE the
-    // lock; if it fails we release the reservation, so a failed charge
-    // never counts against budget. Lock is held only for the quick
-    // re-check + insert — never across the Stripe network call.
-    let reserved = false;
+    // Off-session charge. Stripe will throw a StripeCardError on
+    // most failure modes (declined, requires_action, etc.), which
+    // we catch and downgrade to the email-confirm fallback. The
+    // user gets an explicit reason in the MCP response and (later)
+    // an email with the confirmation link.
     try {
-      reserved = await db.transaction(async (tx) => {
-        await tx.execute(
-          sql`SELECT pg_advisory_xact_lock(hashtext(${`agent-budget:${input.initiatedByTokenId}`}))`
-        );
-        const periodStart = computePeriodStart(policy.periodWindow, new Date());
-        const rows = await tx
-          .select({ amountCents: tokenSpendingLedger.amountCents })
-          .from(tokenSpendingLedger)
-          .where(
-            and(
-              eq(tokenSpendingLedger.tokenId, input.initiatedByTokenId),
-              gte(tokenSpendingLedger.chargedAt, periodStart)
-            )
-          );
-        const spent = rows.reduce((sum, r) => sum + r.amountCents, 0);
-        if (spent + grandTotalCents > policy.periodBudgetCents) return false;
-        await tx.insert(tokenSpendingLedger).values({
-          tokenId: input.initiatedByTokenId,
-          printOrderId: order.id,
-          amountCents: grandTotalCents,
-        });
-        remainingPeriodBudgetCents =
-          policy.periodBudgetCents - spent - grandTotalCents;
-        return true;
-      });
-    } catch (error) {
-      logError("createAgentInitiatedOrder.reserveBudget", error);
-      reserved = false;
-    }
-
-    if (!reserved) {
-      // A concurrent order consumed the remaining budget (or the
-      // reservation failed) — fall through to confirm-by-email.
-      fallbackReason = `Exceeds ${policy.periodWindow} budget`;
-    } else {
-      // Off-session charge. Stripe throws StripeCardError on most
-      // failure modes (declined, requires_action, etc.); on any
-      // non-success we RELEASE the reservation and downgrade to the
-      // email-confirm fallback.
-      try {
-        const stripe = getStripe();
-        const intent = await stripe.paymentIntents.create(
-          {
-            amount: grandTotalCents,
-            currency: "usd",
-            customer: billingRow.stripeCustomerId,
-            payment_method: billingRow.defaultPaymentMethod,
-            off_session: true,
-            confirm: true,
-            metadata: {
-              printOrderId: order.id,
-              source: "agent",
-              token_id: input.initiatedByTokenId,
-              type: "print_order_auto_approved",
-            },
+      const stripe = getStripe();
+      const intent = await stripe.paymentIntents.create(
+        {
+          amount: grandTotalCents,
+          currency: "usd",
+          customer: billingRow.stripeCustomerId,
+          payment_method: billingRow.defaultPaymentMethod,
+          off_session: true,
+          confirm: true,
+          metadata: {
+            printOrderId: order.id,
+            source: "agent",
+            token_id: input.initiatedByTokenId,
+            type: "print_order_auto_approved",
           },
-          // Dedupe the charge against the agent's idempotency key: a retry
-          // returns the same PaymentIntent instead of charging twice.
-          { idempotencyKey: `agent-charge:${input.idempotencyKey}` }
-        );
+        },
+        // Dedupe the charge against the agent's idempotency key: a retry
+        // (the textbook agent-timeout case) returns the same PaymentIntent
+        // instead of charging the customer twice. Pairs with a unique DB
+        // constraint on (userId, agentIdempotencyKey) — proposed as a
+        // follow-up migration, see PR notes.
+        { idempotencyKey: `agent-charge:${input.idempotencyKey}` }
+      );
 
-        if (intent.status === "succeeded") {
-          path = "auto_approved";
-          autoApprovedUntil = new Date(
-            Date.now() + evaluation.cancellationWindowMinutes * 60 * 1000
-          );
-          // Ledger row already written by the reservation; just promote
-          // the order. Record the PaymentIntent id in stripeSessionId
-          // (reused column, opaque to consumers).
-          await db
+      if (intent.status === "succeeded") {
+        path = "auto_approved";
+        autoApprovedUntil = new Date(
+          Date.now() + evaluation.cancellationWindowMinutes * 60 * 1000
+        );
+        remainingPeriodBudgetCents = evaluation.remainingPeriodBudgetCents;
+
+        // Promote the order to auto_approved in a single atomic
+        // update; record the PaymentIntent id in stripeSessionId
+        // (reused — the column predates PaymentIntent support and
+        // the value is opaque to consumers). Also write the
+        // spending ledger row so subsequent orders see this charge
+        // counted in the period budget.
+        await Promise.all([
+          db
             .update(printOrders)
             .set({
               status: "auto_approved",
               autoApprovedUntil,
               stripeSessionId: intent.id,
             })
-            .where(eq(printOrders.id, order.id));
-        } else if (intent.status === "requires_action") {
-          // 3DS challenge — release the reservation; user pays via the
-          // emailed Checkout link (which handles the challenge inline).
-          await releaseReservation(order.id);
-          remainingPeriodBudgetCents = undefined;
-          fallbackReason = "Card requires authentication (3-D Secure)";
-        } else {
-          await releaseReservation(order.id);
-          remainingPeriodBudgetCents = undefined;
-          fallbackReason = `Charge did not succeed (status: ${intent.status})`;
-        }
-      } catch (error) {
-        await releaseReservation(order.id);
-        remainingPeriodBudgetCents = undefined;
-        if (error instanceof Stripe.errors.StripeCardError) {
-          fallbackReason = `Card declined: ${error.message}`;
-        } else {
-          // Non-card errors are infrastructure failures. Log and fall
-          // through; the user can still pay via the email link.
-          logError("createAgentInitiatedOrder.charge", error);
-          fallbackReason = "Could not auto-charge — payment provider error";
-        }
+            .where(eq(printOrders.id, order.id)),
+          db.insert(tokenSpendingLedger).values({
+            tokenId: input.initiatedByTokenId,
+            printOrderId: order.id,
+            amountCents: grandTotalCents,
+          }),
+        ]);
+      } else if (intent.status === "requires_action") {
+        // 3DS challenge — the issuer wants a human. Fall through
+        // to email-confirm; user will pay via Checkout (which
+        // handles the challenge inline).
+        fallbackReason = "Card requires authentication (3-D Secure)";
+      } else {
+        fallbackReason = `Charge did not succeed (status: ${intent.status})`;
+      }
+    } catch (error) {
+      if (error instanceof Stripe.errors.StripeCardError) {
+        fallbackReason = `Card declined: ${error.message}`;
+      } else {
+        // Non-card errors are infrastructure failures. Log and
+        // fall through; the user can still pay via the email link.
+        logError("createAgentInitiatedOrder.charge", error);
+        fallbackReason = "Could not auto-charge — payment provider error";
       }
     }
   }
@@ -481,8 +426,46 @@ const TERMINAL_STATUSES = new Set([
   "cancelled",
 ]);
 
+/**
+ * Resolve a file asset's display name: prefer the linked file's name,
+ * fall back to the original upload filename with its extension stripped.
+ * Shared by the single- and batch-lookup paths so both shape identical
+ * names.
+ */
+function pickFileName(
+  row: { name: string | null; original: string | null } | undefined
+): string | null {
+  return row?.name ?? row?.original?.replace(/\.[^.]+$/, "") ?? null;
+}
+
+/**
+ * Batch-resolve display names for many file assets in one query. Keyed
+ * by fileAssetId; ids with no row simply don't appear in the map.
+ * Lets `listOrdersForUser` avoid a per-order file lookup (CON-79).
+ */
+async function resolveFileNames(
+  assetIds: string[]
+): Promise<Map<string, string | null>> {
+  const map = new Map<string, string | null>();
+  if (assetIds.length === 0) return map;
+  const rows = await db
+    .select({
+      id: fileAssets.id,
+      name: files.name,
+      original: fileAssets.originalFilename,
+    })
+    .from(fileAssets)
+    .leftJoin(files, eq(fileAssets.fileId, files.id))
+    .where(inArray(fileAssets.id, assetIds));
+  for (const r of rows) {
+    map.set(r.id, pickFileName(r));
+  }
+  return map;
+}
+
 async function shapeOrderRow(
-  row: typeof printOrders.$inferSelect
+  row: typeof printOrders.$inferSelect,
+  fileNames?: Map<string, string | null>
 ): Promise<AgentOrderSummary> {
   const [materialEntry, providerEntry] = await Promise.all([
     row.material ? findMaterialConfig(row.material).catch(() => null) : null,
@@ -493,17 +476,22 @@ async function shapeOrderRow(
 
   let fileName: string | null = null;
   if (row.fileAssetId) {
-    const [f] = await db
-      .select({
-        name: files.name,
-        original: fileAssets.originalFilename,
-      })
-      .from(fileAssets)
-      .leftJoin(files, eq(fileAssets.fileId, files.id))
-      .where(eq(fileAssets.id, row.fileAssetId))
-      .limit(1);
-    fileName =
-      f?.name ?? f?.original?.replace(/\.[^.]+$/, "") ?? null;
+    // Batch path: caller pre-resolved every asset id in one query.
+    // Single path: fall back to a per-row lookup.
+    if (fileNames) {
+      fileName = fileNames.get(row.fileAssetId) ?? null;
+    } else {
+      const [f] = await db
+        .select({
+          name: files.name,
+          original: fileAssets.originalFilename,
+        })
+        .from(fileAssets)
+        .leftJoin(files, eq(fileAssets.fileId, files.id))
+        .where(eq(fileAssets.id, row.fileAssetId))
+        .limit(1);
+      fileName = pickFileName(f);
+    }
   }
 
   return {
@@ -562,7 +550,17 @@ export async function listOrdersForUser(params: {
     .where(eq(printOrders.userId, params.userId))
     .orderBy(desc(printOrders.createdAt))
     .limit(Math.max(1, Math.min(100, params.limit ?? 25)));
-  return Promise.all(rows.map(shapeOrderRow));
+
+  // One file query for the whole page instead of one per order (CON-79).
+  const assetIds = [
+    ...new Set(
+      rows
+        .map((r) => r.fileAssetId)
+        .filter((id): id is string => id != null)
+    ),
+  ];
+  const fileNames = await resolveFileNames(assetIds);
+  return Promise.all(rows.map((row) => shapeOrderRow(row, fileNames)));
 }
 
 void printOrderItems;

@@ -30,12 +30,17 @@ jobs:
   review:
     # Only run for successful preview deployments on PR branches.
     # production deploys (main) and failed/in-progress deploys don't
-    # get reviewed.
+    # get reviewed. The `preview` branch is a staging mirror of main
+    # (kept in sync by sync-preview.yml) — it deploys as a Vercel
+    # "Preview" too but never has an open PR, so exclude it to avoid a
+    # wasted trigger on every auto-sync.
     if: >-
       github.event.deployment_status.state == 'success' &&
       github.event.deployment.environment == 'Preview' &&
       github.event.deployment.ref != 'main' &&
-      github.event.deployment.ref != 'refs/heads/main'
+      github.event.deployment.ref != 'refs/heads/main' &&
+      github.event.deployment.ref != 'preview' &&
+      github.event.deployment.ref != 'refs/heads/preview'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -74,12 +79,12 @@ jobs:
 
       - name: Checkout PR head
         if: steps.resolve-pr.outputs.skip != 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.deployment.sha }}
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         if: steps.resolve-pr.outputs.skip != 'true'
         with:
           node-version: "22"
@@ -128,7 +133,7 @@ jobs:
 
       - name: Upload agent artifacts
         if: always() && steps.resolve-pr.outputs.skip != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: pr-browser-review-${{ steps.resolve-pr.outputs.pr_number }}-${{ github.event.deployment.sha }}
           path: |

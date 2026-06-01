@@ -15,9 +15,10 @@
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { projects, projectCircuits } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { deleteObject } from "@/lib/storage";
+import { canWriteProject } from "@/lib/authorization";
 import { logError } from "@/lib/logger";
 
 const MAX_CAPTION_LENGTH = 500;
@@ -49,12 +50,14 @@ function normalizeWokwiUrl(raw: string): string | null {
   return parsed.toString();
 }
 
-async function loadOwnedProject(userId: string, projectId: string) {
-  const [project] = await db
-    .select({ id: projects.id, slug: projects.slug })
-    .from(projects)
-    .where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
-  return project ?? null;
+// Owner, org members, AND per-project collaborators can all edit a
+// project's circuits — the same write set as the rest of projects.ts.
+// (CON-83: previously owner-only, so org/collab editors were locked out
+// of circuits while having write access everywhere else.)
+async function loadWritableProject(userId: string, projectId: string) {
+  const access = await canWriteProject(userId, projectId);
+  if (!access.ok) return null;
+  return { id: access.resource.id, slug: access.resource.slug };
 }
 
 export async function addProjectCircuitImage(params: {
@@ -75,7 +78,7 @@ export async function addProjectCircuitImage(params: {
       return { error: "Invalid storage key" };
     }
 
-    const project = await loadOwnedProject(userId, params.projectId);
+    const project = await loadWritableProject(userId, params.projectId);
     if (!project) return { error: "Project not found" };
 
     const trimmedCaption = params.caption?.trim().slice(0, MAX_CAPTION_LENGTH);
@@ -126,7 +129,7 @@ export async function addProjectCircuitWokwi(params: {
       return { error: "Paste a Wokwi project URL (wokwi.com/projects/…)" };
     }
 
-    const project = await loadOwnedProject(userId, params.projectId);
+    const project = await loadWritableProject(userId, params.projectId);
     if (!project) return { error: "Project not found" };
 
     const trimmedCaption = params.caption?.trim().slice(0, MAX_CAPTION_LENGTH);
@@ -191,7 +194,7 @@ export async function addProjectCircuitKicad(params: {
       return { error: "Invalid kind" };
     }
 
-    const project = await loadOwnedProject(userId, params.projectId);
+    const project = await loadWritableProject(userId, params.projectId);
     if (!project) return { error: "Project not found" };
 
     const trimmedCaption = params.caption?.trim().slice(0, MAX_CAPTION_LENGTH);
@@ -244,7 +247,8 @@ export async function deleteProjectCircuit(circuitId: string) {
       .innerJoin(projects, eq(projectCircuits.projectId, projects.id))
       .where(eq(projectCircuits.id, circuitId));
 
-    if (!row || row.projectUserId !== userId) {
+    if (!row) return { error: "Diagram not found" };
+    if (!(await canWriteProject(userId, row.projectId)).ok) {
       return { error: "Diagram not found" };
     }
 
@@ -288,14 +292,15 @@ export async function updateProjectCircuitCaption(
     const [row] = await db
       .select({
         id: projectCircuits.id,
-        projectUserId: projects.userId,
+        projectId: projectCircuits.projectId,
         projectSlug: projects.slug,
       })
       .from(projectCircuits)
       .innerJoin(projects, eq(projectCircuits.projectId, projects.id))
       .where(eq(projectCircuits.id, circuitId));
 
-    if (!row || row.projectUserId !== userId) {
+    if (!row) return { error: "Diagram not found" };
+    if (!(await canWriteProject(userId, row.projectId)).ok) {
       return { error: "Diagram not found" };
     }
 

@@ -67,7 +67,22 @@ export async function handleListingPurchase(
     .limit(1);
   if (existing) return;
 
-  const creatorPayout = amount - serviceFee;
+  // Reconcile against what Stripe ACTUALLY charged rather than trusting
+  // the metadata alone — metadata is written at session-create time and
+  // could drift from the charged total (a future coupon/tax/price change).
+  // Record the real charged amount and derive the payout from it; loudly
+  // flag any divergence so it surfaces in Sentry. (CON-47)
+  const chargedTotal = session.amount_total;
+  if (chargedTotal != null && chargedTotal !== amount) {
+    logError(
+      "handleListingPurchase:amountMismatch",
+      new Error(
+        `metadata amount ${amount} != charged ${chargedTotal} (pi ${paymentIntentId})`
+      )
+    );
+  }
+  const effectiveAmount = chargedTotal ?? amount;
+  const creatorPayout = effectiveAmount - serviceFee;
 
   // Load the listing to surface name/slug to the notification + to
   // discover the creator id for the purchase_on_listing payload.
@@ -101,7 +116,7 @@ export async function handleListingPurchase(
     buyerId,
     fileId: listingType === "file" ? listingId : null,
     projectId: listingType === "project" ? listingId : null,
-    amount,
+    amount: effectiveAmount,
     serviceFee,
     creatorPayout,
     stripePaymentIntentId: paymentIntentId,
@@ -123,7 +138,7 @@ export async function handleListingPurchase(
       .where(eq(users.id, buyerId));
     if (buyer) {
       const snippet: PurchaseSnippet = {
-        amountCents: amount,
+        amountCents: effectiveAmount,
         currency: "USD",
       };
       await notifyPurchaseOnListing(target.ownerId, {

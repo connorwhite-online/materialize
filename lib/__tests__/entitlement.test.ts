@@ -17,6 +17,10 @@ const state: {
   assets: AssetRow[];
   legacyPrintOrder: PrintOrderRow | null;
   multiItemPrintOrderItem: PrintOrderRow | null;
+  // Set when the viewer is a collaborator on a project that bundles the
+  // file (the transitive-read branch of ownsLoadedFile). Distinct from
+  // the project-direct collaborator lookup used by userOwnsProject.
+  collaboratorGrantViaFile: { id: string } | null;
 } = {
   fileRow: null,
   projectRow: null,
@@ -27,6 +31,7 @@ const state: {
   assets: [],
   legacyPrintOrder: null,
   multiItemPrintOrderItem: null,
+  collaboratorGrantViaFile: null,
 };
 
 vi.mock("@/lib/db", () => ({
@@ -68,11 +73,19 @@ vi.mock("@/lib/db", () => ({
           }
           if (table.__name === "project_collaborators") {
             // Both call shapes appear: bare where().limit() for the
-            // project-direct lookup, and innerJoin().where().limit()
-            // for the file-via-project-collab transitive read.
+            // project-direct lookup (userOwnsProject), and
+            // innerJoin().where().limit() for the file-via-project-collab
+            // transitive read (ownsLoadedFile).
             return {
               where: () => ({ limit: () => [] }),
-              innerJoin: () => ({ where: () => ({ limit: () => [] }) }),
+              innerJoin: () => ({
+                where: () => ({
+                  limit: () =>
+                    state.collaboratorGrantViaFile
+                      ? [state.collaboratorGrantViaFile]
+                      : [],
+                }),
+              }),
             };
           }
           if (table.__name === "purchases") {
@@ -205,6 +218,7 @@ describe("userOwnsFile", () => {
     state.directPurchase = null;
     state.projectPurchaseViaJoin = null;
     state.projectPurchase = null;
+    state.collaboratorGrantViaFile = null;
   });
 
   it("returns false when the file doesn't exist", async () => {
@@ -245,6 +259,33 @@ describe("userOwnsFile", () => {
     state.fileRow = { price: 500, userId: "creator" };
     state.directPurchase = null;
     state.projectPurchaseViaJoin = null;
+    expect(await userOwnsFile("u1", "f1")).toBe(false);
+  });
+
+  // CON-85 — guard the collaborator transitive-download branch. A
+  // collaborator on a project that bundles a paid file gets to download
+  // it. This is SAFE only because `viewerCanAttachAllFiles`
+  // (lib/authorization.ts) forbids a project from bundling files the
+  // project owner/org doesn't own — so a collaborator can only ever
+  // reach files the owner could already hand out. These two tests pin
+  // that the branch grants access; the companion test in
+  // authorization.test.ts pins the attach invariant that keeps it safe.
+  // If a future feature lets a project bundle third-party paid files,
+  // this branch becomes a paywall bypass and that invariant test must
+  // be revisited.
+  it("grants download to a project collaborator on a project bundling the file", async () => {
+    state.fileRow = { price: 500, userId: "creator" };
+    state.directPurchase = null;
+    state.projectPurchaseViaJoin = null;
+    state.collaboratorGrantViaFile = { id: "pc1" };
+    expect(await userOwnsFile("u1", "f1")).toBe(true);
+  });
+
+  it("does not grant download to a non-collaborator non-buyer", async () => {
+    state.fileRow = { price: 500, userId: "creator" };
+    state.directPurchase = null;
+    state.projectPurchaseViaJoin = null;
+    state.collaboratorGrantViaFile = null;
     expect(await userOwnsFile("u1", "f1")).toBe(false);
   });
 });
