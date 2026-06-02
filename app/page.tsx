@@ -2,7 +2,6 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { AuthNav } from "@/components/auth/auth-nav";
 import { HeroShowcase } from "@/components/home/hero-showcase-lazy";
-import { HeroWordmark } from "@/components/home/hero-wordmark";
 import { HomeBottomBar } from "@/components/home/home-bottom-bar";
 import { HomeMarketing } from "@/components/home/home-marketing";
 
@@ -47,28 +46,31 @@ export default async function HomePage() {
         <main className="flex flex-1 flex-col pb-44 sm:pb-40">
           <div className="flex flex-1 items-end justify-center px-4">
             <div className="w-full max-w-5xl flex flex-col items-center gap-2">
-              {/* Real <h1> for crawlers and assistive tech. The visible
-                  "Materialize Anything" lockup is an aria-hidden SVG
-                  wordmark, so without this the home page — the one URL
-                  every backlink points at — would ship no heading and
-                  no descriptive text at all. sr-only keeps the visual
-                  hero unchanged while giving search/agents real text
-                  (and helps disambiguate the contested name). */}
-              <h1 className="sr-only">
-                Materialize Anything — a 3D-print marketplace with on-demand
-                printing
+              {/* Real, selectable <h1> — the visible brand lockup IS
+                  the heading now. It was previously an aria-hidden SVG
+                  wordmark, which left the page heading-less for
+                  crawlers and assistive tech. "Materialize" in the
+                  display face, "Anything" in the script face, using
+                  the same gradient/clip treatment as the nav brand. */}
+              <h1 className="flex flex-col items-center justify-center gap-0 text-center leading-[0.95] sm:flex-row sm:items-baseline sm:gap-3">
+                <span
+                  className="bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-6xl tracking-tight text-transparent sm:text-7xl lg:text-8xl"
+                  style={{
+                    fontFamily: "var(--font-display), system-ui, sans-serif",
+                  }}
+                >
+                  Materialize
+                </span>
+                <span
+                  className="bg-gradient-to-b from-primary to-muted-foreground bg-clip-text text-6xl font-light text-transparent sm:text-7xl lg:text-8xl"
+                  style={{ fontFamily: "var(--font-script), cursive" }}
+                >
+                  Anything
+                </span>
               </h1>
-              {/* Wordmark sits in normal flow above the canvas on every
-                  viewport. We had it absolutely positioned behind the
-                  canvas previously (so the torus floated through the
-                  glyphs), but the overlap was decorative-only and the
-                  extra height on mobile caused the page to scroll a
-                  hair. Keeping the typography simple and stacked. */}
-              <HeroWordmark />
-              <p className="max-w-xl text-balance text-center text-sm text-muted-foreground leading-relaxed sm:text-base">
-                Upload and sell 3D-print files, browse thousands of designs, and
-                order a physical print in PLA, resin, nylon, or metal from a
-                vetted manufacturer — shipped to your door.
+              <p className="max-w-md text-balance text-center text-base leading-relaxed text-muted-foreground">
+                The marketplace for 3D-print files — browse and buy designs, or
+                get any model printed on demand and shipped to your door.
               </p>
               <HeroShowcase />
             </div>
