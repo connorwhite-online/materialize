@@ -28,6 +28,27 @@ vi.mock("next/cache", () => ({
   unstable_cache: vi.fn((fn: unknown) => fn),
 }));
 
+// Mock next/headers — server actions that derive a base URL from
+// the live request (e.g. createStripeSessionForOrder) call headers()
+// at module-load or call-time. Default to an empty header bag so the
+// callee falls back to NEXT_PUBLIC_APP_URL / "http://localhost:3000".
+vi.mock("next/headers", () => ({
+  headers: vi.fn(() =>
+    Promise.resolve({
+      get: (_name: string): string | null => null,
+    })
+  ),
+  cookies: vi.fn(() =>
+    Promise.resolve({
+      get: vi.fn(),
+      getAll: vi.fn(() => []),
+      has: vi.fn(() => false),
+      set: vi.fn(),
+      delete: vi.fn(),
+    })
+  ),
+}));
+
 // Mock next/server's `after` so tests don't need a request context.
 // We swallow the callback — deferred work is verified by direct unit
 // tests on the helpers, not through the action surface.

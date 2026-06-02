@@ -5,7 +5,9 @@ import {
   MainMenuSidebar,
   MainMenuTrigger,
 } from "@/components/nav/main-menu";
+import { SandboxBadge } from "@/components/nav/sandbox-badge";
 import { getMyUnreadNotificationCount } from "@/lib/notifications/queries";
+import { isSandboxMode } from "@/lib/env";
 
 /**
  * Progressive-blur layer table for the mobile header backdrop.
@@ -78,6 +80,7 @@ export default async function AppLayout({
   // on the sidebar avatar uses this as its initial value and the SSE
   // stream picks up the live updates afterwards.
   const initialUnreadCount = await getMyUnreadNotificationCount();
+  const sandbox = isSandboxMode();
   return (
     <CartProvider>
       {/*
@@ -153,11 +156,17 @@ export default async function AppLayout({
             ))}
           </div>
           <div className="relative mx-auto flex h-16 max-w-7xl items-center justify-between px-4">
-            <MainMenuTrigger />
+            <div className="flex items-center gap-2">
+              <MainMenuTrigger />
+              {sandbox && <SandboxBadge />}
+            </div>
             <AuthNav />
           </div>
         </header>
-        <MainMenuSidebar initialUnreadCount={initialUnreadCount} />
+        <MainMenuSidebar
+          initialUnreadCount={initialUnreadCount}
+          sandbox={sandbox}
+        />
         <main className="flex-1">{children}</main>
         <CartPanel />
       </div>

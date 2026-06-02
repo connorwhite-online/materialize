@@ -106,3 +106,22 @@ export function validateServerEnv(): ServerEnv {
 export function serverEnv<K extends keyof ServerEnv>(key: K): ServerEnv[K] {
   return validateServerEnv()[key];
 }
+
+/**
+ * True when EITHER Stripe is on test keys (sk_test_*) OR the CraftCloud
+ * client is in mock mode. Surfaced in the nav as a "Sandbox" badge so a
+ * tester walking the checkout flow can tell at a glance that orders
+ * won't be billed or fulfilled for real.
+ *
+ * Server-only: reads raw process.env, so don't call from a Client
+ * Component. Pass the result down as a prop instead.
+ */
+export function isSandboxMode(): boolean {
+  const stripeKey = process.env.STRIPE_SECRET_KEY ?? "";
+  const stripeIsTest = stripeKey.startsWith("sk_test_");
+  // CRAFTCLOUD_USE_MOCK defaults to ON when unset — matches the gate
+  // in lib/craftcloud/client.ts so the badge and the actual mock
+  // path stay in sync.
+  const craftCloudMock = process.env.CRAFTCLOUD_USE_MOCK !== "false";
+  return stripeIsTest || craftCloudMock;
+}
