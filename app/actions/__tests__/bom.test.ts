@@ -97,8 +97,14 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { replaceProjectBom } from "../bom";
+import type { BomItemInput } from "@/lib/validations/bom";
 
-const VALID_ITEMS = [{ name: "M3 bolt", quantity: 4, unit: "pcs" }];
+// Annotated so the post-transform shape (where `unit` and `notes` are
+// required string|undefined, not optional) is satisfied at the call
+// site — caught after PR #21 merged when the merged tree was tsc'd.
+const VALID_ITEMS: BomItemInput[] = [
+  { name: "M3 bolt", quantity: 4, unit: "pcs", notes: undefined },
+];
 
 beforeEach(() => {
   vi.clearAllMocks();
