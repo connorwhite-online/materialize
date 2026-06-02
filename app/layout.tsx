@@ -31,10 +31,16 @@ const playground = localFont({
 //
 // `metadataBase` is the absolute origin Next uses to resolve relative
 // og:image / twitter:image URLs. Reads from NEXT_PUBLIC_APP_URL in
-// prod / preview and falls back to localhost for dev — without this
-// Next emits a warning + relative URLs that no scraper resolves.
+// prod / preview; the fallback is the production domain (NOT
+// localhost) because this drives the site-wide OG/Twitter tags and
+// canonical base. NEXT_PUBLIC_* vars are inlined at build time, so a
+// build where the var isn't present would otherwise bake
+// `http://localhost:3000` into every link preview and og:url — which
+// is exactly the leaked-dev-metadata symptom we've been bitten by.
+// Mirror the same fallback the rest of the SEO surface uses
+// (sitemap.ts, robots.ts, lib/seo/json-ld.ts, llms.txt).
 const APP_URL =
-  process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  process.env.NEXT_PUBLIC_APP_URL ?? "https://materialize.cc";
 
 const SITE_NAME = "Materialize";
 const SITE_DESCRIPTION =
