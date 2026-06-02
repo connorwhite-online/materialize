@@ -14,6 +14,7 @@ import { Browse } from "@/components/icons/browse";
 import { Materials } from "@/components/icons/materials";
 import { Print } from "@/components/icons/print";
 import { SidebarUserBlock } from "@/components/auth/sidebar-user-block";
+import { SandboxBadge } from "@/components/nav/sandbox-badge";
 import { cn } from "@/lib/utils";
 
 import type { ComponentType, SVGProps } from "react";
@@ -176,9 +177,14 @@ export function MainMenuTrigger() {
 interface MainMenuSidebarProps {
   /** Server-fetched unread notification count for the dot indicator. */
   initialUnreadCount: number;
+  /** True when Stripe is on test keys or CraftCloud is in mock mode. */
+  sandbox?: boolean;
 }
 
-export function MainMenuSidebar({ initialUnreadCount }: MainMenuSidebarProps) {
+export function MainMenuSidebar({
+  initialUnreadCount,
+  sandbox = false,
+}: MainMenuSidebarProps) {
   const pathname = usePathname();
 
   return (
@@ -196,13 +202,16 @@ export function MainMenuSidebar({ initialUnreadCount }: MainMenuSidebarProps) {
       // is still flush against the nav:pl-56 gutter.
       className="fixed top-4 bottom-4 left-[max(1rem,calc(50vw-736px))] z-30 hidden w-48 flex-col rounded-2xl bg-card p-2 shadow-lg shadow-foreground/5 ring-1 ring-foreground/10 nav:flex"
     >
-      <Link
-        href="/"
-        className="block px-2 py-1 text-xl tracking-tight bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-transparent leading-none -translate-y-[2px]"
-        style={{ fontFamily: "var(--font-display), system-ui, sans-serif" }}
-      >
-        Materialize
-      </Link>
+      <div className="flex items-center justify-between gap-2 px-2 py-1">
+        <Link
+          href="/"
+          className="text-xl tracking-tight bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-transparent leading-none -translate-y-[2px]"
+          style={{ fontFamily: "var(--font-display), system-ui, sans-serif" }}
+        >
+          Materialize
+        </Link>
+        {sandbox && <SandboxBadge />}
+      </div>
       <nav className="mt-3 flex flex-col gap-0.5">
         {NAV_ITEMS.map((item) => {
           const active = isActive(pathname, item.href);
