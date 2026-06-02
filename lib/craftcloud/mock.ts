@@ -41,21 +41,72 @@ const MOCK_VENDORS = [
   { id: "vendor-3", name: "PrecisionParts DE" },
 ];
 
+/**
+ * Deterministic 0..1 hash of a string. Replaces the old
+ * `Math.random()` vendor jitter so a given (material, vendor) pair
+ * prices the same on every poll — without this, re-polling made the
+ * quote grid flicker and made the quantity re-quote impossible to
+ * eyeball (the price moved for reasons unrelated to quantity).
+ */
+function stableUnit(seed: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  // >>> 0 to unsigned, then scale to [0, 1).
+  return (h >>> 0) / 0xffffffff;
+}
+
+/**
+ * Per-unit volume discount curve. Real CraftCloud vendor prices drop
+ * sharply per unit as quantity rises (fixed setup cost amortizes);
+ * the mock previously hardcoded quantity:1 and never reflected this,
+ * so the cart's "+1" looked like a flat multiply. Model a gentle
+ * decreasing curve: full price at qty 1, asymptotically approaching
+ * ~55% per unit by the time you hit double digits.
+ */
+function volumeUnitFactor(quantity: number): number {
+  const q = Math.max(1, quantity);
+  // 1.0 at q=1, ~0.86 at q=2, ~0.7 at q=5, ~0.6 at q=10, floored at 0.55.
+  return Math.max(0.55, 1 - 0.2 * Math.log(q));
+}
+
+/**
+ * The client embeds the requested quantity into the mock priceId
+ * (see createPriceRequest in client.ts) so getMockPriceResponse can
+ * price the volume discount without a stateful store. Falls back to
+ * 1 for any priceId that predates / doesn't carry the marker.
+ */
+function quantityFromPriceId(priceId: string): number {
+  const match = /mock-price-q(\d+)-/.exec(priceId);
+  const q = match ? Number(match[1]) : 1;
+  return Number.isFinite(q) && q >= 1 ? q : 1;
+}
+
 export function getMockPriceResponse(priceId: string): PriceResponse {
+  const quantity = quantityFromPriceId(priceId);
+  const unitFactor = volumeUnitFactor(quantity);
   const quotes = MOCK_MATERIALS.flatMap((material) =>
-    MOCK_VENDORS.map((vendor) => ({
-      quoteId: `quote-${material.id}-${vendor.id}`,
-      vendorId: vendor.id,
-      modelId: "mock-model",
-      materialConfigId: material.id,
-      printingMethodId: material.method.toLowerCase(),
-      quantity: 1,
-      price: material.priceBase * (0.8 + Math.random() * 0.4),
-      currency: "USD" as const,
-      productionTimeFast: 3,
-      productionTimeSlow: 7,
-      scale: 1,
-    }))
+    MOCK_VENDORS.map((vendor) => {
+      // Deterministic per-(material, vendor) variation in [0.8, 1.2],
+      // then the quantity volume discount on top — so the per-unit
+      // price visibly drops as the user bumps quantity.
+      const variation = 0.8 + stableUnit(`${material.id}-${vendor.id}`) * 0.4;
+      return {
+        quoteId: `quote-${material.id}-${vendor.id}`,
+        vendorId: vendor.id,
+        modelId: "mock-model",
+        materialConfigId: material.id,
+        printingMethodId: material.method.toLowerCase(),
+        quantity,
+        price: material.priceBase * variation * unitFactor,
+        currency: "USD" as const,
+        productionTimeFast: 3,
+        productionTimeSlow: 7,
+        scale: 1,
+      };
+    })
   );
 
   const shipping = MOCK_VENDORS.flatMap((vendor) => [

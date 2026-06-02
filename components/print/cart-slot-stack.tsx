@@ -70,6 +70,18 @@ function groupMaterial(items: DisplayItem[]): number {
   return items.reduce((sum, i) => sum + i.materialPrice * i.quantity, 0);
 }
 
+/**
+ * Money value that becomes a pulse skeleton while the vendor group
+ * has a line re-quoting after a quantity change — avoids flashing a
+ * stale flat-multiplied subtotal.
+ */
+function SlotPriceCell({ cents, pending }: { cents: number; pending: boolean }) {
+  if (pending) {
+    return <span className="inline-block h-3.5 w-12 animate-pulse rounded bg-muted" />;
+  }
+  return <span>${(cents / 100).toFixed(2)}</span>;
+}
+
 function groupShipping(items: DisplayItem[]): number {
   return dedupeShippingByShipId(items);
 }
@@ -241,6 +253,7 @@ function CartSlot({
   const [checkingOut, setCheckingOut] = useState(false);
   const checkingOutRef = useRef(false);
 
+  const groupRepricing = group.items.some((i) => cart?.repricingIds.has(i.id));
   const material = groupMaterial(group.items);
   const shipping = groupShipping(group.items);
   // Service fee is 3% of material (+ production fee, which we
@@ -364,9 +377,13 @@ function CartSlot({
                 <p className="truncate text-sm font-medium">
                   {item.fileName ?? item.originalFilename}
                 </p>
-                <p className="text-[11px] text-muted-foreground">
-                  ${(item.materialPrice / 100).toFixed(2)} each
-                </p>
+                {cart?.repricingIds.has(item.id) ? (
+                  <span className="mt-1 inline-block h-3 w-16 animate-pulse rounded bg-muted align-middle" />
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">
+                    ${(item.materialPrice / 100).toFixed(2)} each
+                  </p>
+                )}
                 {item.staleQuote && (
                   <p className="mt-0.5 text-[10px] text-amber-700 dark:text-amber-300">
                     Quote may have expired — re-add if checkout fails.
@@ -414,11 +431,11 @@ function CartSlot({
           <div className="space-y-1 text-sm">
             <div className="flex justify-between text-muted-foreground">
               <span>Material</span>
-              <span>${(material / 100).toFixed(2)}</span>
+              <SlotPriceCell cents={material} pending={groupRepricing} />
             </div>
             <div className="flex justify-between text-muted-foreground">
               <span>Service fee (3%)</span>
-              <span>${(serviceFee / 100).toFixed(2)}</span>
+              <SlotPriceCell cents={serviceFee} pending={groupRepricing} />
             </div>
             <div className="flex justify-between text-muted-foreground">
               <span>Shipping</span>
@@ -426,7 +443,7 @@ function CartSlot({
             </div>
             <div className="flex justify-between font-semibold">
               <span>Total</span>
-              <span>${(total / 100).toFixed(2)}</span>
+              <SlotPriceCell cents={total} pending={groupRepricing} />
             </div>
           </div>
 

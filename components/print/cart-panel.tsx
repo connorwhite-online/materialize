@@ -89,6 +89,18 @@ function vendorGroupShipping(items: DisplayItem[]): number {
   return dedupeShippingByShipId(items);
 }
 
+/**
+ * Right-aligned money value that collapses to a pulse skeleton while
+ * its underlying line is re-quoting. Keeps the summary rows from
+ * flashing a stale flat-multiplied total during a quantity change.
+ */
+function PriceCell({ cents, pending }: { cents: number; pending: boolean }) {
+  if (pending) {
+    return <span className="inline-block h-3.5 w-12 animate-pulse rounded bg-muted" />;
+  }
+  return <span>${(cents / 100).toFixed(2)}</span>;
+}
+
 export function CartPanel() {
   const cart = useCart();
   if (!cart) return null;
@@ -304,6 +316,7 @@ function VendorGroup({
   router: ReturnType<typeof useRouter>;
   showSeparator: boolean;
 }) {
+  const cart = useCart();
   const [error, setError] = useState<string | null>(null);
   const [checkingOut, setCheckingOut] = useState(false);
   // Synchronous guard — React state doesn't flip until the next
@@ -312,6 +325,10 @@ function VendorGroup({
   // ref updates immediately.
   const checkingOutRef = useRef(false);
 
+  // Any line still re-quoting after a quantity change makes the group
+  // subtotal provisional (the changed line's price is in flux), so we
+  // skeleton the money rows rather than flash a flat-multiplied total.
+  const groupRepricing = group.items.some((i) => cart?.repricingIds.has(i.id));
   const material = vendorGroupMaterial(group.items);
   const shipping = vendorGroupShipping(group.items);
   // Service fee is 3% of material (production fee gets folded in
@@ -374,11 +391,11 @@ function VendorGroup({
       <div className="space-y-1 text-sm">
         <div className="flex justify-between text-muted-foreground">
           <span>Material</span>
-          <span>${(material / 100).toFixed(2)}</span>
+          <PriceCell cents={material} pending={groupRepricing} />
         </div>
         <div className="flex justify-between text-muted-foreground">
           <span>Service fee (3%)</span>
-          <span>${(serviceFee / 100).toFixed(2)}</span>
+          <PriceCell cents={serviceFee} pending={groupRepricing} />
         </div>
         <div className="flex justify-between text-muted-foreground">
           <span>Shipping</span>
@@ -386,7 +403,7 @@ function VendorGroup({
         </div>
         <div className="flex justify-between font-semibold">
           <span>Total</span>
-          <span>${(total / 100).toFixed(2)}</span>
+          <PriceCell cents={total} pending={groupRepricing} />
         </div>
       </div>
 
@@ -425,6 +442,8 @@ function CartItemRow({
   onRemove: () => void;
   onUpdateQty: (qty: number) => void;
 }) {
+  const cart = useCart();
+  const repricing = !!cart?.repricingIds.has(item.id);
   const unitPrice = item.materialPrice / 100;
   const lineTotal = (item.materialPrice * item.quantity) / 100;
 
@@ -434,9 +453,13 @@ function CartItemRow({
         <p className="text-sm font-medium truncate">
           {item.fileName ?? item.originalFilename}
         </p>
-        <p className="text-xs text-muted-foreground">
-          ${unitPrice.toFixed(2)} each
-        </p>
+        {repricing ? (
+          <span className="mt-1 inline-block h-3 w-16 animate-pulse rounded bg-muted align-middle" />
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            ${unitPrice.toFixed(2)} each
+          </p>
+        )}
         {item.staleQuote && (
           <p className="mt-0.5 text-[10px] text-amber-700 dark:text-amber-300">
             Quote may have expired — re-add from the print page if checkout fails.
@@ -464,9 +487,15 @@ function CartItemRow({
         </button>
       </div>
 
-      <span className="text-sm font-medium w-16 text-right tabular-nums">
-        ${lineTotal.toFixed(2)}
-      </span>
+      {repricing ? (
+        <span className="w-16 flex justify-end">
+          <span className="inline-block h-3.5 w-12 animate-pulse rounded bg-muted" />
+        </span>
+      ) : (
+        <span className="text-sm font-medium w-16 text-right tabular-nums">
+          ${lineTotal.toFixed(2)}
+        </span>
+      )}
 
       <button
         onClick={onRemove}
