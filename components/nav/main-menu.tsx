@@ -194,7 +194,7 @@ export function MainMenuSidebar({ initialUnreadCount }: MainMenuSidebarProps) {
       //   = (50vw - 640) - 16 - 192 + 224  →  50vw - 736
       // and clamps to 16px on narrower viewports where the content
       // is still flush against the nav:pl-56 gutter.
-      className="fixed top-4 bottom-4 left-[max(1rem,calc(50vw-736px))] z-30 hidden w-48 flex-col rounded-2xl bg-card p-2 shadow-lg shadow-foreground/5 ring-1 ring-foreground/10 nav:flex"
+      className="fixed top-8 bottom-8 left-[max(1rem,calc(50vw-736px))] z-30 hidden w-48 flex-col rounded-2xl bg-card p-2 shadow-lg shadow-foreground/5 ring-1 ring-foreground/10 nav:flex"
     >
       <Link
         href="/"

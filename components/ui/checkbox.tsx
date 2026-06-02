@@ -26,4 +26,46 @@ function Checkbox({ className, ...props }: CheckboxPrimitive.Root.Props) {
   )
 }
 
-export { Checkbox }
+type CheckboxFieldProps = {
+  id: string
+  label: React.ReactNode
+  description?: React.ReactNode
+  className?: string
+  labelClassName?: string
+} & Omit<CheckboxPrimitive.Root.Props, "id" | "className">
+
+// Wraps Checkbox + label text in a clickable <label> with the
+// alignment dialed in. We use a raw <label> (not the Label
+// component) because Label carries a default mb-2 that throws off
+// vertical centering — items-center against a 16px checkbox pulls
+// the text optically high. items-start + a 1px top nudge on the
+// checkbox sits its visual midline on the text cap-height for both
+// single-line labels and label+description stacks.
+function CheckboxField({
+  id,
+  label,
+  description,
+  className,
+  labelClassName,
+  ...checkboxProps
+}: CheckboxFieldProps) {
+  return (
+    <label
+      htmlFor={id}
+      className={cn(
+        "flex cursor-pointer items-start gap-2 select-none",
+        className
+      )}
+    >
+      <Checkbox id={id} className="mt-px" {...checkboxProps} />
+      <div className={cn("text-sm leading-snug", labelClassName)}>
+        <span>{label}</span>
+        {description && (
+          <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+        )}
+      </div>
+    </label>
+  )
+}
+
+export { Checkbox, CheckboxField }
