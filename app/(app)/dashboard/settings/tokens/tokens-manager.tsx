@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
+import { CheckboxField } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import {
   createPersonalAccessToken,
@@ -149,29 +149,21 @@ export function TokensManager({ initialTokens, hasPaymentMethod }: Props) {
             </p>
             <div className="mt-2 space-y-2">
               {ALL_SCOPES.map((scope) => (
-                <label
+                <CheckboxField
                   key={scope}
-                  className="flex items-start gap-2 text-sm cursor-pointer"
-                >
-                  <Checkbox
-                    checked={selectedScopes.has(scope)}
-                    onCheckedChange={(checked) =>
-                      setSelectedScopes((prev) => {
-                        const next = new Set(prev);
-                        if (checked) next.add(scope);
-                        else next.delete(scope);
-                        return next;
-                      })
-                    }
-                    className="mt-0.5"
-                  />
-                  <div>
-                    <code className="text-xs font-mono">{scope}</code>
-                    <p className="text-xs text-muted-foreground">
-                      {SCOPE_DESCRIPTIONS[scope]}
-                    </p>
-                  </div>
-                </label>
+                  id={`scope-${scope}`}
+                  checked={selectedScopes.has(scope)}
+                  onCheckedChange={(checked) =>
+                    setSelectedScopes((prev) => {
+                      const next = new Set(prev);
+                      if (checked) next.add(scope);
+                      else next.delete(scope);
+                      return next;
+                    })
+                  }
+                  label={<code className="text-xs font-mono">{scope}</code>}
+                  description={SCOPE_DESCRIPTIONS[scope]}
+                />
               ))}
             </div>
           </div>

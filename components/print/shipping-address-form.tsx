@@ -6,7 +6,7 @@ import { setUsernameFromEmail } from "@/app/actions/onboarding";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
+import { CheckboxField } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   InputOTP,
@@ -479,15 +479,13 @@ export function ShippingAddressForm({
             />
           </div>
 
-          <div className="flex items-center gap-2 pt-2">
-            <Checkbox
+          <div className="pt-2">
+            <CheckboxField
               id="billingSame"
               checked={billingSame}
               onCheckedChange={(checked) => setBillingSame(checked === true)}
+              label="Billing address same as shipping"
             />
-            <Label htmlFor="billingSame" className="text-sm font-normal">
-              Billing address same as shipping
-            </Label>
           </div>
         </CardContent>
       </Card>

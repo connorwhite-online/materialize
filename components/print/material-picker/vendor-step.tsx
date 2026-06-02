@@ -4,6 +4,14 @@ import { useMemo, useState } from "react";
 import { Factory } from "@/components/icons/factory";
 import { Frown } from "@/components/icons/frown";
 import { ChevronRight } from "@/components/icons/chevron-right";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { EnrichedQuote } from "./types";
 
 interface ShippingLite {
@@ -207,33 +215,48 @@ export function VendorStep({
         <p className="text-xs text-muted-foreground">Pick a color + vendor</p>
       </div>
 
-      {/* Color swatch rail */}
       {colors.length > 1 && (
-        <div className="flex flex-wrap gap-2">
-          {colors.map((c) => {
-            const isActive = c.name === activeColor;
-            return (
-              <button
-                key={c.name}
-                type="button"
-                onClick={() => setActiveColor(c.name)}
-                className={`flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs transition-colors ${
-                  isActive
-                    ? "border-primary bg-primary/5 text-foreground"
-                    : "border-border text-muted-foreground hover:border-primary/30"
-                }`}
-              >
-                <span
-                  className="h-4 w-4 rounded-full border border-border/60"
-                  style={{ backgroundColor: c.colorCode }}
-                />
-                <span>{c.name}</span>
-                <span className="text-muted-foreground/70 tabular-nums">
-                  ${cheapestPerColor.get(c.name)!.toFixed(2)}
-                </span>
-              </button>
-            );
-          })}
+        <div>
+          <Label htmlFor="color-select">Color</Label>
+          <Select
+            value={activeColor}
+            onValueChange={(v) => v && setActiveColor(v)}
+          >
+            <SelectTrigger id="color-select" className="w-full">
+              <SelectValue>
+                {(value) => {
+                  const c = colors.find((c) => c.name === value);
+                  if (!c) return "Select a color";
+                  return (
+                    <>
+                      <span
+                        className="size-4 shrink-0 rounded-full border border-border/60"
+                        style={{ backgroundColor: c.colorCode }}
+                      />
+                      <span className="truncate">{c.name}</span>
+                      <span className="ml-auto text-muted-foreground tabular-nums">
+                        from ${cheapestPerColor.get(c.name)!.toFixed(2)}
+                      </span>
+                    </>
+                  );
+                }}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {colors.map((c) => (
+                <SelectItem key={c.name} value={c.name}>
+                  <span
+                    className="size-3.5 shrink-0 rounded-full border border-border/60"
+                    style={{ backgroundColor: c.colorCode }}
+                  />
+                  <span>{c.name}</span>
+                  <span className="ml-auto text-muted-foreground tabular-nums">
+                    ${cheapestPerColor.get(c.name)!.toFixed(2)}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       )}
 
