@@ -17,13 +17,13 @@ test.describe("anon smoke", () => {
     const response = await page.goto("/");
     expect(response?.status()).toBe(200);
 
-    // HeroShowcase mounts a <canvas> for the 3D viewport — its
-    // presence proves the client component hydrated.
+    // HomeScene mounts a <canvas> for the 3D scene — its presence
+    // proves the client component hydrated.
     await expect(page.locator("canvas").first()).toBeVisible({
       timeout: 10_000,
     });
 
-    // HomeBottomBar exposes a Sign-in CTA for anon visitors.
+    // AuthNav (in the header) exposes a Sign-in CTA for anon visitors.
     const signIn = page.getByRole("button", { name: /sign in/i });
     await expect(signIn.first()).toBeVisible();
   });
