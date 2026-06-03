@@ -7,7 +7,12 @@ import * as THREE from "three";
 const MAX_PARTICLES = 800;
 const MIN_PARTICLES = 60;
 const PARTICLE_LIFETIME = 0.55;
-const BASE_RADIUS = 1.05;
+// Spawn on the device's bounding ellipsoid (≈ its half-extents) rather
+// than a big sphere, so particles look shed from the surface by the
+// swipe velocity instead of appearing in a halo around it.
+const HALF_X = 0.72;
+const HALF_Y = 0.5;
+const HALF_Z = 0.32;
 
 interface MaterialBurstProps {
   /** Bumped each time the hero carousel selection changes. */
@@ -66,17 +71,19 @@ export function MaterialBurst({
 
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
-      const r = BASE_RADIUS + (Math.random() - 0.5) * 0.15;
-      p.position.set(
-        r * Math.sin(phi) * Math.cos(theta),
-        r * Math.sin(phi) * Math.sin(theta),
-        r * Math.cos(phi)
-      );
+      const sx = Math.sin(phi) * Math.cos(theta);
+      const sy = Math.sin(phi) * Math.sin(theta);
+      const sz = Math.cos(phi);
+      // Sit just on the device surface (tiny inward/outward jitter).
+      const jitter = 0.95 + Math.random() * 0.1;
+      p.position.set(sx * HALF_X * jitter, sy * HALF_Y * jitter, sz * HALF_Z * jitter);
 
-      const outX = Math.sin(phi) * Math.cos(theta);
-      const outY = Math.sin(phi) * Math.sin(theta);
-      const outZ = Math.cos(phi);
-      const baseSpeed = 0.75 + Math.random() * 0.7;
+      // Fly outward from the surface point.
+      const inv = 1 / (Math.hypot(p.position.x, p.position.y, p.position.z) || 1);
+      const outX = p.position.x * inv;
+      const outY = p.position.y * inv;
+      const outZ = p.position.z * inv;
+      const baseSpeed = 0.6 + Math.random() * 0.6;
       const directionalWeight = Math.random() * Math.random();
       const directionalComponent = direction * directionalPush * (0.5 + directionalWeight);
 

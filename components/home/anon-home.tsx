@@ -295,7 +295,7 @@ function SectionCopy({
 
 function HomeFooter() {
   return (
-    <footer data-home-section className="pointer-events-auto flex min-h-[60svh] snap-start flex-col justify-end">
+    <footer className="pointer-events-auto flex min-h-[60svh] snap-start flex-col justify-end">
       <div className="border-t border-border bg-background/85 backdrop-blur-xl">
         <div className="mx-auto max-w-6xl px-6 py-14 pb-44">
           <div className="flex flex-col gap-10 sm:flex-row sm:items-start sm:justify-between">
