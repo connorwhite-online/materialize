@@ -1,11 +1,10 @@
 "use client";
 
 import { useMemo } from "react";
-import { useLoader } from "@react-three/fiber";
-import { STLLoader } from "three-stdlib";
+import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 
-const MODEL_URL = "/models/device.stl";
+const MODEL_URL = "/models/device.gltf";
 // Target on-screen height (scene units) for the device's long axis.
 const TARGET_HEIGHT = 1.5;
 
@@ -47,22 +46,34 @@ function splitByZ(geo: THREE.BufferGeometry) {
 }
 
 /**
- * Loads the device hardbody STL and prepares it for the scene:
- * centred, baked upright with its largest face toward the camera
- * (local X = width, Y = height, Z = thickness), scaled to a consistent
+ * Loads the device hardbody (glTF — smooth normals, single embedded
+ * mesh) and prepares it for the scene: node transforms baked in,
+ * centred, rotated so its largest face points at the camera (local
+ * X = width, Y = height, Z = thickness), scaled to a consistent
  * on-screen height, and split into front/back halves for the teardown.
- * Must be used under a <Suspense> boundary (useLoader suspends).
+ * Must be used under a <Suspense> boundary (useGLTF suspends).
  */
 export function useDeviceGeometry(): DeviceGeometry {
-  const raw = useLoader(STLLoader, MODEL_URL);
+  const { scene } = useGLTF(MODEL_URL);
   return useMemo(() => {
-    const geo = raw.clone();
+    scene.updateWorldMatrix(true, true);
+    let src: THREE.Mesh | null = null;
+    scene.traverse((o) => {
+      if (!src && (o as THREE.Mesh).isMesh) src = o as THREE.Mesh;
+    });
+    if (!src) throw new Error("device gltf: no mesh found");
+
+    let geo = (src as THREE.Mesh).geometry.clone();
+    geo.applyMatrix4((src as THREE.Mesh).matrixWorld); // bake node rotation
+    geo = geo.toNonIndexed();
+    geo.deleteAttribute("uv");
+
     geo.computeBoundingBox();
     const center = new THREE.Vector3();
     geo.boundingBox!.getCenter(center);
     geo.translate(-center.x, -center.y, -center.z);
-    // Original STL: X = thickness, Y = length, Z = width. Rotate so the
-    // big face points at the camera: X = width, Y = height, Z = thickness.
+    // Big face faces ±X (thickness axis) after baking; rotate it to face
+    // the camera: X = width, Y = height, Z = thickness.
     geo.rotateY(-Math.PI / 2);
     geo.computeBoundingBox();
     const rawSize = new THREE.Vector3();
@@ -75,5 +86,7 @@ export function useDeviceGeometry(): DeviceGeometry {
 
     const { front, back } = splitByZ(geo);
     return { front, back, full: geo, size };
-  }, [raw]);
+  }, [scene]);
 }
+
+useGLTF.preload(MODEL_URL);
