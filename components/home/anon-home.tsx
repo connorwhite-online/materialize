@@ -23,49 +23,99 @@ import { ChevronRight } from "@/components/icons/chevron-right";
 export function AnonHome() {
   const progressRef = useRef(0);
   const sectionRef = useRef<HTMLElement>(null);
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  // Start on a metal (Steel) rather than the cream "Plastics" so the
+  // device has contrast against the light-mode cream background on first
+  // paint — cream-on-cream renders effectively invisible.
+  const [selectedIndex, setSelectedIndex] = useState(1);
   const [burstKey, setBurstKey] = useState(0);
+  const [burstDirection, setBurstDirection] = useState(0);
+  const [burstIntensity, setBurstIntensity] = useState(1);
   const [reducedMotion, setReducedMotion] = useState(false);
 
-  // Step the carousel and fire the spray. Shared by taps and the drag
-  // gesture; reads/writes the current index through a ref so the drag
-  // handlers always see the fresh value.
-  const selectedIndexRef = useRef(0);
+  // Live drag tension (-1..1), read by the device in the canvas to sway
+  // with the swipe — written here, never triggers a re-render.
+  const dragVelocityRef = useRef(0);
+
+  const selectedIndexRef = useRef(1);
   useEffect(() => {
     selectedIndexRef.current = selectedIndex;
   }, [selectedIndex]);
 
-  const step = useCallback((delta: number) => {
-    const next = Math.max(
-      0,
-      Math.min(HERO_MATERIALS.length - 1, selectedIndexRef.current + delta)
-    );
-    if (next === selectedIndexRef.current) return;
-    setSelectedIndex(next);
-    setBurstKey((k) => k + 1);
-  }, []);
+  // Select + fire the directional spray. Shared by taps and swipes.
+  // burstDirection is negated so the spray flies WITH the finger (the
+  // carousel step is opposite the drag), matching production.
+  const handleSelect = useCallback(
+    (index: number, direction: number, intensity = 1) => {
+      setSelectedIndex(index);
+      setBurstDirection(-direction);
+      setBurstIntensity(intensity);
+      setBurstKey((k) => k + 1);
+    },
+    []
+  );
 
-  // Horizontal drag-to-scrub over the hero, restoring the original
-  // swipe gesture. touchAction: pan-y lets vertical scroll/snap through
-  // while we own horizontal moves; a mostly-vertical drag cancels.
-  const dragRef = useRef({ x: 0, y: 0, active: false, cancelled: false });
+  // Full production swipe gesture: tanh position-tension drives the live
+  // device sway during the drag; on release a past-threshold horizontal
+  // swipe steps ±1 with a velocity-scaled spray. touchAction: pan-y lets
+  // vertical scroll/snap through while we own horizontal moves.
+  const SWIPE_THRESHOLD = 30;
+  const VERTICAL_CANCEL = 40;
+  const dragRef = useRef({
+    active: false,
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    lastTime: 0,
+    peakVelocity: 0,
+    cancelled: false,
+  });
+
   const onDragStart = (e: React.PointerEvent) => {
-    dragRef.current = { x: e.clientX, y: e.clientY, active: true, cancelled: false };
+    dragRef.current = {
+      active: true,
+      startX: e.clientX,
+      startY: e.clientY,
+      lastX: e.clientX,
+      lastTime: performance.now(),
+      peakVelocity: 0,
+      cancelled: false,
+    };
   };
   const onDragMove = (e: React.PointerEvent) => {
-    const d = dragRef.current;
-    if (!d.active || d.cancelled) return;
-    const dx = e.clientX - d.x;
-    const dy = e.clientY - d.y;
-    if (Math.abs(dy) > 40 && Math.abs(dy) > Math.abs(dx)) d.cancelled = true;
+    const s = dragRef.current;
+    if (!s.active || s.cancelled) return;
+    const totalDx = e.clientX - s.startX;
+    const totalDy = e.clientY - s.startY;
+    if (Math.abs(totalDy) > VERTICAL_CANCEL && Math.abs(totalDy) > Math.abs(totalDx)) {
+      s.cancelled = true;
+      dragVelocityRef.current = 0;
+      return;
+    }
+    const dx = e.clientX - s.lastX;
+    const now = performance.now();
+    const dt = Math.max(1, now - s.lastTime);
+    s.lastX = e.clientX;
+    s.lastTime = now;
+    // Position-based spring tension; tanh asymptotes so resistance grows.
+    dragVelocityRef.current = Math.tanh(totalDx / 220);
+    const instVel = Math.min(1, Math.abs((dx / dt) * 20));
+    if (instVel > s.peakVelocity) s.peakVelocity = instVel;
   };
   const onDragEnd = (e: React.PointerEvent) => {
-    const d = dragRef.current;
-    if (!d.active) return;
-    d.active = false;
-    if (d.cancelled) return;
-    const dx = e.clientX - d.x;
-    if (Math.abs(dx) > 30) step(dx > 0 ? -1 : 1);
+    const s = dragRef.current;
+    if (!s.active) return;
+    s.active = false;
+    dragVelocityRef.current = 0;
+    if (s.cancelled) return;
+    const totalDx = e.clientX - s.startX;
+    if (Math.abs(totalDx) > SWIPE_THRESHOLD) {
+      const direction = totalDx > 0 ? -1 : 1;
+      const current = selectedIndexRef.current;
+      const next = Math.max(0, Math.min(HERO_MATERIALS.length - 1, current + direction));
+      if (next !== current) {
+        handleSelect(next, direction, 0.3 + s.peakVelocity * 1.2);
+      }
+    }
   };
 
   // prefers-reduced-motion → freeze idle motion and snap transitions.
@@ -110,6 +160,9 @@ export function AnonHome() {
           progressRef={progressRef}
           material={HERO_MATERIALS[selectedIndex]}
           burstKey={burstKey}
+          burstDirection={burstDirection}
+          burstIntensity={burstIntensity}
+          dragVelocityRef={dragVelocityRef}
           reducedMotion={reducedMotion}
         />
       </div>
@@ -169,10 +222,7 @@ export function AnonHome() {
             <MaterialCarousel
               materials={HERO_MATERIALS}
               selectedIndex={selectedIndex}
-              onSelect={(i) => {
-                setSelectedIndex(i);
-                setBurstKey((k) => k + 1);
-              }}
+              onSelect={(i, direction) => handleSelect(i, direction, 1)}
             />
             <p className="mt-4 text-center text-xs uppercase tracking-widest text-muted-foreground/70">
               Scroll to explore

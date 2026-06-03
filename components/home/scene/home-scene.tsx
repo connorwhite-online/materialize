@@ -21,6 +21,12 @@ interface HomeSceneProps {
   material: MaterialMetadata;
   /** Bumped on each carousel selection to fire the particle spray. */
   burstKey: number;
+  /** Spray direction (-1/+1) of the last selection. */
+  burstDirection: number;
+  /** Spray intensity (0.3–1.5) of the last selection. */
+  burstIntensity: number;
+  /** Live hero swipe tension (-1..1). */
+  dragVelocityRef: MutableRefObject<number>;
   reducedMotion: boolean;
 }
 
@@ -46,9 +52,15 @@ function CameraRig() {
 function SceneContents({
   material,
   burstKey,
+  burstDirection,
+  burstIntensity,
+  dragVelocityRef,
 }: {
   material: MaterialMetadata;
   burstKey: number;
+  burstDirection: number;
+  burstIntensity: number;
+  dragVelocityRef: MutableRefObject<number>;
 }) {
   const target = useMemo<MaterialTarget>(
     () => ({
@@ -67,8 +79,13 @@ function SceneContents({
     <>
       <CameraRig />
       <LightsRig />
-      <PrimaryDevice target={target} />
-      <MaterialBurst burstKey={burstKey} color={target.color} />
+      <PrimaryDevice target={target} dragVelocityRef={dragVelocityRef} />
+      <MaterialBurst
+        burstKey={burstKey}
+        direction={burstDirection}
+        intensity={burstIntensity}
+        color={target.color}
+      />
       <MaterialSwatches />
       <FigureBox />
       <ContactShadows
@@ -93,6 +110,9 @@ export function HomeScene({
   progressRef,
   material,
   burstKey,
+  burstDirection,
+  burstIntensity,
+  dragVelocityRef,
   reducedMotion,
 }: HomeSceneProps) {
   return (
@@ -104,7 +124,13 @@ export function HomeScene({
         style={{ pointerEvents: "none" }}
       >
         <SceneController progressRef={progressRef} reducedMotion={reducedMotion}>
-          <SceneContents material={material} burstKey={burstKey} />
+          <SceneContents
+            material={material}
+            burstKey={burstKey}
+            burstDirection={burstDirection}
+            burstIntensity={burstIntensity}
+            dragVelocityRef={dragVelocityRef}
+          />
         </SceneController>
       </Canvas>
     </ErrorBoundary>

@@ -4,23 +4,33 @@ import { useRef, useMemo, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 
-const MAX_PARTICLES = 600;
-const PARTICLE_LIFETIME = 0.6;
-const BASE_RADIUS = 0.95;
+const MAX_PARTICLES = 800;
+const MIN_PARTICLES = 60;
+const PARTICLE_LIFETIME = 0.55;
+const BASE_RADIUS = 1.05;
 
 interface MaterialBurstProps {
   /** Bumped each time the hero carousel selection changes. */
   burstKey: number;
+  /** Carousel step direction the spray flies with (-1 / +1). */
+  direction: number;
+  /** 0.3–1.5, scales particle count + velocity with swipe speed. */
+  intensity: number;
   color: THREE.Color;
 }
 
 /**
- * Instanced particle spray that fires from the device silhouette each
- * time the hero material changes — the flourish that used to live in
- * the old HeroShowcase. Omnidirectional outward burst with a quick
- * fade. Cheap: one InstancedMesh, recycled.
+ * Instanced particle spray fired on each hero material change — the
+ * production hero flourish. Scatters outward from the device silhouette
+ * with a directional push in the swipe direction; count and velocity
+ * scale with swipe intensity. One recycled InstancedMesh.
  */
-export function MaterialBurst({ burstKey, color }: MaterialBurstProps) {
+export function MaterialBurst({
+  burstKey,
+  direction,
+  intensity,
+  color,
+}: MaterialBurstProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
 
   const particles = useMemo(
@@ -30,6 +40,8 @@ export function MaterialBurst({ burstKey, color }: MaterialBurstProps) {
         velocity: new THREE.Vector3(),
         age: PARTICLE_LIFETIME + 1,
         scale: 0,
+        rotation: new THREE.Vector3(),
+        rotationSpeed: new THREE.Vector3(),
         active: false,
       })),
     []
@@ -38,22 +50,56 @@ export function MaterialBurst({ burstKey, color }: MaterialBurstProps) {
 
   useEffect(() => {
     if (burstKey === 0) return;
+
+    const normalized = Math.min(1, intensity / 1.5);
+    const curved = Math.sqrt(normalized);
+    const count = Math.round(MIN_PARTICLES + (MAX_PARTICLES - MIN_PARTICLES) * curved);
+    const directionalPush = 0.8 + intensity * 1.05;
+
     for (let i = 0; i < MAX_PARTICLES; i++) {
       const p = particles[i];
+      if (i >= count) {
+        p.active = false;
+        continue;
+      }
       p.active = true;
+
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
-      const r = BASE_RADIUS + (Math.random() - 0.5) * 0.2;
-      const sx = Math.sin(phi) * Math.cos(theta);
-      const sy = Math.sin(phi) * Math.sin(theta);
-      const sz = Math.cos(phi);
-      p.position.set(r * sx, r * sy, r * sz);
-      const speed = 0.9 + Math.random() * 0.8;
-      p.velocity.set(sx * speed, sy * speed, sz * speed * 0.5);
+      const r = BASE_RADIUS + (Math.random() - 0.5) * 0.15;
+      p.position.set(
+        r * Math.sin(phi) * Math.cos(theta),
+        r * Math.sin(phi) * Math.sin(theta),
+        r * Math.cos(phi)
+      );
+
+      const outX = Math.sin(phi) * Math.cos(theta);
+      const outY = Math.sin(phi) * Math.sin(theta);
+      const outZ = Math.cos(phi);
+      const baseSpeed = 0.75 + Math.random() * 0.7;
+      const directionalWeight = Math.random() * Math.random();
+      const directionalComponent = direction * directionalPush * (0.5 + directionalWeight);
+
+      p.velocity.set(
+        outX * baseSpeed + directionalComponent,
+        outY * baseSpeed + (Math.random() - 0.5) * 0.8,
+        outZ * baseSpeed * 0.4
+      );
+
       p.age = 0;
-      p.scale = 0.006 + Math.random() * 0.012;
+      p.scale = 0.004 + Math.random() * 0.009;
+      p.rotation.set(
+        Math.random() * Math.PI * 2,
+        Math.random() * Math.PI * 2,
+        Math.random() * Math.PI * 2
+      );
+      p.rotationSpeed.set(
+        (Math.random() - 0.5) * 8,
+        (Math.random() - 0.5) * 8,
+        (Math.random() - 0.5) * 8
+      );
     }
-  }, [burstKey, particles]);
+  }, [burstKey, direction, intensity, particles]);
 
   useFrame((_, delta) => {
     if (!meshRef.current) return;
@@ -67,12 +113,18 @@ export function MaterialBurst({ burstKey, color }: MaterialBurstProps) {
       }
       p.age += delta;
       p.position.addScaledVector(p.velocity, delta);
-      p.velocity.multiplyScalar(0.95);
+      p.velocity.multiplyScalar(0.968);
+      p.rotation.x += p.rotationSpeed.x * delta;
+      p.rotation.y += p.rotationSpeed.y * delta;
+      p.rotation.z += p.rotationSpeed.z * delta;
+
       const lifeT = p.age / PARTICLE_LIFETIME;
-      const fade = lifeT < 0.35 ? 1 : 1 - Math.pow((lifeT - 0.35) / 0.65, 1.4);
-      const s = p.scale * fade;
+      const fade = lifeT < 0.4 ? 1 : 1 - Math.pow((lifeT - 0.4) / 0.6, 1.4);
+      const scale = p.scale * fade;
+
       dummy.position.copy(p.position);
-      dummy.scale.set(s, s, s);
+      dummy.rotation.set(p.rotation.x, p.rotation.y, p.rotation.z);
+      dummy.scale.set(scale, scale, scale);
       dummy.updateMatrix();
       meshRef.current.setMatrixAt(i, dummy.matrix);
     }
