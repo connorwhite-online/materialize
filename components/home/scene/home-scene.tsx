@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, type MutableRefObject } from "react";
+import { Suspense, useMemo, type MutableRefObject } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { ContactShadows } from "@react-three/drei";
 import * as THREE from "three";
@@ -124,13 +124,16 @@ export function HomeScene({
         style={{ pointerEvents: "none" }}
       >
         <SceneController progressRef={progressRef} reducedMotion={reducedMotion}>
-          <SceneContents
-            material={material}
-            burstKey={burstKey}
-            burstDirection={burstDirection}
-            burstIntensity={burstIntensity}
-            dragVelocityRef={dragVelocityRef}
-          />
+          {/* useLoader (device STL) suspends — keep it inside the canvas. */}
+          <Suspense fallback={null}>
+            <SceneContents
+              material={material}
+              burstKey={burstKey}
+              burstDirection={burstDirection}
+              burstIntensity={burstIntensity}
+              dragVelocityRef={dragVelocityRef}
+            />
+          </Suspense>
         </SceneController>
       </Canvas>
     </ErrorBoundary>

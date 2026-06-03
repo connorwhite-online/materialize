@@ -1,9 +1,8 @@
 "use client";
 
-import { useMemo, useRef, type MutableRefObject } from "react";
+import { useRef, type MutableRefObject } from "react";
 import { useFrame } from "@react-three/fiber";
 import { RoundedBox, Html, Line } from "@react-three/drei";
-import { RoundedBoxGeometry } from "three-stdlib";
 import * as THREE from "three";
 import {
   TEARDOWN_PARTS,
@@ -12,6 +11,7 @@ import {
   EXPLODE_SPACING,
   PCB_ORDER,
 } from "./constants";
+import { useDeviceGeometry } from "./use-device-geometry";
 
 export interface MaterialTarget {
   color: THREE.Color;
@@ -24,7 +24,7 @@ export interface MaterialTarget {
 }
 
 interface DeviceModelProps {
-  /** Shell material the soft enclosure lerps toward. */
+  /** Shell material the hardbody lerps toward. */
   target: MaterialTarget;
   /** 0 = assembled, 1 = fully exploded teardown. */
   explodeRef: MutableRefObject<number>;
@@ -41,63 +41,25 @@ const CHIP_COLOR = "#0e1013";
 const METAL_COLOR = "#b9bdc4";
 const LENS_COLOR = "#05070a";
 
-/**
- * A rounded box whose +Z half is drafted inward — a soft hump with a
- * tapered top face, per the device brief. three's RoundedBoxGeometry
- * already rounds every edge; we just inset the upper vertices to add
- * the draft angle.
- */
-function useDraftedHump(
-  w: number,
-  h: number,
-  d: number,
-  radius: number,
-  taperDeg: number
-) {
-  return useMemo(() => {
-    const geo = new RoundedBoxGeometry(w, h, d, 12, radius);
-    const pos = geo.attributes.position;
-    const tan = Math.tan((taperDeg * Math.PI) / 180);
-    const v = new THREE.Vector3();
-    const halfTop = d / 2;
-    for (let i = 0; i < pos.count; i++) {
-      v.fromBufferAttribute(pos, i);
-      if (v.z > 0) {
-        const inset = (v.z / halfTop) * (halfTop * tan) * 2.4;
-        v.x -= Math.sign(v.x) * Math.min(Math.abs(v.x), inset);
-        v.y -= Math.sign(v.y) * Math.min(Math.abs(v.y), inset);
-        pos.setXYZ(i, v.x, v.y, v.z);
-      }
-    }
-    pos.needsUpdate = true;
-    geo.computeVertexNormals();
-    return geo;
-  }, [w, h, d, radius, taperDeg]);
-}
-
-function PartGeometry({ id }: { id: string }) {
+/** Internal component geometry, sized relative to the shell. */
+function PartGeometry({ id, size }: { id: string; size: THREE.Vector3 }) {
+  const w = size.x;
   switch (id) {
     case "soc":
       return (
-        <>
-          <RoundedBox args={[0.28, 0.28, 0.08]} radius={0.02} smoothness={5}>
-            <meshStandardMaterial color={CHIP_COLOR} metalness={0.4} roughness={0.5} />
-          </RoundedBox>
-          <mesh position={[0, 0, 0.045]}>
-            <planeGeometry args={[0.18, 0.18]} />
-            <meshStandardMaterial color="#1b1e22" metalness={0.2} roughness={0.7} />
-          </mesh>
-        </>
+        <RoundedBox args={[w * 0.2, w * 0.2, 0.045]} radius={0.01} smoothness={4}>
+          <meshStandardMaterial color={CHIP_COLOR} metalness={0.4} roughness={0.5} />
+        </RoundedBox>
       );
     case "mcu":
       return (
-        <RoundedBox args={[0.17, 0.17, 0.055]} radius={0.016} smoothness={5}>
+        <RoundedBox args={[w * 0.13, w * 0.13, 0.035]} radius={0.008} smoothness={4}>
           <meshStandardMaterial color={CHIP_COLOR} metalness={0.4} roughness={0.5} />
         </RoundedBox>
       );
     case "modem":
       return (
-        <RoundedBox args={[0.32, 0.22, 0.05]} radius={0.016} smoothness={5}>
+        <RoundedBox args={[w * 0.26, w * 0.18, 0.035]} radius={0.008} smoothness={4}>
           <meshStandardMaterial color="#1a1c1f" metalness={0.55} roughness={0.4} />
         </RoundedBox>
       );
@@ -105,25 +67,25 @@ function PartGeometry({ id }: { id: string }) {
       return (
         <group>
           <mesh rotation={[Math.PI / 2, 0, 0]}>
-            <cylinderGeometry args={[0.1, 0.1, 0.1, 48]} />
+            <cylinderGeometry args={[w * 0.07, w * 0.07, 0.08, 40]} />
             <meshStandardMaterial color="#16181c" metalness={0.6} roughness={0.35} />
           </mesh>
-          <mesh position={[0, 0, 0.055]}>
-            <circleGeometry args={[0.06, 48]} />
+          <mesh position={[0, 0, 0.045]}>
+            <circleGeometry args={[w * 0.045, 40]} />
             <meshPhysicalMaterial color={LENS_COLOR} metalness={0.1} roughness={0.05} clearcoat={1} />
           </mesh>
         </group>
       );
     case "battery":
       return (
-        <RoundedBox args={[0.62, 0.85, 0.16]} radius={0.04} smoothness={6}>
+        <RoundedBox args={[w * 0.7, size.y * 0.46, size.z * 0.4]} radius={0.02} smoothness={5}>
           <meshStandardMaterial color={METAL_COLOR} metalness={0.55} roughness={0.45} />
         </RoundedBox>
       );
     case "speaker":
       return (
         <mesh rotation={[Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[0.13, 0.13, 0.08, 48]} />
+          <cylinderGeometry args={[w * 0.1, w * 0.1, 0.06, 40]} />
           <meshStandardMaterial color="#26282c" metalness={0.5} roughness={0.5} />
         </mesh>
       );
@@ -141,11 +103,9 @@ function GithubMark() {
   );
 }
 
-function TeardownLabel({ part }: { part: TeardownPart }) {
+function TeardownLabel({ part, size }: { part: TeardownPart; size: THREE.Vector3 }) {
   const dir = part.labelSide === "right" ? 1 : -1;
-  // Leader line from the part out to the label anchor. Kept short so the
-  // labels stay on-screen in portrait (narrow horizontal FOV).
-  const end: [number, number, number] = [dir * 0.42, part.labelY, 0.12];
+  const end: [number, number, number] = [dir * 0.5, part.labelY * size.y, 0.12];
   return (
     <group>
       <Line points={[[0, 0, 0], end]} color="#8a8f98" lineWidth={1} transparent opacity={0.7} />
@@ -153,12 +113,7 @@ function TeardownLabel({ part }: { part: TeardownPart }) {
         <sphereGeometry args={[0.016, 12, 12]} />
         <meshBasicMaterial color="#8a8f98" />
       </mesh>
-      <Html
-        position={end}
-        distanceFactor={3.4}
-        style={{ pointerEvents: "none" }}
-        zIndexRange={[20, 0]}
-      >
+      <Html position={end} distanceFactor={3.4} style={{ pointerEvents: "none" }} zIndexRange={[20, 0]}>
         <div
           className="teardown-label-fade flex items-center gap-1 whitespace-nowrap rounded-md border border-border/60 bg-background/85 px-1.5 py-0.5 text-[10px] font-medium tracking-tight text-foreground shadow-sm backdrop-blur"
           style={{
@@ -174,11 +129,11 @@ function TeardownLabel({ part }: { part: TeardownPart }) {
 }
 
 /**
- * The stylized Pneuma device: a soft 60×40×10 slab with a drafted 20mm
- * hump over the component stack (battery flat in the thin half). One
- * cohesive shell — in the teardown it ghosts translucent and lifts
- * while the internals slide out. Reads `explodeRef` each frame so a
- * parent only drives one number.
+ * The Pneuma device, built on the real hardbody STL shell. The shell is
+ * split into front/back covers that part along the thickness in the
+ * teardown while the internals slide out along the same axis. Surface
+ * features (camera + LED + mic at the top, USB-C at the bottom, an RF
+ * window down one side) ride on the front cover.
  */
 export function DeviceModel({
   target,
@@ -187,109 +142,110 @@ export function DeviceModel({
   showLabels = false,
   castShadow = true,
 }: DeviceModelProps) {
-  const baseMat = useRef<THREE.MeshPhysicalMaterial>(null);
-  const humpMat = useRef<THREE.MeshPhysicalMaterial>(null);
-  const humpRef = useRef<THREE.Group>(null);
+  const { front, back, size } = useDeviceGeometry();
+  const frontRef = useRef<THREE.Group>(null);
+  const backRef = useRef<THREE.Group>(null);
+  const frontMat = useRef<THREE.MeshPhysicalMaterial>(null);
+  const backMat = useRef<THREE.MeshPhysicalMaterial>(null);
   const partRefs = useRef<Record<string, THREE.Group | null>>({});
 
-  // Drafted hump: footprint ~31×37mm, 20mm tall, ~10° taper on the top.
-  const humpGeo = useDraftedHump(0.78, 0.92, 0.5, 0.16, 10);
+  const halfZ = size.z / 2;
 
-  const lerpShell = (
-    mat: THREE.MeshPhysicalMaterial | null,
-    exploded: number,
-    dt: number
-  ) => {
+  const lerpShell = (mat: THREE.MeshPhysicalMaterial | null, dt: number) => {
     if (!mat) return;
     const k = 1 - Math.exp(-dt * 4);
     mat.color.lerp(target.color, k);
     mat.metalness = THREE.MathUtils.lerp(mat.metalness, target.metalness, k);
     mat.roughness = THREE.MathUtils.lerp(mat.roughness, target.roughness, k);
     mat.clearcoat = THREE.MathUtils.lerp(mat.clearcoat, target.clearcoat, k);
-    // Ghost the shell open so the internals read in the teardown.
-    const targetOpacity = 1 - exploded * 0.85;
-    mat.opacity = THREE.MathUtils.lerp(mat.opacity, targetOpacity, k);
+    mat.transmission = THREE.MathUtils.lerp(mat.transmission, target.transmission, k);
+    mat.ior = THREE.MathUtils.lerp(mat.ior, target.ior, k);
+    mat.thickness = THREE.MathUtils.lerp(mat.thickness, target.thickness, k);
   };
 
   useFrame((_, delta) => {
     const e = explodeRef.current;
-    lerpShell(baseMat.current, e, delta);
-    lerpShell(humpMat.current, e, delta);
+    lerpShell(frontMat.current, delta);
+    lerpShell(backMat.current, delta);
 
-    // Everything separates along ONE axis — device-local +Z — by its
-    // layer order, so the teardown reads as a neat exploded assembly
-    // rather than parts scattering. The device is held at ~45° (see
-    // PrimaryDevice) so this axis is legible from the camera.
-    if (humpRef.current) {
-      humpRef.current.position.z = 0.125 + (5.6 - ORDER_CENTER) * EXPLODE_SPACING * e;
-    }
+    // Covers part along the thickness (Z); front toward the camera.
+    if (frontRef.current) frontRef.current.position.z = e * 0.55;
+    if (backRef.current) backRef.current.position.z = -e * 0.3;
+
+    // Internals separate along the same Z axis by layer order.
     for (const part of TEARDOWN_PARTS) {
       const g = partRefs.current[part.id];
       if (!g) continue;
       g.position.set(
-        part.rest[0],
-        part.rest[1],
-        part.rest[2] + (part.order - ORDER_CENTER) * EXPLODE_SPACING * e
+        part.rest[0] * size.x,
+        part.rest[1] * size.y,
+        part.rest[2] * size.z + (part.order - ORDER_CENTER) * EXPLODE_SPACING * e
       );
     }
     const pcb = partRefs.current["pcb"];
-    if (pcb) {
-      pcb.position.z = (PCB_ORDER - ORDER_CENTER) * EXPLODE_SPACING * e;
-    }
+    if (pcb) pcb.position.z = (PCB_ORDER - ORDER_CENTER) * EXPLODE_SPACING * e;
   });
+
+  const shellMaterial = (ref: MutableRefObject<THREE.MeshPhysicalMaterial | null>) => (
+    <meshPhysicalMaterial
+      ref={ref}
+      color={target.color}
+      metalness={target.metalness}
+      roughness={target.roughness}
+      clearcoat={target.clearcoat}
+      clearcoatRoughness={0.15}
+      transmission={target.transmission}
+      ior={target.ior}
+      thickness={target.thickness}
+      transparent
+    />
+  );
 
   return (
     <group>
-      {/* --- Soft base slab (60×40×10) --- */}
-      <RoundedBox
-        args={[1.5, 1.0, 0.25]}
-        radius={0.11}
-        smoothness={12}
-        castShadow={castShadow}
-        receiveShadow
-      >
-        <meshPhysicalMaterial
-          ref={baseMat}
-          color={target.color}
-          metalness={target.metalness}
-          roughness={target.roughness}
-          clearcoat={target.clearcoat}
-          clearcoatRoughness={0.15}
-          transparent
-          opacity={1}
-        />
-      </RoundedBox>
-
-      {/* --- Drafted hump over the stack, on the +X half --- */}
-      <group ref={humpRef} position={[0.36, 0, 0.125]}>
-        <mesh geometry={humpGeo} castShadow={castShadow} receiveShadow>
-          <meshPhysicalMaterial
-            ref={humpMat}
-            color={target.color}
-            metalness={target.metalness}
-            roughness={target.roughness}
-            clearcoat={target.clearcoat}
-            clearcoatRoughness={0.15}
-            transparent
-            opacity={1}
-          />
+      {/* --- Front cover (with surface features) --- */}
+      <group ref={frontRef}>
+        <mesh geometry={front} castShadow={castShadow} receiveShadow>
+          {shellMaterial(frontMat)}
         </mesh>
-        {/* Camera lens + status LED on the hump's tapered top face. */}
-        <mesh position={[0.16, 0.18, 0.26]}>
-          <circleGeometry args={[0.06, 28]} />
+
+        {/* Camera lens, LED, and mic slot at the top of the front face. */}
+        <mesh position={[0, size.y * 0.4, halfZ + 0.004]}>
+          <circleGeometry args={[size.x * 0.05, 40]} />
           <meshPhysicalMaterial color={LENS_COLOR} metalness={0.2} roughness={0.05} clearcoat={1} />
         </mesh>
-        <mesh position={[-0.18, -0.2, 0.26]}>
-          <circleGeometry args={[0.016, 16]} />
-          <meshStandardMaterial color="#7dd3a0" emissive="#3fae6e" emissiveIntensity={1.4} />
+        <mesh position={[0, size.y * 0.4, halfZ + 0.002]}>
+          <ringGeometry args={[size.x * 0.05, size.x * 0.062, 40]} />
+          <meshStandardMaterial color="#1a1c1f" metalness={0.7} roughness={0.3} />
+        </mesh>
+        <mesh position={[size.x * 0.26, size.y * 0.4, halfZ + 0.004]}>
+          <circleGeometry args={[size.x * 0.018, 20]} />
+          <meshStandardMaterial color="#7dd3a0" emissive="#3fae6e" emissiveIntensity={1.5} />
+        </mesh>
+        <mesh position={[-size.x * 0.26, size.y * 0.42, halfZ + 0.003]}>
+          <boxGeometry args={[size.x * 0.1, size.y * 0.01, 0.02]} />
+          <meshStandardMaterial color="#202226" metalness={0.3} roughness={0.7} />
+        </mesh>
+
+        {/* USB-C charge port at the bottom edge. */}
+        <mesh position={[0, -size.y * 0.5 + 0.012, 0]}>
+          <boxGeometry args={[size.x * 0.18, 0.03, size.z * 0.34]} />
+          <meshStandardMaterial color="#101113" metalness={0.5} roughness={0.5} />
+        </mesh>
+
+        {/* RF window down the +X side. */}
+        <mesh position={[size.x * 0.5 - 0.006, 0, 0]}>
+          <boxGeometry args={[0.014, size.y * 0.5, size.z * 0.72]} />
+          <meshStandardMaterial color="#d8d0c0" metalness={0.05} roughness={0.85} />
         </mesh>
       </group>
 
-      {/* Side button on the thin half's edge. */}
-      <mesh position={[-0.4, 0.5, 0.0]}>
-        <boxGeometry args={[0.18, 0.04, 0.12]} />
-        <meshStandardMaterial color="#2a2c30" metalness={0.6} roughness={0.4} />
-      </mesh>
+      {/* --- Back cover --- */}
+      <group ref={backRef}>
+        <mesh geometry={back} castShadow={castShadow} receiveShadow>
+          {shellMaterial(backMat)}
+        </mesh>
+      </group>
 
       {/* --- Internals --- */}
       {showInternals && (
@@ -298,9 +254,9 @@ export function DeviceModel({
             ref={(el) => {
               partRefs.current["pcb"] = el;
             }}
-            position={[0.34, 0, 0.0]}
+            position={[0, size.y * 0.02, 0]}
           >
-            <RoundedBox args={[0.64, 0.82, 0.03]} radius={0.025} smoothness={5}>
+            <RoundedBox args={[size.x * 0.78, size.y * 0.76, 0.02]} radius={0.015} smoothness={5}>
               <meshStandardMaterial color={PCB_COLOR} metalness={0.2} roughness={0.65} />
             </RoundedBox>
           </group>
@@ -311,10 +267,9 @@ export function DeviceModel({
               ref={(el) => {
                 partRefs.current[part.id] = el;
               }}
-              position={part.rest}
             >
-              <PartGeometry id={part.id} />
-              {showLabels && <TeardownLabel part={part} />}
+              <PartGeometry id={part.id} size={size} />
+              {showLabels && <TeardownLabel part={part} size={size} />}
             </group>
           ))}
         </group>

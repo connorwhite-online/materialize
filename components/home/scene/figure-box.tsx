@@ -85,9 +85,9 @@ export function FigureBox() {
   // Cardboard backing card with a hang-tag slot punched near the top.
   const cardGeo = useMemo(() => {
     const shape = new THREE.Shape();
-    roundedRect(shape, 0, 0, 1.9, 2.0, 0.1);
+    roundedRect(shape, 0, 0, 1.4, 2.1, 0.09);
     const slot = new THREE.Path();
-    roundedRect(slot, 0, 0.84, 0.34, 0.1, 0.05);
+    roundedRect(slot, 0, 0.92, 0.32, 0.1, 0.05);
     shape.holes.push(slot);
     return new THREE.ExtrudeGeometry(shape, {
       depth: 0.04,
@@ -127,8 +127,8 @@ export function FigureBox() {
       </mesh>
 
       {/* Cellophane bubble over the assembled device — the bulk of the pack. */}
-      <mesh position={[0, 0, 0.08]}>
-        <boxGeometry args={[1.72, 1.26, 0.6]} />
+      <mesh position={[0, 0, 0.06]}>
+        <boxGeometry args={[1.2, 1.74, 0.55]} />
         <meshPhysicalMaterial
           ref={filmMat}
           color="#ffffff"
@@ -146,7 +146,7 @@ export function FigureBox() {
       </mesh>
 
       {/* $1 starburst sticker on the cellophane, top-left. */}
-      <group position={[-0.66, 0.42, 0.4]} rotation={[0, 0, -0.12]}>
+      <group position={[-0.46, 0.62, 0.34]} rotation={[0, 0, -0.12]}>
         <mesh>
           <extrudeGeometry
             args={[star, { depth: 0.02, bevelEnabled: true, bevelThickness: 0.01, bevelSize: 0.01, bevelSegments: 1 }]}

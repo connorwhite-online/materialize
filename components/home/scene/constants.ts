@@ -116,17 +116,20 @@ export const COMMERCE_PITCH = 0.06;
 export interface TeardownPart {
   id: string;
   label: string;
-  /** Resting position inside the assembled device. */
+  /**
+   * Resting position as a FRACTION of the shell size [x=width, y=height,
+   * z=thickness]; resolved against the loaded geometry in DeviceModel.
+   */
   rest: [number, number, number];
   /**
-   * Layer index along the single explode axis (device-local +Z). Lower
-   * = deeper in the stack. Parts separate neatly along this one axis
-   * rather than flying off in random directions.
+   * Layer index along the single explode axis (device-local +Z /
+   * thickness). Lower = deeper in the stack. Parts separate neatly along
+   * this one axis rather than flying off in random directions.
    */
   order: number;
   /** Which side the leader-line label sits on. */
   labelSide: "left" | "right";
-  /** Vertical offset (device units) of the label anchor. */
+  /** Label anchor height as a fraction of the shell height. */
   labelY: number;
   /** Show the GitHub mark next to the label (the firmware target). */
   github?: boolean;
@@ -136,57 +139,57 @@ export interface TeardownPart {
 export const PCB_ORDER = 1.5;
 /** Centre of the order range, so the exploded stack stays centred. */
 export const ORDER_CENTER = 2.5;
-/** Spacing between adjacent layers along the explode axis. */
-export const EXPLODE_SPACING = 0.46;
+/** Spacing (scene units) between adjacent layers along the explode axis. */
+export const EXPLODE_SPACING = 0.28;
 
 export const TEARDOWN_PARTS: TeardownPart[] = [
   {
     id: "battery",
     label: "Battery",
-    rest: [-0.34, 0, 0.0],
+    rest: [0, -0.12, -0.18],
     order: 0,
     labelSide: "left",
-    labelY: -0.1,
+    labelY: -0.12,
   },
   {
     id: "speaker",
     label: "Speaker · Haptics",
-    rest: [-0.12, -0.3, 0.05],
+    rest: [-0.16, -0.26, 0.1],
     order: 1,
     labelSide: "left",
-    labelY: -0.6,
+    labelY: -0.3,
   },
   {
     id: "modem",
     label: "LTE Modem",
-    rest: [0.55, -0.22, 0.08],
+    rest: [0.2, -0.08, 0.16],
     order: 2,
     labelSide: "right",
-    labelY: -0.1,
+    labelY: -0.06,
   },
   {
     id: "mcu",
     label: "Wake MCU",
-    rest: [0.1, 0.3, 0.08],
+    rest: [-0.16, 0.26, 0.16],
     order: 3,
     labelSide: "left",
-    labelY: 0.6,
+    labelY: 0.3,
   },
   {
     id: "soc",
     label: "Linux SoC · Firmware",
-    rest: [0.3, 0.05, 0.09],
+    rest: [0.12, 0.18, 0.16],
     order: 4,
     labelSide: "right",
-    labelY: 0.3,
+    labelY: 0.14,
     github: true,
   },
   {
     id: "camera",
     label: "Camera",
-    rest: [0.5, 0.28, 0.16],
+    rest: [0, 0.36, 0.26],
     order: 5,
     labelSide: "right",
-    labelY: 0.95,
+    labelY: 0.42,
   },
 ];
