@@ -5,7 +5,7 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { useStage } from "./stage-context";
 import { DeviceModel, type MaterialTarget } from "./device-model";
-import { STAGE, stageWeight } from "./constants";
+import { STAGE, stageWeight, COMMERCE_YAW, COMMERCE_PITCH } from "./constants";
 
 interface PrimaryDeviceProps {
   /** Shell material driven by the hero carousel selection. */
@@ -37,6 +37,7 @@ export function PrimaryDevice({ target }: PrimaryDeviceProps) {
     const stage = stageRef.current;
 
     const matW = stageWeight(stage, STAGE.MATERIALS);
+    const commerceW = stageWeight(stage, STAGE.COMMERCE);
     const teardownW = stageWeight(stage, STAGE.TEARDOWN);
     const footerW = stageWeight(stage, STAGE.FOOTER);
 
@@ -53,15 +54,18 @@ export function PrimaryDevice({ target }: PrimaryDeviceProps) {
     // Pull the assembly back slightly as it explodes so it stays framed.
     g.position.z = THREE.MathUtils.lerp(g.position.z, -teardownW * 0.4, k);
 
-    // Idle turntable spin everywhere except the teardown, where it
-    // settles facing front so the side labels read cleanly. The base
-    // tilt shows the hump/top face; the teardown flattens it toward
-    // the camera so the exploded parts spread across the screen plane.
+    // Idle turntable spin in the hero; it settles to a fixed pose in the
+    // commerce stage (so it sits still inside the box, angled to match
+    // it) and the teardown (facing front so the side labels read).
+    const still = Math.min(1, teardownW + commerceW);
     if (!reducedMotion) {
-      spin.rotation.y += delta * 0.3 * (1 - teardownW);
+      spin.rotation.y += delta * 0.3 * (1 - still);
     }
-    spin.rotation.y = THREE.MathUtils.lerp(spin.rotation.y, 0, k * teardownW);
-    spin.rotation.x = THREE.MathUtils.lerp(spin.rotation.x, -0.28 + teardownW * 0.46, k);
+    const settleYaw = commerceW * COMMERCE_YAW; // teardown settles to 0
+    spin.rotation.y = THREE.MathUtils.lerp(spin.rotation.y, settleYaw, k * still);
+    const pitch =
+      -0.28 + teardownW * 0.46 + commerceW * (COMMERCE_PITCH + 0.28);
+    spin.rotation.x = THREE.MathUtils.lerp(spin.rotation.x, pitch, k);
 
     const want = stage > 2.4 && stage < 3.6;
     if (want !== labelsOnRef.current) {
