@@ -375,4 +375,32 @@
   .dark ::selection {
     background: oklch(0.922 0 0 / 0.15);
   }
+
+  /* Scroll-snap for the anon-home cinematic. Scoped to a class the
+     home page toggles on <html> on mount (and removes on unmount) so
+     it never leaks to the rest of the app. `proximity`, not
+     `mandatory`, so a half-height footer and short scroll nudges
+     don't get fought by the snap engine. */
+  html.snap-home {
+    scroll-snap-type: y proximity;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html.snap-home {
+      scroll-snap-type: none;
+    }
+  }
+
+  /* Teardown labels mount around the explode stage; fade them in so
+     they don't pop. */
+  .teardown-label-fade {
+    animation: teardown-label-in 0.4s ease both;
+  }
+  @keyframes teardown-label-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
 }
