@@ -94,8 +94,12 @@ export const STICKER_YELLOW = "#f4c20d";
 /**
  * Pneuma teardown parts — the internal components revealed when the
  * device "explodes" in the Teardown stage. Positions are in the
- * device's local space (shell is ~1.5 × 0.95 × 0.5). `explode` is the
- * direction + distance each part travels per unit of explode factor.
+ * device's local space.
+ *
+ * Form: a 60×40×10 soft slab whose +X half swells to 20mm to house the
+ * component stack; the battery lives flat in the −X half. Scale is
+ * 40mm = 1 unit, so the footprint is 1.5 (X) × 1.0 (Y) and the slab is
+ * 0.25 thick (Z, toward camera), the hump reaching ~0.5.
  *
  * Sourced from the pneuma repo BOM: nRF52840-class wake MCU, a
  * Rockchip RV1106-class Linux SoC, a Quectel EG915U LTE modem, a MIPI
@@ -120,50 +124,50 @@ export const TEARDOWN_PARTS: TeardownPart[] = [
   {
     id: "soc",
     label: "Linux SoC · Firmware",
-    rest: [0.12, 0.05, 0.06],
-    explode: [0, 0, 1.6],
+    rest: [0.3, 0.05, 0.09],
+    explode: [0.05, 0.2, 1.3],
     labelSide: "right",
-    labelY: 0.5,
+    labelY: 0.35,
     github: true,
   },
   {
     id: "mcu",
     label: "Wake MCU",
-    rest: [-0.42, 0.08, 0.06],
-    explode: [-0.9, 0.2, 1.1],
+    rest: [0.1, 0.3, 0.08],
+    explode: [-0.15, 0.85, 1.0],
     labelSide: "left",
-    labelY: 0.55,
+    labelY: 0.7,
   },
   {
     id: "modem",
     label: "LTE Modem",
-    rest: [0.5, -0.12, 0.05],
-    explode: [1.0, -0.1, 1.0],
+    rest: [0.55, -0.22, 0.08],
+    explode: [0.7, -0.45, 1.0],
     labelSide: "right",
-    labelY: -0.1,
+    labelY: -0.05,
   },
   {
     id: "camera",
     label: "Camera",
-    rest: [0.0, 0.32, 0.12],
-    explode: [0.1, 1.05, 0.9],
+    rest: [0.5, 0.28, 0.16],
+    explode: [0.45, 0.7, 1.15],
     labelSide: "right",
     labelY: 0.95,
   },
   {
     id: "battery",
     label: "Battery",
-    rest: [-0.05, -0.05, -0.12],
-    explode: [0, -0.15, -1.5],
+    rest: [-0.34, 0, 0.0],
+    explode: [-1.25, -0.05, 0.25],
     labelSide: "left",
-    labelY: -0.5,
+    labelY: 0.0,
   },
   {
     id: "speaker",
     label: "Speaker · Haptics",
-    rest: [-0.45, -0.28, 0.0],
-    explode: [-1.1, -0.7, 0.6],
+    rest: [-0.12, -0.3, 0.05],
+    explode: [-0.45, -0.9, 0.75],
     labelSide: "left",
-    labelY: -0.7,
+    labelY: -0.6,
   },
 ];

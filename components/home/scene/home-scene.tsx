@@ -11,6 +11,7 @@ import { LightsRig } from "./lights-rig";
 import { PrimaryDevice } from "./primary-device";
 import { MaterialSwatches } from "./material-swatches";
 import { FigureBox } from "./figure-box";
+import { MaterialBurst } from "./material-burst";
 import { type MaterialTarget } from "./device-model";
 import { STAGE, stageWeight } from "./constants";
 
@@ -18,15 +19,22 @@ interface HomeSceneProps {
   progressRef: MutableRefObject<number>;
   /** Material the hero carousel has selected, for the lone device. */
   material: MaterialMetadata;
+  /** Bumped on each carousel selection to fire the particle spray. */
+  burstKey: number;
   reducedMotion: boolean;
 }
 
-/** Dolly the camera back + up a touch to frame the exploded teardown. */
+/**
+ * Dolly the camera to frame each stage. Pulls back + up for the
+ * teardown, and extra-back in portrait (narrow horizontal FOV) so the
+ * exploded parts and their side labels stay on-screen.
+ */
 function CameraRig() {
   const { stageRef } = useStage();
-  useFrame(({ camera }) => {
+  useFrame(({ camera, viewport }) => {
     const t = stageWeight(stageRef.current, STAGE.TEARDOWN);
-    const targetZ = THREE.MathUtils.lerp(4.5, 5.7, t);
+    const portrait = viewport.aspect < 1 ? (1 - viewport.aspect) * 2.2 : 0;
+    const targetZ = THREE.MathUtils.lerp(4.5 + portrait, 5.7 + portrait * 1.4, t);
     const targetY = t * 0.25;
     camera.position.z += (targetZ - camera.position.z) * 0.1;
     camera.position.y += (targetY - camera.position.y) * 0.1;
@@ -35,7 +43,13 @@ function CameraRig() {
   return null;
 }
 
-function SceneContents({ material }: { material: MaterialMetadata }) {
+function SceneContents({
+  material,
+  burstKey,
+}: {
+  material: MaterialMetadata;
+  burstKey: number;
+}) {
   const target = useMemo<MaterialTarget>(
     () => ({
       color: new THREE.Color(material.color),
@@ -54,6 +68,7 @@ function SceneContents({ material }: { material: MaterialMetadata }) {
       <CameraRig />
       <LightsRig />
       <PrimaryDevice target={target} />
+      <MaterialBurst burstKey={burstKey} color={target.color} />
       <MaterialSwatches />
       <FigureBox />
       <ContactShadows
@@ -74,7 +89,12 @@ function SceneContents({ material }: { material: MaterialMetadata }) {
  * scrolling anon-home sections. A single SceneController eases scroll
  * progress into the stage value every child reads.
  */
-export function HomeScene({ progressRef, material, reducedMotion }: HomeSceneProps) {
+export function HomeScene({
+  progressRef,
+  material,
+  burstKey,
+  reducedMotion,
+}: HomeSceneProps) {
   return (
     <ErrorBoundary fallback={null}>
       <Canvas
@@ -84,7 +104,7 @@ export function HomeScene({ progressRef, material, reducedMotion }: HomeScenePro
         style={{ pointerEvents: "none" }}
       >
         <SceneController progressRef={progressRef} reducedMotion={reducedMotion}>
-          <SceneContents material={material} />
+          <SceneContents material={material} burstKey={burstKey} />
         </SceneController>
       </Canvas>
     </ErrorBoundary>

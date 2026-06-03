@@ -382,7 +382,7 @@
      `mandatory`, so a half-height footer and short scroll nudges
      don't get fought by the snap engine. */
   html.snap-home {
-    scroll-snap-type: y proximity;
+    scroll-snap-type: y mandatory;
   }
   @media (prefers-reduced-motion: reduce) {
     html.snap-home {

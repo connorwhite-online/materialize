@@ -54,12 +54,14 @@ export function PrimaryDevice({ target }: PrimaryDeviceProps) {
     g.position.z = THREE.MathUtils.lerp(g.position.z, -teardownW * 0.4, k);
 
     // Idle turntable spin everywhere except the teardown, where it
-    // settles facing front so the side labels read cleanly.
+    // settles facing front so the side labels read cleanly. The base
+    // tilt shows the hump/top face; the teardown flattens it toward
+    // the camera so the exploded parts spread across the screen plane.
     if (!reducedMotion) {
       spin.rotation.y += delta * 0.3 * (1 - teardownW);
     }
     spin.rotation.y = THREE.MathUtils.lerp(spin.rotation.y, 0, k * teardownW);
-    spin.rotation.x = THREE.MathUtils.lerp(spin.rotation.x, teardownW * 0.32, k);
+    spin.rotation.x = THREE.MathUtils.lerp(spin.rotation.x, -0.28 + teardownW * 0.46, k);
 
     const want = stage > 2.4 && stage < 3.6;
     if (want !== labelsOnRef.current) {
