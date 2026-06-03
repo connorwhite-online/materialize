@@ -86,7 +86,7 @@ function SwatchCard({ index, shadowTex }: SwatchCardProps) {
       {/* Plate + shadow + model all bob together. */}
       <group ref={bobRef}>
         {/* Backdrop swatch plate. */}
-        <RoundedBox args={[1.9, 2.3, 0.12]} radius={0.12} smoothness={4} position={[0, 0, -0.7]}>
+        <RoundedBox args={[1.9, 2.3, 0.12]} radius={0.12} smoothness={8} position={[0, 0, -0.7]}>
           <meshStandardMaterial color="#f1ece1" metalness={0.05} roughness={0.85} />
         </RoundedBox>
         {/* Contact shadow on the plate. */}

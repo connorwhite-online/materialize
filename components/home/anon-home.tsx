@@ -182,23 +182,23 @@ export function AnonHome() {
 
         {/* --- Stage 1 · Materials --- */}
         <SectionCopy
-          kicker="A multitude of materials"
-          title="One model, every material"
-          body="Plastics, polished alloys, translucent resins and more — preview your part in each finish, with live vendor pricing before you commit."
+          kicker="Materials"
+          title="See every finish"
+          body="Plastics, alloys, resins — your model priced live by real vendors."
         />
 
         {/* --- Stage 2 · Buy & sell --- */}
         <SectionCopy
-          kicker="Buy & sell"
-          title="A marketplace for makers"
-          body="Sell your designs as collectible, ready-to-print files — or buy someone else's. Set a price or share for free; we only take a flat 3% service fee."
+          kicker="Marketplace"
+          title="Buy & sell files"
+          body="List a print-ready design or buy one. Flat 3% fee, nothing else."
         />
 
         {/* --- Stage 3 · Teardown / firmware --- */}
         <SectionCopy
           kicker="Open hardware"
-          title="Every file, down to the firmware"
-          body="List the whole build — STLs, wiring diagrams, the bill of materials, and a link to the firmware repo. Everything someone needs to make it real."
+          title="Down to the firmware"
+          body="STLs, wiring, the BOM, and a link to the firmware repo."
         />
 
         {/* --- Stage 4 · Footer --- */}
@@ -220,18 +220,18 @@ function SectionCopy({
   body: string;
 }) {
   return (
-    <section className="flex h-svh snap-start flex-col justify-start px-4 pt-20">
-      {/* Copy sits at the top of every section, clear of the centered
-          model below it, with a soft scrim so it stays legible over the
-          scene. */}
-      <div className="mx-auto max-w-lg rounded-2xl bg-background/60 px-4 py-3 text-center backdrop-blur-sm">
-        <p className="text-xs font-medium uppercase tracking-widest text-primary/80">
+    <section className="flex h-svh snap-start flex-col justify-start px-4 pt-16">
+      {/* Copy pinned to the very top, well clear of the centered model.
+          No background container — a soft drop-shadow keeps it legible
+          over the scene. */}
+      <div className="mx-auto max-w-xs text-center [text-shadow:0_1px_12px_var(--background)] sm:max-w-sm">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-primary/90">
           {kicker}
         </p>
-        <h2 className="mt-2 text-3xl font-bold leading-tight sm:text-4xl">
+        <h2 className="mt-1.5 text-2xl font-bold leading-tight sm:text-3xl">
           {title}
         </h2>
-        <p className="mx-auto mt-3 max-w-md text-pretty text-base leading-relaxed text-muted-foreground">
+        <p className="mx-auto mt-2 max-w-xs text-sm leading-relaxed text-muted-foreground">
           {body}
         </p>
       </div>

@@ -5,7 +5,12 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { useStage } from "./stage-context";
 import { DeviceModel, type MaterialTarget } from "./device-model";
-import { STAGE, stageWeight, COMMERCE_YAW, COMMERCE_PITCH } from "./constants";
+import { STAGE, stageWeight, smoothstep, COMMERCE_YAW, COMMERCE_PITCH } from "./constants";
+
+// Fixed teardown pose — turned ~45° off the camera so the single
+// explode axis (device-local +Z) is fully legible.
+const TEARDOWN_YAW = -Math.PI / 4;
+const TEARDOWN_PITCH = -0.34;
 
 interface PrimaryDeviceProps {
   /** Shell material driven by the hero carousel selection. */
@@ -41,7 +46,10 @@ export function PrimaryDevice({ target }: PrimaryDeviceProps) {
     const teardownW = stageWeight(stage, STAGE.TEARDOWN);
     const footerW = stageWeight(stage, STAGE.FOOTER);
 
-    explodeRef.current = teardownW;
+    // Explode only AFTER the box stage is gone — the boxed device stays
+    // assembled. Ramps up entering the teardown and back down leaving it.
+    explodeRef.current =
+      smoothstep(2.55, 3, stage) * (1 - smoothstep(3, 3.45, stage));
 
     const present = (1 - matW) * (1 - footerW * 0.9);
     const baseScale = 1 + teardownW * 0.14;
@@ -54,17 +62,17 @@ export function PrimaryDevice({ target }: PrimaryDeviceProps) {
     // Pull the assembly back slightly as it explodes so it stays framed.
     g.position.z = THREE.MathUtils.lerp(g.position.z, -teardownW * 0.4, k);
 
-    // Idle turntable spin in the hero; it settles to a fixed pose in the
-    // commerce stage (so it sits still inside the box, angled to match
-    // it) and the teardown (facing front so the side labels read).
+    // Idle turntable spin in the hero; settles to a fixed pose in the
+    // commerce stage (angled to match the box) and the teardown (turned
+    // ~45° so the single explode axis reads).
     const still = Math.min(1, teardownW + commerceW);
     if (!reducedMotion) {
       spin.rotation.y += delta * 0.3 * (1 - still);
     }
-    const settleYaw = commerceW * COMMERCE_YAW; // teardown settles to 0
+    const settleYaw = commerceW * COMMERCE_YAW + teardownW * TEARDOWN_YAW;
     spin.rotation.y = THREE.MathUtils.lerp(spin.rotation.y, settleYaw, k * still);
     const pitch =
-      -0.28 + teardownW * 0.46 + commerceW * (COMMERCE_PITCH + 0.28);
+      -0.28 + commerceW * (COMMERCE_PITCH + 0.28) + teardownW * (TEARDOWN_PITCH + 0.28);
     spin.rotation.x = THREE.MathUtils.lerp(spin.rotation.x, pitch, k);
 
     const want = stage > 2.4 && stage < 3.6;

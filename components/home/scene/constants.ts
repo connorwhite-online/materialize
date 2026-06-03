@@ -118,8 +118,12 @@ export interface TeardownPart {
   label: string;
   /** Resting position inside the assembled device. */
   rest: [number, number, number];
-  /** Direction × magnitude the part slides out per explode unit. */
-  explode: [number, number, number];
+  /**
+   * Layer index along the single explode axis (device-local +Z). Lower
+   * = deeper in the stack. Parts separate neatly along this one axis
+   * rather than flying off in random directions.
+   */
+  order: number;
   /** Which side the leader-line label sits on. */
   labelSide: "left" | "right";
   /** Vertical offset (device units) of the label anchor. */
@@ -128,54 +132,61 @@ export interface TeardownPart {
   github?: boolean;
 }
 
+/** Layer index assigned to the mainboard (it sits between cells + chips). */
+export const PCB_ORDER = 1.5;
+/** Centre of the order range, so the exploded stack stays centred. */
+export const ORDER_CENTER = 2.5;
+/** Spacing between adjacent layers along the explode axis. */
+export const EXPLODE_SPACING = 0.46;
+
 export const TEARDOWN_PARTS: TeardownPart[] = [
-  {
-    id: "soc",
-    label: "Linux SoC · Firmware",
-    rest: [0.3, 0.05, 0.09],
-    explode: [0.05, 0.2, 1.3],
-    labelSide: "right",
-    labelY: 0.35,
-    github: true,
-  },
-  {
-    id: "mcu",
-    label: "Wake MCU",
-    rest: [0.1, 0.3, 0.08],
-    explode: [-0.15, 0.85, 1.0],
-    labelSide: "left",
-    labelY: 0.7,
-  },
-  {
-    id: "modem",
-    label: "LTE Modem",
-    rest: [0.55, -0.22, 0.08],
-    explode: [0.7, -0.45, 1.0],
-    labelSide: "right",
-    labelY: -0.05,
-  },
-  {
-    id: "camera",
-    label: "Camera",
-    rest: [0.5, 0.28, 0.16],
-    explode: [0.45, 0.7, 1.15],
-    labelSide: "right",
-    labelY: 0.95,
-  },
   {
     id: "battery",
     label: "Battery",
     rest: [-0.34, 0, 0.0],
-    explode: [-1.25, -0.05, 0.25],
+    order: 0,
     labelSide: "left",
-    labelY: 0.0,
+    labelY: -0.1,
   },
   {
     id: "speaker",
     label: "Speaker · Haptics",
     rest: [-0.12, -0.3, 0.05],
-    explode: [-0.45, -0.9, 0.75],
+    order: 1,
     labelSide: "left",
     labelY: -0.6,
+  },
+  {
+    id: "modem",
+    label: "LTE Modem",
+    rest: [0.55, -0.22, 0.08],
+    order: 2,
+    labelSide: "right",
+    labelY: -0.1,
+  },
+  {
+    id: "mcu",
+    label: "Wake MCU",
+    rest: [0.1, 0.3, 0.08],
+    order: 3,
+    labelSide: "left",
+    labelY: 0.6,
+  },
+  {
+    id: "soc",
+    label: "Linux SoC · Firmware",
+    rest: [0.3, 0.05, 0.09],
+    order: 4,
+    labelSide: "right",
+    labelY: 0.3,
+    github: true,
+  },
+  {
+    id: "camera",
+    label: "Camera",
+    rest: [0.5, 0.28, 0.16],
+    order: 5,
+    labelSide: "right",
+    labelY: 0.95,
   },
 ];

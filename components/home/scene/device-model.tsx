@@ -5,7 +5,13 @@ import { useFrame } from "@react-three/fiber";
 import { RoundedBox, Html, Line } from "@react-three/drei";
 import { RoundedBoxGeometry } from "three-stdlib";
 import * as THREE from "three";
-import { TEARDOWN_PARTS, type TeardownPart } from "./constants";
+import {
+  TEARDOWN_PARTS,
+  type TeardownPart,
+  ORDER_CENTER,
+  EXPLODE_SPACING,
+  PCB_ORDER,
+} from "./constants";
 
 export interface MaterialTarget {
   color: THREE.Color;
@@ -49,7 +55,7 @@ function useDraftedHump(
   taperDeg: number
 ) {
   return useMemo(() => {
-    const geo = new RoundedBoxGeometry(w, h, d, 6, radius);
+    const geo = new RoundedBoxGeometry(w, h, d, 12, radius);
     const pos = geo.attributes.position;
     const tan = Math.tan((taperDeg * Math.PI) / 180);
     const v = new THREE.Vector3();
@@ -74,7 +80,7 @@ function PartGeometry({ id }: { id: string }) {
     case "soc":
       return (
         <>
-          <RoundedBox args={[0.28, 0.28, 0.08]} radius={0.015} smoothness={3}>
+          <RoundedBox args={[0.28, 0.28, 0.08]} radius={0.02} smoothness={5}>
             <meshStandardMaterial color={CHIP_COLOR} metalness={0.4} roughness={0.5} />
           </RoundedBox>
           <mesh position={[0, 0, 0.045]}>
@@ -85,13 +91,13 @@ function PartGeometry({ id }: { id: string }) {
       );
     case "mcu":
       return (
-        <RoundedBox args={[0.17, 0.17, 0.055]} radius={0.012} smoothness={3}>
+        <RoundedBox args={[0.17, 0.17, 0.055]} radius={0.016} smoothness={5}>
           <meshStandardMaterial color={CHIP_COLOR} metalness={0.4} roughness={0.5} />
         </RoundedBox>
       );
     case "modem":
       return (
-        <RoundedBox args={[0.32, 0.22, 0.05]} radius={0.012} smoothness={3}>
+        <RoundedBox args={[0.32, 0.22, 0.05]} radius={0.016} smoothness={5}>
           <meshStandardMaterial color="#1a1c1f" metalness={0.55} roughness={0.4} />
         </RoundedBox>
       );
@@ -99,25 +105,25 @@ function PartGeometry({ id }: { id: string }) {
       return (
         <group>
           <mesh rotation={[Math.PI / 2, 0, 0]}>
-            <cylinderGeometry args={[0.1, 0.1, 0.1, 24]} />
+            <cylinderGeometry args={[0.1, 0.1, 0.1, 48]} />
             <meshStandardMaterial color="#16181c" metalness={0.6} roughness={0.35} />
           </mesh>
           <mesh position={[0, 0, 0.055]}>
-            <circleGeometry args={[0.06, 24]} />
+            <circleGeometry args={[0.06, 48]} />
             <meshPhysicalMaterial color={LENS_COLOR} metalness={0.1} roughness={0.05} clearcoat={1} />
           </mesh>
         </group>
       );
     case "battery":
       return (
-        <RoundedBox args={[0.62, 0.85, 0.16]} radius={0.03} smoothness={3}>
+        <RoundedBox args={[0.62, 0.85, 0.16]} radius={0.04} smoothness={6}>
           <meshStandardMaterial color={METAL_COLOR} metalness={0.55} roughness={0.45} />
         </RoundedBox>
       );
     case "speaker":
       return (
         <mesh rotation={[Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[0.13, 0.13, 0.08, 28]} />
+          <cylinderGeometry args={[0.13, 0.13, 0.08, 48]} />
           <meshStandardMaterial color="#26282c" metalness={0.5} roughness={0.5} />
         </mesh>
       );
@@ -210,19 +216,25 @@ export function DeviceModel({
     lerpShell(baseMat.current, e, delta);
     lerpShell(humpMat.current, e, delta);
 
-    // Hump lifts slightly as it opens.
+    // Everything separates along ONE axis — device-local +Z — by its
+    // layer order, so the teardown reads as a neat exploded assembly
+    // rather than parts scattering. The device is held at ~45° (see
+    // PrimaryDevice) so this axis is legible from the camera.
     if (humpRef.current) {
-      humpRef.current.position.z = 0.125 + e * 0.25;
+      humpRef.current.position.z = 0.125 + (5.6 - ORDER_CENTER) * EXPLODE_SPACING * e;
     }
-
     for (const part of TEARDOWN_PARTS) {
       const g = partRefs.current[part.id];
       if (!g) continue;
       g.position.set(
-        part.rest[0] + part.explode[0] * e,
-        part.rest[1] + part.explode[1] * e,
-        part.rest[2] + part.explode[2] * e
+        part.rest[0],
+        part.rest[1],
+        part.rest[2] + (part.order - ORDER_CENTER) * EXPLODE_SPACING * e
       );
+    }
+    const pcb = partRefs.current["pcb"];
+    if (pcb) {
+      pcb.position.z = (PCB_ORDER - ORDER_CENTER) * EXPLODE_SPACING * e;
     }
   });
 
@@ -232,7 +244,7 @@ export function DeviceModel({
       <RoundedBox
         args={[1.5, 1.0, 0.25]}
         radius={0.11}
-        smoothness={8}
+        smoothness={12}
         castShadow={castShadow}
         receiveShadow
       >
@@ -288,7 +300,7 @@ export function DeviceModel({
             }}
             position={[0.34, 0, 0.0]}
           >
-            <RoundedBox args={[0.64, 0.82, 0.03]} radius={0.02} smoothness={3}>
+            <RoundedBox args={[0.64, 0.82, 0.03]} radius={0.025} smoothness={5}>
               <meshStandardMaterial color={PCB_COLOR} metalness={0.2} roughness={0.65} />
             </RoundedBox>
           </group>
