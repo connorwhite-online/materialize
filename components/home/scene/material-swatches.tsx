@@ -66,7 +66,7 @@ function SwatchCard({ index, shadowTex }: SwatchCardProps) {
 
     // Cards grow + fan out of the centre as the stage approaches.
     const k = reducedMotion ? 1 : 1 - Math.exp(-delta * 7);
-    const scale = 0.46 * w;
+    const scale = 0.38 * w;
     g.scale.setScalar(THREE.MathUtils.lerp(g.scale.x, scale, k));
     g.position.x = THREE.MathUtils.lerp(g.position.x, fan.x * w, k);
     g.position.y = THREE.MathUtils.lerp(g.position.y, fan.y * w, k);

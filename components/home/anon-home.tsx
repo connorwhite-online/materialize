@@ -24,6 +24,7 @@ export function AnonHome() {
   const progressRef = useRef(0);
   const sectionRef = useRef<HTMLElement>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [burstKey, setBurstKey] = useState(0);
   const [reducedMotion, setReducedMotion] = useState(false);
 
   // prefers-reduced-motion → freeze idle motion and snap transitions.
@@ -67,6 +68,7 @@ export function AnonHome() {
         <HomeScene
           progressRef={progressRef}
           material={HERO_MATERIALS[selectedIndex]}
+          burstKey={burstKey}
           reducedMotion={reducedMotion}
         />
       </div>
@@ -84,9 +86,10 @@ export function AnonHome() {
         {/* --- Stage 0 · Hero --- */}
         <section
           ref={sectionRef}
-          className="flex h-svh snap-start flex-col items-center justify-between px-4 pt-20 pb-40"
+          className="flex h-svh snap-start flex-col items-center px-4 pt-20 pb-40"
         >
-          <div className="flex flex-1 flex-col items-center justify-center text-center">
+          {/* Copy anchored to the top; the centered model lives below it. */}
+          <div className="flex flex-col items-center text-center">
             <h1 className="flex flex-col items-center justify-center gap-0 leading-[0.95] sm:flex-row sm:items-baseline sm:gap-3">
               <span
                 className="bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-6xl tracking-tight text-transparent sm:text-7xl lg:text-8xl"
@@ -107,12 +110,16 @@ export function AnonHome() {
             </p>
           </div>
 
-          {/* Material carousel drives the lone device's material. */}
-          <div className="pointer-events-auto w-full">
+          {/* Material carousel drives the lone device's material. Pinned
+              to the bottom; firing the spray on each change. */}
+          <div className="mt-auto w-full pointer-events-auto">
             <MaterialCarousel
               materials={HERO_MATERIALS}
               selectedIndex={selectedIndex}
-              onSelect={(i) => setSelectedIndex(i)}
+              onSelect={(i) => {
+                setSelectedIndex(i);
+                setBurstKey((k) => k + 1);
+              }}
             />
             <p className="mt-4 text-center text-xs uppercase tracking-widest text-muted-foreground/70">
               Scroll to explore
@@ -122,7 +129,6 @@ export function AnonHome() {
 
         {/* --- Stage 1 · Materials --- */}
         <SectionCopy
-          align="top"
           kicker="A multitude of materials"
           title="One model, every material"
           body="Plastics, polished alloys, translucent resins and more — preview your part in each finish, with live vendor pricing before you commit."
@@ -130,7 +136,6 @@ export function AnonHome() {
 
         {/* --- Stage 2 · Buy & sell --- */}
         <SectionCopy
-          align="bottom"
           kicker="Buy & sell"
           title="A marketplace for makers"
           body="Sell your designs as collectible, ready-to-print files — or buy someone else's. Set a price or share for free; we only take a flat 3% service fee."
@@ -138,7 +143,6 @@ export function AnonHome() {
 
         {/* --- Stage 3 · Teardown / firmware --- */}
         <SectionCopy
-          align="top"
           kicker="Open hardware"
           title="Every file, down to the firmware"
           body="List the whole build — STLs, wiring diagrams, the bill of materials, and a link to the firmware repo. Everything someone needs to make it real."
@@ -157,20 +161,17 @@ function SectionCopy({
   kicker,
   title,
   body,
-  align,
 }: {
   kicker: string;
   title: string;
   body: string;
-  align: "top" | "bottom";
 }) {
   return (
-    <section
-      className={`flex h-svh snap-start flex-col px-4 ${
-        align === "top" ? "justify-start pt-24" : "justify-end pb-44"
-      }`}
-    >
-      <div className="mx-auto max-w-lg text-center">
+    <section className="flex h-svh snap-start flex-col justify-start px-4 pt-20">
+      {/* Copy sits at the top of every section, clear of the centered
+          model below it, with a soft scrim so it stays legible over the
+          scene. */}
+      <div className="mx-auto max-w-lg rounded-2xl bg-background/60 px-4 py-3 text-center backdrop-blur-sm">
         <p className="text-xs font-medium uppercase tracking-widest text-primary/80">
           {kicker}
         </p>
