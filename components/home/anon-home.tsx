@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AuthNav } from "@/components/auth/auth-nav";
 import { HomeBottomBar } from "@/components/home/home-bottom-bar";
 import { MaterialCarousel } from "@/components/home/material-carousel";
+import { ScrollIndicator } from "@/components/home/scroll-indicator";
 import { HomeScene } from "@/components/home/scene/home-scene-lazy";
 import { HERO_MATERIALS } from "@/lib/materials";
 import { ChevronRight } from "@/components/icons/chevron-right";
@@ -180,6 +181,7 @@ export function AnonHome() {
         {/* --- Stage 0 · Hero --- */}
         <section
           ref={sectionRef}
+          data-home-section
           className="flex h-svh snap-start flex-col items-center px-4 pt-20 pb-40"
         >
           {/* Copy anchored to the top; the centered model lives below it. */}
@@ -224,9 +226,9 @@ export function AnonHome() {
               selectedIndex={selectedIndex}
               onSelect={(i, direction) => handleSelect(i, direction, 1)}
             />
-            <p className="mt-4 text-center text-xs uppercase tracking-widest text-muted-foreground/70">
-              Scroll to explore
-            </p>
+            <div className="mt-5 flex justify-center">
+              <ScrollIndicator />
+            </div>
           </div>
         </section>
 
@@ -270,7 +272,7 @@ function SectionCopy({
   body: string;
 }) {
   return (
-    <section className="flex h-svh snap-start flex-col justify-start px-4 pt-16">
+    <section data-home-section className="flex h-svh snap-start flex-col justify-start px-4 pt-16">
       {/* Copy pinned to the very top, well clear of the centered model.
           No background container — a soft drop-shadow keeps it legible
           over the scene. */}
@@ -291,7 +293,7 @@ function SectionCopy({
 
 function HomeFooter() {
   return (
-    <footer className="pointer-events-auto flex min-h-[60svh] snap-start flex-col justify-end">
+    <footer data-home-section className="pointer-events-auto flex min-h-[60svh] snap-start flex-col justify-end">
       <div className="border-t border-border bg-background/85 backdrop-blur-xl">
         <div className="mx-auto max-w-6xl px-6 py-14 pb-44">
           <div className="flex flex-col gap-10 sm:flex-row sm:items-start sm:justify-between">
