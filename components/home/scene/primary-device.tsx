@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type MutableRefObject } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { useStage } from "./stage-context";
@@ -15,6 +15,8 @@ const TEARDOWN_PITCH = -0.34;
 interface PrimaryDeviceProps {
   /** Shell material driven by the hero carousel selection. */
   target: MaterialTarget;
+  /** Live drag tension (-1..1) from the hero swipe gesture. */
+  dragVelocityRef: MutableRefObject<number>;
 }
 
 /**
@@ -25,7 +27,7 @@ interface PrimaryDeviceProps {
  * recedes for the footer. Owns the single `explode` number the
  * DeviceModel reads.
  */
-export function PrimaryDevice({ target }: PrimaryDeviceProps) {
+export function PrimaryDevice({ target, dragVelocityRef }: PrimaryDeviceProps) {
   const { stageRef, reducedMotion } = useStage();
   const groupRef = useRef<THREE.Group>(null);
   const spinRef = useRef<THREE.Group>(null);
@@ -74,6 +76,13 @@ export function PrimaryDevice({ target }: PrimaryDeviceProps) {
     const pitch =
       -0.28 + commerceW * (COMMERCE_PITCH + 0.28) + teardownW * (TEARDOWN_PITCH + 0.28);
     spin.rotation.x = THREE.MathUtils.lerp(spin.rotation.x, pitch, k);
+
+    // Live drag feedback: sway with the hero swipe tension (hero only).
+    const heroW = (1 - still) * (1 - matW);
+    const tension = dragVelocityRef.current * heroW;
+    const ks = 1 - Math.exp(-delta * 18);
+    spin.rotation.z = THREE.MathUtils.lerp(spin.rotation.z, tension * 0.32, ks);
+    g.position.x = THREE.MathUtils.lerp(g.position.x, tension * 0.28, ks);
 
     const want = stage > 2.4 && stage < 3.6;
     if (want !== labelsOnRef.current) {
