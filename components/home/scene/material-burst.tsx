@@ -9,10 +9,11 @@ const MIN_PARTICLES = 60;
 const PARTICLE_LIFETIME = 0.55;
 // Spawn on the device's bounding ellipsoid (≈ its half-extents) rather
 // than a big sphere, so particles look shed from the surface by the
-// swipe velocity instead of appearing in a halo around it.
-const HALF_X = 0.72;
-const HALF_Y = 0.5;
-const HALF_Z = 0.32;
+// swipe velocity instead of appearing in a halo around it. Matches the
+// STL shell footprint (≈ 0.9 W × 1.5 H × 0.38 thick).
+const HALF_X = 0.45;
+const HALF_Y = 0.72;
+const HALF_Z = 0.2;
 
 interface MaterialBurstProps {
   /** Bumped each time the hero carousel selection changes. */
