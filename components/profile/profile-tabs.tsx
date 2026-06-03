@@ -1,6 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
@@ -14,6 +20,11 @@ interface ProfileTabsProps {
   /** Unread count drives the dot indicator on the Notifications tab. */
   unreadNotifications?: number;
 }
+
+// useLayoutEffect warns when run during SSR. Fall back to useEffect on
+// the server so the measurement below stays a client-only concern.
+const useIsomorphicLayoutEffect =
+  typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 export function ProfileTabs({
   username,
@@ -45,6 +56,47 @@ export function ProfileTabs({
 
   const visibleTabs = tabs.filter((t) => !t.ownerOnly || isOwner);
 
+  // Sliding underline. Previously this was a per-button
+  // `motion.div layoutId` shared-layout transition — the only use of
+  // motion's layout projection in the app — which tripped React error
+  // #310 ("rendered more hooks than during the previous render") on the
+  // owner profile under React 19 + motion 12, because the projection
+  // feature's hook set varies across the measure/commit phase. Here we
+  // animate a single persistent indicator to the measured position of
+  // the active tab instead: same slide, projection-free, stable hooks.
+  const navRef = useRef<HTMLElement | null>(null);
+  const tabRefs = useRef<Map<Tab, HTMLButtonElement | null>>(new Map());
+  const [indicator, setIndicator] = useState<{
+    left: number;
+    width: number;
+  } | null>(null);
+
+  useIsomorphicLayoutEffect(() => {
+    const nav = navRef.current;
+    const btn = tabRefs.current.get(localTab);
+    if (!nav || !btn) return;
+
+    const measure = () => {
+      const navRect = nav.getBoundingClientRect();
+      const btnRect = btn.getBoundingClientRect();
+      setIndicator({
+        left: btnRect.left - navRect.left,
+        width: btnRect.width,
+      });
+    };
+    measure();
+
+    // Keep the underline aligned when the row reflows (responsive width
+    // changes, font load, the notifications dot appearing). Guarded for
+    // environments without ResizeObserver (jsdom in tests).
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(nav);
+    ro.observe(btn);
+    return () => ro.disconnect();
+    // visibleTabs.length / unreadNotifications can shift button layout.
+  }, [localTab, visibleTabs.length, unreadNotifications]);
+
   const handleClick = (tab: Tab) => {
     if (tab === localTab) return;
     // Update UI immediately
@@ -60,12 +112,15 @@ export function ProfileTabs({
 
   return (
     <div className="border-b border-border">
-      <nav className="flex gap-1 -mb-px">
+      <nav ref={navRef} className="relative flex gap-1 -mb-px">
         {visibleTabs.map((tab) => {
           const active = localTab === tab.key;
           return (
             <button
               key={tab.key}
+              ref={(el) => {
+                tabRefs.current.set(tab.key, el);
+              }}
               type="button"
               aria-current={active ? "page" : undefined}
               onClick={() => handleClick(tab.key)}
@@ -85,19 +140,21 @@ export function ProfileTabs({
                   />
                 )}
               </span>
-              {active && (
-                <motion.div
-                  layoutId="profile-tab-underline"
-                  className="absolute left-0 right-0 bottom-0 h-0.5 bg-foreground"
-                  transition={{
-                    duration: 0.22,
-                    ease: [0.2, 0.8, 0.2, 1],
-                  }}
-                />
-              )}
             </button>
           );
         })}
+        {indicator && (
+          <motion.div
+            aria-hidden
+            className="absolute bottom-0 left-0 h-0.5 bg-foreground"
+            initial={false}
+            animate={{ x: indicator.left, width: indicator.width }}
+            transition={{
+              duration: 0.22,
+              ease: [0.2, 0.8, 0.2, 1],
+            }}
+          />
+        )}
       </nav>
     </div>
   );
