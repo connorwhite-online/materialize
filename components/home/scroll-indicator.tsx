@@ -133,7 +133,7 @@ export function ScrollIndicator() {
 
   return (
     <div
-      className="flex flex-col items-center gap-2 rounded-full border border-border/40 bg-background/25 px-1.5 py-2 backdrop-blur-sm"
+      className="flex flex-col items-center gap-1 rounded-full border border-border/40 bg-background/25 px-1 py-1.5 backdrop-blur-sm"
       role="navigation"
       aria-label="Section progress"
     >
@@ -146,22 +146,22 @@ export function ScrollIndicator() {
             onClick={() => goTo(i)}
             aria-label={`Go to section ${i + 1}`}
             aria-current={isActive ? "true" : undefined}
-            className="flex h-4 w-3 items-center justify-center"
+            className="flex h-5 w-4 cursor-pointer items-center justify-center"
           >
             <span
               className={cn(
                 // Active indicator is a pill twice as long as the
-                // inactive dots, with the timer fill rising inside it.
+                // inactive dots; the timer fill grows downward inside it.
                 "relative block overflow-hidden rounded-full transition-all duration-300",
                 isActive
-                  ? "h-3 w-1.5 bg-muted-foreground/25"
-                  : "h-1.5 w-1.5 bg-muted-foreground/30 hover:bg-muted-foreground/50"
+                  ? "h-4 w-2 bg-muted-foreground/25"
+                  : "h-2 w-2 bg-muted-foreground/30 hover:bg-muted-foreground/50"
               )}
             >
               {isActive && (
                 <span
                   ref={fillRef}
-                  className="absolute inset-x-0 bottom-0 bg-foreground"
+                  className="absolute inset-x-0 top-0 bg-foreground"
                   style={{ height: "0%" }}
                 />
               )}
