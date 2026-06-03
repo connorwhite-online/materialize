@@ -102,13 +102,13 @@ export function DraftCartCard({
             variant="ghost"
             size="sm"
             onClick={handleDiscard}
-            disabled={pending}
+            loading={pending}
             className="text-destructive"
           >
-            {pending ? "…" : "Discard"}
+            Discard
           </Button>
-          <Button size="sm" onClick={handleResume} disabled={resuming}>
-            {resuming ? "…" : "Resume"}
+          <Button size="sm" onClick={handleResume} loading={resuming}>
+            Resume
           </Button>
         </div>
       </CardContent>

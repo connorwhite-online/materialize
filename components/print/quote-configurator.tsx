@@ -18,6 +18,7 @@ import {
   createPrintOrder,
   completePrintOrder,
   checkCartPricing,
+  checkoutVendorGroup,
 } from "@/app/actions/print";
 import { useCart } from "./cart-context";
 import { uploadToCraftCloud } from "@/lib/craftcloud/upload-client";
@@ -345,6 +346,30 @@ export function QuoteConfigurator({
 
   const cart = useCart();
   const [isAddingToCart, setIsAddingToCart] = useState(false);
+
+  // Shipping is chosen once per vendor cart. When the vendor being
+  // configured already has cart items, reuse that cart's shipping
+  // option — preselect and lock the picker rather than asking again.
+  // The server enforces the same inheritance on add/checkout (see
+  // addToCart), so this just keeps the UI honest about what will be
+  // charged. Falls back to a normal (unlocked) picker if the existing
+  // option isn't present in the current quote's shipping set.
+  const existingVendorCartShippingId =
+    selectedQuote && cart
+      ? cart.items.find((i) => i.vendorId === selectedQuote.vendorId)
+          ?.shippingId ?? null
+      : null;
+  const lockedShippingOption = existingVendorCartShippingId
+    ? shipping.find((s) => s.shippingId === existingVendorCartShippingId) ?? null
+    : null;
+  useEffect(() => {
+    if (
+      lockedShippingOption &&
+      selectedShipping?.shippingId !== lockedShippingOption.shippingId
+    ) {
+      setSelectedShipping(lockedShippingOption);
+    }
+  }, [lockedShippingOption, selectedShipping]);
 
   // Single polite live region message for the quote pipeline + the
   // quantity clamp (CON-62 / CON-64). Screen readers announce this on
@@ -708,6 +733,46 @@ export function QuoteConfigurator({
     // heavy chain (R2 → draft file → print order → stripe) runs
     // inside handleAddressSubmit once we know the user is authed.
     if (draftMode || !fileAssetId) {
+      setStep("address");
+      return;
+    }
+
+    // If this vendor already has items in the cart, "Proceed to
+    // checkout" should pay for the whole vendor group, not just the
+    // item being configured — otherwise the user silently leaves the
+    // rest of that manufacturer's cart behind. Fold the current item
+    // in (addItem inherits the group's shipping, see addToCart) and
+    // check out the group. With no existing items we keep the leaner
+    // single-item createPrintOrder path.
+    const hasExistingVendorItems =
+      !!cart && cart.items.some((i) => i.vendorId === selectedQuote.vendorId);
+
+    if (hasExistingVendorItems && cart) {
+      const added = await cart.addItem({
+        fileAssetId,
+        quoteId: selectedQuote.quoteId,
+        vendorId: selectedQuote.vendorId,
+        vendorName: selectedQuote.vendorName,
+        materialConfigId: selectedQuote.materialConfigId,
+        shippingId: selectedShipping.shippingId,
+        quantity,
+        materialPrice: selectedQuote.price,
+        shippingPrice: selectedShipping.price,
+        currency: selectedQuote.currency,
+        countryCode: region.code,
+      });
+      if ("error" in added) {
+        setCheckoutError(added.error);
+        return;
+      }
+
+      const grouped = await checkoutVendorGroup(selectedQuote.vendorId);
+      if ("error" in grouped) {
+        setCheckoutError(grouped.error);
+        return;
+      }
+      await cart.refresh();
+      setPrintOrderId(grouped.orderId);
       setStep("address");
       return;
     }
@@ -1146,6 +1211,12 @@ export function QuoteConfigurator({
             isAddingToCart={isAddingToCart}
             minimumFeeInfo={minimumFeeInfo}
             checkingMinimum={checkingMinimum}
+            shippingLocked={!!lockedShippingOption}
+            shippingLockedNotice={
+              lockedShippingOption && selectedQuote
+                ? `Shipping matches your ${selectedQuote.vendorName} cart`
+                : null
+            }
           />
           {rightAnnex?.({ pendingItem })}
         </div>

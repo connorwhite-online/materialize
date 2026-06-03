@@ -74,6 +74,33 @@ export async function addToCart(params: {
       };
     }
 
+    // One shipping option per vendor cart. CraftCloud bills shipping
+    // once per vendor-group order, and `checkoutVendorGroup` collapses
+    // the group's shippingIds — so a second item for a vendor the user
+    // already has a cart with must adopt that cart's shipping choice
+    // rather than carry its own (which would split the group across two
+    // shipping methods and confuse the deduped total). Inherit the
+    // existing group's shippingId/price; the new item's own selection
+    // is intentionally ignored here. Stored prices are already in cents.
+    const [existingForVendor] = await db
+      .select({
+        shippingId: cartItems.shippingId,
+        shippingPrice: cartItems.shippingPrice,
+      })
+      .from(cartItems)
+      .where(
+        and(
+          eq(cartItems.userId, userId),
+          eq(cartItems.vendorId, data.vendorId)
+        )
+      )
+      .limit(1);
+
+    const shippingIdToUse = existingForVendor?.shippingId ?? data.shippingId;
+    const shippingPriceCents = existingForVendor
+      ? existingForVendor.shippingPrice
+      : Math.round(data.shippingPrice * 100);
+
     // Merge duplicates atomically: a "duplicate" is
     // (userId, fileAssetId, quoteId) — the quoteId already encodes
     // vendor + material + shipping on CraftCloud's side, so two rows
@@ -93,10 +120,10 @@ export async function addToCart(params: {
         vendorId: data.vendorId,
         vendorName: data.vendorName ?? null,
         materialConfigId: data.materialConfigId,
-        shippingId: data.shippingId,
+        shippingId: shippingIdToUse,
         quantity: data.quantity,
         materialPrice: Math.round(data.materialPrice * 100),
-        shippingPrice: Math.round(data.shippingPrice * 100),
+        shippingPrice: shippingPriceCents,
         currency: data.currency,
         countryCode: data.countryCode,
       })
@@ -172,6 +199,68 @@ export async function updateCartItemQuantity(
     return { success: true };
   } catch (error) {
     logError("updateCartItemQuantity", error);
+    return { error: "Failed to update quantity" };
+  }
+}
+
+/**
+ * Persist a fresh CraftCloud quote for a cart line after the user
+ * changed its quantity. Unlike `updateCartItemQuantity` (a bare
+ * quantity write), this also swaps in the re-quoted per-unit price and
+ * quoteId so the line reflects the vendor's real volume pricing — a
+ * +1 in the cart should drop the per-unit price, not flat-multiply the
+ * old one. The client fetches the new quote (re-running the price
+ * request at the new quantity) and hands the resolved values here.
+ *
+ * Shipping is deliberately untouched: CraftCloud bills it once per
+ * vendor order regardless of unit count, so a quantity change doesn't
+ * re-quote freight.
+ */
+export async function repriceCartItem(params: {
+  cartItemId: string;
+  quantity: number;
+  quoteId: string;
+  /** Re-quoted per-unit material price, in dollars. */
+  materialPrice: number;
+}): Promise<{ success: true } | { error: string }> {
+  try {
+    const { userId } = await auth();
+    if (!userId) return { error: "Unauthorized" };
+
+    if (
+      !Number.isInteger(params.quantity) ||
+      params.quantity < 1 ||
+      params.quantity > 100
+    ) {
+      return { error: "Invalid quantity" };
+    }
+    if (!params.quoteId || !(params.materialPrice > 0)) {
+      return { error: "Invalid quote" };
+    }
+
+    const [item] = await db
+      .select({ id: cartItems.id })
+      .from(cartItems)
+      .where(
+        and(eq(cartItems.id, params.cartItemId), eq(cartItems.userId, userId))
+      );
+
+    if (!item) return { error: "Cart item not found" };
+
+    await db
+      .update(cartItems)
+      .set({
+        quantity: params.quantity,
+        quoteId: params.quoteId,
+        materialPrice: Math.round(params.materialPrice * 100),
+        updatedAt: new Date(),
+      })
+      .where(eq(cartItems.id, params.cartItemId));
+
+    revalidatePath("/");
+    return { success: true };
+  } catch (error) {
+    logError("repriceCartItem", error);
     return { error: "Failed to update quantity" };
   }
 }

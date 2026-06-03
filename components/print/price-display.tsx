@@ -47,6 +47,13 @@ interface PriceDisplayProps {
   minimumFeeInfo?: MinimumFeeInfo | null;
   /** True while checkCartPricing is in flight. */
   checkingMinimum?: boolean;
+  /**
+   * When the configured vendor already has a cart, shipping is fixed
+   * to that cart's choice (one shipping option per vendor order). The
+   * picker renders read-only with an explanatory notice.
+   */
+  shippingLocked?: boolean;
+  shippingLockedNotice?: string | null;
 }
 
 export function PriceDisplay({
@@ -62,6 +69,8 @@ export function PriceDisplay({
   isAddingToCart,
   minimumFeeInfo,
   checkingMinimum,
+  shippingLocked,
+  shippingLockedNotice,
 }: PriceDisplayProps) {
   if (!selectedQuote) {
     return (
@@ -126,37 +135,63 @@ export function PriceDisplay({
           <p className="text-xs font-medium text-muted-foreground mb-2">
             Shipping
           </p>
-          <RadioGroup
-            value={selectedShipping?.shippingId ?? ""}
-            onValueChange={(value) => {
-              const option = vendorShipping.find((s) => s.shippingId === value);
-              if (option) onSelectShipping(option);
-            }}
-          >
-            {vendorShipping.map((option) => (
-              <Label
-                key={option.shippingId}
-                htmlFor={option.shippingId}
-                className="flex cursor-pointer items-center justify-between rounded-lg border border-border p-3 transition-colors has-[[data-state=checked]]:border-primary"
-              >
-                <div className="flex items-center gap-2">
-                  <RadioGroupItem
-                    value={option.shippingId}
-                    id={option.shippingId}
-                  />
-                  <div>
-                    <span className="text-sm">{option.name}</span>
-                    <span className="ml-1 text-xs text-muted-foreground">
-                      ({option.deliveryTime} days)
-                    </span>
-                  </div>
+          {shippingLocked && selectedShipping ? (
+            // One shipping option per vendor cart — render the inherited
+            // choice read-only so the user isn't asked to re-pick (and
+            // can't split the vendor group across two shipping methods).
+            <div>
+              <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 p-3">
+                <div>
+                  <span className="text-sm">{selectedShipping.name}</span>
+                  <span className="ml-1 text-xs text-muted-foreground">
+                    ({selectedShipping.deliveryTime} days)
+                  </span>
                 </div>
                 <span className="text-sm font-medium">
-                  ${option.price.toFixed(2)}
+                  ${selectedShipping.price.toFixed(2)}
                 </span>
-              </Label>
-            ))}
-          </RadioGroup>
+              </div>
+              {shippingLockedNotice && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {shippingLockedNotice}
+                </p>
+              )}
+            </div>
+          ) : (
+            <RadioGroup
+              value={selectedShipping?.shippingId ?? ""}
+              onValueChange={(value) => {
+                const option = vendorShipping.find(
+                  (s) => s.shippingId === value
+                );
+                if (option) onSelectShipping(option);
+              }}
+            >
+              {vendorShipping.map((option) => (
+                <Label
+                  key={option.shippingId}
+                  htmlFor={option.shippingId}
+                  className="flex cursor-pointer items-center justify-between rounded-lg border border-border p-3 transition-colors has-[[data-state=checked]]:border-primary"
+                >
+                  <div className="flex items-center gap-2">
+                    <RadioGroupItem
+                      value={option.shippingId}
+                      id={option.shippingId}
+                    />
+                    <div>
+                      <span className="text-sm">{option.name}</span>
+                      <span className="ml-1 text-xs text-muted-foreground">
+                        ({option.deliveryTime} days)
+                      </span>
+                    </div>
+                  </div>
+                  <span className="text-sm font-medium">
+                    ${option.price.toFixed(2)}
+                  </span>
+                </Label>
+              ))}
+            </RadioGroup>
+          )}
         </div>
 
         <Separator />

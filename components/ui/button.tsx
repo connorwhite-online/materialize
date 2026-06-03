@@ -48,8 +48,19 @@ function Button({
   size = "default",
   nativeButton,
   render,
+  loading = false,
+  disabled,
+  children,
   ...props
-}: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
+}: ButtonPrimitive.Props &
+  VariantProps<typeof buttonVariants> & {
+    /**
+     * Show a spinner before the label and disable the button. Use this
+     * instead of swapping the label for "…" so pending actions read as
+     * loading everywhere.
+     */
+    loading?: boolean
+  }) {
   // Base-UI's Button defaults nativeButton to true, which warns if the
   // `render` prop yields a non-<button> element (e.g. <Link> → <a>).
   // Default nativeButton to false whenever the caller is explicitly
@@ -62,8 +73,17 @@ function Button({
       className={cn(buttonVariants({ variant, size, className }))}
       nativeButton={resolvedNativeButton}
       render={render}
+      disabled={disabled || loading}
       {...props}
-    />
+    >
+      {loading && (
+        <span
+          aria-hidden
+          className="size-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current"
+        />
+      )}
+      {children}
+    </ButtonPrimitive>
   )
 }
 

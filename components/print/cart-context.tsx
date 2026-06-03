@@ -16,9 +16,11 @@ import {
   addToCart,
   removeFromCart,
   updateCartItemQuantity,
+  repriceCartItem,
   getCartItemCount,
 } from "@/app/actions/cart";
 import { createDraftFileForPrint } from "@/app/actions/files";
+import { pollQuotes, type QuoteSnapshot } from "./poll-quotes";
 
 export interface LocalCartItem {
   localId: string;
@@ -44,6 +46,13 @@ interface CartContextValue {
   isOpen: boolean;
   loading: boolean;
   materializing: boolean;
+  /**
+   * DB cart-item ids currently re-quoting after a quantity change.
+   * The cart UIs render a price skeleton for these while the fresh
+   * CraftCloud quote lands (the quantity number itself updates
+   * optimistically — only the price is in flux).
+   */
+  repricingIds: ReadonlySet<string>;
   open: () => void;
   close: () => void;
   addItem: (params: {
@@ -83,6 +92,14 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [materializing, setMaterializing] = useState(false);
+  const [repricingIds, setRepricingIds] = useState<ReadonlySet<string>>(
+    () => new Set()
+  );
+  // Per-item AbortControllers so a rapid +/- spree cancels the stale
+  // in-flight re-quote before starting the next one — otherwise an
+  // earlier (slower) poll could land after a later one and write a
+  // price for the wrong quantity.
+  const repriceAbortRef = useRef<Map<string, AbortController>>(new Map());
   // Synchronous guard against concurrent materialize calls. The
   // `materializing` state flips on next render so two rapid clicks
   // (e.g. two vendor-group Checkout buttons) can both pass the
@@ -166,14 +183,106 @@ export function CartProvider({ children }: { children: ReactNode }) {
     setLocalItems((prev) => prev.filter((i) => i.localId !== localId));
   }, []);
 
+  const setRepricing = useCallback((id: string, on: boolean) => {
+    setRepricingIds((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
   const updateQuantity = useCallback(
     async (id: string, quantity: number) => {
-      await updateCartItemQuantity(id, quantity);
+      // Optimistically move the quantity number now; the price below
+      // re-quotes in the background (CraftCloud per-unit prices drop
+      // with volume, so we can't just flat-multiply the stored unit
+      // price). The UI shows a price skeleton meanwhile.
+      const item = items.find((i) => i.id === id);
       setItems((prev) =>
         prev.map((i) => (i.id === id ? { ...i, quantity } : i))
       );
+      if (!item) {
+        await updateCartItemQuantity(id, quantity);
+        return;
+      }
+
+      // Cancel any earlier in-flight re-quote for this line.
+      repriceAbortRef.current.get(id)?.abort();
+      const controller = new AbortController();
+      repriceAbortRef.current.set(id, controller);
+      const { signal } = controller;
+
+      setRepricing(id, true);
+      try {
+        const startRes = await fetch("/api/craftcloud/quotes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fileAssetId: item.fileAssetId,
+            currency: item.currency,
+            countryCode: item.countryCode,
+            quantity,
+          }),
+          signal,
+        });
+        if (!startRes.ok) throw new Error("requote start failed");
+        const { priceId } = (await startRes.json()) as { priceId: string };
+
+        const snapshots: QuoteSnapshot[] = [];
+        await pollQuotes({
+          priceId,
+          signal,
+          onSnapshot: (snapshot) => {
+            snapshots.push(snapshot);
+          },
+        });
+        if (signal.aborted) return;
+
+        const latest = snapshots[snapshots.length - 1];
+        const match = latest?.quotes.find(
+          (q) =>
+            q.vendorId === item.vendorId &&
+            q.materialConfigId === item.materialConfigId
+        );
+
+        if (match) {
+          const result = await repriceCartItem({
+            cartItemId: id,
+            quantity,
+            quoteId: match.quoteId,
+            materialPrice: match.price,
+          });
+          if (!("error" in result)) {
+            const newMaterialCents = Math.round(match.price * 100);
+            setItems((prev) =>
+              prev.map((i) =>
+                i.id === id
+                  ? { ...i, quantity, quoteId: match.quoteId, materialPrice: newMaterialCents }
+                  : i
+              )
+            );
+            return;
+          }
+        }
+        // No matching quote (or persist failed) — fall back to a plain
+        // quantity write so the DB still reflects the new count. The
+        // stored unit price stays as-is; the staleness UI already warns
+        // when a line's quote is at risk.
+        await updateCartItemQuantity(id, quantity);
+      } catch (err) {
+        if (signal.aborted || (err as { name?: string }).name === "AbortError") {
+          return;
+        }
+        await updateCartItemQuantity(id, quantity);
+      } finally {
+        if (repriceAbortRef.current.get(id) === controller) {
+          repriceAbortRef.current.delete(id);
+        }
+        setRepricing(id, false);
+      }
     },
-    []
+    [items, setRepricing]
   );
 
   const updateLocalItemQuantity = useCallback(
@@ -290,6 +399,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       isOpen,
       loading,
       materializing,
+      repricingIds,
       open,
       close,
       addItem,
@@ -308,6 +418,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       isOpen,
       loading,
       materializing,
+      repricingIds,
       open,
       close,
       addItem,

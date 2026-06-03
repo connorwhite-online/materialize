@@ -236,7 +236,13 @@ export async function getModel(modelId: string): Promise<CraftCloudModel & { par
 }
 
 export async function createPriceRequest(params: PriceRequest): Promise<{ priceId: string }> {
-  if (USE_MOCK) return { priceId: `mock-price-${Date.now()}` };
+  if (USE_MOCK) {
+    // Embed the requested quantity so getMockPriceResponse can model
+    // the per-unit volume discount (the mock is otherwise stateless —
+    // getPrice only receives the priceId, not the original request).
+    const quantity = params.models[0]?.quantity ?? 1;
+    return { priceId: `mock-price-q${quantity}-${Date.now()}` };
+  }
   return realCreatePriceRequest(params);
 }
 

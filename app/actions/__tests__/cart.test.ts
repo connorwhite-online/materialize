@@ -16,6 +16,11 @@ vi.mock("@/lib/db", () => ({
     select: () => ({
       from: (table: { __name?: string }) => {
         if (table?.__name === "cartItems") {
+          // `where` is awaited directly (currency check) AND chained
+          // with `.limit(1)` (per-vendor shipping lookup) — return an
+          // array augmented with a limit() so both call shapes work.
+          const whereResult = () =>
+            Object.assign([...cartRows], { limit: () => cartRows });
           return {
             innerJoin: () => ({
               leftJoin: () => ({
@@ -24,7 +29,7 @@ vi.mock("@/lib/db", () => ({
                 }),
               }),
             }),
-            where: () => cartRows,
+            where: whereResult,
           };
         }
         return { where: () => [] };
@@ -89,7 +94,13 @@ vi.mock("@/lib/entitlement", () => ({
   userCanPrintAsset: vi.fn(async () => true),
 }));
 
-import { addToCart, removeFromCart, updateCartItemQuantity, getCart } from "../cart";
+import {
+  addToCart,
+  removeFromCart,
+  updateCartItemQuantity,
+  repriceCartItem,
+  getCart,
+} from "../cart";
 import { userCanPrintAsset } from "@/lib/entitlement";
 
 const baseParams = {
@@ -164,6 +175,28 @@ describe("addToCart", () => {
     expect(insertedValues).toHaveLength(0);
     expect(upsertSet).toBeNull();
   });
+
+  it("inherits the existing vendor cart's shipping for a new line", async () => {
+    // A second item for a vendor already in the cart must adopt that
+    // group's shipping (one shipping option per vendor order) instead
+    // of carrying its own picked option/price.
+    cartRows = [
+      {
+        currency: "USD",
+        shippingId: "ship-existing",
+        shippingPrice: 599, // cents, already stored
+      },
+    ];
+    const result = await addToCart({
+      ...baseParams,
+      shippingId: "ship-new-pick",
+      shippingPrice: 14.99,
+    });
+    expect(result).toEqual({ cartItemId: "new-cart-item-id" });
+    const inserted = insertedValues[0] as Record<string, unknown>;
+    expect(inserted.shippingId).toBe("ship-existing");
+    expect(inserted.shippingPrice).toBe(599);
+  });
 });
 
 describe("removeFromCart", () => {
@@ -207,6 +240,60 @@ describe("updateCartItemQuantity", () => {
   it("rejects quantity over 100", async () => {
     const result = await updateCartItemQuantity("item-1", 101);
     expect(result).toEqual({ error: "Invalid quantity" });
+  });
+});
+
+describe("repriceCartItem", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    cartRows = [];
+    updatedSet = null;
+  });
+
+  it("writes quantity, quoteId, and the re-quoted unit price in cents", async () => {
+    cartRows = [{ id: "item-1" }];
+    const result = await repriceCartItem({
+      cartItemId: "item-1",
+      quantity: 5,
+      quoteId: "quote-fresh",
+      materialPrice: 7.27,
+    });
+    expect(result).toEqual({ success: true });
+    const set = updatedSet as Record<string, unknown>;
+    expect(set.quantity).toBe(5);
+    expect(set.quoteId).toBe("quote-fresh");
+    expect(set.materialPrice).toBe(727);
+  });
+
+  it("rejects invalid quantity", async () => {
+    const result = await repriceCartItem({
+      cartItemId: "item-1",
+      quantity: 0,
+      quoteId: "q",
+      materialPrice: 1,
+    });
+    expect(result).toEqual({ error: "Invalid quantity" });
+  });
+
+  it("rejects a non-positive price", async () => {
+    const result = await repriceCartItem({
+      cartItemId: "item-1",
+      quantity: 2,
+      quoteId: "q",
+      materialPrice: 0,
+    });
+    expect(result).toEqual({ error: "Invalid quote" });
+  });
+
+  it("errors when the item isn't found / owned", async () => {
+    cartRows = [];
+    const result = await repriceCartItem({
+      cartItemId: "missing",
+      quantity: 2,
+      quoteId: "q",
+      materialPrice: 5,
+    });
+    expect(result).toEqual({ error: "Cart item not found" });
   });
 });
 
