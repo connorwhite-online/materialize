@@ -2,8 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { STAGE_COUNT } from "@/components/home/scene/constants";
 
+// The four landing sections the pager cycles through (the footer is
+// excluded — it's reachable by manual scroll but not part of the loop).
+const SECTION_COUNT = 4;
 // Time the active dot takes to fill before auto-advancing to the next
 // section. Resets/stops once the visitor scrolls themselves.
 const DURATION_MS = 4500;
@@ -18,6 +20,7 @@ const ADVANCE_KEYS = ["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End
  */
 export function ScrollIndicator() {
   const [active, setActive] = useState(0);
+  const [count, setCount] = useState(SECTION_COUNT);
   const activeRef = useRef(0);
   const fillRef = useRef<HTMLSpanElement | null>(null);
 
@@ -31,6 +34,7 @@ export function ScrollIndicator() {
       sectionsRef.current = Array.from(
         document.querySelectorAll<HTMLElement>("[data-home-section]")
       );
+      if (sectionsRef.current.length) setCount(sectionsRef.current.length);
     };
     collect();
 
@@ -81,8 +85,8 @@ export function ScrollIndicator() {
       const a = activeRef.current;
       const last = sectionsRef.current.length - 1;
 
-      if (!autoRef.current || a >= last) {
-        // Passive pager: active dot reads solid.
+      if (!autoRef.current) {
+        // Passive pager (user took over / reduced motion): solid active.
         progRef.current = 0;
         if (fillRef.current) fillRef.current.style.height = "100%";
         return;
@@ -91,13 +95,16 @@ export function ScrollIndicator() {
       progRef.current += dt / DURATION_MS;
       if (progRef.current >= 1) {
         progRef.current = 0;
-        const next = sectionsRef.current[a + 1];
-        if (next) {
+        // Loop: after the final section, come back up to the top.
+        const nextIdx = a >= last ? 0 : a + 1;
+        const target = sectionsRef.current[nextIdx];
+        if (target) {
           programmaticRef.current = true;
-          window.scrollTo({ top: next.offsetTop, behavior: "smooth" });
+          window.scrollTo({ top: target.offsetTop, behavior: "smooth" });
+          // Longer guard — the loop-to-top scroll can be a long animation.
           window.setTimeout(() => {
             programmaticRef.current = false;
-          }, 900);
+          }, 1200);
         }
       }
       if (fillRef.current) {
@@ -137,7 +144,7 @@ export function ScrollIndicator() {
       role="navigation"
       aria-label="Section progress"
     >
-      {Array.from({ length: STAGE_COUNT }).map((_, i) => {
+      {Array.from({ length: count }).map((_, i) => {
         const isActive = i === active;
         return (
           <button
