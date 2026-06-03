@@ -146,13 +146,15 @@ export function ScrollIndicator() {
             onClick={() => goTo(i)}
             aria-label={`Go to section ${i + 1}`}
             aria-current={isActive ? "true" : undefined}
-            className="flex h-3 w-3 items-center justify-center"
+            className="flex h-4 w-3 items-center justify-center"
           >
             <span
               className={cn(
+                // Active indicator is a pill twice as long as the
+                // inactive dots, with the timer fill rising inside it.
                 "relative block overflow-hidden rounded-full transition-all duration-300",
                 isActive
-                  ? "h-2.5 w-2.5 bg-muted-foreground/25"
+                  ? "h-3 w-1.5 bg-muted-foreground/25"
                   : "h-1.5 w-1.5 bg-muted-foreground/30 hover:bg-muted-foreground/50"
               )}
             >

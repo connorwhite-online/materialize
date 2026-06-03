@@ -226,9 +226,6 @@ export function AnonHome() {
               selectedIndex={selectedIndex}
               onSelect={(i, direction) => handleSelect(i, direction, 1)}
             />
-            <div className="mt-5 flex justify-center">
-              <ScrollIndicator />
-            </div>
           </div>
         </section>
 
@@ -258,6 +255,11 @@ export function AnonHome() {
       </div>
 
       <HomeBottomBar />
+
+      {/* Section pager — fixed to the right edge, vertically centered. */}
+      <div className="fixed right-3 top-1/2 z-30 -translate-y-1/2">
+        <ScrollIndicator />
+      </div>
     </div>
   );
 }
