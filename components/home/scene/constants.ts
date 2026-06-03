@@ -92,6 +92,14 @@ export const DEVICE_DEFAULT_MATERIAL: MaterialMetadata = {
 export const STICKER_YELLOW = "#f4c20d";
 
 /**
+ * Shared orientation for the COMMERCE stage so the lone device and the
+ * box that encloses it stay aligned while viewed at a slight angle —
+ * the yaw is what makes the carton's side walls read as 3D depth.
+ */
+export const COMMERCE_YAW = -0.22;
+export const COMMERCE_PITCH = 0.06;
+
+/**
  * Pneuma teardown parts — the internal components revealed when the
  * device "explodes" in the Teardown stage. Positions are in the
  * device's local space.

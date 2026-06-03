@@ -73,34 +73,36 @@ function SwatchCard({ index, shadowTex }: SwatchCardProps) {
     g.position.z = THREE.MathUtils.lerp(g.position.z, fan.z * w, k);
     g.rotation.z = THREE.MathUtils.lerp(g.rotation.z, fan.rot * w, k);
 
-    // Gentle bob, staggered per card.
+    // The whole swatch card bobs as a unit; the model inside stays put.
     if (bobRef.current) {
       bobRef.current.position.y = reducedMotion
         ? 0
-        : Math.sin(state.clock.elapsedTime * 1.1 + phase) * 0.12;
-      bobRef.current.rotation.y += delta * 0.2;
+        : Math.sin(state.clock.elapsedTime * 1.1 + phase) * 0.1;
     }
   });
 
   return (
     <group ref={groupRef} visible={false}>
-      {/* Backdrop swatch plate. */}
-      <RoundedBox args={[1.9, 2.3, 0.12]} radius={0.12} smoothness={4} position={[0, 0, -0.7]}>
-        <meshStandardMaterial color="#f1ece1" metalness={0.05} roughness={0.85} />
-      </RoundedBox>
-      {/* Contact shadow on the plate. */}
-      <mesh position={[0, -0.55, -0.62]} rotation={[0, 0, 0]}>
-        <planeGeometry args={[1.6, 0.7]} />
-        <meshBasicMaterial map={shadowTex} transparent depthWrite={false} opacity={0.8} />
-      </mesh>
-      {/* The same device, this material. */}
+      {/* Plate + shadow + model all bob together. */}
       <group ref={bobRef}>
-        <DeviceModel
-          target={target}
-          explodeRef={staticExplode}
-          showInternals={false}
-          castShadow={false}
-        />
+        {/* Backdrop swatch plate. */}
+        <RoundedBox args={[1.9, 2.3, 0.12]} radius={0.12} smoothness={4} position={[0, 0, -0.7]}>
+          <meshStandardMaterial color="#f1ece1" metalness={0.05} roughness={0.85} />
+        </RoundedBox>
+        {/* Contact shadow on the plate. */}
+        <mesh position={[0, -0.55, -0.62]}>
+          <planeGeometry args={[1.6, 0.7]} />
+          <meshBasicMaterial map={shadowTex} transparent depthWrite={false} opacity={0.8} />
+        </mesh>
+        {/* The same device, this material — held at a fixed 3/4 pose. */}
+        <group rotation={[-0.32, 0.5, 0]}>
+          <DeviceModel
+            target={target}
+            explodeRef={staticExplode}
+            showInternals={false}
+            castShadow={false}
+          />
+        </group>
       </group>
     </group>
   );

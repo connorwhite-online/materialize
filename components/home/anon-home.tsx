@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AuthNav } from "@/components/auth/auth-nav";
 import { HomeBottomBar } from "@/components/home/home-bottom-bar";
@@ -26,6 +26,47 @@ export function AnonHome() {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [burstKey, setBurstKey] = useState(0);
   const [reducedMotion, setReducedMotion] = useState(false);
+
+  // Step the carousel and fire the spray. Shared by taps and the drag
+  // gesture; reads/writes the current index through a ref so the drag
+  // handlers always see the fresh value.
+  const selectedIndexRef = useRef(0);
+  useEffect(() => {
+    selectedIndexRef.current = selectedIndex;
+  }, [selectedIndex]);
+
+  const step = useCallback((delta: number) => {
+    const next = Math.max(
+      0,
+      Math.min(HERO_MATERIALS.length - 1, selectedIndexRef.current + delta)
+    );
+    if (next === selectedIndexRef.current) return;
+    setSelectedIndex(next);
+    setBurstKey((k) => k + 1);
+  }, []);
+
+  // Horizontal drag-to-scrub over the hero, restoring the original
+  // swipe gesture. touchAction: pan-y lets vertical scroll/snap through
+  // while we own horizontal moves; a mostly-vertical drag cancels.
+  const dragRef = useRef({ x: 0, y: 0, active: false, cancelled: false });
+  const onDragStart = (e: React.PointerEvent) => {
+    dragRef.current = { x: e.clientX, y: e.clientY, active: true, cancelled: false };
+  };
+  const onDragMove = (e: React.PointerEvent) => {
+    const d = dragRef.current;
+    if (!d.active || d.cancelled) return;
+    const dx = e.clientX - d.x;
+    const dy = e.clientY - d.y;
+    if (Math.abs(dy) > 40 && Math.abs(dy) > Math.abs(dx)) d.cancelled = true;
+  };
+  const onDragEnd = (e: React.PointerEvent) => {
+    const d = dragRef.current;
+    if (!d.active) return;
+    d.active = false;
+    if (d.cancelled) return;
+    const dx = e.clientX - d.x;
+    if (Math.abs(dx) > 30) step(dx > 0 ? -1 : 1);
+  };
 
   // prefers-reduced-motion → freeze idle motion and snap transitions.
   useEffect(() => {
@@ -110,9 +151,21 @@ export function AnonHome() {
             </p>
           </div>
 
+          {/* Drag-to-scrub zone over the centered model — restores the
+              original horizontal swipe gesture for changing materials. */}
+          <div
+            className="w-full flex-1 pointer-events-auto cursor-grab active:cursor-grabbing"
+            style={{ touchAction: "pan-y" }}
+            onPointerDown={onDragStart}
+            onPointerMove={onDragMove}
+            onPointerUp={onDragEnd}
+            onPointerCancel={onDragEnd}
+            aria-hidden
+          />
+
           {/* Material carousel drives the lone device's material. Pinned
               to the bottom; firing the spray on each change. */}
-          <div className="mt-auto w-full pointer-events-auto">
+          <div className="w-full pointer-events-auto">
             <MaterialCarousel
               materials={HERO_MATERIALS}
               selectedIndex={selectedIndex}
