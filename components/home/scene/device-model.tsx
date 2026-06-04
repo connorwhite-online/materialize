@@ -47,19 +47,19 @@ function PartGeometry({ id, size }: { id: string; size: THREE.Vector3 }) {
   switch (id) {
     case "soc":
       return (
-        <RoundedBox args={[w * 0.2, w * 0.2, 0.045]} radius={0.01} smoothness={4}>
+        <RoundedBox args={[w * 0.22, w * 0.22, 0.045]} radius={0.01} smoothness={4}>
           <meshStandardMaterial color={CHIP_COLOR} metalness={0.4} roughness={0.5} />
         </RoundedBox>
       );
     case "mcu":
       return (
-        <RoundedBox args={[w * 0.13, w * 0.13, 0.035]} radius={0.008} smoothness={4}>
+        <RoundedBox args={[w * 0.14, w * 0.14, 0.035]} radius={0.008} smoothness={4}>
           <meshStandardMaterial color={CHIP_COLOR} metalness={0.4} roughness={0.5} />
         </RoundedBox>
       );
     case "modem":
       return (
-        <RoundedBox args={[w * 0.26, w * 0.18, 0.035]} radius={0.008} smoothness={4}>
+        <RoundedBox args={[w * 0.28, w * 0.2, 0.035]} radius={0.008} smoothness={4}>
           <meshStandardMaterial color="#1a1c1f" metalness={0.55} roughness={0.4} />
         </RoundedBox>
       );
@@ -67,25 +67,25 @@ function PartGeometry({ id, size }: { id: string; size: THREE.Vector3 }) {
       return (
         <group>
           <mesh rotation={[Math.PI / 2, 0, 0]}>
-            <cylinderGeometry args={[w * 0.07, w * 0.07, 0.08, 40]} />
+            <cylinderGeometry args={[w * 0.11, w * 0.11, 0.07, 40]} />
             <meshStandardMaterial color="#16181c" metalness={0.6} roughness={0.35} />
           </mesh>
-          <mesh position={[0, 0, 0.045]}>
-            <circleGeometry args={[w * 0.045, 40]} />
+          <mesh position={[0, 0, 0.04]}>
+            <circleGeometry args={[w * 0.085, 40]} />
             <meshPhysicalMaterial color={LENS_COLOR} metalness={0.1} roughness={0.05} clearcoat={1} />
           </mesh>
         </group>
       );
     case "battery":
       return (
-        <RoundedBox args={[w * 0.7, size.y * 0.46, size.z * 0.4]} radius={0.02} smoothness={5}>
+        <RoundedBox args={[w * 0.66, size.y * 0.5, size.z * 0.42]} radius={0.02} smoothness={5}>
           <meshStandardMaterial color={METAL_COLOR} metalness={0.55} roughness={0.45} />
         </RoundedBox>
       );
     case "speaker":
       return (
         <mesh rotation={[Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[w * 0.1, w * 0.1, 0.06, 40]} />
+          <cylinderGeometry args={[w * 0.12, w * 0.12, 0.05, 40]} />
           <meshStandardMaterial color="#26282c" metalness={0.5} roughness={0.5} />
         </mesh>
       );
@@ -129,11 +129,12 @@ function TeardownLabel({ part, size }: { part: TeardownPart; size: THREE.Vector3
 }
 
 /**
- * The Pneuma device, built on the real hardbody STL shell. The shell is
- * split into front/back covers that part along the thickness in the
- * teardown while the internals slide out along the same axis. Surface
- * features (camera + LED + mic at the top, USB-C at the bottom, an RF
- * window down one side) ride on the front cover.
+ * The Pneuma device, built on the real two-body hardbody (glTF). The
+ * front/back covers part along the assembly access line (thickness) in
+ * the teardown while the BOM components — battery, speaker, modem, wake
+ * MCU, Linux SoC, camera — slide out along the same axis by layer
+ * order. Small parts (LED, mic, USB-C) sit on the front cover behind
+ * the real holes so they read through them.
  */
 export function DeviceModel({
   target,
@@ -149,6 +150,8 @@ export function DeviceModel({
   const backMat = useRef<THREE.MeshPhysicalMaterial>(null);
   const partRefs = useRef<Record<string, THREE.Group | null>>({});
 
+  const w = size.x;
+  const h = size.y;
   const halfZ = size.z / 2;
 
   const lerpShell = (mat: THREE.MeshPhysicalMaterial | null, dt: number) => {
@@ -169,10 +172,9 @@ export function DeviceModel({
     lerpShell(backMat.current, delta);
 
     // Covers part along the thickness (Z); front toward the camera.
-    if (frontRef.current) frontRef.current.position.z = e * 0.55;
-    if (backRef.current) backRef.current.position.z = -e * 0.3;
+    if (frontRef.current) frontRef.current.position.z = e * 0.5;
+    if (backRef.current) backRef.current.position.z = -e * 0.35;
 
-    // Internals separate along the same Z axis by layer order.
     for (const part of TEARDOWN_PARTS) {
       const g = partRefs.current[part.id];
       if (!g) continue;
@@ -203,40 +205,26 @@ export function DeviceModel({
 
   return (
     <group>
-      {/* --- Front cover (with surface features) --- */}
+      {/* --- Front cover (faces camera; carries the hole-aligned bits) --- */}
       <group ref={frontRef}>
         <mesh geometry={front} castShadow={castShadow} receiveShadow>
           {shellMaterial(frontMat)}
         </mesh>
 
-        {/* Camera lens, LED, and mic slot at the top of the front face. */}
-        <mesh position={[0, size.y * 0.4, halfZ + 0.004]}>
-          <circleGeometry args={[size.x * 0.05, 40]} />
-          <meshPhysicalMaterial color={LENS_COLOR} metalness={0.2} roughness={0.05} clearcoat={1} />
+        {/* Status LED behind the 2mm peep hole (top). */}
+        <mesh position={[w * 0.18, h * 0.4, halfZ - 0.012]}>
+          <circleGeometry args={[w * 0.02, 24]} />
+          <meshStandardMaterial color="#7dd3a0" emissive="#3fae6e" emissiveIntensity={1.6} />
         </mesh>
-        <mesh position={[0, size.y * 0.4, halfZ + 0.002]}>
-          <ringGeometry args={[size.x * 0.05, size.x * 0.062, 40]} />
-          <meshStandardMaterial color="#1a1c1f" metalness={0.7} roughness={0.3} />
-        </mesh>
-        <mesh position={[size.x * 0.26, size.y * 0.4, halfZ + 0.004]}>
-          <circleGeometry args={[size.x * 0.018, 20]} />
-          <meshStandardMaterial color="#7dd3a0" emissive="#3fae6e" emissiveIntensity={1.5} />
-        </mesh>
-        <mesh position={[-size.x * 0.26, size.y * 0.42, halfZ + 0.003]}>
-          <boxGeometry args={[size.x * 0.1, size.y * 0.01, 0.02]} />
+        {/* Mic behind the 2×8mm slot (top). */}
+        <mesh position={[-w * 0.18, h * 0.42, halfZ - 0.012]}>
+          <boxGeometry args={[w * 0.16, h * 0.02, 0.02]} />
           <meshStandardMaterial color="#202226" metalness={0.3} roughness={0.7} />
         </mesh>
-
-        {/* USB-C charge port at the bottom edge. */}
-        <mesh position={[0, -size.y * 0.5 + 0.012, 0]}>
-          <boxGeometry args={[size.x * 0.18, 0.03, size.z * 0.34]} />
+        {/* USB-C behind the 2×8mm slot (bottom edge). */}
+        <mesh position={[0, -h * 0.47, 0]}>
+          <boxGeometry args={[w * 0.16, h * 0.022, size.z * 0.9]} />
           <meshStandardMaterial color="#101113" metalness={0.5} roughness={0.5} />
-        </mesh>
-
-        {/* RF window down the +X side. */}
-        <mesh position={[size.x * 0.5 - 0.006, 0, 0]}>
-          <boxGeometry args={[0.014, size.y * 0.5, size.z * 0.72]} />
-          <meshStandardMaterial color="#d8d0c0" metalness={0.05} roughness={0.85} />
         </mesh>
       </group>
 
@@ -254,9 +242,9 @@ export function DeviceModel({
             ref={(el) => {
               partRefs.current["pcb"] = el;
             }}
-            position={[0, size.y * 0.02, 0]}
+            position={[0, h * 0.04, 0]}
           >
-            <RoundedBox args={[size.x * 0.78, size.y * 0.76, 0.02]} radius={0.015} smoothness={5}>
+            <RoundedBox args={[w * 0.74, h * 0.82, 0.018]} radius={0.015} smoothness={5}>
               <meshStandardMaterial color={PCB_COLOR} metalness={0.2} roughness={0.65} />
             </RoundedBox>
           </group>
