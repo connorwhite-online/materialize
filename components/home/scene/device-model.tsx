@@ -146,13 +146,13 @@ export function DeviceModel({
   const { front, back, size } = useDeviceGeometry();
   const frontRef = useRef<THREE.Group>(null);
   const backRef = useRef<THREE.Group>(null);
+  const internalsRef = useRef<THREE.Group>(null);
   const frontMat = useRef<THREE.MeshPhysicalMaterial>(null);
   const backMat = useRef<THREE.MeshPhysicalMaterial>(null);
   const partRefs = useRef<Record<string, THREE.Group | null>>({});
 
   const w = size.x;
   const h = size.y;
-  const halfZ = size.z / 2;
 
   const lerpShell = (mat: THREE.MeshPhysicalMaterial | null, dt: number) => {
     if (!mat) return;
@@ -183,6 +183,9 @@ export function DeviceModel({
     // Covers part along the thickness (Z); front toward the camera.
     if (frontRef.current) frontRef.current.position.z = e * 0.5;
     if (backRef.current) backRef.current.position.z = -e * 0.35;
+
+    // Internals only appear once the case starts opening.
+    if (internalsRef.current) internalsRef.current.visible = e > 0.015;
 
     for (const part of TEARDOWN_PARTS) {
       const g = partRefs.current[part.id];
@@ -219,22 +222,6 @@ export function DeviceModel({
         <mesh geometry={front} castShadow={castShadow} receiveShadow>
           {shellMaterial(frontMat)}
         </mesh>
-
-        {/* Status LED behind the 2mm peep hole (top). */}
-        <mesh position={[w * 0.18, h * 0.4, halfZ - 0.012]}>
-          <circleGeometry args={[w * 0.02, 24]} />
-          <meshStandardMaterial color="#7dd3a0" emissive="#3fae6e" emissiveIntensity={1.6} />
-        </mesh>
-        {/* Mic behind the 2×8mm slot (top). */}
-        <mesh position={[-w * 0.18, h * 0.42, halfZ - 0.012]}>
-          <boxGeometry args={[w * 0.16, h * 0.02, 0.02]} />
-          <meshStandardMaterial color="#202226" metalness={0.3} roughness={0.7} />
-        </mesh>
-        {/* USB-C behind the 2×8mm slot (bottom edge). */}
-        <mesh position={[0, -h * 0.47, 0]}>
-          <boxGeometry args={[w * 0.16, h * 0.022, size.z * 0.9]} />
-          <meshStandardMaterial color="#101113" metalness={0.5} roughness={0.5} />
-        </mesh>
       </group>
 
       {/* --- Back cover --- */}
@@ -244,9 +231,10 @@ export function DeviceModel({
         </mesh>
       </group>
 
-      {/* --- Internals --- */}
+      {/* --- Internals — only shown once the teardown opens the shell;
+          in the hero / box stages the device reads as a clean solid. --- */}
       {showInternals && (
-        <group>
+        <group ref={internalsRef} visible={false}>
           <group
             ref={(el) => {
               partRefs.current["pcb"] = el;
