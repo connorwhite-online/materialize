@@ -66,12 +66,13 @@ function PartGeometry({ id, size }: { id: string; size: THREE.Vector3 }) {
     case "camera":
       return (
         <group>
-          <mesh rotation={[Math.PI / 2, 0, 0]}>
-            <cylinderGeometry args={[w * 0.11, w * 0.11, 0.07, 40]} />
+          {/* Module looks up (+Y) to match the top-face camera hole. */}
+          <mesh>
+            <cylinderGeometry args={[w * 0.11, w * 0.11, 0.06, 40]} />
             <meshStandardMaterial color="#16181c" metalness={0.6} roughness={0.35} />
           </mesh>
-          <mesh position={[0, 0, 0.04]}>
-            <circleGeometry args={[w * 0.085, 40]} />
+          <mesh position={[0, 0.035, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <circleGeometry args={[w * 0.08, 40]} />
             <meshPhysicalMaterial color={LENS_COLOR} metalness={0.1} roughness={0.05} clearcoat={1} />
           </mesh>
         </group>
@@ -222,6 +223,40 @@ export function DeviceModel({
         <mesh geometry={front} castShadow={castShadow} receiveShadow>
           {shellMaterial(frontMat)}
         </mesh>
+
+        {/* Components seated in the real end-face holes: camera + LED +
+            mic look up out of the top; USB-C faces down out of the
+            bottom. Always shown so the assembled device reads complete. */}
+        {showInternals && (
+          <group>
+            {/* Camera (10mm hole) — top face, looking up. */}
+            <group position={[0, h * 0.47, 0]}>
+              <mesh>
+                <cylinderGeometry args={[w * 0.11, w * 0.11, 0.04, 40]} />
+                <meshStandardMaterial color="#16181c" metalness={0.6} roughness={0.35} />
+              </mesh>
+              <mesh position={[0, 0.022, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+                <circleGeometry args={[w * 0.085, 40]} />
+                <meshPhysicalMaterial color={LENS_COLOR} metalness={0.1} roughness={0.05} clearcoat={1} />
+              </mesh>
+            </group>
+            {/* Status LED (2mm hole) — top face. */}
+            <mesh position={[w * 0.22, h * 0.48, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+              <circleGeometry args={[w * 0.025, 24]} />
+              <meshStandardMaterial color="#7dd3a0" emissive="#3fae6e" emissiveIntensity={1.6} />
+            </mesh>
+            {/* Mic (2×8mm slot) — top face. */}
+            <mesh position={[-w * 0.22, h * 0.48, 0]}>
+              <boxGeometry args={[w * 0.18, 0.015, w * 0.05]} />
+              <meshStandardMaterial color="#202226" metalness={0.3} roughness={0.7} />
+            </mesh>
+            {/* USB-C (2×8mm slot) — bottom face, facing down. */}
+            <mesh position={[0, -h * 0.48, 0]}>
+              <boxGeometry args={[w * 0.2, 0.015, w * 0.06]} />
+              <meshStandardMaterial color="#101113" metalness={0.5} roughness={0.5} />
+            </mesh>
+          </group>
+        )}
       </group>
 
       {/* --- Back cover --- */}
