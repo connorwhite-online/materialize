@@ -136,7 +136,14 @@ vi.mock("../cart-context", () => ({
   useCart: () => null,
 }));
 
+// The configurator reads real auth state via useUser. These cases all
+// exercise the anon (draft) path, so report signed-out.
+vi.mock("@clerk/nextjs", () => ({
+  useUser: () => ({ isLoaded: true, isSignedIn: false, user: null }),
+}));
+
 import { QuoteConfigurator } from "../quote-configurator";
+import { createPrintOrder, completePrintOrder } from "@/app/actions/print";
 
 const STABLE_QUOTE: EnrichedQuote = {
   quoteId: "q1",
@@ -299,6 +306,68 @@ describe("QuoteConfigurator wiring (CON-38)", () => {
 
     await act(async () => {
       release({ ok: true, checkoutUrl: "https://stripe.test/session" });
+    });
+  });
+
+  // Regression: an anon user printing a *published* file lands here in
+  // fileAssetId mode (not draftMode). Proceed-to-checkout must NOT call
+  // createPrintOrder while signed out (that 401'd as "Unauthorized") —
+  // it defers to the address/OTP step, then creates + completes the
+  // order once the session is live.
+  it("anon published-file checkout defers order creation until after the address step", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          json: async () => ({ priceId: "price-1" }),
+        } as unknown as Response)
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    vi.mocked(createPrintOrder).mockResolvedValue({
+      orderId: "order-1",
+      cartId: "cart-1",
+    });
+    vi.mocked(completePrintOrder).mockResolvedValue({
+      checkoutUrl: "https://stripe.test/session",
+    });
+
+    // fileAssetId mode, cached model → no upload, no draftMode.
+    render(
+      <QuoteConfigurator
+        fileAssetId="asset-1"
+        filename="part.stl"
+        format="stl"
+        hasCachedModel
+        geometryData={null}
+      />
+    );
+
+    fireEvent.click(await screen.findByText("select quote"));
+    fireEvent.click(await screen.findByText("select shipping"));
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("checkout"));
+    });
+
+    // The bug: createPrintOrder fired here → "Unauthorized". It must
+    // not be called until the user has signed in via the address step.
+    expect(createPrintOrder).not.toHaveBeenCalled();
+
+    const submit = await screen.findByText("submit address");
+    await act(async () => {
+      fireEvent.click(submit);
+    });
+
+    await waitFor(() => expect(createPrintOrder).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(createPrintOrder).mock.calls[0][0]).toMatchObject({
+      fileAssetId: "asset-1",
+    });
+    await waitFor(() => expect(completePrintOrder).toHaveBeenCalledTimes(1));
+    // Just-signed-up users route to the welcome dashboard.
+    expect(vi.mocked(completePrintOrder).mock.calls[0][0]).toMatchObject({
+      isAnonFlow: true,
     });
   });
 });
