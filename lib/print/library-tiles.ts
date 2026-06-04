@@ -7,6 +7,7 @@ import {
   printOrderItems,
 } from "@/lib/db/schema";
 import { eq, and, desc, inArray, sql } from "drizzle-orm";
+import { withDbRetry } from "@/lib/db/retry";
 
 export interface LibraryTile {
   fileAssetId: string;
@@ -24,6 +25,14 @@ export interface LibraryTile {
  * still see a sensible grid.
  */
 export async function loadLibraryTiles(userId: string): Promise<LibraryTile[]> {
+  // All reads below are idempotent, so retry once on a transient Neon
+  // connection reap — the previous behaviour let a single dropped
+  // socket throw straight through the /print RSC render and trip the
+  // error boundary. See lib/db/retry.ts.
+  return withDbRetry(() => loadLibraryTilesOnce(userId), { retries: 1 });
+}
+
+async function loadLibraryTilesOnce(userId: string): Promise<LibraryTile[]> {
   const ownedFiles = await db
     .select({
       id: files.id,

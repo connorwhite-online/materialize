@@ -1,7 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
 import { getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
 import { PrintPageContent } from "@/components/print/print-page-content";
-import { loadLibraryTiles } from "@/lib/print/library-tiles";
+import { loadLibraryTiles, type LibraryTile } from "@/lib/print/library-tiles";
+import { logError } from "@/lib/logger";
 
 export default async function PrintPage(props: {
   searchParams: Promise<{ material?: string; expand?: string }>;
@@ -18,7 +19,33 @@ export default async function PrintPage(props: {
     : null;
 
   const { userId } = await auth();
-  const tiles = userId ? await loadLibraryTiles(userId) : [];
+
+  // The saved-library grid is a convenience, not load-bearing — you can
+  // always upload + quote a fresh file. A DB hiccup loading it (e.g. a
+  // reaped Neon connection that outlives the single retry in
+  // loadLibraryTiles) must NOT take down the whole Print page, which is
+  // the revenue hot path. Degrade to an empty grid.
+  //
+  // We capture the failure under a clean, application-named error so it
+  // stays visible in Sentry: the raw driver error ("Connection
+  // closed"/ECONNRESET/…) matches the connection-noise `ignoreErrors`
+  // filter in sentry.server.config.ts — tuned for benign client-
+  // disconnect/outbound blips — which would otherwise silently swallow
+  // a failure that actually broke a user-facing render. The original
+  // is preserved in the Vercel log line below and via
+  // includeLocalVariables on the captured frame.
+  let tiles: LibraryTile[] = [];
+  if (userId) {
+    try {
+      tiles = await loadLibraryTiles(userId);
+    } catch (err) {
+      console.error("[print-page] loadLibraryTiles failed:", err);
+      logError(
+        "print-page.loadLibraryTiles",
+        new Error("Print library failed to load; rendered empty grid")
+      );
+    }
+  }
 
   const linkSuffix = material ? `?material=${material.id}` : "";
 
