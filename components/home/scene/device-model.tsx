@@ -164,6 +164,15 @@ export function DeviceModel({
     mat.transmission = THREE.MathUtils.lerp(mat.transmission, target.transmission, k);
     mat.ior = THREE.MathUtils.lerp(mat.ior, target.ior, k);
     mat.thickness = THREE.MathUtils.lerp(mat.thickness, target.thickness, k);
+    // Only genuinely transmissive materials (resin) are transparent —
+    // otherwise the shell stays a solid opaque body that hides the
+    // internals until the teardown opens it. A glassy Steel shell let
+    // the guts show through, reading as "everything's on the outside".
+    const wantTransparent = mat.transmission > 0.02;
+    if (mat.transparent !== wantTransparent) {
+      mat.transparent = wantTransparent;
+      mat.needsUpdate = true;
+    }
   };
 
   useFrame((_, delta) => {
@@ -199,7 +208,7 @@ export function DeviceModel({
       transmission={target.transmission}
       ior={target.ior}
       thickness={target.thickness}
-      transparent
+      transparent={target.transmission > 0.02}
     />
   );
 
