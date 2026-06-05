@@ -116,6 +116,8 @@ export const COMMERCE_PITCH = 0.06;
 export interface TeardownPart {
   id: string;
   label: string;
+  /** Short model spec shown under the label (e.g. "nRF52840"). */
+  sub?: string;
   /**
    * Resting position as a FRACTION of the shell size [x=width, y=height,
    * z=thickness]; resolved against the loaded geometry in DeviceModel.
@@ -123,8 +125,7 @@ export interface TeardownPart {
   rest: [number, number, number];
   /**
    * Layer index along the single explode axis (device-local +Z /
-   * thickness). Lower = deeper in the stack. Parts separate neatly along
-   * this one axis rather than flying off in random directions.
+   * thickness). Lower = deeper in the stack.
    */
   order: number;
   /** Which side the leader-line label sits on. */
@@ -133,6 +134,8 @@ export interface TeardownPart {
   labelY: number;
   /** Show the GitHub mark next to the label (the firmware target). */
   github?: boolean;
+  /** Optional external link for the label (pneuma repo / BOM). */
+  href?: string;
 }
 
 /** Layer index assigned to the mainboard (it sits between cells + chips). */
@@ -142,54 +145,72 @@ export const ORDER_CENTER = 2.5;
 /** Spacing (scene units) between adjacent layers along the explode axis. */
 export const EXPLODE_SPACING = 0.28;
 
+const PNEUMA_REPO = "https://github.com/connorwhite-online/pneuma";
+const PNEUMA_BOM =
+  "https://github.com/connorwhite-online/pneuma/blob/main/hardware/BOM.md";
+
+// Real components + dimensions from the pneuma BOM; geometry is sized in
+// mm against the shell (see DeviceModel). Positions are fractional.
 export const TEARDOWN_PARTS: TeardownPart[] = [
   {
     id: "battery",
     label: "Battery",
-    rest: [0, -0.14, -0.12],
+    sub: "2000 mAh",
+    rest: [0, -0.05, -0.2],
     order: 0,
     labelSide: "left",
-    labelY: -0.16,
+    labelY: -0.18,
+    href: PNEUMA_BOM,
   },
   {
     id: "speaker",
-    label: "Speaker · Haptics",
-    rest: [0, -0.4, 0.0],
+    label: "Speaker",
+    sub: "18 mm · haptics",
+    rest: [0, -0.38, 0.06],
     order: 1,
     labelSide: "left",
     labelY: -0.4,
+    href: PNEUMA_BOM,
   },
   {
     id: "modem",
     label: "LTE Modem",
-    rest: [0.18, -0.05, 0.05],
+    sub: "EG915U",
+    rest: [0.13, -0.16, 0.18],
     order: 2,
     labelSide: "right",
-    labelY: -0.08,
+    labelY: -0.14,
+    href: PNEUMA_BOM,
   },
   {
     id: "mcu",
     label: "Wake MCU",
-    rest: [-0.18, 0.1, 0.05],
+    sub: "nRF52840",
+    rest: [-0.15, 0.08, 0.18],
     order: 3,
     labelSide: "left",
-    labelY: 0.12,
+    labelY: 0.1,
+    href: PNEUMA_BOM,
   },
   {
     id: "soc",
-    label: "Linux SoC · Firmware",
-    rest: [0.1, 0.04, 0.05],
+    label: "Firmware",
+    sub: "RV1106G3",
+    rest: [0.08, 0.13, 0.18],
     order: 4,
     labelSide: "right",
-    labelY: 0.02,
+    labelY: 0.0,
     github: true,
+    href: PNEUMA_REPO,
   },
   {
     id: "camera",
     label: "Camera",
-    rest: [0, 0.4, 0.3],
+    sub: "SC3336 · 3MP",
+    rest: [0, 0.4, 0.24],
     order: 5,
     labelSide: "right",
     labelY: 0.42,
+    href: PNEUMA_BOM,
   },
 ];
