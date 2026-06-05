@@ -286,6 +286,8 @@ export function DeviceModel({
   const botFeatRef = useRef<THREE.Group>(null);
   const frontMat = useRef<THREE.MeshPhysicalMaterial>(null);
   const backMat = useRef<THREE.MeshPhysicalMaterial>(null);
+  const holoFrontRef = useRef<THREE.Mesh>(null);
+  const holoBackRef = useRef<THREE.Mesh>(null);
   const partRefs = useRef<Record<string, THREE.Group | null>>({});
 
   // SLS print reveal: the covers are clipped at a build line that sweeps
@@ -427,6 +429,11 @@ export function DeviceModel({
       m.uniforms.uOpacity.value = holoOp;
       m.uniforms.uBuildY.value = showBand ? worldBuildY : 1e3;
     }
+    // Only draw the coincident hologram ghost when it's actually showing —
+    // otherwise it double-draws the shell surface and z-fights in the hero.
+    const holoVisible = holoOp > 0.002 || showBand === 1;
+    if (holoFrontRef.current) holoFrontRef.current.visible = holoVisible;
+    if (holoBackRef.current) holoBackRef.current.visible = holoVisible;
 
     // Hide the seated end-face parts (camera/LED/mic/USB-C) during the
     // materials hologram so only the shell sinters in; they return for the
@@ -473,8 +480,8 @@ export function DeviceModel({
       {/* Hologram ghost of the whole shell — visible above the sintering
           build line; the bright sinter band rides the surface at the
           build height (see the shader), not as a floating halo. */}
-      <mesh geometry={front} material={holoA} />
-      <mesh geometry={back} material={holoB} />
+      <mesh ref={holoFrontRef} geometry={front} material={holoA} visible={false} />
+      <mesh ref={holoBackRef} geometry={back} material={holoB} visible={false} />
 
       {/* --- Front cover (faces camera; carries the hole-aligned bits) --- */}
       <group ref={frontRef}>
