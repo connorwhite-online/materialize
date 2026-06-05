@@ -378,9 +378,10 @@
 
   /* Scroll-snap for the anon-home cinematic. Scoped to a class the
      home page toggles on <html> on mount (and removes on unmount) so
-     it never leaks to the rest of the app. `proximity`, not
-     `mandatory`, so a half-height footer and short scroll nudges
-     don't get fought by the snap engine. */
+     it never leaks to the rest of the app. `mandatory` for a firm,
+     "absolute" snap between the full-viewport sections; the footer is
+     deliberately excluded from the pager (no data-home-section) but
+     keeps a snap-start so it's still reachable at the end of the page. */
   html.snap-home {
     scroll-snap-type: y mandatory;
   }
