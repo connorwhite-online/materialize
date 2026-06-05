@@ -26,6 +26,8 @@ import { DeleteProjectButton } from "@/components/projects/delete-project-button
 import { BomDisplay } from "@/components/projects/bom-display";
 import { EditBomDialog } from "@/components/projects/edit-bom-dialog";
 import { EditProjectDialog } from "@/components/projects/edit-project-dialog";
+import { AddProjectFilesDialog } from "@/components/projects/add-project-files-dialog";
+import { FileThumbnailStack } from "@/components/projects/file-thumbnail-stack";
 import { BuildGuide } from "@/components/projects/build-guide";
 import {
   CircuitGallery,
@@ -361,17 +363,38 @@ export default async function ProjectDetailPage(props: {
   }));
 
   let ownerBuyerCount = 0;
-  if (isOwner) {
-    const buyerRows = await db
-      .select({ id: purchases.id })
-      .from(purchases)
-      .where(
-        and(
-          eq(purchases.projectId, project.id),
-          eq(purchases.status, "completed")
-        )
-      );
+  // Files the viewer owns that aren't already bundled here — feeds the
+  // "Add files" picker. Owner-only; only the viewer's own files are
+  // offered (addFilesToProject re-validates attachability server-side).
+  let availableFilesToAdd: Array<{
+    id: string;
+    name: string;
+    thumbnailUrl: string | null;
+  }> = [];
+  if (isOwner && userId) {
+    const [buyerRows, ownFiles] = await Promise.all([
+      db
+        .select({ id: purchases.id })
+        .from(purchases)
+        .where(
+          and(
+            eq(purchases.projectId, project.id),
+            eq(purchases.status, "completed")
+          )
+        ),
+      db
+        .select({
+          id: files.id,
+          name: files.name,
+          thumbnailUrl: files.thumbnailUrl,
+        })
+        .from(files)
+        .where(eq(files.userId, userId))
+        .orderBy(desc(files.createdAt)),
+    ]);
     ownerBuyerCount = buyerRows.length;
+    const bundledIds = new Set(bundledFiles.map((f) => f.id));
+    availableFilesToAdd = ownFiles.filter((f) => !bundledIds.has(f.id));
   }
 
   // JSON-LD for crawlers — emitted only for the public, indexable
@@ -425,26 +448,48 @@ export default async function ProjectDetailPage(props: {
         <div className="order-3 space-y-6 lg:col-span-2">
           {(() => {
             // Resolve the cover in priority order:
-            //   1. coverPhotoId pick from the edit dialog → proxy
-            //      route that signs a fresh R2 URL on each load
+            //   1. coverPhotoId pick OR any curator photo (the proxy
+            //      route resolves an explicit pick first, otherwise
+            //      falls back to the first uploaded photo). The `?v=`
+            //      pins the optimizer cache to the current pick so a
+            //      re-pick shows immediately instead of the stale
+            //      max-age=300 copy.
             //   2. legacy thumbnailUrl column (full URL set at
             //      project create time)
-            //   3. placeholder
-            const coverSrc = project.coverPhotoId
-              ? `/api/thumbnails/projects/${project.id}`
+            //   3. cute stack of the bundled files' thumbnails
+            //   4. placeholder
+            const hasProxyCover =
+              !!project.coverPhotoId || curatorPhotos.length > 0;
+            const coverSrc = hasProxyCover
+              ? `/api/thumbnails/projects/${project.id}?v=${
+                  project.coverPhotoId ?? curatorPhotos[0]?.id ?? "auto"
+                }`
               : project.thumbnailUrl;
-            return coverSrc ? (
-              <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
-                <Image
-                  src={coverSrc}
-                  alt={project.name}
-                  fill
-                  priority
-                  sizes="(max-width: 1024px) 100vw, 66vw"
-                  className="object-cover"
-                />
-              </div>
-            ) : (
+            const fileThumbs = bundledFiles
+              .map((f) => f.thumbnailUrl)
+              .filter((u): u is string => !!u);
+            if (coverSrc) {
+              return (
+                <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
+                  <Image
+                    src={coverSrc}
+                    alt={project.name}
+                    fill
+                    priority
+                    sizes="(max-width: 1024px) 100vw, 66vw"
+                    className="object-cover"
+                  />
+                </div>
+              );
+            }
+            if (fileThumbs.length > 0) {
+              return (
+                <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
+                  <FileThumbnailStack thumbnails={fileThumbs} />
+                </div>
+              );
+            }
+            return (
               <div className="aspect-[4/3] rounded-2xl bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center">
                 <span className="text-xs text-muted-foreground/50">
                   No cover image
@@ -530,9 +575,15 @@ export default async function ProjectDetailPage(props: {
           )}
 
           <div>
-            <h2 className="text-sm font-medium mb-3">
-              Files in this project
-            </h2>
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h2 className="text-sm font-medium">Files in this project</h2>
+              {isOwner && (
+                <AddProjectFilesDialog
+                  projectId={project.id}
+                  availableFiles={availableFilesToAdd}
+                />
+              )}
+            </div>
             <div className="grid gap-3 grid-cols-2 sm:grid-cols-3">
               {bundledFiles.map((file) => (
                 <Link

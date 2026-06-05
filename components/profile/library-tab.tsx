@@ -11,7 +11,7 @@ import {
   projectFiles,
   projectPhotos,
 } from "@/lib/db/schema";
-import { eq, and, desc, inArray, sql } from "drizzle-orm";
+import { eq, and, asc, desc, inArray, sql } from "drizzle-orm";
 import { Button } from "@/components/ui/button";
 import { CollectionSection } from "./collection-section";
 import {
@@ -194,7 +194,7 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
     photoRows,
     collectionItemRows,
     purchasedCounts,
-    ownedProjectLinks,
+    projectFileRows,
     projectPhotoRows,
   ] = await Promise.all([
     allFileIds.length > 0
@@ -256,12 +256,28 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
       : Promise.resolve(
           [] as Array<{ projectId: string; count: number }>
         ),
-    ownedProjectIds.length > 0
+    // Bundled files for every project in view (owned + purchased),
+    // in display order. Powers two things: deduping owned-project
+    // files out of the standalone grid, and the "stack of 3" cover
+    // fallback for projects with no curator photos.
+    allProjectIds.length > 0
       ? db
-          .select({ fileId: projectFiles.fileId })
+          .select({
+            projectId: projectFiles.projectId,
+            fileId: projectFiles.fileId,
+            thumbnailUrl: files.thumbnailUrl,
+          })
           .from(projectFiles)
-          .where(inArray(projectFiles.projectId, ownedProjectIds))
-      : Promise.resolve([] as Array<{ fileId: string }>),
+          .innerJoin(files, eq(projectFiles.fileId, files.id))
+          .where(inArray(projectFiles.projectId, allProjectIds))
+          .orderBy(asc(projectFiles.position))
+      : Promise.resolve(
+          [] as Array<{
+            projectId: string;
+            fileId: string;
+            thumbnailUrl: string | null;
+          }>
+        ),
     // Curator photos for every project in view — feeds the card
     // carousel the same way photoRows does for files.
     allProjectIds.length > 0
@@ -297,6 +313,16 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
   ): string[] {
     const all = photoIdsByProjectId.get(projectId) ?? [];
     return coverPhotoId ? all.filter((id) => id !== coverPhotoId) : all;
+  }
+
+  // First few bundled-file thumbnails per project, in display order —
+  // the "stack of 3" fallback cover when a project has no photos.
+  const fileThumbsByProjectId = new Map<string, string[]>();
+  for (const row of projectFileRows) {
+    if (!row.thumbnailUrl) continue;
+    const arr = fileThumbsByProjectId.get(row.projectId) ?? [];
+    if (arr.length < 3) arr.push(row.thumbnailUrl);
+    fileThumbsByProjectId.set(row.projectId, arr);
   }
 
   const photoIdsByFileId = new Map<string, string[]>();
@@ -371,8 +397,10 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
       visibility: p.visibility,
       source: "purchased" as const,
       thumbnailUrl: p.thumbnailUrl,
+      coverPhotoId: p.coverPhotoId,
       fileCount: purchasedCountMap.get(p.id) ?? 0,
       additionalPhotoIds: additionalProjectPhotos(p.id, p.coverPhotoId),
+      fileThumbnails: fileThumbsByProjectId.get(p.id) ?? [],
     })
   );
 
@@ -380,7 +408,9 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
   // these out of the standalone file grid so a creator doesn't see the
   // same file twice (once inside its project card, once on its own).
   const fileIdsInOwnedProjects = new Set(
-    ownedProjectLinks.map((l) => l.fileId)
+    projectFileRows
+      .filter((l) => ownedProjectIds.includes(l.projectId))
+      .map((l) => l.fileId)
   );
 
   const ownedProjectItems: LibraryProjectCardItem[] = ownedProjects.map(
@@ -392,8 +422,10 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
       visibility: p.visibility,
       source: "owned" as const,
       thumbnailUrl: p.thumbnailUrl,
+      coverPhotoId: p.coverPhotoId,
       fileCount: p.fileCount,
       additionalPhotoIds: additionalProjectPhotos(p.id, p.coverPhotoId),
+      fileThumbnails: fileThumbsByProjectId.get(p.id) ?? [],
     })
   );
 

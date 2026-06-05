@@ -79,15 +79,19 @@ export function EditProjectDialog({ projectId, initial }: Props) {
           </Button>
         }
       />
-      <DialogContent className="max-h-[90vh] w-full max-w-lg overflow-y-auto">
-        <DialogHeader>
+      {/* sm:max-w-lg overrides the base popup's sm:max-w-sm; min-w-0
+          on the grid children lets the long description + inputs wrap
+          to the cap instead of overflowing it (the base DialogContent
+          is a grid, whose tracks otherwise size to content). */}
+      <DialogContent className="max-h-[90vh] w-full max-w-lg overflow-y-auto sm:max-w-lg">
+        <DialogHeader className="min-w-0">
           <DialogTitle>Edit project details</DialogTitle>
           <DialogDescription>
             Update the description, tags, or link a code repository for
             builders to clone.
           </DialogDescription>
         </DialogHeader>
-        <form action={handleSubmit} className="space-y-4">
+        <form action={handleSubmit} className="min-w-0 space-y-4">
           <div>
             <Label htmlFor="edit-project-name">Name</Label>
             <Input
@@ -143,7 +147,7 @@ export function EditProjectDialog({ projectId, initial }: Props) {
               <Label className="text-xs">Cover image</Label>
               <p className="text-[11px] text-muted-foreground">
                 Pick which photo represents this project in browse and
-                profile views. Default falls back to the auto thumbnail.
+                profile views. Default (Auto) uses your first photo.
               </p>
               <div className="flex gap-2 overflow-x-auto pb-1 pt-1">
                 <button
@@ -156,9 +160,16 @@ export function EditProjectDialog({ projectId, initial }: Props) {
                       : "border-border hover:border-foreground/30"
                   }`}
                 >
-                  {/* Falls back to the bg gradient when no thumbnail
-                      exists — the "Auto" label still applies. */}
+                  {/* Auto = the first curator photo. Preview it behind
+                      the label so the owner sees what "Auto" resolves
+                      to instead of an empty gradient. */}
                   <div className="absolute inset-0 bg-gradient-to-br from-muted/60 to-muted/30" />
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={initial.photos[0].downloadUrl}
+                    alt=""
+                    className="absolute inset-0 h-full w-full object-cover"
+                  />
                   <span className="absolute inset-x-0 bottom-0 bg-black/60 py-0.5 text-center text-[9px] font-medium uppercase tracking-wide text-white">
                     Auto
                   </span>
