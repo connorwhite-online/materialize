@@ -21,6 +21,7 @@ import {
   checkoutVendorGroup,
 } from "@/app/actions/print";
 import { useCart } from "./cart-context";
+import { useUser } from "@clerk/nextjs";
 import { uploadToCraftCloud } from "@/lib/craftcloud/upload-client";
 import { checkGeometry } from "@/lib/geometry-checks";
 import { REGIONS, DEFAULT_REGION } from "@/lib/craftcloud/regions";
@@ -343,8 +344,23 @@ export function QuoteConfigurator({
   // orders and two charges. Set at the top of the chain and
   // cleared on error so the user can retry.
   const checkoutInFlightRef = useRef(false);
+  // Whether this checkout began while signed out. Captured at
+  // handleCheckout time because, by the time the OTP sign-up completes
+  // and handleAddressSubmit runs, `isAnon` has flipped to false — we
+  // still want the just-signed-up user routed to the welcome dashboard.
+  const checkoutStartedAnonRef = useRef(false);
 
   const cart = useCart();
+  // Real auth state — NOT `draftMode`. An anon user printing a
+  // *published* file lands here with a fileAssetId and no draftMode, so
+  // gating the OTP-sign-up deferral on draftMode (as the old code did)
+  // let them fall through to createPrintOrder → auth() null →
+  // "Unauthorized". Anonymous == not signed in, regardless of how the
+  // model got here. (Defaults to anon until Clerk loads, which is the
+  // safe direction: the address step works for everyone; skipping it is
+  // what breaks anon checkout.)
+  const { isSignedIn } = useUser();
+  const isAnon = !isSignedIn;
   const [isAddingToCart, setIsAddingToCart] = useState(false);
 
   // Shipping is chosen once per vendor cart. When the vendor being
@@ -726,13 +742,19 @@ export function QuoteConfigurator({
   const handleCheckout = async () => {
     if (!selectedQuote || !selectedShipping) return;
     setCheckoutError(null);
+    checkoutStartedAnonRef.current = isAnon;
 
-    // Draft / anon path — defer the actual order creation until
-    // after the address form finishes the Clerk OTP sign-up flow.
-    // We just need to advance the UI to the address step here; the
-    // heavy chain (R2 → draft file → print order → stripe) runs
-    // inside handleAddressSubmit once we know the user is authed.
-    if (draftMode || !fileAssetId) {
+    // Defer order creation to after the address step whenever we can't
+    // create an order here:
+    //   - draftMode: the model is an in-memory file with no DB row yet;
+    //     runAnonCheckout uploads it after sign-up.
+    //   - isAnon: createPrintOrder requires auth — the OTP sign-up runs
+    //     inside the address form first (this is the published-file anon
+    //     case that previously 401'd as "Unauthorized").
+    //   - !fileAssetId: nothing to order against (defensive).
+    // The heavy chain runs in handleAddressSubmit once the session is
+    // live.
+    if (draftMode || !fileAssetId || isAnon) {
       setStep("address");
       return;
     }
@@ -878,16 +900,49 @@ export function QuoteConfigurator({
       return;
     }
 
-    if (!printOrderId) {
-      checkoutInFlightRef.current = false;
-      return;
+    // fileAssetId path. Authed users pre-created the order in
+    // handleCheckout (printOrderId is set). Anon users who just
+    // completed the inline OTP sign-up have no order yet — their
+    // session is live now (the form finished setActive before calling
+    // onSubmit), so create it here before building the Stripe session.
+    let orderId = printOrderId;
+    if (!orderId) {
+      if (!fileAssetId || !selectedQuote || !selectedShipping) {
+        setCheckoutError("Please pick a material and a shipping option.");
+        setStep("address");
+        checkoutInFlightRef.current = false;
+        return;
+      }
+      const created = await createPrintOrder({
+        fileAssetId,
+        quoteId: selectedQuote.quoteId,
+        vendorId: selectedQuote.vendorId,
+        vendorName: selectedQuote.vendorName,
+        materialConfigId: selectedQuote.materialConfigId,
+        shippingId: selectedShipping.shippingId,
+        quantity,
+        materialPrice: selectedQuote.price,
+        shippingPrice: selectedShipping.price,
+        currency: selectedQuote.currency as "USD",
+      });
+      if ("error" in created) {
+        setCheckoutError(created.error);
+        setStep("address");
+        checkoutInFlightRef.current = false;
+        return;
+      }
+      orderId = created.orderId;
     }
 
     const result = await completePrintOrder({
-      orderId: printOrderId,
+      orderId,
       email: addressData.email,
       shipping: addressData.shipping,
       billing: addressData.billing,
+      // Just-signed-up users land on the welcome dashboard, mirroring
+      // the draft anon flow. checkoutStartedAnonRef survives the
+      // post-sign-up re-render that flips isAnon false.
+      isAnonFlow: checkoutStartedAnonRef.current,
     });
 
     if ("error" in result) {
@@ -970,7 +1025,7 @@ export function QuoteConfigurator({
           onSubmit={handleAddressSubmit}
           onBack={() => setStep("configure")}
           isSubmitting={step === "processing"}
-          anonMode={isDraft}
+          anonMode={isAnon}
         />
       </div>
     );
@@ -1207,7 +1262,16 @@ export function QuoteConfigurator({
             onCheckout={handleCheckout}
             isCheckingOut={false}
             checkoutError={checkoutError}
-            onAddToCart={(fileAssetId || draftMode) && cart ? handleAddToCart : undefined}
+            onAddToCart={
+              // Add to Cart needs a cart it can actually write to: the
+              // local cart (draftMode, holds the in-memory file) or the
+              // DB cart (signed-in users). An anon user on a published
+              // file has neither — they go straight to the sign-up
+              // checkout via Proceed to checkout instead.
+              (draftMode || (fileAssetId && isSignedIn)) && cart
+                ? handleAddToCart
+                : undefined
+            }
             isAddingToCart={isAddingToCart}
             minimumFeeInfo={minimumFeeInfo}
             checkingMinimum={checkingMinimum}
