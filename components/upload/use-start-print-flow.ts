@@ -3,6 +3,7 @@
 import { useCallback, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createDraftFileForPrint } from "@/app/actions/files";
+import { reportClientError } from "@/lib/observability/report-client-error";
 
 export type PrintFlowPhase = "idle" | "uploading" | "saving";
 
@@ -70,7 +71,14 @@ export function useStartPrintFlow(): StartPrintFlowResult {
             });
             xhr.addEventListener("load", () => {
               if (xhr.status >= 200 && xhr.status < 300) resolve();
-              else reject(new Error(`R2 upload failed (${xhr.status})`));
+              else {
+                reportClientError(
+                  "upload.r2-put-failed",
+                  new Error(`R2 upload failed (${xhr.status})`),
+                  { status: xhr.status, kind: "authed-print", fileSize: file.size }
+                );
+                reject(new Error(`R2 upload failed (${xhr.status})`));
+              }
             });
             xhr.addEventListener("error", () =>
               reject(new Error("Network error uploading to R2."))

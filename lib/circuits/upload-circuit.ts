@@ -7,6 +7,8 @@
  * Returns the storageKey on success; throws on failure with a
  * human-readable message.
  */
+import { reportClientError } from "@/lib/observability/report-client-error";
+
 export const MAX_CIRCUIT_SIZE = 20 * 1024 * 1024;
 export const ACCEPTED_CIRCUIT_IMAGE_MIME = new Set([
   "image/jpeg",
@@ -86,6 +88,11 @@ export async function uploadCircuitToR2(
     headers: { "Content-Type": contentType },
   });
   if (!putRes.ok) {
+    reportClientError(
+      "upload.r2-put-failed",
+      new Error(`Circuit upload failed (${putRes.status})`),
+      { status: putRes.status, kind: "circuit", fileSize: file.size }
+    );
     throw new Error(`Upload failed (${putRes.status})`);
   }
   return { storageKey };
