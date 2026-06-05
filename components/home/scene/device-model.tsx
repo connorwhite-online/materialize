@@ -41,54 +41,87 @@ const CHIP_COLOR = "#0e1013";
 const METAL_COLOR = "#b9bdc4";
 const LENS_COLOR = "#05070a";
 
-/** Internal component geometry, sized relative to the shell. */
+/**
+ * Internal component geometry, sized in real millimetres against the
+ * shell (the device is 85mm long → size.y). Dimensions + parts are from
+ * the pneuma BOM.
+ */
 function PartGeometry({ id, size }: { id: string; size: THREE.Vector3 }) {
-  const w = size.x;
+  const MM = size.y / 85;
   switch (id) {
-    case "soc":
-      return (
-        <RoundedBox args={[w * 0.22, w * 0.22, 0.045]} radius={0.01} smoothness={4}>
-          <meshStandardMaterial color={CHIP_COLOR} metalness={0.4} roughness={0.5} />
-        </RoundedBox>
-      );
-    case "mcu":
-      return (
-        <RoundedBox args={[w * 0.14, w * 0.14, 0.035]} radius={0.008} smoothness={4}>
-          <meshStandardMaterial color={CHIP_COLOR} metalness={0.4} roughness={0.5} />
-        </RoundedBox>
-      );
-    case "modem":
-      return (
-        <RoundedBox args={[w * 0.28, w * 0.2, 0.035]} radius={0.008} smoothness={4}>
-          <meshStandardMaterial color="#1a1c1f" metalness={0.55} roughness={0.4} />
-        </RoundedBox>
-      );
-    case "camera":
+    case "soc": // Rockchip RV1106G3 — QFN, ~10×10×1.2mm
       return (
         <group>
-          {/* Module looks up (+Y) to match the top-face camera hole. */}
-          <mesh>
-            <cylinderGeometry args={[w * 0.11, w * 0.11, 0.06, 40]} />
-            <meshStandardMaterial color="#16181c" metalness={0.6} roughness={0.35} />
+          <RoundedBox args={[10 * MM, 10 * MM, 1.2 * MM]} radius={0.4 * MM} smoothness={3}>
+            <meshStandardMaterial color={CHIP_COLOR} metalness={0.35} roughness={0.5} />
+          </RoundedBox>
+          <mesh position={[0, 0, 0.7 * MM]}>
+            <planeGeometry args={[7.5 * MM, 7.5 * MM]} />
+            <meshStandardMaterial color="#1b1e22" roughness={0.75} />
           </mesh>
-          <mesh position={[0, 0.035, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-            <circleGeometry args={[w * 0.08, 40]} />
+          <mesh position={[-3 * MM, -3 * MM, 0.75 * MM]}>
+            <circleGeometry args={[0.7 * MM, 16]} />
+            <meshStandardMaterial color="#3a3d42" />
+          </mesh>
+        </group>
+      );
+    case "mcu": // Raytac MDBT50Q (nRF52840) — module 10.5×15.5×2.05mm, metal shield
+      return (
+        <group>
+          <RoundedBox args={[10.5 * MM, 15.5 * MM, 2.05 * MM]} radius={0.3 * MM} smoothness={3}>
+            <meshStandardMaterial color="#15171a" metalness={0.3} roughness={0.6} />
+          </RoundedBox>
+          <RoundedBox args={[9 * MM, 11.5 * MM, 0.5 * MM]} radius={0.2 * MM} smoothness={3} position={[0, -1.4 * MM, 1.15 * MM]}>
+            <meshStandardMaterial color="#c7ccd2" metalness={0.85} roughness={0.3} />
+          </RoundedBox>
+        </group>
+      );
+    case "modem": // Quectel EG915U — LGA, 23.6×19.9×2.4mm
+      return (
+        <group>
+          <RoundedBox args={[19.9 * MM, 23.6 * MM, 2.4 * MM]} radius={0.5 * MM} smoothness={3}>
+            <meshStandardMaterial color="#1a1c1f" metalness={0.5} roughness={0.45} />
+          </RoundedBox>
+          <mesh position={[0, 4 * MM, 1.3 * MM]}>
+            <planeGeometry args={[14 * MM, 9 * MM]} />
+            <meshStandardMaterial color="#2a2d31" roughness={0.7} />
+          </mesh>
+        </group>
+      );
+    case "camera": // SC3336 3MP module — lens up (+Y) to the top hole
+      return (
+        <group>
+          <RoundedBox args={[8.5 * MM, 5 * MM, 8.5 * MM]} radius={0.4 * MM} smoothness={3}>
+            <meshStandardMaterial color="#16181c" metalness={0.5} roughness={0.4} />
+          </RoundedBox>
+          <mesh position={[0, 4 * MM, 0]}>
+            <cylinderGeometry args={[3 * MM, 3.3 * MM, 3.2 * MM, 32]} />
+            <meshStandardMaterial color="#0c0d10" metalness={0.5} roughness={0.35} />
+          </mesh>
+          <mesh position={[0, 5.6 * MM, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <circleGeometry args={[2.6 * MM, 32]} />
             <meshPhysicalMaterial color={LENS_COLOR} metalness={0.1} roughness={0.05} clearcoat={1} />
           </mesh>
         </group>
       );
-    case "battery":
+    case "battery": // PKCell LP803860 — 60×36×8mm, 2000mAh
       return (
-        <RoundedBox args={[w * 0.66, size.y * 0.5, size.z * 0.42]} radius={0.02} smoothness={5}>
-          <meshStandardMaterial color={METAL_COLOR} metalness={0.55} roughness={0.45} />
+        <RoundedBox args={[36 * MM, 60 * MM, 8 * MM]} radius={1.6 * MM} smoothness={4}>
+          <meshStandardMaterial color={METAL_COLOR} metalness={0.5} roughness={0.45} />
         </RoundedBox>
       );
-    case "speaker":
+    case "speaker": // PUI AS01808MR — 18mm dia
       return (
-        <mesh rotation={[Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[w * 0.12, w * 0.12, 0.05, 40]} />
-          <meshStandardMaterial color="#26282c" metalness={0.5} roughness={0.5} />
-        </mesh>
+        <group>
+          <mesh rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[9 * MM, 9 * MM, 4 * MM, 44]} />
+            <meshStandardMaterial color="#26282c" metalness={0.45} roughness={0.55} />
+          </mesh>
+          <mesh position={[0, 0, 2.1 * MM]}>
+            <circleGeometry args={[6.5 * MM, 44]} />
+            <meshStandardMaterial color="#17191c" roughness={0.85} />
+          </mesh>
+        </group>
       );
     default:
       return null;
@@ -133,15 +166,25 @@ function TeardownLabel({ part, size }: { part: TeardownPart; size: THREE.Vector3
         <meshBasicMaterial color="#8a8f98" />
       </mesh>
       <Html position={end} distanceFactor={3.4} style={{ pointerEvents: "none" }} zIndexRange={[20, 0]}>
-        <div
-          className="teardown-label-fade flex items-center gap-1 whitespace-nowrap rounded-md border border-border/60 bg-background/85 px-1.5 py-0.5 text-[10px] font-medium tracking-tight text-foreground shadow-sm backdrop-blur"
+        <a
+          href={part.href}
+          target="_blank"
+          rel="noreferrer"
+          className="teardown-label-fade pointer-events-auto flex items-center gap-1.5 whitespace-nowrap rounded-md border border-border/60 bg-background/85 px-1.5 py-1 text-foreground no-underline shadow-sm backdrop-blur transition-colors hover:border-primary/50 hover:bg-background"
           style={{
             transform: dir > 0 ? "translateX(0.3rem)" : "translateX(-100%) translateX(-0.3rem)",
           }}
         >
           {part.github && <GithubMark />}
-          {part.label}
-        </div>
+          <span className="flex flex-col leading-tight">
+            <span className="text-[10px] font-semibold tracking-tight">{part.label}</span>
+            {part.sub && (
+              <span className="text-[8px] font-medium tracking-tight text-muted-foreground">
+                {part.sub}
+              </span>
+            )}
+          </span>
+        </a>
       </Html>
     </group>
   );
@@ -172,6 +215,7 @@ export function DeviceModel({
 
   const w = size.x;
   const h = size.y;
+  const MM = size.y / 85;
 
   // Quaternions that lay the seated components flat onto the drafted
   // end faces (their local +Y aligns with each face's measured normal).
@@ -305,9 +349,34 @@ export function DeviceModel({
             }}
             position={[0, h * 0.04, 0]}
           >
-            <RoundedBox args={[w * 0.74, h * 0.82, 0.018]} radius={0.015} smoothness={5}>
-              <meshStandardMaterial color={PCB_COLOR} metalness={0.2} roughness={0.65} />
+            {/* Mainboard — green soldermask, ~40×78×1.2mm. */}
+            <RoundedBox args={[40 * MM, 78 * MM, 1.2 * MM]} radius={1.8 * MM} smoothness={5}>
+              <meshStandardMaterial color={PCB_COLOR} metalness={0.2} roughness={0.6} />
             </RoundedBox>
+            {/* Corner mounting holes. */}
+            {[
+              [-15, 35],
+              [15, 35],
+              [-15, -35],
+              [15, -35],
+            ].map(([mx, my], i) => (
+              <mesh key={i} position={[mx * MM, my * MM, 0]}>
+                <cylinderGeometry args={[1.4 * MM, 1.4 * MM, 2 * MM, 16]} />
+                <meshStandardMaterial color="#0a0c0a" metalness={0.3} roughness={0.7} />
+              </mesh>
+            ))}
+            {/* Camera FFC connector (top) + battery JST connector (side). */}
+            <RoundedBox args={[16 * MM, 3.5 * MM, 1.5 * MM]} radius={0.4 * MM} smoothness={3} position={[0, 33 * MM, 1 * MM]}>
+              <meshStandardMaterial color="#e8e3d0" roughness={0.6} />
+            </RoundedBox>
+            <RoundedBox args={[6 * MM, 4 * MM, 2 * MM]} radius={0.4 * MM} smoothness={3} position={[-16 * MM, -20 * MM, 1 * MM]}>
+              <meshStandardMaterial color="#e8e3d0" roughness={0.6} />
+            </RoundedBox>
+            {/* A few silkscreen pads. */}
+            <mesh position={[10 * MM, -10 * MM, 0.65 * MM]}>
+              <planeGeometry args={[8 * MM, 6 * MM]} />
+              <meshStandardMaterial color="#0c3a26" roughness={0.7} />
+            </mesh>
           </group>
 
           {TEARDOWN_PARTS.map((part) => (
