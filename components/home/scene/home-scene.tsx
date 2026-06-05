@@ -9,7 +9,7 @@ import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { SceneController, useStage } from "./stage-context";
 import { LightsRig } from "./lights-rig";
 import { PrimaryDevice } from "./primary-device";
-import { MaterialSwatches } from "./material-swatches";
+import { ManufacturingScene } from "./manufacturing-scene";
 import { FigureBox } from "./figure-box";
 import { MaterialBurst } from "./material-burst";
 import { type MaterialTarget } from "./device-model";
@@ -88,7 +88,7 @@ function SceneContents({
         intensity={burstIntensity}
         color={target.color}
       />
-      <MaterialSwatches />
+      <ManufacturingScene target={target} />
       <FigureBox />
       <ContactShadows
         position={[0, -1.05, 0]}
@@ -123,6 +123,10 @@ export function HomeScene({
         camera={{ position: [0, 0, 4.5], fov: 45 }}
         dpr={[1, 2]}
         gl={{ antialias: true, alpha: true }}
+        onCreated={({ gl }) => {
+          // The manufacturing "print" reveal uses material clipping planes.
+          gl.localClippingEnabled = true;
+        }}
         style={{ pointerEvents: "none" }}
       >
         <SceneController progressRef={progressRef} reducedMotion={reducedMotion}>

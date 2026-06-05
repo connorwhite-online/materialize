@@ -230,11 +230,11 @@ export function AnonHome() {
           </div>
         </section>
 
-        {/* --- Stage 1 · Materials --- */}
+        {/* --- Stage 1 · Manufacturing --- */}
         <SectionCopy
-          kicker="Materials"
-          title="See every finish"
-          body="Plastics, alloys, resins — your model priced live by real vendors."
+          kicker="Global supply chain"
+          title="Printed to order, worldwide"
+          body="A vetted network of manufacturers builds your part on demand — in your material, wherever you are."
         />
 
         {/* --- Stage 2 · Buy & sell --- */}
