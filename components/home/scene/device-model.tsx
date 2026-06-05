@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, type MutableRefObject } from "react";
+import { useMemo, useRef, type MutableRefObject } from "react";
 import { useFrame } from "@react-three/fiber";
 import { RoundedBox, Html, Line } from "@react-three/drei";
 import * as THREE from "three";
@@ -95,6 +95,24 @@ function PartGeometry({ id, size }: { id: string; size: THREE.Vector3 }) {
   }
 }
 
+/** Female USB-C port: a recessed pill cavity with a tongue. Opening
+ *  faces +Y (mapped onto the drafted bottom face by the parent group). */
+function UsbCPort({ w }: { w: number }) {
+  return (
+    <group>
+      <RoundedBox args={[w * 0.24, 0.04, w * 0.1]} radius={0.012} smoothness={4}>
+        <meshStandardMaterial color="#3a3d42" metalness={0.7} roughness={0.4} />
+      </RoundedBox>
+      <RoundedBox args={[w * 0.2, 0.05, w * 0.07]} radius={w * 0.035} smoothness={5} position={[0, -0.008, 0]}>
+        <meshStandardMaterial color="#050608" roughness={0.9} metalness={0.1} />
+      </RoundedBox>
+      <RoundedBox args={[w * 0.15, 0.016, w * 0.03]} radius={0.006} smoothness={4} position={[0, -0.006, 0]}>
+        <meshStandardMaterial color="#2a2c30" metalness={0.4} roughness={0.6} />
+      </RoundedBox>
+    </group>
+  );
+}
+
 /** Inline GitHub mark — lucide-react v1 dropped brand icons. */
 function GithubMark() {
   return (
@@ -144,7 +162,7 @@ export function DeviceModel({
   showLabels = false,
   castShadow = true,
 }: DeviceModelProps) {
-  const { front, back, size } = useDeviceGeometry();
+  const { front, back, size, topCap, bottomCap } = useDeviceGeometry();
   const frontRef = useRef<THREE.Group>(null);
   const backRef = useRef<THREE.Group>(null);
   const internalsRef = useRef<THREE.Group>(null);
@@ -154,6 +172,18 @@ export function DeviceModel({
 
   const w = size.x;
   const h = size.y;
+
+  // Quaternions that lay the seated components flat onto the drafted
+  // end faces (their local +Y aligns with each face's measured normal).
+  const UP = useMemo(() => new THREE.Vector3(0, 1, 0), []);
+  const topQ = useMemo(
+    () => new THREE.Quaternion().setFromUnitVectors(UP, topCap.normal),
+    [UP, topCap]
+  );
+  const bottomQ = useMemo(
+    () => new THREE.Quaternion().setFromUnitVectors(UP, bottomCap.normal),
+    [UP, bottomCap]
+  );
 
   const lerpShell = (mat: THREE.MeshPhysicalMaterial | null, dt: number) => {
     if (!mat) return;
@@ -224,38 +254,37 @@ export function DeviceModel({
           {shellMaterial(frontMat)}
         </mesh>
 
-        {/* Components seated in the real end-face holes: camera + LED +
-            mic look up out of the top; USB-C faces down out of the
-            bottom. Always shown so the assembled device reads complete. */}
+        {/* Components seated in the real end-face holes, laid flat onto
+            the 10° drafted faces (local +Y = the measured face normal).
+            Top: camera + LED + mic; bottom: female USB-C. */}
         {showInternals && (
-          <group>
-            {/* Camera (10mm hole) — top face, looking up. */}
-            <group position={[0, h * 0.47, 0]}>
-              <mesh>
+          <>
+            <group position={topCap.point.toArray()} quaternion={topQ}>
+              {/* Camera (10mm hole), centered. */}
+              <mesh position={[0, -0.012, 0]}>
                 <cylinderGeometry args={[w * 0.11, w * 0.11, 0.04, 40]} />
                 <meshStandardMaterial color="#16181c" metalness={0.6} roughness={0.35} />
               </mesh>
-              <mesh position={[0, 0.022, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+              <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
                 <circleGeometry args={[w * 0.085, 40]} />
                 <meshPhysicalMaterial color={LENS_COLOR} metalness={0.1} roughness={0.05} clearcoat={1} />
               </mesh>
+              {/* Status LED (2mm hole). */}
+              <mesh position={[w * 0.24, 0.004, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+                <circleGeometry args={[w * 0.025, 24]} />
+                <meshStandardMaterial color="#7dd3a0" emissive="#3fae6e" emissiveIntensity={1.6} />
+              </mesh>
+              {/* Mic (2×8mm slot). */}
+              <mesh position={[-w * 0.24, 0.002, 0]}>
+                <boxGeometry args={[w * 0.16, 0.012, w * 0.05]} />
+                <meshStandardMaterial color="#202226" metalness={0.3} roughness={0.7} />
+              </mesh>
             </group>
-            {/* Status LED (2mm hole) — top face. */}
-            <mesh position={[w * 0.22, h * 0.48, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-              <circleGeometry args={[w * 0.025, 24]} />
-              <meshStandardMaterial color="#7dd3a0" emissive="#3fae6e" emissiveIntensity={1.6} />
-            </mesh>
-            {/* Mic (2×8mm slot) — top face. */}
-            <mesh position={[-w * 0.22, h * 0.48, 0]}>
-              <boxGeometry args={[w * 0.18, 0.015, w * 0.05]} />
-              <meshStandardMaterial color="#202226" metalness={0.3} roughness={0.7} />
-            </mesh>
-            {/* USB-C (2×8mm slot) — bottom face, facing down. */}
-            <mesh position={[0, -h * 0.48, 0]}>
-              <boxGeometry args={[w * 0.2, 0.015, w * 0.06]} />
-              <meshStandardMaterial color="#101113" metalness={0.5} roughness={0.5} />
-            </mesh>
-          </group>
+
+            <group position={bottomCap.point.toArray()} quaternion={bottomQ}>
+              <UsbCPort w={w} />
+            </group>
+          </>
         )}
       </group>
 
