@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { CardImageCarousel } from "@/components/photos/card-image-carousel";
+import { FileThumbnailStack } from "@/components/projects/file-thumbnail-stack";
 
 export interface LibraryProjectCardItem {
   id: string;
@@ -11,6 +12,8 @@ export interface LibraryProjectCardItem {
   visibility: string;
   source: "owned" | "purchased";
   thumbnailUrl: string | null;
+  /** Picked cover photo id, or null when on the "Auto" (first photo) cover. */
+  coverPhotoId: string | null;
   fileCount: number;
   /**
    * Curator photo ids beyond the cover. The card carousel renders the
@@ -19,6 +22,11 @@ export interface LibraryProjectCardItem {
    * has no curator photos other than the cover.
    */
   additionalPhotoIds: string[];
+  /**
+   * Bundled-file thumbnails (up to 3) for the "stack of 3" fallback
+   * cover when the project has no curator photos at all.
+   */
+  fileThumbnails: string[];
 }
 
 interface LibraryProjectCardProps {
@@ -26,23 +34,31 @@ interface LibraryProjectCardProps {
 }
 
 export function LibraryProjectCard({ item }: LibraryProjectCardProps) {
-  // The cover always resolves through the thumbnails proxy so an
-  // edited cover-photo pick takes effect immediately. Items with
-  // neither a cover nor any additional photos render a placeholder.
-  const carouselImages = [
-    `/api/thumbnails/projects/${item.id}`,
-    ...item.additionalPhotoIds.map(
-      (id) => `/api/thumbnails/projects/${item.id}?photoId=${id}`
-    ),
-  ];
-  const hasAnyImage = !!item.thumbnailUrl || item.additionalPhotoIds.length > 0;
+  // Carousel slides. When an explicit cover is picked it leads (via
+  // the proxy, `?v=` pinned to the pick so a re-pick busts the stale
+  // optimizer copy), followed by the remaining curator photos. With
+  // no explicit pick the photos lead directly — the proxy's "Auto"
+  // fallback already resolves the first photo, so prepending a bare
+  // cover URL would just duplicate it (and 404 a broken slide when
+  // there are no photos at all). See thumbnails/projects route.
+  const photoSlides = item.additionalPhotoIds.map(
+    (id) => `/api/thumbnails/projects/${item.id}?photoId=${id}`
+  );
+  const carouselImages = item.coverPhotoId
+    ? [
+        `/api/thumbnails/projects/${item.id}?v=${item.coverPhotoId}`,
+        ...photoSlides,
+      ]
+    : photoSlides;
   const isPrivate = item.visibility === "private" && item.source === "owned";
   return (
     <Link href={`/projects/${item.slug}`} className="block">
       <Card className="overflow-hidden transition-colors hover:border-primary/30">
         <div className="relative aspect-square bg-gradient-to-br from-muted to-muted/50">
-          {hasAnyImage ? (
+          {carouselImages.length > 0 ? (
             <CardImageCarousel images={carouselImages} alt="" size="sm" />
+          ) : item.fileThumbnails.length > 0 ? (
+            <FileThumbnailStack thumbnails={item.fileThumbnails} />
           ) : (
             <div className="flex h-full w-full items-center justify-center">
               <span className="text-xs text-muted-foreground/50">Project</span>

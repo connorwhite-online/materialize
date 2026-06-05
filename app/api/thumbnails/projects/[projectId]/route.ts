@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { projects, projectPhotos } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and, asc } from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
 import { logError } from "@/lib/logger";
 
@@ -80,7 +80,9 @@ export async function GET(
     // Resolve storage key in priority order:
     //   1. explicit ?photoId= request (card carousels)
     //   2. project.coverPhotoId pick from the edit dialog
-    //   3. legacy thumbnail_url storage key
+    //   3. first curator photo ("Auto" cover — what the owner sees
+    //      until they pick an explicit one)
+    //   4. legacy thumbnail_url storage key
     let storageKey: string | null = null;
 
     if (requestedPhotoId) {
@@ -106,6 +108,27 @@ export async function GET(
       if (cover && cover.projectId === projectId) {
         storageKey = cover.storageKey;
       }
+    }
+
+    // "Auto" fallback — no explicit pick, so use the first curator
+    // photo the owner uploaded (sortOrder order). This is what makes
+    // a freshly-photographed project show a cover without the owner
+    // having to open the edit dialog and choose one. A legacy
+    // thumbnail_url (if any) still wins below only when there are no
+    // curator photos at all.
+    if (!storageKey && !requestedPhotoId) {
+      const [firstPhoto] = await db
+        .select({ storageKey: projectPhotos.storageKey })
+        .from(projectPhotos)
+        .where(
+          and(
+            eq(projectPhotos.projectId, projectId),
+            eq(projectPhotos.kind, "creator")
+          )
+        )
+        .orderBy(asc(projectPhotos.sortOrder))
+        .limit(1);
+      if (firstPhoto) storageKey = firstPhoto.storageKey;
     }
 
     if (!storageKey) {
