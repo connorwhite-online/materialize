@@ -131,8 +131,10 @@ export function FigureBox() {
   useFrame((_, delta) => {
     const g = groupRef.current;
     if (!g) return;
-    const w = Math.max(0, 1 - Math.abs(stageRef.current - STAGE.COMMERCE) * 1.7);
-    const k = reducedMotion ? 1 : 1 - Math.exp(-delta * 6);
+    // Sharper window + faster fade so the pack appears/disappears quickly
+    // (it's gone well before the footer so the device can rise alone).
+    const w = Math.max(0, 1 - Math.abs(stageRef.current - STAGE.COMMERCE) * 2.6);
+    const k = reducedMotion ? 1 : 1 - Math.exp(-delta * 14);
     g.visible = w > 0.01;
     g.traverse((obj) => {
       const mat = (obj as THREE.Mesh).material as THREE.Material & { opacity: number };

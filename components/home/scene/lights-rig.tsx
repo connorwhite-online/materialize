@@ -27,19 +27,21 @@ export function LightsRig() {
     if (!key) return;
     const w = stageWeight(stageRef.current, STAGE.MATERIALS);
     key.position.lerpVectors(KEY_HOME, KEY_CAMERA, w);
-    key.intensity = 1.35 + w * 0.6;
+    key.intensity = 1.7 + w * 0.6;
   });
 
   return (
     <>
-      {/* Low ambient + a strong key for a dramatic, high-contrast look;
-          the IBL is dimmed (less wrap-around fill) but still gives metals
-          their reflections. */}
-      <ambientLight intensity={0.09} />
-      <directionalLight ref={keyRef} position={KEY_HOME.toArray()} intensity={1.35} />
-      <directionalLight position={[-5, -3, -5]} intensity={0.12} />
-      <directionalLight position={[0, -5, 2]} intensity={0.08} />
-      <StudioEnvironment intensity={0.38} keyBias={1.3} />
+      {/* Cinematic three-point-ish rig with warm/cool colour contrast:
+          a strong WARM key, a dim COOL fill (so shadows read blue, not
+          black), and a bright COOL rim from behind to pop the silhouette
+          off the dark background. Faint cool ambient + a dimmed IBL keep
+          metals reflective without washing the whole thing flat. */}
+      <ambientLight intensity={0.05} color="#aebbd6" />
+      <directionalLight ref={keyRef} position={KEY_HOME.toArray()} intensity={1.7} color="#fff2e2" />
+      <directionalLight position={[-5, -1, -3]} intensity={0.22} color="#9fb6e6" />
+      <directionalLight position={[-1.5, 3.5, -5]} intensity={1.5} color="#dce8ff" />
+      <StudioEnvironment intensity={0.3} keyBias={1.5} />
     </>
   );
 }
