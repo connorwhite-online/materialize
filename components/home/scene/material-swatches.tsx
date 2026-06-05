@@ -43,12 +43,23 @@ function SwatchCard({ index }: SwatchCardProps) {
     g.visible = w > 0.01;
 
     const k = reducedMotion ? 1 : 1 - Math.exp(-delta * 7);
-    const scale = 0.5 * w;
+    const op = w * w * (3 - 2 * w); // smoothstep fade
+    // Scale in from 80% → 100% of full size as it fades in.
+    const scale = 0.5 * (0.8 + 0.2 * op);
     g.scale.setScalar(THREE.MathUtils.lerp(g.scale.x, scale, k));
     g.position.x = THREE.MathUtils.lerp(g.position.x, fan.x * w, k);
     g.position.y = THREE.MathUtils.lerp(g.position.y, fan.y * w, k);
     g.position.z = THREE.MathUtils.lerp(g.position.z, (BASE_Z + fan.z) * w, k);
     g.rotation.z = THREE.MathUtils.lerp(g.rotation.z, fan.rot * w, k);
+
+    // Fade the whole card in/out.
+    g.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.Material & { opacity: number };
+      if (m && typeof m.opacity === "number") {
+        m.transparent = true;
+        m.opacity = op;
+      }
+    });
 
     if (bobRef.current) {
       bobRef.current.position.y = reducedMotion
@@ -58,7 +69,7 @@ function SwatchCard({ index }: SwatchCardProps) {
   });
 
   return (
-    <group ref={groupRef} visible={false}>
+    <group ref={groupRef} visible={false} scale={0.4}>
       <group ref={bobRef}>
         {/* Card plate. */}
         <RoundedBox args={[1.5, 1.9, 0.14]} radius={0.12} smoothness={6}>

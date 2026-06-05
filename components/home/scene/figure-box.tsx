@@ -4,11 +4,14 @@ import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { useStage } from "./stage-context";
+import { useDeviceGeometry } from "./use-device-geometry";
 import { STAGE, STICKER_YELLOW, COMMERCE_YAW, COMMERCE_PITCH } from "./constants";
 
 // Classic dollar-store starburst. The brief said "7-pronged"; the real
 // retail look is a denser burst, so this is exposed as a dial.
 const STAR_POINTS = 12;
+// How much the clear wrap stands off the device surface (vacuum-form fit).
+const WRAP_SCALE = 1.05;
 
 function makeStarShape(points: number, outer: number, inner: number): THREE.Shape {
   const shape = new THREE.Shape();
@@ -67,93 +70,99 @@ function makePriceTexture(): THREE.CanvasTexture {
 }
 
 /**
- * The "buy & sell" stage: the fully-assembled device sits in a simple
- * retail pack — a cardboard backing card with a die-cut hang-tag slot,
- * wrapped in a cellophane bubble, with a dollar-store $1 star sticker.
- * Held at the shared COMMERCE angle so it reads as a 3-D pack and the
- * device (rotated to match) sits enclosed. Fades with the COMMERCE
- * stage; uses a sharp weight so it's gone before the teardown explodes.
+ * The "buy & sell" stage: the assembled device sealed in a retail pack.
+ * The clear shield is a vacuum-formed wrap that follows the device's own
+ * shape (its shell geometry, stood off slightly); the cardboard backing
+ * card carries a standard euro hang hole (round hole + neck); and the $1
+ * starburst is a flat, depth-less printed sticker on the front. Fades
+ * with proximity to the COMMERCE stage.
  */
 export function FigureBox() {
   const { stageRef, reducedMotion } = useStage();
+  const { front, back, size } = useDeviceGeometry();
   const groupRef = useRef<THREE.Group>(null);
-  const filmMat = useRef<THREE.MeshPhysicalMaterial>(null);
 
   const star = useMemo(() => makeStarShape(STAR_POINTS, 0.24, 0.13), []);
+  const starGeo = useMemo(() => new THREE.ShapeGeometry(star), [star]);
   const priceTex = useMemo(() => makePriceTexture(), []);
 
-  // Cardboard backing card with a hang-tag slot punched near the top.
+  const cardW = size.x * 1.7;
+  const cardH = size.y * 1.32;
+  const frontZ = (size.z / 2) * WRAP_SCALE;
+
+  // Backing card with a standard euro hang hole (round hole + neck slot).
   const cardGeo = useMemo(() => {
     const shape = new THREE.Shape();
-    roundedRect(shape, 0, 0, 1.4, 2.1, 0.09);
-    const slot = new THREE.Path();
-    roundedRect(slot, 0, 0.92, 0.32, 0.1, 0.05);
-    shape.holes.push(slot);
+    roundedRect(shape, 0, 0, cardW, cardH, 0.1);
+    const holeY = cardH / 2 - 0.17;
+    const circle = new THREE.Path();
+    circle.absarc(0, holeY, 0.052, 0, Math.PI * 2, false);
+    shape.holes.push(circle);
+    const neck = new THREE.Path();
+    roundedRect(neck, 0, holeY - 0.075, 0.05, 0.1, 0.025);
+    shape.holes.push(neck);
     return new THREE.ExtrudeGeometry(shape, {
       depth: 0.04,
       bevelEnabled: true,
-      bevelThickness: 0.012,
-      bevelSize: 0.012,
+      bevelThickness: 0.01,
+      bevelSize: 0.01,
       bevelSegments: 2,
     });
-  }, []);
+  }, [cardW, cardH]);
+
+  const wrapMaterial = () => (
+    <meshPhysicalMaterial
+      color="#ffffff"
+      metalness={0}
+      roughness={0.06}
+      transmission={0.94}
+      ior={1.3}
+      thickness={0.04}
+      clearcoat={1}
+      clearcoatRoughness={0.06}
+      transparent
+      opacity={0}
+      side={THREE.DoubleSide}
+    />
+  );
 
   useFrame((_, delta) => {
     const g = groupRef.current;
     if (!g) return;
-    // Sharp triangular weight — fully gone by ~stage 2.6, before the
-    // teardown explode begins, so the boxed device is never exploded.
     const w = Math.max(0, 1 - Math.abs(stageRef.current - STAGE.COMMERCE) * 1.7);
     const k = reducedMotion ? 1 : 1 - Math.exp(-delta * 6);
-
-    g.scale.setScalar(THREE.MathUtils.lerp(g.scale.x, 0.94 + w * 0.06, k));
     g.visible = w > 0.01;
-
     g.traverse((obj) => {
       const mat = (obj as THREE.Mesh).material as THREE.Material & {
         opacity: number;
+        transmission?: number;
       };
       if (!mat || typeof mat.opacity !== "number") return;
-      const ceiling = mat === filmMat.current ? 0.4 : 1;
+      // The clear wrap stays glassy; everything else fades fully in.
+      const ceiling = (mat.transmission ?? 0) > 0.5 ? 0.45 : 1;
       mat.opacity = THREE.MathUtils.lerp(mat.opacity, w * ceiling, k);
     });
   });
 
   return (
     <group ref={groupRef} visible={false} rotation={[COMMERCE_PITCH, COMMERCE_YAW, 0]}>
-      {/* Cardboard backing card with the hang-tag cutout. */}
-      <mesh geometry={cardGeo} position={[0, 0.05, -0.4]}>
+      {/* Cardboard backing card with the euro hang hole, behind the device. */}
+      <mesh geometry={cardGeo} position={[0, size.y * 0.12, -size.z * 0.9]}>
         <meshStandardMaterial color="#d8cdb6" roughness={0.92} metalness={0} transparent opacity={0} />
       </mesh>
 
-      {/* Cellophane bubble over the assembled device — the bulk of the pack. */}
-      <mesh position={[0, 0, 0.06]}>
-        <boxGeometry args={[1.2, 1.74, 0.55]} />
-        <meshPhysicalMaterial
-          ref={filmMat}
-          color="#ffffff"
-          metalness={0}
-          roughness={0.04}
-          transmission={0.96}
-          ior={1.2}
-          thickness={0.15}
-          clearcoat={1}
-          clearcoatRoughness={0.04}
-          transparent
-          opacity={0}
-          side={THREE.DoubleSide}
-        />
-      </mesh>
+      {/* Form-fitted vacuum wrap — the device's own shell, stood off. */}
+      <group scale={WRAP_SCALE}>
+        <mesh geometry={front}>{wrapMaterial()}</mesh>
+        <mesh geometry={back}>{wrapMaterial()}</mesh>
+      </group>
 
-      {/* $1 starburst sticker on the cellophane, top-left. */}
-      <group position={[-0.46, 0.62, 0.34]} rotation={[0, 0, -0.12]}>
-        <mesh>
-          <extrudeGeometry
-            args={[star, { depth: 0.02, bevelEnabled: true, bevelThickness: 0.01, bevelSize: 0.01, bevelSegments: 1 }]}
-          />
-          <meshStandardMaterial color={STICKER_YELLOW} metalness={0} roughness={0.55} transparent opacity={0} />
+      {/* Flat $1 sticker — a depth-less printed decal on the front. */}
+      <group position={[-cardW * 0.3, cardH * 0.22, frontZ + 0.03]} rotation={[0, 0, -0.12]}>
+        <mesh geometry={starGeo}>
+          <meshStandardMaterial color={STICKER_YELLOW} roughness={0.6} metalness={0} transparent opacity={0} />
         </mesh>
-        <mesh position={[0, 0, 0.033]}>
+        <mesh position={[0, 0, 0.002]}>
           <planeGeometry args={[0.28, 0.28]} />
           <meshBasicMaterial map={priceTex} transparent opacity={0} />
         </mesh>
