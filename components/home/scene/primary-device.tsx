@@ -1,8 +1,7 @@
 "use client";
 
-import { useRef, useState, type MutableRefObject } from "react";
+import { useMemo, useRef, useState, type MutableRefObject } from "react";
 import { useFrame } from "@react-three/fiber";
-import { RoundedBox } from "@react-three/drei";
 import * as THREE from "three";
 import { useStage } from "./stage-context";
 import { DeviceModel, type MaterialTarget } from "./device-model";
@@ -42,6 +41,28 @@ export function PrimaryDevice({ target, dragVelocityRef }: PrimaryDeviceProps) {
   const up2 = useRef<THREE.PointLight>(null);
   const bedY = -size.y / 2 - 0.16;
   const bedR = size.x * 0.62;
+
+  // Circular pedestal profile (revolved around Y): a flat outer rim that
+  // dips down a beveled inner wall into a sunken well floor. The bevel
+  // wall is the surface that emits the glow (a separate cone laid just
+  // inside it). All Y values are relative to the platform group at bedY.
+  const ped = useMemo(() => {
+    const floorR = bedR * 0.55; // sunken well floor radius
+    const openR = bedR * 1.05; // well opening (top of the bevel)
+    const outerR = bedR * 1.7; // outer edge of the pad
+    const rimY = 0.07; // top surface of the pad
+    const floorY = -0.06; // sunken well floor
+    const baseY = -0.09; // underside of the pad
+    const pts = [
+      new THREE.Vector2(0, floorY),
+      new THREE.Vector2(floorR, floorY),
+      new THREE.Vector2(openR, rimY), // beveled inner wall (glowing)
+      new THREE.Vector2(outerR, rimY),
+      new THREE.Vector2(outerR, baseY),
+      new THREE.Vector2(0, baseY),
+    ];
+    return { pts, floorR, openR, rimY, floorY };
+  }, [bedR]);
 
   // Labels mount only around the teardown stage; a CSS fade smooths it.
   const [labelsOn, setLabelsOn] = useState(false);
@@ -142,31 +163,30 @@ export function PrimaryDevice({ target, dragVelocityRef }: PrimaryDeviceProps) {
         />
       </group>
 
-      {/* Print bed — a simplified "Walkman" slab with a sunken inset
-          whose recessed light band is the source of the floating
-          hologram. Only shown (and quickly faded) in the materials stage. */}
+      {/* Print bed — a circular pedestal with a sunken well bored down
+          into it; the beveled inner wall emits the glow that is the
+          source of the floating hologram. Only shown (and quickly faded)
+          in the materials stage. */}
       <group ref={bedRef} visible={false}>
         <pointLight ref={up1} position={[bedR * 0.8, bedY + 0.2, bedR * 1.0]} color="#bfe4ff" intensity={0} distance={2.6} />
         <pointLight ref={up2} position={[-bedR * 0.8, bedY + 0.2, bedR * 0.6]} color="#9fc6ff" intensity={0} distance={2.6} />
-        {/* Body slab. */}
-        <RoundedBox args={[bedR * 3.0, 0.14, bedR * 2.0]} radius={0.05} smoothness={4} position={[0, bedY, 0]}>
-          <meshStandardMaterial color="#15181e" metalness={0.7} roughness={0.34} />
-        </RoundedBox>
-        {/* Sunken inset bowl. */}
-        <mesh position={[0, bedY + 0.045, 0]}>
-          <cylinderGeometry args={[bedR * 0.95, bedR * 0.95, 0.05, 64]} />
-          <meshStandardMaterial color="#0a0c10" metalness={0.5} roughness={0.55} />
-        </mesh>
-        {/* Recessed glowing light band (hologram source). */}
-        <mesh position={[0, bedY + 0.058, 0]} rotation={[Math.PI / 2, 0, 0]}>
-          <torusGeometry args={[bedR * 0.86, 0.012, 12, 96]} />
-          <meshBasicMaterial color={PEDESTAL_GLOW} toneMapped={false} />
-        </mesh>
-        {/* Soft projection glow on the inset floor. */}
-        <mesh position={[0, bedY + 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <circleGeometry args={[bedR * 0.82, 48]} />
-          <meshBasicMaterial color={PEDESTAL_GLOW} toneMapped={false} transparent opacity={0.28} />
-        </mesh>
+        <group position={[0, bedY, 0]}>
+          {/* Revolved pedestal body: flat rim → beveled inner wall → well. */}
+          <mesh>
+            <latheGeometry args={[ped.pts, 96]} />
+            <meshStandardMaterial color="#15181e" metalness={0.7} roughness={0.34} side={THREE.DoubleSide} />
+          </mesh>
+          {/* Glowing beveled wall — a cone laid just inside the bevel. */}
+          <mesh position={[0, (ped.rimY + ped.floorY) / 2, 0]}>
+            <cylinderGeometry args={[ped.openR * 0.985, ped.floorR * 0.985, ped.rimY - ped.floorY, 96, 1, true]} />
+            <meshBasicMaterial color={PEDESTAL_GLOW} toneMapped={false} side={THREE.DoubleSide} transparent opacity={0.9} />
+          </mesh>
+          {/* Soft glow pooled on the well floor (hologram source). */}
+          <mesh position={[0, ped.floorY + 0.002, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <circleGeometry args={[ped.floorR * 0.96, 64]} />
+            <meshBasicMaterial color={PEDESTAL_GLOW} toneMapped={false} transparent opacity={0.32} />
+          </mesh>
+        </group>
       </group>
     </group>
   );
