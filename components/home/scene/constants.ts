@@ -97,7 +97,10 @@ export const STICKER_YELLOW = "#f4c20d";
  * the yaw is what makes the carton's side walls read as 3D depth.
  */
 export const COMMERCE_YAW = -0.5;
-export const COMMERCE_PITCH = -0.4;
+// Reclined further back so the device lies down into the (shallow) mold
+// rather than standing up in it. Shared by the device + tray so they
+// stay aligned.
+export const COMMERCE_PITCH = -0.72;
 
 /**
  * Pneuma teardown parts — the internal components revealed when the

@@ -100,13 +100,13 @@ export function FigureBox() {
 
   const pulpTex = useMemo(() => makePulpTexture(), []);
 
-  // Shallower walls + a tighter cavity hugging the device.
-  const trayDepth = size.z * 1.12;
-  const cavW = size.x * 1.1;
-  const cavH = size.y * 1.05;
-  const scoopR = size.x * 0.09;
-  const trayW = cavW + 0.42;
-  const trayH = cavH + 0.42;
+  // Much shallower walls + a tight cavity hugging the device.
+  const trayDepth = size.z * 0.52;
+  const cavW = size.x * 1.06;
+  const cavH = size.y * 1.02;
+  const scoopR = size.x * 0.1;
+  const trayW = cavW + 0.46;
+  const trayH = cavH + 0.46;
 
   // Tray rim/walls — an extruded frame (outer outline minus the cavity,
   // which has a finger-pry scoop on each long side).
@@ -117,14 +117,32 @@ export function FigureBox() {
     const geo = new THREE.ExtrudeGeometry(outer, {
       depth: trayDepth,
       bevelEnabled: true,
-      bevelThickness: 0.025,
-      bevelSize: 0.025,
+      bevelThickness: 0.022,
+      bevelSize: 0.022,
       bevelSegments: 3,
     });
     geo.translate(0, 0, -trayDepth / 2);
     return geo;
   }, [trayW, trayH, cavW, cavH, scoopR, trayDepth]);
 
+  // Raised inner lip — a thin tier sitting proud of the rim, inset from
+  // the outer edge, so the rim reads as a molded two-step ledge.
+  const lipGeo = useMemo(() => {
+    const outer = new THREE.Shape();
+    roundedRect(outer, 0, 0, trayW - 0.1, trayH - 0.1, 0.1);
+    outer.holes.push(makeCavityPath(cavW + 0.05, cavH + 0.05, 0.09, scoopR));
+    const geo = new THREE.ExtrudeGeometry(outer, {
+      depth: 0.035,
+      bevelEnabled: true,
+      bevelThickness: 0.012,
+      bevelSize: 0.012,
+      bevelSegments: 2,
+    });
+    return geo;
+  }, [trayW, trayH, cavW, cavH, scoopR]);
+
+  // Floor z (just inside the cavity bottom) for ribs + bosses to sit on.
+  const floorZ = -trayDepth / 2 + 0.05;
   // Debossed relief grooves on the rim, for visual detail.
   const grooveY = trayH / 2 - 0.08;
 
@@ -160,6 +178,8 @@ export function FigureBox() {
     <group ref={groupRef} visible={false} rotation={[COMMERCE_PITCH, COMMERCE_YAW, 0]}>
       {/* Rim / walls of the molded tray. */}
       <mesh geometry={trayGeo}>{pulp()}</mesh>
+      {/* Raised inner lip — the second tier of the molded rim. */}
+      <mesh geometry={lipGeo} position={[0, 0, trayDepth / 2 - 0.01]}>{pulp()}</mesh>
       {/* Cavity floor (closes the bottom of the pocket). */}
       <RoundedBox
         args={[cavW + 0.04, cavH + 0.04, 0.05]}
@@ -169,11 +189,39 @@ export function FigureBox() {
       >
         {pulp(1)}
       </RoundedBox>
-      {/* Relief detail: debossed grooves on the top + bottom rim. */}
+      {/* Molded support ribs across the cavity floor (the device rests on
+          these, not the floor — characteristic of pressed-pulp packs). */}
+      {[-0.34, -0.12, 0.12, 0.34].map((fy) => (
+        <mesh key={`rib-${fy}`} position={[0, fy * cavH, floorZ]}>
+          <boxGeometry args={[cavW * 0.8, cavH * 0.045, 0.055]} />
+          {pulp(1)}
+        </mesh>
+      ))}
+      {/* Chamfered corner support bosses on the floor. */}
+      {[
+        [-1, -1],
+        [1, -1],
+        [-1, 1],
+        [1, 1],
+      ].map(([sx, sy]) => (
+        <mesh
+          key={`boss-${sx}-${sy}`}
+          position={[sx * cavW * 0.4, sy * cavH * 0.42, floorZ]}
+          rotation={[Math.PI / 2, 0, 0]}
+        >
+          <cylinderGeometry args={[0.035, 0.06, 0.06, 18]} />
+          {pulp(1)}
+        </mesh>
+      ))}
+      {/* Debossed brand plate + relief grooves on the bottom rim. */}
+      <mesh position={[0, -grooveY + 0.02, trayDepth / 2 - 0.006]}>
+        <boxGeometry args={[0.5, 0.1, 0.014]} />
+        <meshStandardMaterial color="#bcae88" roughness={0.94} metalness={0} transparent opacity={0} />
+      </mesh>
       {[grooveY, -grooveY].map((gy, row) =>
-        [-1, 0, 1].map((i) => (
-          <mesh key={`${row}-${i}`} position={[i * 0.12, gy, trayDepth / 2 - 0.012]}>
-            <boxGeometry args={[0.07, 0.018, 0.03]} />
+        [-1.5, -0.5, 0.5, 1.5].map((i) => (
+          <mesh key={`${row}-${i}`} position={[i * 0.1, gy, trayDepth / 2 - 0.012]}>
+            <boxGeometry args={[0.06, 0.016, 0.03]} />
             <meshStandardMaterial color="#a89368" roughness={0.95} metalness={0} transparent opacity={0} />
           </mesh>
         ))
