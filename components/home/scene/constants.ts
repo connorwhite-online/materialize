@@ -15,8 +15,8 @@ import { MATERIALS } from "@/lib/materials";
 export const STAGE = {
   HERO: 0,
   MATERIALS: 1,
-  COMMERCE: 2,
-  TEARDOWN: 3,
+  TEARDOWN: 2,
+  COMMERCE: 3,
   FOOTER: 4,
 } as const;
 
