@@ -1,5 +1,6 @@
 import { createDraftFileForPrint } from "@/app/actions/files";
 import { createPrintOrder, completePrintOrder } from "@/app/actions/print";
+import { reportClientError } from "@/lib/observability/report-client-error";
 
 /**
  * The anon-flow post-OTP checkout chain. Pure async function,
@@ -108,6 +109,11 @@ export async function runAnonCheckout(
       body: input.file,
     });
     if (!putRes.ok) {
+      reportClientError(
+        "upload.r2-put-failed",
+        new Error(`R2 upload failed (${putRes.status})`),
+        { status: putRes.status, kind: "anon-print", fileSize: input.file.size }
+      );
       return { ok: false, error: `R2 upload failed (${putRes.status})` };
     }
 

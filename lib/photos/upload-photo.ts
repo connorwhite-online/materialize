@@ -8,6 +8,8 @@
  * Returns the storageKey on success; throws on failure with a
  * human-readable message suitable for surfacing to the user.
  */
+import { reportClientError } from "@/lib/observability/report-client-error";
+
 export const MAX_PHOTO_SIZE = 10 * 1024 * 1024;
 export const ACCEPTED_PHOTO_MIME = new Set([
   "image/jpeg",
@@ -54,6 +56,11 @@ export async function uploadPhotoToR2(
     headers: { "Content-Type": file.type },
   });
   if (!putRes.ok) {
+    reportClientError(
+      "upload.r2-put-failed",
+      new Error(`Photo upload failed (${putRes.status})`),
+      { status: putRes.status, kind: "photo", fileSize: file.size }
+    );
     throw new Error(`Photo upload failed (${putRes.status})`);
   }
   return { storageKey };

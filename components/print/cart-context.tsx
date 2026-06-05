@@ -20,6 +20,7 @@ import {
   getCartItemCount,
 } from "@/app/actions/cart";
 import { createDraftFileForPrint } from "@/app/actions/files";
+import { reportClientError } from "@/lib/observability/report-client-error";
 import { pollQuotes, type QuoteSnapshot } from "./poll-quotes";
 
 export interface LocalCartItem {
@@ -343,6 +344,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
           body: item.file,
         });
         if (!putRes.ok) {
+          reportClientError(
+            "upload.r2-put-failed",
+            new Error(`R2 upload failed (${putRes.status})`),
+            { status: putRes.status, kind: "cart-materialize", fileSize: item.file.size }
+          );
           return { ok: false, error: "File upload failed" };
         }
 
