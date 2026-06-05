@@ -7,26 +7,46 @@ import { useStage } from "./stage-context";
 import { useDeviceGeometry } from "./use-device-geometry";
 import { STAGE, STICKER_YELLOW, COMMERCE_YAW, COMMERCE_PITCH } from "./constants";
 
-// Classic dollar-store starburst. The brief said "7-pronged"; the real
-// retail look is a denser burst, so this is exposed as a dial.
+// Classic dollar-store starburst point count (drawn into the sticker).
 const STAR_POINTS = 12;
-// How much the clear wrap stands off the device surface (vacuum-form
-// fit). Enough clearance to avoid z-fighting with the shell surface.
-const WRAP_SCALE = 1.13;
+// How much the clear blister stands off the device front.
+const WRAP_SCALE = 1.16;
 
-function makeStarShape(points: number, outer: number, inner: number): THREE.Shape {
-  const shape = new THREE.Shape();
-  const step = Math.PI / points;
-  for (let i = 0; i < points * 2; i++) {
+/** The whole $1 starburst sticker drawn to one transparent texture —
+ *  a clean, flat printed decal (burst + price in one). */
+function makeStickerTexture(): THREE.CanvasTexture {
+  const S = 320;
+  const c = document.createElement("canvas");
+  c.width = c.height = S;
+  const ctx = c.getContext("2d")!;
+  ctx.clearRect(0, 0, S, S);
+  const cx = S / 2;
+  const cy = S / 2;
+  const outer = S * 0.46;
+  const inner = S * 0.34;
+  ctx.beginPath();
+  for (let i = 0; i < STAR_POINTS * 2; i++) {
     const r = i % 2 === 0 ? outer : inner;
-    const a = i * step - Math.PI / 2;
-    const x = Math.cos(a) * r;
-    const y = Math.sin(a) * r;
-    if (i === 0) shape.moveTo(x, y);
-    else shape.lineTo(x, y);
+    const a = (i * Math.PI) / STAR_POINTS - Math.PI / 2;
+    const x = cx + Math.cos(a) * r;
+    const y = cy + Math.sin(a) * r;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
   }
-  shape.closePath();
-  return shape;
+  ctx.closePath();
+  ctx.fillStyle = STICKER_YELLOW;
+  ctx.fill();
+  ctx.lineWidth = S * 0.018;
+  ctx.strokeStyle = "#b8870c";
+  ctx.stroke();
+  ctx.fillStyle = "#1a1304";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `900 ${S * 0.42}px Arial, sans-serif`;
+  ctx.fillText("$1", cx, cy + S * 0.03);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
 }
 
 /**
@@ -103,38 +123,19 @@ function makeCorkTexture(): THREE.CanvasTexture {
 }
 
 /** "$1" price text on a transparent canvas texture. */
-function makePriceTexture(): THREE.CanvasTexture {
-  const size = 256;
-  const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext("2d")!;
-  ctx.clearRect(0, 0, size, size);
-  ctx.fillStyle = "#1a1304";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.font = "900 150px Arial, sans-serif";
-  ctx.fillText("$1", size / 2, size / 2 + 8);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.anisotropy = 4;
-  return tex;
-}
-
 /**
  * The "buy & sell" stage: the assembled device sealed in a retail pack.
- * The clear shield is a vacuum-formed wrap that follows the device's own
- * shape (its shell geometry, stood off slightly); the cardboard backing
- * card carries a standard euro hang hole (round hole + neck); and the $1
- * starburst is a flat, depth-less printed sticker on the front. Fades
- * with proximity to the COMMERCE stage.
+ * The clear shield is a glossy front blister (the device's front cover,
+ * stood off); the cardboard backing card carries an open peg slot; and
+ * the $1 starburst is a flat printed sticker on the front. Fades with
+ * proximity to the COMMERCE stage.
  */
 export function FigureBox() {
   const { stageRef, reducedMotion } = useStage();
-  const { front, back, size } = useDeviceGeometry();
+  const { front, size } = useDeviceGeometry();
   const groupRef = useRef<THREE.Group>(null);
 
-  const star = useMemo(() => makeStarShape(STAR_POINTS, 0.24, 0.13), []);
-  const starGeo = useMemo(() => new THREE.ShapeGeometry(star), [star]);
-  const priceTex = useMemo(() => makePriceTexture(), []);
+  const stickerTex = useMemo(() => makeStickerTexture(), []);
   const corkTex = useMemo(() => makeCorkTexture(), []);
 
   const cardW = size.x * 1.7;
@@ -152,22 +153,6 @@ export function FigureBox() {
       bevelSegments: 2,
     });
   }, [cardW, cardH]);
-
-  const wrapMaterial = () => (
-    <meshPhysicalMaterial
-      color="#ffffff"
-      metalness={0}
-      roughness={0.06}
-      transmission={0.94}
-      ior={1.3}
-      thickness={0.04}
-      clearcoat={1}
-      clearcoatRoughness={0.06}
-      transparent
-      opacity={0}
-      side={THREE.DoubleSide}
-    />
-  );
 
   useFrame((_, delta) => {
     const g = groupRef.current;
@@ -203,22 +188,31 @@ export function FigureBox() {
         />
       </mesh>
 
-      {/* Form-fitted vacuum wrap — the device's own shell, stood off. */}
+      {/* Glossy clear blister over the front of the device (front cover
+          only, stood off) — reads as a clean vacuum-formed shield. */}
       <group scale={WRAP_SCALE}>
-        <mesh geometry={front}>{wrapMaterial()}</mesh>
-        <mesh geometry={back}>{wrapMaterial()}</mesh>
+        <mesh geometry={front}>
+          <meshPhysicalMaterial
+            color="#eef4f7"
+            metalness={0}
+            roughness={0.05}
+            transmission={0.6}
+            ior={1.45}
+            thickness={0.02}
+            clearcoat={1}
+            clearcoatRoughness={0.04}
+            transparent
+            opacity={0}
+            side={THREE.FrontSide}
+          />
+        </mesh>
       </group>
 
-      {/* Flat $1 sticker — a depth-less printed decal on the front. */}
-      <group position={[-cardW * 0.3, cardH * 0.22, frontZ + 0.03]} rotation={[0, 0, -0.12]}>
-        <mesh geometry={starGeo}>
-          <meshStandardMaterial color={STICKER_YELLOW} roughness={0.6} metalness={0} transparent opacity={0} />
-        </mesh>
-        <mesh position={[0, 0, 0.002]}>
-          <planeGeometry args={[0.28, 0.28]} />
-          <meshBasicMaterial map={priceTex} transparent opacity={0} />
-        </mesh>
-      </group>
+      {/* $1 starburst — one flat printed sticker decal on the front. */}
+      <mesh position={[-cardW * 0.28, cardH * 0.24, frontZ + 0.04]} rotation={[0, 0, -0.12]}>
+        <planeGeometry args={[0.42, 0.42]} />
+        <meshBasicMaterial map={stickerTex} transparent opacity={0} toneMapped={false} />
+      </mesh>
     </group>
   );
 }
