@@ -163,7 +163,7 @@ export function BuildGlow() {
           ref={dustMat}
           map={dustTex}
           color={GLOW}
-          size={0.05}
+          size={0.03}
           sizeAttenuation
           transparent
           opacity={0}

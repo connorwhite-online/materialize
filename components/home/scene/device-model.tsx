@@ -11,7 +11,6 @@ import {
   EXPLODE_SPACING,
   PCB_ORDER,
   STAGE,
-  stageWeight,
 } from "./constants";
 import { useStage } from "./stage-context";
 import { useDeviceGeometry } from "./use-device-geometry";
@@ -67,16 +66,17 @@ function makeHologramMaterial(): THREE.ShaderMaterial {
         float scan = 0.5 + 0.5 * sin(vWorldY * 90.0 - uTime * 2.5);
         float a = uOpacity * (0.16 + 0.84 * fres) * (0.55 + 0.45 * scan);
         vec3 col = uColor * (0.7 + fres * 1.4);
-        // Sintering heat at the active build line: a bright tight core
-        // that bleeds softly UP into the not-yet-printed hologram above,
-        // like heat diffusing off the fresh layer — rather than a hard,
-        // symmetric line sitting at the boundary.
+        // Sintering heat at the active build line: a soft, wide glow that
+        // bleeds UP into the not-yet-printed hologram (the direction the
+        // print actually grows), with a gentle shimmer — diffuse, not a
+        // hard line at the boundary.
         float d = vWorldY - uBuildY;
-        float core = exp(-pow(d * 24.0, 2.0));
-        float bleed = exp(-max(d, 0.0) * 6.0) * step(0.0, d);
-        float band = max(core, bleed * (0.45 + 0.2 * scan));
-        col += vec3(0.75, 0.95, 1.0) * band * 2.0;
-        a = max(a, band * (0.35 + uOpacity * 1.4));
+        float core = exp(-pow(d * 9.0, 2.0));       // wide soft core
+        float up = exp(-max(d, 0.0) * 2.6);          // long upward heat bleed
+        float band = max(core, up * 0.5);
+        band *= 0.6 + 0.4 * scan;                    // gentle shimmer
+        col += vec3(0.7, 0.9, 1.0) * band * 1.35;
+        a = max(a, band * (0.22 + uOpacity * 0.95));
         gl_FragColor = vec4(col, a);
       }
     `,
@@ -352,42 +352,88 @@ export function DeviceModel({
     // Internals only appear once the case starts opening.
     if (internalsRef.current) internalsRef.current.visible = e > 0.015;
 
-    // --- Manufacturing print reveal (same mesh, no cross-fade) ---
+    // --- Manufacturing: fade the carousel material -> hologram, then SLS
+    // print the material UP the surface once (same mesh, no cross-fade).
+    // Scrolling in we cross-dissolve solid -> hologram, then sinter up;
+    // scrolling back the sinter reverses, then dissolves back to solid —
+    // so the print only ever sweeps in the real direction it would. ---
     const stage = stageRef.current;
-    const matW = stageWeight(stage, STAGE.MATERIALS);
-    // Solid (hero) → dematerialise on entry → slow sinter print → solid.
-    let build = 1;
-    if (stage > 0.6 && stage <= 0.74) build = 1 - (stage - 0.6) / 0.14;
-    else if (stage > 0.74 && stage <= 1.2) build = (stage - 0.74) / 0.46;
-    else if (stage > 0.6) build = 1;
-    build = THREE.MathUtils.clamp(build, 0, 1);
-
-    // Hide the seated end-face parts (camera/LED/mic/USB-C) while the
-    // device is a printing hologram — only the clipped shell sinters in.
-    // Gated on the print actually being underway (shell clipped) or the
-    // hologram dominating, so they stay put during ordinary hero scroll.
-    const hideFeatures = build < 0.999 || matW > 0.5;
-    if (topFeatRef.current) topFeatRef.current.visible = !hideFeatures;
-    if (botFeatRef.current) botFeatRef.current.visible = !hideFeatures;
-
-    const q = Math.round(build * LAYERS) / LAYERS;
-    const localBuildY = -size.y / 2 + q * size.y * 1.04;
-    localBelow.constant = localBuildY;
-    localAbove.constant = -localBuildY;
-    let worldBuildY = 0;
-    if (rootRef.current) {
-      worldBelow.copy(localBelow).applyMatrix4(rootRef.current.matrixWorld);
-      worldAbove.copy(localAbove).applyMatrix4(rootRef.current.matrixWorld);
-      worldBuildY = tmpV.set(0, localBuildY, 0).applyMatrix4(rootRef.current.matrixWorld).y;
+    const FADE_A = 0.5; // start the solid -> hologram dissolve
+    const FADE_B = 0.78; // dissolve complete; sinter begins
+    const SINTER_END = 1.2; // fully printed by here
+    // holoMix: 0 = solid carousel material, 1 = print / hologram mode.
+    // p: sinter progress, 0 = all hologram (bottom) -> 1 = fully solid (top).
+    let holoMix: number;
+    let p: number;
+    if (stage <= FADE_A) {
+      holoMix = 0;
+      p = 0;
+    } else if (stage < FADE_B) {
+      holoMix = (stage - FADE_A) / (FADE_B - FADE_A);
+      p = 0;
+    } else {
+      holoMix = 1;
+      p = THREE.MathUtils.clamp((stage - FADE_B) / (SINTER_END - FADE_B), 0, 1);
     }
+
+    const HOLO_BASE = 0.55;
     const t = state.clock.elapsedTime;
-    const holoOp = matW * 0.55;
-    const showBand = matW > 0.02 && q > 0.01 && q < 0.99 ? 1 : 0;
+    let solidOpacity = 1;
+    let holoOp = 0;
+    let showBand = 0;
+    let worldBuildY = 0;
+
+    if (holoMix < 1) {
+      // Cross-dissolve: whole shape, no clipping. The solid fades out as
+      // the hologram fades in (no sinter motion in either direction).
+      solidOpacity = 1 - holoMix;
+      holoOp = holoMix * HOLO_BASE;
+      localBelow.constant = 1e3;
+      localAbove.constant = 1e3;
+      if (rootRef.current) {
+        worldBelow.copy(localBelow).applyMatrix4(rootRef.current.matrixWorld);
+        worldAbove.copy(localAbove).applyMatrix4(rootRef.current.matrixWorld);
+      }
+    } else {
+      // Sinter: solid material grows up from the bottom, hologram above.
+      holoOp = HOLO_BASE;
+      const q = Math.round(p * LAYERS) / LAYERS;
+      const localBuildY = -size.y / 2 + q * size.y * 1.04;
+      localBelow.constant = localBuildY;
+      localAbove.constant = -localBuildY;
+      if (rootRef.current) {
+        worldBelow.copy(localBelow).applyMatrix4(rootRef.current.matrixWorld);
+        worldAbove.copy(localAbove).applyMatrix4(rootRef.current.matrixWorld);
+        worldBuildY = tmpV.set(0, localBuildY, 0).applyMatrix4(rootRef.current.matrixWorld).y;
+      }
+      showBand = q > 0.01 && q < 0.99 ? 1 : 0;
+    }
+
+    // Drive the shell opacity during the dissolve (force transparent so a
+    // metal shell can fade); otherwise leave lerpShell's transmission-based
+    // transparency in charge.
+    for (const mat of [frontMat.current, backMat.current]) {
+      if (!mat) continue;
+      if (holoMix > 0 && holoMix < 1) {
+        mat.transparent = true;
+        mat.opacity = solidOpacity;
+      } else {
+        mat.opacity = 1;
+      }
+    }
+
     for (const m of [holoA, holoB]) {
       m.uniforms.uTime.value = t;
       m.uniforms.uOpacity.value = holoOp;
       m.uniforms.uBuildY.value = showBand ? worldBuildY : 1e3;
     }
+
+    // Hide the seated end-face parts (camera/LED/mic/USB-C) during the
+    // materials hologram so only the shell sinters in; they return for the
+    // assembled hero and for the teardown explode.
+    const hideFeatures = stage > 0.6 && stage < STAGE.TEARDOWN - 0.45;
+    if (topFeatRef.current) topFeatRef.current.visible = !hideFeatures;
+    if (botFeatRef.current) botFeatRef.current.visible = !hideFeatures;
 
     for (const part of TEARDOWN_PARTS) {
       const g = partRefs.current[part.id];
