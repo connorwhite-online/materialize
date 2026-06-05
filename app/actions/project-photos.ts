@@ -47,11 +47,13 @@ export async function addProjectPhoto(params: {
 
     const trimmedCaption = params.caption?.trim().slice(0, MAX_CAPTION_LENGTH);
 
-    const [project] = await db
-      .select({ id: projects.id, slug: projects.slug })
-      .from(projects)
-      .where(and(eq(projects.id, params.projectId), eq(projects.userId, userId)));
-    if (!project) return { error: "Project not found" };
+    // Owner, org member, or collaborator may add curator photos —
+    // same write gate as addProjectGuideImage / BOM / circuits. The
+    // direct owner-only check here locked org co-owners + collaborators
+    // out of the project's own gallery.
+    const access = await canWriteProject(userId, params.projectId);
+    if (!access.ok) return { error: "Project not found" };
+    const project = access.resource;
 
     const existing = await db
       .select({ sortOrder: projectPhotos.sortOrder })
@@ -258,11 +260,13 @@ export async function deleteProjectPhoto(photoId: string) {
       .innerJoin(projects, eq(projectPhotos.projectId, projects.id))
       .where(eq(projectPhotos.id, photoId));
 
-    if (
-      !photo ||
-      (photo.authorId !== userId && photo.projectUserId !== userId)
-    ) {
-      return { error: "Photo not found" };
+    if (!photo) return { error: "Photo not found" };
+    // The photo's author OR anyone who can write the project (owner,
+    // org member, collaborator) may delete it. Owner-only locked org
+    // co-owners + collaborators out of moderating the gallery.
+    if (photo.authorId !== userId) {
+      const access = await canWriteProject(userId, photo.projectId);
+      if (!access.ok) return { error: "Photo not found" };
     }
 
     try {
@@ -298,14 +302,22 @@ export async function updateProjectPhotoCaption(
     const [photo] = await db
       .select({
         id: projectPhotos.id,
-        projectUserId: projects.userId,
+        authorId: projectPhotos.userId,
+        projectId: projectPhotos.projectId,
+        projectSlug: projects.slug,
       })
       .from(projectPhotos)
       .innerJoin(projects, eq(projectPhotos.projectId, projects.id))
       .where(eq(projectPhotos.id, photoId));
 
-    if (!photo || photo.projectUserId !== userId) {
-      return { error: "Photo not found" };
+    if (!photo) return { error: "Photo not found" };
+    // Author OR project-writer may edit — mirrors deleteProjectPhoto and
+    // the file-photo fix (CON-84). Was owner-only, so build/guide photo
+    // authors couldn't fix their own caption and org co-owners /
+    // collaborators couldn't edit at all.
+    if (photo.authorId !== userId) {
+      const access = await canWriteProject(userId, photo.projectId);
+      if (!access.ok) return { error: "Photo not found" };
     }
 
     await db
@@ -313,6 +325,9 @@ export async function updateProjectPhotoCaption(
       .set({ caption: trimmed || null })
       .where(eq(projectPhotos.id, photoId));
 
+    // Captions render on the project page (SSR) — revalidate so the
+    // edit shows without a manual refresh.
+    revalidatePath(`/projects/${photo.projectSlug}`);
     return { success: true };
   } catch (error) {
     logError("updateProjectPhotoCaption", error);

@@ -298,6 +298,7 @@ export async function updatePhotoCaption(photoId: string, caption: string) {
         id: filePhotos.id,
         authorId: filePhotos.userId,
         fileUserId: files.userId,
+        fileSlug: files.slug,
       })
       .from(filePhotos)
       .innerJoin(files, eq(filePhotos.fileId, files.id))
@@ -315,6 +316,10 @@ export async function updatePhotoCaption(photoId: string, caption: string) {
       .set({ caption: trimmed || null })
       .where(eq(filePhotos.id, photoId));
 
+    // Captions render on the file page (SSR) — revalidate so the edit
+    // shows without a manual refresh, matching addFilePhoto /
+    // deleteFilePhoto which already do.
+    revalidatePath(`/files/${photo.fileSlug}`);
     return { success: true };
   } catch (error) {
     logError("updatePhotoCaption", error);
