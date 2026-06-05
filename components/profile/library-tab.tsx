@@ -12,7 +12,6 @@ import {
   projectPhotos,
 } from "@/lib/db/schema";
 import { eq, and, asc, desc, inArray, sql } from "drizzle-orm";
-import { Button } from "@/components/ui/button";
 import { CollectionSection } from "./collection-section";
 import {
   LibraryFileCard,
@@ -23,7 +22,7 @@ import {
   type LibraryProjectCardItem,
 } from "./library-project-card";
 import { LibraryAddMenu } from "./library-add-menu";
-import { UploadDialog } from "@/components/upload/upload-dialog";
+import { LibraryEmptyState } from "./library-empty-state";
 
 interface LibraryTabProps {
   userId: string;
@@ -488,18 +487,12 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
   const hasAnyContent = totalItems > 0 || userCollections.length > 0;
 
   if (!hasAnyContent) {
+    if (isOwner) {
+      return <LibraryEmptyState />;
+    }
     return (
       <div className="rounded-2xl bg-muted/50 py-16 text-center">
-        <p className="text-muted-foreground">
-          {isOwner ? "Your library is empty." : "Nothing to show."}
-        </p>
-        {isOwner && (
-          <div className="mt-4">
-            <UploadDialog
-              trigger={<Button>Upload your first file</Button>}
-            />
-          </div>
-        )}
+        <p className="text-muted-foreground">Nothing to show.</p>
       </div>
     );
   }

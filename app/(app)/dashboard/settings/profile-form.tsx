@@ -9,12 +9,14 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { AvatarUploader } from "./avatar-uploader";
 
 interface ProfileFormProps {
   initialData: {
     username: string;
     displayName: string;
     bio: string;
+    avatarUrl: string | null;
     socialLinks: Array<{ platform: string; url: string }>;
   };
 }
@@ -73,7 +75,18 @@ export function ProfileForm({ initialData }: ProfileFormProps) {
         <CardHeader>
           <CardTitle className="text-base">Profile</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-6">
+          <div className="space-y-1.5">
+            <Label>Avatar</Label>
+            <AvatarUploader
+              seed={initialData.username || initialData.displayName || "user"}
+              displayName={initialData.displayName}
+              initialAvatarUrl={initialData.avatarUrl}
+            />
+          </div>
+
+          <Separator />
+
           <form action={profileAction} className="space-y-4">
             <div>
               <Label htmlFor="username">Username</Label>

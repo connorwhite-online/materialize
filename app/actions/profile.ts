@@ -51,6 +51,81 @@ export async function updateProfile(formData: FormData) {
   }
 }
 
+const ACCEPTED_AVATAR_TYPES = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+]);
+const MAX_AVATAR_SIZE = 10 * 1024 * 1024; // 10MB
+
+/**
+ * Upload (or replace) the signed-in user's avatar.
+ *
+ * Clerk is the source of truth for avatars — the clerk webhook maps
+ * `image_url` → `users.avatarUrl` — so we push the image through Clerk's
+ * backend API rather than R2. We then mirror the returned `imageUrl`
+ * into our own row right away so the new avatar shows without waiting on
+ * the webhook (which never fires in local dev).
+ */
+export async function updateAvatar(
+  formData: FormData
+): Promise<{ avatarUrl: string | null } | { error: string }> {
+  const { userId } = await auth();
+  if (!userId) return { error: "Unauthorized" };
+
+  const file = formData.get("avatar");
+  if (!(file instanceof File) || file.size === 0) {
+    return { error: "No image selected" };
+  }
+  if (!ACCEPTED_AVATAR_TYPES.has(file.type.toLowerCase())) {
+    return { error: "Unsupported image format. Use JPG, PNG, WEBP or GIF." };
+  }
+  if (file.size > MAX_AVATAR_SIZE) {
+    return { error: "Image exceeds the 10MB limit." };
+  }
+
+  try {
+    const clerk = await clerkClient();
+    const updated = await clerk.users.updateUserProfileImage(userId, { file });
+    const avatarUrl = updated.imageUrl ?? null;
+
+    await db.update(users).set({ avatarUrl }).where(eq(users.id, userId));
+
+    revalidatePath("/dashboard/settings");
+    return { avatarUrl };
+  } catch (error) {
+    logError("updateAvatar", error);
+    return { error: "Failed to upload image. Please try again." };
+  }
+}
+
+/**
+ * Remove the signed-in user's avatar, reverting to the gradient
+ * fallback. Mirrors `updateAvatar`: clears the image in Clerk, then
+ * nulls our cached `avatarUrl`.
+ */
+export async function removeAvatar(): Promise<
+  { ok: true } | { error: string }
+> {
+  const { userId } = await auth();
+  if (!userId) return { error: "Unauthorized" };
+
+  try {
+    const clerk = await clerkClient();
+    await clerk.users.deleteUserProfileImage(userId);
+
+    await db.update(users).set({ avatarUrl: null }).where(eq(users.id, userId));
+
+    revalidatePath("/dashboard/settings");
+    return { ok: true };
+  } catch (error) {
+    logError("removeAvatar", error);
+    return { error: "Failed to remove image. Please try again." };
+  }
+}
+
 export async function updateDefaultUploadVisibility(
   visibility: "public" | "private"
 ): Promise<{ ok: true } | { error: string }> {

@@ -38,6 +38,7 @@ export default async function SettingsPage() {
           username: user?.username ?? "",
           displayName: user?.displayName ?? "",
           bio: user?.bio ?? "",
+          avatarUrl: user?.avatarUrl ?? null,
           socialLinks: user?.socialLinks ?? [],
         }}
       />
