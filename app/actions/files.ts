@@ -57,9 +57,11 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { nanoid } from "nanoid";
 import { createListingSchema } from "@/lib/validations/file";
+import { MAX_PROJECT_FILES } from "@/lib/validations/project";
 import {
   canWriteCollection,
   canWriteFile,
+  canWriteProject,
   resolveOwnerForCreate,
 } from "@/lib/authorization";
 import {
@@ -424,8 +426,43 @@ export async function createFileListing(formData: FormData) {
       });
     }
 
+    // Optional: attach the new file to a project bundle. Used by the
+    // "Project" picker on the upload form and the project page's "Add
+    // files" combo modal (which uploads straight into the bundle).
+    // When attached we redirect back to the project instead of the
+    // file so the creator lands where they started.
+    const rawProjectId = (formData.get("projectId") as string | null) || "";
+    let attachedProjectSlug: string | null = null;
+    if (rawProjectId && rawProjectId !== "none") {
+      const access = await canWriteProject(userId, rawProjectId);
+      if (access.ok) {
+        const existing = await db
+          .select({ fileId: projectFiles.fileId })
+          .from(projectFiles)
+          .where(eq(projectFiles.projectId, rawProjectId));
+        if (existing.length < MAX_PROJECT_FILES) {
+          await db
+            .insert(projectFiles)
+            .values({
+              projectId: rawProjectId,
+              fileId: file.id,
+              position: existing.length,
+            })
+            .onConflictDoNothing({
+              target: [projectFiles.projectId, projectFiles.fileId],
+            });
+        }
+        revalidatePath(`/projects/${access.resource.slug}`);
+        attachedProjectSlug = access.resource.slug;
+      }
+    }
+
     revalidatePath("/dashboard");
-    redirect(`/files/${file.slug}`);
+    redirect(
+      attachedProjectSlug
+        ? `/projects/${attachedProjectSlug}`
+        : `/files/${file.slug}`
+    );
   } catch (error) {
     if (isRedirectError(error)) throw error;
     logError("createFileListing", error);
