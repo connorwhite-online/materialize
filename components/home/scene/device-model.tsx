@@ -10,8 +10,66 @@ import {
   ORDER_CENTER,
   EXPLODE_SPACING,
   PCB_ORDER,
+  STAGE,
+  stageWeight,
 } from "./constants";
+import { useStage } from "./stage-context";
 import { useDeviceGeometry } from "./use-device-geometry";
+
+const HOLO = "#6fd2ff";
+// Visible sinter layers across the print build (SLS-style stepped reveal).
+const LAYERS = 52;
+
+/** Holographic ghost material — subtle fresnel-edge glow + scanlines,
+ *  clipping-aware so it only shows above the sintering build line. */
+function makeHologramMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    clipping: true,
+    uniforms: {
+      uTime: { value: 0 },
+      uColor: { value: new THREE.Color(HOLO) },
+      uOpacity: { value: 0.0 },
+    },
+    vertexShader: /* glsl */ `
+      #include <common>
+      #include <clipping_planes_pars_vertex>
+      varying vec3 vNormalW;
+      varying vec3 vViewDir;
+      varying float vWorldY;
+      void main() {
+        vec3 transformed = position;
+        vec4 worldPos = modelMatrix * vec4(transformed, 1.0);
+        vWorldY = worldPos.y;
+        vNormalW = normalize(mat3(modelMatrix) * normal);
+        vViewDir = normalize(cameraPosition - worldPos.xyz);
+        vec4 mvPosition = viewMatrix * worldPos;
+        #include <clipping_planes_vertex>
+        gl_Position = projectionMatrix * mvPosition;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      #include <common>
+      #include <clipping_planes_pars_fragment>
+      uniform float uTime;
+      uniform vec3 uColor;
+      uniform float uOpacity;
+      varying vec3 vNormalW;
+      varying vec3 vViewDir;
+      varying float vWorldY;
+      void main() {
+        #include <clipping_planes_fragment>
+        float fres = pow(1.0 - abs(dot(normalize(vNormalW), normalize(vViewDir))), 1.8);
+        float scan = 0.5 + 0.5 * sin(vWorldY * 90.0 - uTime * 2.5);
+        float a = uOpacity * (0.16 + 0.84 * fres) * (0.55 + 0.45 * scan);
+        vec3 col = uColor * (0.7 + fres * 1.4);
+        gl_FragColor = vec4(col, a);
+      }
+    `,
+  });
+}
 
 export interface MaterialTarget {
   color: THREE.Color;
@@ -206,12 +264,30 @@ export function DeviceModel({
   castShadow = true,
 }: DeviceModelProps) {
   const { front, back, size, topCap, bottomCap } = useDeviceGeometry();
+  const { stageRef } = useStage();
+  const rootRef = useRef<THREE.Group>(null);
   const frontRef = useRef<THREE.Group>(null);
   const backRef = useRef<THREE.Group>(null);
   const internalsRef = useRef<THREE.Group>(null);
+  const sinterRef = useRef<THREE.Mesh>(null);
   const frontMat = useRef<THREE.MeshPhysicalMaterial>(null);
   const backMat = useRef<THREE.MeshPhysicalMaterial>(null);
   const partRefs = useRef<Record<string, THREE.Group | null>>({});
+
+  // SLS print reveal: the covers are clipped at a build line that sweeps
+  // up in the manufacturing stage (below = solid material, above =
+  // hologram). The clip planes follow the device's own transform so it
+  // works while it's scaled/spun. Single mesh, no cross-fade.
+  const holoA = useMemo(makeHologramMaterial, []);
+  const holoB = useMemo(makeHologramMaterial, []);
+  const worldBelow = useMemo(() => new THREE.Plane(new THREE.Vector3(0, -1, 0), 1e3), []);
+  const worldAbove = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 1e3), []);
+  const localBelow = useMemo(() => new THREE.Plane(new THREE.Vector3(0, -1, 0), 0), []);
+  const localAbove = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), []);
+  useMemo(() => {
+    holoA.clippingPlanes = [worldAbove];
+    holoB.clippingPlanes = [worldAbove];
+  }, [holoA, holoB, worldAbove]);
 
   const w = size.x;
   const h = size.y;
@@ -250,7 +326,7 @@ export function DeviceModel({
     }
   };
 
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
     const e = explodeRef.current;
     lerpShell(frontMat.current, delta);
     lerpShell(backMat.current, delta);
@@ -261,6 +337,34 @@ export function DeviceModel({
 
     // Internals only appear once the case starts opening.
     if (internalsRef.current) internalsRef.current.visible = e > 0.015;
+
+    // --- Manufacturing print reveal (same mesh, no cross-fade) ---
+    const stage = stageRef.current;
+    const matW = stageWeight(stage, STAGE.MATERIALS);
+    // Solid (hero) → dematerialise on entry → slow sinter print → solid.
+    let build = 1;
+    if (stage > 0.6 && stage <= 0.74) build = 1 - (stage - 0.6) / 0.14;
+    else if (stage > 0.74 && stage <= 1.2) build = (stage - 0.74) / 0.46;
+    else if (stage > 0.6) build = 1;
+    build = THREE.MathUtils.clamp(build, 0, 1);
+    const q = Math.round(build * LAYERS) / LAYERS;
+    const localBuildY = -size.y / 2 + q * size.y * 1.04;
+    localBelow.constant = localBuildY;
+    localAbove.constant = -localBuildY;
+    if (rootRef.current) {
+      worldBelow.copy(localBelow).applyMatrix4(rootRef.current.matrixWorld);
+      worldAbove.copy(localAbove).applyMatrix4(rootRef.current.matrixWorld);
+    }
+    const t = state.clock.elapsedTime;
+    const holoOp = matW * 0.55;
+    holoA.uniforms.uTime.value = t;
+    holoB.uniforms.uTime.value = t;
+    holoA.uniforms.uOpacity.value = holoOp;
+    holoB.uniforms.uOpacity.value = holoOp;
+    if (sinterRef.current) {
+      sinterRef.current.position.y = localBuildY;
+      sinterRef.current.visible = matW > 0.02 && q > 0.01 && q < 0.99;
+    }
 
     for (const part of TEARDOWN_PARTS) {
       const g = partRefs.current[part.id];
@@ -287,11 +391,22 @@ export function DeviceModel({
       ior={target.ior}
       thickness={target.thickness}
       transparent={target.transmission > 0.02}
+      clippingPlanes={[worldBelow]}
     />
   );
 
   return (
-    <group>
+    <group ref={rootRef}>
+      {/* Hologram ghost of the whole shell — visible above the sintering
+          build line in the manufacturing stage; clipped away otherwise. */}
+      <mesh geometry={front} material={holoA} />
+      <mesh geometry={back} material={holoB} />
+      {/* Sinter line — a bright print-head ring at the build height. */}
+      <mesh ref={sinterRef} rotation={[Math.PI / 2, 0, 0]} visible={false}>
+        <torusGeometry args={[size.x * 0.56, 0.004, 8, 80]} />
+        <meshBasicMaterial color="#eaffff" toneMapped={false} />
+      </mesh>
+
       {/* --- Front cover (faces camera; carries the hole-aligned bits) --- */}
       <group ref={frontRef}>
         <mesh geometry={front} castShadow={castShadow} receiveShadow>
