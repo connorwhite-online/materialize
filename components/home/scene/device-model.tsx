@@ -67,9 +67,15 @@ function makeHologramMaterial(): THREE.ShaderMaterial {
         float scan = 0.5 + 0.5 * sin(vWorldY * 90.0 - uTime * 2.5);
         float a = uOpacity * (0.16 + 0.84 * fres) * (0.55 + 0.45 * scan);
         vec3 col = uColor * (0.7 + fres * 1.4);
-        // Bright sintering band on the surface at the active build line.
-        float band = exp(-pow((vWorldY - uBuildY) * 26.0, 2.0));
-        col += vec3(0.75, 0.95, 1.0) * band * 2.2;
+        // Sintering heat at the active build line: a bright tight core
+        // that bleeds softly UP into the not-yet-printed hologram above,
+        // like heat diffusing off the fresh layer — rather than a hard,
+        // symmetric line sitting at the boundary.
+        float d = vWorldY - uBuildY;
+        float core = exp(-pow(d * 24.0, 2.0));
+        float bleed = exp(-max(d, 0.0) * 6.0) * step(0.0, d);
+        float band = max(core, bleed * (0.45 + 0.2 * scan));
+        col += vec3(0.75, 0.95, 1.0) * band * 2.0;
         a = max(a, band * (0.35 + uOpacity * 1.4));
         gl_FragColor = vec4(col, a);
       }
