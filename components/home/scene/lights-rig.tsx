@@ -27,16 +27,19 @@ export function LightsRig() {
     if (!key) return;
     const w = stageWeight(stageRef.current, STAGE.MATERIALS);
     key.position.lerpVectors(KEY_HOME, KEY_CAMERA, w);
-    key.intensity = 1.2 + w * 0.6;
+    key.intensity = 2.0 + w * 0.8;
   });
 
   return (
     <>
-      <ambientLight intensity={0.5} />
-      <directionalLight ref={keyRef} position={KEY_HOME.toArray()} intensity={1.2} />
-      <directionalLight position={[-5, -3, -5]} intensity={0.45} />
-      <directionalLight position={[0, -5, 2]} intensity={0.3} />
-      <StudioEnvironment />
+      {/* Low ambient + a strong key for a dramatic, high-contrast look;
+          the IBL is dimmed (less wrap-around fill) but still gives metals
+          their reflections. */}
+      <ambientLight intensity={0.12} />
+      <directionalLight ref={keyRef} position={KEY_HOME.toArray()} intensity={2.0} />
+      <directionalLight position={[-5, -3, -5]} intensity={0.18} />
+      <directionalLight position={[0, -5, 2]} intensity={0.12} />
+      <StudioEnvironment intensity={0.5} keyBias={1.3} />
     </>
   );
 }
