@@ -90,15 +90,16 @@ export async function runCreateListing(
         if (xhr.status >= 200 && xhr.status < 300) {
           resolve();
         } else {
-          reject(
-            new Error(
-              `R2 upload failed (${xhr.status}). Check R2 CORS settings.`
-            )
-          );
+          // A real HTTP status came back, so the request reached R2 and
+          // CORS is fine — don't misdirect to CORS here. A genuine CORS
+          // failure surfaces on the `error` event below with status 0.
+          reject(new Error(`R2 upload failed (${xhr.status}).`));
         }
       });
       xhr.addEventListener("error", () =>
-        reject(new Error("Network error uploading to R2."))
+        reject(
+          new Error("Couldn't reach R2 (network or CORS). Please try again.")
+        )
       );
       xhr.open("PUT", uploadUrl);
       xhr.setRequestHeader("Content-Type", "application/octet-stream");

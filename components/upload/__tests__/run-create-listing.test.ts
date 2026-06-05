@@ -130,7 +130,7 @@ describe("runCreateListing", () => {
     FakeXHR.nextError = "network";
     const result = await runCreateListing(makeInput());
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toMatch(/Network error/);
+    if (!result.ok) expect(result.error).toMatch(/network or CORS/);
   });
 
   it("propagates createFileListing field errors", async () => {
