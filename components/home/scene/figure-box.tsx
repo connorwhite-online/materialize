@@ -10,8 +10,9 @@ import { STAGE, STICKER_YELLOW, COMMERCE_YAW, COMMERCE_PITCH } from "./constants
 // Classic dollar-store starburst. The brief said "7-pronged"; the real
 // retail look is a denser burst, so this is exposed as a dial.
 const STAR_POINTS = 12;
-// How much the clear wrap stands off the device surface (vacuum-form fit).
-const WRAP_SCALE = 1.05;
+// How much the clear wrap stands off the device surface (vacuum-form
+// fit). Enough clearance to avoid z-fighting with the shell surface.
+const WRAP_SCALE = 1.13;
 
 function makeStarShape(points: number, outer: number, inner: number): THREE.Shape {
   const shape = new THREE.Shape();
