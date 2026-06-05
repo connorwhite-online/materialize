@@ -53,11 +53,15 @@ export function PrimaryDevice({ target, dragVelocityRef }: PrimaryDeviceProps) {
     explodeRef.current =
       smoothstep(2.55, 3, stage) * (1 - smoothstep(3, 3.45, stage));
 
-    const present = (1 - matW) * (1 - footerW * 0.9);
+    // In the materials stage the device stays — it just shrinks and
+    // sits in front of the material-sample cards (no model swap). It
+    // still fully recedes for the footer.
+    const present = 1 - footerW * 0.9;
+    const matShrink = 1 - matW * 0.55;
     const baseScale = 1 + teardownW * 0.14;
     const k = reducedMotion ? 1 : 1 - Math.exp(-delta * 6);
 
-    const targetScale = baseScale * present;
+    const targetScale = baseScale * present * matShrink;
     g.scale.setScalar(THREE.MathUtils.lerp(g.scale.x, targetScale, k));
     g.visible = targetScale > 0.02;
 
