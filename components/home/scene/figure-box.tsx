@@ -28,28 +28,77 @@ function makeStarShape(points: number, outer: number, inner: number): THREE.Shap
   return shape;
 }
 
-/** Trace a centred rounded rectangle onto a Shape or Path. */
-function roundedRect(
-  ctx: THREE.Shape | THREE.Path,
-  cx: number,
-  cy: number,
-  w: number,
-  h: number,
-  r: number
-) {
-  const l = cx - w / 2;
-  const rt = cx + w / 2;
-  const t = cy + h / 2;
-  const b = cy - h / 2;
-  ctx.moveTo(l + r, b);
-  ctx.lineTo(rt - r, b);
-  ctx.absarc(rt - r, b + r, r, -Math.PI / 2, 0, false);
-  ctx.lineTo(rt, t - r);
-  ctx.absarc(rt - r, t - r, r, 0, Math.PI / 2, false);
-  ctx.lineTo(l + r, t);
-  ctx.absarc(l + r, t - r, r, Math.PI / 2, Math.PI, false);
-  ctx.lineTo(l, b + r);
-  ctx.absarc(l + r, b + r, r, Math.PI, Math.PI * 1.5, false);
+/**
+ * Backing-card outline with an open peg slot: a narrow slit runs in
+ * from the top edge down to a semicircle the peg rests in — a cleaner,
+ * more futuristic take on the classic hang hole.
+ */
+function makeCardShape(cardW: number, cardH: number): THREE.Shape {
+  const hw = cardW / 2;
+  const hh = cardH / 2;
+  const r = 0.1;
+  const slitHalf = 0.02;
+  const circR = 0.058;
+  const circCY = hh - 0.22;
+  const yInt = circCY + Math.sqrt(Math.max(0, circR * circR - slitHalf * slitHalf));
+
+  const s = new THREE.Shape();
+  s.moveTo(-hw + r, -hh);
+  s.lineTo(hw - r, -hh);
+  s.absarc(hw - r, -hh + r, r, -Math.PI / 2, 0, false);
+  s.lineTo(hw, hh - r);
+  s.absarc(hw - r, hh - r, r, 0, Math.PI / 2, false); // → (hw-r, hh)
+  // Top edge in to the slit, down its right wall to the circle.
+  s.lineTo(slitHalf, hh);
+  s.lineTo(slitHalf, yInt);
+  // Sweep the circle the long way (through the bottom) to the slit's left wall.
+  const aR = Math.atan2(yInt - circCY, slitHalf);
+  const aL = Math.atan2(yInt - circCY, -slitHalf);
+  const start = aR;
+  const end = aL - Math.PI * 2;
+  const segs = 28;
+  for (let i = 1; i <= segs; i++) {
+    const a = start + (i / segs) * (end - start);
+    s.lineTo(circR * Math.cos(a), circCY + circR * Math.sin(a));
+  }
+  s.lineTo(-slitHalf, hh); // up the slit's left wall
+  s.lineTo(-hw + r, hh);
+  s.absarc(-hw + r, hh - r, r, Math.PI / 2, Math.PI, false);
+  s.lineTo(-hw, -hh + r);
+  s.absarc(-hw + r, -hh + r, r, Math.PI, Math.PI * 1.5, false);
+  return s;
+}
+
+/** Pressed-recycled-paper / cork texture: warm base + dense flecks. */
+function makeCorkTexture(): THREE.CanvasTexture {
+  const S = 512;
+  const c = document.createElement("canvas");
+  c.width = c.height = S;
+  const x = c.getContext("2d")!;
+  x.fillStyle = "#cbbf9d";
+  x.fillRect(0, 0, S, S);
+  const palette = ["#b9ab83", "#d6cba8", "#a8966c", "#c2b48c", "#8f7c54"];
+  for (let i = 0; i < 6000; i++) {
+    x.globalAlpha = 0.15 + Math.random() * 0.35;
+    x.fillStyle = palette[(Math.random() * palette.length) | 0];
+    x.beginPath();
+    x.arc(Math.random() * S, Math.random() * S, 0.4 + Math.random() * 1.8, 0, Math.PI * 2);
+    x.fill();
+  }
+  for (let i = 0; i < 320; i++) {
+    x.globalAlpha = 1;
+    x.fillStyle = `rgba(80,64,40,${0.2 + Math.random() * 0.3})`;
+    const r = 0.6 + Math.random() * 1.6;
+    x.beginPath();
+    x.ellipse(Math.random() * S, Math.random() * S, r, r * (0.6 + Math.random() * 0.6), Math.random() * Math.PI, 0, Math.PI * 2);
+    x.fill();
+  }
+  x.globalAlpha = 1;
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
 }
 
 /** "$1" price text on a transparent canvas texture. */
@@ -85,22 +134,15 @@ export function FigureBox() {
   const star = useMemo(() => makeStarShape(STAR_POINTS, 0.24, 0.13), []);
   const starGeo = useMemo(() => new THREE.ShapeGeometry(star), [star]);
   const priceTex = useMemo(() => makePriceTexture(), []);
+  const corkTex = useMemo(() => makeCorkTexture(), []);
 
   const cardW = size.x * 1.7;
   const cardH = size.y * 1.32;
   const frontZ = (size.z / 2) * WRAP_SCALE;
 
-  // Backing card with a standard euro hang hole (round hole + neck slot).
+  // Backing card with an open peg slot (slit in from the top → semicircle rest).
   const cardGeo = useMemo(() => {
-    const shape = new THREE.Shape();
-    roundedRect(shape, 0, 0, cardW, cardH, 0.1);
-    const holeY = cardH / 2 - 0.17;
-    const circle = new THREE.Path();
-    circle.absarc(0, holeY, 0.052, 0, Math.PI * 2, false);
-    shape.holes.push(circle);
-    const neck = new THREE.Path();
-    roundedRect(neck, 0, holeY - 0.075, 0.05, 0.1, 0.025);
-    shape.holes.push(neck);
+    const shape = makeCardShape(cardW, cardH);
     return new THREE.ExtrudeGeometry(shape, {
       depth: 0.04,
       bevelEnabled: true,
@@ -146,9 +188,18 @@ export function FigureBox() {
 
   return (
     <group ref={groupRef} visible={false} rotation={[COMMERCE_PITCH, COMMERCE_YAW, 0]}>
-      {/* Cardboard backing card with the euro hang hole, behind the device. */}
+      {/* Pressed-recycled-paper backing card with the open peg slot. */}
       <mesh geometry={cardGeo} position={[0, size.y * 0.12, -size.z * 0.9]}>
-        <meshStandardMaterial color="#d8cdb6" roughness={0.92} metalness={0} transparent opacity={0} />
+        <meshStandardMaterial
+          map={corkTex}
+          bumpMap={corkTex}
+          bumpScale={0.004}
+          color="#ffffff"
+          roughness={0.95}
+          metalness={0}
+          transparent
+          opacity={0}
+        />
       </mesh>
 
       {/* Form-fitted vacuum wrap — the device's own shell, stood off. */}
