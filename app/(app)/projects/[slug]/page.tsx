@@ -19,7 +19,6 @@ import {
 import { eq, and, asc, desc, inArray } from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
 import { Card, CardContent } from "@/components/ui/card";
-import { CollapsibleSection } from "@/components/ui/collapsible-section";
 import { ExpandableDescription } from "@/components/ui/expandable-description";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -27,6 +26,10 @@ import { DeleteProjectButton } from "@/components/projects/delete-project-button
 import { BomDisplay } from "@/components/projects/bom-display";
 import { EditBomDialog } from "@/components/projects/edit-bom-dialog";
 import { EditProjectDialog } from "@/components/projects/edit-project-dialog";
+import {
+  ProjectTabs,
+  type ProjectTab,
+} from "@/components/projects/project-tabs";
 import { AddProjectFilesDialog } from "@/components/projects/add-project-files-dialog";
 import { FileThumbnailStack } from "@/components/projects/file-thumbnail-stack";
 import { BuildGuide } from "@/components/projects/build-guide";
@@ -35,6 +38,8 @@ import {
   type CircuitTile,
 } from "@/components/circuits/circuit-gallery";
 import { Code } from "@/components/icons/code";
+import { Pencil } from "@/components/icons/pencil";
+import { Trash } from "@/components/icons/trash";
 import { projectJsonLd } from "@/lib/seo/json-ld";
 import { PurchaseButton } from "@/components/purchase/purchase-button";
 import { PayoutSetupWarning } from "@/components/payouts/payout-setup-warning";
@@ -476,6 +481,147 @@ export default async function ProjectDetailPage(props: {
         })
       : null;
 
+  // Content tabs that sit under the cover/photos and above the
+  // Discussion section. Order is fixed — Files, Build Guide, BOM,
+  // Wiring — and each tab is only included when it has something to
+  // show (always for owners, who get the inline editors / empty
+  // states). The first entry is the default selection, so Files
+  // (always present) anchors it.
+  const tabs: ProjectTab[] = [];
+
+  tabs.push({
+    value: "files",
+    label: "Files",
+    meta: bundledFiles.length,
+    content: (
+      <div>
+        {isOwner && (
+          <div className="mb-3 flex items-center justify-end">
+            <AddProjectFilesDialog
+              projectId={project.id}
+              availableFiles={availableFilesToAdd}
+            />
+          </div>
+        )}
+        <div className="grid gap-3 grid-cols-2 sm:grid-cols-3">
+          {bundledFileCards.map((file) => {
+            const dims = dimensionsLabel(file.dimensions);
+            return (
+              <Link
+                key={file.id}
+                href={`/files/${file.slug}`}
+                className="group flex flex-col gap-2"
+              >
+                <div className="aspect-square overflow-hidden rounded-lg border border-border bg-muted">
+                  {file.thumbnailUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={file.thumbnailUrl}
+                      alt=""
+                      className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground/50">
+                      No preview
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <p className="truncate text-sm font-medium transition-colors group-hover:text-primary">
+                    {file.displayName}
+                  </p>
+                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                    {dims ??
+                      (file.price > 0
+                        ? `$${(file.price / 100).toFixed(2)}`
+                        : "Free")}
+                  </p>
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+    ),
+  });
+
+  // Build guide — owner-authored markdown with inline step photos.
+  // Owners always get the tab (with the inline editor / empty-state
+  // prompt); non-owners only once a guide exists.
+  if (project.buildGuide || isOwner) {
+    tabs.push({
+      value: "build-guide",
+      label: "Build Guide",
+      content: (
+        <BuildGuide
+          projectId={project.id}
+          buildGuide={project.buildGuide}
+          canManage={isOwner}
+        />
+      ),
+    });
+  }
+
+  // Bill of materials — the additional parts a builder needs beyond
+  // the printed files. Owners always get the tab (the editor lives
+  // here now, not the sidebar); non-owners only once items exist.
+  if (bomItems.length > 0 || isOwner) {
+    tabs.push({
+      value: "bom",
+      label: "BOM",
+      meta: bomItems.length || undefined,
+      content: (
+        <div className="space-y-3">
+          {isOwner && (
+            <div className="flex justify-end">
+              <EditBomDialog
+                projectId={project.id}
+                initial={bomItems.map((it) => ({
+                  name: it.name,
+                  quantity: String(it.quantity),
+                  unit: it.unit ?? "",
+                  notes: it.notes ?? "",
+                  sourceUrl: it.sourceUrl ?? "",
+                }))}
+                trigger={
+                  <Button variant="outline" size="sm">
+                    {bomItems.length > 0
+                      ? "Edit BOM"
+                      : "Add a Bill of Materials"}
+                  </Button>
+                }
+              />
+            </div>
+          )}
+          {bomItems.length > 0 ? (
+            <BomDisplay items={bomItems} />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No bill of materials yet.
+            </p>
+          )}
+        </div>
+      ),
+    });
+  }
+
+  // Wiring / circuit diagrams — owners always get the tab (uploader
+  // inline when empty); non-owners only once a diagram exists.
+  if (circuits.length > 0 || isOwner) {
+    tabs.push({
+      value: "wiring",
+      label: "Wiring",
+      meta: circuits.length || undefined,
+      content: (
+        <CircuitGallery
+          projectId={project.id}
+          circuits={circuits}
+          canManage={isOwner}
+        />
+      ),
+    });
+  }
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
       {jsonLd && (
@@ -582,103 +728,11 @@ export default async function ProjectDetailPage(props: {
               metadata, not creator-facing copy. Same as the file
               detail page. */}
 
-          {/* Build guide — the long-form "how to build this" doc.
-              Owner-authored markdown with inline step photos, distinct
-              from the short description above. Owners always see the
-              section (with the inline editor / empty-state prompt);
-              non-owners only once a guide exists. */}
-          {(project.buildGuide || isOwner) && (
-            <CollapsibleSection title="Build Guide" defaultOpen>
-              <BuildGuide
-                projectId={project.id}
-                buildGuide={project.buildGuide}
-                canManage={isOwner}
-              />
-            </CollapsibleSection>
-          )}
-
-          {/* Wiring / circuit diagrams — the visual half of the
-              assembly story. Sits above the BOM because builders
-              typically read it left-to-right (what does it do? how
-              do I wire it? what do I need to buy?). Owners always
-              see this region (uploader inline when empty); non-
-              owners only see it once a diagram exists. */}
-          {(circuits.length > 0 || isOwner) && (
-            <CollapsibleSection
-              title="Wiring"
-              meta={circuits.length || undefined}
-              defaultOpen
-            >
-              <CircuitGallery
-                projectId={project.id}
-                circuits={circuits}
-                canManage={isOwner}
-              />
-            </CollapsibleSection>
-          )}
-
-          {/* Bill of materials — sits below wiring because the BOM
-              answers "what do I need to buy" after the user has seen
-              the diagram. Hidden when empty; collapsed by default
-              since the BOM can be long. */}
-          {bomItems.length > 0 && (
-            <CollapsibleSection
-              title="Bill of Materials"
-              meta={bomItems.length}
-            >
-              <BomDisplay items={bomItems} />
-            </CollapsibleSection>
-          )}
-
-          <div>
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <h2 className="text-sm font-medium">Files in this project</h2>
-              {isOwner && (
-                <AddProjectFilesDialog
-                  projectId={project.id}
-                  availableFiles={availableFilesToAdd}
-                />
-              )}
-            </div>
-            <div className="grid gap-3 grid-cols-2 sm:grid-cols-3">
-              {bundledFileCards.map((file) => {
-                const dims = dimensionsLabel(file.dimensions);
-                return (
-                  <Link
-                    key={file.id}
-                    href={`/files/${file.slug}`}
-                    className="group flex flex-col gap-2"
-                  >
-                    <div className="aspect-square overflow-hidden rounded-lg border border-border bg-muted">
-                      {file.thumbnailUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={file.thumbnailUrl}
-                          alt=""
-                          className="w-full h-full object-cover transition-transform group-hover:scale-105"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground/50">
-                          No preview
-                        </div>
-                      )}
-                    </div>
-                    <div>
-                      <p className="truncate text-sm font-medium transition-colors group-hover:text-primary">
-                        {file.displayName}
-                      </p>
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                        {dims ??
-                          (file.price > 0
-                            ? `$${(file.price / 100).toFixed(2)}`
-                            : "Free")}
-                      </p>
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
+          {/* Content tabs — Files, Build Guide, BOM, Wiring. Sit
+              between the cover/photos and the Discussion section.
+              Built above; each tab carries its own inline editor and
+              empty state for owners. */}
+          <ProjectTabs tabs={tabs} />
 
           {/* Comments — public discussion. Wrapped in a Card here
               because CommentsSection itself renders bare (the file
@@ -805,7 +859,10 @@ export default async function ProjectDetailPage(props: {
               {isOwner && (
                 <>
                   <Separator className="my-4" />
-                  <div className="space-y-2">
+                  {/* Edit / delete as icon buttons, matching the file
+                      detail page. BOM editing lives in the BOM tab now,
+                      not here. */}
+                  <div className="flex items-center gap-1">
                     <EditProjectDialog
                       projectId={project.id}
                       initial={{
@@ -819,16 +876,16 @@ export default async function ProjectDetailPage(props: {
                           downloadUrl: p.downloadUrl,
                         })),
                       }}
-                    />
-                    <EditBomDialog
-                      projectId={project.id}
-                      initial={bomItems.map((it) => ({
-                        name: it.name,
-                        quantity: String(it.quantity),
-                        unit: it.unit ?? "",
-                        notes: it.notes ?? "",
-                        sourceUrl: it.sourceUrl ?? "",
-                      }))}
+                      trigger={
+                        <Button
+                          variant="ghost"
+                          size="icon-lg"
+                          className="rounded-[12px] p-2"
+                          aria-label="Edit project"
+                        >
+                          <Pencil className="size-5" />
+                        </Button>
+                      }
                     />
                     <DeleteProjectButton
                       projectId={project.id}
@@ -836,6 +893,16 @@ export default async function ProjectDetailPage(props: {
                       hasBuyers={ownerBuyerCount > 0}
                       buyerCount={ownerBuyerCount}
                       redirectTo={`/${project.username}`}
+                      trigger={
+                        <Button
+                          variant="ghost"
+                          size="icon-lg"
+                          className="rounded-[12px] p-2 text-destructive hover:text-destructive"
+                          aria-label="Delete project"
+                        >
+                          <Trash className="size-5" />
+                        </Button>
+                      }
                     />
                   </div>
                 </>

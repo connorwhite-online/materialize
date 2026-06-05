@@ -15,24 +15,34 @@ import { BomEditor, type BomEditorItem } from "./bom-editor";
 interface Props {
   projectId: string;
   initial: BomEditorItem[];
+  /**
+   * Optional custom trigger element. Lets the call site swap in a
+   * compact button or any other shape; defaults to a full-width
+   * outline button labeled "Edit BOM" / "Add a Bill of Materials".
+   */
+  trigger?: React.ReactNode;
 }
 
 /**
  * Owner-only dialog wrapper around the BOM editor. Lives on the
- * project sidebar; opens to a 2xl panel that fits the row editor
+ * project's BOM tab; opens to a 2xl panel that fits the row editor
  * comfortably without cramping. Closes on save.
  */
-export function EditBomDialog({ projectId, initial }: Props) {
+export function EditBomDialog({ projectId, initial, trigger }: Props) {
   const [open, setOpen] = useState(false);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger
         render={
-          <Button variant="outline" className="w-full">
-            {initial.length > 0
-              ? `Edit BOM (${initial.length})`
-              : "Add a Bill of Materials"}
-          </Button>
+          trigger ? (
+            (trigger as React.ReactElement)
+          ) : (
+            <Button variant="outline" className="w-full">
+              {initial.length > 0
+                ? `Edit BOM (${initial.length})`
+                : "Add a Bill of Materials"}
+            </Button>
+          )
         }
       />
       <DialogContent className="max-h-[90vh] w-full max-w-2xl overflow-y-auto sm:max-w-2xl">
