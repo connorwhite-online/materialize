@@ -21,6 +21,17 @@ function getS3() {
         accessKeyId: requireEnv("R2_ACCESS_KEY_ID"),
         secretAccessKey: requireEnv("R2_SECRET_ACCESS_KEY"),
       },
+      // aws-sdk v3.729+ defaults requestChecksumCalculation to
+      // "WHEN_SUPPORTED", which folds an x-amz-checksum-crc32 header
+      // into the SIGNED set of every PutObject — including presigned
+      // URLs. The browser then PUTs the file without computing that
+      // checksum, and Cloudflare R2 (incomplete flexible-checksum
+      // support) rejects the mismatch with a 500, surfacing as
+      // "R2 upload failed (500)" on every upload. Pin both knobs to
+      // "WHEN_REQUIRED" so presigned PUTs match a plain browser PUT.
+      // (R2 also doesn't implement response checksum validation.)
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      responseChecksumValidation: "WHEN_REQUIRED",
     });
   }
   return _s3;
