@@ -5,6 +5,7 @@ import { fileAssets, files } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { FileAssetPrintShell } from "@/components/print/file-asset-print-shell";
 import { getMaterialById } from "@/lib/materials";
+import { resolveRecommendedCraftCloudMaterialId } from "@/lib/materials/craftcloud-resolver";
 import { Badge } from "@/components/ui/badge";
 import { DESIGN_TAG_LABELS } from "@/lib/validations/file";
 
@@ -54,6 +55,16 @@ export default async function PrintConfigPage(props: {
     ? getMaterialById(asset.recommendedMaterialId)
     : null;
 
+  // If the creator stated an ideal material and the visitor didn't
+  // arrive with an explicit `?material=` scope, pre-scope the picker to
+  // that material so they land on (essentially) just vendor selection.
+  // Resolver returns null on no confident match → full picker (no
+  // regression). An explicit `?material=` always wins.
+  const resolvedPreselectMaterialId =
+    preselectMaterialId ??
+    (await resolveRecommendedCraftCloudMaterialId(asset.recommendedMaterialId)) ??
+    undefined;
+
   const configureHeader = (
     <div>
       <h1 className="text-2xl font-bold">
@@ -94,7 +105,7 @@ export default async function PrintConfigPage(props: {
         format={asset.format}
         hasCachedModel={!!asset.craftCloudModelId}
         geometryData={asset.geometryData}
-        preselectMaterialId={preselectMaterialId}
+        preselectMaterialId={resolvedPreselectMaterialId}
         configureHeader={configureHeader}
       />
     </div>
