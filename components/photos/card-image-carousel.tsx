@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
-import { motion } from "motion/react";
 import { ChevronLeft } from "@/components/icons/chevron-left";
 import { ChevronRight } from "@/components/icons/chevron-right";
 import { cn } from "@/lib/utils";
@@ -126,20 +125,10 @@ export function CardImageCarousel({
         )}
         <div className="pointer-events-auto flex items-center gap-1 rounded-full bg-black/45 px-2 py-1.5 backdrop-blur-md">
           {images.map((_, i) => (
-            <motion.button
+            <button
               key={i}
               type="button"
               role="tab"
-              layout
-              transition={{
-                // Spring keeps the leaving and incoming dots locked
-                // to one physics simulation — width gained equals
-                // width lost at every frame, no easing-curve drift.
-                type: "spring",
-                stiffness: 500,
-                damping: 35,
-                mass: 0.5,
-              }}
               aria-selected={i === activeIndex}
               aria-label={`Image ${i + 1}`}
               onClick={(e) => {
@@ -147,8 +136,15 @@ export function CardImageCarousel({
                 e.stopPropagation();
                 goTo(i);
               }}
+              // A plain CSS width/opacity transition replaces motion's
+              // `layout` animation. `layout` (motion's layout-projection
+              // feature) was the diagnosed source of React error #310 on
+              // the owner library page, and this was the LAST remaining
+              // use of layout/layoutId in the app — the ProfileTabs one
+              // was already removed. The dot still grows/shrinks; it just
+              // tweens via CSS instead of motion's projection hooks.
               className={cn(
-                "h-1.5 cursor-pointer rounded-full bg-white",
+                "h-1.5 cursor-pointer rounded-full bg-white transition-[width,opacity] duration-300 ease-out",
                 i === activeIndex ? "w-3" : "w-1.5 opacity-60"
               )}
             />
