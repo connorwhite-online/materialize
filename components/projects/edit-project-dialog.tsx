@@ -32,6 +32,12 @@ interface Props {
      */
     photos: Array<{ id: string; downloadUrl: string }>;
   };
+  /**
+   * Optional custom trigger element. Lets the call site swap in an
+   * icon button or any other shape; defaults to a full-width outline
+   * button labeled "Edit details".
+   */
+  trigger?: React.ReactNode;
 }
 
 /**
@@ -42,7 +48,7 @@ interface Props {
  * decided at create time and changing them after-the-fact has buyer-
  * facing consequences that need their own UX.
  */
-export function EditProjectDialog({ projectId, initial }: Props) {
+export function EditProjectDialog({ projectId, initial, trigger }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -74,9 +80,13 @@ export function EditProjectDialog({ projectId, initial }: Props) {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger
         render={
-          <Button variant="outline" className="w-full">
-            Edit details
-          </Button>
+          trigger ? (
+            (trigger as React.ReactElement)
+          ) : (
+            <Button variant="outline" className="w-full">
+              Edit details
+            </Button>
+          )
         }
       />
       {/* sm:max-w-lg overrides the base popup's sm:max-w-sm; min-w-0

@@ -22,6 +22,12 @@ interface DeleteProjectButtonProps {
   hasBuyers: boolean;
   buyerCount: number;
   redirectTo: string;
+  /**
+   * Optional custom trigger element. Lets the call site swap in an
+   * icon button or any other shape; defaults to a full-width outline
+   * button labeled "Delete project".
+   */
+  trigger?: React.ReactNode;
 }
 
 export function DeleteProjectButton({
@@ -30,6 +36,7 @@ export function DeleteProjectButton({
   hasBuyers,
   buyerCount,
   redirectTo,
+  trigger,
 }: DeleteProjectButtonProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -67,9 +74,13 @@ export function DeleteProjectButton({
     >
       <DialogTrigger
         render={
-          <Button variant="outline" className="w-full text-destructive">
-            Delete project
-          </Button>
+          trigger ? (
+            (trigger as React.ReactElement)
+          ) : (
+            <Button variant="outline" className="w-full text-destructive">
+              Delete project
+            </Button>
+          )
         }
       />
       <DialogContent className="max-w-md">
