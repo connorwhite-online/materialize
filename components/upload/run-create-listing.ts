@@ -1,4 +1,5 @@
 import { createFileListing } from "@/app/actions/files";
+import { reportClientError } from "@/lib/observability/report-client-error";
 
 /**
  * The full create-a-listing pipeline from a client-side picked
@@ -93,6 +94,16 @@ export async function runCreateListing(
           // A real HTTP status came back, so the request reached R2 and
           // CORS is fine — don't misdirect to CORS here. A genuine CORS
           // failure surfaces on the `error` event below with status 0.
+          //
+          // Report to Sentry explicitly: this is a handled error shown
+          // in the UI, so client Sentry won't auto-capture it — without
+          // this an outage that fails every PUT (e.g. the aws-sdk
+          // flexible-checksum 500) produces no signal at all.
+          reportClientError(
+            "upload.r2-put-failed",
+            new Error(`R2 upload failed (${xhr.status})`),
+            { status: xhr.status, storageKey, fileSize: input.file.size }
+          );
           reject(new Error(`R2 upload failed (${xhr.status}).`));
         }
       });
