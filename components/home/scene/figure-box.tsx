@@ -2,157 +2,105 @@
 
 import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
+import { RoundedBox } from "@react-three/drei";
 import * as THREE from "three";
 import { useStage } from "./stage-context";
 import { useDeviceGeometry } from "./use-device-geometry";
-import { STAGE, STICKER_YELLOW, COMMERCE_YAW, COMMERCE_PITCH } from "./constants";
+import { STAGE, COMMERCE_YAW, COMMERCE_PITCH } from "./constants";
 
-// Classic dollar-store starburst point count (drawn into the sticker).
-const STAR_POINTS = 12;
-// How much the clear blister stands off the device front.
-const WRAP_SCALE = 1.16;
-
-/** The whole $1 starburst sticker drawn to one transparent texture —
- *  a clean, flat printed decal (burst + price in one). */
-function makeStickerTexture(): THREE.CanvasTexture {
-  const S = 320;
-  const c = document.createElement("canvas");
-  c.width = c.height = S;
-  const ctx = c.getContext("2d")!;
-  ctx.clearRect(0, 0, S, S);
-  const cx = S / 2;
-  const cy = S / 2;
-  const outer = S * 0.46;
-  const inner = S * 0.34;
-  ctx.beginPath();
-  for (let i = 0; i < STAR_POINTS * 2; i++) {
-    const r = i % 2 === 0 ? outer : inner;
-    const a = (i * Math.PI) / STAR_POINTS - Math.PI / 2;
-    const x = cx + Math.cos(a) * r;
-    const y = cy + Math.sin(a) * r;
-    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-  }
-  ctx.closePath();
-  ctx.fillStyle = STICKER_YELLOW;
-  ctx.fill();
-  ctx.lineWidth = S * 0.018;
-  ctx.strokeStyle = "#b8870c";
-  ctx.stroke();
-  ctx.fillStyle = "#1a1304";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.font = `900 ${S * 0.42}px Arial, sans-serif`;
-  ctx.fillText("$1", cx, cy + S * 0.03);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 8;
-  return t;
+/** Trace a centred rounded rectangle onto a Shape or Path. */
+function roundedRect(
+  ctx: THREE.Shape | THREE.Path,
+  cx: number,
+  cy: number,
+  w: number,
+  h: number,
+  r: number
+) {
+  const l = cx - w / 2;
+  const rt = cx + w / 2;
+  const t = cy + h / 2;
+  const b = cy - h / 2;
+  ctx.moveTo(l + r, b);
+  ctx.lineTo(rt - r, b);
+  ctx.absarc(rt - r, b + r, r, -Math.PI / 2, 0, false);
+  ctx.lineTo(rt, t - r);
+  ctx.absarc(rt - r, t - r, r, 0, Math.PI / 2, false);
+  ctx.lineTo(l + r, t);
+  ctx.absarc(l + r, t - r, r, Math.PI / 2, Math.PI, false);
+  ctx.lineTo(l, b + r);
+  ctx.absarc(l + r, b + r, r, Math.PI, Math.PI * 1.5, false);
 }
 
-/**
- * Backing-card outline with an open peg slot: a narrow slit runs in
- * from the top edge down to a semicircle the peg rests in — a cleaner,
- * more futuristic take on the classic hang hole.
- */
-function makeCardShape(cardW: number, cardH: number): THREE.Shape {
-  const hw = cardW / 2;
-  const hh = cardH / 2;
-  const r = 0.1;
-  const slitHalf = 0.02;
-  const circR = 0.058;
-  const circCY = hh - 0.22;
-  const yInt = circCY + Math.sqrt(Math.max(0, circR * circR - slitHalf * slitHalf));
-
-  const s = new THREE.Shape();
-  s.moveTo(-hw + r, -hh);
-  s.lineTo(hw - r, -hh);
-  s.absarc(hw - r, -hh + r, r, -Math.PI / 2, 0, false);
-  s.lineTo(hw, hh - r);
-  s.absarc(hw - r, hh - r, r, 0, Math.PI / 2, false); // → (hw-r, hh)
-  // Top edge in to the slit, down its right wall to the circle.
-  s.lineTo(slitHalf, hh);
-  s.lineTo(slitHalf, yInt);
-  // Sweep the circle the long way (through the bottom) to the slit's left wall.
-  const aR = Math.atan2(yInt - circCY, slitHalf);
-  const aL = Math.atan2(yInt - circCY, -slitHalf);
-  const start = aR;
-  const end = aL - Math.PI * 2;
-  const segs = 28;
-  for (let i = 1; i <= segs; i++) {
-    const a = start + (i / segs) * (end - start);
-    s.lineTo(circR * Math.cos(a), circCY + circR * Math.sin(a));
-  }
-  s.lineTo(-slitHalf, hh); // up the slit's left wall
-  s.lineTo(-hw + r, hh);
-  s.absarc(-hw + r, hh - r, r, Math.PI / 2, Math.PI, false);
-  s.lineTo(-hw, -hh + r);
-  s.absarc(-hw + r, -hh + r, r, Math.PI, Math.PI * 1.5, false);
-  return s;
-}
-
-/** Pressed-recycled-paper / cork texture: warm base + dense flecks. */
-function makeCorkTexture(): THREE.CanvasTexture {
+/** Pressed-recycled-fiber / pulp texture: warm base + dense flecks. */
+function makePulpTexture(): THREE.CanvasTexture {
   const S = 512;
   const c = document.createElement("canvas");
   c.width = c.height = S;
   const x = c.getContext("2d")!;
-  x.fillStyle = "#cbbf9d";
+  x.fillStyle = "#cabf9c";
   x.fillRect(0, 0, S, S);
-  const palette = ["#b9ab83", "#d6cba8", "#a8966c", "#c2b48c", "#8f7c54"];
-  for (let i = 0; i < 6000; i++) {
+  const palette = ["#b8aa80", "#d6cba6", "#a89368", "#c2b489", "#8d7a50"];
+  for (let i = 0; i < 6500; i++) {
     x.globalAlpha = 0.15 + Math.random() * 0.35;
     x.fillStyle = palette[(Math.random() * palette.length) | 0];
     x.beginPath();
-    x.arc(Math.random() * S, Math.random() * S, 0.4 + Math.random() * 1.8, 0, Math.PI * 2);
+    x.arc(Math.random() * S, Math.random() * S, 0.4 + Math.random() * 1.9, 0, Math.PI * 2);
     x.fill();
   }
-  for (let i = 0; i < 320; i++) {
+  for (let i = 0; i < 340; i++) {
     x.globalAlpha = 1;
-    x.fillStyle = `rgba(80,64,40,${0.2 + Math.random() * 0.3})`;
-    const r = 0.6 + Math.random() * 1.6;
+    x.fillStyle = `rgba(78,62,38,${0.2 + Math.random() * 0.3})`;
+    const r = 0.6 + Math.random() * 1.7;
     x.beginPath();
     x.ellipse(Math.random() * S, Math.random() * S, r, r * (0.6 + Math.random() * 0.6), Math.random() * Math.PI, 0, Math.PI * 2);
     x.fill();
   }
   x.globalAlpha = 1;
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 4;
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  return t;
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
 }
 
-/** "$1" price text on a transparent canvas texture. */
 /**
- * The "buy & sell" stage: the assembled device sealed in a retail pack.
- * The clear shield is a glossy front blister (the device's front cover,
- * stood off); the cardboard backing card carries an open peg slot; and
- * the $1 starburst is a flat printed sticker on the front. Fades with
- * proximity to the COMMERCE stage.
+ * The packaging stage: the assembled device drops into a molded
+ * recycled-pulp tray (a fiber-board pack with a device-shaped cavity).
+ * The pack is angled so its opening faces toward the camera but off to
+ * the left, like the reference. Fades with the COMMERCE stage; the
+ * device falls into the cavity (see PrimaryDevice).
  */
 export function FigureBox() {
   const { stageRef, reducedMotion } = useStage();
-  const { front, size } = useDeviceGeometry();
+  const { size } = useDeviceGeometry();
   const groupRef = useRef<THREE.Group>(null);
 
-  const stickerTex = useMemo(() => makeStickerTexture(), []);
-  const corkTex = useMemo(() => makeCorkTexture(), []);
+  const pulpTex = useMemo(() => makePulpTexture(), []);
 
-  const cardW = size.x * 1.7;
-  const cardH = size.y * 1.32;
-  const frontZ = (size.z / 2) * WRAP_SCALE;
+  const trayDepth = size.z * 1.55;
+  const cavW = size.x * 1.32;
+  const cavH = size.y * 1.14;
+  const trayW = cavW + 0.36;
+  const trayH = cavH + 0.36;
 
-  // Backing card with an open peg slot (slit in from the top → semicircle rest).
-  const cardGeo = useMemo(() => {
-    const shape = makeCardShape(cardW, cardH);
-    return new THREE.ExtrudeGeometry(shape, {
-      depth: 0.04,
+  // Tray rim/walls — an extruded frame (outer outline minus the cavity).
+  const trayGeo = useMemo(() => {
+    const outer = new THREE.Shape();
+    roundedRect(outer, 0, 0, trayW, trayH, 0.13);
+    const hole = new THREE.Path();
+    roundedRect(hole, 0, 0, cavW, cavH, 0.1);
+    outer.holes.push(hole);
+    const geo = new THREE.ExtrudeGeometry(outer, {
+      depth: trayDepth,
       bevelEnabled: true,
-      bevelThickness: 0.01,
-      bevelSize: 0.01,
-      bevelSegments: 2,
+      bevelThickness: 0.025,
+      bevelSize: 0.025,
+      bevelSegments: 3,
     });
-  }, [cardW, cardH]);
+    geo.translate(0, 0, -trayDepth / 2);
+    return geo;
+  }, [trayW, trayH, cavW, cavH, trayDepth]);
 
   useFrame((_, delta) => {
     const g = groupRef.current;
@@ -161,58 +109,38 @@ export function FigureBox() {
     const k = reducedMotion ? 1 : 1 - Math.exp(-delta * 6);
     g.visible = w > 0.01;
     g.traverse((obj) => {
-      const mat = (obj as THREE.Mesh).material as THREE.Material & {
-        opacity: number;
-        transmission?: number;
-      };
+      const mat = (obj as THREE.Mesh).material as THREE.Material & { opacity: number };
       if (!mat || typeof mat.opacity !== "number") return;
-      // The clear wrap stays glassy; everything else fades fully in.
-      const ceiling = (mat.transmission ?? 0) > 0.5 ? 0.45 : 1;
-      mat.opacity = THREE.MathUtils.lerp(mat.opacity, w * ceiling, k);
+      mat.opacity = THREE.MathUtils.lerp(mat.opacity, w, k);
     });
   });
 
+  const pulp = (extra?: number) => (
+    <meshStandardMaterial
+      map={pulpTex}
+      bumpMap={pulpTex}
+      bumpScale={0.005}
+      color={extra ? "#c0b693" : "#cabf9c"}
+      roughness={0.96}
+      metalness={0}
+      transparent
+      opacity={0}
+    />
+  );
+
   return (
     <group ref={groupRef} visible={false} rotation={[COMMERCE_PITCH, COMMERCE_YAW, 0]}>
-      {/* Pressed-recycled-paper backing card with the open peg slot. */}
-      <mesh geometry={cardGeo} position={[0, size.y * 0.12, -size.z * 0.9]}>
-        <meshStandardMaterial
-          map={corkTex}
-          bumpMap={corkTex}
-          bumpScale={0.004}
-          color="#ffffff"
-          roughness={0.95}
-          metalness={0}
-          transparent
-          opacity={0}
-        />
-      </mesh>
-
-      {/* Glossy clear blister over the front of the device (front cover
-          only, stood off) — reads as a clean vacuum-formed shield. */}
-      <group scale={WRAP_SCALE}>
-        <mesh geometry={front}>
-          <meshPhysicalMaterial
-            color="#eef4f7"
-            metalness={0}
-            roughness={0.05}
-            transmission={0.6}
-            ior={1.45}
-            thickness={0.02}
-            clearcoat={1}
-            clearcoatRoughness={0.04}
-            transparent
-            opacity={0}
-            side={THREE.FrontSide}
-          />
-        </mesh>
-      </group>
-
-      {/* $1 starburst — one flat printed sticker decal on the front. */}
-      <mesh position={[-cardW * 0.28, cardH * 0.24, frontZ + 0.04]} rotation={[0, 0, -0.12]}>
-        <planeGeometry args={[0.42, 0.42]} />
-        <meshBasicMaterial map={stickerTex} transparent opacity={0} toneMapped={false} />
-      </mesh>
+      {/* Rim / walls of the molded tray. */}
+      <mesh geometry={trayGeo}>{pulp()}</mesh>
+      {/* Cavity floor (closes the bottom of the pocket). */}
+      <RoundedBox
+        args={[cavW + 0.06, cavH + 0.06, 0.06]}
+        radius={0.04}
+        smoothness={3}
+        position={[0, 0, -trayDepth / 2 + 0.03]}
+      >
+        {pulp(1)}
+      </RoundedBox>
     </group>
   );
 }

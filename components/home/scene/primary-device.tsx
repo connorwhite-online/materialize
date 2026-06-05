@@ -81,6 +81,10 @@ export function PrimaryDevice({ target, dragVelocityRef }: PrimaryDeviceProps) {
     // Pull the assembly back slightly as it explodes so it stays framed.
     g.position.z = THREE.MathUtils.lerp(g.position.z, -teardownW * 0.4, k);
 
+    // Drop into the molded tray as the packaging stage settles.
+    const yFall = stage > 2.55 ? (1 - commerceW) * 0.45 : 0;
+    g.position.y = THREE.MathUtils.lerp(g.position.y, yFall, k);
+
     // Idle turntable spin in the hero; settles to a fixed pose in the
     // commerce stage (angled to match the box) and the teardown (turned
     // ~45° so the single explode axis reads).

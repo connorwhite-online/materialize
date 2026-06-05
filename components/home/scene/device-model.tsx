@@ -32,6 +32,7 @@ function makeHologramMaterial(): THREE.ShaderMaterial {
       uTime: { value: 0 },
       uColor: { value: new THREE.Color(HOLO) },
       uOpacity: { value: 0.0 },
+      uBuildY: { value: 0 },
     },
     vertexShader: /* glsl */ `
       #include <common>
@@ -56,6 +57,7 @@ function makeHologramMaterial(): THREE.ShaderMaterial {
       uniform float uTime;
       uniform vec3 uColor;
       uniform float uOpacity;
+      uniform float uBuildY;
       varying vec3 vNormalW;
       varying vec3 vViewDir;
       varying float vWorldY;
@@ -65,6 +67,10 @@ function makeHologramMaterial(): THREE.ShaderMaterial {
         float scan = 0.5 + 0.5 * sin(vWorldY * 90.0 - uTime * 2.5);
         float a = uOpacity * (0.16 + 0.84 * fres) * (0.55 + 0.45 * scan);
         vec3 col = uColor * (0.7 + fres * 1.4);
+        // Bright sintering band on the surface at the active build line.
+        float band = exp(-pow((vWorldY - uBuildY) * 26.0, 2.0));
+        col += vec3(0.75, 0.95, 1.0) * band * 2.2;
+        a = max(a, band * (0.35 + uOpacity * 1.4));
         gl_FragColor = vec4(col, a);
       }
     `,
@@ -269,7 +275,7 @@ export function DeviceModel({
   const frontRef = useRef<THREE.Group>(null);
   const backRef = useRef<THREE.Group>(null);
   const internalsRef = useRef<THREE.Group>(null);
-  const sinterRef = useRef<THREE.Mesh>(null);
+  const tmpV = useMemo(() => new THREE.Vector3(), []);
   const topFeatRef = useRef<THREE.Group>(null);
   const botFeatRef = useRef<THREE.Group>(null);
   const frontMat = useRef<THREE.MeshPhysicalMaterial>(null);
@@ -353,19 +359,19 @@ export function DeviceModel({
     const localBuildY = -size.y / 2 + q * size.y * 1.04;
     localBelow.constant = localBuildY;
     localAbove.constant = -localBuildY;
+    let worldBuildY = 0;
     if (rootRef.current) {
       worldBelow.copy(localBelow).applyMatrix4(rootRef.current.matrixWorld);
       worldAbove.copy(localAbove).applyMatrix4(rootRef.current.matrixWorld);
+      worldBuildY = tmpV.set(0, localBuildY, 0).applyMatrix4(rootRef.current.matrixWorld).y;
     }
     const t = state.clock.elapsedTime;
     const holoOp = matW * 0.55;
-    holoA.uniforms.uTime.value = t;
-    holoB.uniforms.uTime.value = t;
-    holoA.uniforms.uOpacity.value = holoOp;
-    holoB.uniforms.uOpacity.value = holoOp;
-    if (sinterRef.current) {
-      sinterRef.current.position.y = localBuildY;
-      sinterRef.current.visible = matW > 0.02 && q > 0.01 && q < 0.99;
+    const showBand = matW > 0.02 && q > 0.01 && q < 0.99 ? 1 : 0;
+    for (const m of [holoA, holoB]) {
+      m.uniforms.uTime.value = t;
+      m.uniforms.uOpacity.value = holoOp;
+      m.uniforms.uBuildY.value = showBand ? worldBuildY : 1e3;
     }
 
     for (const part of TEARDOWN_PARTS) {
@@ -404,14 +410,10 @@ export function DeviceModel({
   return (
     <group ref={rootRef}>
       {/* Hologram ghost of the whole shell — visible above the sintering
-          build line in the manufacturing stage; clipped away otherwise. */}
+          build line; the bright sinter band rides the surface at the
+          build height (see the shader), not as a floating halo. */}
       <mesh geometry={front} material={holoA} />
       <mesh geometry={back} material={holoB} />
-      {/* Sinter line — a bright print-head ring at the build height. */}
-      <mesh ref={sinterRef} rotation={[Math.PI / 2, 0, 0]} visible={false}>
-        <torusGeometry args={[size.x * 0.56, 0.004, 8, 80]} />
-        <meshBasicMaterial color="#eaffff" toneMapped={false} />
-      </mesh>
 
       {/* --- Front cover (faces camera; carries the hole-aligned bits) --- */}
       <group ref={frontRef}>
