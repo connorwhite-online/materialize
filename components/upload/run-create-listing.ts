@@ -34,6 +34,8 @@ export interface CreateListingInput {
   license: string;
   collectionChoice: string;
   newCollectionName: string;
+  /** Optional project to attach the new file to ("none" / "" = skip). */
+  projectChoice?: string;
   onProgress?: (percent: number) => void;
   onPhaseChange?: (phase: "uploading" | "saving") => void;
 }
@@ -147,6 +149,9 @@ export async function runCreateListing(
     input.formData.set("collectionId", input.collectionChoice);
     if (input.collectionChoice === "__new__") {
       input.formData.set("newCollectionName", input.newCollectionName);
+    }
+    if (input.projectChoice && input.projectChoice !== "none") {
+      input.formData.set("projectId", input.projectChoice);
     }
 
     const result = await createFileListing(input.formData);

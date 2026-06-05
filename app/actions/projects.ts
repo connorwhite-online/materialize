@@ -21,8 +21,9 @@ import {
   projectPhotos,
   purchases,
   users,
+  organizationMembers,
 } from "@/lib/db/schema";
-import { eq, and, inArray, sql } from "drizzle-orm";
+import { eq, and, or, ne, desc, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { nanoid } from "nanoid";
@@ -40,6 +41,51 @@ import {
   viewerCanAttachAllFiles,
 } from "@/lib/authorization";
 import { notifyCollaboratorAddedToProject } from "@/lib/notifications/notify";
+
+/**
+ * Projects the viewer can attach files to — their personal projects
+ * plus any owned by an org they belong to. Powers the "Project"
+ * picker on the upload form and the project carousel's upload step.
+ * Mirrors listMyCollections' owner-scoping. Archived projects are
+ * excluded since you can't meaningfully add files to a dead bundle.
+ */
+export async function listMyProjects(): Promise<
+  Array<{ id: string; name: string; slug: string }>
+> {
+  try {
+    const { userId } = await auth();
+    if (!userId) return [];
+
+    const myOrgIds = (
+      await db
+        .select({ organizationId: organizationMembers.organizationId })
+        .from(organizationMembers)
+        .where(eq(organizationMembers.userId, userId))
+    ).map((r) => r.organizationId);
+
+    const ownerFilter =
+      myOrgIds.length > 0
+        ? or(
+            eq(projects.userId, userId),
+            ...myOrgIds.map((orgId) => eq(projects.organizationId, orgId))
+          )
+        : eq(projects.userId, userId);
+
+    const rows = await db
+      .select({
+        id: projects.id,
+        name: projects.name,
+        slug: projects.slug,
+      })
+      .from(projects)
+      .where(and(ownerFilter, ne(projects.status, "archived")))
+      .orderBy(desc(projects.updatedAt));
+    return rows;
+  } catch (error) {
+    logError("listMyProjects", error);
+    return [];
+  }
+}
 
 export async function createProject(formData: FormData) {
   const { userId } = await auth();

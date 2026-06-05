@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { listMyCollections } from "@/app/actions/collections";
+import { listMyProjects } from "@/app/actions/projects";
 import { runCreateListing } from "./run-create-listing";
 import { MATERIALS } from "@/lib/materials";
 import { DESIGN_TAG_OPTIONS, DESIGN_TAG_LABELS } from "@/lib/validations/file";
@@ -62,6 +63,12 @@ interface FileMetadataFormProps {
    * dialog so cancel just closes the modal.
    */
   onCancel?: () => void;
+  /**
+   * Pre-selects the "Project" picker. Set when the form is launched
+   * from a project's "Add files" modal so the upload lands straight
+   * in that bundle.
+   */
+  initialProjectId?: string;
 }
 
 function formatDim(n: number) {
@@ -93,6 +100,7 @@ export function FileMetadataForm({
   file,
   format,
   onCancel,
+  initialProjectId,
 }: FileMetadataFormProps) {
   const [selectedDesignTags, setSelectedDesignTags] = useState<string[]>([]);
   const [recommendedMaterial, setRecommendedMaterial] = useState("");
@@ -111,6 +119,14 @@ export function FileMetadataForm({
   const [collectionChoice, setCollectionChoice] = useState<string>("none");
   const [newCollectionName, setNewCollectionName] = useState("");
 
+  // Projects (bundles). Pre-selected when launched from a project.
+  const [userProjects, setUserProjects] = useState<
+    Array<{ id: string; name: string }>
+  >([]);
+  const [projectChoice, setProjectChoice] = useState<string>(
+    initialProjectId ?? "none"
+  );
+
   // Submit state
   const [phase, setPhase] = useState<SubmitPhase>("idle");
   const [progress, setProgress] = useState(0);
@@ -124,6 +140,9 @@ export function FileMetadataForm({
     let cancelled = false;
     listMyCollections().then((rows) => {
       if (!cancelled) setUserCollections(rows);
+    });
+    listMyProjects().then((rows) => {
+      if (!cancelled) setUserProjects(rows);
     });
     return () => {
       cancelled = true;
@@ -162,6 +181,7 @@ export function FileMetadataForm({
       license,
       collectionChoice,
       newCollectionName,
+      projectChoice,
       onProgress: setProgress,
       onPhaseChange: setPhase,
     });
@@ -315,6 +335,37 @@ export function FileMetadataForm({
               )}
             </AnimatePresence>
           </div>
+
+          {userProjects.length > 0 && (
+            <div>
+              <Label htmlFor="project-trigger">Project</Label>
+              <Select
+                value={projectChoice}
+                onValueChange={(v) => v && setProjectChoice(v)}
+              >
+                <SelectTrigger id="project-trigger" className="w-full">
+                  <SelectValue>
+                    {(value) => {
+                      if (!value || value === "none") return "No project";
+                      const found = userProjects.find((p) => p.id === value);
+                      return found?.name ?? "No project";
+                    }}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No project</SelectItem>
+                  {userProjects.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Bundle this file into a project to sell it as part of a set.
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
 
