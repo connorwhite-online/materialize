@@ -9,7 +9,6 @@ import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { SceneController, useStage } from "./stage-context";
 import { LightsRig } from "./lights-rig";
 import { PrimaryDevice } from "./primary-device";
-import { ManufacturingScene } from "./manufacturing-scene";
 import { FigureBox } from "./figure-box";
 import { MaterialBurst } from "./material-burst";
 import { type MaterialTarget } from "./device-model";
@@ -38,12 +37,16 @@ interface HomeSceneProps {
 function CameraRig() {
   const { stageRef } = useStage();
   useFrame(({ camera, viewport }) => {
-    const t = stageWeight(stageRef.current, STAGE.TEARDOWN);
+    const stage = stageRef.current;
+    const t = stageWeight(stage, STAGE.TEARDOWN);
+    const m = stageWeight(stage, STAGE.MATERIALS);
     const portrait = viewport.aspect < 1 ? (1 - viewport.aspect) * 2.2 : 0;
-    const targetZ = THREE.MathUtils.lerp(4.5 + portrait, 6.3 + portrait * 1.4, t);
+    // Zoom in for the manufacturing stage; pull back for the teardown.
+    const baseZ = 4.5 + portrait - m * 1.5;
+    const targetZ = THREE.MathUtils.lerp(baseZ, 6.3 + portrait * 1.4, t);
     // Slightly raised viewpoint (looking a touch down at the device),
     // rising a bit more for the teardown.
-    const targetY = 0.5 + t * 0.25;
+    const targetY = 0.5 + t * 0.25 - m * 0.12;
     camera.position.z += (targetZ - camera.position.z) * 0.1;
     camera.position.y += (targetY - camera.position.y) * 0.1;
     camera.lookAt(0, 0, 0);
@@ -88,7 +91,6 @@ function SceneContents({
         intensity={burstIntensity}
         color={target.color}
       />
-      <ManufacturingScene target={target} />
       <FigureBox />
       <ContactShadows
         position={[0, -1.05, 0]}
