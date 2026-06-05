@@ -32,6 +32,28 @@ function roundedRect(
   ctx.absarc(l + r, b + r, r, Math.PI, Math.PI * 1.5, false);
 }
 
+/** Cavity outline: a tight rounded rect around the device with a
+ *  finger-pry scoop bulging out of each long side. */
+function makeCavityPath(w: number, h: number, r: number, scoopR: number): THREE.Path {
+  const hw = w / 2;
+  const hh = h / 2;
+  const p = new THREE.Path();
+  p.moveTo(-hw + r, -hh);
+  p.lineTo(hw - r, -hh);
+  p.absarc(hw - r, -hh + r, r, -Math.PI / 2, 0, false);
+  p.lineTo(hw, -scoopR);
+  p.absarc(hw, 0, scoopR, -Math.PI / 2, Math.PI / 2, false); // right finger scoop
+  p.lineTo(hw, hh - r);
+  p.absarc(hw - r, hh - r, r, 0, Math.PI / 2, false);
+  p.lineTo(-hw + r, hh);
+  p.absarc(-hw + r, hh - r, r, Math.PI / 2, Math.PI, false);
+  p.lineTo(-hw, scoopR);
+  p.absarc(-hw, 0, scoopR, Math.PI / 2, Math.PI * 1.5, false); // left finger scoop
+  p.lineTo(-hw, -hh + r);
+  p.absarc(-hw + r, -hh + r, r, Math.PI, Math.PI * 1.5, false);
+  return p;
+}
+
 /** Pressed-recycled-fiber / pulp texture: warm base + dense flecks. */
 function makePulpTexture(): THREE.CanvasTexture {
   const S = 512;
@@ -78,19 +100,20 @@ export function FigureBox() {
 
   const pulpTex = useMemo(() => makePulpTexture(), []);
 
-  const trayDepth = size.z * 1.55;
-  const cavW = size.x * 1.32;
-  const cavH = size.y * 1.14;
-  const trayW = cavW + 0.36;
-  const trayH = cavH + 0.36;
+  // Shallower walls + a tighter cavity hugging the device.
+  const trayDepth = size.z * 1.12;
+  const cavW = size.x * 1.1;
+  const cavH = size.y * 1.05;
+  const scoopR = size.x * 0.09;
+  const trayW = cavW + 0.42;
+  const trayH = cavH + 0.42;
 
-  // Tray rim/walls — an extruded frame (outer outline minus the cavity).
+  // Tray rim/walls — an extruded frame (outer outline minus the cavity,
+  // which has a finger-pry scoop on each long side).
   const trayGeo = useMemo(() => {
     const outer = new THREE.Shape();
     roundedRect(outer, 0, 0, trayW, trayH, 0.13);
-    const hole = new THREE.Path();
-    roundedRect(hole, 0, 0, cavW, cavH, 0.1);
-    outer.holes.push(hole);
+    outer.holes.push(makeCavityPath(cavW, cavH, 0.08, scoopR));
     const geo = new THREE.ExtrudeGeometry(outer, {
       depth: trayDepth,
       bevelEnabled: true,
@@ -100,7 +123,10 @@ export function FigureBox() {
     });
     geo.translate(0, 0, -trayDepth / 2);
     return geo;
-  }, [trayW, trayH, cavW, cavH, trayDepth]);
+  }, [trayW, trayH, cavW, cavH, scoopR, trayDepth]);
+
+  // Debossed relief grooves on the rim, for visual detail.
+  const grooveY = trayH / 2 - 0.08;
 
   useFrame((_, delta) => {
     const g = groupRef.current;
@@ -134,13 +160,22 @@ export function FigureBox() {
       <mesh geometry={trayGeo}>{pulp()}</mesh>
       {/* Cavity floor (closes the bottom of the pocket). */}
       <RoundedBox
-        args={[cavW + 0.06, cavH + 0.06, 0.06]}
-        radius={0.04}
+        args={[cavW + 0.04, cavH + 0.04, 0.05]}
+        radius={0.03}
         smoothness={3}
-        position={[0, 0, -trayDepth / 2 + 0.03]}
+        position={[0, 0, -trayDepth / 2 + 0.025]}
       >
         {pulp(1)}
       </RoundedBox>
+      {/* Relief detail: debossed grooves on the top + bottom rim. */}
+      {[grooveY, -grooveY].map((gy, row) =>
+        [-1, 0, 1].map((i) => (
+          <mesh key={`${row}-${i}`} position={[i * 0.12, gy, trayDepth / 2 - 0.012]}>
+            <boxGeometry args={[0.07, 0.018, 0.03]} />
+            <meshStandardMaterial color="#a89368" roughness={0.95} metalness={0} transparent opacity={0} />
+          </mesh>
+        ))
+      )}
     </group>
   );
 }
