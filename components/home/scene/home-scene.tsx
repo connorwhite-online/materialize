@@ -128,6 +128,10 @@ export function HomeScene({
         onCreated={({ gl }) => {
           // The manufacturing "print" reveal uses material clipping planes.
           gl.localClippingEnabled = true;
+          // Filmic tone curve + a touch under 1.0 exposure for punchier
+          // contrast (less of the flat, washed look).
+          gl.toneMapping = THREE.ACESFilmicToneMapping;
+          gl.toneMappingExposure = 0.92;
         }}
         style={{ pointerEvents: "none" }}
       >
