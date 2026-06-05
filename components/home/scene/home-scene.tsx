@@ -41,7 +41,9 @@ function CameraRig() {
     const t = stageWeight(stageRef.current, STAGE.TEARDOWN);
     const portrait = viewport.aspect < 1 ? (1 - viewport.aspect) * 2.2 : 0;
     const targetZ = THREE.MathUtils.lerp(4.5 + portrait, 6.3 + portrait * 1.4, t);
-    const targetY = t * 0.25;
+    // Slightly raised viewpoint (looking a touch down at the device),
+    // rising a bit more for the teardown.
+    const targetY = 0.5 + t * 0.25;
     camera.position.z += (targetZ - camera.position.z) * 0.1;
     camera.position.y += (targetY - camera.position.y) * 0.1;
     camera.lookAt(0, 0, 0);

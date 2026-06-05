@@ -6,6 +6,7 @@ import { AuthNav } from "@/components/auth/auth-nav";
 import { HomeBottomBar } from "@/components/home/home-bottom-bar";
 import { MaterialCarousel } from "@/components/home/material-carousel";
 import { ScrollIndicator } from "@/components/home/scroll-indicator";
+import { ScrollReveal } from "@/components/home/scroll-reveal";
 import { HomeScene } from "@/components/home/scene/home-scene-lazy";
 import { HERO_MATERIALS } from "@/lib/materials";
 import { ChevronRight } from "@/components/icons/chevron-right";
@@ -185,7 +186,7 @@ export function AnonHome() {
           className="flex h-svh snap-start flex-col items-center px-4 pt-20 pb-40"
         >
           {/* Copy anchored to the top; the centered model lives below it. */}
-          <div className="flex flex-col items-center text-center">
+          <ScrollReveal className="flex flex-col items-center text-center">
             <h1 className="flex flex-col items-center justify-center gap-0 leading-[0.95] sm:flex-row sm:items-baseline sm:gap-3">
               <span
                 className="bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-6xl tracking-tight text-transparent sm:text-7xl lg:text-8xl"
@@ -204,7 +205,7 @@ export function AnonHome() {
               The marketplace for 3D-print files — browse and buy designs, or get
               any model printed on demand and shipped to your door.
             </p>
-          </div>
+          </ScrollReveal>
 
           {/* Drag-to-scrub zone over the centered model — restores the
               original horizontal swipe gesture for changing materials. */}
@@ -278,7 +279,7 @@ function SectionCopy({
       {/* Copy pinned to the very top, well clear of the centered model.
           No background container — a soft drop-shadow keeps it legible
           over the scene. */}
-      <div className="mx-auto max-w-xs text-center [text-shadow:0_1px_12px_var(--background)] sm:max-w-sm">
+      <ScrollReveal className="mx-auto max-w-xs text-center [text-shadow:0_1px_12px_var(--background)] sm:max-w-sm">
         <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-primary/90">
           {kicker}
         </p>
@@ -288,7 +289,7 @@ function SectionCopy({
         <p className="mx-auto mt-2 max-w-xs text-sm leading-relaxed text-muted-foreground">
           {body}
         </p>
-      </div>
+      </ScrollReveal>
     </section>
   );
 }
