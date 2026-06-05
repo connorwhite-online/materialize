@@ -74,7 +74,12 @@ export function PrimaryDevice({ target, dragVelocityRef }: PrimaryDeviceProps) {
       spin.rotation.y += delta * 0.3 * (1 - still);
     }
     const settleYaw = commerceW * COMMERCE_YAW + teardownW * TEARDOWN_YAW;
-    spin.rotation.y = THREE.MathUtils.lerp(spin.rotation.y, settleYaw, k * still);
+    // Settle to the NEAREST equivalent of the target angle, so the
+    // accumulated idle spin doesn't unwind through several full turns
+    // when the device locks into the commerce/teardown pose.
+    const twoPi = Math.PI * 2;
+    const nearYaw = settleYaw + twoPi * Math.round((spin.rotation.y - settleYaw) / twoPi);
+    spin.rotation.y = THREE.MathUtils.lerp(spin.rotation.y, nearYaw, k * still);
     const pitch =
       -0.28 + commerceW * (COMMERCE_PITCH + 0.28) + teardownW * (TEARDOWN_PITCH + 0.28);
     spin.rotation.x = THREE.MathUtils.lerp(spin.rotation.x, pitch, k);

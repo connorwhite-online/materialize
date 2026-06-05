@@ -8,17 +8,70 @@ import { useDeviceGeometry } from "./use-device-geometry";
 import { type MaterialTarget } from "./device-model";
 import { STAGE, stageWeight } from "./constants";
 
-const GLOW = "#62d0ff";
+const GLOW = "#6fd2ff";
 // Scaled-down "on the print bed" size.
 const S = 0.7;
+// Visible sinter layers across the build (SLS-style stepped reveal).
+const LAYERS = 52;
+
+/** Holographic ghost material — subtle fresnel-edge glow + scanlines,
+ *  clipping-aware so it only shows above the sintering build line. */
+function makeHologramMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    clipping: true,
+    uniforms: {
+      uTime: { value: 0 },
+      uColor: { value: new THREE.Color(GLOW) },
+      uOpacity: { value: 0.0 },
+    },
+    vertexShader: /* glsl */ `
+      #include <common>
+      #include <clipping_planes_pars_vertex>
+      varying vec3 vNormalW;
+      varying vec3 vViewDir;
+      varying float vWorldY;
+      void main() {
+        vec3 transformed = position;
+        vec4 worldPos = modelMatrix * vec4(transformed, 1.0);
+        vWorldY = worldPos.y;
+        vNormalW = normalize(mat3(modelMatrix) * normal);
+        vViewDir = normalize(cameraPosition - worldPos.xyz);
+        vec4 mvPosition = viewMatrix * worldPos;
+        #include <clipping_planes_vertex>
+        gl_Position = projectionMatrix * mvPosition;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      #include <common>
+      #include <clipping_planes_pars_fragment>
+      uniform float uTime;
+      uniform vec3 uColor;
+      uniform float uOpacity;
+      varying vec3 vNormalW;
+      varying vec3 vViewDir;
+      varying float vWorldY;
+      void main() {
+        #include <clipping_planes_fragment>
+        float fres = pow(1.0 - abs(dot(normalize(vNormalW), normalize(vViewDir))), 1.8);
+        float scan = 0.5 + 0.5 * sin(vWorldY * 90.0 - uTime * 2.5);
+        float a = uOpacity * (0.16 + 0.84 * fres) * (0.55 + 0.45 * scan);
+        vec3 col = uColor * (0.7 + fres * 1.4);
+        gl_FragColor = vec4(col, a);
+      }
+    `,
+  });
+}
 
 /**
  * The manufacturing / supply-chain stage. The two outer enclosures sit
- * on a pedestal-like print bed lit dramatically from below, and
- * "print" from bottom to top: below the build line they're the solid
- * selected material; above it they're a digital wireframe glow. The
- * build line sweeps up as the reader scrolls into the section. Uses
- * world-space clipping planes (localClippingEnabled is set on the
+ * on a pedestal-like print bed lit dramatically from below and are
+ * sintered into being layer-by-layer (SLS-style): above the build line
+ * they're a subtle hologram; as the line sweeps up each layer "turns"
+ * into the solid selected material. Driven by scroll into the section
+ * via world-space clipping planes (localClippingEnabled is set on the
  * renderer in HomeScene).
  */
 export function ManufacturingScene({ target }: { target: MaterialTarget }) {
@@ -35,6 +88,12 @@ export function ManufacturingScene({ target }: { target: MaterialTarget }) {
 
   const planeBelow = useMemo(() => new THREE.Plane(new THREE.Vector3(0, -1, 0), 0), []);
   const planeAbove = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), []);
+  const holoA = useMemo(makeHologramMaterial, []);
+  const holoB = useMemo(makeHologramMaterial, []);
+  useMemo(() => {
+    holoA.clippingPlanes = [planeAbove];
+    holoB.clippingPlanes = [planeAbove];
+  }, [holoA, holoB, planeAbove]);
 
   const devBottom = (-S * size.y) / 2;
   const devHeight = S * size.y;
@@ -49,58 +108,75 @@ export function ManufacturingScene({ target }: { target: MaterialTarget }) {
     m.clearcoat = THREE.MathUtils.lerp(m.clearcoat, target.clearcoat, k);
   };
 
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
     const g = groupRef.current;
     if (!g) return;
     const stage = stageRef.current;
     const w = stageWeight(stage, STAGE.MATERIALS);
     g.visible = w > 0.01;
 
-    // Build line sweeps up as you scroll into the section.
-    const build = THREE.MathUtils.clamp((stage - 0.58) / 0.4, 0, 1);
+    // Build line sweeps up as you scroll into the section, quantized into
+    // sinter layers so it reads as the SLS process building height.
+    const raw = THREE.MathUtils.clamp((stage - 0.6) / 0.38, 0, 1);
+    const build = Math.round(raw * LAYERS) / LAYERS;
     const buildY = devBottom + build * devHeight;
     planeBelow.constant = buildY;
     planeAbove.constant = -buildY;
 
     if (ringRef.current) {
       ringRef.current.position.y = buildY;
-      ringRef.current.visible = build > 0.02 && build < 0.985;
+      ringRef.current.visible = build > 0.01 && build < 0.99;
     }
 
     lerpSolid(solidA.current, delta);
     lerpSolid(solidB.current, delta);
 
-    if (spinRef.current && !reducedMotion) spinRef.current.rotation.y += delta * 0.25;
+    const t = state.clock.elapsedTime;
+    holoA.uniforms.uTime.value = t;
+    holoB.uniforms.uTime.value = t;
+    holoA.uniforms.uOpacity.value = w * 0.55;
+    holoB.uniforms.uOpacity.value = w * 0.55;
 
-    // Fade everything with the stage; uplights only burn in this section.
+    if (spinRef.current && !reducedMotion) spinRef.current.rotation.y += delta * 0.2;
+
     g.traverse((obj) => {
       const m = (obj as THREE.Mesh).material as
-        | (THREE.Material & { opacity: number; wireframe?: boolean })
+        | (THREE.Material & { opacity: number; isShaderMaterial?: boolean })
         | undefined;
-      if (!m || typeof m.opacity !== "number") return;
-      m.opacity = m.wireframe ? w * 0.55 : w;
+      if (!m || m.isShaderMaterial || typeof m.opacity !== "number") return;
+      m.opacity = w;
     });
-    if (up1.current) up1.current.intensity = w * 16;
-    if (up2.current) up2.current.intensity = w * 10;
+    if (up1.current) up1.current.intensity = w * 8;
+    if (up2.current) up2.current.intensity = w * 5;
   });
 
   return (
     <group ref={groupRef} visible={false}>
-      {/* Dramatic upward lights — bottom of the platform is lost in glare. */}
+      {/* Dramatic upward lights — the base of the platform is lost in glare. */}
       <pointLight ref={up1} position={[0.5, devBottom - 0.25, 0.5]} color="#bfe4ff" intensity={0} distance={4} />
       <pointLight ref={up2} position={[-0.5, devBottom - 0.25, 0.2]} color="#ffffff" intensity={0} distance={4} />
 
-      {/* Pedestal / print bed (its base falls off into darkness). */}
-      <mesh position={[0, devBottom - 0.85, 0]}>
-        <cylinderGeometry args={[halfW * 1.7, halfW * 2.0, 1.6, 48]} />
-        <meshStandardMaterial color="#16181d" metalness={0.6} roughness={0.4} />
-      </mesh>
-      <mesh position={[0, devBottom - 0.045, 0]}>
-        <cylinderGeometry args={[halfW * 1.7, halfW * 1.7, 0.02, 48]} />
-        <meshBasicMaterial color={GLOW} toneMapped={false} transparent opacity={0.5} />
-      </mesh>
+      {/* Print bed — a low, beveled platform tucked right under the
+          device; only the top edge reads, the rest falls into dark. */}
+      <group position={[0, devBottom - 0.015, 0]}>
+        {/* Bed surface. */}
+        <mesh position={[0, -0.035, 0]}>
+          <cylinderGeometry args={[halfW * 1.5, halfW * 1.6, 0.07, 64]} />
+          <meshStandardMaterial color="#15171c" metalness={0.75} roughness={0.32} />
+        </mesh>
+        {/* Beveled lip. */}
+        <mesh position={[0, -0.085, 0]}>
+          <cylinderGeometry args={[halfW * 1.62, halfW * 1.92, 0.05, 64]} />
+          <meshStandardMaterial color="#0d0f12" metalness={0.6} roughness={0.45} />
+        </mesh>
+        {/* Glowing edge line. */}
+        <mesh position={[0, -0.002, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[halfW * 1.55, 0.005, 8, 90]} />
+          <meshBasicMaterial color={GLOW} toneMapped={false} transparent opacity={0.55} />
+        </mesh>
+      </group>
 
-      {/* The two outer enclosures: solid below the build line, wireframe above. */}
+      {/* Enclosures: solid below the build line, hologram above. */}
       <group ref={spinRef} scale={S}>
         <mesh geometry={front}>
           <meshPhysicalMaterial
@@ -126,18 +202,14 @@ export function ManufacturingScene({ target }: { target: MaterialTarget }) {
             clippingPlanes={[planeBelow]}
           />
         </mesh>
-        <mesh geometry={front}>
-          <meshBasicMaterial color={GLOW} wireframe transparent opacity={0.5} depthWrite={false} toneMapped={false} clippingPlanes={[planeAbove]} />
-        </mesh>
-        <mesh geometry={back}>
-          <meshBasicMaterial color={GLOW} wireframe transparent opacity={0.5} depthWrite={false} toneMapped={false} clippingPlanes={[planeAbove]} />
-        </mesh>
+        <mesh geometry={front} material={holoA} />
+        <mesh geometry={back} material={holoB} />
       </group>
 
-      {/* The build line — a glowing print head ring. */}
+      {/* The sinter line — a bright laser/print-head ring. */}
       <mesh ref={ringRef} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[halfW * 1.12, 0.01, 8, 64]} />
-        <meshBasicMaterial color={GLOW} toneMapped={false} />
+        <torusGeometry args={[halfW * 1.1, 0.006, 8, 64]} />
+        <meshBasicMaterial color="#eaffff" toneMapped={false} />
       </mesh>
     </group>
   );
