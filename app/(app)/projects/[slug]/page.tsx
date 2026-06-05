@@ -12,10 +12,11 @@ import {
   projectCircuits,
   projectPhotos,
   files,
+  fileAssets,
   users,
   purchases,
 } from "@/lib/db/schema";
-import { eq, and, asc, desc } from "drizzle-orm";
+import { eq, and, asc, desc, inArray } from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
 import { Card, CardContent } from "@/components/ui/card";
 import { CollapsibleSection } from "@/components/ui/collapsible-section";
@@ -54,6 +55,16 @@ import { swallow } from "@/lib/utils/swallow";
 
 function truncate(s: string, n: number) {
   return s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s;
+}
+
+// Bounding-box label matching the file cards elsewhere (library /
+// profile): "40.0 × 30.0 × 20.0 mm".
+function dimensionsLabel(
+  dims: [number, number, number] | null
+): string | null {
+  if (!dims) return null;
+  const fmt = (n: number) => n.toFixed(1);
+  return `${fmt(dims[0])} × ${fmt(dims[1])} × ${fmt(dims[2])} mm`;
 }
 
 export async function generateMetadata(props: {
@@ -362,6 +373,51 @@ export default async function ProjectDetailPage(props: {
     },
   }));
 
+  // Primary asset per bundled file — gives the "Files in this project"
+  // grid the same name + dimensions treatment as file cards elsewhere.
+  // The display name prefers the user-entered file name and falls back
+  // to the original upload filename (files auto-created by the print
+  // flow can land with an empty name). Mirrors the primary-asset pick
+  // in library-tab: first asset by createdAt.
+  const bundledFileIds = bundledFiles.map((f) => f.id);
+  const fileAssetRows = bundledFileIds.length
+    ? await db
+        .select({
+          fileId: fileAssets.fileId,
+          originalFilename: fileAssets.originalFilename,
+          geometryData: fileAssets.geometryData,
+        })
+        .from(fileAssets)
+        .where(inArray(fileAssets.fileId, bundledFileIds))
+        .orderBy(asc(fileAssets.createdAt))
+    : [];
+  const primaryAssetByFileId = new Map<
+    string,
+    { originalFilename: string; dimensions: [number, number, number] | null }
+  >();
+  for (const a of fileAssetRows) {
+    if (!a.fileId || primaryAssetByFileId.has(a.fileId)) continue;
+    const dims = a.geometryData?.dimensions;
+    const dimsOk =
+      dims &&
+      typeof dims.x === "number" &&
+      typeof dims.y === "number" &&
+      typeof dims.z === "number";
+    primaryAssetByFileId.set(a.fileId, {
+      originalFilename: a.originalFilename,
+      dimensions: dimsOk ? [dims.x, dims.y, dims.z] : null,
+    });
+  }
+  const bundledFileCards = bundledFiles.map((file) => {
+    const asset = primaryAssetByFileId.get(file.id);
+    return {
+      ...file,
+      displayName:
+        file.name?.trim() || asset?.originalFilename || "Untitled file",
+      dimensions: asset?.dimensions ?? null,
+    };
+  });
+
   let ownerBuyerCount = 0;
   // Files the viewer owns that aren't already bundled here — feeds the
   // "Add files" picker. Owner-only; only the viewer's own files are
@@ -585,31 +641,42 @@ export default async function ProjectDetailPage(props: {
               )}
             </div>
             <div className="grid gap-3 grid-cols-2 sm:grid-cols-3">
-              {bundledFiles.map((file) => (
-                <Link
-                  key={file.id}
-                  href={`/files/${file.slug}`}
-                  className="group flex flex-col gap-2"
-                >
-                  <div className="aspect-square overflow-hidden rounded-lg border border-border bg-muted">
-                    {file.thumbnailUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={file.thumbnailUrl}
-                        alt=""
-                        className="w-full h-full object-cover transition-transform group-hover:scale-105"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground/50">
-                        No preview
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-sm font-medium line-clamp-1">
-                    {file.name}
-                  </p>
-                </Link>
-              ))}
+              {bundledFileCards.map((file) => {
+                const dims = dimensionsLabel(file.dimensions);
+                return (
+                  <Link
+                    key={file.id}
+                    href={`/files/${file.slug}`}
+                    className="group flex flex-col gap-2"
+                  >
+                    <div className="aspect-square overflow-hidden rounded-lg border border-border bg-muted">
+                      {file.thumbnailUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={file.thumbnailUrl}
+                          alt=""
+                          className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground/50">
+                          No preview
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <p className="truncate text-sm font-medium transition-colors group-hover:text-primary">
+                        {file.displayName}
+                      </p>
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                        {dims ??
+                          (file.price > 0
+                            ? `$${(file.price / 100).toFixed(2)}`
+                            : "Free")}
+                      </p>
+                    </div>
+                  </Link>
+                );
+              })}
             </div>
           </div>
 
