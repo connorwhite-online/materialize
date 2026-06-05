@@ -57,10 +57,10 @@ export function PrimaryDevice({ target, dragVelocityRef }: PrimaryDeviceProps) {
     const teardownW = stageWeight(stage, STAGE.TEARDOWN);
     const footerW = stageWeight(stage, STAGE.FOOTER);
 
-    // Explode only AFTER the box stage is gone — the boxed device stays
-    // assembled. Ramps up entering the teardown and back down leaving it.
+    // Explode only AROUND the teardown stage (2); solid + assembled
+    // everywhere else (including the packaging stage that follows it).
     explodeRef.current =
-      smoothstep(2.55, 3, stage) * (1 - smoothstep(3, 3.45, stage));
+      smoothstep(1.55, 2, stage) * (1 - smoothstep(2, 2.45, stage));
 
     // One persistent mesh across every stage (no cross-fade): it stays
     // present in the materials stage — just scaled down onto the print
@@ -109,7 +109,7 @@ export function PrimaryDevice({ target, dragVelocityRef }: PrimaryDeviceProps) {
     spin.rotation.z = THREE.MathUtils.lerp(spin.rotation.z, tension * 0.32, ks);
     g.position.x = THREE.MathUtils.lerp(g.position.x, tension * 0.28, ks);
 
-    const want = stage > 2.4 && stage < 3.6;
+    const want = stage > 1.4 && stage < 2.6;
     if (want !== labelsOnRef.current) {
       labelsOnRef.current = want;
       setLabelsOn(want);

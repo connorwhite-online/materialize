@@ -270,6 +270,8 @@ export function DeviceModel({
   const backRef = useRef<THREE.Group>(null);
   const internalsRef = useRef<THREE.Group>(null);
   const sinterRef = useRef<THREE.Mesh>(null);
+  const topFeatRef = useRef<THREE.Group>(null);
+  const botFeatRef = useRef<THREE.Group>(null);
   const frontMat = useRef<THREE.MeshPhysicalMaterial>(null);
   const backMat = useRef<THREE.MeshPhysicalMaterial>(null);
   const partRefs = useRef<Record<string, THREE.Group | null>>({});
@@ -371,10 +373,14 @@ export function DeviceModel({
       if (!g) continue;
       g.position.set(
         part.rest[0] * size.x,
-        part.rest[1] * size.y,
+        // Spread vertically outward too (top parts up, bottom parts down).
+        part.rest[1] * size.y * (1 + 0.55 * e),
         part.rest[2] * size.z + (part.order - ORDER_CENTER) * EXPLODE_SPACING * e
       );
     }
+    // End-face components ride out vertically as well: camera up, USB-C down.
+    if (topFeatRef.current) topFeatRef.current.position.y = topCap.point.y + e * 0.3;
+    if (botFeatRef.current) botFeatRef.current.position.y = bottomCap.point.y - e * 0.3;
     const pcb = partRefs.current["pcb"];
     if (pcb) pcb.position.z = (PCB_ORDER - ORDER_CENTER) * EXPLODE_SPACING * e;
   });
@@ -418,7 +424,7 @@ export function DeviceModel({
             Top: camera + LED + mic; bottom: female USB-C. */}
         {showInternals && (
           <>
-            <group position={topCap.point.toArray()} quaternion={topQ}>
+            <group ref={topFeatRef} position={topCap.point.toArray()} quaternion={topQ}>
               {/* Camera (10mm hole), centered. */}
               <mesh position={[0, -0.012, 0]}>
                 <cylinderGeometry args={[w * 0.11, w * 0.11, 0.04, 40]} />
@@ -440,7 +446,7 @@ export function DeviceModel({
               </mesh>
             </group>
 
-            <group position={bottomCap.point.toArray()} quaternion={bottomQ}>
+            <group ref={botFeatRef} position={bottomCap.point.toArray()} quaternion={bottomQ}>
               <UsbCPort w={w} />
             </group>
           </>

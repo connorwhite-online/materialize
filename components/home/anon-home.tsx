@@ -237,18 +237,18 @@ export function AnonHome() {
           body="A vetted network of manufacturers builds your part on demand — in your material, wherever you are."
         />
 
-        {/* --- Stage 2 · Buy & sell --- */}
-        <SectionCopy
-          kicker="Marketplace"
-          title="Buy & sell files"
-          body="List a print-ready design or buy one. Flat 3% fee, nothing else."
-        />
-
-        {/* --- Stage 3 · Teardown / firmware --- */}
+        {/* --- Stage 2 · Assembly / teardown --- */}
         <SectionCopy
           kicker="Open hardware"
           title="Down to the firmware"
           body="STLs, wiring, the BOM, and a link to the firmware repo."
+        />
+
+        {/* --- Stage 3 · Packaging / buy & sell --- */}
+        <SectionCopy
+          kicker="Marketplace"
+          title="Buy & sell files"
+          body="List a print-ready design or buy one. Flat 3% fee, nothing else."
         />
 
         {/* --- Stage 4 · Footer --- */}
