@@ -9,6 +9,7 @@ import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { SceneController, useStage } from "./stage-context";
 import { LightsRig } from "./lights-rig";
 import { PrimaryDevice } from "./primary-device";
+import { BuildGlow } from "./build-glow";
 import { FigureBox } from "./figure-box";
 import { MaterialBurst } from "./material-burst";
 import { type MaterialTarget } from "./device-model";
@@ -41,8 +42,8 @@ function CameraRig() {
     const t = stageWeight(stage, STAGE.TEARDOWN);
     const m = stageWeight(stage, STAGE.MATERIALS);
     const portrait = viewport.aspect < 1 ? (1 - viewport.aspect) * 2.2 : 0;
-    // Zoom in for the manufacturing stage; pull back for the teardown.
-    const baseZ = 4.5 + portrait - m * 1.5;
+    // Zoom in close for the manufacturing stage; pull back for the teardown.
+    const baseZ = 4.5 + portrait - m * 2.3;
     const targetZ = THREE.MathUtils.lerp(baseZ, 6.3 + portrait * 1.4, t);
     // Slightly raised viewpoint (looking a touch down at the device),
     // rising a bit more for the teardown.
@@ -85,6 +86,7 @@ function SceneContents({
       <CameraRig />
       <LightsRig />
       <PrimaryDevice target={target} dragVelocityRef={dragVelocityRef} />
+      <BuildGlow />
       <MaterialBurst
         burstKey={burstKey}
         direction={burstDirection}

@@ -361,6 +361,15 @@ export function DeviceModel({
     else if (stage > 0.74 && stage <= 1.2) build = (stage - 0.74) / 0.46;
     else if (stage > 0.6) build = 1;
     build = THREE.MathUtils.clamp(build, 0, 1);
+
+    // Hide the seated end-face parts (camera/LED/mic/USB-C) while the
+    // device is a printing hologram — only the clipped shell sinters in.
+    // Gated on the print actually being underway (shell clipped) or the
+    // hologram dominating, so they stay put during ordinary hero scroll.
+    const hideFeatures = build < 0.999 || matW > 0.5;
+    if (topFeatRef.current) topFeatRef.current.visible = !hideFeatures;
+    if (botFeatRef.current) botFeatRef.current.visible = !hideFeatures;
+
     const q = Math.round(build * LAYERS) / LAYERS;
     const localBuildY = -size.y / 2 + q * size.y * 1.04;
     localBelow.constant = localBuildY;
