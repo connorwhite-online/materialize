@@ -45,7 +45,7 @@ import {
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { Pencil } from "@/components/icons/pencil";
 import { Trash } from "@/components/icons/trash";
-import { getLicenseMeta } from "@/lib/licenses";
+import { LicenseBadge } from "@/components/licenses/license-badge";
 import { getMaterialById } from "@/lib/materials";
 import { findMaterialConfig } from "@/lib/craftcloud/catalog";
 import { generateDownloadUrl } from "@/lib/storage";
@@ -899,21 +899,7 @@ export default async function FileDetailPage(props: {
                     Free to use
                   </div>
                 )}
-                {(() => {
-                  const meta = getLicenseMeta(file.license);
-                  if (!meta) return null;
-                  return (
-                    <a
-                      href={meta.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      title={meta.summary}
-                      className="mt-1 inline-block text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-                    >
-                      {meta.shortName} · {meta.name}
-                    </a>
-                  );
-                })()}
+                <LicenseBadge license={file.license} className="mt-2" />
               </div>
 
               <div className="space-y-2">

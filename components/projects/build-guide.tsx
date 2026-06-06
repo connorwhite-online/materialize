@@ -116,7 +116,7 @@ export function BuildGuide({ projectId, buildGuide, canManage }: Props) {
     return (
       <div className="space-y-3">
         {buildGuide ? (
-          <MarkdownProse imageMaxHeightClass={GUIDE_IMAGE_MAX_HEIGHT}>
+          <MarkdownProse imageMaxHeightClass={GUIDE_IMAGE_MAX_HEIGHT} allowHtml>
             {buildGuide}
           </MarkdownProse>
         ) : (
@@ -179,7 +179,7 @@ export function BuildGuide({ projectId, buildGuide, canManage }: Props) {
       {showPreview ? (
         <div className="min-h-40 rounded-lg border border-border p-3">
           {draft.trim() ? (
-            <MarkdownProse imageMaxHeightClass={GUIDE_IMAGE_MAX_HEIGHT}>
+            <MarkdownProse imageMaxHeightClass={GUIDE_IMAGE_MAX_HEIGHT} allowHtml>
               {draft}
             </MarkdownProse>
           ) : (
