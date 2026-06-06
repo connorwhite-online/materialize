@@ -21,6 +21,17 @@ describe("MarkdownProse allowHtml", () => {
     );
   });
 
+  it("honors the align attribute on imported headings", () => {
+    const { container } = render(
+      <MarkdownProse allowHtml>
+        {'<h1 align="center">Centered</h1>'}
+      </MarkdownProse>
+    );
+    const heading = container.querySelector("h2");
+    expect(heading?.textContent).toContain("Centered");
+    expect(heading?.className).toContain("text-center");
+  });
+
   it("strips scripts even with allowHtml", () => {
     const { container } = render(
       <MarkdownProse allowHtml>
