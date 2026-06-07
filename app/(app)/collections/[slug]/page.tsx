@@ -15,6 +15,7 @@ import { auth } from "@clerk/nextjs/server";
 import { isOrgMember } from "@/lib/authorization";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { getLicenseMeta } from "@/lib/licenses";
 
 type FileItem = {
   kind: "file";
@@ -220,11 +221,8 @@ export default async function CollectionPage(props: {
                         {item.fileCount === 1 ? "file" : "files"}
                       </Badge>
                     )}
-                    <Badge
-                      variant="outline"
-                      className="text-[10px] capitalize"
-                    >
-                      {item.license}
+                    <Badge variant="outline" className="text-[10px]">
+                      {getLicenseMeta(item.license)?.shortName ?? item.license}
                     </Badge>
                     {item.price > 0 ? (
                       <span className="text-xs font-medium">

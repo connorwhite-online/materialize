@@ -1,21 +1,62 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import { cn } from "@/lib/utils";
+
+// Map a pasted `align` attribute (preserved through sanitize for
+// imported HTML) to a text-align utility. The custom element renderers
+// only receive `children`, so we read the alignment off the hast node's
+// properties and apply it as a class — otherwise `<h1 align="center">`
+// survives sanitization but renders flush-left.
+function nodeAlign(node: unknown): string {
+  const align = (node as { properties?: Record<string, unknown> } | undefined)
+    ?.properties?.align;
+  if (align === "center") return "text-center";
+  if (align === "right" || align === "end") return "text-right";
+  if (align === "justify") return "text-justify";
+  return "";
+}
+
+// Sanitize schema for the `allowHtml` path. Starts from the safe
+// default (which strips <script>, event handlers, javascript: URLs,
+// etc.) and additionally permits the presentational `align` attribute
+// authors reach for in pasted HTML (`<h1 align="center">`, honored by
+// `nodeAlign` below) plus explicit img sizing — enough to render
+// imported build guides faithfully without opening an injection hole.
+const htmlSchema = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    "*": [...(defaultSchema.attributes?.["*"] ?? []), "align"],
+    img: [
+      ...(defaultSchema.attributes?.img ?? []),
+      "width",
+      "height",
+      "loading",
+    ],
+  },
+};
 
 /**
  * Renders markdown source as styled prose. Used for file + project
  * descriptions and discussion comments — anywhere a user-authored
  * body may want bold, italic, links, lists, code, or inline images.
  *
- * Safety — react-markdown does NOT pass raw HTML through by default,
- * so untrusted input can't inject `<script>` etc. Inline images are
- * rendered (post-attached comment images use markdown image syntax
- * pointing at our own /api/thumbnails URLs); the image renderer
- * caps at a sensible max-height so a tall photo doesn't blow out
- * the column.
+ * Safety — by default react-markdown does NOT pass raw HTML through,
+ * so untrusted input (descriptions, comments) can't inject `<script>`
+ * etc. The opt-in `allowHtml` flag turns on `rehype-raw` so embedded
+ * HTML renders, paired with `rehype-sanitize` so the markup is still
+ * scrubbed to a safe subset. Only owner-authored surfaces (the build
+ * guide) should pass it. Inline images are rendered (post-attached
+ * comment images use markdown image syntax pointing at our own
+ * /api/thumbnails URLs); the image renderer caps at a sensible
+ * max-height so a tall photo doesn't blow out the column.
  */
 export function MarkdownProse({
   children,
   imageMaxHeightClass = "max-h-80",
+  allowHtml = false,
 }: {
   children: string;
   /**
@@ -24,34 +65,67 @@ export function MarkdownProse({
    * taller value so step photos read at a useful size.
    */
   imageMaxHeightClass?: string;
+  /**
+   * Render embedded raw HTML (sanitized). Off for untrusted surfaces;
+   * the build guide opts in so authors can paste formatted HTML.
+   */
+  allowHtml?: boolean;
 }) {
   return (
     <div className="text-sm leading-relaxed text-muted-foreground">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        rehypePlugins={
+          allowHtml ? [rehypeRaw, [rehypeSanitize, htmlSchema]] : []
+        }
         components={{
-          p: ({ children }) => (
-            <p className="my-3 first:mt-0 last:mb-0 whitespace-pre-wrap break-words">
+          p: ({ children, node }) => (
+            <p
+              className={cn(
+                "my-3 first:mt-0 last:mb-0 whitespace-pre-wrap break-words",
+                nodeAlign(node)
+              )}
+            >
               {children}
             </p>
           ),
-          h1: ({ children }) => (
-            <h2 className="mt-5 mb-2 text-base font-semibold text-foreground">
+          h1: ({ children, node }) => (
+            <h2
+              className={cn(
+                "mt-5 mb-2 text-base font-semibold text-foreground",
+                nodeAlign(node)
+              )}
+            >
               {children}
             </h2>
           ),
-          h2: ({ children }) => (
-            <h3 className="mt-5 mb-2 text-sm font-semibold text-foreground">
+          h2: ({ children, node }) => (
+            <h3
+              className={cn(
+                "mt-5 mb-2 text-sm font-semibold text-foreground",
+                nodeAlign(node)
+              )}
+            >
               {children}
             </h3>
           ),
-          h3: ({ children }) => (
-            <h4 className="mt-4 mb-2 text-sm font-medium text-foreground">
+          h3: ({ children, node }) => (
+            <h4
+              className={cn(
+                "mt-4 mb-2 text-sm font-medium text-foreground",
+                nodeAlign(node)
+              )}
+            >
               {children}
             </h4>
           ),
-          h4: ({ children }) => (
-            <h5 className="mt-3 mb-1.5 text-sm font-medium text-foreground">
+          h4: ({ children, node }) => (
+            <h5
+              className={cn(
+                "mt-3 mb-1.5 text-sm font-medium text-foreground",
+                nodeAlign(node)
+              )}
+            >
               {children}
             </h5>
           ),
