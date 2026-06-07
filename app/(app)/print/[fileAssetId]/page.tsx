@@ -11,14 +11,20 @@ import { DESIGN_TAG_LABELS } from "@/lib/validations/file";
 
 export default async function PrintConfigPage(props: {
   params: Promise<{ fileAssetId: string }>;
-  searchParams: Promise<{ material?: string }>;
+  searchParams: Promise<{ material?: string; project?: string }>;
 }) {
   const { fileAssetId } = await props.params;
   // CraftCloud material id threaded from /materials/[slug]'s
   // "Print with X" link. Forwarded to MaterialPicker's preselect
   // effect; exact-id match is reliable since it came from the
   // same catalog the quote route enriches against.
-  const { material: preselectMaterialId } = await props.searchParams;
+  //
+  // `project` is the slug of the project print hub the user came
+  // from (the "Print this project" flow). Forwarded so a successful
+  // Add to Cart routes back into that hub instead of the personal
+  // library, letting the user walk the project's files one by one.
+  const { material: preselectMaterialId, project: projectSlug } =
+    await props.searchParams;
 
   const { userId } = await auth();
 
@@ -107,6 +113,7 @@ export default async function PrintConfigPage(props: {
         geometryData={asset.geometryData}
         preselectMaterialId={resolvedPreselectMaterialId}
         configureHeader={configureHeader}
+        projectSlug={projectSlug}
       />
     </div>
   );
