@@ -22,6 +22,10 @@ interface WhatNextPaneProps {
   linkSuffix: string;
   onFilePicked: (file: File, format: Format) => void;
   uploadError?: string | null;
+  /** Heading for the tile list. Defaults to "Your recent files". */
+  tilesLabel?: string;
+  /** Render the tile list expanded on first paint. Defaults to false. */
+  tilesDefaultExpanded?: boolean;
 }
 
 /**
@@ -38,8 +42,10 @@ export function WhatNextPane({
   linkSuffix,
   onFilePicked,
   uploadError,
+  tilesLabel = "Your recent files",
+  tilesDefaultExpanded = false,
 }: WhatNextPaneProps) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(tilesDefaultExpanded);
 
   return (
     <div className="space-y-5">
@@ -63,7 +69,7 @@ export function WhatNextPane({
             className="flex w-full items-center justify-between px-4 py-3 text-left"
           >
             <span className="text-sm font-medium">
-              Your recent files{" "}
+              {tilesLabel}{" "}
               <span className="text-muted-foreground">({tiles.length})</span>
             </span>
             {expanded ? (

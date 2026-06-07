@@ -51,6 +51,19 @@ interface PrintPageContentProps {
    * the user having to click.
    */
   initialExpandVendorId?: string;
+  /**
+   * Heading for the tile list in the idle pane. Defaults to "Your
+   * recent files" (personal library); the project print hub passes
+   * "Files in this project".
+   */
+  tilesLabel?: string;
+  /**
+   * Render the tile list expanded on first paint. The personal
+   * library keeps it collapsed (it's a convenience below the
+   * uploader); the project hub expands it since the project's files
+   * ARE the point of the page.
+   */
+  tilesDefaultExpanded?: boolean;
 }
 
 type PickedFile = { file: File; format: Format };
@@ -88,6 +101,8 @@ export function PrintPageContent({
   linkSuffix,
   preselectMaterialId,
   initialExpandVendorId,
+  tilesLabel,
+  tilesDefaultExpanded,
 }: PrintPageContentProps) {
   const { isSignedIn, isLoaded } = useUser();
   const router = useRouter();
@@ -270,6 +285,8 @@ export function PrintPageContent({
               linkSuffix={linkSuffix}
               onFilePicked={handleFilePicked}
               uploadError={draft?.status === "error" ? draft.message : error}
+              tilesLabel={tilesLabel}
+              tilesDefaultExpanded={tilesDefaultExpanded}
             />
           )}
         </div>

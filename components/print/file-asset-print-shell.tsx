@@ -22,6 +22,13 @@ interface FileAssetPrintShellProps {
    * user away to /print — no need for a header-hiding pivot.
    */
   configureHeader?: ReactNode;
+  /**
+   * Slug of the project print hub the user arrived from ("Print this
+   * project"). When set, a successful Add to Cart routes back into
+   * that hub (`/print?project=<slug>&expand=…`) instead of the
+   * personal library, so the user keeps walking the project's files.
+   */
+  projectSlug?: string;
 }
 
 /**
@@ -40,11 +47,19 @@ export function FileAssetPrintShell({
   geometryData,
   preselectMaterialId,
   configureHeader,
+  projectSlug,
 }: FileAssetPrintShellProps) {
   const router = useRouter();
 
   const handleAddedToCart = (vendorId: string) => {
-    router.push(`/print?expand=${encodeURIComponent(vendorId)}`);
+    const expand = `expand=${encodeURIComponent(vendorId)}`;
+    // Stay inside the project print hub when the user came from
+    // "Print this project" — otherwise they'd lose the project's
+    // file list after the first add and drop into the personal library.
+    const dest = projectSlug
+      ? `/print?project=${encodeURIComponent(projectSlug)}&${expand}`
+      : `/print?${expand}`;
+    router.push(dest);
   };
 
   return (

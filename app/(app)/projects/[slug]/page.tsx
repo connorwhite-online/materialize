@@ -644,37 +644,54 @@ export default async function ProjectDetailPage(props: {
   // Price + purchase block, shared between the mobile flow (inline,
   // under the gallery) and the desktop sticky sidebar. A function so
   // each call site gets its own element tree rather than reusing one.
-  const renderPurchasePanel = () =>
-    project.price > 0 ? (
-      <>
-        <p className="text-2xl font-bold">
-          ${(project.price / 100).toFixed(2)}
-        </p>
-        {isOwner && !project.ownerOnboarded && (
-          <div className="mt-3">
-            <PayoutSetupWarning />
-          </div>
-        )}
-        {canDownload ? (
+  const renderPurchasePanel = () => (
+    <>
+      {project.price > 0 ? (
+        <>
+          <p className="text-2xl font-bold">
+            ${(project.price / 100).toFixed(2)}
+          </p>
+          {isOwner && !project.ownerOnboarded && (
+            <div className="mt-3">
+              <PayoutSetupWarning />
+            </div>
+          )}
+          {canDownload ? (
+            <p className="text-xs text-muted-foreground mt-3">
+              Download files individually below.
+            </p>
+          ) : (
+            <PurchaseButton
+              projectId={project.id}
+              priceCents={project.price}
+              className="mt-3"
+            />
+          )}
+        </>
+      ) : (
+        <>
+          <p className="text-lg font-medium text-muted-foreground">Free</p>
           <p className="text-xs text-muted-foreground mt-3">
             Download files individually below.
           </p>
-        ) : (
-          <PurchaseButton
-            projectId={project.id}
-            priceCents={project.price}
-            className="mt-3"
-          />
-        )}
-      </>
-    ) : (
-      <>
-        <p className="text-lg font-medium text-muted-foreground">Free</p>
-        <p className="text-xs text-muted-foreground mt-3">
-          Download files individually below.
-        </p>
-      </>
-    );
+        </>
+      )}
+      {/* Print the whole project — walks the user through each
+          bundled file's quote in the project print hub, building one
+          cart they check out together. Shown whenever the project has
+          files; printing a published file doesn't require buying the
+          design (mirrors the per-file "Print this file" button). */}
+      {bundledFiles.length > 0 && (
+        <Button
+          variant="outline"
+          className="mt-3 w-full"
+          render={<Link href={`/print?project=${project.slug}`} />}
+        >
+          Print this project
+        </Button>
+      )}
+    </>
+  );
 
   // Author byline (avatar + name) — rendered in the mobile header and
   // again in the desktop sidebar. Same reasoning as the panel above.
