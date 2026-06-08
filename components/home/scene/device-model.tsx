@@ -285,20 +285,18 @@ function TeardownLabel({
         <meshBasicMaterial color="#8a8f98" />
       </mesh>
       <Html position={end} distanceFactor={5} style={{ pointerEvents: "none" }} zIndexRange={[20, 0]}>
-        {/* The leader-line side offset lives on the wrapper so the <a> is
-            free to use a hover scale transform of its own. */}
+        {/* The leader-line side offset lives on the wrapper so the label is
+            free to use a hover scale transform of its own. Labels are not
+            links — they enlarge and lean the assembly on hover, no nav. */}
         <div
           style={{
             transform: dir > 0 ? "translateX(0.3rem)" : "translateX(-100%) translateX(-0.3rem)",
           }}
         >
-          <a
-            href={part.href}
-            target="_blank"
-            rel="noreferrer"
+          <div
             onPointerOver={() => setHover(lean)}
             onPointerOut={() => setHover({ yaw: 0, pitch: 0 })}
-            className="teardown-label-fade pointer-events-auto flex origin-center items-center gap-2 whitespace-nowrap rounded-md border border-border/60 bg-background/85 px-2.5 py-1.5 text-foreground no-underline shadow-sm backdrop-blur transition-[transform,border-color,background-color] duration-200 ease-out hover:scale-[1.22] hover:border-primary/60 hover:bg-background hover:shadow-md"
+            className="teardown-label-fade pointer-events-auto flex origin-center items-center gap-2 whitespace-nowrap rounded-md border border-border/60 bg-background/85 px-2.5 py-1.5 text-foreground shadow-sm backdrop-blur transition-[transform,border-color,background-color] duration-200 ease-out hover:scale-[1.22] hover:border-primary/60 hover:bg-background hover:shadow-md"
           >
             {part.github && <GithubMark />}
             <span className="flex flex-col leading-tight">
@@ -309,7 +307,7 @@ function TeardownLabel({
                 </span>
               )}
             </span>
-          </a>
+          </div>
         </div>
       </Html>
     </group>
