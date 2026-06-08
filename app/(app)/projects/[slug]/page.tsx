@@ -672,9 +672,6 @@ export default async function ProjectDetailPage(props: {
       ) : (
         <>
           <p className="text-sm text-muted-foreground">Free</p>
-          <p className="text-xs text-muted-foreground mt-3">
-            Download files individually below.
-          </p>
         </>
       )}
       {/* Print the whole project — walks the user through each
