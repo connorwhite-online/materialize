@@ -402,9 +402,8 @@ export function DeviceModel({
     lerpShell(frontMat.current, delta);
     lerpShell(backMat.current, delta);
 
-    // Covers part along the thickness (Z); front toward the camera.
-    if (frontRef.current) frontRef.current.position.z = e * 0.5;
-    if (backRef.current) backRef.current.position.z = -e * 0.35;
+    // (Covers part along the thickness Z below — combined with the
+    // hologram-scene seam gap once the stage value is known.)
 
     // Internals only appear once the case starts opening.
     if (internalsRef.current) internalsRef.current.visible = e > 0.015;
@@ -489,6 +488,18 @@ export function DeviceModel({
     const holoVisible = holoOp > 0.002 || showBand === 1;
     if (holoFrontRef.current) holoFrontRef.current.visible = holoVisible;
     if (holoBackRef.current) holoBackRef.current.visible = holoVisible;
+
+    // Part the two body halves slightly along the seam (Z) while in the
+    // hologram scene, so there's a touch of space between them. Applies to
+    // both the solid covers and their hologram ghosts; fades with the
+    // materials weight so it's gone by the teardown (where the explode
+    // takes over).
+    const matSceneW = Math.max(0, 1 - Math.abs(stage - STAGE.MATERIALS));
+    const gap = matSceneW * 0.07;
+    if (frontRef.current) frontRef.current.position.z = e * 0.5 + gap;
+    if (backRef.current) backRef.current.position.z = -e * 0.35 - gap;
+    if (holoFrontRef.current) holoFrontRef.current.position.z = gap;
+    if (holoBackRef.current) holoBackRef.current.position.z = -gap;
 
     // Hide the seated end-face parts (camera/LED/mic/USB-C) during the
     // materials hologram so only the shell sinters in; they return for the

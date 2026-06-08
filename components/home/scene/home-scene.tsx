@@ -12,6 +12,7 @@ import { PrimaryDevice } from "./primary-device";
 import { BuildGlow } from "./build-glow";
 import { FigureBox } from "./figure-box";
 import { MaterialBurst } from "./material-burst";
+import { DissolveBurst } from "./dissolve-burst";
 import { type MaterialTarget } from "./device-model";
 import { STAGE, stageWeight } from "./constants";
 
@@ -97,6 +98,7 @@ function SceneContents({
         intensity={burstIntensity}
         color={target.color}
       />
+      <DissolveBurst color={target.color} />
       <FigureBox />
       <ContactShadows
         position={[0, -1.05, 0]}

@@ -32,8 +32,11 @@ export function PrimaryDevice({ target, dragVelocityRef }: PrimaryDeviceProps) {
   const groupRef = useRef<THREE.Group>(null);
   const spinRef = useRef<THREE.Group>(null);
   const explodeRef = useRef(0);
-  // Lean offset set when a teardown tag is hovered (eased in below).
+  // Lean offset set when a teardown tag is hovered, plus a critically
+  // damped spring that eases the scene into (and out of) the lean.
   const hoverRef = useRef<HoverTarget>({ yaw: 0, pitch: 0 });
+  const leanCur = useRef<HoverTarget>({ yaw: 0, pitch: 0 });
+  const leanVel = useRef<HoverTarget>({ yaw: 0, pitch: 0 });
 
   // Labels mount only around the teardown stage; a CSS fade smooths it.
   const [labelsOn, setLabelsOn] = useState(false);
@@ -81,11 +84,23 @@ export function PrimaryDevice({ target, dragVelocityRef }: PrimaryDeviceProps) {
     if (!reducedMotion) {
       spin.rotation.y += delta * 0.3 * (1 - still);
     }
+    // Spring the hover-lean toward its target so the scene eases IN
+    // (accelerates) and OUT (decelerates) — a plain lerp only eases out.
+    const hov = hoverRef.current;
+    const stiff = 45;
+    const damp = 2 * Math.sqrt(stiff); // ~critically damped: smooth, no overshoot
+    const dt = Math.min(delta, 1 / 30);
+    for (const ax of ["yaw", "pitch"] as const) {
+      const accel = (hov[ax] - leanCur.current[ax]) * stiff - leanVel.current[ax] * damp;
+      leanVel.current[ax] += accel * dt;
+      leanCur.current[ax] += leanVel.current[ax] * dt;
+    }
+    const lean = leanCur.current;
+
     // Lean toward the hovered teardown tag (only meaningful while the
     // assembly is exploded, so scale the offset by the teardown weight).
-    const hov = hoverRef.current;
     const settleYaw =
-      commerceW * COMMERCE_YAW + teardownW * (TEARDOWN_YAW + hov.yaw);
+      commerceW * COMMERCE_YAW + teardownW * (TEARDOWN_YAW + lean.yaw);
     // Settle to the NEAREST equivalent of the target angle, so the
     // accumulated idle spin doesn't unwind through several full turns
     // when the device locks into the commerce/teardown pose.
@@ -97,7 +112,7 @@ export function PrimaryDevice({ target, dragVelocityRef }: PrimaryDeviceProps) {
       -0.28 * (1 - matW) +
       commerceW * (COMMERCE_PITCH + 0.28) +
       teardownW * (TEARDOWN_PITCH + 0.28) +
-      teardownW * hov.pitch;
+      teardownW * lean.pitch;
     spin.rotation.x = THREE.MathUtils.lerp(spin.rotation.x, pitch, k);
 
     // Live drag feedback: sway with the hero swipe tension (hero only).
