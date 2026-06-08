@@ -543,7 +543,7 @@ export function DeviceModel({
     // on): erode a noisy margin just below the world-space build line.
     shellEdge.uEdgeTime.value = t;
     shellEdge.uBuildLineY.value = worldBuildY;
-    shellEdge.uEdgeAmp.value = showBand ? size.y * 0.06 : 0;
+    shellEdge.uEdgeAmp.value = showBand ? size.y * 0.03 : 0;
     // Only draw the coincident hologram ghost when it's actually showing —
     // otherwise it double-draws the shell surface and z-fights in the hero.
     const holoVisible = holoOp > 0.002 || showBand === 1;
