@@ -644,6 +644,7 @@ export default async function FileDetailPage(props: {
           fileId={file.id}
           fileAssetId={primaryAsset.id}
           format={primaryAsset.format}
+          recommendedMaterialId={file.recommendedMaterialId}
         />
       )}
       {isOwner && file.flaggedReason && file.flaggedAt && (

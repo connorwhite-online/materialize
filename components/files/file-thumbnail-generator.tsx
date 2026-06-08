@@ -8,6 +8,7 @@ interface FileThumbnailGeneratorProps {
   fileId: string;
   fileAssetId: string;
   format: "stl" | "obj" | "3mf" | "step" | "amf";
+  recommendedMaterialId?: string | null;
 }
 
 const PREVIEWABLE = new Set(["stl", "obj", "3mf"]);
@@ -27,6 +28,7 @@ export function FileThumbnailGenerator({
   fileId,
   fileAssetId,
   format,
+  recommendedMaterialId,
 }: FileThumbnailGeneratorProps) {
   const router = useRouter();
   const [done, setDone] = useState(false);
@@ -61,6 +63,7 @@ export function FileThumbnailGenerator({
       format={format}
       fileId={fileId}
       onCapture={onCaptured}
+      recommendedMaterialId={recommendedMaterialId}
     />
   );
 }

@@ -230,6 +230,7 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
           }
           fileId={item.id}
           onCapture={onCaptured}
+          recommendedMaterialId={item.recommendedMaterialId}
         />
       )}
     </Link>
