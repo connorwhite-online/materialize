@@ -32,6 +32,7 @@ export interface LibraryFileCardItem {
   // the owner notices something they wouldn't otherwise see (the
   // listing is still in their library but hidden from buyers).
   flaggedReason?: string | null;
+  recommendedMaterialId?: string | null;
 }
 
 interface LibraryFileCardProps {
@@ -229,6 +230,7 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
           }
           fileId={item.id}
           onCapture={onCaptured}
+          recommendedMaterialId={item.recommendedMaterialId}
         />
       )}
     </Link>

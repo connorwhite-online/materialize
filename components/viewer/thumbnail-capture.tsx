@@ -9,6 +9,7 @@ import {
 } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
+import { MATERIALS } from "@/lib/materials";
 import { StlModel } from "./loaders/stl-model";
 import { ObjModel } from "./loaders/obj-model";
 import { ThreeMfModel } from "./loaders/threemf-model";
@@ -18,6 +19,7 @@ interface ThumbnailCaptureProps {
   format: "stl" | "obj" | "3mf" | "step" | "amf";
   fileId: string;
   onCapture: (fileId: string, dataUrl: string) => void;
+  recommendedMaterialId?: string | null;
 }
 
 /**
@@ -111,24 +113,46 @@ function NormalizedModel({
 function ModelMesh({
   modelUrl,
   format,
+  materialColor,
+  useCustomShader,
 }: {
   modelUrl: string;
   format: string;
+  materialColor?: string;
+  useCustomShader?: boolean;
 }) {
+  const color = materialColor || "#a0a0a0";
+
   switch (format) {
     case "stl":
-      return <StlModel url={modelUrl} color="#a0a0a0" useCustomShader={false} />;
+      return (
+        <StlModel
+          url={modelUrl}
+          color={color}
+          useCustomShader={useCustomShader || false}
+        />
+      );
     case "obj":
-      return <ObjModel url={modelUrl} color="#a0a0a0" useCustomShader={false} />;
+      return (
+        <ObjModel
+          url={modelUrl}
+          color={color}
+          useCustomShader={useCustomShader || false}
+        />
+      );
     case "3mf":
       return (
-        <ThreeMfModel url={modelUrl} color="#a0a0a0" useCustomShader={false} />
+        <ThreeMfModel
+          url={modelUrl}
+          color={color}
+          useCustomShader={useCustomShader || false}
+        />
       );
     default:
       return (
         <mesh>
           <boxGeometry args={[1, 1, 1]} />
-          <meshStandardMaterial color="#a0a0a0" />
+          <meshStandardMaterial color={color} />
         </mesh>
       );
   }
@@ -181,9 +205,16 @@ export function ThumbnailCapture({
   format,
   fileId,
   onCapture,
+  recommendedMaterialId,
 }: ThumbnailCaptureProps) {
   const stableOnCapture = useCallback(onCapture, [onCapture]);
   const [ready, setReady] = useState(false);
+
+  const material = recommendedMaterialId
+    ? MATERIALS.find((m) => m.id === recommendedMaterialId)
+    : null;
+  const materialColor = material?.color;
+  const useCustomShader = !!material;
 
   return (
     <div className="fixed -left-[9999px] top-0 h-[512px] w-[512px] pointer-events-none">
@@ -211,7 +242,12 @@ export function ThumbnailCapture({
 
         <Suspense fallback={null}>
           <NormalizedModel onReady={() => setReady(true)}>
-            <ModelMesh modelUrl={modelUrl} format={format} />
+            <ModelMesh
+              modelUrl={modelUrl}
+              format={format}
+              materialColor={materialColor}
+              useCustomShader={useCustomShader}
+            />
           </NormalizedModel>
         </Suspense>
 

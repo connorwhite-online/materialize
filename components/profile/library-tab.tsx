@@ -82,6 +82,7 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
             coverPhotoId: files.coverPhotoId,
             creatorUsername: users.username,
             creatorDisplayName: users.displayName,
+            recommendedMaterialId: files.recommendedMaterialId,
           })
           .from(purchases)
           .innerJoin(files, eq(purchases.fileId, files.id))
@@ -104,6 +105,7 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
             coverPhotoId: string | null;
             creatorUsername: string | null;
             creatorDisplayName: string | null;
+            recommendedMaterialId: string | null;
           }>
         ),
     db
@@ -381,6 +383,7 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
       dimensions: asset?.dimensions ?? null,
       creatorUsername: r.creatorUsername,
       creatorDisplayName: r.creatorDisplayName,
+      recommendedMaterialId: r.recommendedMaterialId,
     };
   });
 
@@ -449,6 +452,7 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
         primaryFormat: asset?.format ?? null,
         dimensions: asset?.dimensions ?? null,
         flaggedReason: f.flaggedReason,
+        recommendedMaterialId: f.recommendedMaterialId,
       };
     });
 
