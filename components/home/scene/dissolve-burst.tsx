@@ -12,8 +12,12 @@ const LIFE = 0.95;
 const HALF_X = 0.4;
 const HALF_Y = 0.64;
 const HALF_Z = 0.17;
-// Scroll position of the carousel <-> hologram transition we trigger on.
-const TRIGGER = 0.64;
+// Scroll positions the two sprays trigger at. Direction-specific so each
+// fires AS the material sheds/reforms, not after: scrolling down we shed
+// right as the dissolve begins (~FADE_A); scrolling up we gather right as
+// the hologram starts condensing back (~near FADE_B).
+const T_SHED = 0.54;
+const T_GATHER = 0.74;
 
 type Mode = "shed" | "gather";
 
@@ -113,11 +117,12 @@ export function DissolveBurst({ color }: { color: THREE.Color }) {
     if (prev.current !== null && !reducedMotion) {
       const a = prev.current;
       const b = stage;
-      if (a <= TRIGGER && b > TRIGGER && armedShed.current) {
+      if (a <= T_SHED && b > T_SHED && armedShed.current) {
         fire("shed");
         armedShed.current = false;
         armedGather.current = true;
-      } else if (a >= TRIGGER && b < TRIGGER && armedGather.current) {
+      }
+      if (a >= T_GATHER && b < T_GATHER && armedGather.current) {
         fire("gather");
         armedGather.current = false;
         armedShed.current = true;
