@@ -190,17 +190,7 @@ export function MainMenuSidebar({
   return (
     <aside
       aria-label="Primary"
-      // Track the content's outer left edge with a 16px gap. Pages
-      // wrap themselves in `mx-auto max-w-7xl px-4` (80rem + 16px
-      // padding), so once the viewport exceeds 1504px (= max-w-7xl
-      // + the 14rem nav:pl-56 gutter) the centered content drifts
-      // right and the sidebar would otherwise stay glued to the
-      // viewport edge. The calc derives sidebar.left from
-      // content_outer_left - sidebar_width (12rem) - gap (1rem):
-      //   = (50vw - 640) - 16 - 192 + 224  →  50vw - 736
-      // and clamps to 16px on narrower viewports where the content
-      // is still flush against the nav:pl-56 gutter.
-      className="fixed top-8 bottom-8 left-[max(1rem,calc(50vw-736px))] z-30 hidden w-48 flex-col rounded-2xl bg-card p-2 shadow-lg shadow-foreground/5 ring-1 ring-foreground/10 nav:flex"
+      className="fixed top-8 bottom-8 left-4 z-30 hidden w-48 flex-col rounded-2xl bg-card p-2 shadow-lg shadow-foreground/5 ring-1 ring-foreground/10 nav:flex"
     >
       <div className="flex items-center justify-between gap-2 px-2 py-1">
         <Link
