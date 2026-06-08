@@ -1,0 +1,20 @@
+{
+  "apps": [
+    {
+      "name": "materialize",
+      "devCommand": "next dev",
+      "envFiles": [
+        ".env.local"
+      ]
+    }
+  ],
+  "packageManager": "npm",
+  "basePort": 3100,
+  "daemonPort": 47100,
+  "maxIterations": 3,
+  "idleTimeout": 0,
+  "copyFiles": [
+    ".env*",
+    ".npmrc"
+  ]
+}

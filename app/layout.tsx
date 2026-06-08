@@ -5,6 +5,7 @@ import "./globals.css";
 import { AuthModalProvider } from "@/components/auth/auth-modal";
 import { ThemeProvider } from "@/components/theme-provider";
 import { PendingPrintFileProvider } from "@/components/upload/pending-print-file";
+import { Iterate } from "iterate-ui-next/devtools";
 
 // Display + script faces for the hero wordmark — both loaded as
 // local OTF files from /public. Body text stays on the system
@@ -98,6 +99,7 @@ export default function RootLayout({
               <PendingPrintFileProvider>{children}</PendingPrintFileProvider>
             </AuthModalProvider>
           </ThemeProvider>
+          <Iterate />
         </body>
       </html>
     </ClerkProvider>

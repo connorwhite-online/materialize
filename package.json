@@ -70,6 +70,7 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.1",
+    "iterate-ui-next": "^0.2.0",
     "jsdom": "^27.0.1",
     "playwright": "^1.59.1",
     "shadcn": "^4.2.0",

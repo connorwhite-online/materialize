@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "iterate": {
+      "command": "npx",
+      "args": [
+        "iterate-ui-mcp"
+      ]
+    }
+  }
+}

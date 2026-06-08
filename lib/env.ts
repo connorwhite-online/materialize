@@ -39,7 +39,8 @@ const serverEnvSchema = z.object({
 
   // Auth (Clerk)
   CLERK_SECRET_KEY: z.string().min(1),
-  CLERK_WEBHOOK_SECRET: z.string().min(1),
+  // Only needed when the Clerk webhook route is hit — not required at boot
+  CLERK_WEBHOOK_SECRET: z.string().min(1).optional(),
 
   // Payments (Stripe)
   STRIPE_SECRET_KEY: z.string().min(1),
@@ -57,8 +58,8 @@ const serverEnvSchema = z.object({
   // Purchased-file watermarking (HMAC)
   WATERMARK_SECRET: z.string().min(1),
 
-  // Cron / internal job auth
-  CRON_SECRET: z.string().min(1),
+  // Cron / internal job auth — only needed when cron routes are hit
+  CRON_SECRET: z.string().min(1).optional(),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;

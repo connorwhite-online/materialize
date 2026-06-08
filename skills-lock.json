@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "skills": {
+    "iterate": {
+      "source": "connorwhite-online/iterate",
+      "sourceType": "github",
+      "skillPath": "packages/cli/skills/iterate/SKILL.md",
+      "computedHash": "da3d297102887d95a598325a1cf3a13f8633666762f3ef4f00f7d9ca17325e35"
+    },
+    "iterate:go": {
+      "source": "connorwhite-online/iterate",
+      "sourceType": "github",
+      "skillPath": "packages/cli/skills/iterate:go/SKILL.md",
+      "computedHash": "b232b3dc06017e9b4d4fbb186864a7b06adf38d787d24f281cf55009f2f798bd"
+    },
+    "iterate:keep": {
+      "source": "connorwhite-online/iterate",
+      "sourceType": "github",
+      "skillPath": "packages/cli/skills/iterate:keep/SKILL.md",
+      "computedHash": "34de4bd9b5b791a38deed33905c236dd42657488ada9799afb898917bff578a8"
+    },
+    "iterate:prompt": {
+      "source": "connorwhite-online/iterate",
+      "sourceType": "github",
+      "skillPath": "packages/cli/skills/iterate:prompt/SKILL.md",
+      "computedHash": "85ee7d115eee52e08f5ca3a63fefd3dbf1283f3c9ddb0a009664c1bacd704a99"
+    }
+  }
+}
