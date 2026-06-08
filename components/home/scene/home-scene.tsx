@@ -41,16 +41,20 @@ function CameraRig() {
     const stage = stageRef.current;
     const t = stageWeight(stage, STAGE.TEARDOWN);
     const m = stageWeight(stage, STAGE.MATERIALS);
+    const f = stageWeight(stage, STAGE.FOOTER);
     const portrait = viewport.aspect < 1 ? (1 - viewport.aspect) * 2.2 : 0;
-    // Zoom in close for the manufacturing stage; pull back for the teardown.
+    // Zoom in close for the manufacturing stage; pull back for the teardown;
+    // pull back a bit more for the footer (the device rises higher there).
     const baseZ = 4.5 + portrait - m * 2.3;
-    const targetZ = THREE.MathUtils.lerp(baseZ, 6.3 + portrait * 1.4, t);
+    const targetZ = THREE.MathUtils.lerp(baseZ, 6.3 + portrait * 1.4, t) + f * 1.3;
     // Slightly raised viewpoint (looking a touch down at the device),
     // rising a bit more for the teardown.
-    const targetY = 0.5 + t * 0.25 - m * 0.12;
+    const targetY = 0.5 + t * 0.25 - m * 0.12 + f * 0.1;
     camera.position.z += (targetZ - camera.position.z) * 0.1;
     camera.position.y += (targetY - camera.position.y) * 0.1;
-    camera.lookAt(0, 0, 0);
+    // Track up toward the risen device for the footer so it sits a touch
+    // high in frame (rather than dead-centre).
+    camera.lookAt(0, f * 0.3, 0);
   });
   return null;
 }

@@ -39,10 +39,12 @@ function makeHologramMaterial(): THREE.ShaderMaterial {
       varying vec3 vNormalW;
       varying vec3 vViewDir;
       varying float vWorldY;
+      varying vec3 vWorldPos;
       void main() {
         vec3 transformed = position;
         vec4 worldPos = modelMatrix * vec4(transformed, 1.0);
         vWorldY = worldPos.y;
+        vWorldPos = worldPos.xyz;
         vNormalW = normalize(mat3(modelMatrix) * normal);
         vViewDir = normalize(cameraPosition - worldPos.xyz);
         vec4 mvPosition = viewMatrix * worldPos;
@@ -60,23 +62,48 @@ function makeHologramMaterial(): THREE.ShaderMaterial {
       varying vec3 vNormalW;
       varying vec3 vViewDir;
       varying float vWorldY;
+      varying vec3 vWorldPos;
+
+      float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+      }
+      float vnoise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        float a = hash(i);
+        float b = hash(i + vec2(1.0, 0.0));
+        float c = hash(i + vec2(0.0, 1.0));
+        float d = hash(i + vec2(1.0, 1.0));
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+      }
+
       void main() {
         #include <clipping_planes_fragment>
         float fres = pow(1.0 - abs(dot(normalize(vNormalW), normalize(vViewDir))), 1.8);
         float scan = 0.5 + 0.5 * sin(vWorldY * 90.0 - uTime * 2.5);
         float a = uOpacity * (0.16 + 0.84 * fres) * (0.55 + 0.45 * scan);
         vec3 col = uColor * (0.7 + fres * 1.4);
-        // Sintering heat at the active build line: a soft, wide glow that
-        // bleeds UP into the not-yet-printed hologram (the direction the
-        // print actually grows), with a gentle shimmer — diffuse, not a
-        // hard line at the boundary.
-        float d = vWorldY - uBuildY;
-        float core = exp(-pow(d * 9.0, 2.0));       // wide soft core
-        float up = exp(-max(d, 0.0) * 2.6);          // long upward heat bleed
-        float band = max(core, up * 0.5);
-        band *= 0.6 + 0.4 * scan;                    // gentle shimmer
-        col += vec3(0.7, 0.9, 1.0) * band * 1.35;
+
+        // Sintering boundary between the printed material (below) and the
+        // hologram (above). Rather than a hard line, the build height
+        // WAVERS with animated noise and the band breaks into PARTICULATES
+        // — powder caught mid-sinter, feathering as it tries to solidify.
+        vec2 np = vWorldPos.xz;
+        float wob = (vnoise(np * 7.0 + uTime * 0.5) - 0.5) * 0.05;   // wavering line
+        float fine = vnoise(np * 26.0 - uTime * 0.8);                 // powder grain
+        float d = vWorldY - (uBuildY + wob);
+        float core = exp(-pow(d * 10.0, 2.0));   // soft wide core
+        float up = exp(-max(d, 0.0) * 2.6);       // upward heat bleed (print dir)
+        float down = exp(-max(-d, 0.0) * 7.0);    // feathers a touch below the seam
+        float band = max(max(core, up * 0.5), down * 0.4);
+        band *= 0.45 + 0.55 * fine;               // particulate break-up
+        band *= 0.6 + 0.4 * scan;                 // gentle shimmer
+        // Bright flecks of powder fusing right at the build height.
+        float spark = smoothstep(0.8, 0.96, vnoise(np * 40.0 + uTime * 1.7)) * core;
+        col += vec3(0.7, 0.9, 1.0) * band * 1.35 + vec3(0.92, 0.97, 1.0) * spark * 1.6;
         a = max(a, band * (0.22 + uOpacity * 0.95));
+        a = max(a, spark * 0.85);
         gl_FragColor = vec4(col, a);
       }
     `,

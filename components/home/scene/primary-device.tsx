@@ -66,9 +66,11 @@ export function PrimaryDevice({ target, dragVelocityRef }: PrimaryDeviceProps) {
     // Pull the assembly back slightly as it explodes so it stays framed.
     g.position.z = THREE.MathUtils.lerp(g.position.z, -teardownW * 0.4, k);
 
-    // Drop into the molded tray (packaging), then rise into view (footer).
-    const yFall = stage > 2.55 && stage < 3.5 ? (1 - commerceW) * 0.45 : 0;
-    g.position.y = THREE.MathUtils.lerp(g.position.y, yFall + footerW * 0.55, k);
+    // Lay the device down INTO the tray (packaging) via a small settle +
+    // the lay-back rotation below, rather than sliding straight down
+    // through the pulp mesh. Then rise higher for the footer.
+    const settleY = stage > 2.55 && stage < 3.5 ? (1 - commerceW) * 0.1 : 0;
+    g.position.y = THREE.MathUtils.lerp(g.position.y, settleY + footerW * 0.7, k);
 
     // Idle turntable spin in the hero; settles to a fixed pose in the
     // commerce stage (angled to match the box) and the teardown (turned
