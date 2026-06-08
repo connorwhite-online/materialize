@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { AnimatePresence, motion } from "motion/react";
 import { AuthNav } from "@/components/auth/auth-nav";
 import { HomeBottomBar } from "@/components/home/home-bottom-bar";
 import { MaterialCarousel } from "@/components/home/material-carousel";
@@ -34,6 +35,18 @@ export function AnonHome() {
   const [burstIntensity, setBurstIntensity] = useState(1);
   const [reducedMotion, setReducedMotion] = useState(false);
 
+  // First-visit hero intro: the "Anything" slot cycles through the
+  // material names (with the device material changing in step), then the
+  // header slides from centre to top-left and the carousel + subheading
+  // fade in. Plays once per browser; repeat visits (and reduced-motion)
+  // render the settled layout immediately — which is also the SSR state,
+  // so the crawlable <h1> ("Materialize Anything") is unaffected.
+  const [introPlaying, setIntroPlaying] = useState(false);
+  const [wordSettled, setWordSettled] = useState(false);
+  const [heroExtras, setHeroExtras] = useState(true);
+  const heroWord =
+    introPlaying && !wordSettled ? HERO_MATERIALS[selectedIndex].name : "Anything";
+
   // Live drag tension (-1..1), read by the device in the canvas to sway
   // with the swipe — written here, never triggers a re-render.
   const dragVelocityRef = useRef(0);
@@ -42,6 +55,51 @@ export function AnonHome() {
   useEffect(() => {
     selectedIndexRef.current = selectedIndex;
   }, [selectedIndex]);
+
+  // Kick off the intro on first visit only (before paint, so there's no
+  // flash of the settled layout). matchMedia is checked directly since
+  // the reducedMotion state lands a tick later.
+  useLayoutEffect(() => {
+    if (typeof window === "undefined") return;
+    const seen = window.localStorage.getItem("mz_hero_intro_v1");
+    const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (seen || prefersReduced) return;
+    setIntroPlaying(true);
+    setWordSettled(false);
+    setHeroExtras(false);
+  }, []);
+
+  // Run the cycle, then settle: land on "Anything", slide the header to
+  // top-left, and fade in the carousel + subheading.
+  useEffect(() => {
+    if (!introPlaying) return;
+    const n = HERO_MATERIALS.length;
+    const order: number[] = [];
+    for (let s = 0; s < n + 1; s++) order.push(s % n);
+    if (order[order.length - 1] !== 1) order.push(1);
+
+    const timers: number[] = [];
+    let i = 0;
+    setSelectedIndex(order[0]);
+    const tick = window.setInterval(() => {
+      i += 1;
+      if (i < order.length) {
+        setSelectedIndex(order[i]);
+        return;
+      }
+      window.clearInterval(tick);
+      window.localStorage.setItem("mz_hero_intro_v1", "1");
+      // Land the word, then slide the header, then reveal the extras.
+      setWordSettled(true);
+      timers.push(window.setTimeout(() => setIntroPlaying(false), 420));
+      timers.push(window.setTimeout(() => setHeroExtras(true), 420 + 720));
+    }, 300);
+
+    return () => {
+      window.clearInterval(tick);
+      timers.forEach((t) => window.clearTimeout(t));
+    };
+  }, [introPlaying]);
 
   // Select + fire the directional spray. Shared by taps and swipes.
   // burstDirection is negated so the spray flies WITH the finger (the
@@ -183,29 +241,61 @@ export function AnonHome() {
         <section
           ref={sectionRef}
           data-home-section
-          className="flex h-svh snap-start flex-col items-center px-4 pt-20 pb-40"
+          className="flex h-svh snap-start flex-col items-start px-4 pt-20 pb-40"
         >
-          {/* Copy anchored to the top; the centered model lives below it. */}
-          <ScrollReveal className="flex flex-col items-center text-center">
-            <h1 className="flex flex-col items-center justify-center gap-0 leading-[0.95] sm:flex-row sm:items-baseline sm:gap-3">
-              <span
-                className="bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-6xl tracking-tight text-transparent sm:text-7xl lg:text-8xl"
-                style={{ fontFamily: "var(--font-display), system-ui, sans-serif" }}
+          {/* Settled copy — top-left, left-aligned (also the SSR /
+              repeat-visit state, so the crawlable <h1> ships here). */}
+          {!introPlaying && (
+            <ScrollReveal className="w-full max-w-md text-left">
+              <motion.h1
+                layoutId="hero-heading"
+                transition={{ duration: 0.7, ease: "linear" }}
+                className="flex flex-col items-start leading-[0.95]"
               >
-                Materialize
-              </span>
-              <span
-                className="bg-gradient-to-b from-primary to-muted-foreground bg-clip-text text-6xl font-light text-transparent sm:text-7xl lg:text-8xl"
-                style={{ fontFamily: "var(--font-script), cursive" }}
+                <span
+                  className="bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-5xl tracking-tight text-transparent sm:text-6xl"
+                  style={{ fontFamily: "var(--font-display), system-ui, sans-serif" }}
+                >
+                  Materialize
+                </span>
+                <span
+                  className="bg-gradient-to-b from-primary to-muted-foreground bg-clip-text text-5xl font-light text-transparent sm:text-6xl"
+                  style={{ fontFamily: "var(--font-script), cursive" }}
+                >
+                  Anything
+                </span>
+              </motion.h1>
+              <motion.p
+                initial={false}
+                animate={{ opacity: heroExtras ? 1 : 0, y: heroExtras ? 0 : 8 }}
+                transition={{ duration: 0.5, ease: "easeOut" }}
+                className="mt-3 max-w-md text-left text-base leading-relaxed text-muted-foreground"
               >
-                Anything
-              </span>
-            </h1>
-            <p className="mt-3 max-w-md text-balance text-base leading-relaxed text-muted-foreground">
-              The marketplace for 3D-print files — browse and buy designs, or get
-              any model printed on demand and shipped to your door.
-            </p>
-          </ScrollReveal>
+                The marketplace for 3D-print files — browse and buy designs, or get
+                any model printed on demand and shipped to your door.
+              </motion.p>
+            </ScrollReveal>
+          )}
+
+          {/* Intro overlay — centred, large; the "Anything" slot cycles
+              through the material names before the header settles. */}
+          {introPlaying && (
+            <div className="pointer-events-none fixed inset-0 z-20 flex items-center justify-center px-6">
+              <motion.h1
+                layoutId="hero-heading"
+                transition={{ duration: 0.7, ease: "linear" }}
+                className="flex flex-col items-center text-center leading-[0.95]"
+              >
+                <span
+                  className="bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-7xl tracking-tight text-transparent sm:text-8xl"
+                  style={{ fontFamily: "var(--font-display), system-ui, sans-serif" }}
+                >
+                  Materialize
+                </span>
+                <CyclingWord text={heroWord} />
+              </motion.h1>
+            </div>
+          )}
 
           {/* Drag-to-scrub zone over the centered model — restores the
               original horizontal swipe gesture for changing materials. */}
@@ -220,14 +310,20 @@ export function AnonHome() {
           />
 
           {/* Material carousel drives the lone device's material. Pinned
-              to the bottom; firing the spray on each change. */}
-          <div className="w-full pointer-events-auto">
+              to the bottom; fades in after the intro settles. */}
+          <motion.div
+            initial={false}
+            animate={{ opacity: heroExtras ? 1 : 0 }}
+            transition={{ duration: 0.5, ease: "easeOut" }}
+            className="w-full"
+            style={{ pointerEvents: heroExtras ? "auto" : "none" }}
+          >
             <MaterialCarousel
               materials={HERO_MATERIALS}
               selectedIndex={selectedIndex}
               onSelect={(i, direction) => handleSelect(i, direction, 1)}
             />
-          </div>
+          </motion.div>
         </section>
 
         {/* --- Stage 1 · Manufacturing --- */}
@@ -275,22 +371,54 @@ function SectionCopy({
   body: string;
 }) {
   return (
-    <section data-home-section className="flex h-svh snap-start flex-col justify-start px-4 pt-16">
-      {/* Copy pinned to the very top, well clear of the centered model.
-          No background container — a soft drop-shadow keeps it legible
-          over the scene. */}
-      <ScrollReveal className="mx-auto max-w-xs text-center [text-shadow:0_1px_12px_var(--background)] sm:max-w-sm">
+    <section data-home-section className="flex h-svh snap-start flex-col items-start justify-start px-4 pt-20">
+      {/* Copy pinned top-left (matching the settled hero), well clear of
+          the centered model. No background container — a soft drop-shadow
+          keeps it legible over the scene. */}
+      <ScrollReveal className="w-full max-w-md text-left [text-shadow:0_1px_12px_var(--background)]">
         <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-primary/90">
           {kicker}
         </p>
         <h2 className="mt-1.5 text-2xl font-bold leading-tight sm:text-3xl">
           {title}
         </h2>
-        <p className="mx-auto mt-2 max-w-xs text-sm leading-relaxed text-muted-foreground">
+        <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
           {body}
         </p>
       </ScrollReveal>
     </section>
+  );
+}
+
+/**
+ * The hero's cycling word slot. An invisible spacer sizes the slot to the
+ * current word; the visible word is absolutely overlaid so each swap
+ * cross-fades with an x / blur / opacity / scale transition (no layout
+ * jump) — a slot-reel through the material names that lands on "Anything".
+ */
+function CyclingWord({ text }: { text: string }) {
+  const wordClass =
+    "bg-gradient-to-b from-primary to-muted-foreground bg-clip-text text-7xl font-light text-transparent sm:text-8xl";
+  const wordStyle = { fontFamily: "var(--font-script), cursive" } as const;
+  return (
+    <span className="relative inline-flex justify-center">
+      <span className={`${wordClass} invisible whitespace-nowrap`} style={wordStyle} aria-hidden>
+        {text}
+      </span>
+      <AnimatePresence initial={false}>
+        <motion.span
+          key={text}
+          initial={{ opacity: 0, filter: "blur(10px)", x: 26, scale: 0.82 }}
+          animate={{ opacity: 1, filter: "blur(0px)", x: 0, scale: 1 }}
+          exit={{ opacity: 0, filter: "blur(10px)", x: -26, scale: 0.82 }}
+          transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+          className={`${wordClass} absolute inset-0 flex justify-center whitespace-nowrap`}
+          style={wordStyle}
+        >
+          {text}
+        </motion.span>
+      </AnimatePresence>
+    </span>
   );
 }
 
