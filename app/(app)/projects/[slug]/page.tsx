@@ -58,6 +58,7 @@ import { userOwnsProject } from "@/lib/entitlement";
 import { isOrgMember } from "@/lib/authorization";
 import { listProjectCollaborators } from "@/app/actions/projects";
 import { ProjectCollaborators } from "@/components/projects/project-collaborators";
+import { UserAvatar } from "@/components/auth/user-avatar";
 import { swallow } from "@/lib/utils/swallow";
 
 function truncate(s: string, n: number) {
@@ -670,7 +671,7 @@ export default async function ProjectDetailPage(props: {
         </>
       ) : (
         <>
-          <p className="text-lg font-medium text-muted-foreground">Free</p>
+          <p className="text-sm text-muted-foreground">Free</p>
           <p className="text-xs text-muted-foreground mt-3">
             Download files individually below.
           </p>
@@ -698,17 +699,15 @@ export default async function ProjectDetailPage(props: {
   const renderByline = () => (
     <Link
       href={`/${project.username}`}
-      className="flex w-fit items-center gap-2 hover:underline"
+      className="flex w-fit items-center gap-1.5 hover:underline"
     >
-      {project.avatarUrl && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={project.avatarUrl}
-          alt=""
-          className="h-8 w-8 rounded-full"
-        />
-      )}
-      <span className="text-sm font-medium">
+      <UserAvatar
+        seed={project.username || project.userId}
+        imageUrl={project.avatarUrl}
+        displayName={project.displayName || project.username}
+        className="h-5 w-5"
+      />
+      <span className="text-xs text-muted-foreground">
         {project.displayName || project.username}
       </span>
     </Link>
@@ -920,11 +919,11 @@ export default async function ProjectDetailPage(props: {
             <CardContent className="p-4">
               {renderByline()}
 
-              <Separator className="my-4" />
+              <Separator className="my-3" />
 
               {renderPurchasePanel()}
 
-              <Separator className="my-4" />
+              <Separator className="my-3" />
 
               <ProjectCollaborators
                 projectId={project.id}
