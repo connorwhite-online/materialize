@@ -4,7 +4,7 @@ import { useRef, useState, type MutableRefObject } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { useStage } from "./stage-context";
-import { DeviceModel, type MaterialTarget } from "./device-model";
+import { DeviceModel, type MaterialTarget, type HoverTarget } from "./device-model";
 import { STAGE, stageWeight, smoothstep, COMMERCE_YAW, COMMERCE_PITCH } from "./constants";
 
 // Fixed teardown pose — turned ~45° off the camera so the single
@@ -32,6 +32,8 @@ export function PrimaryDevice({ target, dragVelocityRef }: PrimaryDeviceProps) {
   const groupRef = useRef<THREE.Group>(null);
   const spinRef = useRef<THREE.Group>(null);
   const explodeRef = useRef(0);
+  // Lean offset set when a teardown tag is hovered (eased in below).
+  const hoverRef = useRef<HoverTarget>({ yaw: 0, pitch: 0 });
 
   // Labels mount only around the teardown stage; a CSS fade smooths it.
   const [labelsOn, setLabelsOn] = useState(false);
@@ -79,7 +81,11 @@ export function PrimaryDevice({ target, dragVelocityRef }: PrimaryDeviceProps) {
     if (!reducedMotion) {
       spin.rotation.y += delta * 0.3 * (1 - still);
     }
-    const settleYaw = commerceW * COMMERCE_YAW + teardownW * TEARDOWN_YAW;
+    // Lean toward the hovered teardown tag (only meaningful while the
+    // assembly is exploded, so scale the offset by the teardown weight).
+    const hov = hoverRef.current;
+    const settleYaw =
+      commerceW * COMMERCE_YAW + teardownW * (TEARDOWN_YAW + hov.yaw);
     // Settle to the NEAREST equivalent of the target angle, so the
     // accumulated idle spin doesn't unwind through several full turns
     // when the device locks into the commerce/teardown pose.
@@ -90,7 +96,8 @@ export function PrimaryDevice({ target, dragVelocityRef }: PrimaryDeviceProps) {
     const pitch =
       -0.28 * (1 - matW) +
       commerceW * (COMMERCE_PITCH + 0.28) +
-      teardownW * (TEARDOWN_PITCH + 0.28);
+      teardownW * (TEARDOWN_PITCH + 0.28) +
+      teardownW * hov.pitch;
     spin.rotation.x = THREE.MathUtils.lerp(spin.rotation.x, pitch, k);
 
     // Live drag feedback: sway with the hero swipe tension (hero only).
@@ -115,6 +122,7 @@ export function PrimaryDevice({ target, dragVelocityRef }: PrimaryDeviceProps) {
           explodeRef={explodeRef}
           showInternals
           showLabels={labelsOn}
+          hoverRef={hoverRef}
         />
       </group>
     </group>

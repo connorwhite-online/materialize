@@ -110,6 +110,12 @@ function makeHologramMaterial(): THREE.ShaderMaterial {
   });
 }
 
+/** Yaw/pitch offset (radians) the assembly leans by when a tag is hovered. */
+export interface HoverTarget {
+  yaw: number;
+  pitch: number;
+}
+
 export interface MaterialTarget {
   color: THREE.Color;
   metalness: number;
@@ -129,6 +135,8 @@ interface DeviceModelProps {
   showInternals?: boolean;
   /** Mount the leader-line teardown labels (primary device only). */
   showLabels?: boolean;
+  /** Set on label hover so the assembly can rotate toward that tag. */
+  hoverRef?: MutableRefObject<HoverTarget>;
   castShadow?: boolean;
 }
 
@@ -252,9 +260,23 @@ function GithubMark() {
   );
 }
 
-function TeardownLabel({ part, size }: { part: TeardownPart; size: THREE.Vector3 }) {
+function TeardownLabel({
+  part,
+  size,
+  hoverRef,
+}: {
+  part: TeardownPart;
+  size: THREE.Vector3;
+  hoverRef?: MutableRefObject<HoverTarget>;
+}) {
   const dir = part.labelSide === "right" ? 1 : -1;
   const end: [number, number, number] = [dir * 0.5, part.labelY * size.y, 0.12];
+  // Lean the assembly toward the hovered tag: yaw to its side, pitch to
+  // its height (top parts tip forward, bottom parts tip back).
+  const lean: HoverTarget = { yaw: dir * 0.24, pitch: part.labelY * 0.32 };
+  const setHover = (v: HoverTarget) => {
+    if (hoverRef) hoverRef.current = v;
+  };
   return (
     <group>
       <Line points={[[0, 0, 0], end]} color="#8a8f98" lineWidth={1} transparent opacity={0.7} />
@@ -263,25 +285,32 @@ function TeardownLabel({ part, size }: { part: TeardownPart; size: THREE.Vector3
         <meshBasicMaterial color="#8a8f98" />
       </mesh>
       <Html position={end} distanceFactor={5} style={{ pointerEvents: "none" }} zIndexRange={[20, 0]}>
-        <a
-          href={part.href}
-          target="_blank"
-          rel="noreferrer"
-          className="teardown-label-fade pointer-events-auto flex items-center gap-2 whitespace-nowrap rounded-md border border-border/60 bg-background/85 px-2.5 py-1.5 text-foreground no-underline shadow-sm backdrop-blur transition-colors hover:border-primary/50 hover:bg-background"
+        {/* The leader-line side offset lives on the wrapper so the <a> is
+            free to use a hover scale transform of its own. */}
+        <div
           style={{
             transform: dir > 0 ? "translateX(0.3rem)" : "translateX(-100%) translateX(-0.3rem)",
           }}
         >
-          {part.github && <GithubMark />}
-          <span className="flex flex-col leading-tight">
-            <span className="text-[13px] font-semibold tracking-tight">{part.label}</span>
-            {part.sub && (
-              <span className="text-[11px] font-medium tracking-tight text-muted-foreground">
-                {part.sub}
-              </span>
-            )}
-          </span>
-        </a>
+          <a
+            href={part.href}
+            target="_blank"
+            rel="noreferrer"
+            onPointerOver={() => setHover(lean)}
+            onPointerOut={() => setHover({ yaw: 0, pitch: 0 })}
+            className="teardown-label-fade pointer-events-auto flex origin-center items-center gap-2 whitespace-nowrap rounded-md border border-border/60 bg-background/85 px-2.5 py-1.5 text-foreground no-underline shadow-sm backdrop-blur transition-[transform,border-color,background-color] duration-200 ease-out hover:scale-[1.22] hover:border-primary/60 hover:bg-background hover:shadow-md"
+          >
+            {part.github && <GithubMark />}
+            <span className="flex flex-col leading-tight">
+              <span className="text-[13px] font-semibold tracking-tight">{part.label}</span>
+              {part.sub && (
+                <span className="text-[11px] font-medium tracking-tight text-muted-foreground">
+                  {part.sub}
+                </span>
+              )}
+            </span>
+          </a>
+        </div>
       </Html>
     </group>
   );
@@ -300,6 +329,7 @@ export function DeviceModel({
   explodeRef,
   showInternals = true,
   showLabels = false,
+  hoverRef,
   castShadow = true,
 }: DeviceModelProps) {
   const { front, back, size, topCap, bottomCap } = useDeviceGeometry();
@@ -605,7 +635,7 @@ export function DeviceModel({
               }}
             >
               <PartGeometry id={part.id} size={size} />
-              {showLabels && <TeardownLabel part={part} size={size} />}
+              {showLabels && <TeardownLabel part={part} size={size} hoverRef={hoverRef} />}
             </group>
           ))}
         </group>
