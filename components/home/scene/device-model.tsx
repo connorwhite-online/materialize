@@ -360,6 +360,62 @@ export function DeviceModel({
     holoB.clippingPlanes = [worldAbove];
   }, [holoA, holoB, worldAbove]);
 
+  // Erode/distort the SOLID shell's edge where it meets the hologram: a
+  // noisy discard just below the build line so the material boundary
+  // reads as ragged powder fusing in, not a clean cut. Uniforms are
+  // shared by both covers and driven each frame.
+  const shellEdge = useMemo(
+    () => ({
+      uBuildLineY: { value: 1e3 },
+      uEdgeAmp: { value: 0 },
+      uEdgeTime: { value: 0 },
+    }),
+    []
+  );
+  const onShellCompile = useMemo(
+    () => (shader: THREE.WebGLProgramParametersWithUniforms) => {
+      shader.uniforms.uBuildLineY = shellEdge.uBuildLineY;
+      shader.uniforms.uEdgeAmp = shellEdge.uEdgeAmp;
+      shader.uniforms.uEdgeTime = shellEdge.uEdgeTime;
+      shader.vertexShader = shader.vertexShader
+        .replace("#include <common>", "#include <common>\nvarying vec3 vEdgeWPos;")
+        .replace(
+          "#include <begin_vertex>",
+          "#include <begin_vertex>\nvEdgeWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;"
+        );
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          "#include <common>",
+          `#include <common>
+          varying vec3 vEdgeWPos;
+          uniform float uBuildLineY;
+          uniform float uEdgeAmp;
+          uniform float uEdgeTime;
+          float edgeHash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+          float edgeNoise(vec2 p){
+            vec2 i = floor(p); vec2 f = fract(p);
+            float a = edgeHash(i);
+            float b = edgeHash(i + vec2(1.0, 0.0));
+            float c = edgeHash(i + vec2(0.0, 1.0));
+            float d = edgeHash(i + vec2(1.0, 1.0));
+            vec2 u = f * f * (3.0 - 2.0 * f);
+            return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+          }`
+        )
+        .replace(
+          "#include <clipping_planes_fragment>",
+          `#include <clipping_planes_fragment>
+          if (uEdgeAmp > 0.0001) {
+            float belowDist = uBuildLineY - vEdgeWPos.y;
+            float n1 = edgeNoise(vEdgeWPos.xz * 22.0 + uEdgeTime * 0.6);
+            float n2 = edgeNoise(vEdgeWPos.xz * 58.0 - uEdgeTime * 0.9);
+            if (belowDist < uEdgeAmp * (0.4 * n1 + 0.6 * n2)) discard;
+          }`
+        );
+    },
+    [shellEdge]
+  );
+
   const w = size.x;
   const h = size.y;
   const MM = size.y / 85;
@@ -483,6 +539,11 @@ export function DeviceModel({
       m.uniforms.uOpacity.value = holoOp;
       m.uniforms.uBuildY.value = showBand ? worldBuildY : 1e3;
     }
+    // Distort the solid shell's edge only while actively sintering (band
+    // on): erode a noisy margin just below the world-space build line.
+    shellEdge.uEdgeTime.value = t;
+    shellEdge.uBuildLineY.value = worldBuildY;
+    shellEdge.uEdgeAmp.value = showBand ? size.y * 0.06 : 0;
     // Only draw the coincident hologram ghost when it's actually showing —
     // otherwise it double-draws the shell surface and z-fights in the hero.
     const holoVisible = holoOp > 0.002 || showBand === 1;
@@ -538,6 +599,7 @@ export function DeviceModel({
       thickness={target.thickness}
       transparent={target.transmission > 0.02}
       clippingPlanes={[worldBelow]}
+      onBeforeCompile={onShellCompile}
     />
   );
 
