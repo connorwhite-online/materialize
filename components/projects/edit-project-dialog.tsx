@@ -14,7 +14,26 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { updateProject } from "@/app/actions/projects";
+import {
+  LICENSES,
+  LICENSE_ORDER,
+  DEFAULT_LICENSE,
+  getLicenseMeta,
+  type LicenseId,
+} from "@/lib/licenses";
+
+function resolveLicense(raw: string | undefined): LicenseId {
+  const meta = getLicenseMeta(raw);
+  return meta?.id ?? DEFAULT_LICENSE;
+}
 
 interface Props {
   projectId: string;
@@ -23,6 +42,7 @@ interface Props {
     description: string | null;
     tags: string[] | null;
     repoUrl: string | null;
+    license: string;
     coverPhotoId: string | null;
     /**
      * Curator photos that are eligible to be picked as the cover.
@@ -42,17 +62,17 @@ interface Props {
 
 /**
  * Owner-only dialog for project metadata that doesn't fit elsewhere —
- * name, description, tags, and the optional code-repo URL. Lives on
- * the project sidebar alongside the BOM editor. Other fields (price,
- * license, visibility) intentionally aren't here because they're
- * decided at create time and changing them after-the-fact has buyer-
- * facing consequences that need their own UX.
+ * name, description, tags, license, and the optional code-repo URL.
+ * Lives on the project sidebar alongside the BOM editor.
  */
 export function EditProjectDialog({ projectId, initial, trigger }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [errors, setErrors] = useState<Record<string, string[]> | null>(null);
+  const [license, setLicense] = useState<LicenseId>(
+    resolveLicense(initial.license)
+  );
   // Empty string = auto thumbnail (no override); otherwise the selected
   // curator photo's id. Mirrors edit-file-button.tsx.
   const [coverPhotoId, setCoverPhotoId] = useState<string>(
@@ -64,6 +84,7 @@ export function EditProjectDialog({ projectId, initial, trigger }: Props) {
     // Always include the cover field so the server action knows the
     // user actually opened the dialog and made a decision (empty
     // string clears, populated string picks).
+    formData.set("license", license);
     formData.set("coverPhotoId", coverPhotoId);
     startTransition(async () => {
       const res = await updateProject(projectId, formData);
@@ -132,6 +153,42 @@ export function EditProjectDialog({ projectId, initial, trigger }: Props) {
               placeholder="board game, chess"
             />
           </div>
+          <div>
+            <Label htmlFor="edit-project-license">License</Label>
+            <Select
+              value={license}
+              onValueChange={(v) => v && setLicense(v as LicenseId)}
+            >
+              <SelectTrigger id="edit-project-license" className="w-full">
+                <SelectValue>
+                  {(value) => {
+                    const meta = LICENSES[value as LicenseId];
+                    return meta
+                      ? `${meta.shortName} — ${meta.name}`
+                      : "Select a license";
+                  }}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {LICENSE_ORDER.map((id) => {
+                  const meta = LICENSES[id];
+                  return (
+                    <SelectItem key={id} value={id}>
+                      <div className="flex flex-col gap-0.5">
+                        <span>
+                          {meta.shortName} — {meta.name}
+                        </span>
+                        <span className="whitespace-normal text-[11px] text-muted-foreground leading-tight">
+                          {meta.summary}
+                        </span>
+                      </div>
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+          </div>
+
           <div>
             <Label htmlFor="edit-project-repo">Code repository</Label>
             <Input
