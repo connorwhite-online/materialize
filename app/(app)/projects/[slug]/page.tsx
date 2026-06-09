@@ -39,6 +39,7 @@ import {
 import { Pencil } from "@/components/icons/pencil";
 import { Trash } from "@/components/icons/trash";
 import { LicenseBadge } from "@/components/licenses/license-badge";
+import { getCategoryLabel } from "@/lib/categories";
 import { SourceCodeCard } from "@/components/projects/source-code-card";
 import { CardImageCarousel } from "@/components/photos/card-image-carousel";
 import { projectJsonLd } from "@/lib/seo/json-ld";
@@ -142,6 +143,7 @@ export default async function ProjectDetailPage(props: {
       status: projects.status,
       visibility: projects.visibility,
       tags: projects.tags,
+      category: projects.category,
       designTags: projects.designTags,
       thumbnailUrl: projects.thumbnailUrl,
       repoUrl: projects.repoUrl,
@@ -687,6 +689,7 @@ export default async function ProjectDetailPage(props: {
           name: project.name,
           description: project.description,
           tags: project.tags,
+          category: project.category,
           repoUrl: project.repoUrl,
           license: project.license,
           coverPhotoId: project.coverPhotoId,
@@ -789,6 +792,14 @@ export default async function ProjectDetailPage(props: {
                   </span>
                 )}
                 <LicenseBadge license={project.license} />
+                {project.category && getCategoryLabel(project.category) && (
+                  <Link
+                    href={`/files?category=${project.category}`}
+                    className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    {getCategoryLabel(project.category)}
+                  </Link>
+                )}
               </div>
             </div>
 

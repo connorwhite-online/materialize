@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { updateProject } from "@/app/actions/projects";
+import { CategorySelect } from "@/components/categories/category-select";
 import {
   LICENSES,
   LICENSE_ORDER,
@@ -41,6 +42,7 @@ interface Props {
     name: string;
     description: string | null;
     tags: string[] | null;
+    category: string | null;
     repoUrl: string | null;
     license: string;
     coverPhotoId: string | null;
@@ -73,6 +75,7 @@ export function EditProjectDialog({ projectId, initial, trigger }: Props) {
   const [license, setLicense] = useState<LicenseId>(
     resolveLicense(initial.license)
   );
+  const [category, setCategory] = useState(initial.category ?? "");
   // Empty string = auto thumbnail (no override); otherwise the selected
   // curator photo's id. Mirrors edit-file-button.tsx.
   const [coverPhotoId, setCoverPhotoId] = useState<string>(
@@ -85,6 +88,7 @@ export function EditProjectDialog({ projectId, initial, trigger }: Props) {
     // user actually opened the dialog and made a decision (empty
     // string clears, populated string picks).
     formData.set("license", license);
+    formData.set("category", category);
     formData.set("coverPhotoId", coverPhotoId);
     startTransition(async () => {
       const res = await updateProject(projectId, formData);
@@ -151,6 +155,14 @@ export function EditProjectDialog({ projectId, initial, trigger }: Props) {
               name="tags"
               defaultValue={initial.tags?.join(", ") ?? ""}
               placeholder="board game, chess"
+            />
+          </div>
+          <div>
+            <Label htmlFor="edit-project-category">Category</Label>
+            <CategorySelect
+              id="edit-project-category"
+              value={category}
+              onValueChange={setCategory}
             />
           </div>
           <div>

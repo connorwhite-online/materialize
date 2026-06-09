@@ -216,6 +216,7 @@ export async function createFileListing(formData: FormData) {
     price: formData.get("price"),
     license: formData.get("license"),
     tags: formData.get("tags"),
+    category: formData.get("category") || undefined,
     recommendedMaterialId: formData.get("recommendedMaterialId") || undefined,
     designTags: designTagValues.length > 0 ? designTagValues : undefined,
     minWallThickness: formData.get("minWallThickness") || undefined,
@@ -347,6 +348,7 @@ export async function createFileListing(formData: FormData) {
         price: parsed.data.price,
         license: parsed.data.license,
         tags: parsed.data.tags,
+        category: parsed.data.category,
         recommendedMaterialId: parsed.data.recommendedMaterialId,
         designTags: parsed.data.designTags,
         minWallThickness: parsed.data.minWallThickness,
@@ -491,6 +493,7 @@ export async function updateFileListing(fileId: string, formData: FormData) {
       license: formData.get("license"),
       visibility: formData.get("visibility") || undefined,
       tags: formData.get("tags") || undefined,
+      category: formData.get("category") || undefined,
       recommendedMaterialId:
         formData.get("recommendedMaterialId") || undefined,
       recommendedCcMaterialId:
@@ -540,6 +543,7 @@ export async function updateFileListing(fileId: string, formData: FormData) {
         license: parsed.data.license,
         visibility: parsed.data.visibility ?? file.visibility,
         tags: parsed.data.tags,
+        category: parsed.data.category ?? null,
         recommendedMaterialId: parsed.data.recommendedMaterialId,
         recommendedCcMaterialId: parsed.data.recommendedCcMaterialId,
         designTags: parsed.data.designTags,

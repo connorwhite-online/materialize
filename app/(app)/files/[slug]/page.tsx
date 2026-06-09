@@ -46,6 +46,7 @@ import { UserAvatar } from "@/components/auth/user-avatar";
 import { Pencil } from "@/components/icons/pencil";
 import { Trash } from "@/components/icons/trash";
 import { LicenseBadge } from "@/components/licenses/license-badge";
+import { getCategoryLabel } from "@/lib/categories";
 import { getMaterialById } from "@/lib/materials";
 import { findMaterialConfig, getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
 import { generateDownloadUrl } from "@/lib/storage";
@@ -141,6 +142,7 @@ export default async function FileDetailPage(props: {
       price: files.price,
       license: files.license,
       tags: files.tags,
+      category: files.category,
       designTags: files.designTags,
       recommendedMaterialId: files.recommendedMaterialId,
       recommendedCcMaterialId: files.recommendedCcMaterialId,
@@ -740,6 +742,14 @@ export default async function FileDetailPage(props: {
                   </span>
                 )}
                 <LicenseBadge license={file.license} />
+                {file.category && getCategoryLabel(file.category) && (
+                  <Link
+                    href={`/files?category=${file.category}`}
+                    className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    {getCategoryLabel(file.category)}
+                  </Link>
+                )}
               </div>
             </div>
 
@@ -778,6 +788,7 @@ export default async function FileDetailPage(props: {
                       name: file.name,
                       description: file.description,
                       tags: file.tags,
+                      category: file.category,
                       price: file.price,
                       license: file.license,
                       visibility: file.visibility ?? "public",
