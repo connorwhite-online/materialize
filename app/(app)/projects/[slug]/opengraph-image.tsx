@@ -21,33 +21,38 @@ export default async function Image({
 }) {
   try {
     const { slug } = await params;
-    const [row] = await db
-      .select({
-        id: projects.id,
-        name: projects.name,
-        thumbnailUrl: projects.thumbnailUrl,
-        coverPhotoId: projects.coverPhotoId,
-        status: projects.status,
-        visibility: projects.visibility,
-        displayName: users.displayName,
-        username: users.username,
-      })
-      .from(projects)
-      .innerJoin(users, eq(projects.userId, users.id))
-      .where(eq(projects.slug, slug));
-
-    if (!row || row.status !== "published" || row.visibility !== "public") {
-      return renderOgCard({ title: "Materialize", subtitle: null });
+    let row;
+    try {
+      const result = await db
+        .select({
+          id: projects.id,
+          name: projects.name,
+          thumbnailUrl: projects.thumbnailUrl,
+          coverPhotoId: projects.coverPhotoId,
+          status: projects.status,
+          visibility: projects.visibility,
+          displayName: users.displayName,
+          username: users.username,
+        })
+        .from(projects)
+        .innerJoin(users, eq(projects.userId, users.id))
+        .where(eq(projects.slug, slug));
+      row = result[0];
+    } catch {
+      // If project query fails, return branded card
+      return await renderOgCard({ title: "Materialize", subtitle: null });
     }
 
-    // Resolve the cover to an absolute, fetchable URL for the card.
-    // Try multiple sources with graceful fallbacks to ensure OG generation
-    // doesn't fail if any step encounters an error.
-    let imageUrl: string | null = null;
+    if (!row || row.status !== "published" || row.visibility !== "public") {
+      return await renderOgCard({ title: "Materialize", subtitle: null });
+    }
 
-    try {
-      // 1. Try explicit coverPhotoId pick
-      if (row.coverPhotoId) {
+    let imageUrl: string | null = null;
+    const creator = row.displayName || row.username;
+
+    // 1. Try explicit coverPhotoId pick
+    if (row.coverPhotoId) {
+      try {
         const [cover] = await db
           .select({
             storageKey: projectPhotos.storageKey,
@@ -56,19 +61,26 @@ export default async function Image({
           .from(projectPhotos)
           .where(eq(projectPhotos.id, row.coverPhotoId));
         if (cover && cover.projectId === row.id && cover.storageKey) {
-          imageUrl = await generateDownloadUrl(cover.storageKey, 3600);
+          try {
+            imageUrl = await generateDownloadUrl(cover.storageKey, 3600);
+          } catch {
+            imageUrl = null;
+          }
           if (imageUrl) {
-            const creator = row.displayName || row.username;
-            return renderOgCard({
+            return await renderOgCard({
               title: row.name,
               subtitle: creator ? `Project by ${creator}` : "Project",
               imageUrl,
             });
           }
         }
+      } catch {
+        // Silently fall through
       }
+    }
 
-      // 2. Try first curator photo ("Auto" cover)
+    // 2. Try first curator photo ("Auto" cover)
+    try {
       const [firstCurator] = await db
         .select({ storageKey: projectPhotos.storageKey })
         .from(projectPhotos)
@@ -81,10 +93,13 @@ export default async function Image({
         .orderBy(asc(projectPhotos.sortOrder))
         .limit(1);
       if (firstCurator?.storageKey) {
-        imageUrl = await generateDownloadUrl(firstCurator.storageKey, 3600);
+        try {
+          imageUrl = await generateDownloadUrl(firstCurator.storageKey, 3600);
+        } catch {
+          imageUrl = null;
+        }
         if (imageUrl) {
-          const creator = row.displayName || row.username;
-          return renderOgCard({
+          return await renderOgCard({
             title: row.name,
             subtitle: creator ? `Project by ${creator}` : "Project",
             imageUrl,
@@ -92,26 +107,25 @@ export default async function Image({
         }
       }
     } catch {
-      // Silently fall through to legacy thumbnail if photo resolution fails
+      // Silently fall through
     }
 
     // 3. Try legacy thumbnailUrl
     if (row.thumbnailUrl) {
-      if (
-        row.thumbnailUrl.startsWith("http://") ||
-        row.thumbnailUrl.startsWith("https://")
-      ) {
-        imageUrl = row.thumbnailUrl;
-      } else {
-        try {
+      try {
+        if (
+          row.thumbnailUrl.startsWith("http://") ||
+          row.thumbnailUrl.startsWith("https://")
+        ) {
+          imageUrl = row.thumbnailUrl;
+        } else {
           imageUrl = await generateDownloadUrl(row.thumbnailUrl, 3600);
-        } catch {
-          // If signing fails, fall through to bundled files
         }
+      } catch {
+        imageUrl = null;
       }
       if (imageUrl) {
-        const creator = row.displayName || row.username;
-        return renderOgCard({
+        return await renderOgCard({
           title: row.name,
           subtitle: creator ? `Project by ${creator}` : "Project",
           imageUrl,
@@ -132,18 +146,17 @@ export default async function Image({
         imageUrl = firstFile.thumbnailUrl;
       }
     } catch {
-      // Silently ignore if bundled file fetch fails
+      // Silently ignore
     }
 
-    // Render with whatever image we found, or null for a placeholder
-    const creator = row.displayName || row.username;
-    return renderOgCard({
-      title: row.name,
+    // Final render with whatever image we found
+    return await renderOgCard({
+      title: row.name || "Project",
       subtitle: creator ? `Project by ${creator}` : "Project",
-      imageUrl,
+      imageUrl: imageUrl || null,
     });
   } catch {
-    // Fallback for any unexpected errors during OG generation
-    return renderOgCard({ title: "Materialize", subtitle: null });
+    // Ultimate fallback - just render branded card
+    return await renderOgCard({ title: "Materialize", subtitle: null });
   }
 }
