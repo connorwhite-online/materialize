@@ -45,20 +45,22 @@ export function EditBomDialog({ projectId, initial, trigger }: Props) {
           )
         }
       />
-      <DialogContent className="max-h-[90vh] w-full max-w-2xl overflow-y-auto sm:max-w-2xl">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden sm:max-w-2xl">
+        <DialogHeader className="shrink-0 border-b border-border pb-4">
           <DialogTitle>Bill of Materials</DialogTitle>
           <DialogDescription>
             List the additional parts a builder needs to complete this
             project — screws, electronics, magnets, anything beyond the
-            printed parts. Casual creators can skip this entirely.
+            printed parts.
           </DialogDescription>
         </DialogHeader>
-        <BomEditor
-          projectId={projectId}
-          initial={initial}
-          onSaved={() => setOpen(false)}
-        />
+        <div className="flex-1 overflow-y-auto pt-4">
+          <BomEditor
+            projectId={projectId}
+            initial={initial}
+            onSaved={() => setOpen(false)}
+          />
+        </div>
       </DialogContent>
     </Dialog>
   );

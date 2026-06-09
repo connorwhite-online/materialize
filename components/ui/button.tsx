@@ -69,12 +69,12 @@ function Button({
   const resolvedNativeButton = nativeButton ?? render == null;
   return (
     <ButtonPrimitive
-      data-slot="button"
       className={cn(buttonVariants({ variant, size, className }))}
       nativeButton={resolvedNativeButton}
       render={render}
       disabled={disabled || loading}
       {...props}
+      data-slot="button"
     >
       {loading && (
         <span

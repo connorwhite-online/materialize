@@ -123,7 +123,7 @@ export function CardImageCarousel({
             onClick={() => goTo(Math.max(0, activeIndex - 1))}
           />
         )}
-        <div className="pointer-events-auto flex items-center gap-1 rounded-full bg-black/45 px-2 py-1.5 backdrop-blur-md">
+        <div className="pointer-events-auto flex h-7 items-center gap-1 rounded-full bg-black/45 px-2 backdrop-blur-md">
           {images.map((_, i) => (
             <button
               key={i}
@@ -136,16 +136,9 @@ export function CardImageCarousel({
                 e.stopPropagation();
                 goTo(i);
               }}
-              // A plain CSS width/opacity transition replaces motion's
-              // `layout` animation. `layout` (motion's layout-projection
-              // feature) was the diagnosed source of React error #310 on
-              // the owner library page, and this was the LAST remaining
-              // use of layout/layoutId in the app — the ProfileTabs one
-              // was already removed. The dot still grows/shrinks; it just
-              // tweens via CSS instead of motion's projection hooks.
               className={cn(
-                "h-1.5 cursor-pointer rounded-full bg-white transition-[width,opacity] duration-300 ease-out",
-                i === activeIndex ? "w-3" : "w-1.5 opacity-60"
+                "h-2 cursor-pointer rounded-full bg-white transition-[width,opacity] duration-300 ease-out",
+                i === activeIndex ? "w-4" : "w-2 opacity-60"
               )}
             />
           ))}

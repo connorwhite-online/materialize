@@ -188,7 +188,7 @@ export function BomEditor({ projectId, initial, onSaved }: Props) {
         </div>
       )}
 
-      <div className="flex items-center justify-between gap-2">
+      <div className="sticky bottom-0 flex items-center justify-between gap-2 border-t border-border bg-background py-3">
         <Button
           variant="outline"
           size="sm"

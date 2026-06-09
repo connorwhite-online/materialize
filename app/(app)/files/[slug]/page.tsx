@@ -632,7 +632,7 @@ export default async function FileDetailPage(props: {
       : null;
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8">
+    <div className="mx-auto max-w-4xl px-4 py-8">
       {jsonLd && (
         <script
           type="application/ld+json"
@@ -654,74 +654,172 @@ export default async function FileDetailPage(props: {
           flaggedAt={file.flaggedAt}
         />
       )}
-      <div className="flex flex-col gap-6 lg:grid lg:grid-cols-3 lg:items-start lg:gap-8">
-        {/* Title + filename · filesize · bounding-box. The format
-            badge that used to live here was duplicative — the
-            original filename already carries the extension. */}
-        <div className="order-1 space-y-1 lg:col-span-2">
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold">{file.name}</h1>
-            {verifying && <VerifyingPill />}
+      <div className="flex flex-col gap-8">
+        {/* Hero — 3D preview left, file info right on md+ */}
+        <div className="flex flex-col gap-6 md:grid md:grid-cols-[3fr_2fr] md:items-start md:gap-8">
+          {/* 3D preview */}
+          <div>
+            {previewable && primaryAsset ? (
+              <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
+                <OrderModelPreview
+                  fileAssetId={primaryAsset.id}
+                  format={primaryAsset.format}
+                  materialColor={recommendedMaterial?.color ?? "#a1a1aa"}
+                />
+              </div>
+            ) : (
+              <div className="aspect-[4/3] rounded-2xl bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center">
+                <span className="text-xs text-muted-foreground/50">
+                  {primaryAsset
+                    ? `Preview not supported for .${primaryAsset.format}`
+                    : "No preview"}
+                </span>
+              </div>
+            )}
           </div>
-          {primaryAsset && (
-            <p className="text-sm text-muted-foreground">
-              {primaryAsset.originalFilename}
-              <span className="mx-1.5">·</span>
-              {formatBytes(primaryAsset.fileSize)}
-            </p>
-          )}
-          {dims && (
-            <p className="flex flex-wrap items-center gap-2 pt-1 text-xs text-muted-foreground">
-              <span className="font-medium text-foreground">Bounding box</span>
-              <span className="font-mono">
-                {dims.x.toFixed(1)} × {dims.y.toFixed(1)} × {dims.z.toFixed(1)} mm
-              </span>
-            </p>
-          )}
+
+          {/* File info + actions */}
+          <div className="flex flex-col gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-2xl font-bold">{file.name}</h1>
+                {verifying && <VerifyingPill />}
+              </div>
+              <div className="mt-2">
+                <Link
+                  href={`/${file.username}`}
+                  className="flex w-fit items-center gap-1.5 hover:underline"
+                >
+                  <UserAvatar
+                    seed={file.username || file.userId}
+                    imageUrl={file.avatarUrl}
+                    displayName={file.displayName || file.username}
+                    className="h-5 w-5"
+                  />
+                  <span className="text-sm text-muted-foreground">
+                    {file.displayName || file.username}
+                  </span>
+                </Link>
+              </div>
+              {primaryAsset && (
+                <p className="mt-3 text-sm text-muted-foreground">
+                  {primaryAsset.originalFilename}
+                  <span className="mx-1.5">·</span>
+                  {formatBytes(primaryAsset.fileSize)}
+                </p>
+              )}
+              {dims && (
+                <p className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">Bounding box</span>
+                  <span className="font-mono">
+                    {dims.x.toFixed(1)} × {dims.y.toFixed(1)} × {dims.z.toFixed(1)} mm
+                  </span>
+                </p>
+              )}
+              <div className="mt-3 flex items-center gap-2">
+                {isOwner && (
+                  <span
+                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                      file.visibility === "public"
+                        ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                        : "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400"
+                    }`}
+                  >
+                    {file.visibility === "public" ? "Public" : "Private"}
+                  </span>
+                )}
+                <LicenseBadge license={file.license} />
+              </div>
+            </div>
+
+            {file.price > 0 && (
+              <>
+                {isOwner && !file.ownerOnboarded && <PayoutSetupWarning />}
+                {!canDownload && (
+                  <PurchaseButton fileId={file.id} priceCents={file.price} />
+                )}
+              </>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2">
+              {canDownload && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  render={<a href={`/files/${slug}/download`} />}
+                >
+                  Download
+                </Button>
+              )}
+              {assets[0] && (
+                <Button
+                  size="sm"
+                  render={<Link href={`/print/${assets[0].id}`} />}
+                >
+                  Print this file
+                </Button>
+              )}
+              {isOwner && (
+                <div className="flex items-center gap-1">
+                  <EditFileButton
+                    fileId={file.id}
+                    initial={{
+                      name: file.name,
+                      description: file.description,
+                      tags: file.tags,
+                      price: file.price,
+                      license: file.license,
+                      visibility: file.visibility ?? "public",
+                      recommendedMaterialId: file.recommendedMaterialId,
+                      designTags: file.designTags,
+                      minWallThickness: file.minWallThickness,
+                      coverPhotoId: file.coverPhotoId,
+                    }}
+                    photos={photosWithUrls.map((p) => ({
+                      id: p.id,
+                      downloadUrl: p.downloadUrl,
+                    }))}
+                    hasBuyers={ownerBuyerCount > 0}
+                    trigger={
+                      <Button
+                        variant="ghost"
+                        size="icon-lg"
+                        className="rounded-[12px] p-2"
+                        aria-label="Edit file"
+                      >
+                        <Pencil className="size-5" />
+                      </Button>
+                    }
+                  />
+                  <DeleteFileButton
+                    fileId={file.id}
+                    fileName={file.name}
+                    hasBuyers={ownerBuyerCount > 0}
+                    buyerCount={ownerBuyerCount}
+                    redirectTo={`/${file.username}`}
+                    trigger={
+                      <Button
+                        variant="ghost"
+                        size="icon-lg"
+                        className="rounded-[12px] p-2 text-destructive hover:text-destructive"
+                        aria-label="Delete file"
+                      >
+                        <Trash className="size-5" />
+                      </Button>
+                    }
+                  />
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
-        {/* 3D preview — order-2 on mobile so it sits right under the
-            title block, with the action card slotting in below it
-            (order-3) before the buyer scrolls into the long
-            description / discussion. On desktop pinned to row 2
-            cols 1-2 via explicit placement, so it doesn't fight
-            with the row-spanning action card. */}
-        <div className="order-2 lg:col-span-2 lg:col-start-1 lg:row-start-2">
-          {previewable && primaryAsset ? (
-            <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
-              <OrderModelPreview
-                fileAssetId={primaryAsset.id}
-                format={primaryAsset.format}
-                materialColor={recommendedMaterial?.color ?? "#a1a1aa"}
-              />
-            </div>
-          ) : (
-            <div className="aspect-[4/3] rounded-2xl bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center">
-              <span className="text-xs text-muted-foreground/50">
-                {primaryAsset
-                  ? `Preview not supported for .${primaryAsset.format}`
-                  : "No preview"}
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* Main content (description, photos, comments, activity) —
-            order-4 on mobile, lg row 3 cols 1-2 on desktop. */}
-        <div className="order-4 space-y-6 lg:col-span-2 lg:col-start-1 lg:row-start-3">
-          {/* Description — markdown-rendered, with inline expand for
-              long-form copy. Short descriptions render in full; long
-              ones collapse to a few lines with a gradient fade and
-              "Show more" toggle. */}
+        {/* Content below the hero */}
+        <div className="space-y-6">
           {file.description && (
             <ExpandableDescription source={file.description} />
           )}
 
-          {/* Print recommendations — compact inline metadata so a
-              listing with only a recommended material doesn't get a
-              giant card. Search tags + design tags intentionally
-              don't render publicly; they're indexing/filtering
-              metadata, not creator-facing copy. */}
           {(recommendedMaterial || file.minWallThickness) && (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
               {recommendedMaterial && (
@@ -750,11 +848,6 @@ export default async function FileDetailPage(props: {
             </div>
           )}
 
-          {/* Curator carousel — owner-only authoritative photos.
-              Sits between the description and the Discussion card so
-              the creator's reference shots are clearly attributed to
-              them, separate from the community discussion below.
-              Hidden for non-owners with no curator photos. */}
           {(feedPhotos.length > 0 || isOwner) && (
             <div className="space-y-2">
               <h2 className="text-sm font-semibold">Photos</h2>
@@ -769,10 +862,6 @@ export default async function FileDetailPage(props: {
             </div>
           )}
 
-          {/* Discussion — text comments interleaved with community
-              photos (commenter posts). Composer accepts an optional
-              photo attachment so a "post" can be text, a photo, or
-              both. */}
           <Card>
             <CardContent className="space-y-5">
               <h2 className="text-base font-semibold">Discussion</h2>
@@ -790,150 +879,10 @@ export default async function FileDetailPage(props: {
             </CardContent>
           </Card>
 
-          {/* Activity stream — prints + downloads. The component
-              self-hides when both are empty. */}
           <FileActivity
             prints={printActivity}
             downloads={downloadActivity}
           />
-        </div>
-
-        {/* Action card — order-3 on mobile so price + Print + Download
-            sit right under the 3D preview (the buyer's focal point)
-            before the long description / discussion scroll. On desktop
-            pinned to col 3 spanning all three rows with sticky
-            positioning so it stays in view while the user scrolls. */}
-        <div className="order-3 space-y-4 lg:col-start-3 lg:row-start-1 lg:row-span-3 lg:sticky lg:top-6">
-          {/* Compact action card. Top row pairs the creator identity
-              (left) with owner-only edit/delete icons (right) in a
-              flex row — keeps the icons aligned to the top edge of
-              the card without absolute positioning. Print is the
-              primary CTA (the project's revenue path); Download is
-              demoted to secondary. License is a tiny line below the
-              price; the running download count moved to the activity
-              tab so it's no longer duplicated here. */}
-          <Card>
-            <CardContent className="space-y-4">
-              <div className="flex items-start gap-2">
-                <Link
-                  href={`/${file.username}`}
-                  className="flex flex-1 min-w-0 items-center gap-2.5 hover:opacity-80 transition-opacity"
-                >
-                  <UserAvatar
-                    seed={file.username || file.userId}
-                    imageUrl={file.avatarUrl}
-                    displayName={file.displayName || file.username}
-                    className="h-10 w-10"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium leading-tight truncate">
-                      {file.displayName || file.username}
-                    </div>
-                    {file.username && (
-                      <div className="text-xs text-muted-foreground truncate">
-                        @{file.username}
-                      </div>
-                    )}
-                  </div>
-                </Link>
-
-                {isOwner && (
-                  <div className="flex shrink-0 gap-1">
-                    <EditFileButton
-                      fileId={file.id}
-                      initial={{
-                        name: file.name,
-                        description: file.description,
-                        tags: file.tags,
-                        price: file.price,
-                        license: file.license,
-                        visibility: file.visibility ?? "public",
-                        recommendedMaterialId: file.recommendedMaterialId,
-                        designTags: file.designTags,
-                        minWallThickness: file.minWallThickness,
-                        coverPhotoId: file.coverPhotoId,
-                      }}
-                      photos={photosWithUrls.map((p) => ({
-                        id: p.id,
-                        downloadUrl: p.downloadUrl,
-                      }))}
-                      hasBuyers={ownerBuyerCount > 0}
-                      trigger={
-                        <Button
-                          variant="ghost"
-                          size="icon-lg"
-                          className="rounded-[12px] p-2"
-                          aria-label="Edit file"
-                        >
-                          <Pencil className="size-5" />
-                        </Button>
-                      }
-                    />
-                    <DeleteFileButton
-                      fileId={file.id}
-                      fileName={file.name}
-                      hasBuyers={ownerBuyerCount > 0}
-                      buyerCount={ownerBuyerCount}
-                      redirectTo={`/${file.username}`}
-                      trigger={
-                        <Button
-                          variant="ghost"
-                          size="icon-lg"
-                          className="rounded-[12px] p-2 text-destructive hover:text-destructive"
-                          aria-label="Delete file"
-                        >
-                          <Trash className="size-5" />
-                        </Button>
-                      }
-                    />
-                  </div>
-                )}
-              </div>
-
-              <div>
-                {file.price > 0 ? (
-                  <div className="text-2xl font-bold leading-none">
-                    ${(file.price / 100).toFixed(2)}
-                  </div>
-                ) : (
-                  <div className="text-base font-semibold leading-tight">
-                    Free to use
-                  </div>
-                )}
-                <LicenseBadge license={file.license} className="mt-2" />
-              </div>
-
-              <div className="space-y-2">
-                {assets[0] && (
-                  <Button
-                    className="w-full"
-                    render={<Link href={`/print/${assets[0].id}`} />}
-                  >
-                    Print this file
-                  </Button>
-                )}
-                {canDownload ? (
-                  <Button
-                    variant="secondary"
-                    className="w-full"
-                    render={<a href={`/files/${slug}/download`} />}
-                  >
-                    Download
-                  </Button>
-                ) : file.price > 0 ? (
-                  <>
-                    {isOwner && !file.ownerOnboarded && (
-                      <PayoutSetupWarning />
-                    )}
-                    <PurchaseButton
-                      fileId={file.id}
-                      priceCents={file.price}
-                    />
-                  </>
-                ) : null}
-              </div>
-            </CardContent>
-          </Card>
         </div>
       </div>
     </div>

@@ -21,7 +21,6 @@ import { generateDownloadUrl } from "@/lib/storage";
 import { Card, CardContent } from "@/components/ui/card";
 import { ExpandableDescription } from "@/components/ui/expandable-description";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { DeleteProjectButton } from "@/components/projects/delete-project-button";
 import { BomDisplay } from "@/components/projects/bom-display";
 import { EditBomDialog } from "@/components/projects/edit-bom-dialog";
@@ -509,37 +508,36 @@ export default async function ProjectDetailPage(props: {
         <div className="grid gap-3 grid-cols-2 sm:grid-cols-3">
           {bundledFileCards.map((file) => {
             const dims = dimensionsLabel(file.dimensions);
+            const subtitle =
+              dims ?? (file.price > 0 ? `$${(file.price / 100).toFixed(2)}` : null);
             return (
-              <Link
-                key={file.id}
-                href={`/files/${file.slug}`}
-                className="group flex flex-col gap-2"
-              >
-                <div className="aspect-square overflow-hidden rounded-lg border border-border bg-muted">
-                  {file.thumbnailUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={file.thumbnailUrl}
-                      alt=""
-                      className="w-full h-full object-cover transition-transform group-hover:scale-105"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground/50">
-                      No preview
-                    </div>
-                  )}
-                </div>
-                <div>
-                  <p className="truncate text-sm font-medium transition-colors group-hover:text-primary">
-                    {file.displayName}
-                  </p>
-                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                    {dims ??
-                      (file.price > 0
-                        ? `$${(file.price / 100).toFixed(2)}`
-                        : "Free")}
-                  </p>
-                </div>
+              <Link key={file.id} href={`/files/${file.slug}`} className="block">
+                <Card className="group gap-0 p-1 overflow-hidden transition-colors hover:border-primary/30">
+                  <div className="relative aspect-square overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted to-muted/50">
+                    {file.thumbnailUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={file.thumbnailUrl}
+                        alt=""
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground/50">
+                        No preview
+                      </div>
+                    )}
+                  </div>
+                  <CardContent className="px-2 py-2">
+                    <p className="truncate text-sm font-medium line-clamp-1 transition-colors group-hover:text-primary">
+                      {file.displayName}
+                    </p>
+                    {subtitle && (
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                        {subtitle}
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
               </Link>
             );
           })}
@@ -642,54 +640,24 @@ export default async function ProjectDetailPage(props: {
     .map((f) => f.thumbnailUrl)
     .filter((u): u is string => !!u);
 
-  // Price + purchase block, shared between the mobile flow (inline,
-  // under the gallery) and the desktop sticky sidebar. A function so
-  // each call site gets its own element tree rather than reusing one.
-  const renderPurchasePanel = () => (
-    <>
-      {project.price > 0 ? (
-        <>
-          <p className="text-2xl font-bold">
-            ${(project.price / 100).toFixed(2)}
-          </p>
-          {isOwner && !project.ownerOnboarded && (
-            <div className="mt-3">
-              <PayoutSetupWarning />
-            </div>
-          )}
-          {canDownload ? (
-            <p className="text-xs text-muted-foreground mt-3">
-              Download files individually below.
-            </p>
-          ) : (
-            <PurchaseButton
-              projectId={project.id}
-              priceCents={project.price}
-              className="mt-3"
-            />
-          )}
-        </>
-      ) : (
-        <>
-          <p className="text-sm text-muted-foreground">Free</p>
-        </>
-      )}
-      {/* Print the whole project — walks the user through each
-          bundled file's quote in the project print hub, building one
-          cart they check out together. Shown whenever the project has
-          files; printing a published file doesn't require buying the
-          design (mirrors the per-file "Print this file" button). */}
-      {bundledFiles.length > 0 && (
-        <Button
-          variant="outline"
-          className="mt-3 w-full"
-          render={<Link href={`/print?project=${project.slug}`} />}
-        >
-          Print this project
-        </Button>
-      )}
-    </>
-  );
+  // Purchase block for paid projects — rendered inline below the
+  // gallery. Free projects omit this entirely (price is shown in the
+  // header metadata line instead).
+  const renderPurchasePanel = () => {
+    if (project.price <= 0) return null;
+    return (
+      <>
+        {isOwner && !project.ownerOnboarded && <PayoutSetupWarning />}
+        {!canDownload && (
+          <PurchaseButton
+            projectId={project.id}
+            priceCents={project.price}
+            className="w-full"
+          />
+        )}
+      </>
+    );
+  };
 
   // Author byline (avatar + name) — rendered in the mobile header and
   // again in the desktop sidebar. Same reasoning as the panel above.
@@ -704,7 +672,7 @@ export default async function ProjectDetailPage(props: {
         displayName={project.displayName || project.username}
         className="h-5 w-5"
       />
-      <span className="text-xs text-muted-foreground">
+      <span className="text-sm text-muted-foreground">
         {project.displayName || project.username}
       </span>
     </Link>
@@ -758,96 +726,104 @@ export default async function ProjectDetailPage(props: {
   );
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8">
+    <div className="mx-auto max-w-4xl px-4 py-8">
       {jsonLd && (
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
       )}
-      <div className="flex flex-col gap-8 lg:grid lg:grid-cols-3 lg:items-start">
-        {/* Header — order-1 mobile, col-span-2 row-1 desktop. License
-            sits directly under the name. The byline + owner controls
-            render here only on mobile; desktop keeps them in the
-            sticky sidebar (the action card lives there now). */}
-        <div className="order-1 lg:col-span-2">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h1 className="text-2xl font-bold">{project.name}</h1>
-              <div className="mt-2">
-                <LicenseBadge license={project.license} />
+      <div className="flex flex-col gap-8">
+        {/* Hero — gallery left, project info right on md+ */}
+        <div className="flex flex-col gap-6 md:grid md:grid-cols-[3fr_2fr] md:items-start md:gap-8">
+          {/* Gallery */}
+          <div>
+            {galleryImages.length > 0 ? (
+              <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
+                <CardImageCarousel
+                  images={galleryImages}
+                  alt={project.name}
+                  size="lg"
+                />
               </div>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Project
-                <span className="mx-1.5">·</span>
-                {bundledFiles.length}{" "}
-                {bundledFiles.length === 1 ? "file" : "files"}
-              </p>
-            </div>
-            {isOwner && (
-              <div className="shrink-0 lg:hidden">{renderOwnerControls()}</div>
+            ) : project.thumbnailUrl ? (
+              <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
+                <Image
+                  src={project.thumbnailUrl}
+                  alt={project.name}
+                  fill
+                  priority
+                  sizes="(max-width: 768px) 100vw, 60vw"
+                  className="object-cover"
+                />
+              </div>
+            ) : fileThumbs.length > 0 ? (
+              <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
+                <FileThumbnailStack thumbnails={fileThumbs} />
+              </div>
+            ) : (
+              <div className="aspect-[4/3] rounded-2xl bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center">
+                <span className="text-xs text-muted-foreground/50">
+                  No cover image
+                </span>
+              </div>
             )}
           </div>
 
-          {/* Author byline — mobile only (desktop sidebar has its own). */}
-          <div className="mt-4 lg:hidden">{renderByline()}</div>
+          {/* Project info + actions */}
+          <div className="flex flex-col gap-4">
+            <div>
+              <h1 className="text-2xl font-bold">{project.name}</h1>
+              <div className="mt-2">{renderByline()}</div>
+              <div className="mt-3 flex items-center gap-2">
+                {(isOwner || collaborators.some((c) => c.id === userId)) && (
+                  <span
+                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                      project.visibility === "public"
+                        ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                        : "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400"
+                    }`}
+                  >
+                    {project.visibility === "public" ? "Public" : "Private"}
+                  </span>
+                )}
+                <LicenseBadge license={project.license} />
+              </div>
+            </div>
+
+            {renderPurchasePanel()}
+
+            <div className="flex flex-wrap items-center gap-2">
+              {bundledFiles.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  render={<Link href="#project-files" />}
+                >
+                  Download files
+                </Button>
+              )}
+              {bundledFiles.length > 0 && (
+                <Button
+                  size="sm"
+                  render={<Link href={`/print?project=${project.slug}`} />}
+                >
+                  Print this project
+                </Button>
+              )}
+              {isOwner && renderOwnerControls()}
+            </div>
+          </div>
         </div>
 
-        {/* Main content — order-3 on mobile, row 2 cols 1-2 on
-            desktop via auto-flow. */}
-        <div className="order-3 space-y-6 lg:col-span-2">
-          {/* Single hero carousel — every curator photo, cover-first,
-              with a legacy-thumbnail / file-stack fallback. Replaces
-              the old big-cover-plus-separate-photo-strip pairing that
-              showed the same images twice. */}
-          {galleryImages.length > 0 ? (
-            <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
-              <CardImageCarousel
-                images={galleryImages}
-                alt={project.name}
-                size="lg"
-              />
-            </div>
-          ) : project.thumbnailUrl ? (
-            <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
-              <Image
-                src={project.thumbnailUrl}
-                alt={project.name}
-                fill
-                priority
-                sizes="(max-width: 1024px) 100vw, 66vw"
-                className="object-cover"
-              />
-            </div>
-          ) : fileThumbs.length > 0 ? (
-            <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
-              <FileThumbnailStack thumbnails={fileThumbs} />
-            </div>
-          ) : (
-            <div className="aspect-[4/3] rounded-2xl bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center">
-              <span className="text-xs text-muted-foreground/50">
-                No cover image
-              </span>
-            </div>
-          )}
-
-          {/* Mobile price/purchase — desktop keeps this in the sidebar. */}
-          <div className="lg:hidden">{renderPurchasePanel()}</div>
-
+        {/* Content below the hero */}
+        <div className="space-y-6">
           {project.description && (
             <ExpandableDescription source={project.description} />
           )}
 
-          {/* Source code — a compact GitHub card sitting below the
-              description and above the content tabs. */}
-          {project.repoUrl && <SourceCodeCard repoUrl={project.repoUrl} />}
-
-          {/* Owner photo management. Non-owners see the gallery solely
-              through the hero carousel above; owners keep an inline
-              uploader / delete strip here to seed and curate it. */}
           {isOwner && (
             <div className="space-y-2">
-              <h2 className="text-sm font-semibold">Manage photos</h2>
               <PhotosFeed
                 photos={curatorPhotos}
                 targetType="project"
@@ -859,19 +835,13 @@ export default async function ProjectDetailPage(props: {
             </div>
           )}
 
-          {/* Search tags + design-tag "Print Recommendations" card
-              intentionally don't render publicly — they're indexing
-              metadata, not creator-facing copy. Same as the file
-              detail page. */}
+          {project.repoUrl && <SourceCodeCard repoUrl={project.repoUrl} />}
 
-          {/* Content tabs — Files, Build Guide, BOM, Wiring. Sit
-              between the gallery and the Discussion section. Built
-              above; each tab carries its own inline editor and empty
-              state for owners. */}
-          <ProjectTabs tabs={tabs} />
+          <div id="project-files">
+            <ProjectTabs tabs={tabs} />
+          </div>
 
-          {/* Mobile collaborators — desktop keeps this in the sidebar. */}
-          <div className="lg:hidden">
+          {(collaborators.length > 0 || isOwner) && (
             <ProjectCollaborators
               projectId={project.id}
               initial={collaborators.map((c) => ({
@@ -883,12 +853,8 @@ export default async function ProjectDetailPage(props: {
               canManage={isOwner}
               viewerId={userId}
             />
-          </div>
+          )}
 
-          {/* Comments — public discussion. Wrapped in a Card here
-              because CommentsSection itself renders bare (the file
-              detail page combines it with photos under a single
-              "Discussion" Card). */}
           <Card>
             <CardContent className="space-y-5">
               <h2 className="text-base font-semibold">Discussion</h2>
@@ -903,46 +869,6 @@ export default async function ProjectDetailPage(props: {
                 signInRedirect={`/projects/${slug}`}
                 acceptPhoto={!!userId && canPostBuild}
               />
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Action card — desktop only (the mobile flow distributes
-            these parts inline above). col-3 spanning rows 1-2 with
-            sticky positioning so it stays in view while the user
-            scrolls comments / file grid. */}
-        <div className="order-2 hidden space-y-4 lg:col-start-3 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-6 lg:block">
-          <Card>
-            <CardContent className="p-4">
-              {renderByline()}
-
-              <Separator className="my-3" />
-
-              {renderPurchasePanel()}
-
-              <Separator className="my-3" />
-
-              <ProjectCollaborators
-                projectId={project.id}
-                initial={collaborators.map((c) => ({
-                  id: c.id,
-                  username: c.username,
-                  displayName: c.displayName,
-                  avatarUrl: c.avatarUrl,
-                }))}
-                canManage={isOwner}
-                viewerId={userId}
-              />
-
-              {isOwner && (
-                <>
-                  <Separator className="my-4" />
-                  {/* Edit / delete as icon buttons, matching the file
-                      detail page. BOM editing lives in the BOM tab now,
-                      not here. */}
-                  {renderOwnerControls()}
-                </>
-              )}
             </CardContent>
           </Card>
         </div>

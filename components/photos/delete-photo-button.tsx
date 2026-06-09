@@ -76,7 +76,7 @@ export function DeletePhotoButton({
         // backdrop blur — the blur lifts the X off whatever's behind
         // it so it stays legible over busy photos. Pinned tight to
         // the corner of the parent rather than inset.
-        className="absolute right-1 top-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-destructive/20 text-destructive ring-1 ring-destructive/30 backdrop-blur-md transition-colors hover:bg-destructive/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive cursor-pointer"
+        className="absolute right-1 top-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-destructive/30 text-destructive ring-1 ring-destructive/40 backdrop-blur-md transition-colors hover:bg-destructive/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive cursor-pointer"
       >
         <X size={14} />
       </button>

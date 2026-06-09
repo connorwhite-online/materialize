@@ -16,7 +16,7 @@ export type BomDisplayItem = {
 export function BomDisplay({ items }: { items: BomDisplayItem[] }) {
   if (items.length === 0) return null;
   return (
-    <div className="overflow-hidden rounded-xl border border-border divide-y divide-border/60">
+    <div className="overflow-hidden rounded-xl border border-border bg-muted/40 divide-y divide-border/60">
       {items.map((item) => (
         <BomRow key={item.id} item={item} />
       ))}
@@ -26,25 +26,16 @@ export function BomDisplay({ items }: { items: BomDisplayItem[] }) {
 
 function BomRow({ item }: { item: BomDisplayItem }) {
   const qty = formatQuantity(item.quantity, item.unit);
-  return (
-    <div className="flex items-start gap-4 px-4 py-3">
-      <span className="w-20 shrink-0 font-mono text-xs text-muted-foreground tabular-nums">
+  const inner = (
+    <div className="flex items-baseline gap-4 px-4 py-3">
+      <span className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums">
         {qty}
       </span>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium">
-          {item.sourceUrl ? (
-            <a
-              href={item.sourceUrl}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="hover:underline"
-            >
-              {item.name}
-              <span className="ml-1 text-xs text-muted-foreground">↗</span>
-            </a>
-          ) : (
-            item.name
+          {item.name}
+          {item.sourceUrl && (
+            <span className="ml-1 text-xs text-muted-foreground">↗</span>
           )}
         </p>
         {item.notes && (
@@ -55,6 +46,19 @@ function BomRow({ item }: { item: BomDisplayItem }) {
       </div>
     </div>
   );
+  if (item.sourceUrl) {
+    return (
+      <a
+        href={item.sourceUrl}
+        target="_blank"
+        rel="noreferrer noopener"
+        className="block transition-colors hover:bg-muted/60"
+      >
+        {inner}
+      </a>
+    );
+  }
+  return inner;
 }
 
 function formatQuantity(quantity: number, unit: string | null): string {

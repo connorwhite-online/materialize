@@ -63,7 +63,7 @@ export function SidebarUserBlock({ initialUnreadCount }: Props) {
           />
           <div className="min-w-0 flex-1 leading-tight">
             <p className="truncate text-sm font-medium">{displayName}</p>
-            {user.username && (
+            {user.username && displayName !== user.username && (
               <p className="truncate text-xs text-muted-foreground">
                 @{user.username}
               </p>

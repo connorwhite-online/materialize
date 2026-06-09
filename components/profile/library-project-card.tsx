@@ -53,8 +53,8 @@ export function LibraryProjectCard({ item }: LibraryProjectCardProps) {
   const isPrivate = item.visibility === "private" && item.source === "owned";
   return (
     <Link href={`/projects/${item.slug}`} className="block">
-      <Card className="overflow-hidden transition-colors hover:border-primary/30">
-        <div className="relative aspect-square bg-gradient-to-br from-muted to-muted/50">
+      <Card className="group gap-0 p-1 overflow-hidden transition-colors hover:border-primary/30">
+        <div className="relative aspect-square overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted to-muted/50">
           {carouselImages.length > 0 ? (
             <CardImageCarousel images={carouselImages} alt="" size="sm" />
           ) : item.fileThumbnails.length > 0 ? (
@@ -65,32 +65,35 @@ export function LibraryProjectCard({ item }: LibraryProjectCardProps) {
             </div>
           )}
 
-          {/* Private overlay — same chrome as the file card. */}
-          {isPrivate && (
-            <div className="pointer-events-none absolute left-1.5 top-1.5">
-              <span className="inline-flex items-center rounded-md bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-white backdrop-blur-md ring-1 ring-white/10">
-                Private
-              </span>
+          {(isPrivate || item.price > 0) && (
+            <div className="pointer-events-none absolute left-1.5 top-1.5 flex flex-wrap items-center gap-1">
+              {isPrivate && (
+                <span className="inline-flex items-center rounded-md bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-white backdrop-blur-md ring-1 ring-white/10">
+                  Private
+                </span>
+              )}
+              {item.price > 0 && (
+                <span className="inline-flex items-center rounded-md bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-white backdrop-blur-md ring-1 ring-white/10">
+                  ${(item.price / 100).toFixed(2)}
+                </span>
+              )}
             </div>
           )}
         </div>
-        <CardContent className="p-3 space-y-1">
-          <p className="text-sm font-medium line-clamp-1">{item.name}</p>
-          <div className="flex items-center gap-1.5">
-            <Badge variant="outline" className="text-[10px]">
+        <CardContent className="px-2 py-2">
+          <p className="text-sm font-medium line-clamp-1 transition-colors group-hover:text-primary">
+            {item.name}
+          </p>
+          <div className="mt-0.5 flex items-center gap-1.5">
+            <span className="text-xs text-muted-foreground">
               {item.fileCount} {item.fileCount === 1 ? "file" : "files"}
-            </Badge>
+            </span>
             {item.source === "purchased" && (
               <Badge variant="secondary" className="text-[10px]">
                 Purchased
               </Badge>
             )}
           </div>
-          <p className="text-xs text-muted-foreground">
-            {item.price > 0
-              ? `$${(item.price / 100).toFixed(2)}`
-              : "Free"}
-          </p>
         </CardContent>
       </Card>
     </Link>

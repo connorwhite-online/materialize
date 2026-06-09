@@ -84,7 +84,7 @@ export function EmailNotificationsSetting({ initial, initialPrefs }: Props) {
       </div>
 
       {master && (
-        <div className="mt-4 space-y-3 rounded-xl border border-border bg-muted/20 p-4">
+        <div className="mt-4 space-y-3 rounded-xl border border-border bg-muted/50 p-4">
           {EVENT_TYPES.map(({ key, label, description }) => {
             const enabled = prefs[key] !== false;
             return (
