@@ -128,7 +128,7 @@ describe("createListingSchema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("accepts all valid CC licenses", () => {
+  it("accepts all valid licenses", () => {
     for (const license of [
       "cc0",
       "cc_by",
@@ -137,6 +137,8 @@ describe("createListingSchema", () => {
       "cc_by_nc",
       "cc_by_nc_sa",
       "cc_by_nc_nd",
+      "mit",
+      "gpl_v3",
     ]) {
       const result = createListingSchema.safeParse({ ...validData, license });
       expect(result.success).toBe(true);

@@ -232,6 +232,13 @@
       "when": 1781023209262,
       "tag": "0032_recommended_cc_material_id",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1749470400000,
+      "tag": "0033_multiple_license_types",
+      "breakpoints": true
     }
   ]
 }

@@ -688,6 +688,7 @@ export default async function ProjectDetailPage(props: {
           description: project.description,
           tags: project.tags,
           repoUrl: project.repoUrl,
+          license: project.license,
           coverPhotoId: project.coverPhotoId,
           photos: curatorPhotos.map((p) => ({
             id: p.id,

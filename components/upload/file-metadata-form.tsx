@@ -442,14 +442,7 @@ export function FileMetadataForm({
                       </SelectContent>
                     </Select>
                     <p className="mt-1 text-[11px] text-muted-foreground">
-                      <a
-                        href="https://creativecommons.org/share-your-work/cclicenses/"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="underline-offset-2 hover:underline"
-                      >
-                        Compare CC licenses
-                      </a>
+                      Controls what buyers can do with the files after download.
                     </p>
                   </div>
                 </div>

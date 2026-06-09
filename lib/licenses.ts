@@ -1,14 +1,14 @@
 /**
- * Creative Commons licenses for file + project listings.
+ * Licenses for file + project listings.
  *
  * We follow the Thingiverse / Printables convention: a single license
- * picker with the seven CC variants. The same license terms apply
- * whether the file is free or paid — `price` controls cost of
- * acquisition, `license` controls what you can do after.
+ * picker. The same license terms apply whether the file is free or
+ * paid — `price` controls cost of acquisition, `license` controls what
+ * you can do after.
  *
  * Legacy values (`free`, `personal`, `commercial`) are kept in the
  * Postgres enum because Postgres can't drop enum values; rows are
- * backfilled in migration 0012. New writes only use CC ids. The
+ * backfilled in migration 0012. New writes only use current ids. The
  * `LEGACY_LICENSE_MAP` exists so any straggler row still renders
  * sensibly.
  */
@@ -21,6 +21,8 @@ export const LICENSE_ORDER = [
   "cc_by_nc",
   "cc_by_nc_sa",
   "cc_by_nc_nd",
+  "mit",
+  "gpl_v3",
 ] as const;
 
 export type LicenseId = (typeof LICENSE_ORDER)[number];
@@ -110,6 +112,24 @@ export const LICENSES: Record<LicenseId, LicenseMeta> = {
     url: "https://creativecommons.org/licenses/by-nc-nd/4.0/",
     permits: { share: true, modify: false, commercial: false },
     requires: { attribution: true, shareAlike: false, noDerivatives: true },
+  },
+  mit: {
+    id: "mit",
+    shortName: "MIT",
+    name: "MIT License",
+    summary: "Use, modify, and distribute freely (including commercially). Keep the copyright notice.",
+    url: "https://opensource.org/licenses/MIT",
+    permits: { share: true, modify: true, commercial: true },
+    requires: { attribution: true, shareAlike: false, noDerivatives: false },
+  },
+  gpl_v3: {
+    id: "gpl_v3",
+    shortName: "GPL-3.0",
+    name: "GNU General Public License v3",
+    summary: "Use, modify, and distribute freely. Derivatives must also be GPL-3.0 (copyleft).",
+    url: "https://www.gnu.org/licenses/gpl-3.0.html",
+    permits: { share: true, modify: true, commercial: true },
+    requires: { attribution: true, shareAlike: true, noDerivatives: false },
   },
 };
 
