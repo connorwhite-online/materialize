@@ -1,0 +1,1 @@
+ALTER TABLE "files" ADD COLUMN "recommended_cc_material_id" text;

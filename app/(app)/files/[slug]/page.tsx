@@ -47,7 +47,7 @@ import { Pencil } from "@/components/icons/pencil";
 import { Trash } from "@/components/icons/trash";
 import { LicenseBadge } from "@/components/licenses/license-badge";
 import { getMaterialById } from "@/lib/materials";
-import { findMaterialConfig } from "@/lib/craftcloud/catalog";
+import { findMaterialConfig, getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
 import { generateDownloadUrl } from "@/lib/storage";
 import { PRINTED_STATUSES } from "@/lib/print-statuses";
 import { swallow } from "@/lib/utils/swallow";
@@ -143,6 +143,7 @@ export default async function FileDetailPage(props: {
       tags: files.tags,
       designTags: files.designTags,
       recommendedMaterialId: files.recommendedMaterialId,
+      recommendedCcMaterialId: files.recommendedCcMaterialId,
       minWallThickness: files.minWallThickness,
       visibility: files.visibility,
       thumbnailUrl: files.thumbnailUrl,
@@ -565,6 +566,16 @@ export default async function FileDetailPage(props: {
     ? getMaterialById(file.recommendedMaterialId)
     : null;
 
+  // CraftCloud materials for the "Recommended print material" picker in
+  // the file settings dialog. Owner-only — no need to load for visitors.
+  let ccMaterials: Array<{ id: string; name: string; groupName: string }> = [];
+  if (isOwner) {
+    const catalog = await getCraftCloudCatalog();
+    ccMaterials = catalog.groups.flatMap((g) =>
+      g.materials.map((m) => ({ id: m.id, name: m.name, groupName: g.name }))
+    );
+  }
+
   // Curator photos carousel (kind='creator' only) — community photos
   // are now folded into the comments thread as photo-posts so a
   // listing's discussion reads as one stream.
@@ -771,10 +782,12 @@ export default async function FileDetailPage(props: {
                       license: file.license,
                       visibility: file.visibility ?? "public",
                       recommendedMaterialId: file.recommendedMaterialId,
+                      recommendedCcMaterialId: file.recommendedCcMaterialId,
                       designTags: file.designTags,
                       minWallThickness: file.minWallThickness,
                       coverPhotoId: file.coverPhotoId,
                     }}
+                    ccMaterials={ccMaterials}
                     photos={photosWithUrls.map((p) => ({
                       id: p.id,
                       downloadUrl: p.downloadUrl,

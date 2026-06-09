@@ -225,6 +225,13 @@
       "when": 1780003273413,
       "tag": "0031_tan_dagger",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1781023209262,
+      "tag": "0032_recommended_cc_material_id",
+      "breakpoints": true
     }
   ]
 }

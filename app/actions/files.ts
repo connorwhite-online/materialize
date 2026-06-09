@@ -493,6 +493,8 @@ export async function updateFileListing(fileId: string, formData: FormData) {
       tags: formData.get("tags") || undefined,
       recommendedMaterialId:
         formData.get("recommendedMaterialId") || undefined,
+      recommendedCcMaterialId:
+        formData.get("recommendedCcMaterialId") || undefined,
       designTags: designTagValues.length > 0 ? designTagValues : undefined,
       minWallThickness: formData.get("minWallThickness") || undefined,
     });
@@ -539,6 +541,7 @@ export async function updateFileListing(fileId: string, formData: FormData) {
         visibility: parsed.data.visibility ?? file.visibility,
         tags: parsed.data.tags,
         recommendedMaterialId: parsed.data.recommendedMaterialId,
+        recommendedCcMaterialId: parsed.data.recommendedCcMaterialId,
         designTags: parsed.data.designTags,
         minWallThickness: parsed.data.minWallThickness,
         coverPhotoId: nextCoverPhotoId,

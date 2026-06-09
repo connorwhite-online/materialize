@@ -41,6 +41,7 @@ export default async function PrintConfigPage(props: {
       fileUserId: files.userId,
       fileStatus: files.status,
       recommendedMaterialId: files.recommendedMaterialId,
+      recommendedCcMaterialId: files.recommendedCcMaterialId,
       designTags: files.designTags,
       minWallThickness: files.minWallThickness,
     })
@@ -66,8 +67,12 @@ export default async function PrintConfigPage(props: {
   // that material so they land on (essentially) just vendor selection.
   // Resolver returns null on no confident match → full picker (no
   // regression). An explicit `?material=` always wins.
+  // Resolve the preselect material: explicit ?material= wins, then a
+  // directly-stored CraftCloud UUID (most reliable — no fuzzy lookup),
+  // then fall back to the fuzzy editorial-slug resolver.
   const resolvedPreselectMaterialId =
     preselectMaterialId ??
+    asset.recommendedCcMaterialId ??
     (await resolveRecommendedCraftCloudMaterialId(asset.recommendedMaterialId)) ??
     undefined;
 

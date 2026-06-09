@@ -33,6 +33,13 @@ import {
   type LicenseId,
 } from "@/lib/licenses";
 
+/** A flat CraftCloud material option for the print-material picker. */
+export interface CcMaterialOption {
+  id: string;
+  name: string;
+  groupName: string;
+}
+
 interface EditFileButtonProps {
   fileId: string;
   initial: {
@@ -44,6 +51,8 @@ interface EditFileButtonProps {
     license: string;
     visibility: "public" | "private" | string;
     recommendedMaterialId: string | null;
+    /** Direct CraftCloud material UUID — bypasses fuzzy resolver in the print flow. */
+    recommendedCcMaterialId: string | null;
     designTags: string[] | null;
     minWallThickness: number | null; // 0.1mm units
     /** Currently-set cover photo id (null = use auto-captured thumbnail). */
@@ -56,6 +65,12 @@ interface EditFileButtonProps {
    */
   photos: Array<{ id: string; downloadUrl: string }>;
   hasBuyers: boolean;
+  /**
+   * CraftCloud materials from the live catalog. When provided, replaces the
+   * editorial material list in the "Recommended print material" picker so
+   * the creator can pick an exact CraftCloud UUID rather than a near-match slug.
+   */
+  ccMaterials?: CcMaterialOption[];
   /**
    * Optional custom trigger element. Lets the call site swap in an
    * icon button or any other shape; defaults to a full-width outline
@@ -78,6 +93,7 @@ export function EditFileButton({
   initial,
   photos,
   hasBuyers,
+  ccMaterials,
   trigger,
 }: EditFileButtonProps) {
   const router = useRouter();
@@ -100,6 +116,9 @@ export function EditFileButton({
   const [recommendedMaterial, setRecommendedMaterial] = useState(
     initial.recommendedMaterialId ?? ""
   );
+  const [recommendedCcMaterial, setRecommendedCcMaterial] = useState(
+    initial.recommendedCcMaterialId ?? ""
+  );
   const [designTags, setDesignTags] = useState<string[]>(
     initial.designTags ?? []
   );
@@ -120,6 +139,7 @@ export function EditFileButton({
     setLicense(resolveLicense(initial.license));
     setVisibility((initial.visibility as "public" | "private") || "public");
     setRecommendedMaterial(initial.recommendedMaterialId ?? "");
+    setRecommendedCcMaterial(initial.recommendedCcMaterialId ?? "");
     setDesignTags(initial.designTags ?? []);
     setMinWallThicknessMm(
       initial.minWallThickness ? (initial.minWallThickness / 10).toString() : ""
@@ -148,6 +168,9 @@ export function EditFileButton({
     formData.set("visibility", visibility);
     if (recommendedMaterial) {
       formData.set("recommendedMaterialId", recommendedMaterial);
+    }
+    if (recommendedCcMaterial) {
+      formData.set("recommendedCcMaterialId", recommendedCcMaterial);
     }
     for (const tag of designTags) {
       formData.append("designTags", tag);
@@ -381,35 +404,72 @@ export function EditFileButton({
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="edit-material" className="text-xs">
-              Recommended material
-            </Label>
-            <Select
-              value={recommendedMaterial || "none"}
-              onValueChange={(v) =>
-                setRecommendedMaterial(!v || v === "none" ? "" : String(v))
-              }
-            >
-              <SelectTrigger id="edit-material" className="w-full">
-                <SelectValue>
-                  {(value) => {
-                    if (!value || value === "none") return "None";
-                    const mat = MATERIALS.find((m) => m.id === value);
-                    return mat ? `${mat.name} (${mat.method})` : value;
-                  }}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">None — let the buyer decide</SelectItem>
-                {MATERIALS.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.name} ({m.method})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {ccMaterials && ccMaterials.length > 0 ? (
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-cc-material" className="text-xs">
+                Recommended print material
+              </Label>
+              <p className="text-[11px] text-muted-foreground">
+                When set, users printing this file skip straight to vendor
+                selection for this material.
+              </p>
+              <Select
+                value={recommendedCcMaterial || "none"}
+                onValueChange={(v) =>
+                  setRecommendedCcMaterial(!v || v === "none" ? "" : String(v))
+                }
+              >
+                <SelectTrigger id="edit-cc-material" className="w-full">
+                  <SelectValue>
+                    {(value) => {
+                      if (!value || value === "none") return "None — let the buyer decide";
+                      const mat = ccMaterials.find((m) => m.id === value);
+                      return mat ? `${mat.name} (${mat.groupName})` : value;
+                    }}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None — let the buyer decide</SelectItem>
+                  {ccMaterials.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      <span>{m.name}</span>
+                      <span className="ml-1.5 text-muted-foreground text-[11px]">{m.groupName}</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-material" className="text-xs">
+                Recommended material
+              </Label>
+              <Select
+                value={recommendedMaterial || "none"}
+                onValueChange={(v) =>
+                  setRecommendedMaterial(!v || v === "none" ? "" : String(v))
+                }
+              >
+                <SelectTrigger id="edit-material" className="w-full">
+                  <SelectValue>
+                    {(value) => {
+                      if (!value || value === "none") return "None";
+                      const mat = MATERIALS.find((m) => m.id === value);
+                      return mat ? `${mat.name} (${mat.method})` : value;
+                    }}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None — let the buyer decide</SelectItem>
+                  {MATERIALS.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.name} ({m.method})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <Label className="text-xs">This part needs to be…</Label>

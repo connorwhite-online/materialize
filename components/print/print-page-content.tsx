@@ -9,6 +9,7 @@ import { usePendingPrintFile } from "@/components/upload/pending-print-file";
 import { uploadFileToCraftCloud } from "@/lib/craftcloud/upload-client";
 import { QuoteConfigurator } from "@/components/print/quote-configurator";
 import { WhatNextPane } from "@/components/print/what-next-pane";
+import { ProjectFileChecklist } from "@/components/print/project-file-checklist";
 import { CartSlotStack } from "@/components/print/cart-slot-stack";
 import {
   Select,
@@ -64,6 +65,13 @@ interface PrintPageContentProps {
    * ARE the point of the page.
    */
   tilesDefaultExpanded?: boolean;
+  /**
+   * When true the left column renders a ProjectFileChecklist (no
+   * uploader, always-visible list with cart status) instead of the
+   * WhatNextPane. Set for ?project= routes where the project files
+   * are the entire scope of the print session.
+   */
+  isProjectMode?: boolean;
 }
 
 type PickedFile = { file: File; format: Format };
@@ -103,6 +111,7 @@ export function PrintPageContent({
   initialExpandVendorId,
   tilesLabel,
   tilesDefaultExpanded,
+  isProjectMode,
 }: PrintPageContentProps) {
   const { isSignedIn, isLoaded } = useUser();
   const router = useRouter();
@@ -278,6 +287,11 @@ export function PrintPageContent({
               onUnitChange={handleUnitChange}
               onReset={handleReset}
               onAddedToCart={handleAddedToCart}
+            />
+          ) : isProjectMode ? (
+            <ProjectFileChecklist
+              tiles={tiles}
+              linkSuffix={linkSuffix}
             />
           ) : (
             <WhatNextPane
