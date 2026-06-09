@@ -39,26 +39,36 @@ export default async function Image({
     return renderOgCard({ title: "Materialize", subtitle: null });
   }
 
-  // Resolve the cover to an absolute, fetchable URL for the card —
-  // same priority order as the /api/thumbnails/projects route (the OG
-  // renderer can't call that proxy, so we sign the R2 key directly):
-  //   1. explicit coverPhotoId pick
-  //   2. first curator photo ("Auto" cover)
-  //   3. legacy thumbnailUrl (full URL, or a storage key we sign)
-  //   4. first bundled file's thumbnail
-  let coverKey: string | null = null;
-  if (row.coverPhotoId) {
-    const [cover] = await db
-      .select({
-        storageKey: projectPhotos.storageKey,
-        projectId: projectPhotos.projectId,
-      })
-      .from(projectPhotos)
-      .where(eq(projectPhotos.id, row.coverPhotoId));
-    if (cover && cover.projectId === row.id) coverKey = cover.storageKey;
-  }
-  if (!coverKey) {
-    const [first] = await db
+  // Resolve the cover to an absolute, fetchable URL for the card.
+  // Try multiple sources with graceful fallbacks to ensure OG generation
+  // doesn't fail if any step encounters an error.
+  let imageUrl: string | null = null;
+
+  try {
+    // 1. Try explicit coverPhotoId pick
+    if (row.coverPhotoId) {
+      const [cover] = await db
+        .select({
+          storageKey: projectPhotos.storageKey,
+          projectId: projectPhotos.projectId,
+        })
+        .from(projectPhotos)
+        .where(eq(projectPhotos.id, row.coverPhotoId));
+      if (cover && cover.projectId === row.id && cover.storageKey) {
+        imageUrl = await generateDownloadUrl(cover.storageKey, 3600);
+        if (imageUrl) {
+          const creator = row.displayName || row.username;
+          return renderOgCard({
+            title: row.name,
+            subtitle: creator ? `Project by ${creator}` : "Project",
+            imageUrl,
+          });
+        }
+      }
+    }
+
+    // 2. Try first curator photo ("Auto" cover)
+    const [firstCurator] = await db
       .select({ storageKey: projectPhotos.storageKey })
       .from(projectPhotos)
       .where(
@@ -69,19 +79,47 @@ export default async function Image({
       )
       .orderBy(asc(projectPhotos.sortOrder))
       .limit(1);
-    if (first) coverKey = first.storageKey;
+    if (firstCurator?.storageKey) {
+      imageUrl = await generateDownloadUrl(firstCurator.storageKey, 3600);
+      if (imageUrl) {
+        const creator = row.displayName || row.username;
+        return renderOgCard({
+          title: row.name,
+          subtitle: creator ? `Project by ${creator}` : "Project",
+          imageUrl,
+        });
+      }
+    }
+  } catch {
+    // Silently fall through to legacy thumbnail if photo resolution fails
   }
 
-  let imageUrl: string | null = null;
-  if (coverKey) {
-    imageUrl = await generateDownloadUrl(coverKey, 3600);
-  } else if (row.thumbnailUrl) {
-    imageUrl =
+  // 3. Try legacy thumbnailUrl
+  if (row.thumbnailUrl) {
+    if (
       row.thumbnailUrl.startsWith("http://") ||
       row.thumbnailUrl.startsWith("https://")
-        ? row.thumbnailUrl
-        : await generateDownloadUrl(row.thumbnailUrl, 3600);
-  } else {
+    ) {
+      imageUrl = row.thumbnailUrl;
+    } else {
+      try {
+        imageUrl = await generateDownloadUrl(row.thumbnailUrl, 3600);
+      } catch {
+        // If signing fails, fall through to bundled files
+      }
+    }
+    if (imageUrl) {
+      const creator = row.displayName || row.username;
+      return renderOgCard({
+        title: row.name,
+        subtitle: creator ? `Project by ${creator}` : "Project",
+        imageUrl,
+      });
+    }
+  }
+
+  // 4. Try first bundled file's thumbnail
+  try {
     const [firstFile] = await db
       .select({ thumbnailUrl: files.thumbnailUrl })
       .from(projectFiles)
@@ -89,9 +127,14 @@ export default async function Image({
       .where(eq(projectFiles.projectId, row.id))
       .orderBy(asc(projectFiles.position))
       .limit(1);
-    if (firstFile?.thumbnailUrl) imageUrl = firstFile.thumbnailUrl;
+    if (firstFile?.thumbnailUrl) {
+      imageUrl = firstFile.thumbnailUrl;
+    }
+  } catch {
+    // Silently ignore if bundled file fetch fails
   }
 
+  // Render with whatever image we found, or null for a placeholder
   const creator = row.displayName || row.username;
   return renderOgCard({
     title: row.name,
