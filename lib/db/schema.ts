@@ -18,14 +18,11 @@ import {
 
 // Enums
 //
-// `license` carries seven Creative Commons variants plus three
-// legacy values (`free`, `personal`, `commercial`) that predate the
-// CC switch. Postgres enums don't support DROP VALUE, so the legacy
-// values stay in the type — migration 0012 backfills every row to a
-// CC equivalent, and the upload + edit forms only offer CC ids
-// going forward, so legacy values shouldn't appear on new rows.
-// `LEGACY_LICENSE_MAP` in `lib/licenses.ts` handles display of any
-// straggler.
+// `license` carries the CC variants, MIT, GPL-3.0, plus three legacy
+// values (`free`, `personal`, `commercial`) that predate the CC switch.
+// Postgres enums don't support DROP VALUE, so legacy values stay in the
+// type — migration 0012 backfills rows to CC equivalents.
+// `LEGACY_LICENSE_MAP` in `lib/licenses.ts` handles display of stragglers.
 export const licenseEnum = pgEnum("license", [
   "cc0",
   "cc_by",
@@ -34,6 +31,8 @@ export const licenseEnum = pgEnum("license", [
   "cc_by_nc",
   "cc_by_nc_sa",
   "cc_by_nc_nd",
+  "mit",
+  "gpl_v3",
   "free",
   "personal",
   "commercial",
