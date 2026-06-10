@@ -320,7 +320,7 @@ function CartSlot({
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center justify-between px-4 py-3 text-left"
+        className="flex w-full cursor-pointer items-center justify-between px-4 py-3 text-left"
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">

@@ -508,8 +508,7 @@ export default async function ProjectDetailPage(props: {
         <div className="grid gap-3 grid-cols-2 sm:grid-cols-3">
           {bundledFileCards.map((file) => {
             const dims = dimensionsLabel(file.dimensions);
-            const subtitle =
-              dims ?? (file.price > 0 ? `$${(file.price / 100).toFixed(2)}` : null);
+            const subtitle = dims ?? null;
             return (
               <Link key={file.id} href={`/files/${file.slug}`} className="block">
                 <Card className="group gap-0 p-1 overflow-hidden transition-colors hover:border-primary/30">
@@ -525,6 +524,11 @@ export default async function ProjectDetailPage(props: {
                       <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground/50">
                         No preview
                       </div>
+                    )}
+                    {file.price > 0 && (
+                      <span className="absolute left-2 top-2 rounded-full bg-background/90 px-2 py-1 text-xs font-medium tabular-nums backdrop-blur-sm">
+                        ${(file.price / 100).toFixed(2)}
+                      </span>
                     )}
                   </div>
                   <CardContent className="px-2 py-2">

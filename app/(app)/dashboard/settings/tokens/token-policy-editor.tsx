@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { updateTokenSpendingPolicy } from "@/app/actions/tokens";
@@ -129,9 +130,8 @@ export function TokenPolicyEditor({
               >
                 Per-order limit
               </Label>
-              <Input
+              <NumberInput
                 id={`per-order-${tokenId}`}
-                type="number"
                 inputMode="decimal"
                 step="0.01"
                 min="0.50"
@@ -140,7 +140,7 @@ export function TokenPolicyEditor({
                   const c = centsFromDollars(e.target.value);
                   if (c != null) update("perOrderLimitCents", c);
                 }}
-                className="mt-1 h-8 text-xs"
+                className="mt-1 h-8 w-full rounded-lg border border-input bg-background px-3 text-xs shadow-xs focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/50 depth-sunken"
                 disabled={disabled || pending}
               />
             </div>
@@ -151,9 +151,8 @@ export function TokenPolicyEditor({
               >
                 Per-{policy.periodWindow} budget
               </Label>
-              <Input
+              <NumberInput
                 id={`period-budget-${tokenId}`}
-                type="number"
                 inputMode="decimal"
                 step="0.01"
                 min="0.50"
@@ -162,7 +161,7 @@ export function TokenPolicyEditor({
                   const c = centsFromDollars(e.target.value);
                   if (c != null) update("periodBudgetCents", c);
                 }}
-                className="mt-1 h-8 text-xs"
+                className="mt-1 h-8 w-full rounded-lg border border-input bg-background px-3 text-xs shadow-xs focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/50 depth-sunken"
                 disabled={disabled || pending}
               />
             </div>
@@ -198,9 +197,8 @@ export function TokenPolicyEditor({
             >
               Confirm anything above (optional)
             </Label>
-            <Input
+            <NumberInput
               id={`confirm-above-${tokenId}`}
-              type="number"
               inputMode="decimal"
               step="0.01"
               min="0"
@@ -218,7 +216,7 @@ export function TokenPolicyEditor({
                 const c = centsFromDollars(e.target.value);
                 if (c != null) update("confirmAboveCents", c);
               }}
-              className="mt-1 h-8 text-xs"
+              className="mt-1 h-8 w-full rounded-lg border border-input bg-background px-3 text-xs shadow-xs focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/50 depth-sunken"
               disabled={disabled || pending}
             />
           </div>
