@@ -55,13 +55,20 @@ export const MaterialCarousel = forwardRef<HTMLDivElement, MaterialCarouselProps
 
     return (
       <div className="relative w-full max-w-[420px] mx-auto">
-        {/* Edge fades */}
-        <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-20 bg-gradient-to-r from-background to-transparent" />
-        <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-20 bg-gradient-to-l from-background to-transparent" />
-
+        {/* Edge fade via a mask (alpha only) — overlaying a colored
+            `from-background` gradient used to leave a visible cream band
+            because the page background is now a gradient behind the 3D
+            scene, not a flat fill. A mask fades the items themselves and
+            never tints the scene. */}
         <div
           ref={trackRef}
           className="flex items-center gap-10 overflow-x-hidden px-[50%] py-2 select-none"
+          style={{
+            maskImage:
+              "linear-gradient(to right, transparent, #000 18%, #000 82%, transparent)",
+            WebkitMaskImage:
+              "linear-gradient(to right, transparent, #000 18%, #000 82%, transparent)",
+          }}
         >
           {materials.map((material, i) => {
             const isActive = i === selectedIndex;

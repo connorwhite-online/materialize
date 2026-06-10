@@ -1,0 +1,181 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { cn } from "@/lib/utils";
+
+// The four landing sections the pager cycles through (the footer is
+// excluded — it's reachable by manual scroll but not part of the loop).
+const SECTION_COUNT = 4;
+// Time the active dot takes to fill before auto-advancing to the next
+// section. Resets/stops once the visitor scrolls themselves.
+const DURATION_MS = 4500;
+const ADVANCE_KEYS = ["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " "];
+
+/**
+ * Apple-style scroll indicator: a vertical capsule of one dot per
+ * section. The active dot fills like a timer and, on completion,
+ * smooth-scrolls to the next section — until the visitor takes over by
+ * scrolling/clicking, after which it becomes a passive section pager.
+ * Dots are also clickable to jump to a section.
+ */
+export function ScrollIndicator() {
+  const [active, setActive] = useState(0);
+  const [count, setCount] = useState(SECTION_COUNT);
+  const activeRef = useRef(0);
+  const fillRef = useRef<HTMLSpanElement | null>(null);
+
+  const autoRef = useRef(true);
+  const progRef = useRef(0);
+  const programmaticRef = useRef(false);
+  const sectionsRef = useRef<HTMLElement[]>([]);
+
+  useEffect(() => {
+    const collect = () => {
+      sectionsRef.current = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-home-section]")
+      );
+      if (sectionsRef.current.length) setCount(sectionsRef.current.length);
+    };
+    collect();
+
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      autoRef.current = false;
+    }
+
+    const currentIndex = () => {
+      const mid = window.scrollY + window.innerHeight / 2;
+      let idx = 0;
+      sectionsRef.current.forEach((el, i) => {
+        if (el.offsetTop <= mid) idx = i;
+      });
+      return idx;
+    };
+
+    const syncActive = () => {
+      const idx = currentIndex();
+      if (idx !== activeRef.current) {
+        activeRef.current = idx;
+        setActive(idx);
+      }
+    };
+
+    // Any direct input means "I've got it" — stop auto-advancing.
+    const takeOver = () => {
+      if (programmaticRef.current) return;
+      autoRef.current = false;
+      progRef.current = 0;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (ADVANCE_KEYS.includes(e.key)) takeOver();
+    };
+
+    window.addEventListener("scroll", syncActive, { passive: true });
+    window.addEventListener("wheel", takeOver, { passive: true });
+    window.addEventListener("touchmove", takeOver, { passive: true });
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", collect);
+
+    let raf = 0;
+    let lastTs = 0;
+    const tick = (ts: number) => {
+      raf = requestAnimationFrame(tick);
+      const dt = lastTs ? ts - lastTs : 16;
+      lastTs = ts;
+
+      const a = activeRef.current;
+      const last = sectionsRef.current.length - 1;
+
+      if (!autoRef.current) {
+        // Passive pager (user took over / reduced motion): solid active.
+        progRef.current = 0;
+        if (fillRef.current) fillRef.current.style.height = "100%";
+        return;
+      }
+
+      progRef.current += dt / DURATION_MS;
+      if (progRef.current >= 1) {
+        progRef.current = 0;
+        // Loop: after the final section, come back up to the top.
+        const nextIdx = a >= last ? 0 : a + 1;
+        const target = sectionsRef.current[nextIdx];
+        if (target) {
+          programmaticRef.current = true;
+          window.scrollTo({ top: target.offsetTop, behavior: "smooth" });
+          // Longer guard — the loop-to-top scroll can be a long animation.
+          window.setTimeout(() => {
+            programmaticRef.current = false;
+          }, 1200);
+        }
+      }
+      if (fillRef.current) {
+        fillRef.current.style.height = `${Math.min(1, progRef.current) * 100}%`;
+      }
+    };
+    raf = requestAnimationFrame(tick);
+
+    syncActive();
+
+    return () => {
+      window.removeEventListener("scroll", syncActive);
+      window.removeEventListener("wheel", takeOver);
+      window.removeEventListener("touchmove", takeOver);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", collect);
+      cancelAnimationFrame(raf);
+    };
+  }, []);
+
+  const goTo = (i: number) => {
+    autoRef.current = false;
+    progRef.current = 0;
+    const el = sectionsRef.current[i];
+    if (el) {
+      programmaticRef.current = true;
+      window.scrollTo({ top: el.offsetTop, behavior: "smooth" });
+      window.setTimeout(() => {
+        programmaticRef.current = false;
+      }, 900);
+    }
+  };
+
+  return (
+    <div
+      className="flex flex-col items-center gap-1 rounded-full border border-border/40 bg-background/25 px-1 py-1.5 backdrop-blur-sm"
+      role="navigation"
+      aria-label="Section progress"
+    >
+      {Array.from({ length: count }).map((_, i) => {
+        const isActive = i === active;
+        return (
+          <button
+            key={i}
+            type="button"
+            onClick={() => goTo(i)}
+            aria-label={`Go to section ${i + 1}`}
+            aria-current={isActive ? "true" : undefined}
+            className="flex h-5 w-4 cursor-pointer items-center justify-center"
+          >
+            <span
+              className={cn(
+                // Active indicator is a pill twice as long as the
+                // inactive dots; the timer fill grows downward inside it.
+                "relative block overflow-hidden rounded-full transition-all duration-300",
+                isActive
+                  ? "h-4 w-2 bg-muted-foreground/25"
+                  : "h-2 w-2 bg-muted-foreground/30 hover:bg-muted-foreground/50"
+              )}
+            >
+              {isActive && (
+                <span
+                  ref={fillRef}
+                  className="absolute inset-x-0 top-0 bg-foreground"
+                  style={{ height: "0%" }}
+                />
+              )}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
