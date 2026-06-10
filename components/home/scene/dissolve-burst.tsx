@@ -72,7 +72,7 @@ export function DissolveBurst({ color }: { color: THREE.Color }) {
       p.active = true;
       p.mode = mode;
       p.age = 0;
-      p.scale = 0.004 + Math.random() * 0.011;
+      p.scale = 0.002 + Math.random() * 0.005;
 
       // A point on the device surface ellipsoid.
       const theta = Math.random() * Math.PI * 2;
@@ -176,8 +176,8 @@ export function DissolveBurst({ color }: { color: THREE.Color }) {
 
   return (
     <instancedMesh ref={meshRef} args={[undefined, undefined, MAX]} frustumCulled={false}>
-      <boxGeometry args={[1, 1, 1]} />
-      <meshStandardMaterial color={color} metalness={0.4} roughness={0.3} />
+      <icosahedronGeometry args={[0.5, 0]} />
+      <meshStandardMaterial color={color} metalness={0.3} roughness={0.45} />
     </instancedMesh>
   );
 }

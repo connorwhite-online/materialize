@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, type MutableRefObject } from "react";
 import { useFrame } from "@react-three/fiber";
-import { RoundedBox, Html, Line } from "@react-three/drei";
+import { RoundedBox, Line } from "@react-three/drei";
 import * as THREE from "three";
 import {
   TEARDOWN_PARTS,
@@ -90,13 +90,13 @@ function makeHologramMaterial(): THREE.ShaderMaterial {
         // WAVERS with animated noise and the band breaks into PARTICULATES
         // — powder caught mid-sinter, feathering as it tries to solidify.
         vec2 np = vWorldPos.xz;
-        float wob = (vnoise(np * 7.0 + uTime * 0.5) - 0.5) * 0.05;   // wavering line
+        float wob = (vnoise(np * 6.0 + uTime * 0.45) - 0.5) * 0.07;  // wavering line
         float fine = vnoise(np * 26.0 - uTime * 0.8);                 // powder grain
         float d = vWorldY - (uBuildY + wob);
-        float core = exp(-pow(d * 10.0, 2.0));   // soft wide core
-        float up = exp(-max(d, 0.0) * 2.6);       // upward heat bleed (print dir)
-        float down = exp(-max(-d, 0.0) * 7.0);    // feathers a touch below the seam
-        float band = max(max(core, up * 0.5), down * 0.4);
+        float core = exp(-pow(d * 7.0, 2.0));    // soft wide core (wider than before)
+        float up = exp(-max(d, 0.0) * 2.0);      // upward heat bleed (print dir)
+        float down = exp(-max(-d, 0.0) * 4.5);   // softer feather below the seam
+        float band = max(max(core, up * 0.6), down * 0.5);
         band *= 0.45 + 0.55 * fine;               // particulate break-up
         band *= 0.6 + 0.4 * scan;                 // gentle shimmer
         // Bright flecks of powder fusing right at the build height.
@@ -137,6 +137,12 @@ interface DeviceModelProps {
   showLabels?: boolean;
   /** Set on label hover so the assembly can rotate toward that tag. */
   hoverRef?: MutableRefObject<HoverTarget>;
+  /**
+   * World-space anchor positions for each label (one per TEARDOWN_PARTS),
+   * written every frame. The caller renders Html elements at these positions
+   * OUTSIDE the spinRef group so labels don't rotate with the scene on hover.
+   */
+  labelWorldPositions?: MutableRefObject<THREE.Vector3[]>;
   castShadow?: boolean;
 }
 
@@ -263,20 +269,13 @@ function GithubMark() {
 function TeardownLabel({
   part,
   size,
-  hoverRef,
 }: {
   part: TeardownPart;
   size: THREE.Vector3;
-  hoverRef?: MutableRefObject<HoverTarget>;
 }) {
   const dir = part.labelSide === "right" ? 1 : -1;
-  const end: [number, number, number] = [dir * 0.5, part.labelY * size.y, 0.12];
-  // Lean the assembly toward the hovered tag: yaw to its side, pitch to
-  // its height (top parts tip forward, bottom parts tip back).
-  const lean: HoverTarget = { yaw: dir * 0.24, pitch: part.labelY * 0.32 };
-  const setHover = (v: HoverTarget) => {
-    if (hoverRef) hoverRef.current = v;
-  };
+  // Leader-line anchor: side + height; Z=0 so the dot sits on the explode plane.
+  const end: [number, number, number] = [dir * 0.5, part.labelY * size.y, 0];
   return (
     <group>
       <Line points={[[0, 0, 0], end]} color="#8a8f98" lineWidth={1} transparent opacity={0.7} />
@@ -284,32 +283,6 @@ function TeardownLabel({
         <sphereGeometry args={[0.016, 12, 12]} />
         <meshBasicMaterial color="#8a8f98" />
       </mesh>
-      <Html position={end} distanceFactor={5} style={{ pointerEvents: "none" }} zIndexRange={[20, 0]}>
-        {/* The leader-line side offset lives on the wrapper so the label is
-            free to use a hover scale transform of its own. Labels are not
-            links — they enlarge and lean the assembly on hover, no nav. */}
-        <div
-          style={{
-            transform: dir > 0 ? "translateX(0.3rem)" : "translateX(-100%) translateX(-0.3rem)",
-          }}
-        >
-          <div
-            onPointerOver={() => setHover(lean)}
-            onPointerOut={() => setHover({ yaw: 0, pitch: 0 })}
-            className="teardown-label-fade pointer-events-auto flex origin-center items-center gap-2 whitespace-nowrap rounded-md border border-border/60 bg-background/85 px-2.5 py-1.5 text-foreground shadow-sm backdrop-blur transition-[transform,border-color,background-color] duration-200 ease-out hover:scale-[1.22] hover:border-primary/60 hover:bg-background hover:shadow-md"
-          >
-            {part.github && <GithubMark />}
-            <span className="flex flex-col leading-tight">
-              <span className="text-[13px] font-semibold tracking-tight">{part.label}</span>
-              {part.sub && (
-                <span className="text-[11px] font-medium tracking-tight text-muted-foreground">
-                  {part.sub}
-                </span>
-              )}
-            </span>
-          </div>
-        </div>
-      </Html>
     </group>
   );
 }
@@ -328,6 +301,7 @@ export function DeviceModel({
   showInternals = true,
   showLabels = false,
   hoverRef,
+  labelWorldPositions,
   castShadow = true,
 }: DeviceModelProps) {
   const { front, back, size, topCap, bottomCap } = useDeviceGeometry();
@@ -337,6 +311,7 @@ export function DeviceModel({
   const backRef = useRef<THREE.Group>(null);
   const internalsRef = useRef<THREE.Group>(null);
   const tmpV = useMemo(() => new THREE.Vector3(), []);
+  const tmpLabel = useMemo(() => new THREE.Vector3(), []);
   const topFeatRef = useRef<THREE.Group>(null);
   const botFeatRef = useRef<THREE.Group>(null);
   const frontMat = useRef<THREE.MeshPhysicalMaterial>(null);
@@ -543,7 +518,7 @@ export function DeviceModel({
     // on): erode a noisy margin just below the world-space build line.
     shellEdge.uEdgeTime.value = t;
     shellEdge.uBuildLineY.value = worldBuildY;
-    shellEdge.uEdgeAmp.value = showBand ? size.y * 0.03 : 0;
+    shellEdge.uEdgeAmp.value = showBand ? size.y * 0.012 : 0;
     // Only draw the coincident hologram ghost when it's actually showing —
     // otherwise it double-draws the shell surface and z-fights in the hero.
     const holoVisible = holoOp > 0.002 || showBand === 1;
@@ -557,8 +532,8 @@ export function DeviceModel({
     // takes over).
     const matSceneW = Math.max(0, 1 - Math.abs(stage - STAGE.MATERIALS));
     const gap = matSceneW * 0.07;
-    if (frontRef.current) frontRef.current.position.z = e * 0.5 + gap;
-    if (backRef.current) backRef.current.position.z = -e * 0.35 - gap;
+    if (frontRef.current) frontRef.current.position.z = e * 0.95 + gap;
+    if (backRef.current) backRef.current.position.z = -e * 0.95 - gap;
     if (holoFrontRef.current) holoFrontRef.current.position.z = gap;
     if (holoBackRef.current) holoBackRef.current.position.z = -gap;
 
@@ -584,6 +559,20 @@ export function DeviceModel({
     if (botFeatRef.current) botFeatRef.current.position.y = bottomCap.point.y - e * 0.3;
     const pcb = partRefs.current["pcb"];
     if (pcb) pcb.position.z = (PCB_ORDER - ORDER_CENTER) * EXPLODE_SPACING * e;
+
+    // Write world-space anchor for each label so the caller can position
+    // Html elements outside the spinRef group (labels stay screen-stable).
+    if (showLabels && labelWorldPositions) {
+      TEARDOWN_PARTS.forEach((part, i) => {
+        const g = partRefs.current[part.id];
+        const dest = labelWorldPositions.current[i];
+        if (!g || !dest) return;
+        const dir = part.labelSide === "right" ? 1 : -1;
+        tmpLabel.set(dir * 0.5, part.labelY * size.y, 0);
+        tmpLabel.applyMatrix4(g.matrixWorld);
+        dest.copy(tmpLabel);
+      });
+    }
   });
 
   const shellMaterial = (ref: MutableRefObject<THREE.MeshPhysicalMaterial | null>) => (
@@ -706,7 +695,7 @@ export function DeviceModel({
               }}
             >
               <PartGeometry id={part.id} size={size} />
-              {showLabels && <TeardownLabel part={part} size={size} hoverRef={hoverRef} />}
+              {showLabels && <TeardownLabel part={part} size={size} />}
             </group>
           ))}
         </group>

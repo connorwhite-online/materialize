@@ -146,7 +146,7 @@ export const PCB_ORDER = 1.5;
 /** Centre of the order range, so the exploded stack stays centred. */
 export const ORDER_CENTER = 2.5;
 /** Spacing (scene units) between adjacent layers along the explode axis. */
-export const EXPLODE_SPACING = 0.28;
+export const EXPLODE_SPACING = 0.38;
 
 const PNEUMA_REPO = "https://github.com/connorwhite-online/pneuma";
 const PNEUMA_BOM =
