@@ -91,6 +91,12 @@ export const printOrderStatusEnum = pgEnum("print_order_status", [
   // payment success and CraftCloud-order placement to give the user a
   // short cancellation window (see auto_approved_until on print_orders).
   "auto_approved",
+  // Two-step checkout orders (CON-118): our service fee is authorized
+  // (a hold, not a charge) and the CraftCloud order is placed but
+  // unpaid — the customer still has to complete CraftCloud's hosted
+  // checkout. The reconciliation cron captures the fee and advances
+  // the row to `ordered` once CraftCloud payment is confirmed.
+  "awaiting_production_payment",
   "ordered",
   "in_production",
   "shipped",
@@ -647,6 +653,21 @@ export const printOrders = pgTable("print_orders", {
   // Stripe error can't leave a cancelled order silently charged. Null on
   // every order whose refund either succeeded or was never attempted.
   refundFailedAt: timestamp("refund_failed_at", { withTimezone: true }),
+  // Which checkout architecture this order was created under (CON-118):
+  // "single" (one charge via our Stripe Checkout) or "two_step" (fee
+  // authorization + CraftCloud-hosted production payment). The row value
+  // — not the CHECKOUT_MODEL env var — drives all lifecycle branching,
+  // so flipping the env never strands in-flight orders.
+  checkoutModel: text("checkout_model").notNull().default("single"),
+  // Two-step only: CraftCloud-hosted Stripe session the customer pays
+  // production + shipping at. Null on single-checkout orders.
+  bridgeSessionId: text("bridge_session_id"),
+  bridgeSessionUrl: text("bridge_session_url"),
+  // Two-step only: our manual-capture PaymentIntent for the 3% service
+  // fee — authorized at checkout, captured by the reconciliation cron.
+  feePaymentIntentId: text("fee_payment_intent_id"),
+  feeAuthorizedAt: timestamp("fee_authorized_at", { withTimezone: true }),
+  feeCapturedAt: timestamp("fee_captured_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
