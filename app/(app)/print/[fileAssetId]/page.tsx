@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { FileAssetPrintShell } from "@/components/print/file-asset-print-shell";
 import { getMaterialById } from "@/lib/materials";
 import { resolveRecommendedCraftCloudMaterialId } from "@/lib/materials/craftcloud-resolver";
+import { getCheckoutModel } from "@/lib/env";
 import { Badge } from "@/components/ui/badge";
 import { DESIGN_TAG_LABELS } from "@/lib/validations/file";
 
@@ -119,6 +120,7 @@ export default async function PrintConfigPage(props: {
         preselectMaterialId={resolvedPreselectMaterialId}
         configureHeader={configureHeader}
         projectSlug={projectSlug}
+        checkoutModel={getCheckoutModel()}
       />
     </div>
   );

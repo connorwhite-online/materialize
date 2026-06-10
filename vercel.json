@@ -15,6 +15,10 @@
     {
       "path": "/api/cron/retry-failed-refunds",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/reconcile-production-payments",
+      "schedule": "0 * * * *"
     }
   ]
 }

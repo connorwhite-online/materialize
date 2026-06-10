@@ -8,6 +8,7 @@ import { useStartPrintFlow } from "@/components/upload/use-start-print-flow";
 import { usePendingPrintFile } from "@/components/upload/pending-print-file";
 import { uploadFileToCraftCloud } from "@/lib/craftcloud/upload-client";
 import { QuoteConfigurator } from "@/components/print/quote-configurator";
+import type { CheckoutModel } from "@/lib/env";
 import { WhatNextPane } from "@/components/print/what-next-pane";
 import { ProjectFileChecklist } from "@/components/print/project-file-checklist";
 import { CartSlotStack } from "@/components/print/cart-slot-stack";
@@ -72,6 +73,15 @@ interface PrintPageContentProps {
    * are the entire scope of the print session.
    */
   isProjectMode?: boolean;
+  /**
+   * Checkout architecture for new orders — pass
+   * `checkoutModel={getCheckoutModel()}` from the server page
+   * component (lib/env reads process.env, so the value can't be
+   * computed client side). Drilled to QuoteConfigurator →
+   * PriceDisplay, which shows the two-charge disclosure under
+   * "two_step". Defaults to "single".
+   */
+  checkoutModel?: CheckoutModel;
 }
 
 type PickedFile = { file: File; format: Format };
@@ -112,6 +122,7 @@ export function PrintPageContent({
   tilesLabel,
   tilesDefaultExpanded,
   isProjectMode,
+  checkoutModel = "single",
 }: PrintPageContentProps) {
   const { isSignedIn, isLoaded } = useUser();
   const router = useRouter();
@@ -282,6 +293,7 @@ export function PrintPageContent({
               authedActive={!!authedActive}
               draftConfig={draftConfig}
               preselectMaterialId={preselectMaterialId}
+              checkoutModel={checkoutModel}
               phase={phase}
               progress={progress}
               onUnitChange={handleUnitChange}
@@ -322,6 +334,7 @@ function ActiveColumn({
   authedActive,
   draftConfig,
   preselectMaterialId,
+  checkoutModel,
   phase,
   progress,
   onUnitChange,
@@ -337,6 +350,7 @@ function ActiveColumn({
   authedActive: boolean;
   draftConfig: { modelId: string; file: File } | null;
   preselectMaterialId?: string;
+  checkoutModel: CheckoutModel;
   phase: "idle" | "uploading" | "saving";
   progress: number;
   onUnitChange: (u: Unit) => void;
@@ -381,6 +395,7 @@ function ActiveColumn({
                 : null
             }
             preselectMaterialId={preselectMaterialId}
+            checkoutModel={checkoutModel}
             onAddedToCart={onAddedToCart}
             rightAnnex={({ pendingItem }) => (
               <CartSlotStack pendingItem={pendingItem} />

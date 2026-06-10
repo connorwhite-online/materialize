@@ -6,7 +6,7 @@ import {
   fileAssets,
   files,
 } from "@/lib/db/schema";
-import { eq, desc, and, ne, inArray, asc } from "drizzle-orm";
+import { eq, desc, and, inArray, notInArray, asc } from "drizzle-orm";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import { DraftCartCard } from "./draft-cart-card";
 const STATUS_LABELS: Record<string, string> = {
   quoting: "Quoting",
   cart_created: "Pending Payment",
+  awaiting_production_payment: "Awaiting production payment",
   ordered: "Confirmed",
   in_production: "In Production",
   shipped: "Shipped",
@@ -32,6 +33,7 @@ const STATUS_VARIANT: Record<
 > = {
   quoting: "outline",
   cart_created: "outline",
+  awaiting_production_payment: "outline",
   ordered: "secondary",
   in_production: "secondary",
   shipped: "default",
@@ -41,14 +43,25 @@ const STATUS_VARIANT: Record<
   cancelled: "destructive",
 };
 
+// In-progress rows that surface in the "Carts" section with a Resume /
+// Complete-payment action instead of the read-only orders list:
+//   - cart_created — user bailed before paying our Stripe checkout.
+//   - awaiting_production_payment — two_step orders where the service-fee
+//     hold succeeded but the customer hasn't paid CraftCloud yet.
+const IN_PROGRESS_STATUSES = [
+  "cart_created",
+  "awaiting_production_payment",
+] as const;
+
 export async function OrdersTab({ userId }: { userId: string }) {
-  // Drafts (`cart_created`) surface separately as a "Carts" section
-  // with Resume / Discard actions — they're not real orders yet.
+  // In-progress rows surface separately as a "Carts" section with
+  // Resume / Discard actions — they're not finished orders yet.
   // Same-user filter on both → fan them out in one roundtrip.
   const [draftsRaw, ordersRaw] = await Promise.all([
     db
       .select({
         id: printOrders.id,
+        status: printOrders.status,
         material: printOrders.material,
         vendor: printOrders.vendor,
         vendorName: printOrders.vendorName,
@@ -63,7 +76,7 @@ export async function OrdersTab({ userId }: { userId: string }) {
       .where(
         and(
           eq(printOrders.userId, userId),
-          eq(printOrders.status, "cart_created")
+          inArray(printOrders.status, [...IN_PROGRESS_STATUSES])
         )
       )
       .orderBy(desc(printOrders.createdAt)),
@@ -86,7 +99,7 @@ export async function OrdersTab({ userId }: { userId: string }) {
       .where(
         and(
           eq(printOrders.userId, userId),
-          ne(printOrders.status, "cart_created")
+          notInArray(printOrders.status, [...IN_PROGRESS_STATUSES])
         )
       )
       .orderBy(desc(printOrders.createdAt)),
@@ -253,6 +266,12 @@ export async function OrdersTab({ userId }: { userId: string }) {
                 <DraftCartCard
                   key={draft.id}
                   orderId={draft.id}
+                  // Safe narrow: the drafts query filters on
+                  // IN_PROGRESS_STATUSES, drizzle just can't carry
+                  // that through the row type.
+                  status={
+                    draft.status as (typeof IN_PROGRESS_STATUSES)[number]
+                  }
                   fileAssetId={draft.fileAssetId}
                   fileName={draft.fileName}
                   vendorName={draft.vendorName ?? draft.vendor ?? null}

@@ -1,5 +1,6 @@
 "use client";
 
+import type { CheckoutModel } from "@/lib/env";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -54,6 +55,16 @@ interface PriceDisplayProps {
    */
   shippingLocked?: boolean;
   shippingLockedNotice?: string | null;
+  /**
+   * Which checkout architecture the order will be created under.
+   * Server-derived (getCheckoutModel() in the page component) and
+   * threaded down as a prop — lib/env reads process.env, so the
+   * VALUE can't be computed in a client component. Under "two_step"
+   * we owe the customer a heads-up that their card will see two
+   * separate charges (our fee hold + CraftCloud's production
+   * charge) before they hit the button.
+   */
+  checkoutModel?: CheckoutModel;
 }
 
 export function PriceDisplay({
@@ -71,6 +82,7 @@ export function PriceDisplay({
   checkingMinimum,
   shippingLocked,
   shippingLockedNotice,
+  checkoutModel = "single",
 }: PriceDisplayProps) {
   if (!selectedQuote) {
     return (
@@ -211,6 +223,14 @@ export function PriceDisplay({
         {checkoutError && (
           <p className="mt-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
             {checkoutError}
+          </p>
+        )}
+
+        {checkoutModel === "two_step" && (
+          <p className="mt-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            You&apos;ll see two charges: a hold for the 3% service fee (only
+            charged once your order is placed) and CraftCloud&apos;s charge for
+            production + shipping.
           </p>
         )}
 

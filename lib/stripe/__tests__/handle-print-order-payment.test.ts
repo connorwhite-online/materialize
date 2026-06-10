@@ -54,6 +54,11 @@ vi.mock("@/lib/craftcloud/client", () => ({
   createOrder: (...args: unknown[]) => mockCreateOrder(...args),
 }));
 
+const mockNotify = vi.fn();
+vi.mock("@/lib/notifications/print-order", () => ({
+  notifyPrintOrderPlaced: (...args: unknown[]) => mockNotify(...args),
+}));
+
 vi.mock("@/lib/logger", () => ({
   logError: vi.fn(),
   isRedirectError: () => false,
@@ -229,5 +234,116 @@ describe("handlePrintOrderPayment", () => {
       /Print order not found/
     );
     expect(mockCreateOrder).not.toHaveBeenCalled();
+  });
+
+  it("single mode accepts (and ignores) the paymentIntentId option", async () => {
+    claimReturns = [{ id: "order-1" }];
+    dbOrder = {
+      id: "order-1",
+      status: "cart_created",
+      checkoutModel: "single",
+      craftCloudCartId: "cart-1",
+      craftCloudOrderId: SENTINEL,
+      shippingAddress: baseAddress,
+    };
+    mockCreateOrder.mockResolvedValue({ orderId: "cc-new" });
+
+    await handlePrintOrderPayment("order-1", { paymentIntentId: "pi_123" });
+
+    expect(mockCreateOrder).toHaveBeenCalledTimes(1);
+    // Place-phase write is byte-identical to the no-opts path — no
+    // fee fields leak into single mode.
+    expect(mockUpdateSet).toHaveBeenNthCalledWith(2, {
+      craftCloudOrderId: "cc-new",
+      status: "ordered",
+    });
+  });
+});
+
+describe("handlePrintOrderPayment (two_step)", () => {
+  const twoStepOrder = {
+    id: "order-2",
+    status: "cart_created",
+    checkoutModel: "two_step",
+    craftCloudCartId: "cart-2",
+    // Two-step rows already carry the real CraftCloud id — placed
+    // up-front by completePrintOrder.
+    craftCloudOrderId: "cc-upfront",
+    shippingAddress: baseAddress,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dbOrder = null;
+    claimReturns = [];
+  });
+
+  it("advances cart_created → awaiting_production_payment with PI id + timestamp", async () => {
+    dbOrder = { ...twoStepOrder };
+
+    await handlePrintOrderPayment("order-2", { paymentIntentId: "pi_fee_1" });
+
+    expect(mockUpdateSet).toHaveBeenCalledTimes(1);
+    expect(mockUpdateSet).toHaveBeenCalledWith({
+      status: "awaiting_production_payment",
+      feePaymentIntentId: "pi_fee_1",
+      feeAuthorizedAt: expect.any(Date),
+    });
+    // The UPDATE is the idempotency gate: id match AND still
+    // cart_created.
+    expect(mockUpdateWhere).toHaveBeenCalledWith({
+      and: [{ eq: ["id", "order-2"] }, { eq: ["status", "cart_created"] }],
+    });
+  });
+
+  it("never calls CraftCloud createOrder, never notifies, never takes the claim sentinel", async () => {
+    dbOrder = { ...twoStepOrder };
+
+    await handlePrintOrderPayment("order-2", { paymentIntentId: "pi_fee_1" });
+
+    expect(mockCreateOrder).not.toHaveBeenCalled();
+    expect(mockNotify).not.toHaveBeenCalled();
+    // No update ever wrote a placing:* sentinel.
+    const sentinelWrites = mockUpdateSet.mock.calls.filter((c) =>
+      String((c[0] as Record<string, unknown>).craftCloudOrderId).startsWith(
+        "placing:"
+      )
+    );
+    expect(sentinelWrites).toHaveLength(0);
+  });
+
+  it("is idempotent: a duplicate delivery after the row advanced stays a no-op", async () => {
+    dbOrder = { ...twoStepOrder };
+    await handlePrintOrderPayment("order-2", { paymentIntentId: "pi_fee_1" });
+
+    // Second delivery sees the already-advanced row. The conditional
+    // UPDATE still fires but its WHERE (status = cart_created) can't
+    // match — and nothing else runs.
+    dbOrder = { ...twoStepOrder, status: "awaiting_production_payment" };
+    await handlePrintOrderPayment("order-2", { paymentIntentId: "pi_fee_1" });
+
+    expect(mockCreateOrder).not.toHaveBeenCalled();
+    expect(mockNotify).not.toHaveBeenCalled();
+    // Every write was the gated conditional — no status:"ordered"
+    // heal, no sentinel claim.
+    for (const call of mockUpdateSet.mock.calls) {
+      expect(call[0]).toEqual({
+        status: "awaiting_production_payment",
+        feePaymentIntentId: "pi_fee_1",
+        feeAuthorizedAt: expect.any(Date),
+      });
+    }
+  });
+
+  it("stores a null PI id when the webhook couldn't extract one", async () => {
+    dbOrder = { ...twoStepOrder };
+
+    await handlePrintOrderPayment("order-2");
+
+    expect(mockUpdateSet).toHaveBeenCalledWith({
+      status: "awaiting_production_payment",
+      feePaymentIntentId: null,
+      feeAuthorizedAt: expect.any(Date),
+    });
   });
 });

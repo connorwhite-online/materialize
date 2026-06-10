@@ -33,7 +33,8 @@ export async function POST(request: Request) {
     return Response.json({ error: "Invalid signature" }, { status: 400 });
   }
 
-  // We place the CraftCloud order on two events:
+  // We place the CraftCloud order (single-checkout model) on two
+  // events:
   //   - checkout.session.completed WITH payment_status === "paid"
   //     (card + synchronous rails — the common path).
   //   - checkout.session.async_payment_succeeded (ACH, SEPA, any
@@ -41,11 +42,26 @@ export async function POST(request: Request) {
   //     confirms). Stripe's docs call this out explicitly.
   // Both events carry the same session + metadata shape. The
   // handler is idempotent, so if both fire for the same order we
-  // only place it once.
+  // only place it once. (Two-step fee sessions are the third shape,
+  // handled separately below.)
   const isPaidCheckout =
     event.type === "checkout.session.completed" &&
     (event.data.object as Stripe.Checkout.Session).payment_status === "paid";
   const isAsyncSuccess = event.type === "checkout.session.async_payment_succeeded";
+  // Two-step print orders are the exception to the "paid" gate: their
+  // fee-only session uses capture_method: "manual", and a completed
+  // manual-capture session reports payment_status "unpaid" (funds are
+  // authorized, not captured). Gating on "paid" alone would silently
+  // drop these. Recognize them by the metadata stamped in
+  // createStripeSessionForOrder, regardless of payment_status — the
+  // inner handler's two_step branch only records the authorization
+  // and is idempotent.
+  const isTwoStepFeeAuth =
+    event.type === "checkout.session.completed" &&
+    (event.data.object as Stripe.Checkout.Session).metadata?.type ===
+      "print_order" &&
+    (event.data.object as Stripe.Checkout.Session).metadata?.checkoutModel ===
+      "two_step";
   // Mode=setup Checkout Sessions don't have payment_status — they
   // complete the SetupIntent and we persist the resulting payment
   // method onto the user. Tagged with metadata.type=billing_setup
@@ -71,6 +87,7 @@ export async function POST(request: Request) {
   const isHandled =
     isPaidCheckout ||
     isAsyncSuccess ||
+    isTwoStepFeeAuth ||
     isBillingSetup ||
     isAccountUpdated ||
     isChargeRefunded;
@@ -100,7 +117,8 @@ export async function POST(request: Request) {
   // cast — a Checkout.Session cast is correct only for paidCheckout /
   // asyncSuccess / billingSetup; Charge for chargeRefunded; Account
   // for accountUpdated.
-  const isSessionEvent = isPaidCheckout || isAsyncSuccess || isBillingSetup;
+  const isSessionEvent =
+    isPaidCheckout || isAsyncSuccess || isTwoStepFeeAuth || isBillingSetup;
 
   if (isSessionEvent) {
     const session = event.data.object as Stripe.Checkout.Session;
@@ -108,7 +126,15 @@ export async function POST(request: Request) {
 
     if (printOrderId && session.metadata?.type === "print_order") {
       try {
-        await handlePrintOrderPayment(printOrderId);
+        // `payment_intent` is string | object | null on the session —
+        // normalize to string | undefined. Two-step orders persist
+        // this id (the manual-capture fee hold) for the
+        // reconciliation cron to capture; single-mode ignores it.
+        const paymentIntentId =
+          typeof session.payment_intent === "string"
+            ? session.payment_intent
+            : session.payment_intent?.id;
+        await handlePrintOrderPayment(printOrderId, { paymentIntentId });
       } catch (error) {
         logError("stripe-webhook-handler", error);
         // Return 500 so Stripe retries — the user paid, we MUST place the order
