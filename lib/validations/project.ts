@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DESIGN_TAG_OPTIONS } from "./file";
+import { DESIGN_TAG_OPTIONS, categorySchema } from "./file";
 import { LICENSE_ENUM_VALUES } from "@/lib/licenses";
 
 // Hard ceilings — pasted JSON, scripted requests, or a runaway loop
@@ -60,6 +60,7 @@ export const createProjectSchema = z.object({
       }
       return out;
     }),
+  category: categorySchema,
   designTags: z.array(z.enum(DESIGN_TAG_OPTIONS)).optional(),
   thumbnailUrl: z.string().url().optional(),
   // Optional pointer to the project's source code / firmware repo.

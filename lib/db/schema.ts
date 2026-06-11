@@ -256,6 +256,10 @@ export const files = pgTable("files", {
   license: licenseEnum("license").notNull().default("cc_by"),
   status: fileStatusEnum("status").notNull().default("draft"),
   tags: text("tags").array(),
+  // Optional curated browse category — one slug from lib/categories.
+  // Plain text (not a pg enum) so the taxonomy grows without a
+  // migration; validated at the app layer. Null = uncategorized.
+  category: text("category"),
   recommendedMaterialId: text("recommended_material_id"), // from our materials metadata (editorial slug e.g. "pla-white")
   recommendedCcMaterialId: text("recommended_cc_material_id"), // direct CraftCloud material UUID (bypasses resolver)
   designTags: text("design_tags").array(), // ["strong", "flexible", "heat-resistant", "watertight", "detailed"]
@@ -292,6 +296,7 @@ export const files = pgTable("files", {
   index("files_status_idx").on(table.status),
   index("files_slug_idx").on(table.slug),
   index("files_flagged_at_idx").on(table.flaggedAt),
+  index("files_category_idx").on(table.category),
 ]);
 
 // Projects — sellable bundles of files. A creator can list a single
@@ -327,6 +332,8 @@ export const projects = pgTable("projects", {
   status: fileStatusEnum("status").notNull().default("draft"),
   visibility: visibilityEnum("visibility").notNull().default("public"),
   tags: text("tags").array(),
+  // Curated browse category slug from lib/categories — see files.category.
+  category: text("category"),
   designTags: text("design_tags").array(),
   thumbnailUrl: text("thumbnail_url"),
   // Optional pointer to the project's source code / firmware repo
@@ -354,6 +361,7 @@ export const projects = pgTable("projects", {
   index("projects_organization_id_idx").on(table.organizationId),
   index("projects_status_idx").on(table.status),
   index("projects_slug_idx").on(table.slug),
+  index("projects_category_idx").on(table.category),
 ]);
 
 export const projectFiles = pgTable("project_files", {
@@ -763,6 +771,8 @@ export const collections = pgTable("collections", {
   slug: text("slug").notNull().unique(),
   description: text("description"),
   tags: text("tags").array(),
+  // Curated browse category slug from lib/categories — see files.category.
+  category: text("category"),
   visibility: visibilityEnum("visibility").notNull().default("public"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
@@ -775,6 +785,7 @@ export const collections = pgTable("collections", {
   index("collections_user_id_idx").on(table.userId),
   index("collections_organization_id_idx").on(table.organizationId),
   index("collections_slug_idx").on(table.slug),
+  index("collections_category_idx").on(table.category),
 ]);
 
 // Collection items — heterogeneous, can hold a file OR a project.

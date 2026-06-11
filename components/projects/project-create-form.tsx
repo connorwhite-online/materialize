@@ -16,6 +16,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { createProject } from "@/app/actions/projects";
 import { OwnerPicker } from "@/components/orgs/owner-picker";
+import { CategorySelect } from "@/components/categories/category-select";
 import {
   LICENSES,
   LICENSE_ORDER,
@@ -35,6 +36,7 @@ export function ProjectCreateForm({
   ownedFiles: OwnedFile[];
 }) {
   const [selected, setSelected] = useState<string[]>([]);
+  const [category, setCategory] = useState("");
   const [license, setLicense] = useState<LicenseId>(DEFAULT_LICENSE);
   const [sellEnabled, setSellEnabled] = useState(false);
   const [errors, setErrors] = useState<Record<string, string[]> | null>(null);
@@ -52,6 +54,7 @@ export function ProjectCreateForm({
     }
     for (const id of selected) formData.append("fileIds", id);
     formData.append("license", license);
+    formData.set("category", category);
     startTransition(async () => {
       const result = await createProject(formData);
       if (result && "error" in result) {
@@ -88,6 +91,17 @@ export function ProjectCreateForm({
           <div>
             <Label htmlFor="tags">Tags</Label>
             <Input id="tags" name="tags" placeholder="board game, chess" />
+          </div>
+          <div>
+            <Label htmlFor="project-category">Category</Label>
+            <CategorySelect
+              id="project-category"
+              value={category}
+              onValueChange={setCategory}
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Pick the closest shelf so this shows up when people browse.
+            </p>
           </div>
           <div>
             <Label htmlFor="repoUrl">Code repository (optional)</Label>

@@ -116,6 +116,7 @@ export async function createProject(formData: FormData) {
     license: formData.get("license"),
     visibility: formData.get("visibility") || undefined,
     tags: formData.get("tags") || undefined,
+    category: formData.get("category") || undefined,
     designTags: designTagValues.length > 0 ? designTagValues : undefined,
     thumbnailUrl: formData.get("thumbnailUrl") || undefined,
     repoUrl: formData.get("repoUrl") || undefined,
@@ -154,6 +155,7 @@ export async function createProject(formData: FormData) {
         license: parsed.data.license,
         visibility,
         tags: parsed.data.tags,
+        category: parsed.data.category,
         designTags: parsed.data.designTags,
         thumbnailUrl: parsed.data.thumbnailUrl,
         repoUrl: parsed.data.repoUrl,
@@ -198,6 +200,7 @@ export async function updateProject(projectId: string, formData: FormData) {
       license: formData.get("license"),
       visibility: formData.get("visibility") || undefined,
       tags: formData.get("tags") || undefined,
+      category: formData.get("category") || undefined,
       designTags: designTagValues.length > 0 ? designTagValues : undefined,
       thumbnailUrl: formData.get("thumbnailUrl") || undefined,
       // Empty submission means "clear the repo URL" — explicit null so
@@ -251,6 +254,11 @@ export async function updateProject(projectId: string, formData: FormData) {
         license: parsed.data.license,
         visibility: parsed.data.visibility ?? project.visibility,
         tags: parsed.data.tags,
+        // Only touch category when the edit form actually submitted it
+        // (mirrors the repoUrl guard below) — empty value clears it.
+        ...(formData.has("category")
+          ? { category: parsed.data.category ?? null }
+          : {}),
         designTags: parsed.data.designTags,
         thumbnailUrl: parsed.data.thumbnailUrl,
         // Only touch repoUrl if the caller actually submitted the field.
