@@ -553,7 +553,7 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
       {/* Projects (owned + purchased bundles) */}
       {projectGridItems.length > 0 && (
         <div className="space-y-2">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          <p className="text-sm font-medium text-muted-foreground">
             Projects
           </p>
           <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">

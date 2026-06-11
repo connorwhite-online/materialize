@@ -1,11 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
-import { ChevronDown } from "@/components/icons/chevron-down";
-import { ChevronUp } from "@/components/icons/chevron-up";
-import { FileUploader } from "@/components/upload/file-uploader";
 import { Badge } from "@/components/ui/badge";
+import { FileUploader } from "@/components/upload/file-uploader";
 
 type Format = "stl" | "obj" | "3mf" | "step" | "amf";
 
@@ -22,36 +19,38 @@ interface WhatNextPaneProps {
   linkSuffix: string;
   onFilePicked: (file: File, format: Format) => void;
   uploadError?: string | null;
-  /** Heading for the tile list. Defaults to "Your recent files". */
+  /** Label above the uploader section. Defaults to "Upload a file". */
+  uploaderLabel?: string;
+  /** Heading for the tile carousel. Defaults to "Your recent files". */
   tilesLabel?: string;
-  /** Render the tile list expanded on first paint. Defaults to false. */
+  /**
+   * @deprecated Tiles are now always visible as a horizontal carousel.
+   * This prop is ignored and retained only for call-site compatibility.
+   */
   tilesDefaultExpanded?: boolean;
 }
 
 /**
- * Post-add-to-cart left column. Pairs an uploader with a collapsed
- * "your recent files" list so the user can immediately stage another
- * print without pushing past the cart they just built on the right.
+ * Idle left column for the /print page. Shows an uploader and a
+ * horizontal carousel of the user's library so they can immediately
+ * pick a file without scrolling through a long list.
  *
- * Tiles are rendered in recency order (sort happens server-side in
- * the /print loader — most-recently-printed first). List is
- * collapsed by default; the uploader is always visible.
+ * Tile order is determined server-side (most recently printed first).
  */
 export function WhatNextPane({
   tiles,
   linkSuffix,
   onFilePicked,
   uploadError,
+  uploaderLabel = "Upload a file",
   tilesLabel = "Your recent files",
-  tilesDefaultExpanded = false,
 }: WhatNextPaneProps) {
-  const [expanded, setExpanded] = useState(tilesDefaultExpanded);
-
   return (
     <div className="space-y-5">
+      {/* Uploader */}
       <div>
         <h2 className="text-sm font-medium text-muted-foreground">
-          Print another file
+          {uploaderLabel}
         </h2>
         <div className="mt-3 space-y-3">
           <FileUploader onFileSelected={onFilePicked} />
@@ -61,64 +60,47 @@ export function WhatNextPane({
         </div>
       </div>
 
+      {/* Horizontal tile carousel */}
       {tiles.length > 0 && (
-        <div className="rounded-xl border border-border bg-card">
-          <button
-            type="button"
-            onClick={() => setExpanded((v) => !v)}
-            className="flex w-full items-center justify-between px-4 py-3 text-left"
-          >
-            <span className="text-sm font-medium">
-              {tilesLabel}{" "}
-              <span className="text-muted-foreground">({tiles.length})</span>
-            </span>
-            {expanded ? (
-              <ChevronUp className="text-muted-foreground" />
-            ) : (
-              <ChevronDown className="text-muted-foreground" />
-            )}
-          </button>
-          {expanded && (
-            <ul className="border-t border-border divide-y divide-border">
-              {tiles.map((tile) => (
-                <li key={tile.fileAssetId}>
-                  <Link
-                    href={`/print/${tile.fileAssetId}${linkSuffix}`}
-                    className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-muted/60"
-                  >
-                    <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md border border-border bg-muted">
-                      {tile.thumbnailUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={tile.thumbnailUrl}
-                          alt=""
-                          loading="lazy"
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center text-[9px] uppercase tracking-wider text-muted-foreground/50">
-                          .{tile.format}
-                        </div>
-                      )}
+        <div>
+          <h2 className="mb-2.5 text-sm font-medium">{tilesLabel}</h2>
+          <div className="flex gap-3 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {tiles.map((tile) => (
+              <Link
+                key={tile.fileAssetId}
+                href={`/print/${tile.fileAssetId}${linkSuffix}`}
+                className="group flex shrink-0 flex-col gap-1.5"
+                style={{ width: "96px" }}
+              >
+                <div className="relative aspect-square w-full overflow-hidden rounded-lg border border-border bg-muted transition-colors group-hover:border-primary/40">
+                  {tile.thumbnailUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={tile.thumbnailUrl}
+                      alt=""
+                      loading="lazy"
+                      className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-[9px] uppercase tracking-wider text-muted-foreground/50">
+                      .{tile.format}
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">
-                        {tile.name}
-                      </p>
-                      <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                        .{tile.format}
-                      </p>
-                    </div>
-                    {tile.source === "purchased" && (
-                      <Badge variant="secondary" className="text-[9px]">
-                        Purchased
-                      </Badge>
-                    )}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
+                  )}
+                  {tile.source === "purchased" && (
+                    <span className="absolute left-1 top-1 rounded-sm bg-background/80 px-1 py-0.5 text-[8px] font-medium backdrop-blur-sm">
+                      Purchased
+                    </span>
+                  )}
+                </div>
+                <p className="truncate text-xs font-medium leading-tight transition-colors group-hover:text-primary">
+                  {tile.name}
+                </p>
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground/70">
+                  .{tile.format}
+                </p>
+              </Link>
+            ))}
+          </div>
         </div>
       )}
     </div>

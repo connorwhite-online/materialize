@@ -32,6 +32,16 @@ interface LibraryTile {
   thumbnailUrl: string | null;
   format: string;
   source: "owned" | "purchased";
+  originalFilename?: string;
+  fileSizeBytes?: number;
+}
+
+interface ProjectMeta {
+  name: string;
+  thumbnailUrl: string | null;
+  author: { username: string | null; displayName: string | null };
+  fileCount: number;
+  totalFileSizeBytes: number;
 }
 
 interface PrintPageContentProps {
@@ -82,6 +92,12 @@ interface PrintPageContentProps {
    * "two_step". Defaults to "single".
    */
   checkoutModel?: CheckoutModel;
+  /**
+   * Project metadata for the info card rendered above the file
+   * checklist in project mode. Includes name, thumbnail, author,
+   * file count, and total size.
+   */
+  projectMeta?: ProjectMeta;
 }
 
 type PickedFile = { file: File; format: Format };
@@ -123,6 +139,7 @@ export function PrintPageContent({
   tilesDefaultExpanded,
   isProjectMode,
   checkoutModel = "single",
+  projectMeta,
 }: PrintPageContentProps) {
   const { isSignedIn, isLoaded } = useUser();
   const router = useRouter();
@@ -304,6 +321,7 @@ export function PrintPageContent({
             <ProjectFileChecklist
               tiles={tiles}
               linkSuffix={linkSuffix}
+              projectMeta={projectMeta}
             />
           ) : (
             <WhatNextPane
@@ -311,6 +329,11 @@ export function PrintPageContent({
               linkSuffix={linkSuffix}
               onFilePicked={handleFilePicked}
               uploadError={draft?.status === "error" ? draft.message : error}
+              uploaderLabel={
+                preselectMaterialId
+                  ? "Choose a file to print with this material"
+                  : "Upload a file"
+              }
               tilesLabel={tilesLabel}
               tilesDefaultExpanded={tilesDefaultExpanded}
             />

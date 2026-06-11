@@ -1,4 +1,4 @@
-import { CreativeCommons } from "lucide-react";
+import { CreativeCommons, Scale } from "lucide-react";
 import { getLicenseMeta } from "@/lib/licenses";
 import { cn } from "@/lib/utils";
 
@@ -39,7 +39,11 @@ export function LicenseBadge({ license, size = "full", className }: Props) {
         className
       )}
     >
-      <CreativeCommons className="size-3.5 shrink-0 opacity-70" />
+      {meta.id.startsWith("cc") ? (
+        <CreativeCommons className="size-3.5 shrink-0 opacity-70" />
+      ) : (
+        <Scale className="size-3.5 shrink-0 opacity-70" />
+      )}
       <span className="text-foreground">{meta.shortName}</span>
       {size === "full" && (
         <>

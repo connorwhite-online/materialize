@@ -1,6 +1,6 @@
 {
-  "id": "7d9d5fd6-e6c3-469e-b46e-347c1f4436ac",
-  "prevId": "ae9a3cc8-f8b5-4ec5-a1ae-367a7f5d6343",
+  "id": "e5296884-0673-4f78-af3f-1f9c92044d67",
+  "prevId": "7d9d5fd6-e6c3-469e-b46e-347c1f4436ac",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -394,6 +394,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "category": {
+          "name": "category",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "visibility": {
           "name": "visibility",
           "type": "visibility",
@@ -453,6 +459,21 @@
           "columns": [
             {
               "expression": "slug",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "collections_category_idx": {
+          "name": "collections_category_idx",
+          "columns": [
+            {
+              "expression": "category",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1376,6 +1397,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "category": {
+          "name": "category",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "recommended_material_id": {
           "name": "recommended_material_id",
           "type": "text",
@@ -1533,6 +1560,21 @@
           "columns": [
             {
               "expression": "flagged_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "files_category_idx": {
+          "name": "files_category_idx",
+          "columns": [
+            {
+              "expression": "category",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -3312,6 +3354,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "category": {
+          "name": "category",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "design_tags": {
           "name": "design_tags",
           "type": "text[]",
@@ -3416,6 +3464,21 @@
           "columns": [
             {
               "expression": "slug",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "projects_category_idx": {
+          "name": "projects_category_idx",
+          "columns": [
+            {
+              "expression": "category",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

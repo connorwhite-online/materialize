@@ -1,13 +1,18 @@
 import { db } from "@/lib/db";
-import { files, fileAssets, projects, projectFiles } from "@/lib/db/schema";
+import { files, fileAssets, projects, projectFiles, projectPhotos, users } from "@/lib/db/schema";
 import { eq, asc, inArray } from "drizzle-orm";
 import { withDbRetry } from "@/lib/db/retry";
 import { isOrgMember } from "@/lib/authorization";
+import { generateDownloadUrl } from "@/lib/storage";
 import type { LibraryTile } from "./library-tiles";
 
 export interface ProjectPrintContext {
   projectName: string;
   projectSlug: string;
+  projectThumbnailUrl: string | null;
+  author: { username: string | null; displayName: string | null };
+  /** Sum of all bundled asset file sizes in bytes. */
+  totalFileSizeBytes: number;
   /** Bundled files, in project order, that the viewer may print. */
   tiles: LibraryTile[];
 }
@@ -53,8 +58,13 @@ async function loadProjectPrintTilesOnce(
       visibility: projects.visibility,
       userId: projects.userId,
       organizationId: projects.organizationId,
+      thumbnailUrl: projects.thumbnailUrl,
+      coverPhotoId: projects.coverPhotoId,
+      authorUsername: users.username,
+      authorDisplayName: users.displayName,
     })
     .from(projects)
+    .leftJoin(users, eq(projects.userId, users.id))
     .where(eq(projects.slug, slug));
 
   if (!project) return null;
@@ -94,8 +104,54 @@ async function loadProjectPrintTilesOnce(
     : bundled.filter((f) => f.status === "published");
 
   const fileIds = printable.map((f) => f.id);
+  // Resolve project cover photo using the same priority order as the OG
+  // image renderer:
+  //   1. Explicit coverPhotoId → get storageKey from projectPhotos → sign
+  //   2. First creator-kind photo (auto cover) → storageKey → sign
+  //   3. Legacy thumbnailUrl (full URL pass-through or storage key sign)
+  //   4. Falls back to first bundled file's thumbnail after tiles are built
+  let resolvedThumbnailUrl: string | null = null;
+  let coverStorageKey: string | null = null;
+  if (project.coverPhotoId) {
+    const [cover] = await db
+      .select({ storageKey: projectPhotos.storageKey })
+      .from(projectPhotos)
+      .where(eq(projectPhotos.id, project.coverPhotoId));
+    if (cover) coverStorageKey = cover.storageKey;
+  }
+  if (!coverStorageKey) {
+    const [firstPhoto] = await db
+      .select({ storageKey: projectPhotos.storageKey })
+      .from(projectPhotos)
+      .where(
+        eq(projectPhotos.projectId, project.id)
+      )
+      .orderBy(asc(projectPhotos.sortOrder))
+      .limit(1);
+    if (firstPhoto) coverStorageKey = firstPhoto.storageKey;
+  }
+  if (coverStorageKey) {
+    resolvedThumbnailUrl = await generateDownloadUrl(coverStorageKey, 3600);
+  } else if (project.thumbnailUrl) {
+    resolvedThumbnailUrl =
+      project.thumbnailUrl.startsWith("http://") ||
+      project.thumbnailUrl.startsWith("https://")
+        ? project.thumbnailUrl
+        : await generateDownloadUrl(project.thumbnailUrl, 3600);
+  }
+
+  const projectMeta = {
+    projectName: project.name,
+    projectSlug: project.slug,
+    projectThumbnailUrl: resolvedThumbnailUrl,
+    author: {
+      username: project.authorUsername ?? null,
+      displayName: project.authorDisplayName ?? null,
+    },
+  };
+
   if (fileIds.length === 0) {
-    return { projectName: project.name, projectSlug: project.slug, tiles: [] };
+    return { ...projectMeta, totalFileSizeBytes: 0, tiles: [] };
   }
 
   // Primary asset per file = first by createdAt, mirroring
@@ -106,15 +162,25 @@ async function loadProjectPrintTilesOnce(
       fileId: fileAssets.fileId,
       format: fileAssets.format,
       createdAt: fileAssets.createdAt,
+      originalFilename: fileAssets.originalFilename,
+      fileSize: fileAssets.fileSize,
     })
     .from(fileAssets)
     .where(inArray(fileAssets.fileId, fileIds))
     .orderBy(asc(fileAssets.createdAt));
 
-  const primaryByFileId = new Map<string, { id: string; format: string }>();
+  const primaryByFileId = new Map<
+    string,
+    { id: string; format: string; originalFilename: string; fileSize: number }
+  >();
   for (const row of assetRows) {
     if (!row.fileId || primaryByFileId.has(row.fileId)) continue;
-    primaryByFileId.set(row.fileId, { id: row.id, format: row.format });
+    primaryByFileId.set(row.fileId, {
+      id: row.id,
+      format: row.format,
+      originalFilename: row.originalFilename,
+      fileSize: row.fileSize,
+    });
   }
 
   // Preserve project order — iterate `printable` (position-sorted), not
@@ -129,8 +195,24 @@ async function loadProjectPrintTilesOnce(
       thumbnailUrl: f.thumbnailUrl,
       format: asset.format,
       source: "owned",
+      originalFilename: asset.originalFilename,
+      fileSizeBytes: asset.fileSize,
     });
   }
 
-  return { projectName: project.name, projectSlug: project.slug, tiles };
+  const totalFileSizeBytes = tiles.reduce(
+    (sum, t) => sum + (t.fileSizeBytes ?? 0),
+    0
+  );
+
+  // Fall back to first file's thumbnail if project has no resolved thumbnail
+  const projectThumbnailUrl =
+    projectMeta.projectThumbnailUrl ?? tiles[0]?.thumbnailUrl ?? null;
+
+  return {
+    ...projectMeta,
+    projectThumbnailUrl,
+    totalFileSizeBytes,
+    tiles,
+  };
 }

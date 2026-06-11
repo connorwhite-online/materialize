@@ -200,11 +200,11 @@ function GroupSection({
           >
             <ChevronRight size={14} />
           </motion.span>
-          <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <h3 className="text-sm font-medium text-muted-foreground">
             {name}
           </h3>
         </div>
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           {count} {count === 1 ? "material" : "materials"}
         </p>
       </button>

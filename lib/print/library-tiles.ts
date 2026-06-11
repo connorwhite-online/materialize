@@ -15,6 +15,10 @@ export interface LibraryTile {
   thumbnailUrl: string | null;
   format: string;
   source: "owned" | "purchased";
+  /** Original upload filename (e.g. "terra_shell_top.stl"). Only populated for project-mode tiles. */
+  originalFilename?: string;
+  /** Asset file size in bytes. Only populated for project-mode tiles. */
+  fileSizeBytes?: number;
 }
 
 /**

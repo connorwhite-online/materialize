@@ -123,7 +123,7 @@ export function CardImageCarousel({
             onClick={() => goTo(Math.max(0, activeIndex - 1))}
           />
         )}
-        <div className="pointer-events-auto flex h-7 items-center gap-1 rounded-full bg-black/45 px-2 backdrop-blur-md">
+        <div className="pointer-events-auto flex h-7 items-center gap-1 rounded-full bg-black/45 px-2.5 backdrop-blur-md">
           {images.map((_, i) => (
             <button
               key={i}

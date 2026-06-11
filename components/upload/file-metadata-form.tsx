@@ -8,6 +8,7 @@ import { listMyProjects } from "@/app/actions/projects";
 import { runCreateListing } from "./run-create-listing";
 import { MATERIALS } from "@/lib/materials";
 import { DESIGN_TAG_OPTIONS, DESIGN_TAG_LABELS } from "@/lib/validations/file";
+import { CategorySelect } from "@/components/categories/category-select";
 import {
   LICENSES,
   LICENSE_ORDER,
@@ -103,6 +104,7 @@ export function FileMetadataForm({
   initialProjectId,
 }: FileMetadataFormProps) {
   const [selectedDesignTags, setSelectedDesignTags] = useState<string[]>([]);
+  const [category, setCategory] = useState("");
   const [recommendedMaterial, setRecommendedMaterial] = useState("");
   const [license, setLicense] = useState<LicenseId>(DEFAULT_LICENSE);
   const [sellEnabled, setSellEnabled] = useState(false);
@@ -176,6 +178,7 @@ export function FileMetadataForm({
       fileUnit,
       formData,
       selectedDesignTags,
+      category,
       recommendedMaterial,
       sellEnabled,
       license,
@@ -285,6 +288,18 @@ export function FileMetadataForm({
             />
             <p className="mt-1 text-xs text-muted-foreground">
               Help people find this file in search.
+            </p>
+          </div>
+
+          <div>
+            <Label htmlFor="category-trigger">Category</Label>
+            <CategorySelect
+              id="category-trigger"
+              value={category}
+              onValueChange={setCategory}
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Pick the closest shelf so this shows up when people browse.
             </p>
           </div>
 
@@ -442,14 +457,7 @@ export function FileMetadataForm({
                       </SelectContent>
                     </Select>
                     <p className="mt-1 text-[11px] text-muted-foreground">
-                      <a
-                        href="https://creativecommons.org/share-your-work/cclicenses/"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="underline-offset-2 hover:underline"
-                      >
-                        Compare CC licenses
-                      </a>
+                      Controls what buyers can do with the files after download.
                     </p>
                   </div>
                 </div>

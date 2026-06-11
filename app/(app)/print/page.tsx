@@ -45,11 +45,18 @@ export default async function PrintPage(props: {
     if (projectCtx) {
       return (
         <PrintPageContent
-          headline={`Print ${projectCtx.projectName}`}
+          headline={"Print a Project"}
           subheadline="Configure each file, add it to your cart, then check out together."
           tiles={projectCtx.tiles}
           linkSuffix={`?project=${encodeURIComponent(projectCtx.projectSlug)}`}
           isProjectMode
+          projectMeta={{
+            name: projectCtx.projectName,
+            thumbnailUrl: projectCtx.projectThumbnailUrl,
+            author: projectCtx.author,
+            fileCount: projectCtx.tiles.length,
+            totalFileSizeBytes: projectCtx.totalFileSizeBytes,
+          }}
           initialExpandVendorId={initialExpandVendorId}
           checkoutModel={getCheckoutModel()}
         />

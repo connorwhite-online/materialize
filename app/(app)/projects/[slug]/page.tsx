@@ -39,6 +39,7 @@ import {
 import { Pencil } from "@/components/icons/pencil";
 import { Trash } from "@/components/icons/trash";
 import { LicenseBadge } from "@/components/licenses/license-badge";
+import { getCategoryLabel } from "@/lib/categories";
 import { SourceCodeCard } from "@/components/projects/source-code-card";
 import { CardImageCarousel } from "@/components/photos/card-image-carousel";
 import { projectJsonLd } from "@/lib/seo/json-ld";
@@ -142,6 +143,7 @@ export default async function ProjectDetailPage(props: {
       status: projects.status,
       visibility: projects.visibility,
       tags: projects.tags,
+      category: projects.category,
       designTags: projects.designTags,
       thumbnailUrl: projects.thumbnailUrl,
       repoUrl: projects.repoUrl,
@@ -508,8 +510,7 @@ export default async function ProjectDetailPage(props: {
         <div className="grid gap-3 grid-cols-2 sm:grid-cols-3">
           {bundledFileCards.map((file) => {
             const dims = dimensionsLabel(file.dimensions);
-            const subtitle =
-              dims ?? (file.price > 0 ? `$${(file.price / 100).toFixed(2)}` : null);
+            const subtitle = dims ?? null;
             return (
               <Link key={file.id} href={`/files/${file.slug}`} className="block">
                 <Card className="group gap-0 p-1 overflow-hidden transition-colors hover:border-primary/30">
@@ -525,6 +526,11 @@ export default async function ProjectDetailPage(props: {
                       <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground/50">
                         No preview
                       </div>
+                    )}
+                    {file.price > 0 && (
+                      <span className="absolute left-2 top-2 rounded-full bg-background/90 px-2 py-1 text-xs font-medium tabular-nums backdrop-blur-sm">
+                        ${(file.price / 100).toFixed(2)}
+                      </span>
                     )}
                   </div>
                   <CardContent className="px-2 py-2">
@@ -687,7 +693,9 @@ export default async function ProjectDetailPage(props: {
           name: project.name,
           description: project.description,
           tags: project.tags,
+          category: project.category,
           repoUrl: project.repoUrl,
+          license: project.license,
           coverPhotoId: project.coverPhotoId,
           photos: curatorPhotos.map((p) => ({
             id: p.id,
@@ -788,6 +796,14 @@ export default async function ProjectDetailPage(props: {
                   </span>
                 )}
                 <LicenseBadge license={project.license} />
+                {project.category && getCategoryLabel(project.category) && (
+                  <Link
+                    href={`/files?category=${project.category}`}
+                    className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    {getCategoryLabel(project.category)}
+                  </Link>
+                )}
               </div>
             </div>
 

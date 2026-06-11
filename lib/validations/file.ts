@@ -1,5 +1,14 @@
 import { z } from "zod";
 import { LICENSE_ENUM_VALUES } from "@/lib/licenses";
+import { CATEGORY_IDS } from "@/lib/categories";
+
+/**
+ * Optional curated browse category. Empty string (from a "None"
+ * select) or an unknown/stale slug both resolve to undefined rather
+ * than failing the whole form — categories are a soft classification,
+ * never a hard gate on publishing.
+ */
+export const categorySchema = z.enum(CATEGORY_IDS).optional().catch(undefined);
 
 export const ACCEPTED_FORMATS = [
   "stl",
@@ -69,6 +78,7 @@ export const createListingSchema = z.object({
             .filter(Boolean)
         : []
     ),
+  category: categorySchema,
   recommendedMaterialId: z.string().optional(),
   recommendedCcMaterialId: z.string().optional(),
   designTags: z.array(z.enum(DESIGN_TAG_OPTIONS)).optional(),
