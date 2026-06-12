@@ -292,6 +292,30 @@ export const files = pgTable("files", {
   index("files_status_idx").on(table.status),
   index("files_slug_idx").on(table.slug),
   index("files_flagged_at_idx").on(table.flaggedAt),
+  // Partial composite indexes for browse-page hot paths. (CON-167)
+  //
+  // The idle browse shows published+public files sorted by
+  // download_count DESC (most popular first). A partial index on
+  // that column with the same WHERE predicate lets Postgres satisfy
+  // the query with a single index scan instead of a full bitmap-scan
+  // + sort.
+  //
+  // The search path sorts by created_at DESC. Same partial predicate
+  // eliminates the full-table sort for the most common search case.
+  //
+  // Note: there is no "category" column in this schema (the Linear
+  // issue references a future column). These indexes cover the actual
+  // predicates in app/(app)/files/page.tsx as of this migration.
+  index("files_public_download_count_idx")
+    .on(table.downloadCount)
+    .where(
+      sql`${table.status} = 'published' AND ${table.visibility} = 'public'`
+    ),
+  index("files_public_created_at_idx")
+    .on(table.createdAt)
+    .where(
+      sql`${table.status} = 'published' AND ${table.visibility} = 'public'`
+    ),
 ]);
 
 // Projects — sellable bundles of files. A creator can list a single
@@ -354,6 +378,13 @@ export const projects = pgTable("projects", {
   index("projects_organization_id_idx").on(table.organizationId),
   index("projects_status_idx").on(table.status),
   index("projects_slug_idx").on(table.slug),
+  // Partial composite index for the browse page projects section —
+  // matches the WHERE + ORDER BY in app/(app)/files/page.tsx. (CON-167)
+  index("projects_public_created_at_idx")
+    .on(table.createdAt)
+    .where(
+      sql`${table.status} = 'published' AND ${table.visibility} = 'public'`
+    ),
 ]);
 
 export const projectFiles = pgTable("project_files", {
@@ -775,6 +806,11 @@ export const collections = pgTable("collections", {
   index("collections_user_id_idx").on(table.userId),
   index("collections_organization_id_idx").on(table.organizationId),
   index("collections_slug_idx").on(table.slug),
+  // Partial index for collection browse queries — WHERE visibility='public'
+  // ORDER BY created_at DESC, matching app/(app)/files/page.tsx. (CON-167)
+  index("collections_public_created_at_idx")
+    .on(table.createdAt)
+    .where(sql`${table.visibility} = 'public'`),
 ]);
 
 // Collection items — heterogeneous, can hold a file OR a project.

@@ -15,17 +15,25 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  */
 
 // ── DB mock ────────────────────────────────────────────────────────────────
-// `mockDbWhere` is the terminal method of the query chain
-// (db.select().from().where()). We configure it per-test: by default it
-// throws a Postgres-style "invalid input syntax" error to simulate what
-// a real Neon instance would do with a non-UUID $1 param. Tests that
-// need a valid lookup return an appropriate row instead.
+// `mockDbWhere` is the terminal method of the query chain. The route was
+// refactored (CON-142) to use a leftJoin to collapse the cover-photo
+// second query, so the chain is now:
+//   db.select().from().leftJoin().where()
+// The mock threads through the extra builder step so existing tests keep
+// working unchanged. We configure it per-test: by default it throws a
+// Postgres-style "invalid input syntax" error to simulate what a real
+// Neon instance would do with a non-UUID $1 param.
 const mockDbWhere = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
     select: () => ({
       from: () => ({
+        leftJoin: () => ({
+          where: mockDbWhere,
+        }),
+        // Kept for safety — no current tests use the plain from().where()
+        // path directly, but mocking both prevents accidental 500s.
         where: mockDbWhere,
       }),
     }),
@@ -137,6 +145,7 @@ describe("GET /api/thumbnails/[fileId]", () => {
           })
         );
 
+      // Row now includes joined filePhotos columns (CON-142 leftJoin).
       mockDbWhere
         .mockResolvedValueOnce([
           {
@@ -145,6 +154,8 @@ describe("GET /api/thumbnails/[fileId]", () => {
             status: "published",
             userId: "user-1",
             coverPhotoId: null,
+            photoStorageKey: null,
+            photoFileId: null,
           },
         ])
         .mockResolvedValue([]);
@@ -182,6 +193,8 @@ describe("GET /api/thumbnails/[fileId]", () => {
           })
         );
 
+      // Row now includes joined filePhotos columns (CON-142 leftJoin).
+      // coverPhotoId is set, but ?original=1 bypasses the photo lookup.
       mockDbWhere.mockResolvedValueOnce([
         {
           id: fileId,
@@ -189,6 +202,8 @@ describe("GET /api/thumbnails/[fileId]", () => {
           status: "published",
           userId: "user-1",
           coverPhotoId: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+          photoStorageKey: "photos/cover.jpg",
+          photoFileId: fileId,
         },
       ]);
 

@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { files, filePhotos } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
 import { logError } from "@/lib/logger";
 
@@ -69,16 +69,45 @@ export async function GET(
       return new Response("Not found", { status: 404 });
     }
 
-    const [file] = await db
+    // Collapse the cover-photo / photo-id lookup into the file query
+    // with a single leftJoin so we never need a second round-trip for
+    // the common cases. (CON-142)
+    //
+    // Join target depends on the access pattern:
+    //   ?photoId=X  → join filePhotos on id = X AND fileId = files.id
+    //   default     → join filePhotos on id = files.coverPhotoId
+    //
+    // `forceOriginal=1` skips the join result entirely — it uses the
+    // auto-captured key regardless — but the join is still harmless and
+    // avoids a separate code path.
+    const [row] = await db
       .select({
         id: files.id,
         thumbnailUrl: files.thumbnailUrl,
         status: files.status,
         userId: files.userId,
         coverPhotoId: files.coverPhotoId,
+        photoStorageKey: filePhotos.storageKey,
+        photoFileId: filePhotos.fileId,
       })
       .from(files)
+      .leftJoin(
+        filePhotos,
+        requestedPhotoId
+          ? and(eq(filePhotos.id, requestedPhotoId), eq(filePhotos.fileId, files.id))
+          : eq(filePhotos.id, files.coverPhotoId)
+      )
       .where(eq(files.id, fileId));
+
+    const file = row
+      ? {
+          id: row.id,
+          thumbnailUrl: row.thumbnailUrl,
+          status: row.status,
+          userId: row.userId,
+          coverPhotoId: row.coverPhotoId,
+        }
+      : null;
 
     if (!file || !file.thumbnailUrl) {
       return new Response("Not found", { status: 404 });
@@ -95,37 +124,26 @@ export async function GET(
     let storageKey = `thumbnails/${fileId}.webp`;
 
     // Specific photo requested — verify it belongs to this file and
-    // redirect to its storage key. `forceOriginal` wins over both
+    // use its storage key. `forceOriginal` wins over both
     // requestedPhotoId and coverPhotoId — explicit intent to fetch
     // the auto-captured asset.
     if (forceOriginal) {
       // storageKey already set to the auto-captured path above; skip
       // both branches below.
     } else if (requestedPhotoId) {
-      const [photo] = await db
-        .select({
-          storageKey: filePhotos.storageKey,
-          fileId: filePhotos.fileId,
-        })
-        .from(filePhotos)
-        .where(eq(filePhotos.id, requestedPhotoId));
-      if (!photo || photo.fileId !== fileId) {
+      // The leftJoin above already verified fileId matches. If no row
+      // came back (photo not found or belongs to a different file),
+      // photoStorageKey will be null.
+      if (!row?.photoStorageKey || row.photoFileId !== fileId) {
         return new Response("Not found", { status: 404 });
       }
-      storageKey = photo.storageKey;
+      storageKey = row.photoStorageKey;
     } else if (file.coverPhotoId) {
-      // Default cover — when the creator picked one of their curator
-      // photos as the cover, redirect to that photo's signed URL
-      // instead of the auto-captured thumbnail.
-      const [cover] = await db
-        .select({
-          storageKey: filePhotos.storageKey,
-          fileId: filePhotos.fileId,
-        })
-        .from(filePhotos)
-        .where(eq(filePhotos.id, file.coverPhotoId));
-      if (cover && cover.fileId === fileId) {
-        storageKey = cover.storageKey;
+      // Default cover — use the storage key from the joined photo row.
+      // If the cover photo was deleted (join produces null), fall back
+      // to the auto-captured thumbnail path set above.
+      if (row?.photoStorageKey && row.photoFileId === fileId) {
+        storageKey = row.photoStorageKey;
       }
     }
 

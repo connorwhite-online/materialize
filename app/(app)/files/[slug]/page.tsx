@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { cache } from "react";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
@@ -29,8 +30,8 @@ import {
 } from "@/components/photos/photos-feed";
 import { DeleteFileButton } from "@/components/files/delete-file-button";
 import { EditFileButton } from "@/components/files/edit-file-button";
-import { FileThumbnailGenerator } from "@/components/files/file-thumbnail-generator";
-import { OrderModelPreview } from "@/components/print/order-model-preview";
+import { FileThumbnailGeneratorLazy } from "@/components/files/file-thumbnail-generator-lazy";
+import { OrderModelPreviewLazy } from "@/components/print/order-model-preview-lazy";
 import { VerifyingPill } from "@/components/files/verifying-pill";
 import { ListingFlaggedBanner } from "@/components/files/listing-flagged-banner";
 import {
@@ -74,24 +75,63 @@ function truncate(s: string, n: number) {
   return s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s;
 }
 
-export async function generateMetadata(props: {
-  params: Promise<{ slug: string }>;
-}): Promise<Metadata> {
-  const { slug } = await props.params;
+/**
+ * React.cache-wrapped loader for the file detail row.
+ *
+ * Both `generateMetadata` and the page body need the same row.
+ * Without the cache wrapper Next.js executes two separate DB queries
+ * per request. Wrapping in `cache()` deduplicates them within a
+ * single render pass — the second caller gets the memoized promise
+ * for free. (CON-141)
+ *
+ * Selects the superset of columns needed by both callers so there is
+ * only one query shape to maintain. `generateMetadata` only reads
+ * `name`, `description`, `thumbnailUrl`, `status`, `displayName`,
+ * and `username`; the page body reads everything else.
+ */
+const loadFileBySlug = cache(async function loadFileBySlug(slug: string) {
   const [row] = await db
     .select({
+      id: files.id,
+      status: files.status,
       name: files.name,
       description: files.description,
+      slug: files.slug,
+      price: files.price,
+      license: files.license,
+      tags: files.tags,
+      designTags: files.designTags,
+      recommendedMaterialId: files.recommendedMaterialId,
+      recommendedCcMaterialId: files.recommendedCcMaterialId,
+      minWallThickness: files.minWallThickness,
+      visibility: files.visibility,
       thumbnailUrl: files.thumbnailUrl,
-      status: files.status,
-      displayName: users.displayName,
+      coverPhotoId: files.coverPhotoId,
+      downloadCount: files.downloadCount,
+      viewCount: files.viewCount,
+      createdAt: files.createdAt,
+      flaggedReason: files.flaggedReason,
+      flaggedAt: files.flaggedAt,
+      userId: files.userId,
+      organizationId: files.organizationId,
       username: users.username,
+      displayName: users.displayName,
+      avatarUrl: users.avatarUrl,
+      ownerOnboarded: users.stripeOnboardingComplete,
     })
     .from(files)
     .innerJoin(users, eq(files.userId, users.id))
     .where(eq(files.slug, slug));
+  return row ?? null;
+});
 
-  if (!row || row.status !== "published") {
+export async function generateMetadata(props: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await props.params;
+  const row = await loadFileBySlug(slug);
+
+  if (!row || row.status !== "published" || row.visibility === "private") {
     return { title: "Not found", robots: { index: false, follow: false } };
   }
 
@@ -130,39 +170,10 @@ export default async function FileDetailPage(props: {
   const { slug } = await props.params;
   const { userId } = await auth();
 
-  // Look up by slug only — we filter by published status (or owner) below.
-  const [file] = await db
-    .select({
-      id: files.id,
-      status: files.status,
-      name: files.name,
-      description: files.description,
-      slug: files.slug,
-      price: files.price,
-      license: files.license,
-      tags: files.tags,
-      designTags: files.designTags,
-      recommendedMaterialId: files.recommendedMaterialId,
-      recommendedCcMaterialId: files.recommendedCcMaterialId,
-      minWallThickness: files.minWallThickness,
-      visibility: files.visibility,
-      thumbnailUrl: files.thumbnailUrl,
-      coverPhotoId: files.coverPhotoId,
-      downloadCount: files.downloadCount,
-      viewCount: files.viewCount,
-      createdAt: files.createdAt,
-      flaggedReason: files.flaggedReason,
-      flaggedAt: files.flaggedAt,
-      userId: files.userId,
-      organizationId: files.organizationId,
-      username: users.username,
-      displayName: users.displayName,
-      avatarUrl: users.avatarUrl,
-      ownerOnboarded: users.stripeOnboardingComplete,
-    })
-    .from(files)
-    .innerJoin(users, eq(files.userId, users.id))
-    .where(eq(files.slug, slug));
+  // loadFileBySlug is React.cache-wrapped — if generateMetadata already
+  // ran for this request the result is returned from the per-request
+  // memo without a second DB round-trip. (CON-141)
+  const file = await loadFileBySlug(slug);
 
   // Visible to anyone if published & public; visible to writers
   // (creator or org member) regardless of status / visibility. The
@@ -651,7 +662,7 @@ export default async function FileDetailPage(props: {
         />
       )}
       {needsThumbnail && primaryAsset && (
-        <FileThumbnailGenerator
+        <FileThumbnailGeneratorLazy
           fileId={file.id}
           fileAssetId={primaryAsset.id}
           format={primaryAsset.format}
@@ -672,7 +683,7 @@ export default async function FileDetailPage(props: {
           <div>
             {previewable && primaryAsset ? (
               <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
-                <OrderModelPreview
+                <OrderModelPreviewLazy
                   fileAssetId={primaryAsset.id}
                   format={primaryAsset.format}
                   materialColor={recommendedMaterial?.color ?? "#a1a1aa"}

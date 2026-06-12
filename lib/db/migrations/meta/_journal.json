@@ -239,6 +239,13 @@
       "when": 1749470400000,
       "tag": "0033_multiple_license_types",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1781301146092,
+      "tag": "0034_browse_partial_indexes",
+      "breakpoints": true
     }
   ]
 }

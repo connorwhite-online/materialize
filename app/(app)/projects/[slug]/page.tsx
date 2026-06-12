@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { cache } from "react";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -64,6 +65,47 @@ function truncate(s: string, n: number) {
   return s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s;
 }
 
+/**
+ * React.cache-wrapped loader for the project detail row.
+ *
+ * Both `generateMetadata` and the page body need the same row.
+ * Wrapping in `cache()` deduplicates the DB query within a single
+ * render pass — the second caller gets the memoised promise. (CON-141)
+ *
+ * Selects the superset of columns needed by both callers.
+ */
+const loadProjectBySlug = cache(async function loadProjectBySlug(slug: string) {
+  const [row] = await db
+    .select({
+      id: projects.id,
+      name: projects.name,
+      description: projects.description,
+      buildGuide: projects.buildGuide,
+      slug: projects.slug,
+      price: projects.price,
+      license: projects.license,
+      status: projects.status,
+      visibility: projects.visibility,
+      tags: projects.tags,
+      designTags: projects.designTags,
+      thumbnailUrl: projects.thumbnailUrl,
+      repoUrl: projects.repoUrl,
+      coverPhotoId: projects.coverPhotoId,
+      downloadCount: projects.downloadCount,
+      createdAt: projects.createdAt,
+      userId: projects.userId,
+      organizationId: projects.organizationId,
+      username: users.username,
+      displayName: users.displayName,
+      avatarUrl: users.avatarUrl,
+      ownerOnboarded: users.stripeOnboardingComplete,
+    })
+    .from(projects)
+    .innerJoin(users, eq(projects.userId, users.id))
+    .where(eq(projects.slug, slug));
+  return row ?? null;
+});
+
 // Bounding-box label matching the file cards elsewhere (library /
 // profile): "40.0 × 30.0 × 20.0 mm".
 function dimensionsLabel(
@@ -78,19 +120,7 @@ export async function generateMetadata(props: {
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await props.params;
-  const [row] = await db
-    .select({
-      name: projects.name,
-      description: projects.description,
-      thumbnailUrl: projects.thumbnailUrl,
-      status: projects.status,
-      visibility: projects.visibility,
-      displayName: users.displayName,
-      username: users.username,
-    })
-    .from(projects)
-    .innerJoin(users, eq(projects.userId, users.id))
-    .where(eq(projects.slug, slug));
+  const row = await loadProjectBySlug(slug);
 
   if (!row || row.status !== "published" || row.visibility !== "public") {
     return { title: "Not found", robots: { index: false, follow: false } };
@@ -130,34 +160,10 @@ export default async function ProjectDetailPage(props: {
   const { slug } = await props.params;
   const { userId } = await auth();
 
-  const [project] = await db
-    .select({
-      id: projects.id,
-      name: projects.name,
-      description: projects.description,
-      buildGuide: projects.buildGuide,
-      slug: projects.slug,
-      price: projects.price,
-      license: projects.license,
-      status: projects.status,
-      visibility: projects.visibility,
-      tags: projects.tags,
-      designTags: projects.designTags,
-      thumbnailUrl: projects.thumbnailUrl,
-      repoUrl: projects.repoUrl,
-      coverPhotoId: projects.coverPhotoId,
-      downloadCount: projects.downloadCount,
-      createdAt: projects.createdAt,
-      userId: projects.userId,
-      organizationId: projects.organizationId,
-      username: users.username,
-      displayName: users.displayName,
-      avatarUrl: users.avatarUrl,
-      ownerOnboarded: users.stripeOnboardingComplete,
-    })
-    .from(projects)
-    .innerJoin(users, eq(projects.userId, users.id))
-    .where(eq(projects.slug, slug));
+  // loadProjectBySlug is React.cache-wrapped — if generateMetadata
+  // already ran for this request, the result is returned from the
+  // per-request memo without a second DB round-trip. (CON-141)
+  const project = await loadProjectBySlug(slug);
 
   if (!project) notFound();
   // "Owner" here means write-access for visibility purposes — covers

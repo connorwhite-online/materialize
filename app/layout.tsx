@@ -7,9 +7,8 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { PendingPrintFileProvider } from "@/components/upload/pending-print-file";
 import { Iterate } from "iterate-ui-next/devtools";
 
-// Display + script faces for the hero wordmark — both loaded as
-// local OTF files from /public. Body text stays on the system
-// font stack (set in globals.css).
+// Display face for the hero wordmark — loaded as a local OTF from
+// /public. Body text stays on the system font stack (set in globals.css).
 //
 // PP Fuji Bold — Pangram Pangram's chunky modernist display face,
 // used for "Materialize" and the nav brand logo on app pages.
@@ -18,13 +17,11 @@ const fuji = localFont({
   variable: "--font-display",
   display: "swap",
 });
-// PP Playground Light — Pangram Pangram's script, used for
-// "Anything" in the home hero wordmark.
-const playground = localFont({
-  src: "../public/PPPlayground-Light.otf",
-  variable: "--font-script",
-  display: "swap",
-});
+// PP Playground Light is home-only (used once: "Anything" in the hero).
+// It is declared in app/page.tsx so the 157KB preload is scoped to
+// the home route only and does not appear in the <head> of every page.
+// Follow-up: subset the face to the glyphs of "Anything" and convert
+// to woff2 (~10-30KB) using pyftsubset / fonttools (CON-166).
 
 // Site-wide defaults. Per-page `generateMetadata` overrides title,
 // description, and og:image; everything else (twitter card type,
@@ -90,7 +87,7 @@ export default function RootLayout({
     <ClerkProvider>
       <html
         lang="en"
-        className={`${fuji.variable} ${playground.variable} h-full antialiased`}
+        className={`${fuji.variable} h-full antialiased`}
         suppressHydrationWarning
       >
         <body className="min-h-full flex flex-col">

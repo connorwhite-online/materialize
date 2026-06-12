@@ -1,11 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ThumbnailCapture } from "@/components/viewer/thumbnail-capture";
 import { CardImageCarousel } from "@/components/photos/card-image-carousel";
+
+// ThumbnailCapture pulls in the full three/R3F stack. It is only
+// mounted when the owner of a thumbnail-less file scrolls the card
+// into view. Using React.lazy + Suspense keeps three.js out of the
+// profile-page bundle entirely until it's actually needed. (CON-139)
+const ThumbnailCapture = lazy(() =>
+  import("@/components/viewer/thumbnail-capture").then((m) => ({
+    default: m.ThumbnailCapture,
+  }))
+);
 
 export interface LibraryFileCardItem {
   id: string;
@@ -223,15 +232,17 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
         </CardContent>
       </Card>
       {captureModelUrl && item.primaryFormat && (
-        <ThumbnailCapture
-          modelUrl={captureModelUrl}
-          format={
-            item.primaryFormat as "stl" | "obj" | "3mf" | "step" | "amf"
-          }
-          fileId={item.id}
-          onCapture={onCaptured}
-          recommendedMaterialId={item.recommendedMaterialId}
-        />
+        <Suspense fallback={null}>
+          <ThumbnailCapture
+            modelUrl={captureModelUrl}
+            format={
+              item.primaryFormat as "stl" | "obj" | "3mf" | "step" | "amf"
+            }
+            fileId={item.id}
+            onCapture={onCaptured}
+            recommendedMaterialId={item.recommendedMaterialId}
+          />
+        </Suspense>
       )}
     </Link>
   );
