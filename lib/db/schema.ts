@@ -945,9 +945,9 @@ export const notifications = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    // Free-form text + CHECK so we can introduce new types without
-    // running an enum migration. Known types are documented in
-    // `lib/notifications/types.ts`.
+    // Free-form text (not a pg enum) so we can introduce new types
+    // without running an enum migration. Known types are documented in
+    // `lib/notifications/types.ts`; validation is at the app layer.
     type: text("type").notNull(),
     payload: jsonb("payload").notNull(),
     readAt: timestamp("read_at", { withTimezone: true }),
