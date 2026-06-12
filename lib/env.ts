@@ -108,6 +108,32 @@ export function serverEnv<K extends keyof ServerEnv>(key: K): ServerEnv[K] {
   return validateServerEnv()[key];
 }
 
+export type CheckoutModel = "single" | "two_step";
+
+/**
+ * Which print-checkout architecture new orders are created under
+ * (CON-118):
+ *
+ *  - "single"   — one Stripe Checkout charges print + shipping + 3%
+ *    service fee; the webhook places the CraftCloud order after payment.
+ *  - "two_step" — our Stripe Checkout only AUTHORIZES the 3% fee
+ *    (manual capture), the CraftCloud order is placed up-front unpaid,
+ *    the customer pays CraftCloud directly via its hosted Stripe bridge
+ *    session, and a reconciliation cron captures the fee once CraftCloud
+ *    payment is confirmed.
+ *
+ * Returns "two_step" only when CHECKOUT_MODEL is exactly that string —
+ * anything else (unset, typo) falls back to "single". The env var only
+ * decides the model for NEW orders; in-flight orders branch on the
+ * persisted `printOrders.checkoutModel` column, never on this.
+ *
+ * Deliberately NOT folded into `isSandboxMode()` — two_step against the
+ * real CraftCloud API is a live, billable flow, not a sandbox.
+ */
+export function getCheckoutModel(): CheckoutModel {
+  return process.env.CHECKOUT_MODEL === "two_step" ? "two_step" : "single";
+}
+
 /**
  * True when EITHER Stripe is on test keys (sk_test_*) OR the CraftCloud
  * client is in mock mode. Surfaced in the nav as a "Sandbox" badge so a

@@ -9,11 +9,18 @@ import {
   collections,
   collectionItems,
 } from "@/lib/db/schema";
-import { eq, desc, ilike, and, or, sql, inArray, isNotNull } from "drizzle-orm";
+import { eq, desc, ilike, and, or, sql, inArray, isNotNull, type SQL } from "drizzle-orm";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { BrowseSearchBar } from "@/components/browse/browse-search-bar";
+import { CategoryFilterBar } from "@/components/browse/category-filter-bar";
+import { arrayTextIlike } from "@/lib/db/search";
+import {
+  categoryIdsMatchingQuery,
+  isCategoryId,
+  getCategoryById,
+} from "@/lib/categories";
 import { CardImageCarousel } from "@/components/photos/card-image-carousel";
 import { Download } from "@/components/icons/download";
 import { formatCompactCount } from "@/lib/utils/format-count";
@@ -148,7 +155,7 @@ async function fetchFileThumbnailsByProject(
 }
 
 export default async function BrowsePage(props: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; category?: string }>;
 }) {
   const searchParams = await props.searchParams;
   const rawQ = (searchParams.q ?? "").trim();
@@ -160,9 +167,31 @@ export default async function BrowsePage(props: {
       : `%${escapeLikePattern(query)}%`
     : null;
 
-  // Idle state: just the recent files grid. Same DB cost as before,
-  // identical layout below the bar.
-  if (!pattern) {
+  // Validate the category against the catalog so a stale / hand-typed
+  // slug can't poison the query — unknown values fall through to "no
+  // category filter" rather than returning an empty page.
+  const rawCategory = (searchParams.category ?? "").trim();
+  const category = isCategoryId(rawCategory) ? rawCategory : "";
+  const activeCategory = getCategoryById(category);
+
+  // Browse is "active" once there's either a text query OR a category
+  // filter. Anything less is the idle recent-content grid.
+  const active = !!pattern || !!category;
+
+  // The header (search bar + category chips) is identical across states.
+  const header = (
+    <>
+      <div className="flex justify-center">
+        <BrowseSearchBar defaultValue={query} category={category} />
+      </div>
+      <div className="mt-4">
+        <CategoryFilterBar />
+      </div>
+    </>
+  );
+
+  // Idle state: recent projects + files + creators grid below the header.
+  if (!active) {
     const [recentFiles, recentProjects, recentCreators] = await Promise.all([
       db
         .select({
@@ -233,9 +262,7 @@ export default async function BrowsePage(props: {
 
     return (
       <div className="mx-auto max-w-7xl px-4 py-6">
-        <div className="flex justify-center">
-          <BrowseSearchBar />
-        </div>
+        {header}
 
         {/* Projects */}
         {projectsWithPhotos.length > 0 && (
@@ -280,7 +307,62 @@ export default async function BrowsePage(props: {
     );
   }
 
-  // Search state: four sections in parallel. Materials are intentionally
+  // Categories whose label / keywords match the text query, so a search
+  // for "drone" or "gps" also surfaces everything filed under Hobby &
+  // RC even when the item's own name says neither.
+  const matchedCategoryIds = pattern ? categoryIdsMatchingQuery(query) : [];
+
+  // Per-section text-match clause: name OR any tag OR any design tag OR
+  // (the matched-category bridge). Undefined when there's no text query
+  // (category-only browse), which drizzle's `and`/`or` simply skip.
+  const fileMatch: SQL | undefined = pattern
+    ? or(
+        ilike(files.name, pattern),
+        arrayTextIlike(files.tags, pattern),
+        arrayTextIlike(files.designTags, pattern),
+        ...(matchedCategoryIds.length
+          ? [inArray(files.category, matchedCategoryIds)]
+          : [])
+      )
+    : undefined;
+  const projectMatch: SQL | undefined = pattern
+    ? or(
+        ilike(projects.name, pattern),
+        arrayTextIlike(projects.tags, pattern),
+        arrayTextIlike(projects.designTags, pattern),
+        ...(matchedCategoryIds.length
+          ? [inArray(projects.category, matchedCategoryIds)]
+          : [])
+      )
+    : undefined;
+  const collectionMatch: SQL | undefined = pattern
+    ? or(
+        ilike(collections.name, pattern),
+        arrayTextIlike(collections.tags, pattern),
+        ...(matchedCategoryIds.length
+          ? [inArray(collections.category, matchedCategoryIds)]
+          : [])
+      )
+    : undefined;
+
+  // Creators are only relevant to a text search — a category-only
+  // browse shouldn't dump every user, so skip the query entirely then.
+  const userQuery = pattern
+    ? db
+        .select({
+          id: users.id,
+          username: users.username,
+          displayName: users.displayName,
+          avatarUrl: users.avatarUrl,
+        })
+        .from(users)
+        .where(
+          or(ilike(users.username, pattern), ilike(users.displayName, pattern))
+        )
+        .limit(PER_SECTION)
+    : Promise.resolve([] as UserRow[]);
+
+  // Search/browse state: sections in parallel. Materials are intentionally
   // excluded — they have their own /materials page with rich filters.
   const [fileRows, projectRows, collectionRows, userRows] = await Promise.all([
     db
@@ -302,7 +384,8 @@ export default async function BrowsePage(props: {
         and(
           eq(files.status, "published"),
           eq(files.visibility, "public"),
-          ilike(files.name, pattern)
+          fileMatch,
+          category ? eq(files.category, category) : undefined
         )
       )
       .orderBy(desc(files.createdAt))
@@ -326,7 +409,8 @@ export default async function BrowsePage(props: {
         and(
           eq(projects.status, "published"),
           eq(projects.visibility, "public"),
-          ilike(projects.name, pattern)
+          projectMatch,
+          category ? eq(projects.category, category) : undefined
         )
       )
       .groupBy(
@@ -356,7 +440,8 @@ export default async function BrowsePage(props: {
       .where(
         and(
           eq(collections.visibility, "public"),
-          ilike(collections.name, pattern)
+          collectionMatch,
+          category ? eq(collections.category, category) : undefined
         )
       )
       .groupBy(
@@ -367,18 +452,7 @@ export default async function BrowsePage(props: {
       )
       .orderBy(desc(collections.createdAt))
       .limit(PER_SECTION),
-    db
-      .select({
-        id: users.id,
-        username: users.username,
-        displayName: users.displayName,
-        avatarUrl: users.avatarUrl,
-      })
-      .from(users)
-      .where(
-        or(ilike(users.username, pattern), ilike(users.displayName, pattern))
-      )
-      .limit(PER_SECTION),
+    userQuery,
   ]);
 
   const [photosByFile, photosByProject, thumbnailsByProject] = await Promise.all([
@@ -402,16 +476,32 @@ export default async function BrowsePage(props: {
     collectionRows.length +
     userRows.length;
 
+  // What we're browsing, for the empty-state copy.
+  const scopeLabel = query
+    ? `"${query}"`
+    : activeCategory
+      ? activeCategory.label
+      : "";
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-6">
-      <div className="flex justify-center">
-        <BrowseSearchBar defaultValue={query} />
-      </div>
+      {header}
+
+      {activeCategory && !query && (
+        <div className="mt-6">
+          <h1 className="text-lg font-semibold tracking-tight">
+            {activeCategory.label}
+          </h1>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            {activeCategory.description}
+          </p>
+        </div>
+      )}
 
       {totalHits === 0 ? (
         <div className="mt-12 text-center">
           <p className="text-sm text-muted-foreground">
-            No results for &ldquo;{query}&rdquo;
+            No results for {scopeLabel}
           </p>
         </div>
       ) : (
@@ -564,6 +654,7 @@ interface ProjectRow {
   slug: string;
   name: string;
   thumbnailUrl: string | null;
+  coverPhotoId?: string | null;
   creatorUsername: string | null;
   creatorDisplayName: string | null;
   creatorAvatarUrl: string | null;

@@ -8,8 +8,10 @@ import {
   collections,
   collectionItems,
 } from "@/lib/db/schema";
-import { and, eq, ilike, or, desc, sql } from "drizzle-orm";
+import { and, eq, ilike, or, desc, sql, inArray } from "drizzle-orm";
 import { getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
+import { arrayTextIlike } from "@/lib/db/search";
+import { categoryIdsMatchingQuery } from "@/lib/categories";
 import { logError } from "@/lib/logger";
 
 const PER_CATEGORY_LIMIT = 8;
@@ -122,6 +124,10 @@ export async function GET(request: Request) {
   const escaped = escapeLikePattern(q);
   const isPrefixOnly = q.length < PREFIX_ONLY_LENGTH;
   const pattern = isPrefixOnly ? `${escaped}%` : `%${escaped}%`;
+  // Categories whose label/keywords match the query bridge into the
+  // results (e.g. "drone" surfaces the Hobby & RC shelf). Empty list →
+  // the inArray clause is simply omitted below.
+  const matchedCategoryIds = categoryIdsMatchingQuery(q);
 
   try {
     const [fileRows, projectRows, collectionRows, userRows, catalog] = await Promise.all([
@@ -140,7 +146,14 @@ export async function GET(request: Request) {
           and(
             eq(files.status, "published"),
             eq(files.visibility, "public"),
-            ilike(files.name, pattern)
+            or(
+              ilike(files.name, pattern),
+              arrayTextIlike(files.tags, pattern),
+              arrayTextIlike(files.designTags, pattern),
+              ...(matchedCategoryIds.length
+                ? [inArray(files.category, matchedCategoryIds)]
+                : [])
+            )
           )
         )
         .orderBy(desc(files.createdAt))
@@ -162,7 +175,14 @@ export async function GET(request: Request) {
           and(
             eq(projects.status, "published"),
             eq(projects.visibility, "public"),
-            ilike(projects.name, pattern)
+            or(
+              ilike(projects.name, pattern),
+              arrayTextIlike(projects.tags, pattern),
+              arrayTextIlike(projects.designTags, pattern),
+              ...(matchedCategoryIds.length
+                ? [inArray(projects.category, matchedCategoryIds)]
+                : [])
+            )
           )
         )
         .groupBy(
@@ -191,7 +211,13 @@ export async function GET(request: Request) {
         .where(
           and(
             eq(collections.visibility, "public"),
-            ilike(collections.name, pattern)
+            or(
+              ilike(collections.name, pattern),
+              arrayTextIlike(collections.tags, pattern),
+              ...(matchedCategoryIds.length
+                ? [inArray(collections.category, matchedCategoryIds)]
+                : [])
+            )
           )
         )
         .groupBy(

@@ -18,11 +18,13 @@ import {
   canWriteCollection,
   resolveOwnerForCreate,
 } from "@/lib/authorization";
+import { categorySchema } from "@/lib/validations/file";
 
 const collectionSchema = z.object({
   name: z.string().min(1, "Name is required").max(100),
   description: z.string().max(500).optional(),
   visibility: z.enum(["public", "private"]).optional(),
+  category: categorySchema,
   tags: z
     .string()
     .optional()
@@ -101,6 +103,7 @@ export async function createCollection(formData: FormData) {
     name: formData.get("name"),
     description: formData.get("description"),
     visibility: formData.get("visibility") || undefined,
+    category: formData.get("category") || undefined,
     tags: formData.get("tags"),
   });
 
@@ -122,6 +125,7 @@ export async function createCollection(formData: FormData) {
         name: parsed.data.name,
         description: parsed.data.description,
         visibility: parsed.data.visibility ?? "public",
+        category: parsed.data.category,
         tags: parsed.data.tags,
         slug,
       })
@@ -267,6 +271,7 @@ const updateCollectionSchema = z.object({
   name: z.string().min(1, "Name is required").max(100),
   description: z.string().max(500).optional(),
   visibility: z.enum(["public", "private"]),
+  category: categorySchema,
 });
 
 export async function updateCollection(
@@ -285,6 +290,7 @@ export async function updateCollection(
       name: formData.get("name"),
       description: formData.get("description") || undefined,
       visibility: formData.get("visibility"),
+      category: formData.get("category") || undefined,
     });
     if (!parsed.success) {
       return { error: parsed.error.flatten().fieldErrors };
@@ -296,6 +302,10 @@ export async function updateCollection(
         name: parsed.data.name,
         description: parsed.data.description,
         visibility: parsed.data.visibility,
+        // Only the create form has surfaced category so far, but the
+        // update path accepts it too — omitted field leaves it alone,
+        // explicit empty resolves to null via the schema.
+        category: parsed.data.category ?? null,
       })
       .where(eq(collections.id, collectionId));
 

@@ -46,6 +46,30 @@ QuoteConfigurator:
 
 **Stripe redirect URL** — `createStripeSessionForOrder` derives the `success_url` / `cancel_url` base from request headers (`x-forwarded-host` + `x-forwarded-proto`), NOT from `NEXT_PUBLIC_APP_URL`. The env var bakes at build time; when unset in production it falls back to `http://localhost:3000` and the hardcoded localhost lands in every customer's post-payment redirect. The `tokens/page.tsx` MCP URL uses the same header-derived pattern for the same reason. Don't reintroduce `NEXT_PUBLIC_APP_URL` for runtime URL construction.
 
+### Two-checkout flow (`CHECKOUT_MODEL=two_step`, CON-118)
+
+Alternative checkout where the customer pays CraftCloud directly for production + shipping and we only ever touch our 3% fee. Gated by `CHECKOUT_MODEL` (read via `getCheckoutModel()` in `lib/env.ts`; default `single`). The env var only decides the model for NEW orders — every in-flight order branches on the persisted `printOrders.checkoutModel` column, so flipping the env never strands an order mid-flow.
+
+```
+completePrintOrder: places the CraftCloud order UNPAID up-front
+                    + creates the CraftCloud-hosted bridge (payment) session
+→ our Stripe Checkout authorizes the 3% fee ONLY (capture_method: manual)
+→ webhook advances cart_created → awaiting_production_payment
+→ customer pays CraftCloud at /orders/[id]/pay-production (interstitial → CraftCloud-hosted page)
+→ hourly cron reconcile-production-payments polls getOrderStatus:
+    paid      → capture the fee hold, notifyPrintOrderPlaced, → ordered
+    abandoned → after 72h, CANCEL the hold (Stripe auths die at ~7 days regardless)
+```
+
+Gotchas:
+
+- **`payment_status: "unpaid"` is success** — a completed manual-capture session reports `payment_status: "unpaid"` (the fee is held, not charged). The webhook router special-cases two_step for exactly this; don't "fix" it back to requiring `paid`.
+- **Money invariant** — under two_step we never hold customer money for an unplaced order. Abandonment = cancel the authorization, not refund. If you find yourself writing a refund path for `awaiting_production_payment`, you've taken a wrong turn.
+- **`isProductionPaymentConfirmed`** (`lib/craftcloud/payment-confirmation.ts`) is how the cron decides CraftCloud got paid. It's built on an UNVERIFIED assumption about CraftCloud's order-status payload (CON-118 open question #2) and is the designated swap point once the real signal is confirmed — change it there, not in the cron.
+- **`notifyPrintOrderPlaced` fires at capture time** under two_step (when the cron confirms CraftCloud payment), NOT when the customer pays our fee checkout.
+- **UI surfaces** — `awaiting_production_payment` rows sit in the profile "Carts" section with a "Complete payment" button (same `resumePrintOrder`, returns the CraftCloud payment URL, or an error when the fee authorization expired); the pre-checkout "you'll see two charges" disclosure in `price-display.tsx` is driven by a `checkoutModel` prop threaded from the server pages (`getCheckoutModel()` is server-only — `import type { CheckoutModel }` is fine in client components, the value is not).
+- **Upgrade path** — if the CraftCloud partner/reseller agreement lands (CON-116 path 2), `CHECKOUT_MODEL` flips back to `single` and the original single-checkout architecture (fully preserved) takes over; two_step stays as the fallback.
+
 ### Anon OTP sign-up at checkout
 
 The revenue shortcut. Anon users walk the full quote flow, then enter email on the shipping form. Inside `ShippingAddressForm`, we run `signUp.create({ emailAddress })` + `prepareEmailAddressVerification` inline, show the OTP step, `attemptEmailAddressVerification` + `setActive`, then `setUsernameFromEmail` (best-effort), then call the parent's `onSubmit` with the stashed address payload. If the email already exists we pivot to `signIn` email-code instead. All in one form, no modal.

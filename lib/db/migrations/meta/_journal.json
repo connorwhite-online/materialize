@@ -239,6 +239,20 @@
       "when": 1749470400000,
       "tag": "0033_multiple_license_types",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1781044553882,
+      "tag": "0034_content_categories",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1781112214912,
+      "tag": "0035_two_step_checkout",
+      "breakpoints": true
     }
   ]
 }

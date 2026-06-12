@@ -6,6 +6,12 @@ import { Button } from "@/components/ui/button";
 
 interface BrowseSearchBarProps {
   defaultValue?: string;
+  /**
+   * Active category slug. Carried through as a hidden field so
+   * submitting a search keeps the category filter applied instead of
+   * silently dropping it (the form is a plain GET to /files).
+   */
+  category?: string;
 }
 
 function CircleXIcon({ className }: { className?: string }) {
@@ -35,7 +41,7 @@ function CircleXIcon({ className }: { className?: string }) {
  * server-renders the results below this bar from the `?q=` param,
  * so the bar's only job is to submit the form.
  */
-export function BrowseSearchBar({ defaultValue = "" }: BrowseSearchBarProps) {
+export function BrowseSearchBar({ defaultValue = "", category }: BrowseSearchBarProps) {
   const [value, setValue] = useState(defaultValue);
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
@@ -46,12 +52,16 @@ export function BrowseSearchBar({ defaultValue = "" }: BrowseSearchBarProps) {
     router.push("/files");
   };
 
+
   return (
     <form
       method="GET"
       action="/files"
       className="w-full max-w-2xl rounded-3xl border border-input bg-muted/70 backdrop-blur-xl dark:bg-input/40 depth-sunken p-1"
     >
+      {category ? (
+        <input type="hidden" name="category" value={category} />
+      ) : null}
       <div className="flex h-[38px] items-center gap-1 px-1">
         <input
           ref={inputRef}
