@@ -303,6 +303,23 @@ export const files = pgTable("files", {
   index("files_slug_idx").on(table.slug),
   index("files_flagged_at_idx").on(table.flaggedAt),
   index("files_category_idx").on(table.category),
+  // Partial composite indexes for the hot browse queries (CON-167).
+  // The WHERE clause restricts the index to publicly visible rows so
+  // it stays small and the planner can use it without a residual filter.
+  // (category, created_at DESC) supports ORDER BY created_at DESC with
+  // an optional category = $1 equality filter.
+  index("files_pub_category_created_at_idx")
+    .on(table.category, table.createdAt)
+    .where(
+      sql`${table.status} = 'published' AND ${table.visibility} = 'public'`
+    ),
+  // (download_count DESC) supports the idle-browse ORDER BY download_count
+  // DESC ordering without reading the full table.
+  index("files_pub_download_count_idx")
+    .on(table.downloadCount)
+    .where(
+      sql`${table.status} = 'published' AND ${table.visibility} = 'public'`
+    ),
 ]);
 
 // Projects — sellable bundles of files. A creator can list a single
@@ -368,6 +385,14 @@ export const projects = pgTable("projects", {
   index("projects_status_idx").on(table.status),
   index("projects_slug_idx").on(table.slug),
   index("projects_category_idx").on(table.category),
+  // Partial composite index for the hot browse query (CON-167).
+  // Mirrors the files partial index: category browse + created_at sort
+  // on the publicly visible subset.
+  index("projects_pub_category_created_at_idx")
+    .on(table.category, table.createdAt)
+    .where(
+      sql`${table.status} = 'published' AND ${table.visibility} = 'public'`
+    ),
 ]);
 
 export const projectFiles = pgTable("project_files", {
@@ -807,6 +832,12 @@ export const collections = pgTable("collections", {
   index("collections_organization_id_idx").on(table.organizationId),
   index("collections_slug_idx").on(table.slug),
   index("collections_category_idx").on(table.category),
+  // Partial composite index for the hot browse query (CON-167).
+  // Collections only filter on visibility (no status column), so the
+  // WHERE clause is narrower than the files/projects equivalents.
+  index("collections_pub_category_created_at_idx")
+    .on(table.category, table.createdAt)
+    .where(sql`${table.visibility} = 'public'`),
 ]);
 
 // Collection items — heterogeneous, can hold a file OR a project.

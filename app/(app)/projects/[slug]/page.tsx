@@ -17,6 +17,7 @@ import {
   purchases,
 } from "@/lib/db/schema";
 import { eq, and, asc, desc, inArray } from "drizzle-orm";
+import { loadProjectBySlug } from "./loader";
 import { generateDownloadUrl } from "@/lib/storage";
 import { Card, CardContent } from "@/components/ui/card";
 import { ExpandableDescription } from "@/components/ui/expandable-description";
@@ -79,19 +80,7 @@ export async function generateMetadata(props: {
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await props.params;
-  const [row] = await db
-    .select({
-      name: projects.name,
-      description: projects.description,
-      thumbnailUrl: projects.thumbnailUrl,
-      status: projects.status,
-      visibility: projects.visibility,
-      displayName: users.displayName,
-      username: users.username,
-    })
-    .from(projects)
-    .innerJoin(users, eq(projects.userId, users.id))
-    .where(eq(projects.slug, slug));
+  const row = await loadProjectBySlug(slug);
 
   if (!row || row.status !== "published" || row.visibility !== "public") {
     return { title: "Not found", robots: { index: false, follow: false } };
@@ -131,35 +120,9 @@ export default async function ProjectDetailPage(props: {
   const { slug } = await props.params;
   const { userId } = await auth();
 
-  const [project] = await db
-    .select({
-      id: projects.id,
-      name: projects.name,
-      description: projects.description,
-      buildGuide: projects.buildGuide,
-      slug: projects.slug,
-      price: projects.price,
-      license: projects.license,
-      status: projects.status,
-      visibility: projects.visibility,
-      tags: projects.tags,
-      category: projects.category,
-      designTags: projects.designTags,
-      thumbnailUrl: projects.thumbnailUrl,
-      repoUrl: projects.repoUrl,
-      coverPhotoId: projects.coverPhotoId,
-      downloadCount: projects.downloadCount,
-      createdAt: projects.createdAt,
-      userId: projects.userId,
-      organizationId: projects.organizationId,
-      username: users.username,
-      displayName: users.displayName,
-      avatarUrl: users.avatarUrl,
-      ownerOnboarded: users.stripeOnboardingComplete,
-    })
-    .from(projects)
-    .innerJoin(users, eq(projects.userId, users.id))
-    .where(eq(projects.slug, slug));
+  // React.cache deduplicates this call with the one in generateMetadata
+  // for the same slug on the same request — one DB round-trip total.
+  const project = await loadProjectBySlug(slug);
 
   if (!project) notFound();
   // "Owner" here means write-access for visibility purposes — covers
