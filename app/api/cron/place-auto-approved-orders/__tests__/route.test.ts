@@ -7,6 +7,8 @@
  *      = 'auto_approved' AND autoApprovedUntil <= now, so:
  *        - rows still inside their cancel window aren't claimed,
  *        - rows another invocation already claimed don't double-fire.
+ *   3. CON-159: Stuck charged rows (cart_created + pi_ stripeSessionId
+ *      + null craftCloudOrderId) are retried, not silently abandoned.
  *
  *   Plus: handler errors are reported but don't poison the rest of
  *   the batch.
@@ -15,12 +17,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const handlerMock = vi.fn();
+// Phase-1 claim (auto_approved → cart_created)
 let claimReturn: Array<{ id: string }> = [];
+// Phase-2 stuck rows (SELECT from cart_created where pi_ + no cc order)
+let stuckSelectReturn: Array<{ id: string }> = [];
 
 vi.mock("@/lib/db/schema", () => ({
   printOrders: {
     status: "status",
     autoApprovedUntil: "auto_approved_until",
+    stripeSessionId: "stripe_session_id",
+    craftCloudOrderId: "craft_cloud_order_id",
   },
 }));
 
@@ -31,6 +38,11 @@ vi.mock("@/lib/db", () => ({
         where: () => ({
           returning: () => Promise.resolve(claimReturn),
         }),
+      }),
+    }),
+    select: () => ({
+      from: () => ({
+        where: () => Promise.resolve(stuckSelectReturn),
       }),
     }),
   },
@@ -49,6 +61,7 @@ import { GET } from "../route";
 beforeEach(() => {
   process.env.CRON_SECRET = "test-secret";
   claimReturn = [];
+  stuckSelectReturn = [];
   handlerMock.mockReset();
 });
 
@@ -82,7 +95,7 @@ describe("place-auto-approved-orders cron", () => {
     const res = await GET(makeRequest("Bearer test-secret"));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ claimed: 0, placed: 0, failed: 0 });
+    expect(body).toMatchObject({ claimed: 0, placed: 0, failed: 0 });
     expect(handlerMock).not.toHaveBeenCalled();
   });
 
@@ -93,7 +106,7 @@ describe("place-auto-approved-orders cron", () => {
     const res = await GET(makeRequest("Bearer test-secret"));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ claimed: 2, placed: 2, failed: 0 });
+    expect(body).toMatchObject({ claimed: 2, placed: 2, failed: 0 });
     expect(handlerMock).toHaveBeenCalledTimes(2);
     expect(handlerMock).toHaveBeenCalledWith("order-1");
     expect(handlerMock).toHaveBeenCalledWith("order-2");
@@ -108,9 +121,43 @@ describe("place-auto-approved-orders cron", () => {
     const res = await GET(makeRequest("Bearer test-secret"));
     expect(res.status).toBe(500);
     const body = await res.json();
-    expect(body).toEqual({ claimed: 3, placed: 2, failed: 1 });
+    expect(body).toEqual({
+      claimed: 3,
+      freshClaimed: 3,
+      retriedStuck: 0,
+      placed: 2,
+      failed: 1,
+    });
     // The other two orders still got placed — one bad row doesn't
     // poison the batch.
     expect(handlerMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("CON-159: retries stuck cart_created rows with pi_ stripeSessionId", async () => {
+    // A previous run's handler threw after placement, leaving a charged
+    // row in cart_created with a pi_ id and no craftCloudOrderId.
+    stuckSelectReturn = [{ id: "stuck-1" }];
+    handlerMock.mockResolvedValue(undefined);
+
+    const res = await GET(makeRequest("Bearer test-secret"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.retriedStuck).toBe(1);
+    expect(body.claimed).toBe(1); // 0 fresh + 1 stuck
+    expect(handlerMock).toHaveBeenCalledWith("stuck-1");
+  });
+
+  it("CON-159: deduplicates when a row appears in both fresh and stuck lists", async () => {
+    // A row just transitioned auto_approved → cart_created (fresh) also
+    // matches the stuck WHERE. It should only be processed once.
+    claimReturn = [{ id: "order-1" }];
+    stuckSelectReturn = [{ id: "order-1" }];
+    handlerMock.mockResolvedValue(undefined);
+
+    const res = await GET(makeRequest("Bearer test-secret"));
+    const body = await res.json();
+    expect(body.claimed).toBe(1);
+    expect(handlerMock).toHaveBeenCalledTimes(1);
+    expect(body.retriedStuck).toBe(0); // deduplicated
   });
 });

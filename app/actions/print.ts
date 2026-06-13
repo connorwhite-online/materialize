@@ -27,7 +27,7 @@
  * only AUTHORIZES the 3% fee — captured later by the reconciliation
  * cron.
  *
- * SERVICE_FEE_RATE is our cut. Do not hardcode elsewhere.
+ * Fee calculation lives in lib/fees.ts (calcServiceFee). Do not hardcode elsewhere.
  */
 
 import { auth } from "@clerk/nextjs/server";
@@ -53,8 +53,7 @@ import { logError } from "@/lib/logger";
 import { userCanPrintAsset } from "@/lib/entitlement";
 import { dedupeShippingByShipId } from "@/lib/pricing/shipping";
 import type { Address, Currency } from "@/lib/craftcloud/types";
-
-const SERVICE_FEE_RATE = 0.03;
+import { calcServiceFee } from "@/lib/fees";
 
 /**
  * Lightweight check for vendor minimum production prices. Creates a
@@ -191,7 +190,7 @@ export async function createPrintOrder(params: {
     const preShippingTotal =
       materialSubtotal * data.quantity + productionFeeCents;
     const totalPrice = preShippingTotal + shippingSubtotal;
-    const serviceFee = Math.round(preShippingTotal * SERVICE_FEE_RATE);
+    const serviceFee = calcServiceFee(preShippingTotal, getCheckoutModel());
 
     // Create print order record
     const [order] = await db
@@ -219,17 +218,18 @@ export async function createPrintOrder(params: {
     return { orderId: order.id, cartId: cart.cartId };
   } catch (error) {
     logError("createPrintOrder", error);
-    if (error instanceof CraftCloudApiError && error.isQuoteExpired()) {
-      return {
-        error:
-          "This quote has expired. Please pick a material again — prices may have changed.",
-      };
+    if (error instanceof CraftCloudApiError) {
+      if (error.isQuoteExpired()) {
+        return {
+          error:
+            "This quote has expired. Please pick a material again — prices may have changed.",
+        };
+      }
+      // Never return the raw CraftCloudApiError message — it contains
+      // internal API paths and upstream response bodies (CON-138).
+      return { error: "Our print partner returned an error. Please try again." };
     }
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Failed to create print order. Please try again.";
-    return { error: message };
+    return { error: "Failed to create print order. Please try again." };
   }
 }
 
@@ -335,7 +335,7 @@ export async function checkoutVendorGroup(
     // subtotal so freight doesn't inflate our cut.
     const preShippingTotal = totalMaterial + productionFeeCents;
     const totalPrice = preShippingTotal + totalShipping;
-    const serviceFee = Math.round(preShippingTotal * SERVICE_FEE_RATE);
+    const serviceFee = calcServiceFee(preShippingTotal, getCheckoutModel());
 
     // All cart items were selected by vendorId, so the vendor name
     // (if any) is consistent across the group — pick the first
@@ -393,17 +393,18 @@ export async function checkoutVendorGroup(
     return { orderId: order.id, cartId: cart.cartId };
   } catch (error) {
     logError("checkoutVendorGroup", error);
-    if (error instanceof CraftCloudApiError && error.isQuoteExpired()) {
-      return {
-        error:
-          "One or more quotes in this cart have expired. Remove those items and re-add them from the quote page.",
-      };
+    if (error instanceof CraftCloudApiError) {
+      if (error.isQuoteExpired()) {
+        return {
+          error:
+            "One or more quotes in this cart have expired. Remove those items and re-add them from the quote page.",
+        };
+      }
+      // Never return the raw CraftCloudApiError message — it contains
+      // internal API paths and upstream response bodies (CON-138).
+      return { error: "Our print partner returned an error. Please try again." };
     }
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Failed to checkout vendor group";
-    return { error: message };
+    return { error: "Failed to checkout vendor group. Please try again." };
   }
 }
 
@@ -828,6 +829,16 @@ export async function completePrintOrder(params: {
         if (existing.status === "open" && existing.url) {
           return { checkoutUrl: existing.url };
         }
+        // Session completed (paid) but the webhook hasn't processed
+        // yet — the row is still cart_created. Minting a second session
+        // here would let the user pay twice. Surface a friendly message
+        // and let the webhook advance the order. Do NOT null out the id.
+        if (existing.status === "complete") {
+          return {
+            error:
+              "This order is already being processed — check your orders in a moment.",
+          };
+        }
         // Expired/closed → fall through to mint a fresh one. We
         // can't atomically claim with isNull(stripeSessionId) so
         // null it out first via a conditional swap on the stale id.
@@ -1151,6 +1162,23 @@ export async function resumePrintOrder(
       return { error: "Order has no saved address" };
     }
 
+    // CON-159: Auto-approved orders store the off-session PaymentIntent
+    // id (pi_…) in stripeSessionId. The PI is NOT a Checkout session —
+    // sessions.retrieve("pi_…") would throw. These rows are awaiting
+    // CraftCloud placement by the place-auto-approved-orders cron; the
+    // Resume button cannot do anything useful. Suppress it with a
+    // friendly message instead of letting sessions.retrieve throw.
+    if (
+      order.stripeSessionId &&
+      order.stripeSessionId.startsWith("pi_") &&
+      !order.craftCloudOrderId
+    ) {
+      return {
+        error:
+          "Your order is being placed — it will appear under Orders shortly.",
+      };
+    }
+
     const stripe = getStripe();
 
     // Same multi-tab guard as completePrintOrder: if a real session
@@ -1168,6 +1196,16 @@ export async function resumePrintOrder(
         );
         if (existing.status === "open" && existing.url) {
           return { checkoutUrl: existing.url };
+        }
+        // Session completed (paid) but the webhook hasn't processed
+        // yet — the row is still cart_created. Minting a second session
+        // here would let the user pay twice. Surface a friendly message
+        // and let the webhook advance the order. Do NOT null out the id.
+        if (existing.status === "complete") {
+          return {
+            error:
+              "This order is already being processed — check your orders in a moment.",
+          };
         }
         // Expired/closed → null out the stale id so the atomic
         // claim below can fire on a clean row.
@@ -1319,6 +1357,20 @@ export async function requestOrderRefund(
       .where(and(eq(printOrders.id, orderId), eq(printOrders.userId, userId)));
 
     if (!order) return { error: "Order not found" };
+
+    // Two-step orders: the customer paid CraftCloud directly for
+    // production + shipping; our session only captured the 3% fee.
+    // Refunding the fee alone would leave the customer believing they
+    // got a full refund while CraftCloud may still produce and ship the
+    // print. Until a CraftCloud cancellation API exists (CON-109) we
+    // cannot safely complete a two-step refund self-service — route to
+    // support instead. Do NOT flip the status to `refunded`.
+    if (order.checkoutModel === "two_step") {
+      return {
+        error:
+          "This order was processed through a two-step checkout. To request a refund, please contact support — we'll coordinate with the print vendor on your behalf.",
+      };
+    }
 
     // Blocked = factory rejected, safe to refund immediately
     // Ordered = placed but not yet in production — check live status first

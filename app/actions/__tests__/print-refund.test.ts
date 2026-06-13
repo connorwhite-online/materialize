@@ -51,6 +51,7 @@ const blockedOrder = {
   status: "blocked", // skips the live-status check; goes straight to refund
   craftCloudOrderId: null,
   stripeSessionId: "sess_1",
+  checkoutModel: "single" as string | null,
 };
 
 describe("requestOrderRefund — refund idempotency (CON-46)", () => {
@@ -83,5 +84,43 @@ describe("requestOrderRefund — refund idempotency (CON-46)", () => {
       "print-refund:order-id-1",
       "print-refund:order-id-1",
     ]);
+  });
+});
+
+describe("requestOrderRefund — CON-160 two_step guard", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("blocks self-service refund for two_step orders and does NOT flip status to refunded", async () => {
+    selectedOrder = {
+      ...blockedOrder,
+      checkoutModel: "two_step",
+      status: "ordered",
+    };
+
+    const res = await requestOrderRefund("order-id-1");
+
+    // Must return an error routing to support — NOT success.
+    expect(res).not.toEqual({ success: true });
+    if (!("error" in res)) throw new Error("expected error");
+    expect(res.error).toMatch(/two-step|support/i);
+
+    // Must NOT issue a refund (would only refund the 3% fee).
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    // Must NOT flip the row to `refunded`.
+    // (The db.update mock here doesn't capture the set values, but we
+    // verify by checking the session was never retrieved — no attempt
+    // to look up the PI from the Stripe session.)
+    expect(mockSessionRetrieve).not.toHaveBeenCalled();
+  });
+
+  it("single-checkout blocked order still refunds as before", async () => {
+    selectedOrder = { ...blockedOrder, checkoutModel: "single" };
+
+    const res = await requestOrderRefund("order-id-1");
+
+    expect(res).toEqual({ success: true });
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
   });
 });

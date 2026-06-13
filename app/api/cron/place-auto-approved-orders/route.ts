@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { printOrders } from "@/lib/db/schema";
-import { and, eq, lte } from "drizzle-orm";
+import { and, eq, isNull, like, lte, or } from "drizzle-orm";
 import { handlePrintOrderPayment } from "@/lib/stripe/handle-print-order-payment";
 import { logError } from "@/lib/logger";
 
@@ -25,9 +25,17 @@ import { logError } from "@/lib/logger";
  * cron invocations: the UPDATE only succeeds for one worker per
  * order, so handlePrintOrderPayment runs exactly once per row.
  *
+ * Retry semantics for stuck charged rows (CON-159):
+ *   If handlePrintOrderPayment throws (e.g. CraftCloud 500), the
+ *   handler releases its claim sentinel and the row stays in
+ *   `cart_created` with the off-session PI id in stripeSessionId.
+ *   The next invocation's WHERE includes a second OR-branch that
+ *   re-claims these stuck rows so they get retried. Without this
+ *   widening, the row would stay `cart_created` indefinitely until
+ *   cleanup-stale-orders cancels it — WITHOUT issuing a refund.
+ *
  * On handler failure we log and return a non-200 so Vercel's cron
- * monitoring surfaces it. The order stays in `cart_created` (the
- * handler is itself idempotent — the next run will retry).
+ * monitoring surfaces it.
  *
  * Wired in vercel.json. To run locally:
  *   curl -H "Authorization: Bearer $CRON_SECRET" \\
@@ -49,11 +57,11 @@ export async function GET(request: Request) {
   try {
     const now = new Date();
 
-    // Atomically claim all due rows by flipping them to
+    // Phase 1: Atomically claim all due rows by flipping them to
     // cart_created. The handler we call below requires that exact
     // status, so a row not returned here (because someone else
     // claimed it) is also a row we won't redundantly place.
-    const claimed = await db
+    const freshClaimed = await db
       .update(printOrders)
       .set({ status: "cart_created" })
       .where(
@@ -63,6 +71,39 @@ export async function GET(request: Request) {
         )
       )
       .returning({ id: printOrders.id });
+
+    // Phase 2 (CON-159): Reclaim stuck charged rows. If a previous
+    // run's handler threw after CraftCloud call (e.g. 500), it
+    // released the claim sentinel and the row stayed in `cart_created`
+    // with the off-session PaymentIntent id still in stripeSessionId.
+    // The cleanup cron would cancel such rows WITHOUT refunding the
+    // customer. Reclaim them here so they get retried.
+    //
+    // Safety: handlePrintOrderPayment's own atomic claim (gated on
+    // craftCloudOrderId IS NULL) prevents double-placement even if
+    // multiple cron invocations overlap on the same row.
+    const stuckClaimed = await db
+      .select({ id: printOrders.id })
+      .from(printOrders)
+      .where(
+        and(
+          eq(printOrders.status, "cart_created"),
+          like(printOrders.stripeSessionId, "pi_%"),
+          isNull(printOrders.craftCloudOrderId)
+        )
+      );
+
+    // Deduplicate in case a row just transitioned auto_approved →
+    // cart_created in phase 1 (it will also match phase 2's WHERE).
+    const freshIds = new Set(freshClaimed.map((r) => r.id));
+    const retryIds = stuckClaimed
+      .map((r) => r.id)
+      .filter((id) => !freshIds.has(id));
+
+    const claimed = [
+      ...freshClaimed,
+      ...retryIds.map((id) => ({ id })),
+    ];
 
     // Worker pool of CONCURRENCY against CraftCloud — same pattern
     // as sweep-fingerprint-stragglers/route.ts. Strictly serial used
@@ -97,7 +138,13 @@ export async function GET(request: Request) {
       )
     );
 
-    const result = { claimed: claimed.length, placed, failed };
+    const result = {
+      claimed: claimed.length,
+      freshClaimed: freshClaimed.length,
+      retriedStuck: retryIds.length,
+      placed,
+      failed,
+    };
     console.log("[cron/place-auto-approved-orders] swept", result);
 
     if (failed > 0) {

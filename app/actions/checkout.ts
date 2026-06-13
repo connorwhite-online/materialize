@@ -19,17 +19,12 @@ import { eq } from "drizzle-orm";
 import { getStripe } from "@/lib/stripe";
 import { logError } from "@/lib/logger";
 import { userOwnsFile, userOwnsProject } from "@/lib/entitlement";
+import { calcServiceFee } from "@/lib/fees";
 
 const APP_URL =
   process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
-const SERVICE_FEE_RATE = 0.03;
-
 type CheckoutResult = { url: string } | { error: string };
-
-function calcServiceFee(amountCents: number) {
-  return Math.round(amountCents * SERVICE_FEE_RATE);
-}
 
 interface ListingFetch {
   id: string;

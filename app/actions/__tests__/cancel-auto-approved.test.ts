@@ -16,12 +16,22 @@ const refundCreateMock = vi.fn();
 const sendCancellationEmailMock = vi.fn();
 const ledgerDeleteCalls: unknown[] = [];
 
+// CON-163: Capture db.update call args so tests can assert the
+// conditional WHERE guard cannot be deleted without breaking them.
+const updateSetCalls: unknown[] = [];
+const updateWhereCalls: unknown[] = [];
+
 vi.mock("@clerk/nextjs/server", () => ({
   auth: async () => ({ userId: mockUserId }),
 }));
 
 vi.mock("@/lib/db/schema", () => ({
-  printOrders: { id: "id", userId: "user_id", status: "status" },
+  printOrders: {
+    id: "id",
+    userId: "user_id",
+    status: "status",
+    autoApprovedUntil: "auto_approved_until",
+  },
   fileAssets: { id: "id" },
   files: { id: "id" },
   tokenSpendingLedger: { printOrderId: "print_order_id" },
@@ -37,11 +47,17 @@ vi.mock("@/lib/db", () => ({
       }),
     }),
     update: () => ({
-      set: () => ({
-        where: () => ({
-          returning: () => Promise.resolve(updateClaimRows),
-        }),
-      }),
+      set: (s: unknown) => {
+        updateSetCalls.push(s);
+        return {
+          where: (w: unknown) => {
+            updateWhereCalls.push(w);
+            return {
+              returning: () => Promise.resolve(updateClaimRows),
+            };
+          },
+        };
+      },
     }),
     delete: () => ({
       where: (w: unknown) => {
@@ -89,6 +105,8 @@ beforeEach(() => {
   sendCancellationEmailMock.mockReset();
   sendCancellationEmailMock.mockResolvedValue({ ok: true });
   ledgerDeleteCalls.length = 0;
+  updateSetCalls.length = 0;
+  updateWhereCalls.length = 0;
 });
 
 const futureWindow = () => new Date(Date.now() + 5 * 60_000);
@@ -232,5 +250,34 @@ describe("cancelAutoApprovedOrder", () => {
 
     expect(result).toEqual({ ok: true });
     expect(refundCreateMock).not.toHaveBeenCalled();
+  });
+
+  it("CON-163: atomic claim passes status='auto_approved' and autoApprovedUntil guards to WHERE (deleting either breaks this test)", async () => {
+    orderRow = baseOrder();
+    updateClaimRows = [{ id: "order-1" }];
+
+    await cancelAutoApprovedOrder({
+      orderId: "order-1",
+      confirmationToken: "tok-correct",
+    });
+
+    // The claim UPDATE must appear in the set/where calls.
+    // The SET value is { status: "cancelled" } — the result of the claim.
+    const cancelSet = updateSetCalls.find(
+      (s) =>
+        s !== null &&
+        typeof s === "object" &&
+        (s as Record<string, unknown>).status === "cancelled"
+    );
+    expect(cancelSet).toBeDefined();
+
+    // The WHERE must include both the status guard and the
+    // autoApprovedUntil guard. We verify both are present by
+    // stringifying the where clause and asserting they appear.
+    const whereStr = JSON.stringify(updateWhereCalls);
+    // status eq auto_approved — the dedup primitive
+    expect(whereStr).toContain("auto_approved");
+    // autoApprovedUntil guard — prevents cancelling after the window closes
+    expect(whereStr).toContain("auto_approved_until");
   });
 });

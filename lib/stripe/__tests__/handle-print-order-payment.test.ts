@@ -69,6 +69,7 @@ vi.mock("nanoid", () => ({
 }));
 
 import { handlePrintOrderPayment } from "../handle-print-order-payment";
+import { logError } from "@/lib/logger";
 
 const baseAddress = {
   email: "ada@example.com",
@@ -138,6 +139,24 @@ describe("handlePrintOrderPayment", () => {
     expect(mockCreateOrder).not.toHaveBeenCalled();
     // Only the claim attempt fired — no heal, no place.
     expect(mockUpdateSet).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs via logError (not console.warn) when reentry against active sentinel (CON-137)", async () => {
+    claimReturns = [];
+    dbOrder = {
+      id: "order-1",
+      status: "cart_created",
+      craftCloudCartId: "cart-1",
+      craftCloudOrderId: "placing:other-worker",
+      shippingAddress: baseAddress,
+    };
+
+    await handlePrintOrderPayment("order-1");
+
+    expect(logError).toHaveBeenCalledWith(
+      "handlePrintOrderPayment.reentryAgainstActiveClaim",
+      expect.any(Error)
+    );
   });
 
   it("claim loses because status already advanced (Guard #1)", async () => {
@@ -335,14 +354,24 @@ describe("handlePrintOrderPayment (two_step)", () => {
     }
   });
 
-  it("stores a null PI id when the webhook couldn't extract one", async () => {
+  it("throws when paymentIntentId is missing — prevents stranding the order", async () => {
     dbOrder = { ...twoStepOrder };
 
-    await handlePrintOrderPayment("order-2");
+    await expect(handlePrintOrderPayment("order-2")).rejects.toThrow(
+      /missing paymentIntentId/
+    );
+    // Must NOT advance the row — nothing should be written.
+    expect(mockUpdateSet).not.toHaveBeenCalled();
+  });
+
+  it("advances the row when paymentIntentId is present", async () => {
+    dbOrder = { ...twoStepOrder };
+
+    await handlePrintOrderPayment("order-2", { paymentIntentId: "pi_fee_1" });
 
     expect(mockUpdateSet).toHaveBeenCalledWith({
       status: "awaiting_production_payment",
-      feePaymentIntentId: null,
+      feePaymentIntentId: "pi_fee_1",
       feeAuthorizedAt: expect.any(Date),
     });
   });

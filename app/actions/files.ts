@@ -619,9 +619,22 @@ export async function archiveFileListing(fileId: string) {
  * referenced by an active row in either of these states must not be
  * hard-deleted: cascading the fileAsset away would silently drop the
  * line item from a Stripe session, the buyer's library, or a
- * production-side order at CraftCloud. */
+ * production-side order at CraftCloud.
+ *
+ * Keep this set in sync with the status machine in AGENTS.md
+ * (CON-153). Any new status that represents a charged-or-about-to-be-
+ * charged order must be added here.
+ *
+ * Includes charged-before-fulfillment statuses (CON-164):
+ *   - awaiting_agent_approval: agent order created, policy eval in flight
+ *   - auto_approved: off-session PI already charged; CraftCloud placement pending
+ *   - awaiting_production_payment: two-step fee hold active; deleting
+ *     the file would break resumption and refund context */
 const ACTIVE_ORDER_STATUSES = [
   "cart_created",
+  "awaiting_agent_approval",
+  "auto_approved",
+  "awaiting_production_payment",
   "ordered",
   "in_production",
   "shipped",
