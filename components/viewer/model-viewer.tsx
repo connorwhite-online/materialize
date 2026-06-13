@@ -122,7 +122,12 @@ export function ModelViewer({
             <Stage
               adjustCamera={1.2}
               intensity={0.5}
-              environment="city"
+              // No IBL environment: drei's "city" preset fetches an HDR
+              // from an external CDN (raw.githack.com) that drops CORS
+              // headers, spamming the console and failing intermittently.
+              // Stage still provides its three-point light rig (ambient +
+              // spot + point), which is plenty for matte print previews.
+              environment={null}
             >
               <Center>
                 <ModelMesh
