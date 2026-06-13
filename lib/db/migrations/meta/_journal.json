@@ -253,6 +253,13 @@
       "when": 1781112214912,
       "tag": "0035_two_step_checkout",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1781333429342,
+      "tag": "0036_perf_indexes",
+      "breakpoints": true
     }
   ]
 }

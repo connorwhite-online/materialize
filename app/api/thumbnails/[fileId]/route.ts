@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { files, filePhotos } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
 import { logError } from "@/lib/logger";
 
@@ -69,64 +69,62 @@ export async function GET(
       return new Response("Not found", { status: 404 });
     }
 
-    const [file] = await db
+    // Single query — leftJoin folds the cover-photo row into the file
+    // row for the default path (coverPhotoId set, no ?photoId param).
+    // The ?photoId path still needs a second query because the requested
+    // photo id is not known until after we read the file row; for the
+    // default cover we DO know the id (files.coverPhotoId) at query
+    // time, so we can join eagerly. (CON-142)
+    const [row] = await db
       .select({
         id: files.id,
         thumbnailUrl: files.thumbnailUrl,
         status: files.status,
         userId: files.userId,
         coverPhotoId: files.coverPhotoId,
+        coverStorageKey: filePhotos.storageKey,
       })
       .from(files)
+      .leftJoin(filePhotos, eq(filePhotos.id, files.coverPhotoId))
       .where(eq(files.id, fileId));
 
-    if (!file || !file.thumbnailUrl) {
+    if (!row || !row.thumbnailUrl) {
       return new Response("Not found", { status: 404 });
     }
 
-    const isDraft = file.status !== "published";
+    const isDraft = row.status !== "published";
     if (isDraft) {
       const { userId } = await auth();
-      if (!userId || userId !== file.userId) {
+      if (!userId || userId !== row.userId) {
         return new Response("Not found", { status: 404 });
       }
     }
 
     let storageKey = `thumbnails/${fileId}.webp`;
 
-    // Specific photo requested — verify it belongs to this file and
-    // redirect to its storage key. `forceOriginal` wins over both
-    // requestedPhotoId and coverPhotoId — explicit intent to fetch
-    // the auto-captured asset.
+    // Specific photo requested — verify it belongs to this file.
+    // `forceOriginal` wins over both requestedPhotoId and coverPhotoId.
     if (forceOriginal) {
       // storageKey already set to the auto-captured path above; skip
       // both branches below.
     } else if (requestedPhotoId) {
+      // ?photoId variant: the photo id came from the query string, so we
+      // couldn't join eagerly — second query here only on this path.
       const [photo] = await db
         .select({
           storageKey: filePhotos.storageKey,
           fileId: filePhotos.fileId,
         })
         .from(filePhotos)
-        .where(eq(filePhotos.id, requestedPhotoId));
-      if (!photo || photo.fileId !== fileId) {
+        .where(and(eq(filePhotos.id, requestedPhotoId), eq(filePhotos.fileId, fileId)));
+      if (!photo) {
         return new Response("Not found", { status: 404 });
       }
       storageKey = photo.storageKey;
-    } else if (file.coverPhotoId) {
-      // Default cover — when the creator picked one of their curator
-      // photos as the cover, redirect to that photo's signed URL
-      // instead of the auto-captured thumbnail.
-      const [cover] = await db
-        .select({
-          storageKey: filePhotos.storageKey,
-          fileId: filePhotos.fileId,
-        })
-        .from(filePhotos)
-        .where(eq(filePhotos.id, file.coverPhotoId));
-      if (cover && cover.fileId === fileId) {
-        storageKey = cover.storageKey;
-      }
+    } else if (row.coverPhotoId && row.coverStorageKey) {
+      // Default cover — the leftJoin already fetched the storageKey;
+      // no second query needed.
+      storageKey = row.coverStorageKey;
     }
 
     // Short-lived — we're going to use the URL immediately to fetch

@@ -1,0 +1,4 @@
+CREATE INDEX "collections_pub_category_created_at_idx" ON "collections" USING btree ("category","created_at") WHERE "collections"."visibility" = 'public';--> statement-breakpoint
+CREATE INDEX "files_pub_category_created_at_idx" ON "files" USING btree ("category","created_at") WHERE "files"."status" = 'published' AND "files"."visibility" = 'public';--> statement-breakpoint
+CREATE INDEX "files_pub_download_count_idx" ON "files" USING btree ("download_count") WHERE "files"."status" = 'published' AND "files"."visibility" = 'public';--> statement-breakpoint
+CREATE INDEX "projects_pub_category_created_at_idx" ON "projects" USING btree ("category","created_at") WHERE "projects"."status" = 'published' AND "projects"."visibility" = 'public';
