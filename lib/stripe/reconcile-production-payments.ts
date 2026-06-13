@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { printOrders } from "@/lib/db/schema";
 import { getStripe } from "@/lib/stripe";
@@ -71,7 +71,9 @@ export async function reconcileProductionPayments(): Promise<ReconcileResult> {
         eq(printOrders.status, "awaiting_production_payment"),
         eq(printOrders.checkoutModel, "two_step")
       )
-    );
+    )
+    .orderBy(asc(printOrders.feeAuthorizedAt))
+    .limit(500);
 
   const result: ReconcileResult = {
     captured: 0,

@@ -1,6 +1,34 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { OrderStatusResponse } from "@/lib/craftcloud/types";
 
+// vi.hoisted runs before vi.mock factories (and before module imports),
+// so the class is available both in the mock factory AND in test bodies.
+const { MockCraftCloudApiError } = vi.hoisted(() => {
+  class MockCraftCloudApiError extends Error {
+    status: number;
+    body: string;
+    path: string;
+    constructor(status: number, body: string, path: string) {
+      super(`Craft Cloud API error ${status} at ${path}: ${body}`);
+      this.name = "CraftCloudApiError";
+      this.status = status;
+      this.body = body;
+      this.path = path;
+    }
+    isQuoteExpired() {
+      if (this.status !== 400 && this.status !== 404) return false;
+      const l = this.body.toLowerCase();
+      return (
+        l.includes("quote") &&
+        (l.includes("not found") ||
+          l.includes("expired") ||
+          l.includes("invalid"))
+      );
+    }
+  }
+  return { MockCraftCloudApiError };
+});
+
 // Mock CraftCloud client. Mocks accept rest args so the indirection
 // in vi.mock's factory (`(...args) => mockX(...args)`) type-checks.
 const mockCreateCart = vi.fn((..._args: unknown[]) =>
@@ -25,21 +53,26 @@ vi.mock("@/lib/craftcloud/client", () => ({
   createOrder: vi.fn(),
   getOrderStatus: (...args: unknown[]) => mockGetOrderStatus(...args),
   createStripeCheckout: vi.fn(),
+  CraftCloudApiError: MockCraftCloudApiError,
 }));
 
 // Mock DB
 const mockDbInsertReturning = vi.fn(() => [
   { id: "order-id-1", userId: "test-user-id" },
 ]);
+const mockDbInsertValues = vi.fn();
 const mockDbUpdateSet = vi.fn();
 const mockDbUpdateWhere = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
     insert: () => ({
-      values: () => ({
-        returning: () => mockDbInsertReturning(),
-      }),
+      values: (...args: unknown[]) => {
+        mockDbInsertValues(...args);
+        return {
+          returning: () => mockDbInsertReturning(),
+        };
+      },
     }),
     select: () => ({
       from: () => ({
@@ -127,7 +160,12 @@ describe("createPrintOrder", () => {
     expect(result).toHaveProperty("cartId", "cart-123");
   });
 
-  it("calculates correct total and service fee", async () => {
+  it("calculates correct total and service fee (CON-163)", async () => {
+    // materialPrice=10, quantity=1 → materialSubtotal=1000 cents
+    // shippingPrice=5 → shippingSubtotal=500 cents
+    // preShippingTotal = 1000 * 1 + 0 (no productionFee) = 1000 cents
+    // totalPrice = 1000 + 500 = 1500 cents
+    // serviceFee = Math.round(1000 * 0.03) = 30 cents
     await createPrintOrder({
       fileAssetId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
       quoteId: "quote-1",
@@ -140,9 +178,60 @@ describe("createPrintOrder", () => {
       currency: "USD",
     });
 
-    // total = (10 * 1 + 5) * 100 = 1500 cents
-    // serviceFee = 1500 * 0.08 = 120 cents
-    expect(mockDbInsertReturning).toHaveBeenCalled();
+    expect(mockDbInsertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        totalPrice: 1500,
+        serviceFee: 30,
+        materialSubtotal: 1000,
+        shippingSubtotal: 500,
+      })
+    );
+  });
+
+  it("CON-138: CraftCloudApiError (non-expired) returns safe generic message, not raw error.message", async () => {
+    mockCreateCart.mockRejectedValueOnce(
+      new MockCraftCloudApiError(500, "internal /v5/path details leaked here", "/v5/carts")
+    );
+
+    const result = await createPrintOrder({
+      fileAssetId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      quoteId: "quote-1",
+      vendorId: "vendor-1",
+      materialConfigId: "pla-white",
+      shippingId: "ship-1",
+      quantity: 1,
+      materialPrice: 10,
+      shippingPrice: 5,
+      currency: "USD",
+    });
+
+    if (!("error" in result)) throw new Error("expected error");
+    // Must not contain the internal path or raw body
+    expect(result.error).not.toContain("/v5/");
+    expect(result.error).not.toContain("internal /v5/path details");
+    expect(result.error).toMatch(/print partner|try again/i);
+  });
+
+  it("CON-138: CraftCloudApiError (quote expired) returns actionable message", async () => {
+    mockCreateCart.mockRejectedValueOnce(
+      new MockCraftCloudApiError(400, "Quote not found or expired", "/v5/carts")
+    );
+
+    const result = await createPrintOrder({
+      fileAssetId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      quoteId: "quote-1",
+      vendorId: "vendor-1",
+      materialConfigId: "pla-white",
+      shippingId: "ship-1",
+      quantity: 1,
+      materialPrice: 10,
+      shippingPrice: 5,
+      currency: "USD",
+    });
+
+    if (!("error" in result)) throw new Error("expected error");
+    expect(result.error).toMatch(/expired|pick a material/i);
+    expect(result.error).not.toContain("/v5/");
   });
 });
 

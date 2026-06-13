@@ -46,6 +46,9 @@ export async function GET(request: Request) {
   try {
     const result = await reconcileProductionPayments();
     console.log("[cron/reconcile-production-payments] swept", result);
+    if (result.errors > 0) {
+      return Response.json(result, { status: 500 });
+    }
     return Response.json(result);
   } catch (error) {
     logError("cron/reconcile-production-payments", error);

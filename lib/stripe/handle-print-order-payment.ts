@@ -111,10 +111,9 @@ export async function handlePrintOrderPayment(
 
     // Another worker holds an active claim. Stay out of their way.
     if (isClaimSentinel(order.craftCloudOrderId)) {
-      console.warn("[handlePrintOrderPayment] reentry against active claim", {
-        printOrderId,
-        sentinel: order.craftCloudOrderId,
-      });
+      logError("handlePrintOrderPayment.reentryAgainstActiveClaim", new Error(
+        `reentry against active claim for order ${printOrderId} (sentinel: ${order.craftCloudOrderId})`
+      ));
       return;
     }
 
@@ -203,11 +202,16 @@ async function handleTwoStepFeeAuthorization(
   printOrderId: string,
   paymentIntentId: string | undefined
 ): Promise<void> {
+  if (paymentIntentId === undefined) {
+    throw new Error(
+      `handleTwoStepFeeAuthorization: missing paymentIntentId for order ${printOrderId} — cannot advance without a PI to capture`
+    );
+  }
   await db
     .update(printOrders)
     .set({
       status: "awaiting_production_payment",
-      feePaymentIntentId: paymentIntentId ?? null,
+      feePaymentIntentId: paymentIntentId,
       feeAuthorizedAt: new Date(),
     })
     .where(

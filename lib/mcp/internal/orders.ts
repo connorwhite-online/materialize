@@ -19,8 +19,8 @@ import { evaluateSpendingPolicy } from "@/lib/billing/policy";
 import { getStripe } from "@/lib/stripe";
 import { logError } from "@/lib/logger";
 import type { Currency } from "@/lib/craftcloud/types";
+import { calcServiceFee } from "@/lib/fees";
 
-const SERVICE_FEE_RATE = 0.03;
 const CONFIRMATION_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
@@ -189,7 +189,7 @@ export async function createAgentInitiatedOrder(
   const preShippingTotal =
     input.materialPriceCents * input.quantity + productionFeeCents;
   const totalPrice = preShippingTotal + input.shippingPriceCents;
-  const serviceFee = Math.round(preShippingTotal * SERVICE_FEE_RATE);
+  const serviceFee = calcServiceFee(preShippingTotal);
   // What the user will actually be charged — service fee on top of
   // the line items. Keep this consistent with mintStripeSession in
   // app/actions/agent-orders.ts so the auto-approved charge equals
