@@ -86,6 +86,10 @@ export function useCart(): CartContextValue | null {
   return useContext(CartContext);
 }
 
+// Three-tier cart: (1) `localItems` — anon in-memory Files; (2) DB `cartItems`
+// (Materialize cart); (3) CraftCloud cart — created only at checkout per vendor
+// group (`createCart()` in lib/print/print.ts). Never equate the DB cart with a
+// CraftCloud cart; they're separate concepts.
 export function CartProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<CartItemWithMeta[]>([]);
   const [localItems, setLocalItems] = useState<LocalCartItem[]>([]);

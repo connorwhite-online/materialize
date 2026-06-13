@@ -21,9 +21,8 @@ interface ListingFlaggedBannerProps {
 /**
  * Owner-only banner that appears when fingerprintAndPersistAsset (or
  * the cron sweep) auto-archives the listing on a cross-user geometry
- * collision. Stays visible until the dispute flow (TODO) is built out;
- * for now the only action is the implicit "leave it" or contact-out-
- * of-band path.
+ * collision. The dispute flow is built — see DisputeButton below,
+ * `app/actions/disputes.ts`, and the `disputes` table in lib/db/schema.ts.
  */
 export function ListingFlaggedBanner({
   fileId,
