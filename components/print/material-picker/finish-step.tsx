@@ -104,6 +104,13 @@ export function FinishStep({
     return { materialName, cards };
   }, [quotes, shipping, sortQuantity, materialId]);
 
+  // Ref for the step heading — focused on mount so keyboard/SR users
+  // land on it after a step transition (CON-157).
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
+
   // If the selected material only has one finish group, skip this
   // step entirely — there's no decision for the user to make. We
   // only fire once per mount/material change so the user can still
@@ -136,7 +143,7 @@ export function FinishStep({
           <ChevronRight size={14} className="rotate-180" />
           All materials
         </button>
-        <h2 className="mt-2 text-lg font-semibold">{materialName}</h2>
+        <h2 ref={headingRef} tabIndex={-1} className="mt-2 text-lg font-semibold outline-none">{materialName}</h2>
         <p className="text-xs text-muted-foreground">Pick a finish</p>
       </div>
 

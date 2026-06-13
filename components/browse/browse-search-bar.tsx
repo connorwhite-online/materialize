@@ -57,7 +57,7 @@ export function BrowseSearchBar({ defaultValue = "", category }: BrowseSearchBar
     <form
       method="GET"
       action="/files"
-      className="w-full max-w-2xl rounded-3xl border border-input bg-muted/70 backdrop-blur-xl dark:bg-input/40 depth-sunken p-1"
+      className="w-full max-w-2xl rounded-3xl border border-input bg-muted/70 backdrop-blur-xl dark:bg-input/40 depth-sunken p-1 focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2"
     >
       {category ? (
         <input type="hidden" name="category" value={category} />

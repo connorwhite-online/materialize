@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import localFont from "next/font/local";
 import "./globals.css";
+import { MotionConfig } from "motion/react";
 import { AuthModalProvider } from "@/components/auth/auth-modal";
 import { ThemeProvider } from "@/components/theme-provider";
 import { PendingPrintFileProvider } from "@/components/upload/pending-print-file";
@@ -89,11 +90,13 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <body className="min-h-full flex flex-col">
-          <ThemeProvider>
-            <AuthModalProvider>
-              <PendingPrintFileProvider>{children}</PendingPrintFileProvider>
-            </AuthModalProvider>
-          </ThemeProvider>
+          <MotionConfig reducedMotion="user">
+            <ThemeProvider>
+              <AuthModalProvider>
+                <PendingPrintFileProvider>{children}</PendingPrintFileProvider>
+              </AuthModalProvider>
+            </ThemeProvider>
+          </MotionConfig>
           <Iterate />
         </body>
       </html>

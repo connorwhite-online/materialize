@@ -215,13 +215,16 @@ export function PriceDisplay({
 
         <Separator />
 
-        <div className="flex justify-between font-semibold">
+        <div className="flex justify-between font-semibold" aria-live="polite" aria-atomic="true">
           <span>Total</span>
           <span>${total.toFixed(2)}</span>
         </div>
 
         {checkoutError && (
-          <p className="mt-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+          <p
+            role="alert"
+            className="mt-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+          >
             {checkoutError}
           </p>
         )}

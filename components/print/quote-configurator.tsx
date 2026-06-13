@@ -1032,6 +1032,13 @@ export function QuoteConfigurator({
             <p className="text-sm">{checkoutError}</p>
           </Alert>
         )}
+        {/* Authed path: announce processing state to SR (anon path
+            already has its own role="status" inside ShippingAddressForm). */}
+        {step === "processing" && !isAnon && (
+          <p role="status" className="sr-only">
+            Placing your order…
+          </p>
+        )}
         <ShippingAddressForm
           onSubmit={handleAddressSubmit}
           onBack={() => setStep("configure")}
