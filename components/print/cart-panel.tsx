@@ -1,13 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useUser } from "@clerk/nextjs";
 import { useCart, type LocalCartItem } from "./cart-context";
 import type { CartItemWithMeta } from "@/app/actions/cart";
 import { useAuthModal } from "@/components/auth/auth-modal";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { XIcon, MinusIcon, PlusIcon, TrashIcon } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { MinusIcon, PlusIcon, TrashIcon } from "lucide-react";
 import { checkoutVendorGroup } from "@/app/actions/print";
 import { dedupeShippingByShipId } from "@/lib/pricing/shipping";
 import { useRouter } from "next/navigation";
@@ -122,49 +127,41 @@ function CartPanelInner() {
     materializing,
     loading,
   } = cart;
-  const panelRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    function handleClickOutside(e: MouseEvent) {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        close();
-      }
-    }
-
-    function handleEscape(e: KeyboardEvent) {
-      if (e.key === "Escape") close();
-    }
-
-    document.addEventListener("mousedown", handleClickOutside);
-    document.addEventListener("keydown", handleEscape);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, [isOpen, close]);
-
-  if (!isOpen) return null;
 
   const allItems = toDisplayItems(items, localItems);
   const isEmpty = allItems.length === 0;
 
   return (
-    <div className="fixed inset-0 z-50">
-      <div className="fixed inset-0 bg-black/20" />
-      <div
-        ref={panelRef}
-        className="fixed right-4 top-16 w-[380px] max-h-[calc(100vh-5rem)] overflow-y-auto rounded-xl border border-border bg-background shadow-lg animate-in fade-in slide-in-from-top-2 duration-200 max-md:left-4 max-md:right-4 max-md:w-auto"
+    // Dialog.Root takes open + onOpenChange — wires to the cart context
+    // open/close so focus is trapped and restored by base-ui.
+    <Dialog open={isOpen} onOpenChange={(open) => { if (!open) close(); }}>
+      <DialogContent
+        aria-label="Cart"
+        showCloseButton={false}
+        className="fixed right-4 top-16 left-auto translate-x-0 translate-y-0 w-[380px] max-h-[calc(100vh-5rem)] overflow-y-auto rounded-xl p-0 max-md:left-4 max-md:right-4 max-md:w-auto sm:max-w-none data-open:animate-in data-open:fade-in data-open:slide-in-from-top-2 data-closed:animate-out data-closed:fade-out data-closed:slide-out-to-top-2 duration-200"
       >
         <div className="flex items-center justify-between p-4 pb-2">
-          <h2 className="text-sm font-semibold">Cart</h2>
+          <DialogTitle className="text-sm font-semibold">Cart</DialogTitle>
           <button
             onClick={close}
+            aria-label="Close cart"
             className="rounded-md p-1 text-muted-foreground hover:text-foreground transition-colors"
           >
-            <XIcon className="h-4 w-4" />
+            <svg
+              aria-hidden="true"
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M18 6 6 18" /><path d="M6 6l12 12" />
+            </svg>
           </button>
         </div>
 
@@ -204,8 +201,8 @@ function CartPanelInner() {
             close={close}
           />
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -408,7 +405,10 @@ function VendorGroup({
       </div>
 
       {error && (
-        <p className="mt-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+        <p
+          role="alert"
+          className="mt-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+        >
           {error}
         </p>
       )}
@@ -446,12 +446,13 @@ function CartItemRow({
   const repricing = !!cart?.repricingIds.has(item.id);
   const unitPrice = item.materialPrice / 100;
   const lineTotal = (item.materialPrice * item.quantity) / 100;
+  const name = item.fileName ?? item.originalFilename;
 
   return (
     <div className="flex items-start gap-3">
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate">
-          {item.fileName ?? item.originalFilename}
+          {name}
         </p>
         {repricing ? (
           <span className="mt-1 inline-block h-3 w-16 animate-pulse rounded bg-muted align-middle" />
@@ -471,19 +472,21 @@ function CartItemRow({
         <button
           onClick={() => item.quantity > 1 && onUpdateQty(item.quantity - 1)}
           disabled={item.quantity <= 1}
+          aria-label={`Decrease quantity of ${name}`}
           className="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
         >
-          <MinusIcon className="h-3.5 w-3.5" />
+          <MinusIcon className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
-        <span className="w-6 text-center text-sm tabular-nums">
+        <span className="w-6 text-center text-sm tabular-nums" aria-live="polite">
           {item.quantity}
         </span>
         <button
           onClick={() => item.quantity < 100 && onUpdateQty(item.quantity + 1)}
           disabled={item.quantity >= 100}
+          aria-label={`Increase quantity of ${name}`}
           className="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
         >
-          <PlusIcon className="h-3.5 w-3.5" />
+          <PlusIcon className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
       </div>
 
@@ -499,9 +502,10 @@ function CartItemRow({
 
       <button
         onClick={onRemove}
+        aria-label={`Remove ${name} from cart`}
         className="rounded p-0.5 text-muted-foreground hover:text-destructive transition-colors"
       >
-        <TrashIcon className="h-3.5 w-3.5" />
+        <TrashIcon className="h-3.5 w-3.5" aria-hidden="true" />
       </button>
     </div>
   );
