@@ -376,3 +376,28 @@
     background: oklch(0.922 0 0 / 0.15);
   }
 }
+
+/* Reduce motion for vestibular-disorder users (CON-158).
+   MotionConfig reducedMotion="user" handles motion/react animations;
+   this covers CSS keyframe loaders (loading bars, spinners, pulse
+   skeletons) that live outside the Framer Motion tree. */
+@media (prefers-reduced-motion: reduce) {
+  /* Collapse translate-based loaders to opacity-only */
+  @keyframes material-loading-bar {
+    0%, 100% { opacity: 0.4; transform: none; }
+    50% { opacity: 1; transform: none; }
+  }
+  @keyframes loading-bar {
+    0%, 100% { opacity: 0.4; transform: none; }
+    50% { opacity: 1; transform: none; }
+  }
+  /* Tailwind spin / pulse utilities */
+  .animate-spin {
+    animation: none;
+    opacity: 0.6;
+  }
+  .animate-pulse {
+    animation: none;
+    opacity: 0.5;
+  }
+}

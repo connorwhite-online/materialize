@@ -10,6 +10,7 @@ import type {
 import { modelFitsInVolume } from "@/lib/craftcloud/fits-volume";
 import type { MaterialsManifestResponse } from "@/app/api/craftcloud/materials-manifest/route";
 import { PriceDisplay, type MinimumFeeInfo } from "./price-display";
+import type { CheckoutModel } from "@/lib/env";
 import type { Currency } from "@/lib/craftcloud/types";
 import { ShippingAddressForm } from "./shipping-address-form";
 import { pollQuotes } from "./poll-quotes";
@@ -103,6 +104,15 @@ interface QuoteConfiguratorProps {
    * inline FileContextBar pill at the top.
    */
   headerSlot?: ReactNode;
+  /**
+   * Checkout architecture for new orders — server-derived via
+   * getCheckoutModel() in the page component and prop-drilled here
+   * (lib/env reads process.env; only the TYPE is importable client
+   * side). Forwarded to PriceDisplay so the "two charges" disclosure
+   * renders next to the checkout button under two_step. Defaults to
+   * "single" so existing call sites/tests are unaffected.
+   */
+  checkoutModel?: CheckoutModel;
 }
 
 type CheckoutStep = "configure" | "address" | "processing";
@@ -129,6 +139,7 @@ export function QuoteConfigurator({
   onAddedToCart,
   rightAnnex,
   headerSlot,
+  checkoutModel = "single",
 }: QuoteConfiguratorProps) {
   const isDraft = !!draftMode;
 
@@ -1021,6 +1032,13 @@ export function QuoteConfigurator({
             <p className="text-sm">{checkoutError}</p>
           </Alert>
         )}
+        {/* Authed path: announce processing state to SR (anon path
+            already has its own role="status" inside ShippingAddressForm). */}
+        {step === "processing" && !isAnon && (
+          <p role="status" className="sr-only">
+            Placing your order…
+          </p>
+        )}
         <ShippingAddressForm
           onSubmit={handleAddressSubmit}
           onBack={() => setStep("configure")}
@@ -1281,6 +1299,7 @@ export function QuoteConfigurator({
                 ? `Shipping matches your ${selectedQuote.vendorName} cart`
                 : null
             }
+            checkoutModel={checkoutModel}
           />
           {rightAnnex?.({ pendingItem })}
         </div>

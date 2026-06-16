@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
@@ -13,6 +14,7 @@ import { OrderModelPreview } from "@/components/print/order-model-preview";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { getMaterialById } from "@/lib/materials";
 import { formatOrderNumber } from "@/lib/utils/order-number";
@@ -20,6 +22,7 @@ import { formatOrderNumber } from "@/lib/utils/order-number";
 const STATUS_LABELS: Record<string, string> = {
   quoting: "Quoting",
   cart_created: "Pending Payment",
+  awaiting_production_payment: "Awaiting production payment",
   ordered: "Confirmed",
   in_production: "In Production",
   shipped: "Shipped",
@@ -207,6 +210,31 @@ export default async function OrderDetailPage(props: {
             </div>
           )}
         </div>
+      )}
+
+      {/* Two-step checkout limbo: the 3% service fee is authorized
+          (held, not charged) and the CraftCloud order is placed, but
+          production + shipping haven't been paid to CraftCloud yet.
+          The tracker below renders all-pending for this status, so
+          spell out what's owed and link the payment interstitial. */}
+      {order.status === "awaiting_production_payment" && (
+        <Alert className="mt-6 border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950">
+          <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+            Awaiting production payment
+          </p>
+          <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+            Service fee authorized — finish paying CraftCloud for production.
+            Your card hold for the 3% service fee is only charged once your
+            order is confirmed.
+          </p>
+          <Button
+            size="sm"
+            className="mt-3"
+            render={<Link href={`/orders/${order.id}/pay-production`} />}
+          >
+            Complete payment
+          </Button>
+        </Alert>
       )}
 
       {/* Status tracker */}

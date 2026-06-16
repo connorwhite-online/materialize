@@ -71,11 +71,11 @@ export function FileUploader({ onFileSelected }: FileUploaderProps) {
       <label
         onDrop={handleDrop}
         onDragOver={(e) => e.preventDefault()}
-        className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-foreground/15 bg-foreground/[0.03] p-12 text-center transition-colors hover:border-primary/50 hover:bg-foreground/[0.06] dark:border-foreground/20 dark:bg-foreground/[0.04] dark:hover:bg-foreground/[0.08]"
+        className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-foreground/15 bg-foreground/[0.03] p-12 text-center transition-colors hover:border-primary/50 hover:bg-foreground/[0.06] dark:border-foreground/20 dark:bg-foreground/[0.04] dark:hover:bg-foreground/[0.08] focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2"
       >
         <input
           type="file"
-          className="hidden"
+          className="sr-only"
           accept={acceptExtensions}
           onChange={handleChange}
         />
@@ -86,7 +86,11 @@ export function FileUploader({ onFileSelected }: FileUploaderProps) {
           STL, OBJ, 3MF, STEP, AMF — Max 200MB
         </p>
       </label>
-      {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+      {error && (
+        <p role="alert" className="mt-2 text-sm text-destructive">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

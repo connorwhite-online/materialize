@@ -17,7 +17,8 @@ import {
   printOrders,
   printOrderItems,
 } from "@/lib/db/schema";
-import { eq, and, asc, desc, inArray, isNull } from "drizzle-orm";
+import { eq, and, asc, desc, inArray } from "drizzle-orm";
+import { loadFileBySlug } from "./loader";
 import { ownsLoadedFile, userHasUsedFile } from "@/lib/entitlement";
 import { isOrgMember } from "@/lib/authorization";
 import { Card, CardContent } from "@/components/ui/card";
@@ -29,8 +30,8 @@ import {
 } from "@/components/photos/photos-feed";
 import { DeleteFileButton } from "@/components/files/delete-file-button";
 import { EditFileButton } from "@/components/files/edit-file-button";
-import { FileThumbnailGenerator } from "@/components/files/file-thumbnail-generator";
-import { OrderModelPreview } from "@/components/print/order-model-preview";
+import { FileThumbnailGeneratorLazy } from "@/components/files/file-thumbnail-generator-lazy";
+import { OrderModelPreviewLazy } from "@/components/print/order-model-preview-lazy";
 import { VerifyingPill } from "@/components/files/verifying-pill";
 import { ListingFlaggedBanner } from "@/components/files/listing-flagged-banner";
 import {
@@ -46,6 +47,7 @@ import { UserAvatar } from "@/components/auth/user-avatar";
 import { Pencil } from "@/components/icons/pencil";
 import { Trash } from "@/components/icons/trash";
 import { LicenseBadge } from "@/components/licenses/license-badge";
+import { getCategoryLabel } from "@/lib/categories";
 import { getMaterialById } from "@/lib/materials";
 import { findMaterialConfig, getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
 import { generateDownloadUrl } from "@/lib/storage";
@@ -78,18 +80,7 @@ export async function generateMetadata(props: {
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await props.params;
-  const [row] = await db
-    .select({
-      name: files.name,
-      description: files.description,
-      thumbnailUrl: files.thumbnailUrl,
-      status: files.status,
-      displayName: users.displayName,
-      username: users.username,
-    })
-    .from(files)
-    .innerJoin(users, eq(files.userId, users.id))
-    .where(eq(files.slug, slug));
+  const row = await loadFileBySlug(slug);
 
   if (!row || row.status !== "published") {
     return { title: "Not found", robots: { index: false, follow: false } };
@@ -130,39 +121,9 @@ export default async function FileDetailPage(props: {
   const { slug } = await props.params;
   const { userId } = await auth();
 
-  // Look up by slug only — we filter by published status (or owner) below.
-  const [file] = await db
-    .select({
-      id: files.id,
-      status: files.status,
-      name: files.name,
-      description: files.description,
-      slug: files.slug,
-      price: files.price,
-      license: files.license,
-      tags: files.tags,
-      designTags: files.designTags,
-      recommendedMaterialId: files.recommendedMaterialId,
-      recommendedCcMaterialId: files.recommendedCcMaterialId,
-      minWallThickness: files.minWallThickness,
-      visibility: files.visibility,
-      thumbnailUrl: files.thumbnailUrl,
-      coverPhotoId: files.coverPhotoId,
-      downloadCount: files.downloadCount,
-      viewCount: files.viewCount,
-      createdAt: files.createdAt,
-      flaggedReason: files.flaggedReason,
-      flaggedAt: files.flaggedAt,
-      userId: files.userId,
-      organizationId: files.organizationId,
-      username: users.username,
-      displayName: users.displayName,
-      avatarUrl: users.avatarUrl,
-      ownerOnboarded: users.stripeOnboardingComplete,
-    })
-    .from(files)
-    .innerJoin(users, eq(files.userId, users.id))
-    .where(eq(files.slug, slug));
+  // React.cache deduplicates this call with the one in generateMetadata
+  // for the same slug on the same request — one DB round-trip total.
+  const file = await loadFileBySlug(slug);
 
   // Visible to anyone if published & public; visible to writers
   // (creator or org member) regardless of status / visibility. The
@@ -651,7 +612,7 @@ export default async function FileDetailPage(props: {
         />
       )}
       {needsThumbnail && primaryAsset && (
-        <FileThumbnailGenerator
+        <FileThumbnailGeneratorLazy
           fileId={file.id}
           fileAssetId={primaryAsset.id}
           format={primaryAsset.format}
@@ -672,7 +633,7 @@ export default async function FileDetailPage(props: {
           <div>
             {previewable && primaryAsset ? (
               <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
-                <OrderModelPreview
+                <OrderModelPreviewLazy
                   fileAssetId={primaryAsset.id}
                   format={primaryAsset.format}
                   materialColor={recommendedMaterial?.color ?? "#a1a1aa"}
@@ -740,6 +701,14 @@ export default async function FileDetailPage(props: {
                   </span>
                 )}
                 <LicenseBadge license={file.license} />
+                {file.category && getCategoryLabel(file.category) && (
+                  <Link
+                    href={`/files?category=${file.category}`}
+                    className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    {getCategoryLabel(file.category)}
+                  </Link>
+                )}
               </div>
             </div>
 
@@ -778,6 +747,7 @@ export default async function FileDetailPage(props: {
                       name: file.name,
                       description: file.description,
                       tags: file.tags,
+                      category: file.category,
                       price: file.price,
                       license: file.license,
                       visibility: file.visibility ?? "public",

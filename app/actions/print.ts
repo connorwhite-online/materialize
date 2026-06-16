@@ -18,11 +18,16 @@
  *     - Returns { checkoutUrl } for the client to window.location to.
  *     - isAnonFlow swaps the success redirect to /dashboard/orders?welcome=1
  *
- * The CraftCloud order itself is NOT placed here — that happens in
- * app/api/webhooks/stripe/route.ts after the payment clears. See
- * that file for the idempotency invariants.
+ * Under the "single" checkout model the CraftCloud order is NOT
+ * placed here — that happens in app/api/webhooks/stripe/route.ts
+ * after the payment clears. See that file for the idempotency
+ * invariants. Under "two_step" (see printOrders.checkoutModel),
+ * completePrintOrder places the CraftCloud order up-front (unpaid),
+ * mints CraftCloud's hosted bridge session, and our Stripe session
+ * only AUTHORIZES the 3% fee — captured later by the reconciliation
+ * cron.
  *
- * SERVICE_FEE_RATE is our cut. Do not hardcode elsewhere.
+ * Fee calculation lives in lib/fees.ts (calcServiceFee). Do not hardcode elsewhere.
  */
 
 import { auth } from "@clerk/nextjs/server";
@@ -34,9 +39,12 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import {
   createCart,
+  createOrder,
+  createStripeCheckout,
   getOrderStatus,
   CraftCloudApiError,
 } from "@/lib/craftcloud/client";
+import { getCheckoutModel, isSandboxMode } from "@/lib/env";
 import { findMaterialConfig, findProvider } from "@/lib/craftcloud/catalog";
 import { getStripe } from "@/lib/stripe";
 import { printOrderSchema } from "@/lib/validations/print";
@@ -44,9 +52,8 @@ import { checkoutAddressSchema } from "@/lib/validations/address";
 import { logError } from "@/lib/logger";
 import { userCanPrintAsset } from "@/lib/entitlement";
 import { dedupeShippingByShipId } from "@/lib/pricing/shipping";
-import type { Currency } from "@/lib/craftcloud/types";
-
-const SERVICE_FEE_RATE = 0.03;
+import type { Address, Currency } from "@/lib/craftcloud/types";
+import { calcServiceFee } from "@/lib/fees";
 
 /**
  * Lightweight check for vendor minimum production prices. Creates a
@@ -115,6 +122,17 @@ export async function discardDraftOrder(
   }
 }
 
+/**
+ * NOTE on checkoutModel: user-driven orders (this action +
+ * checkoutVendorGroup) stamp the row with getCheckoutModel() at
+ * creation time — the persisted column, not the env var, drives all
+ * later lifecycle branching, so flipping CHECKOUT_MODEL never strands
+ * in-flight orders. Agent/MCP-initiated orders (lib/mcp/**) are
+ * intentionally NOT stamped and stay "single" via the column default:
+ * they auto-charge a saved payment method with no customer present,
+ * so there is nobody to walk through CraftCloud's hosted production
+ * payment.
+ */
 export async function createPrintOrder(params: {
   fileAssetId: string;
   quoteId: string;
@@ -172,7 +190,7 @@ export async function createPrintOrder(params: {
     const preShippingTotal =
       materialSubtotal * data.quantity + productionFeeCents;
     const totalPrice = preShippingTotal + shippingSubtotal;
-    const serviceFee = Math.round(preShippingTotal * SERVICE_FEE_RATE);
+    const serviceFee = calcServiceFee(preShippingTotal, getCheckoutModel());
 
     // Create print order record
     const [order] = await db
@@ -190,6 +208,9 @@ export async function createPrintOrder(params: {
         vendor: data.vendorId,
         vendorName: data.vendorName ?? null,
         status: "cart_created",
+        // Persisted model drives all later branching — see the
+        // checkoutModel note above createPrintOrder.
+        checkoutModel: getCheckoutModel(),
       })
       .returning();
 
@@ -197,17 +218,18 @@ export async function createPrintOrder(params: {
     return { orderId: order.id, cartId: cart.cartId };
   } catch (error) {
     logError("createPrintOrder", error);
-    if (error instanceof CraftCloudApiError && error.isQuoteExpired()) {
-      return {
-        error:
-          "This quote has expired. Please pick a material again — prices may have changed.",
-      };
+    if (error instanceof CraftCloudApiError) {
+      if (error.isQuoteExpired()) {
+        return {
+          error:
+            "This quote has expired. Please pick a material again — prices may have changed.",
+        };
+      }
+      // Never return the raw CraftCloudApiError message — it contains
+      // internal API paths and upstream response bodies (CON-138).
+      return { error: "Our print partner returned an error. Please try again." };
     }
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Failed to create print order. Please try again.";
-    return { error: message };
+    return { error: "Failed to create print order. Please try again." };
   }
 }
 
@@ -313,7 +335,7 @@ export async function checkoutVendorGroup(
     // subtotal so freight doesn't inflate our cut.
     const preShippingTotal = totalMaterial + productionFeeCents;
     const totalPrice = preShippingTotal + totalShipping;
-    const serviceFee = Math.round(preShippingTotal * SERVICE_FEE_RATE);
+    const serviceFee = calcServiceFee(preShippingTotal, getCheckoutModel());
 
     // All cart items were selected by vendorId, so the vendor name
     // (if any) is consistent across the group — pick the first
@@ -333,6 +355,9 @@ export async function checkoutVendorGroup(
         vendor: vendorId,
         vendorName: resolvedVendorName,
         status: "cart_created",
+        // Persisted model drives all later branching — see the
+        // checkoutModel note above createPrintOrder.
+        checkoutModel: getCheckoutModel(),
       })
       .returning();
 
@@ -368,17 +393,18 @@ export async function checkoutVendorGroup(
     return { orderId: order.id, cartId: cart.cartId };
   } catch (error) {
     logError("checkoutVendorGroup", error);
-    if (error instanceof CraftCloudApiError && error.isQuoteExpired()) {
-      return {
-        error:
-          "One or more quotes in this cart have expired. Remove those items and re-add them from the quote page.",
-      };
+    if (error instanceof CraftCloudApiError) {
+      if (error.isQuoteExpired()) {
+        return {
+          error:
+            "One or more quotes in this cart have expired. Remove those items and re-add them from the quote page.",
+        };
+      }
+      // Never return the raw CraftCloudApiError message — it contains
+      // internal API paths and upstream response bodies (CON-138).
+      return { error: "Our print partner returned an error. Please try again." };
     }
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Failed to checkout vendor group";
-    return { error: message };
+    return { error: "Failed to checkout vendor group. Please try again." };
   }
 }
 
@@ -539,26 +565,40 @@ function dedupeShippingSum(
   return items.reduce((sum, i) => sum + i.shippingSubtotal, 0);
 }
 
+/**
+ * Derive the redirect base URL from the live request rather than a
+ * build-time env var. NEXT_PUBLIC_APP_URL bakes at build time and,
+ * when unset in production, the fallback "http://localhost:3000"
+ * got embedded into the Stripe session's success/cancel URLs — so
+ * every customer post-payment landed on a dead localhost page.
+ * Mirrors the pattern in app/(app)/dashboard/settings/tokens/page.tsx.
+ */
+async function deriveAppUrl(): Promise<string> {
+  const h = await headers();
+  const host = h.get("x-forwarded-host") ?? h.get("host");
+  const proto = h.get("x-forwarded-proto") ?? "https";
+  return host
+    ? `${proto}://${host}`
+    : process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+}
+
 async function createStripeSessionForOrder(
   order: typeof printOrders.$inferSelect,
   opts: { email: string; isAnonFlow: boolean }
 ): Promise<{ id: string; url: string } | { error: string }> {
-  // Derive the redirect base URL from the live request rather than a
-  // build-time env var. NEXT_PUBLIC_APP_URL bakes at build time and,
-  // when unset in production, the fallback "http://localhost:3000"
-  // got embedded into the Stripe session's success/cancel URLs — so
-  // every customer post-payment landed on a dead localhost page.
-  // Mirrors the pattern in app/(app)/dashboard/settings/tokens/page.tsx.
-  const h = await headers();
-  const host = h.get("x-forwarded-host") ?? h.get("host");
-  const proto = h.get("x-forwarded-proto") ?? "https";
-  const appUrl = host
-    ? `${proto}://${host}`
-    : process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  const appUrl = await deriveAppUrl();
+
+  // Two-step model: our session only AUTHORIZES the 3% service fee
+  // (capture_method: "manual" below). Print + shipping are paid to
+  // CraftCloud directly via their hosted bridge session, so the only
+  // line item here is the fee.
+  const isTwoStep = order.checkoutModel === "two_step";
 
   const lineItems: StripeLineItem[] = [];
 
-  if (!order.fileAssetId) {
+  if (isTwoStep) {
+    // Fee-only — no print/shipping lines.
+  } else if (!order.fileAssetId) {
     // Multi-item order — build line items from printOrderItems
     const itemLines = await buildMultiItemLineItems(
       order.id,
@@ -660,7 +700,9 @@ async function createStripeSessionForOrder(
       unit_amount: order.serviceFee,
       product_data: {
         name: "Service fee",
-        description: "Materialize platform fee (3%)",
+        description: isTwoStep
+          ? "Materialize platform fee (3%) — authorized now, charged only when your order is placed"
+          : "Materialize platform fee (3%)",
       },
     },
     quantity: 1,
@@ -672,13 +714,27 @@ async function createStripeSessionForOrder(
     customer_email: opts.email,
     line_items: lineItems,
     payment_intent_data: {
+      // Two-step: hold the fee, don't charge it. The reconciliation
+      // cron captures once CraftCloud payment is confirmed. NOTE:
+      // under manual capture the completed session reports
+      // payment_status "unpaid" — the webhook router special-cases
+      // this via metadata.checkoutModel below.
+      ...(isTwoStep ? { capture_method: "manual" as const } : {}),
       metadata: { printOrderId: order.id },
     },
     metadata: {
       printOrderId: order.id,
       type: "print_order",
+      // Stamped on both models so the webhook (and anyone reading
+      // Stripe events) can tell which lifecycle the session belongs
+      // to without a DB lookup.
+      checkoutModel: isTwoStep ? "two_step" : "single",
     },
-    success_url: `${appUrl}/dashboard/orders?${opts.isAnonFlow ? "welcome=1&" : ""}payment=success&orderId=${order.id}`,
+    success_url: isTwoStep
+      ? // Fee authorized — next stop is CraftCloud's hosted production
+        // payment, surfaced on the pay-production page.
+        `${appUrl}/orders/${order.id}/pay-production?fee=authorized`
+      : `${appUrl}/dashboard/orders?${opts.isAnonFlow ? "welcome=1&" : ""}payment=success&orderId=${order.id}`,
     cancel_url: `${appUrl}/dashboard/orders?payment=cancelled&orderId=${order.id}`,
   });
 
@@ -773,6 +829,16 @@ export async function completePrintOrder(params: {
         if (existing.status === "open" && existing.url) {
           return { checkoutUrl: existing.url };
         }
+        // Session completed (paid) but the webhook hasn't processed
+        // yet — the row is still cart_created. Minting a second session
+        // here would let the user pay twice. Surface a friendly message
+        // and let the webhook advance the order. Do NOT null out the id.
+        if (existing.status === "complete") {
+          return {
+            error:
+              "This order is already being processed — check your orders in a moment.",
+          };
+        }
         // Expired/closed → fall through to mint a fresh one. We
         // can't atomically claim with isNull(stripeSessionId) so
         // null it out first via a conditional swap on the stale id.
@@ -837,6 +903,23 @@ export async function completePrintOrder(params: {
       return {
         error: "Checkout already in progress. Please refresh and try again.",
       };
+    }
+
+    // Two-step model: the CraftCloud order is placed UP-FRONT, unpaid,
+    // and CraftCloud's hosted bridge session is minted BEFORE our
+    // fee-only Stripe session. Both steps are individually idempotent
+    // (conditional writes + reuse), so a retry after a partial failure
+    // picks up where the last attempt left off.
+    if (order.checkoutModel === "two_step") {
+      const prep = await prepareTwoStepOrder(order, {
+        email: params.email,
+        shipping: params.shipping,
+        billing: params.billing,
+      });
+      if ("error" in prep) {
+        await releaseSessionClaim(params.orderId, sentinel);
+        return { error: prep.error };
+      }
     }
 
     let sessionResult: Awaited<ReturnType<typeof createStripeSessionForOrder>>;
@@ -905,6 +988,135 @@ async function releaseSessionClaim(orderId: string, sentinel: string) {
 }
 
 /**
+ * Two-step checkout prep — runs under the session-claim sentinel in
+ * completePrintOrder, BEFORE the fee-only Stripe session is minted:
+ *
+ *   1. Place the CraftCloud order up-front, unpaid. Under two_step
+ *      the customer pays CraftCloud directly, so placement isn't
+ *      gated on our webhook the way single-checkout is.
+ *   2. Create CraftCloud's hosted Stripe bridge session the customer
+ *      will pay production + shipping at.
+ *
+ * Each step persists via a conditional UPDATE gated on the column
+ * still being NULL. If 0 rows come back, another actor already
+ * persisted a value — we re-fetch and REUSE theirs rather than error
+ * (or worse, double-place). A retry after a partial failure (e.g.
+ * order placed, bridge session creation died) therefore skips the
+ * steps that already committed.
+ */
+async function prepareTwoStepOrder(
+  order: typeof printOrders.$inferSelect,
+  contact: {
+    email: string;
+    shipping: Address;
+    billing: Address & { isCompany: boolean; vatId?: string };
+  }
+): Promise<
+  { craftCloudOrderId: string; bridgeSessionUrl: string } | { error: string }
+> {
+  // `order` was read before the session claim — a previous claim
+  // holder may have placed the CraftCloud order and released before
+  // we won. Re-read so we never place a second order off a stale
+  // snapshot.
+  const [fresh] = await db
+    .select()
+    .from(printOrders)
+    .where(eq(printOrders.id, order.id));
+  let craftCloudOrderId = fresh?.craftCloudOrderId ?? order.craftCloudOrderId;
+  let bridgeSessionUrl = fresh?.bridgeSessionUrl ?? order.bridgeSessionUrl;
+
+  if (!craftCloudOrderId) {
+    let ccOrderId: string;
+    try {
+      const ccOrder = await createOrder({
+        cartId: order.craftCloudCartId!,
+        user: {
+          emailAddress: contact.email,
+          shipping: contact.shipping,
+          billing: contact.billing,
+        },
+      });
+      ccOrderId = ccOrder.orderId;
+    } catch (err) {
+      logError("completePrintOrder.twoStep.createOrder", err);
+      return {
+        error:
+          "Could not place your order with the print service. Please try again.",
+      };
+    }
+
+    const wrote = await db
+      .update(printOrders)
+      .set({ craftCloudOrderId: ccOrderId })
+      .where(
+        and(
+          eq(printOrders.id, order.id),
+          isNull(printOrders.craftCloudOrderId)
+        )
+      )
+      .returning({ id: printOrders.id });
+
+    if (wrote.length > 0) {
+      craftCloudOrderId = ccOrderId;
+    } else {
+      // Another tab/worker won the persist — reuse their id. Do NOT
+      // error: the user just needs one valid order, whichever actor
+      // placed it.
+      const [refetched] = await db
+        .select()
+        .from(printOrders)
+        .where(eq(printOrders.id, order.id));
+      craftCloudOrderId = refetched?.craftCloudOrderId ?? ccOrderId;
+    }
+  }
+
+  if (!bridgeSessionUrl) {
+    // Same header-derived base as createStripeSessionForOrder — never
+    // NEXT_PUBLIC_APP_URL for runtime URL construction.
+    const appUrl = await deriveAppUrl();
+    let bridge: { sessionId: string; sessionUrl: string };
+    try {
+      bridge = await createStripeCheckout({
+        orderId: craftCloudOrderId,
+        returnUrl: `${appUrl}/dashboard/orders?production=paid&orderId=${order.id}`,
+        cancelUrl: `${appUrl}/orders/${order.id}/pay-production`,
+        isTestOrder: isSandboxMode(),
+      });
+    } catch (err) {
+      logError("completePrintOrder.twoStep.createStripeCheckout", err);
+      return {
+        error:
+          "Could not set up the production payment. Please try again.",
+      };
+    }
+
+    const wrote = await db
+      .update(printOrders)
+      .set({
+        bridgeSessionId: bridge.sessionId,
+        bridgeSessionUrl: bridge.sessionUrl,
+      })
+      .where(
+        and(eq(printOrders.id, order.id), isNull(printOrders.bridgeSessionUrl))
+      )
+      .returning({ id: printOrders.id });
+
+    if (wrote.length > 0) {
+      bridgeSessionUrl = bridge.sessionUrl;
+    } else {
+      // Same reuse pattern as the order id above.
+      const [refetched] = await db
+        .select()
+        .from(printOrders)
+        .where(eq(printOrders.id, order.id));
+      bridgeSessionUrl = refetched?.bridgeSessionUrl ?? bridge.sessionUrl;
+    }
+  }
+
+  return { craftCloudOrderId, bridgeSessionUrl };
+}
+
+/**
  * Resume a cart_created print order: reuse the existing Stripe
  * Checkout session when it's still open (they live 24h), otherwise
  * mint a fresh one from the stored address + line items. Used by
@@ -925,6 +1137,21 @@ export async function resumePrintOrder(
       .where(and(eq(printOrders.id, orderId), eq(printOrders.userId, userId)));
 
     if (!order) return { error: "Order not found" };
+
+    // Two-step orders parked at awaiting_production_payment have an
+    // authorized-but-uncaptured fee hold and an unpaid CraftCloud
+    // bridge session. Resume there means: verify the hold is still
+    // live, then send the user back to CraftCloud's hosted payment.
+    // (cart_created two-step rows fall through to the normal path
+    // below, which mints fee-only sessions for them automatically via
+    // createStripeSessionForOrder's checkoutModel branch.)
+    if (
+      order.checkoutModel === "two_step" &&
+      order.status === "awaiting_production_payment"
+    ) {
+      return resumeTwoStepProductionPayment(order);
+    }
+
     if (order.status !== "cart_created") {
       return { error: "Order already processed" };
     }
@@ -933,6 +1160,23 @@ export async function resumePrintOrder(
       // session without an email. Caller should fall back to the
       // material-picker entry point.
       return { error: "Order has no saved address" };
+    }
+
+    // CON-159: Auto-approved orders store the off-session PaymentIntent
+    // id (pi_…) in stripeSessionId. The PI is NOT a Checkout session —
+    // sessions.retrieve("pi_…") would throw. These rows are awaiting
+    // CraftCloud placement by the place-auto-approved-orders cron; the
+    // Resume button cannot do anything useful. Suppress it with a
+    // friendly message instead of letting sessions.retrieve throw.
+    if (
+      order.stripeSessionId &&
+      order.stripeSessionId.startsWith("pi_") &&
+      !order.craftCloudOrderId
+    ) {
+      return {
+        error:
+          "Your order is being placed — it will appear under Orders shortly.",
+      };
     }
 
     const stripe = getStripe();
@@ -952,6 +1196,16 @@ export async function resumePrintOrder(
         );
         if (existing.status === "open" && existing.url) {
           return { checkoutUrl: existing.url };
+        }
+        // Session completed (paid) but the webhook hasn't processed
+        // yet — the row is still cart_created. Minting a second session
+        // here would let the user pay twice. Surface a friendly message
+        // and let the webhook advance the order. Do NOT null out the id.
+        if (existing.status === "complete") {
+          return {
+            error:
+              "This order is already being processed — check your orders in a moment.",
+          };
         }
         // Expired/closed → null out the stale id so the atomic
         // claim below can fire on a clean row.
@@ -1046,6 +1300,50 @@ export async function resumePrintOrder(
   }
 }
 
+const FEE_AUTH_EXPIRED_ERROR =
+  "Your card authorization expired. Please start a new checkout from the material picker.";
+
+/**
+ * Resume path for two-step orders sitting in
+ * awaiting_production_payment: the 3% fee was authorized (manual
+ * capture — a hold, not a charge) and the CraftCloud order is placed
+ * but unpaid. Whether we can send the user back to CraftCloud's
+ * bridge session depends on the fee hold still being capturable —
+ * resuming production payment after the hold lapsed would leave the
+ * reconciliation cron with nothing to capture.
+ */
+async function resumeTwoStepProductionPayment(
+  order: typeof printOrders.$inferSelect
+): Promise<{ checkoutUrl: string } | { error: string }> {
+  // Defensive: rows in this status should always carry both values
+  // (the webhook stamps the PI id, completePrintOrder the bridge
+  // URL). If either is missing we can't safely resume — treat it
+  // like an expired hold and route through a fresh checkout.
+  if (!order.feePaymentIntentId || !order.bridgeSessionUrl) {
+    return { error: FEE_AUTH_EXPIRED_ERROR };
+  }
+
+  const stripe = getStripe();
+  const intent = await stripe.paymentIntents.retrieve(
+    order.feePaymentIntentId
+  );
+
+  if (intent.status === "requires_capture") {
+    // Fee hold is still good — the only missing piece is CraftCloud's
+    // production payment. Send them straight back to it.
+    return { checkoutUrl: order.bridgeSessionUrl };
+  }
+  if (intent.status === "canceled") {
+    // Manual-capture authorizations expire (Stripe cancels them after
+    // ~7 days) — the fee can no longer be captured, so the whole
+    // two-step chain has to restart.
+    return { error: FEE_AUTH_EXPIRED_ERROR };
+  }
+  // Anything else (succeeded = the cron already captured, processing,
+  // …) means this order is past self-service resumption.
+  return { error: "Order already processed" };
+}
+
 export async function requestOrderRefund(
   orderId: string
 ): Promise<{ success: true } | { error: string }> {
@@ -1059,6 +1357,20 @@ export async function requestOrderRefund(
       .where(and(eq(printOrders.id, orderId), eq(printOrders.userId, userId)));
 
     if (!order) return { error: "Order not found" };
+
+    // Two-step orders: the customer paid CraftCloud directly for
+    // production + shipping; our session only captured the 3% fee.
+    // Refunding the fee alone would leave the customer believing they
+    // got a full refund while CraftCloud may still produce and ship the
+    // print. Until a CraftCloud cancellation API exists (CON-109) we
+    // cannot safely complete a two-step refund self-service — route to
+    // support instead. Do NOT flip the status to `refunded`.
+    if (order.checkoutModel === "two_step") {
+      return {
+        error:
+          "This order was processed through a two-step checkout. To request a refund, please contact support — we'll coordinate with the print vendor on your behalf.",
+      };
+    }
 
     // Blocked = factory rejected, safe to refund immediately
     // Ordered = placed but not yet in production — check live status first

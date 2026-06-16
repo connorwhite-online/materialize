@@ -4,7 +4,8 @@ import {
   printOrders,
   webhookEventsProcessed,
 } from "@/lib/db/schema";
-import { and, eq, lt } from "drizzle-orm";
+import { and, eq, like, lt } from "drizzle-orm";
+import { getStripe } from "@/lib/stripe";
 import { logError } from "@/lib/logger";
 
 /**
@@ -64,32 +65,110 @@ export async function GET(request: Request) {
     const cartCutoff = new Date(now - STALE_CART_AGE_MS);
     const webhookCutoff = new Date(now - WEBHOOK_DEDUP_RETENTION_MS);
 
-    const [cancelledOrders, deletedCartItems, prunedEvents] =
-      await Promise.all([
-        db
-          .update(printOrders)
-          .set({ status: "cancelled" })
-          .where(
-            and(
-              eq(printOrders.status, "cart_created"),
-              lt(printOrders.createdAt, orderCutoff)
-            )
+    type OpResult = number | "error";
+    let cancelledOrders: OpResult = "error";
+    let deletedCartItems: OpResult = "error";
+    let prunedWebhookEvents: OpResult = "error";
+
+    try {
+      // CON-159: Rows with a `pi_`-prefixed stripeSessionId are
+      // off-session auto-approved orders where the customer was already
+      // charged. Cancel them only after attempting a refund so we never
+      // silently abandon a charged-but-unplaced order.
+      //
+      // We split the operation into two passes:
+      //   1. Charged rows (pi_ stripeSessionId): refund first, then cancel.
+      //   2. Uncharged rows: cancel directly.
+      const staleRows = await db
+        .select({
+          id: printOrders.id,
+          stripeSessionId: printOrders.stripeSessionId,
+        })
+        .from(printOrders)
+        .where(
+          and(
+            eq(printOrders.status, "cart_created"),
+            lt(printOrders.createdAt, orderCutoff)
           )
-          .returning({ id: printOrders.id }),
-        db
-          .delete(cartItems)
-          .where(lt(cartItems.updatedAt, cartCutoff))
-          .returning({ id: cartItems.id }),
-        db
-          .delete(webhookEventsProcessed)
-          .where(lt(webhookEventsProcessed.processedAt, webhookCutoff))
-          .returning({ id: webhookEventsProcessed.id }),
-      ]);
+        );
+
+      const stripe = getStripe();
+      let cancelled = 0;
+
+      for (const row of staleRows) {
+        const isChargedRow =
+          typeof row.stripeSessionId === "string" &&
+          row.stripeSessionId.startsWith("pi_");
+
+        if (isChargedRow) {
+          // The order was charged via off-session PI but never placed.
+          // Issue a refund before cancelling. On refund failure, still
+          // cancel but set refundFailedAt so retry-failed-refunds picks it up.
+          let refundFailedAt: Date | null = null;
+          try {
+            await stripe.refunds.create(
+              {
+                payment_intent: row.stripeSessionId!,
+                reason: "requested_by_customer",
+                metadata: {
+                  printOrderId: row.id,
+                  source: "cleanup_stale_charged",
+                },
+              },
+              { idempotencyKey: `agent-cancel-refund:${row.id}` }
+            );
+          } catch (refundErr) {
+            logError("cron/cleanup-stale-orders.refundCharged", refundErr);
+            refundFailedAt = new Date();
+          }
+          await db
+            .update(printOrders)
+            .set({ status: "cancelled", refundFailedAt })
+            .where(eq(printOrders.id, row.id));
+        } else {
+          // No charge — safe to cancel without refund.
+          await db
+            .update(printOrders)
+            .set({ status: "cancelled" })
+            .where(eq(printOrders.id, row.id));
+        }
+        cancelled++;
+      }
+
+      cancelledOrders = cancelled;
+    } catch (err) {
+      logError("cron/cleanup-stale-orders.cancelOrders", err);
+    }
+
+    try {
+      const rows = await db
+        .delete(cartItems)
+        .where(lt(cartItems.updatedAt, cartCutoff))
+        .returning({ id: cartItems.id });
+      deletedCartItems = rows.length;
+    } catch (err) {
+      logError("cron/cleanup-stale-orders.deleteCartItems", err);
+    }
+
+    try {
+      const rows = await db
+        .delete(webhookEventsProcessed)
+        .where(lt(webhookEventsProcessed.processedAt, webhookCutoff))
+        .returning({ id: webhookEventsProcessed.id });
+      prunedWebhookEvents = rows.length;
+    } catch (err) {
+      logError("cron/cleanup-stale-orders.pruneWebhookEvents", err);
+    }
+
+    const anyFailed =
+      cancelledOrders === "error" ||
+      deletedCartItems === "error" ||
+      prunedWebhookEvents === "error";
 
     const result = {
-      cancelledOrders: cancelledOrders.length,
-      deletedCartItems: deletedCartItems.length,
-      prunedWebhookEvents: prunedEvents.length,
+      cancelledOrders,
+      deletedCartItems,
+      prunedWebhookEvents: prunedWebhookEvents,
       cutoffs: {
         orders: orderCutoff.toISOString(),
         cartItems: cartCutoff.toISOString(),
@@ -98,6 +177,9 @@ export async function GET(request: Request) {
     };
     console.log("[cron/cleanup-stale-orders] swept", result);
 
+    if (anyFailed) {
+      return Response.json(result, { status: 500 });
+    }
     return Response.json(result);
   } catch (error) {
     logError("cron/cleanup-stale-orders", error);

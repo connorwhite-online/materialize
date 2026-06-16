@@ -14,6 +14,8 @@ interface SandboxBadgeProps {
 export function SandboxBadge({ className }: SandboxBadgeProps) {
   return (
     <span
+      role="img"
+      aria-label="Sandbox mode — orders will not be billed or fulfilled"
       title="Stripe test mode and/or CraftCloud mock mode is enabled — orders will not be billed or fulfilled"
       className={cn(
         "inline-flex shrink-0 items-center rounded-full bg-amber-100 p-1 text-amber-900 ring-1 ring-amber-300 dark:bg-amber-950/60 dark:text-amber-200 dark:ring-amber-800",

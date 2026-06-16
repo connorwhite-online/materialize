@@ -29,6 +29,8 @@ export interface CreateListingInput {
   /** Snapshot of the form fields. Mutated to add assetsJson. */
   formData: FormData;
   selectedDesignTags: string[];
+  /** Curated browse category slug, or "" for uncategorized. */
+  category?: string;
   recommendedMaterial: string;
   sellEnabled: boolean;
   license: string;
@@ -136,6 +138,9 @@ export async function runCreateListing(
     );
     for (const tag of input.selectedDesignTags) {
       input.formData.append("designTags", tag);
+    }
+    if (input.category) {
+      input.formData.set("category", input.category);
     }
     if (!input.sellEnabled) {
       input.formData.set("price", "0");

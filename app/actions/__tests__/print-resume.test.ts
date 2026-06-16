@@ -198,4 +198,27 @@ describe("resumePrintOrder", () => {
     expect(result).toEqual({ error: "Order has no saved address" });
     expect(mockCreate).not.toHaveBeenCalled();
   });
+
+  it("CON-161: returns friendly error (no new session) when existing session status is 'complete'", async () => {
+    // Webhook-lag window: session paid but not yet processed.
+    // Must not mint a second payable session → double charge.
+    selectedOrder = { ...baseOrder, stripeSessionId: "sess_complete" };
+    mockRetrieve.mockResolvedValueOnce({
+      status: "complete",
+      url: null,
+    });
+
+    const result = await resumePrintOrder("order-id-1");
+
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      error:
+        "This order is already being processed — check your orders in a moment.",
+    });
+    // Must NOT null out the session id.
+    const nulledSession = mockDbUpdateSet.mock.calls.find(
+      (c) => (c[0] as { stripeSessionId?: unknown }).stripeSessionId === null
+    );
+    expect(nulledSession).toBeUndefined();
+  });
 });

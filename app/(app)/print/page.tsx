@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
 import { PrintPageContent } from "@/components/print/print-page-content";
 import { loadLibraryTiles, type LibraryTile } from "@/lib/print/library-tiles";
+import { getCheckoutModel } from "@/lib/env";
 import { loadProjectPrintTiles } from "@/lib/print/project-tiles";
 import { logError } from "@/lib/logger";
 
@@ -57,6 +58,7 @@ export default async function PrintPage(props: {
             totalFileSizeBytes: projectCtx.totalFileSizeBytes,
           }}
           initialExpandVendorId={initialExpandVendorId}
+          checkoutModel={getCheckoutModel()}
         />
       );
     }
@@ -103,6 +105,7 @@ export default async function PrintPage(props: {
       linkSuffix={linkSuffix}
       preselectMaterialId={material?.id}
       initialExpandVendorId={initialExpandVendorId}
+      checkoutModel={getCheckoutModel()}
     />
   );
 }

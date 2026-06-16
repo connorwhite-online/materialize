@@ -180,6 +180,7 @@ describe("POST /api/webhooks/stripe", () => {
       data: {
         object: {
           payment_status: "paid",
+          payment_intent: "pi_single_1",
           metadata: { type: "print_order", printOrderId: "po_1" },
         },
       },
@@ -189,7 +190,9 @@ describe("POST /api/webhooks/stripe", () => {
 
     expect(res.status).toBe(200);
     expect(mockHandlePrintOrderPayment).toHaveBeenCalledTimes(1);
-    expect(mockHandlePrintOrderPayment).toHaveBeenCalledWith("po_1");
+    expect(mockHandlePrintOrderPayment).toHaveBeenCalledWith("po_1", {
+      paymentIntentId: "pi_single_1",
+    });
     expect(mockHandleListingPurchase).not.toHaveBeenCalled();
     expect(mockHandleListingRefund).not.toHaveBeenCalled();
     // Event recorded in the dedup table only after the handler succeeds.
@@ -212,7 +215,87 @@ describe("POST /api/webhooks/stripe", () => {
     const res = await POST(makeRequest());
 
     expect(res.status).toBe(200);
-    expect(mockHandlePrintOrderPayment).toHaveBeenCalledWith("po_async");
+    expect(mockHandlePrintOrderPayment).toHaveBeenCalledWith("po_async", {
+      paymentIntentId: undefined,
+    });
+  });
+
+  it("routes an UNPAID two-step fee session (manual capture) to handlePrintOrderPayment", async () => {
+    // Under capture_method: "manual" a completed session reports
+    // payment_status "unpaid" — the funds are authorized, not
+    // captured. The route must still dispatch it (recognized by the
+    // two_step metadata), or fee authorizations would be silently
+    // dropped.
+    nextEvent = event({
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          payment_status: "unpaid",
+          payment_intent: "pi_fee_1",
+          metadata: {
+            type: "print_order",
+            checkoutModel: "two_step",
+            printOrderId: "po_two_step",
+          },
+        },
+      },
+    });
+
+    const res = await POST(makeRequest());
+
+    expect(res.status).toBe(200);
+    expect(mockHandlePrintOrderPayment).toHaveBeenCalledTimes(1);
+    expect(mockHandlePrintOrderPayment).toHaveBeenCalledWith("po_two_step", {
+      paymentIntentId: "pi_fee_1",
+    });
+    // Handled events land in the dedup table.
+    expect(mockDbInsert).toHaveBeenCalledWith({
+      id: "evt_test",
+      eventType: "checkout.session.completed",
+    });
+  });
+
+  it("normalizes an expanded payment_intent object to its id", async () => {
+    nextEvent = event({
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          payment_status: "unpaid",
+          payment_intent: { id: "pi_expanded" },
+          metadata: {
+            type: "print_order",
+            checkoutModel: "two_step",
+            printOrderId: "po_two_step",
+          },
+        },
+      },
+    });
+
+    const res = await POST(makeRequest());
+
+    expect(res.status).toBe(200);
+    expect(mockHandlePrintOrderPayment).toHaveBeenCalledWith("po_two_step", {
+      paymentIntentId: "pi_expanded",
+    });
+  });
+
+  it("still drops an unpaid completed session WITHOUT two_step metadata (single gating unchanged)", async () => {
+    nextEvent = event({
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          payment_status: "unpaid",
+          metadata: { type: "print_order", printOrderId: "po_1" },
+        },
+      },
+    });
+
+    const res = await POST(makeRequest());
+
+    expect(res.status).toBe(200);
+    expect(mockHandlePrintOrderPayment).not.toHaveBeenCalled();
+    // Not a recognized shape → not recorded in the dedup table.
+    expect(mockDbInsert).not.toHaveBeenCalled();
   });
 
   it("routes a listing_purchase checkout session to handleListingPurchase", async () => {

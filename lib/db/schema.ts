@@ -90,6 +90,12 @@ export const printOrderStatusEnum = pgEnum("print_order_status", [
   // payment success and CraftCloud-order placement to give the user a
   // short cancellation window (see auto_approved_until on print_orders).
   "auto_approved",
+  // Two-step checkout orders (CON-118): our service fee is authorized
+  // (a hold, not a charge) and the CraftCloud order is placed but
+  // unpaid — the customer still has to complete CraftCloud's hosted
+  // checkout. The reconciliation cron captures the fee and advances
+  // the row to `ordered` once CraftCloud payment is confirmed.
+  "awaiting_production_payment",
   "ordered",
   "in_production",
   "shipped",
@@ -256,6 +262,10 @@ export const files = pgTable("files", {
   license: licenseEnum("license").notNull().default("cc_by"),
   status: fileStatusEnum("status").notNull().default("draft"),
   tags: text("tags").array(),
+  // Optional curated browse category — one slug from lib/categories.
+  // Plain text (not a pg enum) so the taxonomy grows without a
+  // migration; validated at the app layer. Null = uncategorized.
+  category: text("category"),
   recommendedMaterialId: text("recommended_material_id"), // from our materials metadata (editorial slug e.g. "pla-white")
   recommendedCcMaterialId: text("recommended_cc_material_id"), // direct CraftCloud material UUID (bypasses resolver)
   designTags: text("design_tags").array(), // ["strong", "flexible", "heat-resistant", "watertight", "detailed"]
@@ -292,6 +302,24 @@ export const files = pgTable("files", {
   index("files_status_idx").on(table.status),
   index("files_slug_idx").on(table.slug),
   index("files_flagged_at_idx").on(table.flaggedAt),
+  index("files_category_idx").on(table.category),
+  // Partial composite indexes for the hot browse queries (CON-167).
+  // The WHERE clause restricts the index to publicly visible rows so
+  // it stays small and the planner can use it without a residual filter.
+  // (category, created_at DESC) supports ORDER BY created_at DESC with
+  // an optional category = $1 equality filter.
+  index("files_pub_category_created_at_idx")
+    .on(table.category, table.createdAt)
+    .where(
+      sql`${table.status} = 'published' AND ${table.visibility} = 'public'`
+    ),
+  // (download_count DESC) supports the idle-browse ORDER BY download_count
+  // DESC ordering without reading the full table.
+  index("files_pub_download_count_idx")
+    .on(table.downloadCount)
+    .where(
+      sql`${table.status} = 'published' AND ${table.visibility} = 'public'`
+    ),
 ]);
 
 // Projects — sellable bundles of files. A creator can list a single
@@ -327,6 +355,8 @@ export const projects = pgTable("projects", {
   status: fileStatusEnum("status").notNull().default("draft"),
   visibility: visibilityEnum("visibility").notNull().default("public"),
   tags: text("tags").array(),
+  // Curated browse category slug from lib/categories — see files.category.
+  category: text("category"),
   designTags: text("design_tags").array(),
   thumbnailUrl: text("thumbnail_url"),
   // Optional pointer to the project's source code / firmware repo
@@ -354,6 +384,15 @@ export const projects = pgTable("projects", {
   index("projects_organization_id_idx").on(table.organizationId),
   index("projects_status_idx").on(table.status),
   index("projects_slug_idx").on(table.slug),
+  index("projects_category_idx").on(table.category),
+  // Partial composite index for the hot browse query (CON-167).
+  // Mirrors the files partial index: category browse + created_at sort
+  // on the publicly visible subset.
+  index("projects_pub_category_created_at_idx")
+    .on(table.category, table.createdAt)
+    .where(
+      sql`${table.status} = 'published' AND ${table.visibility} = 'public'`
+    ),
 ]);
 
 export const projectFiles = pgTable("project_files", {
@@ -646,6 +685,21 @@ export const printOrders = pgTable("print_orders", {
   // Stripe error can't leave a cancelled order silently charged. Null on
   // every order whose refund either succeeded or was never attempted.
   refundFailedAt: timestamp("refund_failed_at", { withTimezone: true }),
+  // Which checkout architecture this order was created under (CON-118):
+  // "single" (one charge via our Stripe Checkout) or "two_step" (fee
+  // authorization + CraftCloud-hosted production payment). The row value
+  // — not the CHECKOUT_MODEL env var — drives all lifecycle branching,
+  // so flipping the env never strands in-flight orders.
+  checkoutModel: text("checkout_model").notNull().default("single"),
+  // Two-step only: CraftCloud-hosted Stripe session the customer pays
+  // production + shipping at. Null on single-checkout orders.
+  bridgeSessionId: text("bridge_session_id"),
+  bridgeSessionUrl: text("bridge_session_url"),
+  // Two-step only: our manual-capture PaymentIntent for the 3% service
+  // fee — authorized at checkout, captured by the reconciliation cron.
+  feePaymentIntentId: text("fee_payment_intent_id"),
+  feeAuthorizedAt: timestamp("fee_authorized_at", { withTimezone: true }),
+  feeCapturedAt: timestamp("fee_captured_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -763,6 +817,8 @@ export const collections = pgTable("collections", {
   slug: text("slug").notNull().unique(),
   description: text("description"),
   tags: text("tags").array(),
+  // Curated browse category slug from lib/categories — see files.category.
+  category: text("category"),
   visibility: visibilityEnum("visibility").notNull().default("public"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
@@ -775,6 +831,13 @@ export const collections = pgTable("collections", {
   index("collections_user_id_idx").on(table.userId),
   index("collections_organization_id_idx").on(table.organizationId),
   index("collections_slug_idx").on(table.slug),
+  index("collections_category_idx").on(table.category),
+  // Partial composite index for the hot browse query (CON-167).
+  // Collections only filter on visibility (no status column), so the
+  // WHERE clause is narrower than the files/projects equivalents.
+  index("collections_pub_category_created_at_idx")
+    .on(table.category, table.createdAt)
+    .where(sql`${table.visibility} = 'public'`),
 ]);
 
 // Collection items — heterogeneous, can hold a file OR a project.
@@ -913,9 +976,9 @@ export const notifications = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    // Free-form text + CHECK so we can introduce new types without
-    // running an enum migration. Known types are documented in
-    // `lib/notifications/types.ts`.
+    // Free-form text (not a pg enum) so we can introduce new types
+    // without running an enum migration. Known types are documented in
+    // `lib/notifications/types.ts`; validation is at the app layer.
     type: text("type").notNull(),
     payload: jsonb("payload").notNull(),
     readAt: timestamp("read_at", { withTimezone: true }),

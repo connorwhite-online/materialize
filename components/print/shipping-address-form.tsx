@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSignUp, useSignIn } from "@clerk/nextjs/legacy";
 import { setUsernameFromEmail } from "@/app/actions/onboarding";
 import { Button } from "@/components/ui/button";
@@ -57,6 +57,17 @@ const COUNTRIES = [
   { code: "CH", name: "Switzerland" },
   { code: "NO", name: "Norway" },
 ];
+
+// Fields that carry a required attribute and can receive focus on
+// failed submit. Matches the validate() checks below.
+const REQUIRED_FIELD_IDS = [
+  "email",
+  "firstName",
+  "lastName",
+  "address",
+  "city",
+  "zipCode",
+] as const;
 
 export function ShippingAddressForm({
   onSubmit,
@@ -118,6 +129,16 @@ export function ShippingAddressForm({
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  // Ref used to focus the first invalid field on failed submit (CON-149).
+  const formRef = useRef<HTMLFormElement>(null);
+
+  // Focus the "Shipping Address" heading on mount so step transitions
+  // land AT users on the new step heading (CON-157).
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    titleRef.current?.focus();
+  }, []);
+
   const validate = () => {
     const errs: Record<string, string> = {};
     if (!email || !email.includes("@")) errs.email = "Valid email required";
@@ -127,12 +148,27 @@ export function ShippingAddressForm({
     if (!shipping.city) errs.city = "Required";
     if (!shipping.zipCode) errs.zipCode = "Required";
     setErrors(errs);
-    return Object.keys(errs).length === 0;
+    return errs;
+  };
+
+  /** Move focus to the first invalid field so keyboard/SR users land on it. */
+  const focusFirstError = (errs: Record<string, string>) => {
+    for (const id of REQUIRED_FIELD_IDS) {
+      if (errs[id]) {
+        const el = formRef.current?.querySelector<HTMLElement>(`#${id}`);
+        el?.focus();
+        break;
+      }
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validate()) return;
+    const errs = validate();
+    if (Object.keys(errs).length > 0) {
+      focusFirstError(errs);
+      return;
+    }
 
     const billingAddress = billingSame ? shipping : billing;
     const payload = {
@@ -307,6 +343,9 @@ export function ShippingAddressForm({
               }}
               autoFocus
               disabled={otpVerifying || isSubmitting}
+              aria-label="6-digit verification code"
+              aria-invalid={!!otpError}
+              aria-describedby={otpError ? "otp-error" : undefined}
             >
               <InputOTPGroup>
                 <InputOTPSlot index={0} />
@@ -319,7 +358,7 @@ export function ShippingAddressForm({
             </InputOTP>
           </div>
           {otpError && (
-            <p role="alert" className="text-xs text-destructive text-center">
+            <p id="otp-error" role="alert" className="text-xs text-destructive text-center">
               {otpError}
             </p>
           )}
@@ -350,10 +389,10 @@ export function ShippingAddressForm({
   }
 
   return (
-    <form onSubmit={handleSubmit}>
+    <form ref={formRef} onSubmit={handleSubmit}>
       <Card>
         <CardHeader>
-          <CardTitle>Shipping Address</CardTitle>
+          <CardTitle ref={titleRef} tabIndex={-1} className="outline-none">Shipping Address</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
@@ -364,9 +403,12 @@ export function ShippingAddressForm({
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
+              aria-required="true"
+              aria-invalid={!!errors.email}
+              aria-describedby={errors.email ? "email-error" : undefined}
             />
             {errors.email && (
-              <p className="mt-1 text-xs text-destructive">{errors.email}</p>
+              <p id="email-error" className="mt-1 text-xs text-destructive">{errors.email}</p>
             )}
           </div>
 
@@ -377,9 +419,12 @@ export function ShippingAddressForm({
                 id="firstName"
                 value={shipping.firstName}
                 onChange={(e) => updateShipping("firstName", e.target.value)}
+                aria-required="true"
+                aria-invalid={!!errors.firstName}
+                aria-describedby={errors.firstName ? "firstName-error" : undefined}
               />
               {errors.firstName && (
-                <p className="mt-1 text-xs text-destructive">{errors.firstName}</p>
+                <p id="firstName-error" className="mt-1 text-xs text-destructive">{errors.firstName}</p>
               )}
             </div>
             <div>
@@ -388,9 +433,12 @@ export function ShippingAddressForm({
                 id="lastName"
                 value={shipping.lastName}
                 onChange={(e) => updateShipping("lastName", e.target.value)}
+                aria-required="true"
+                aria-invalid={!!errors.lastName}
+                aria-describedby={errors.lastName ? "lastName-error" : undefined}
               />
               {errors.lastName && (
-                <p className="mt-1 text-xs text-destructive">{errors.lastName}</p>
+                <p id="lastName-error" className="mt-1 text-xs text-destructive">{errors.lastName}</p>
               )}
             </div>
           </div>
@@ -402,9 +450,12 @@ export function ShippingAddressForm({
               value={shipping.address}
               onChange={(e) => updateShipping("address", e.target.value)}
               placeholder="123 Main St"
+              aria-required="true"
+              aria-invalid={!!errors.address}
+              aria-describedby={errors.address ? "address-error" : undefined}
             />
             {errors.address && (
-              <p className="mt-1 text-xs text-destructive">{errors.address}</p>
+              <p id="address-error" className="mt-1 text-xs text-destructive">{errors.address}</p>
             )}
           </div>
 
@@ -425,9 +476,12 @@ export function ShippingAddressForm({
                 id="city"
                 value={shipping.city}
                 onChange={(e) => updateShipping("city", e.target.value)}
+                aria-required="true"
+                aria-invalid={!!errors.city}
+                aria-describedby={errors.city ? "city-error" : undefined}
               />
               {errors.city && (
-                <p className="mt-1 text-xs text-destructive">{errors.city}</p>
+                <p id="city-error" className="mt-1 text-xs text-destructive">{errors.city}</p>
               )}
             </div>
             <div>
@@ -436,9 +490,12 @@ export function ShippingAddressForm({
                 id="zipCode"
                 value={shipping.zipCode}
                 onChange={(e) => updateShipping("zipCode", e.target.value)}
+                aria-required="true"
+                aria-invalid={!!errors.zipCode}
+                aria-describedby={errors.zipCode ? "zipCode-error" : undefined}
               />
               {errors.zipCode && (
-                <p className="mt-1 text-xs text-destructive">{errors.zipCode}</p>
+                <p id="zipCode-error" className="mt-1 text-xs text-destructive">{errors.zipCode}</p>
               )}
             </div>
           </div>

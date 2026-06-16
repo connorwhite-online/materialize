@@ -15,17 +15,20 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  */
 
 // ── DB mock ────────────────────────────────────────────────────────────────
-// `mockDbWhere` is the terminal method of the query chain
-// (db.select().from().where()). We configure it per-test: by default it
-// throws a Postgres-style "invalid input syntax" error to simulate what
-// a real Neon instance would do with a non-UUID $1 param. Tests that
-// need a valid lookup return an appropriate row instead.
+// The main file query is now: select().from().leftJoin().where()
+// The optional ?photoId second query is: select().from().where()
+// We mock both via mockDbWhere as the terminal .where() call, so
+// consecutive mockResolvedValueOnce() chains work across both paths.
 const mockDbWhere = vi.fn();
+const mockDbLeftJoin = vi.fn(() => ({ where: mockDbWhere }));
 
 vi.mock("@/lib/db", () => ({
   db: {
     select: () => ({
       from: () => ({
+        // The main file query uses leftJoin before where
+        leftJoin: mockDbLeftJoin,
+        // The ?photoId second query goes straight to where
         where: mockDbWhere,
       }),
     }),
@@ -63,6 +66,8 @@ import { generateDownloadUrl } from "@/lib/storage";
 describe("GET /api/thumbnails/[fileId]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // The main file query goes through leftJoin before where; reset both.
+    mockDbLeftJoin.mockImplementation(() => ({ where: mockDbWhere }));
     // Default: simulate Postgres rejecting an invalid UUID.  Tests that
     // exercise the DB-lookup path override this to resolve with data.
     mockDbWhere.mockRejectedValue(
@@ -145,6 +150,7 @@ describe("GET /api/thumbnails/[fileId]", () => {
             status: "published",
             userId: "user-1",
             coverPhotoId: null,
+            coverStorageKey: null,
           },
         ])
         .mockResolvedValue([]);
@@ -189,6 +195,7 @@ describe("GET /api/thumbnails/[fileId]", () => {
           status: "published",
           userId: "user-1",
           coverPhotoId: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+          coverStorageKey: "photos/some-cover.webp",
         },
       ]);
 

@@ -25,6 +25,7 @@ import {
 import { updateFileListing } from "@/app/actions/files";
 import { MATERIALS } from "@/lib/materials";
 import { DESIGN_TAG_OPTIONS, DESIGN_TAG_LABELS } from "@/lib/validations/file";
+import { CategorySelect } from "@/components/categories/category-select";
 import {
   LICENSES,
   LICENSE_ORDER,
@@ -46,6 +47,7 @@ interface EditFileButtonProps {
     name: string;
     description: string | null;
     tags: string[] | null;
+    category: string | null;
     price: number; // cents
     /** May be either a current LicenseId or a legacy enum value. */
     license: string;
@@ -104,6 +106,7 @@ export function EditFileButton({
   const [name, setName] = useState(initial.name);
   const [description, setDescription] = useState(initial.description ?? "");
   const [tags, setTags] = useState((initial.tags ?? []).join(", "));
+  const [category, setCategory] = useState(initial.category ?? "");
   const [priceDollars, setPriceDollars] = useState(
     (initial.price / 100).toString()
   );
@@ -135,6 +138,7 @@ export function EditFileButton({
     setName(initial.name);
     setDescription(initial.description ?? "");
     setTags((initial.tags ?? []).join(", "));
+    setCategory(initial.category ?? "");
     setPriceDollars((initial.price / 100).toString());
     setLicense(resolveLicense(initial.license));
     setVisibility((initial.visibility as "public" | "private") || "public");
@@ -163,6 +167,7 @@ export function EditFileButton({
     formData.set("name", name);
     formData.set("description", description);
     formData.set("tags", tags);
+    formData.set("category", category);
     formData.set("price", priceDollars || "0");
     formData.set("license", license);
     formData.set("visibility", visibility);
@@ -315,6 +320,20 @@ export function EditFileButton({
             />
             <p className="text-[11px] text-muted-foreground">
               Comma-separated. Helps people find this file in search.
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-category" className="text-xs">
+              Category
+            </Label>
+            <CategorySelect
+              id="edit-category"
+              value={category}
+              onValueChange={setCategory}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Where this shows up when people browse by category.
             </p>
           </div>
 

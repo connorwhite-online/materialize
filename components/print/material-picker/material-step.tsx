@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { AnimatePresence, motion } from "motion/react";
 import { Button } from "@/components/ui/button";
@@ -246,6 +246,13 @@ export function MaterialStep({
 
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
 
+  // Focus the heading on mount so returning to the material step via
+  // "Back" moves keyboard/SR focus here (CON-157).
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
+
   // Nothing at all to render — fall back to the thin loader. This
   // path now only fires when (a) we don't have viableMaterials yet
   // (dimensions unknown, manifest still in flight, or scoped) AND
@@ -351,7 +358,7 @@ export function MaterialStep({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold">Select a material</h2>
+        <h2 ref={headingRef} tabIndex={-1} className="text-lg font-semibold outline-none">Select a material</h2>
         <p className="mt-0.5 text-xs text-muted-foreground">
           {quotesLoading
             ? "Still collecting quotes — more options will appear as vendors respond."
@@ -509,10 +516,14 @@ function MaterialCardButton({
               ${card.cheapest!.toFixed(2)}
             </p>
           ) : pending ? (
-            <Skeleton className="mt-1 h-4 w-12" />
+            <>
+              <Skeleton className="mt-1 h-4 w-12" aria-hidden="true" />
+              <span className="sr-only">price pending</span>
+            </>
           ) : (
             <p className="text-sm font-medium text-muted-foreground tabular-nums">
-              —
+              <span aria-hidden="true">—</span>
+              <span className="sr-only">no vendor quote available</span>
             </p>
           )}
         </div>

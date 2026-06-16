@@ -9,8 +9,17 @@ import { notifyPrintOrderPlaced } from "@/lib/notifications/print-order";
 
 /**
  * Fires after a successful Stripe `checkout.session.completed`
- * event — the user has paid, and we need to place the real
- * CraftCloud order so production starts.
+ * event. What "successful" means depends on the order's persisted
+ * `checkoutModel` (the row value, never the CHECKOUT_MODEL env var,
+ * so flipping the env can't strand in-flight orders):
+ *
+ *   - "single"   — the user paid print + shipping + fee in full; we
+ *     place the real CraftCloud order so production starts. The
+ *     atomic-claim machinery below guards that placement.
+ *   - "two_step" — the session only AUTHORIZED the 3% service fee
+ *     (capture_method: "manual"); the CraftCloud order was already
+ *     placed up-front by completePrintOrder. See
+ *     handleTwoStepFeeAuthorization.
  *
  * Idempotency is critical: Stripe retries any non-2xx and will
  * also fire duplicate deliveries on network hiccups. The hardened
@@ -51,8 +60,25 @@ function isClaimSentinel(value: string | null | undefined): boolean {
 }
 
 export async function handlePrintOrderPayment(
-  printOrderId: string
+  printOrderId: string,
+  opts?: { paymentIntentId?: string }
 ): Promise<void> {
+  // Fetch-first purely to branch on the persisted checkout model —
+  // the single-mode claim below still re-checks everything it gates
+  // on atomically, so this read introduces no TOCTOU risk.
+  const [existing] = await db
+    .select()
+    .from(printOrders)
+    .where(eq(printOrders.id, printOrderId));
+
+  if (existing?.checkoutModel === "two_step") {
+    await handleTwoStepFeeAuthorization(printOrderId, opts?.paymentIntentId);
+    return;
+  }
+
+  // Single-checkout model from here down. (A missing row also falls
+  // through — the claim flow's own guards produce the original
+  // "Print order not found" / release semantics.)
   const sentinel = `${CLAIM_PREFIX}${nanoid()}`;
 
   // Atomic claim: only succeeds if the row is still in the pristine
@@ -85,10 +111,9 @@ export async function handlePrintOrderPayment(
 
     // Another worker holds an active claim. Stay out of their way.
     if (isClaimSentinel(order.craftCloudOrderId)) {
-      console.warn("[handlePrintOrderPayment] reentry against active claim", {
-        printOrderId,
-        sentinel: order.craftCloudOrderId,
-      });
+      logError("handlePrintOrderPayment.reentryAgainstActiveClaim", new Error(
+        `reentry against active claim for order ${printOrderId} (sentinel: ${order.craftCloudOrderId})`
+      ));
       return;
     }
 
@@ -153,6 +178,48 @@ export async function handlePrintOrderPayment(
   if (placed.length > 0) {
     await notifyPrintOrderPlaced(printOrderId);
   }
+}
+
+/**
+ * Two-step model: the completed Checkout session only AUTHORIZED the
+ * 3% service fee under `capture_method: "manual"` — no money has
+ * moved, and nothing is owed to anyone yet. The CraftCloud order was
+ * already placed (unpaid) up-front by completePrintOrder, and the
+ * customer still has to pay CraftCloud directly via the bridge
+ * session. So this branch makes NO CraftCloud call, takes NO claim
+ * sentinel, and sends NO notifyPrintOrderPlaced — the reconciliation
+ * cron notifies when it captures the fee after CraftCloud payment
+ * confirms.
+ *
+ * All we record is "the fee hold exists": advance the row to
+ * awaiting_production_payment and stash the PaymentIntent id the
+ * cron will later capture. Idempotency is a single conditional
+ * UPDATE gated on status='cart_created' — a duplicate Stripe
+ * delivery (or an order that already advanced) matches 0 rows and
+ * silently no-ops.
+ */
+async function handleTwoStepFeeAuthorization(
+  printOrderId: string,
+  paymentIntentId: string | undefined
+): Promise<void> {
+  if (paymentIntentId === undefined) {
+    throw new Error(
+      `handleTwoStepFeeAuthorization: missing paymentIntentId for order ${printOrderId} — cannot advance without a PI to capture`
+    );
+  }
+  await db
+    .update(printOrders)
+    .set({
+      status: "awaiting_production_payment",
+      feePaymentIntentId: paymentIntentId,
+      feeAuthorizedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(printOrders.id, printOrderId),
+        eq(printOrders.status, "cart_created")
+      )
+    );
 }
 
 async function releaseClaim(

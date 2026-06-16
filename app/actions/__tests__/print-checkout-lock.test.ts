@@ -270,4 +270,27 @@ describe("completePrintOrder multi-tab/device guard", () => {
     expect(result).toEqual({ error: "Order already processed" });
     expect(stripeCreate).not.toHaveBeenCalled();
   });
+
+  it("CON-161: returns friendly error (no new session) when existing session status is 'complete'", async () => {
+    // Session is complete (paid) but webhook hasn't processed yet —
+    // row is still cart_created. Must not mint a second session.
+    selectedOrder = { ...baseOrder, stripeSessionId: "sess_complete" };
+    stripeRetrieve.mockResolvedValueOnce({
+      status: "complete",
+      url: null,
+    });
+
+    const result = await completePrintOrder(callArgs);
+
+    expect(stripeCreate).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      error:
+        "This order is already being processed — check your orders in a moment.",
+    });
+    // Must NOT null out the session id (that would let a new session be minted).
+    const nulledSession = updateSet.mock.calls.find(
+      (c) => (c[0] as { stripeSessionId?: unknown }).stripeSessionId === null
+    );
+    expect(nulledSession).toBeUndefined();
+  });
 });

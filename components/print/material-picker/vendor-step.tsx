@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Factory } from "@/components/icons/factory";
 import { Frown } from "@/components/icons/frown";
 import { ChevronRight } from "@/components/icons/chevron-right";
@@ -192,6 +192,12 @@ export function VendorStep({
     selectedQuote?.color ?? colors[0]?.name ?? ""
   );
 
+  // Focus the heading on mount so step transitions land AT users here (CON-157).
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
+
   const activeColorGroup = colors.find((c) => c.name === activeColor) ?? colors[0];
   const vendorQuotes = activeColorGroup?.quotes ?? [];
 
@@ -206,7 +212,7 @@ export function VendorStep({
           <ChevronRight size={14} className="rotate-180" />
           {backLabel}
         </button>
-        <h2 className="mt-2 text-lg font-semibold">
+        <h2 ref={headingRef} tabIndex={-1} className="mt-2 text-lg font-semibold outline-none">
           {materialName}
           <span className="ml-2 text-sm font-normal text-muted-foreground">
             {finishGroupName}
@@ -284,6 +290,7 @@ export function VendorStep({
               key={quote.quoteId}
               type="button"
               onClick={() => onPick(quote)}
+              aria-pressed={isSelected}
               className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors ${
                 isSelected
                   ? "border-primary bg-primary/5"

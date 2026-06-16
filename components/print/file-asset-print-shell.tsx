@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { type ReactNode } from "react";
 import { QuoteConfigurator } from "@/components/print/quote-configurator";
 import { CartSlotStack } from "@/components/print/cart-slot-stack";
+import type { CheckoutModel } from "@/lib/env";
 
 interface FileAssetPrintShellProps {
   fileAssetId: string;
@@ -29,6 +30,13 @@ interface FileAssetPrintShellProps {
    * personal library, so the user keeps walking the project's files.
    */
   projectSlug?: string;
+  /**
+   * Checkout architecture for new orders — pass
+   * `checkoutModel={getCheckoutModel()}` from the server page
+   * component. Forwarded to QuoteConfigurator → PriceDisplay for the
+   * two-charge disclosure under "two_step". Defaults to "single".
+   */
+  checkoutModel?: CheckoutModel;
 }
 
 /**
@@ -48,6 +56,7 @@ export function FileAssetPrintShell({
   preselectMaterialId,
   configureHeader,
   projectSlug,
+  checkoutModel = "single",
 }: FileAssetPrintShellProps) {
   const router = useRouter();
 
@@ -74,6 +83,7 @@ export function FileAssetPrintShell({
       hasCachedModel={hasCachedModel}
       geometryData={geometryData}
       preselectMaterialId={preselectMaterialId}
+      checkoutModel={checkoutModel}
       onAddedToCart={handleAddedToCart}
       headerSlot={configureHeader}
       rightAnnex={({ pendingItem }) => (

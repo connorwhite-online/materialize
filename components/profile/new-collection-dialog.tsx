@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import { createCollection } from "@/app/actions/collections";
 import { OwnerPicker } from "@/components/orgs/owner-picker";
+import { CategorySelect } from "@/components/categories/category-select";
 
 interface NewCollectionDialogProps {
   open: boolean;
@@ -42,6 +43,7 @@ export function NewCollectionDialog({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [visibility, setVisibility] = useState<"public" | "private">("public");
+  const [category, setCategory] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -49,6 +51,7 @@ export function NewCollectionDialog({
     setName("");
     setDescription("");
     setVisibility("public");
+    setCategory("");
     setError(null);
   };
 
@@ -69,6 +72,7 @@ export function NewCollectionDialog({
     formData.set("name", name);
     formData.set("description", description);
     formData.set("visibility", visibility);
+    formData.set("category", category);
     startTransition(async () => {
       const result = (await createCollection(formData)) as
         | { collectionId: string; slug: string }
@@ -149,6 +153,16 @@ export function NewCollectionDialog({
                 <SelectItem value="private">Private</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="new-collection-category" className="text-xs">
+              Category
+            </Label>
+            <CategorySelect
+              id="new-collection-category"
+              value={category}
+              onValueChange={setCategory}
+            />
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
           <DialogFooter>

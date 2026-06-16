@@ -1,9 +1,19 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import localFont from "next/font/local";
 import { AuthNav } from "@/components/auth/auth-nav";
 import { HeroShowcase } from "@/components/home/hero-showcase-lazy";
 import { HomeBottomBar } from "@/components/home/home-bottom-bar";
 import { HomeMarketing } from "@/components/home/home-marketing";
+
+// PP Playground Light — scoped to the home page so the 157KB OTF is
+// only preloaded here, not on every route (CON-166). Applied to the
+// "Anything" word in the hero <h1> via the --font-script CSS variable.
+const playground = localFont({
+  src: "../public/PPPlayground-Light.otf",
+  variable: "--font-script",
+  display: "swap",
+});
 
 export default async function HomePage() {
   // Authed home = the user's own profile. Materialize is mostly a
@@ -26,7 +36,7 @@ export default async function HomePage() {
   // flow (no h-dvh / overflow-hidden) so the content below the fold
   // can extend it.
   return (
-    <div className="flex flex-col">
+    <div className={`flex flex-col ${playground.variable}`}>
       {/* Hero — exactly one screen. min-h-dvh (not h-dvh) keeps the
           hero at one mobile viewport while letting HomeMarketing below
           grow the page. dvh, not vh: 100vh on iOS Safari includes the
