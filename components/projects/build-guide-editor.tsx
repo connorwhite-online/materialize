@@ -127,9 +127,9 @@ export function BuildGuideEditor({
 
   return (
     <div className="min-h-screen">
-      {/* Floating sticky header: exit · toolbar · save */}
+      {/* Top bar: back · project title · save */}
       <header className="sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur">
-        <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2 px-4 py-2">
+        <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-2">
           <Button
             type="button"
             variant="ghost"
@@ -140,22 +140,10 @@ export function BuildGuideEditor({
             <ChevronLeft size={16} />
             Back
           </Button>
-          <span className="hidden min-w-0 truncate text-sm font-medium text-muted-foreground sm:block">
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-muted-foreground">
             {projectName}
           </span>
-
-          {editor && (
-            <div className="order-last w-full overflow-x-auto rounded-full border border-border bg-card px-1.5 py-1 shadow-sm sm:order-none sm:w-auto sm:flex-1">
-              <EditorToolbar
-                editor={editor}
-                onUploadImage={uploadImage}
-                onUploadImages={uploadImages}
-                disabled={pending}
-              />
-            </div>
-          )}
-
-          <div className="ml-auto flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <span className="text-[11px] tabular-nums text-muted-foreground">
               {uploading
                 ? "Uploading…"
@@ -176,7 +164,9 @@ export function BuildGuideEditor({
         </div>
       </header>
 
-      <main className="mx-auto max-w-3xl px-4 py-8">
+      {/* Extra bottom padding so the floating toolbar never covers the
+          last lines of the guide when scrolled to the end. */}
+      <main className="mx-auto max-w-3xl px-4 pb-32 pt-8">
         {error && (
           <p className="mb-3 text-sm text-destructive" role="alert">
             {error}
@@ -193,6 +183,22 @@ export function BuildGuideEditor({
           }
         />
       </main>
+
+      {/* Floating formatting toolbar, centered just above the bottom edge.
+          The full-width wrapper is click-through; only the pill itself
+          captures pointer events so it never blocks the page behind it. */}
+      {editor && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex justify-center px-4">
+          <div className="pointer-events-auto max-w-full overflow-x-auto rounded-xl border border-border bg-card px-1.5 py-1 shadow-lg">
+            <EditorToolbar
+              editor={editor}
+              onUploadImage={uploadImage}
+              onUploadImages={uploadImages}
+              disabled={pending}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

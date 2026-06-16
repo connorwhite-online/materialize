@@ -142,10 +142,9 @@ export function EditorToolbar({
       {onUploadImages && (
         <Tool label="Insert image gallery" icon={Images} onClick={() => galleryInputRef.current?.click()} />
       )}
-      <div className="ml-auto flex items-center gap-0.5">
-        <Tool label="Undo" icon={Undo2} disabled={!s.canUndo} onClick={() => editor.chain().focus().undo().run()} />
-        <Tool label="Redo" icon={Redo2} disabled={!s.canRedo} onClick={() => editor.chain().focus().redo().run()} />
-      </div>
+      <Divider />
+      <Tool label="Undo" icon={Undo2} disabled={!s.canUndo} onClick={() => editor.chain().focus().undo().run()} />
+      <Tool label="Redo" icon={Redo2} disabled={!s.canRedo} onClick={() => editor.chain().focus().redo().run()} />
 
       <input
         ref={imageInputRef}
