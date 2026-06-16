@@ -34,6 +34,7 @@ import {
   MAX_BUILD_GUIDE_LENGTH,
 } from "@/lib/validations/project";
 import { buildListingSlug } from "@/lib/filenames";
+import { sanitizeRichHtml } from "@/lib/sanitize/sanitize-html";
 import { logError, isRedirectError } from "@/lib/logger";
 import {
   canWriteProject,
@@ -309,11 +310,16 @@ export async function updateProjectBuildGuide(
         error: `Build guide must be under ${MAX_BUILD_GUIDE_LENGTH} characters.`,
       };
     }
+    // The guide is owner-authored HTML (WYSIWYG output or pasted README).
+    // Scrub it against the shared allowlist before persisting so the
+    // stored value is safe for every consumer, not just the sanitizing
+    // render path. Empty/whitespace-only collapses to NULL.
     const trimmed = buildGuide.trim();
+    const sanitized = trimmed ? (await sanitizeRichHtml(trimmed)).trim() : "";
 
     await db
       .update(projects)
-      .set({ buildGuide: trimmed || null })
+      .set({ buildGuide: sanitized || null })
       .where(eq(projects.id, projectId));
 
     revalidatePath(`/projects/${project.slug}`);

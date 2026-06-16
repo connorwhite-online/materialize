@@ -1,7 +1,8 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
-import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import rehypeSanitize from "rehype-sanitize";
+import { richHtmlSchema } from "@/lib/sanitize/html-schema";
 import { cn } from "@/lib/utils";
 
 // Map a pasted `align` attribute (preserved through sanitize for
@@ -18,25 +19,9 @@ function nodeAlign(node: unknown): string {
   return "";
 }
 
-// Sanitize schema for the `allowHtml` path. Starts from the safe
-// default (which strips <script>, event handlers, javascript: URLs,
-// etc.) and additionally permits the presentational `align` attribute
-// authors reach for in pasted HTML (`<h1 align="center">`, honored by
-// `nodeAlign` below) plus explicit img sizing — enough to render
-// imported build guides faithfully without opening an injection hole.
-const htmlSchema = {
-  ...defaultSchema,
-  attributes: {
-    ...defaultSchema.attributes,
-    "*": [...(defaultSchema.attributes?.["*"] ?? []), "align"],
-    img: [
-      ...(defaultSchema.attributes?.img ?? []),
-      "width",
-      "height",
-      "loading",
-    ],
-  },
-};
+// Sanitize schema for the `allowHtml` path lives in lib/sanitize so the
+// write-time sanitizer (sanitizeRichHtml) shares the exact same allowlist.
+const htmlSchema = richHtmlSchema;
 
 /**
  * Renders markdown source as styled prose. Used for file + project
