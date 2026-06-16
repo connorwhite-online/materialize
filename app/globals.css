@@ -401,3 +401,74 @@
     opacity: 0.5;
   }
 }
+/* ── Rich-text editor (Tiptap) ──────────────────────────────────────
+   The editable surface mirrors MarkdownProse so editing looks like the
+   rendered guide. Scoped to .rte-content (set on the ProseMirror root). */
+.rte-content :where(h2) {
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.rte-content :where(h3) {
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.rte-content :where(p) {
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.rte-content :where(p:first-child) { margin-top: 0; }
+.rte-content :where(ul) {
+  margin: 0.75rem 0;
+  padding-left: 1.25rem;
+  list-style: disc;
+}
+.rte-content :where(ol) {
+  margin: 0.75rem 0;
+  padding-left: 1.25rem;
+  list-style: decimal;
+}
+.rte-content :where(li) { margin: 0.125rem 0; }
+.rte-content :where(a) {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.rte-content :where(strong) { color: var(--foreground); font-weight: 600; }
+.rte-content :where(blockquote) {
+  margin: 0.75rem 0;
+  border-left: 2px solid var(--border);
+  padding-left: 0.75rem;
+  font-style: italic;
+}
+.rte-content :where(code) {
+  border-radius: 0.25rem;
+  background: var(--muted);
+  padding: 0.1em 0.3em;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.85em;
+}
+.rte-content :where(pre) {
+  margin: 0.75rem 0;
+  overflow-x: auto;
+  border-radius: 0.5rem;
+  background: var(--muted);
+  padding: 0.75rem;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
+}
+.rte-content :where(pre code) { background: transparent; padding: 0; }
+.rte-content :where(hr) { margin: 1rem 0; border-color: var(--border); }
+/* Placeholder (extension-placeholder) on the first empty line. */
+.rte-content p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  color: var(--muted-foreground);
+}

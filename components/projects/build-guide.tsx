@@ -1,11 +1,11 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { marked } from "marked";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { MarkdownProse } from "@/components/ui/markdown-prose";
-import { ImagePlus } from "@/components/icons/image-plus";
+import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { updateProjectBuildGuide } from "@/app/actions/projects";
 import { addProjectGuideImage } from "@/app/actions/project-photos";
 import { uploadPhotoToR2, validatePhoto } from "@/lib/photos/upload-photo";
@@ -29,56 +29,70 @@ interface Props {
 // for descriptions and comment images.
 const GUIDE_IMAGE_MAX_HEIGHT = "max-h-[36rem]";
 
+// Stored guides predate the WYSIWYG editor and hold markdown. Detect
+// that case so we can convert markdown → HTML once, when the editor is
+// first opened on a legacy guide. New guides are saved as HTML and skip
+// the conversion (they already contain block tags).
+function looksLikeHtml(content: string): boolean {
+  return /<(p|div|h[1-6]|ul|ol|li|img|br|blockquote|pre|table|strong|em|a)\b/i.test(
+    content
+  );
+}
+
+function toEditorHtml(content: string | null): string {
+  if (!content) return "";
+  if (looksLikeHtml(content)) return content;
+  // marked passes embedded HTML through and renders markdown to HTML.
+  return marked.parse(content, { async: false }) as string;
+}
+
+// Tiptap emits `<p></p>` for an empty document. Treat a guide as empty
+// when it has no text and no standalone media so we store NULL rather
+// than an empty paragraph.
+function isEmptyHtml(html: string): boolean {
+  if (/<(img|hr)\b/i.test(html)) return false;
+  return (
+    html
+      .replace(/<[^>]*>/g, "")
+      .replace(/&nbsp;/gi, " ")
+      .trim().length === 0
+  );
+}
+
 /**
  * Renders a project's build guide and — for users with write access —
- * an inline markdown editor with image upload and a live preview.
+ * an inline WYSIWYG editor with image upload.
  *
- * Images upload to R2 then register as `kind = 'inline'` project
- * photos; the editor splices the `/api/thumbnails/projects/{id}?photoId=`
- * proxy URL into the markdown so the reference resolves to a freshly-
- * signed link on every load (no expiry, same pattern as comment photos).
+ * The guide is stored as sanitized HTML. The editor (Tiptap) reads and
+ * writes HTML, so pasting a README's formatted HTML round-trips, and
+ * non-technical authors get rich text without typing markup. Inserted
+ * images upload to R2, register as `kind = 'inline'` project photos, and
+ * are referenced by the `/api/thumbnails/projects/{id}?photoId=` proxy
+ * URL so the link resolves to a freshly-signed URL on every load.
  */
 export function BuildGuide({ projectId, buildGuide, canManage }: Props) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(buildGuide ?? "");
-  const [showPreview, setShowPreview] = useState(false);
+  const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [pending, startTransition] = useTransition();
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Seed value for the editor, computed from the persisted guide. Recomputed
+  // only when the source changes; the editor reads it once on mount.
+  const seedHtml = useMemo(() => toEditorHtml(buildGuide), [buildGuide]);
 
   const startEditing = () => {
-    setDraft(buildGuide ?? "");
+    setDraft(seedHtml);
     setError(null);
-    setShowPreview(false);
     setEditing(true);
   };
 
-  const insertAtCursor = (snippet: string) => {
-    const el = textareaRef.current;
-    if (!el) {
-      setDraft((d) => (d ? `${d}\n\n${snippet}` : snippet));
-      return;
-    }
-    const start = el.selectionStart ?? draft.length;
-    const end = el.selectionEnd ?? draft.length;
-    const next = draft.slice(0, start) + snippet + draft.slice(end);
-    setDraft(next);
-    // Restore the caret just after the inserted snippet on the next tick.
-    requestAnimationFrame(() => {
-      el.focus();
-      const pos = start + snippet.length;
-      el.setSelectionRange(pos, pos);
-    });
-  };
-
-  const handleImage = async (file: File) => {
+  const uploadImage = async (file: File): Promise<string> => {
     const invalid = validatePhoto(file);
     if (invalid) {
       setError(invalid);
-      return;
+      throw new Error(invalid);
     }
     setError(null);
     setUploading(true);
@@ -86,22 +100,30 @@ export function BuildGuide({ projectId, buildGuide, canManage }: Props) {
       const { storageKey } = await uploadPhotoToR2(file);
       const res = await addProjectGuideImage({ projectId, storageKey });
       if ("error" in res) {
-        setError(res.error ?? "Couldn't upload image.");
-        return;
+        const msg = res.error ?? "Couldn't upload image.";
+        setError(msg);
+        throw new Error(msg);
       }
-      const url = `/api/thumbnails/projects/${projectId}?photoId=${res.photoId}`;
-      insertAtCursor(`\n\n![](${url})\n\n`);
+      return `/api/thumbnails/projects/${projectId}?photoId=${res.photoId}`;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't upload image.");
+      throw err;
     } finally {
       setUploading(false);
     }
   };
 
   const save = () => {
+    const payload = isEmptyHtml(draft) ? "" : draft;
+    if (payload.length > MAX_BUILD_GUIDE_LENGTH) {
+      setError(
+        `Build guide is too long (${payload.length.toLocaleString()} / ${MAX_BUILD_GUIDE_LENGTH.toLocaleString()} characters).`
+      );
+      return;
+    }
     setError(null);
     startTransition(async () => {
-      const res = await updateProjectBuildGuide(projectId, draft);
+      const res = await updateProjectBuildGuide(projectId, payload);
       if (res && "error" in res) {
         setError(res.error ?? "Couldn't save.");
         return;
@@ -123,7 +145,8 @@ export function BuildGuide({ projectId, buildGuide, canManage }: Props) {
           canManage && (
             <p className="text-sm text-muted-foreground">
               Document how to build this project — steps, photos, wiring
-              notes, code snippets. Supports markdown and inline images.
+              notes, code snippets. Paste in a README or write it inline with
+              rich text and images.
             </p>
           )
         )}
@@ -137,87 +160,45 @@ export function BuildGuide({ projectId, buildGuide, canManage }: Props) {
   }
 
   // ── Editor ──────────────────────────────────────────────────────
+  const busy = pending || uploading;
   return (
     <div className="space-y-2">
+      <RichTextEditor
+        initialHTML={seedHtml}
+        onChange={setDraft}
+        onUploadImage={uploadImage}
+        imageMaxHeightClass={GUIDE_IMAGE_MAX_HEIGHT}
+        disabled={pending}
+        placeholder={
+          "Step 1 — Print the parts. Use PLA at 0.2mm…\n\nPaste a README, or use the toolbar to format and insert images."
+        }
+      />
+
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void handleImage(f);
-              e.target.value = "";
-            }}
-          />
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={uploading || pending}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <ImagePlus size={14} />
-            {uploading ? "Uploading…" : "Insert image"}
-          </Button>
+        <span className="text-[11px] tabular-nums text-muted-foreground">
+          {uploading ? "Uploading image…" : null}
+          {!uploading && draft.length > MAX_BUILD_GUIDE_LENGTH * 0.9
+            ? `${draft.length.toLocaleString()} / ${MAX_BUILD_GUIDE_LENGTH.toLocaleString()}`
+            : null}
+        </span>
+        {error && <p className="text-xs text-destructive">{error}</p>}
+        <div className="flex justify-end gap-2">
           <Button
             type="button"
             variant="ghost"
             size="sm"
-            onClick={() => setShowPreview((v) => !v)}
+            disabled={busy}
+            onClick={() => {
+              setEditing(false);
+              setError(null);
+            }}
           >
-            {showPreview ? "Write" : "Preview"}
+            Cancel
+          </Button>
+          <Button type="button" size="sm" disabled={busy} onClick={save}>
+            {pending ? "Saving…" : "Save"}
           </Button>
         </div>
-        <span className="text-[11px] tabular-nums text-muted-foreground">
-          {draft.length.toLocaleString()} / {MAX_BUILD_GUIDE_LENGTH.toLocaleString()}
-        </span>
-      </div>
-
-      {showPreview ? (
-        <div className="min-h-40 rounded-lg border border-border p-3">
-          {draft.trim() ? (
-            <MarkdownProse imageMaxHeightClass={GUIDE_IMAGE_MAX_HEIGHT} allowHtml>
-              {draft}
-            </MarkdownProse>
-          ) : (
-            <p className="text-sm text-muted-foreground">Nothing to preview yet.</p>
-          )}
-        </div>
-      ) : (
-        <Textarea
-          ref={textareaRef}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          maxLength={MAX_BUILD_GUIDE_LENGTH}
-          rows={16}
-          placeholder={
-            "## Step 1 — Print the parts\n\nUse PLA at 0.2mm…\n\n![](paste or insert an image)\n\n## Step 2 — Wiring\n\n…"
-          }
-          className="font-mono text-xs"
-        />
-      )}
-
-      {error && <p className="text-xs text-destructive">{error}</p>}
-
-      <div className="flex justify-end gap-2">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={pending || uploading}
-          onClick={() => {
-            setEditing(false);
-            setError(null);
-          }}
-        >
-          Cancel
-        </Button>
-        <Button type="button" size="sm" disabled={pending || uploading} onClick={save}>
-          {pending ? "Saving…" : "Save"}
-        </Button>
       </div>
     </div>
   );
