@@ -200,7 +200,7 @@ function GroupSection({
           >
             <ChevronRight size={14} />
           </motion.span>
-          <h3 className="text-sm font-medium text-muted-foreground">
+          <h3 className="text-sm font-medium text-muted-foreground transition-colors group-hover:text-foreground">
             {name}
           </h3>
         </div>

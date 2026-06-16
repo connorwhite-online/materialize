@@ -91,7 +91,7 @@ async function loadLibraryTilesOnce(userId: string): Promise<LibraryTile[]> {
     const legacyPrints = await db
       .select({
         fileAssetId: printOrders.fileAssetId,
-        lastPrintedAt: sql<Date>`max(${printOrders.createdAt})`,
+        lastPrintedAt: sql<string>`max(${printOrders.createdAt})`,
       })
       .from(printOrders)
       .where(
@@ -103,13 +103,13 @@ async function loadLibraryTilesOnce(userId: string): Promise<LibraryTile[]> {
       .groupBy(printOrders.fileAssetId);
     for (const row of legacyPrints) {
       if (row.fileAssetId) {
-        lastPrintedByAssetId.set(row.fileAssetId, row.lastPrintedAt);
+        lastPrintedByAssetId.set(row.fileAssetId, new Date(row.lastPrintedAt));
       }
     }
     const itemPrints = await db
       .select({
         fileAssetId: printOrderItems.fileAssetId,
-        lastPrintedAt: sql<Date>`max(${printOrders.createdAt})`,
+        lastPrintedAt: sql<string>`max(${printOrders.createdAt})`,
       })
       .from(printOrderItems)
       .innerJoin(printOrders, eq(printOrderItems.printOrderId, printOrders.id))
@@ -121,9 +121,10 @@ async function loadLibraryTilesOnce(userId: string): Promise<LibraryTile[]> {
       )
       .groupBy(printOrderItems.fileAssetId);
     for (const row of itemPrints) {
+      const d = new Date(row.lastPrintedAt);
       const prev = lastPrintedByAssetId.get(row.fileAssetId);
-      if (!prev || row.lastPrintedAt > prev) {
-        lastPrintedByAssetId.set(row.fileAssetId, row.lastPrintedAt);
+      if (!prev || d > prev) {
+        lastPrintedByAssetId.set(row.fileAssetId, d);
       }
     }
   }
