@@ -472,3 +472,25 @@
   pointer-events: none;
   color: var(--muted-foreground);
 }
+
+/* Gallery block inside the editor: lay the child images out as a wrapping
+   row (the read view renders galleries via the BuildGuideGallery
+   component, so this only styles the WYSIWYG surface). */
+.rte-content .build-guide-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+.rte-content .build-guide-gallery img {
+  margin: 0;
+  height: 10rem;
+  width: auto;
+  flex: 1 1 auto;
+  object-fit: cover;
+}
+.rte-content .build-guide-gallery.ProseMirror-selectednode {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 0.75rem;
+}

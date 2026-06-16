@@ -1,9 +1,47 @@
+import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import { richHtmlSchema } from "@/lib/sanitize/html-schema";
+import {
+  BuildGuideGallery,
+  LightboxImage,
+  type GalleryImage,
+} from "@/components/projects/build-guide-gallery";
 import { cn } from "@/lib/utils";
+
+type HastNode = {
+  tagName?: string;
+  properties?: Record<string, unknown>;
+  children?: HastNode[];
+};
+
+// True when a hast <div> carries the gallery marker emitted by the
+// imageGallery node + preserved through sanitize (`data-gallery`).
+function isGalleryNode(node: unknown): boolean {
+  const props = (node as HastNode | undefined)?.properties;
+  if (!props) return false;
+  if (props.dataGallery) return true;
+  const cls = props.className;
+  return Array.isArray(cls)
+    ? cls.includes("build-guide-gallery")
+    : cls === "build-guide-gallery";
+}
+
+// Pull the direct <img> children out of a gallery node.
+function collectGalleryImages(node: unknown): GalleryImage[] {
+  const children = (node as HastNode | undefined)?.children ?? [];
+  const out: GalleryImage[] = [];
+  for (const child of children) {
+    if (child.tagName !== "img") continue;
+    const src = child.properties?.src;
+    if (typeof src !== "string") continue;
+    const alt = child.properties?.alt;
+    out.push({ src, alt: typeof alt === "string" ? alt : undefined });
+  }
+  return out;
+}
 
 // Map a pasted `align` attribute (preserved through sanitize for
 // imported HTML) to a text-align utility. The custom element renderers
@@ -42,6 +80,7 @@ export function MarkdownProse({
   children,
   imageMaxHeightClass = "max-h-80",
   allowHtml = false,
+  richMedia = false,
 }: {
   children: string;
   /**
@@ -55,6 +94,13 @@ export function MarkdownProse({
    * the build guide opts in so authors can paste formatted HTML.
    */
   allowHtml?: boolean;
+  /**
+   * Build-guide-only enhancements: render `imageGallery` blocks as a
+   * click-to-expand carousel and make standalone images open the
+   * full-screen viewer. Off for comments/descriptions so their plain
+   * inline images stay non-interactive.
+   */
+  richMedia?: boolean;
 }) {
   return (
     <div className="text-sm leading-relaxed text-muted-foreground">
@@ -168,15 +214,37 @@ export function MarkdownProse({
           td: ({ children }) => (
             <td className="border border-border px-2 py-1">{children}</td>
           ),
-          img: ({ src, alt }) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={typeof src === "string" ? src : undefined}
-              alt={alt || ""}
-              loading="lazy"
-              className={`my-3 block ${imageMaxHeightClass} max-w-full rounded-xl border border-border object-contain`}
-            />
-          ),
+          img: ({ src, alt }) => {
+            const url = typeof src === "string" ? src : undefined;
+            if (richMedia && url) {
+              return (
+                <LightboxImage
+                  src={url}
+                  alt={alt || ""}
+                  maxHeightClass={imageMaxHeightClass}
+                />
+              );
+            }
+            return (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={url}
+                alt={alt || ""}
+                loading="lazy"
+                className={`my-3 block ${imageMaxHeightClass} max-w-full rounded-xl border border-border object-contain`}
+              />
+            );
+          },
+          ...(richMedia
+            ? {
+                div: ({ children, node }: { children?: ReactNode; node?: unknown }) =>
+                  isGalleryNode(node) ? (
+                    <BuildGuideGallery images={collectGalleryImages(node)} />
+                  ) : (
+                    <div>{children}</div>
+                  ),
+              }
+            : {}),
         }}
       >
         {children}

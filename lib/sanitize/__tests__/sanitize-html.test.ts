@@ -45,6 +45,22 @@ describe("sanitizeRichHtml", () => {
     expect(out).toContain('loading="lazy"');
   });
 
+  it("preserves a gallery container with its marker", async () => {
+    const out = await sanitizeRichHtml(
+      '<div data-gallery="true" class="build-guide-gallery"><img src="/a.png"><img src="/b.png"></div>'
+    );
+    expect(out).toContain("data-gallery");
+    expect(out).toContain("build-guide-gallery");
+    expect(out).toContain("/a.png");
+    expect(out).toContain("/b.png");
+  });
+
+  it("strips a non-gallery div and disallowed classes", async () => {
+    const out = await sanitizeRichHtml('<div class="evil">x</div>');
+    // The div survives only as a gallery; an arbitrary class is dropped.
+    expect(out).not.toContain('class="evil"');
+  });
+
   it("keeps a safe external link", async () => {
     const out = await sanitizeRichHtml(
       '<a href="https://example.com" target="_blank" rel="noreferrer noopener">x</a>'
