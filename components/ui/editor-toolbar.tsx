@@ -110,7 +110,11 @@ export function EditorToolbar({
   return (
     <div
       className={cn(
-        "flex flex-wrap items-center gap-0.5",
+        // Single non-wrapping row: the host pill (build-guide editor) is
+        // `overflow-x-auto`, so when the controls outgrow the available
+        // width they scroll horizontally instead of wrapping the
+        // `ml-auto` undo/redo group onto a ragged second line.
+        "flex flex-nowrap items-center gap-0.5",
         disabled && "pointer-events-none opacity-50",
         className
       )}
@@ -192,7 +196,7 @@ function Tool({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors",
+        "inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors",
         "hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40",
         active && "bg-foreground/10 text-foreground"
       )}
