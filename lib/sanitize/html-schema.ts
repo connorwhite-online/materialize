@@ -1,4 +1,4 @@
-import { defaultSchema } from "rehype-sanitize";
+import { defaultSchema, type Options as SanitizeSchema } from "rehype-sanitize";
 
 /**
  * Shared sanitize allowlist for owner-authored rich HTML — the project
@@ -16,8 +16,11 @@ import { defaultSchema } from "rehype-sanitize";
  *  - write  time: sanitizeRichHtml() (lib/sanitize/sanitize-html.ts),
  *                 called by updateProjectBuildGuide before persisting.
  */
-export const richHtmlSchema = {
+export const richHtmlSchema: SanitizeSchema = {
   ...defaultSchema,
+  // Permit the gallery container element. Everything else stays on the
+  // default (GitHub) tag allowlist.
+  tagNames: [...(defaultSchema.tagNames ?? []), "div"],
   attributes: {
     ...defaultSchema.attributes,
     "*": [...(defaultSchema.attributes?.["*"] ?? []), "align"],
@@ -27,5 +30,9 @@ export const richHtmlSchema = {
       "height",
       "loading",
     ],
+    // A <div> is only allowed as a gallery: the `data-gallery` marker
+    // plus a className locked to the single gallery class. This keeps the
+    // surface minimal — no arbitrary divs/classes survive sanitization.
+    div: [["className", "build-guide-gallery"], "dataGallery"],
   },
 };

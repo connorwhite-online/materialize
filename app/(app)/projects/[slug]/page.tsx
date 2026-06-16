@@ -32,7 +32,7 @@ import {
 } from "@/components/projects/project-tabs";
 import { AddProjectFilesDialog } from "@/components/projects/add-project-files-dialog";
 import { FileThumbnailStack } from "@/components/projects/file-thumbnail-stack";
-import { BuildGuide } from "@/components/projects/build-guide";
+import { BuildGuideReader } from "@/components/projects/build-guide-reader";
 import {
   CircuitGallery,
   type CircuitTile,
@@ -515,19 +515,39 @@ export default async function ProjectDetailPage(props: {
     ),
   });
 
-  // Build guide — owner-authored markdown with inline step photos.
-  // Owners always get the tab (with the inline editor / empty-state
-  // prompt); non-owners only once a guide exists.
+  // Build guide — owner-authored HTML with chapters + inline media.
+  // Read-only here; editing happens on the focused /build-guide/edit
+  // page. Owners always get the tab (with the empty-state prompt + edit
+  // link); non-owners only once a guide exists.
   if (project.buildGuide || isOwner) {
     tabs.push({
       value: "build-guide",
       label: "Build Guide",
       content: (
-        <BuildGuide
-          projectId={project.id}
-          buildGuide={project.buildGuide}
-          canManage={isOwner}
-        />
+        <div className="space-y-3">
+          {project.buildGuide ? (
+            <BuildGuideReader html={project.buildGuide} />
+          ) : (
+            isOwner && (
+              <p className="text-sm text-muted-foreground">
+                Document how to build this project — steps, photos, wiring
+                notes, code snippets. Organize it into chapters and add
+                image galleries.
+              </p>
+            )
+          )}
+          {isOwner && (
+            <Button
+              variant="outline"
+              size="sm"
+              render={
+                <Link href={`/projects/${project.slug}/build-guide/edit`} />
+              }
+            >
+              {project.buildGuide ? "Edit build guide" : "Write build guide"}
+            </Button>
+          )}
+        </div>
       ),
     });
   }
