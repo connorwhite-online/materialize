@@ -1,6 +1,6 @@
 {
-  "id": "b3554560-fedf-4bbb-83a9-e14c07f7c814",
-  "prevId": "f97183f5-13b2-4694-aad4-8bccf63b4f6e",
+  "id": "89172577-2ef1-48c1-bd86-44fdb0886085",
+  "prevId": "b3554560-fedf-4bbb-83a9-e14c07f7c814",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -73,8 +73,8 @@
           "notNull": true,
           "default": 0
         },
-        "render_data_url": {
-          "name": "render_data_url",
+        "render_storage_key": {
+          "name": "render_storage_key",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -95,11 +95,17 @@
         }
       },
       "indexes": {
-        "cad_generations_user_id_idx": {
-          "name": "cad_generations_user_id_idx",
+        "cad_generations_user_created_idx": {
+          "name": "cad_generations_user_created_idx",
           "columns": [
             {
               "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
