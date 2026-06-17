@@ -9,7 +9,7 @@ import { SandboxBadge } from "@/components/nav/sandbox-badge";
 import { getMyUnreadNotificationCount } from "@/lib/notifications/queries";
 import { isSandboxMode } from "@/lib/env";
 import { currentUser } from "@clerk/nextjs/server";
-import { canUseTextToCad } from "@/lib/features";
+import { canUseTextToCad, isTextToCadEnabled } from "@/lib/features";
 import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
 
 /**
@@ -86,8 +86,12 @@ export default async function AppLayout({
   const sandbox = isSandboxMode();
   // Owner-only experimental nav entry. Resolved server-side and threaded
   // down; the page itself re-checks the gate and 404s as a second layer.
-  const user = (await currentUser()) as ClerkUserLike;
-  const textToCad = canUseTextToCad(primaryEmail(user));
+  // Gate the currentUser() backend call on the env kill-switch first — it's
+  // a fast env read and false by default, so the default-off deployment
+  // pays nothing here (currentUser runs on every request under /(app)).
+  const textToCad = isTextToCadEnabled()
+    ? canUseTextToCad(primaryEmail((await currentUser()) as ClerkUserLike))
+    : false;
   return (
     <CartProvider>
       {/*

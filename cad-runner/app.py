@@ -13,10 +13,13 @@ SECURITY: this executes model-generated Python. The container is the
 trust boundary — deploy it network-disabled, non-root, read-only FS,
 with memory/CPU caps (see Dockerfile). Per-run we additionally fork a
 child process with resource limits and a wall-clock timeout so a hang or
-OOM can't take down the service. This is adequate for the owner-only v0;
-before any public/multi-user exposure, move execution into a stronger
-sandbox (gVisor / seccomp / per-run microVM). See the plan's
-"out of scope for v0" note.
+OOM can't take down the service. Note the `exec` namespace is NOT a
+sandbox: builtins (e.g. `__import__`, `os`) remain reachable from
+generated code, so a script can run arbitrary Python — the container
+boundary, not the namespace, is what contains it. This is adequate for
+the owner-only v0; before any public/multi-user exposure, move execution
+into a stronger sandbox (gVisor / seccomp / per-run microVM). See the
+plan's "out of scope for v0" note.
 """
 
 import base64
@@ -33,7 +36,13 @@ app = FastAPI(title="materialize-cad-runner")
 
 # Defaults; override via env in the deployment.
 RUN_TIMEOUT_S = int(os.environ.get("CAD_RUN_TIMEOUT_S", "30"))
-MEM_LIMIT_BYTES = int(os.environ.get("CAD_RUN_MEM_BYTES", str(1024 * 1024 * 1024)))
+# RLIMIT_AS caps *virtual* address space, not RSS. Python + build123d +
+# OpenCASCADE map well over 1 GB of address space at import time, so a 1 GB
+# cap can ENOMEM before user code even runs. Default to 4 GB; the container
+# memory limit (Dockerfile) is the real physical-RAM bound.
+MEM_LIMIT_BYTES = int(
+    os.environ.get("CAD_RUN_MEM_BYTES", str(4 * 1024 * 1024 * 1024))
+)
 CPU_LIMIT_S = int(os.environ.get("CAD_RUN_CPU_S", "25"))
 RUNNER_SECRET = os.environ.get("CAD_RUNNER_SECRET", "")
 
@@ -164,8 +173,14 @@ async def run(req: RunRequest, request: Request) -> dict:
     proc.join(RUN_TIMEOUT_S)
 
     if proc.is_alive():
+        # SIGTERM, then escalate to SIGKILL if the child ignores it (a
+        # build123d/OCC C-extension thread can swallow SIGTERM). Never
+        # join() without a timeout — that would hang the worker forever.
         proc.terminate()
-        proc.join()
+        proc.join(5)
+        if proc.is_alive():
+            proc.kill()
+            proc.join()
         return {
             "ok": False,
             "files": {},

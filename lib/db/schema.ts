@@ -1367,9 +1367,10 @@ export const cadGenerations = pgTable(
     error: text("error"),
     // How many harness loop turns (generate -> run -> repair) it took.
     attempts: integer("attempts").notNull().default(0),
-    // Last preview render the sidecar produced, stored inline as a data
-    // URL for cheap redisplay in the studio. Nullable.
-    renderDataUrl: text("render_data_url"),
+    // R2 storage key for the preview render the sidecar produced (PNG).
+    // Stored in object storage like every other image — never inline — so
+    // the history query stays small; a presigned URL is minted at read time.
+    renderStorageKey: text("render_storage_key"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -1378,7 +1379,12 @@ export const cadGenerations = pgTable(
       .defaultNow(),
   },
   (table) => [
-    index("cad_generations_user_id_idx").on(table.userId),
+    // Composite covers the history query (WHERE user_id ORDER BY created_at)
+    // and the user_id-prefix lookup, so no separate user_id index needed.
+    index("cad_generations_user_created_idx").on(
+      table.userId,
+      table.createdAt
+    ),
     index("cad_generations_file_asset_id_idx").on(table.fileAssetId),
     index("cad_generations_parent_idx").on(table.parentGenerationId),
     foreignKey({

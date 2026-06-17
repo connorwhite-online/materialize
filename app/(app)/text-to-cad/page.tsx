@@ -5,6 +5,7 @@ import { desc, eq } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { cadGenerations } from "@/lib/db/schema";
+import { generateDownloadUrl } from "@/lib/storage";
 import { canUseTextToCad } from "@/lib/features";
 import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
 import {
@@ -31,7 +32,7 @@ export default async function TextToCadPage() {
       id: cadGenerations.id,
       prompt: cadGenerations.prompt,
       status: cadGenerations.status,
-      renderDataUrl: cadGenerations.renderDataUrl,
+      renderStorageKey: cadGenerations.renderStorageKey,
       fileAssetId: cadGenerations.fileAssetId,
     })
     .from(cadGenerations)
@@ -39,13 +40,18 @@ export default async function TextToCadPage() {
     .orderBy(desc(cadGenerations.createdAt))
     .limit(50);
 
-  const initialGenerations: StudioGeneration[] = rows.map((r) => ({
-    id: r.id,
-    prompt: r.prompt,
-    status: r.status,
-    renderDataUrl: r.renderDataUrl,
-    fileAssetId: r.fileAssetId,
-  }));
+  // Mint a short-lived URL per render (local signing, no network round-trip).
+  const initialGenerations: StudioGeneration[] = await Promise.all(
+    rows.map(async (r) => ({
+      id: r.id,
+      prompt: r.prompt,
+      status: r.status,
+      renderUrl: r.renderStorageKey
+        ? await generateDownloadUrl(r.renderStorageKey)
+        : null,
+      fileAssetId: r.fileAssetId,
+    }))
+  );
 
   return <TextToCadStudio initialGenerations={initialGenerations} />;
 }

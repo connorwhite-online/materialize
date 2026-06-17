@@ -1,3 +1,6 @@
+# Versions are pinned exactly. This container executes untrusted Python, so
+# before any public exposure regenerate this as a hashed lockfile
+# (`pip-compile --generate-hashes`) in CI to close the PyPI supply-chain vector.
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 pydantic==2.10.4

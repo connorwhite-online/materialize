@@ -25,6 +25,9 @@ import { EVAL_CASES, type EvalCase, type EvalTier } from "./cases";
 
 const RUNNER_URL = process.env.CAD_RUNNER_URL;
 
+// NOTE: intentionally mirrors completeText() in lib/cad/model-client.ts.
+// Kept standalone so the eval script depends only on pure shared helpers
+// (no "server-only" import chain) — keep the two in sync if either changes.
 async function generate(prompt: string): Promise<string> {
   const result = query({
     prompt: `Create a 3D model: ${prompt}`,

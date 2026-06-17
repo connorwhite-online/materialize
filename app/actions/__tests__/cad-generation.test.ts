@@ -8,12 +8,17 @@ const updatedRows: Array<Record<string, unknown>> = [];
 
 // Hoisted so the mock factories below (which run before the const
 // initializers) can return them without a TDZ error.
-const { putObject, createDraftFileForPrint } = vi.hoisted(() => ({
-  putObject: vi.fn(() => Promise.resolve()),
-  createDraftFileForPrint: vi.fn(() =>
-    Promise.resolve({ fileAssetId: "asset-1", fileSlug: "thing-abc123" })
-  ),
-}));
+const { putObject, generateDownloadUrl, createDraftFileForPrint } = vi.hoisted(
+  () => ({
+    putObject: vi.fn(() => Promise.resolve()),
+    generateDownloadUrl: vi.fn(() =>
+      Promise.resolve("https://r2.example/signed/render.png")
+    ),
+    createDraftFileForPrint: vi.fn(() =>
+      Promise.resolve({ fileAssetId: "asset-1", fileSlug: "thing-abc123" })
+    ),
+  })
+);
 
 vi.mock("@/lib/features", () => ({
   canUseTextToCad: vi.fn(() => allowed),
@@ -23,7 +28,7 @@ vi.mock("@/lib/cad/harness", () => ({
   runHarness: vi.fn(() => Promise.resolve(harnessResult)),
 }));
 
-vi.mock("@/lib/storage", () => ({ putObject }));
+vi.mock("@/lib/storage", () => ({ putObject, generateDownloadUrl }));
 
 vi.mock("@/app/actions/files", () => ({ createDraftFileForPrint }));
 
@@ -94,17 +99,28 @@ describe("generateCadModel", () => {
     expect(runHarness).not.toHaveBeenCalled();
   });
 
-  it("happy path: uploads STL, mints a draft, returns the asset id", async () => {
+  it("happy path: uploads STL + render, mints a draft, returns the asset id", async () => {
     const res = await generateCadModel({ prompt: "a 20mm cube" });
-    expect(putObject).toHaveBeenCalledTimes(1);
-    // Storage key must live under the caller's prefix.
+    // Two writes: the printable STL and the preview render.
+    expect(putObject).toHaveBeenCalledTimes(2);
+    // STL lives under the caller's uploads/ prefix (ownership guard).
     expect((putObject.mock.calls[0] as unknown[])[0]).toMatch(
-      /^uploads\/test-user-id\//
+      /^uploads\/test-user-id\/.*model\.stl$/
+    );
+    // Render lives under a distinct prefix so upload sweeps never touch it.
+    expect((putObject.mock.calls[1] as unknown[])[0]).toMatch(
+      /^cad-renders\/test-user-id\//
     );
     expect(createDraftFileForPrint).toHaveBeenCalledTimes(1);
-    expect(res).toMatchObject({ fileAssetId: "asset-1", fileSlug: "thing-abc123" });
-    // Row marked succeeded.
-    expect(updatedRows.at(-1)).toMatchObject({ status: "succeeded", fileAssetId: "asset-1" });
+    expect(res).toMatchObject({
+      fileAssetId: "asset-1",
+      fileSlug: "thing-abc123",
+      renderUrl: "https://r2.example/signed/render.png",
+    });
+    // Row marked succeeded, render persisted as an R2 key (not inline).
+    const last = updatedRows.at(-1)!;
+    expect(last).toMatchObject({ status: "succeeded", fileAssetId: "asset-1" });
+    expect(last.renderStorageKey).toMatch(/^cad-renders\/test-user-id\//);
   });
 
   it("marks the row failed and returns an error when the harness fails", async () => {

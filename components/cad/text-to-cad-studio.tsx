@@ -8,7 +8,7 @@ export interface StudioGeneration {
   id: string;
   prompt: string;
   status: "pending" | "succeeded" | "failed";
-  renderDataUrl: string | null;
+  renderUrl: string | null;
   fileAssetId: string | null;
 }
 
@@ -16,7 +16,7 @@ interface CurrentResult {
   generationId: string;
   fileAssetId: string;
   fileSlug: string;
-  renderDataUrl: string | null;
+  renderUrl: string | null;
   sourceCode: string;
 }
 
@@ -56,7 +56,7 @@ export function TextToCadStudio({
           id: res.generationId,
           prompt: submittedPrompt,
           status: "succeeded",
-          renderDataUrl: res.renderDataUrl,
+          renderUrl: res.renderUrl,
           fileAssetId: res.fileAssetId,
         },
         ...h,
@@ -125,10 +125,10 @@ export function TextToCadStudio({
 
         {current && (
           <div className="mt-6 rounded-xl border border-foreground/10 p-4">
-            {current.renderDataUrl && (
+            {current.renderUrl && (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={current.renderDataUrl}
+                src={current.renderUrl}
                 alt="Generated model preview"
                 className="mb-4 w-full rounded-lg bg-muted/40 object-contain"
               />
@@ -147,7 +147,7 @@ export function TextToCadStudio({
                     id: current.generationId,
                     prompt: "",
                     status: "succeeded",
-                    renderDataUrl: current.renderDataUrl,
+                    renderUrl: current.renderUrl,
                     fileAssetId: current.fileAssetId,
                   });
                 }}
@@ -174,10 +174,10 @@ export function TextToCadStudio({
               key={g.id}
               className="flex items-center gap-3 rounded-lg border border-foreground/10 p-2"
             >
-              {g.renderDataUrl ? (
+              {g.renderUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={g.renderDataUrl}
+                  src={g.renderUrl}
                   alt=""
                   className="h-10 w-10 shrink-0 rounded bg-muted/40 object-contain"
                 />

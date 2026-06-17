@@ -26,7 +26,7 @@ import { logError } from "@/lib/logger";
 import { canUseTextToCad } from "@/lib/features";
 import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
 import { runHarness } from "@/lib/cad/harness";
-import { putObject } from "@/lib/storage";
+import { putObject, generateDownloadUrl } from "@/lib/storage";
 import { createDraftFileForPrint } from "@/app/actions/files";
 
 export type GenerateCadResult =
@@ -35,7 +35,7 @@ export type GenerateCadResult =
       generationId: string;
       fileAssetId: string;
       fileSlug: string;
-      renderDataUrl: string | null;
+      renderUrl: string | null;
       sourceCode: string;
     };
 
@@ -131,9 +131,26 @@ export async function generateCadModel(input: {
       return fail(draft.error, result.sourceCode, result.attempts);
     }
 
-    const renderDataUrl = result.run.renderPng
-      ? `data:image/png;base64,${result.run.renderPng}`
-      : null;
+    // Store the preview render in R2 (not inline in the DB) and mint a
+    // short-lived URL for immediate display. Best-effort: a render failure
+    // must not fail an otherwise-good generation.
+    let renderStorageKey: string | null = null;
+    let renderUrl: string | null = null;
+    if (result.run.renderPng) {
+      try {
+        renderStorageKey = `cad-renders/${userId}/${nanoid()}.png`;
+        await putObject(
+          renderStorageKey,
+          new Uint8Array(Buffer.from(result.run.renderPng, "base64")),
+          "image/png"
+        );
+        renderUrl = await generateDownloadUrl(renderStorageKey);
+      } catch (err) {
+        logError("generateCadModel.render", err);
+        renderStorageKey = null;
+        renderUrl = null;
+      }
+    }
 
     await db
       .update(cadGenerations)
@@ -142,7 +159,7 @@ export async function generateCadModel(input: {
         sourceCode: result.sourceCode,
         attempts: result.attempts,
         fileAssetId: draft.fileAssetId,
-        renderDataUrl,
+        renderStorageKey,
         updatedAt: new Date(),
       })
       .where(eq(cadGenerations.id, generationId));
@@ -153,7 +170,7 @@ export async function generateCadModel(input: {
       generationId,
       fileAssetId: draft.fileAssetId,
       fileSlug: draft.fileSlug,
-      renderDataUrl,
+      renderUrl,
       sourceCode: result.sourceCode,
     };
   } catch (error) {

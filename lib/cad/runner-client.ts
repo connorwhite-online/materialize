@@ -12,16 +12,17 @@ import type { CadOutputFormat, CadRunResult } from "./types";
  * (no kernel binary, no long-lived process), so this always talks to an
  * external `CAD_RUNNER_URL` over HTTP — same shape as lib/craftcloud/client.ts.
  *
- * Mock mode is ON by default (CAD_RUNNER_USE_MOCK !== "false") so the app
- * boots and the whole text-to-CAD -> print pipeline can be exercised
- * locally without standing up the sidecar. The mock returns a tiny valid
- * empty-mesh STL and a 1x1 PNG; bytes content is irrelevant downstream in
- * mock mode (CraftCloud is also mocked by default).
+ * Mock mode is ON whenever no sidecar URL is configured, so the app boots
+ * and the whole text-to-CAD -> print pipeline can be exercised locally
+ * without standing up the sidecar. Setting CAD_RUNNER_URL switches to live
+ * automatically; set CAD_RUNNER_USE_MOCK=true to force the mock even with a
+ * URL present (e.g. CI). The mock returns a tiny valid empty-mesh STL and a
+ * 1x1 PNG; bytes content is irrelevant downstream in mock mode (CraftCloud
+ * is also mocked by default).
  */
 
 const RUNNER_URL = process.env.CAD_RUNNER_URL ?? "";
-const USE_MOCK =
-  process.env.CAD_RUNNER_USE_MOCK !== "false" || RUNNER_URL === "";
+const USE_MOCK = RUNNER_URL === "" || process.env.CAD_RUNNER_USE_MOCK === "true";
 
 // 1x1 transparent PNG, base64 (no data: prefix).
 const MOCK_PNG_BASE64 =
