@@ -54,6 +54,27 @@ export async function generateUploadUrl(
   return getSignedUrl(getS3(), command, { expiresIn });
 }
 
+/**
+ * Server-side write of bytes we generated ourselves (e.g. a CAD model
+ * the text-to-CAD harness produced) straight to R2 — no presign/browser
+ * round-trip. Callers must still place the object under the right
+ * `uploads/{userId}/...` prefix so downstream ownership guards
+ * (createDraftFileForPrint) accept it.
+ */
+export async function putObject(
+  key: string,
+  body: Uint8Array,
+  contentType: string
+): Promise<void> {
+  const command = new PutObjectCommand({
+    Bucket: getBucket(),
+    Key: key,
+    Body: body,
+    ContentType: contentType,
+  });
+  await getS3().send(command);
+}
+
 export async function generateDownloadUrl(
   key: string,
   expiresIn = 3600

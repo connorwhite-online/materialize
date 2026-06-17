@@ -8,6 +8,9 @@ import {
 import { SandboxBadge } from "@/components/nav/sandbox-badge";
 import { getMyUnreadNotificationCount } from "@/lib/notifications/queries";
 import { isSandboxMode } from "@/lib/env";
+import { currentUser } from "@clerk/nextjs/server";
+import { canUseTextToCad } from "@/lib/features";
+import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
 
 /**
  * Progressive-blur layer table for the mobile header backdrop.
@@ -81,6 +84,10 @@ export default async function AppLayout({
   // stream picks up the live updates afterwards.
   const initialUnreadCount = await getMyUnreadNotificationCount();
   const sandbox = isSandboxMode();
+  // Owner-only experimental nav entry. Resolved server-side and threaded
+  // down; the page itself re-checks the gate and 404s as a second layer.
+  const user = (await currentUser()) as ClerkUserLike;
+  const textToCad = canUseTextToCad(primaryEmail(user));
   return (
     <CartProvider>
       {/*
@@ -157,7 +164,7 @@ export default async function AppLayout({
           </div>
           <div className="relative mx-auto flex h-16 max-w-7xl items-center justify-between px-4">
             <div className="flex items-center gap-2">
-              <MainMenuTrigger />
+              <MainMenuTrigger textToCad={textToCad} />
               {sandbox && <SandboxBadge />}
             </div>
             <AuthNav />
@@ -166,6 +173,7 @@ export default async function AppLayout({
         <MainMenuSidebar
           initialUnreadCount={initialUnreadCount}
           sandbox={sandbox}
+          textToCad={textToCad}
         />
         <main className="flex-1">{children}</main>
         <CartPanel />

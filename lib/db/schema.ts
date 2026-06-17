@@ -1327,3 +1327,64 @@ export const webhookEventsProcessed = pgTable(
     index("webhook_events_processed_processed_at_idx").on(table.processedAt),
   ]
 );
+
+// Text-to-CAD generations (experimental, owner-only — gated by
+// lib/features.ts). One row per generation attempt. This is both the
+// edit-history source ("edit existing" re-prompts against a prior row's
+// sourceCode via parentGenerationId) and the prompt -> code -> printed?
+// data flywheel: joining fileAssetId out to printOrders tells us which
+// generations a human actually accepted and ordered.
+export const cadGenerationStatusEnum = pgEnum("cad_generation_status", [
+  "pending",
+  "succeeded",
+  "failed",
+]);
+
+export const cadGenerations = pgTable(
+  "cad_generations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    prompt: text("prompt").notNull(),
+    // CAD program dialect the harness emitted (e.g. "build123d"). Plain
+    // text + default so adding engines later needs no enum migration.
+    engine: text("engine").notNull().default("build123d"),
+    // The generated parametric source. Null while pending / on failure.
+    sourceCode: text("source_code"),
+    // Set on an "edit existing" generation — points at the generation
+    // whose sourceCode seeded this one. Self-FK declared below.
+    parentGenerationId: uuid("parent_generation_id"),
+    // The printable library asset produced on success. Null until the
+    // R2 upload + createDraftFileForPrint step completes; SET NULL if the
+    // asset is later deleted so the generation history survives.
+    fileAssetId: uuid("file_asset_id").references(() => fileAssets.id, {
+      onDelete: "set null",
+    }),
+    status: cadGenerationStatusEnum("status").notNull().default("pending"),
+    // Failure message surfaced back to the studio UI when status=failed.
+    error: text("error"),
+    // How many harness loop turns (generate -> run -> repair) it took.
+    attempts: integer("attempts").notNull().default(0),
+    // Last preview render the sidecar produced, stored inline as a data
+    // URL for cheap redisplay in the studio. Nullable.
+    renderDataUrl: text("render_data_url"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("cad_generations_user_id_idx").on(table.userId),
+    index("cad_generations_file_asset_id_idx").on(table.fileAssetId),
+    index("cad_generations_parent_idx").on(table.parentGenerationId),
+    foreignKey({
+      columns: [table.parentGenerationId],
+      foreignColumns: [table.id],
+      name: "cad_generations_parent_fk",
+    }).onDelete("set null"),
+  ]
+);

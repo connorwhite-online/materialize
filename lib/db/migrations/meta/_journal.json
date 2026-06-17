@@ -260,6 +260,13 @@
       "when": 1781333429342,
       "tag": "0036_perf_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1781727869671,
+      "tag": "0037_cad_generations",
+      "breakpoints": true
     }
   ]
 }
