@@ -1,8 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { RichTextEditor, type Editor } from "@/components/ui/rich-text-editor";
 import { EditorToolbar } from "@/components/ui/editor-toolbar";
 import { ChevronLeft } from "@/components/icons/chevron-left";
@@ -39,9 +54,14 @@ export function BuildGuideEditor({
   const [editor, setEditor] = useState<Editor | null>(null);
   const [draft, setDraft] = useState(seedHtml);
   const [dirty, setDirty] = useState(false);
+  const [confirmLeave, setConfirmLeave] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [pending, startTransition] = useTransition();
+  // The fixed floating-toolbar wrapper. Its `bottom` is rewritten from
+  // the VisualViewport API so the bar rides above the iOS soft keyboard
+  // instead of hiding behind it (same pattern as HomeBottomBar).
+  const toolbarWrapRef = useRef<HTMLDivElement>(null);
 
   const onChange = useCallback((html: string) => {
     setDraft(html);
@@ -59,8 +79,47 @@ export function BuildGuideEditor({
     return () => window.removeEventListener("beforeunload", handler);
   }, [dirty]);
 
+  // Pin the floating toolbar above the soft keyboard on mobile. Without
+  // this the fixed bar sits at bottom-5 of the layout viewport, which on
+  // iOS hides behind the keyboard once the editor is focused. Re-runs
+  // when the editor mounts so the ref is populated. 20 = bottom-5.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    const updateOffset = () => {
+      const el = toolbarWrapRef.current;
+      if (!el) return;
+      const overlap = window.innerHeight - vv.height - vv.offsetTop;
+      el.style.bottom = `${Math.max(20, overlap + 20)}px`;
+    };
+
+    updateOffset();
+    vv.addEventListener("resize", updateOffset);
+    vv.addEventListener("scroll", updateOffset);
+    return () => {
+      vv.removeEventListener("resize", updateOffset);
+      vv.removeEventListener("scroll", updateOffset);
+    };
+  }, [editor]);
+
+  // In-app "Back": unsaved edits open our own confirm dialog instead of
+  // window.confirm. (The beforeunload guard above only covers hard
+  // navigations — refresh / tab close — which browsers won't let us skin.)
   const leave = () => {
-    if (dirty && !window.confirm("Discard unsaved changes?")) return;
+    if (dirty) {
+      setConfirmLeave(true);
+      return;
+    }
+    router.push(`/projects/${slug}`);
+  };
+
+  const discardAndLeave = () => {
+    // Drop the dirty flag first so the beforeunload listener detaches
+    // before we navigate — no stray native prompt on the way out.
+    setDirty(false);
+    setConfirmLeave(false);
     router.push(`/projects/${slug}`);
   };
 
@@ -186,10 +245,15 @@ export function BuildGuideEditor({
 
       {/* Floating formatting toolbar, centered just above the bottom edge.
           The full-width wrapper is click-through; only the pill itself
-          captures pointer events so it never blocks the page behind it. */}
+          captures pointer events so it never blocks the page behind it.
+          `nav:pl-56` mirrors the app shell's sidebar gutter so the pill
+          centers over the guide column, not the whole viewport. */}
       {editor && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex justify-center px-4">
-          <div className="pointer-events-auto max-w-full overflow-x-auto rounded-xl border border-border bg-card px-1.5 py-1 shadow-lg">
+        <div
+          ref={toolbarWrapRef}
+          className="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex justify-center px-4 nav:pl-56"
+        >
+          <div className="pointer-events-auto max-w-full overflow-x-auto rounded-xl border border-border bg-card p-1.5 shadow-lg">
             <EditorToolbar
               editor={editor}
               onUploadImage={uploadImage}
@@ -199,6 +263,35 @@ export function BuildGuideEditor({
           </div>
         </div>
       )}
+
+      {/* Custom discard confirmation — replaces window.confirm on Back. */}
+      <Dialog open={confirmLeave} onOpenChange={setConfirmLeave}>
+        <DialogContent className="max-w-sm" showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>Discard unsaved changes?</DialogTitle>
+            <DialogDescription>
+              You have edits to this build guide that haven&apos;t been saved.
+              Leaving now will lose them.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setConfirmLeave(false)}
+            >
+              Keep editing
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={discardAndLeave}
+            >
+              Discard changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -9,7 +9,7 @@ import {
   collections,
   collectionItems,
 } from "@/lib/db/schema";
-import { eq, desc, ilike, and, or, sql, inArray, isNotNull, type SQL } from "drizzle-orm";
+import { eq, desc, ilike, and, or, sql, inArray, isNotNull, notExists, type SQL } from "drizzle-orm";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { UserAvatar } from "@/components/auth/user-avatar";
@@ -178,13 +178,23 @@ export default async function BrowsePage(props: {
   // filter. Anything less is the idle recent-content grid.
   const active = !!pattern || !!category;
 
+  // Files bundled into a project are surfaced under that project, not as
+  // standalone entries in the Files section. Correlated NOT EXISTS so a
+  // file with any project membership drops out.
+  const fileNotInAnyProject = notExists(
+    db
+      .select({ one: sql`1` })
+      .from(projectFiles)
+      .where(eq(projectFiles.fileId, files.id))
+  );
+
   // The header (search bar + category chips) is identical across states.
   const header = (
     <>
       <div className="flex justify-center">
         <BrowseSearchBar defaultValue={query} category={category} />
       </div>
-      <div className="mt-4">
+      <div className="mt-4 flex">
         <CategoryFilterBar />
       </div>
     </>
@@ -208,7 +218,13 @@ export default async function BrowsePage(props: {
         })
         .from(files)
         .innerJoin(users, eq(files.userId, users.id))
-        .where(and(eq(files.status, "published"), eq(files.visibility, "public")))
+        .where(
+          and(
+            eq(files.status, "published"),
+            eq(files.visibility, "public"),
+            fileNotInAnyProject
+          )
+        )
         .orderBy(desc(files.downloadCount))
         .limit(PER_SECTION),
       db
@@ -296,7 +312,7 @@ export default async function BrowsePage(props: {
             <h2 className="mb-4 text-sm font-medium text-muted-foreground">
               Creators
             </h2>
-            <div className="grid grid-cols-3 gap-x-4 gap-y-5 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {recentCreators.map((u) => (
                 <UserCard key={u.id} user={u} />
               ))}
@@ -385,7 +401,8 @@ export default async function BrowsePage(props: {
           eq(files.status, "published"),
           eq(files.visibility, "public"),
           fileMatch,
-          category ? eq(files.category, category) : undefined
+          category ? eq(files.category, category) : undefined,
+          fileNotInAnyProject
         )
       )
       .orderBy(desc(files.createdAt))
@@ -508,7 +525,7 @@ export default async function BrowsePage(props: {
         <div className="mt-8 space-y-10">
           {userRows.length > 0 && (
             <Section title="Creators">
-              <div className="grid grid-cols-3 gap-x-4 gap-y-5 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {userRows.map((u) => (
                   <UserCard key={u.id} user={u} />
                 ))}
@@ -803,16 +820,16 @@ function UserCard({ user }: { user: UserRow }) {
   return (
     <Link
       href={`/${user.username}`}
-      className="group flex flex-col items-start gap-2"
+      className="group flex items-center gap-2.5 rounded-l-full rounded-r-xl border border-border bg-card p-1.5 pr-3 transition-colors hover:border-foreground/20 hover:bg-muted/30"
     >
       <UserAvatar
         seed={user.username}
         imageUrl={user.avatarUrl}
         displayName={user.displayName || user.username}
-        className="h-12 w-12 text-lg transition-opacity group-hover:opacity-80"
+        className="h-9 w-9 shrink-0 text-base"
       />
-      <div className="min-w-0 w-full">
-        <p className="truncate text-sm font-medium transition-colors group-hover:text-primary">
+      <div className="min-w-0">
+        <p className="truncate text-sm font-medium leading-tight transition-colors group-hover:text-primary">
           {user.displayName || user.username}
         </p>
         <p className="truncate text-xs text-muted-foreground">

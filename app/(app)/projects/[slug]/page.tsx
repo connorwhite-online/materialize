@@ -22,6 +22,7 @@ import { generateDownloadUrl } from "@/lib/storage";
 import { Card, CardContent } from "@/components/ui/card";
 import { ExpandableDescription } from "@/components/ui/expandable-description";
 import { Button } from "@/components/ui/button";
+import { OwnerBar } from "@/components/ui/owner-bar";
 import { DeleteProjectButton } from "@/components/projects/delete-project-button";
 import { BomDisplay } from "@/components/projects/bom-display";
 import { EditBomDialog } from "@/components/projects/edit-bom-dialog";
@@ -37,8 +38,6 @@ import {
   CircuitGallery,
   type CircuitTile,
 } from "@/components/circuits/circuit-gallery";
-import { Pencil } from "@/components/icons/pencil";
-import { Trash } from "@/components/icons/trash";
 import { LicenseBadge } from "@/components/licenses/license-badge";
 import { getCategoryLabel } from "@/lib/categories";
 import { SourceCodeCard } from "@/components/projects/source-code-card";
@@ -525,17 +524,6 @@ export default async function ProjectDetailPage(props: {
       label: "Build Guide",
       content: (
         <div className="space-y-3">
-          {project.buildGuide ? (
-            <BuildGuideReader html={project.buildGuide} />
-          ) : (
-            isOwner && (
-              <p className="text-sm text-muted-foreground">
-                Document how to build this project — steps, photos, wiring
-                notes, code snippets. Organize it into chapters and add
-                image galleries.
-              </p>
-            )
-          )}
           {isOwner && (
             <Button
               variant="outline"
@@ -546,6 +534,17 @@ export default async function ProjectDetailPage(props: {
             >
               {project.buildGuide ? "Edit build guide" : "Write build guide"}
             </Button>
+          )}
+          {project.buildGuide ? (
+            <BuildGuideReader html={project.buildGuide} />
+          ) : (
+            isOwner && (
+              <p className="text-sm text-muted-foreground">
+                Document how to build this project — steps, photos, wiring
+                notes, code snippets. Organize it into chapters and add
+                image galleries.
+              </p>
+            )
           )}
         </div>
       ),
@@ -558,7 +557,7 @@ export default async function ProjectDetailPage(props: {
   if (bomItems.length > 0 || isOwner) {
     tabs.push({
       value: "bom",
-      label: "BOM",
+      label: "Components",
       meta: bomItems.length || undefined,
       content: (
         <div className="space-y-3">
@@ -576,7 +575,7 @@ export default async function ProjectDetailPage(props: {
                 trigger={
                   <Button variant="outline" size="sm">
                     {bomItems.length > 0
-                      ? "Edit BOM"
+                      ? "Edit Components"
                       : "Add a Bill of Materials"}
                   </Button>
                 }
@@ -667,9 +666,26 @@ export default async function ProjectDetailPage(props: {
     </Link>
   );
 
-  // Owner edit/delete icon controls — mobile header + desktop sidebar.
+  // Owner edit/delete controls — text buttons in the OwnerBar.
   const renderOwnerControls = () => (
-    <div className="flex items-center gap-1">
+    <>
+      <DeleteProjectButton
+        projectId={project.id}
+        projectName={project.name}
+        hasBuyers={ownerBuyerCount > 0}
+        buyerCount={ownerBuyerCount}
+        redirectTo={`/${project.username}`}
+        trigger={
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-destructive hover:text-destructive"
+            aria-label="Delete project"
+          >
+            Delete
+          </Button>
+        }
+      />
       <EditProjectDialog
         projectId={project.id}
         initial={{
@@ -686,34 +702,12 @@ export default async function ProjectDetailPage(props: {
           })),
         }}
         trigger={
-          <Button
-            variant="ghost"
-            size="icon-lg"
-            className="rounded-[12px] p-2"
-            aria-label="Edit project"
-          >
-            <Pencil className="size-5" />
+          <Button variant="outline" size="sm" aria-label="Edit project">
+            Edit
           </Button>
         }
       />
-      <DeleteProjectButton
-        projectId={project.id}
-        projectName={project.name}
-        hasBuyers={ownerBuyerCount > 0}
-        buyerCount={ownerBuyerCount}
-        redirectTo={`/${project.username}`}
-        trigger={
-          <Button
-            variant="ghost"
-            size="icon-lg"
-            className="rounded-[12px] p-2 text-destructive hover:text-destructive"
-            aria-label="Delete project"
-          >
-            <Trash className="size-5" />
-          </Button>
-        }
-      />
-    </div>
+    </>
   );
 
   return (
@@ -725,6 +719,16 @@ export default async function ProjectDetailPage(props: {
         />
       )}
       <div className="flex flex-col gap-8">
+        {/* Admin-only bar — visibility status + owner controls, above
+            all page content. Collaborators see the status only. */}
+        {(isOwner || collaborators.some((c) => c.id === userId)) && (
+          <OwnerBar
+            visibility={project.visibility === "public" ? "public" : "private"}
+          >
+            {isOwner && renderOwnerControls()}
+          </OwnerBar>
+        )}
+
         {/* Hero — gallery left, project info right on md+ */}
         <div className="flex flex-col gap-6 md:grid md:grid-cols-[3fr_2fr] md:items-start md:gap-8">
           {/* Gallery */}
@@ -766,37 +770,26 @@ export default async function ProjectDetailPage(props: {
             <div>
               <h1 className="text-2xl font-bold">{project.name}</h1>
               <div className="mt-2">{renderByline()}</div>
-              <div className="mt-3 flex items-center gap-2">
-                {(isOwner || collaborators.some((c) => c.id === userId)) && (
-                  <span
-                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                      project.visibility === "public"
-                        ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                        : "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400"
-                    }`}
-                  >
-                    {project.visibility === "public" ? "Public" : "Private"}
-                  </span>
-                )}
-                <LicenseBadge license={project.license} />
-                {project.category && getCategoryLabel(project.category) && (
+              {project.category && getCategoryLabel(project.category) && (
+                <div className="mt-3">
                   <Link
                     href={`/files?category=${project.category}`}
                     className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
                   >
                     {getCategoryLabel(project.category)}
                   </Link>
-                )}
-              </div>
+                </div>
+              )}
             </div>
 
             {renderPurchasePanel()}
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-col gap-2">
               {bundledFiles.length > 0 && (
                 <Button
                   variant="outline"
                   size="sm"
+                  className="w-full"
                   render={<Link href="#project-files" />}
                 >
                   Download files
@@ -805,12 +798,12 @@ export default async function ProjectDetailPage(props: {
               {bundledFiles.length > 0 && (
                 <Button
                   size="sm"
+                  className="w-full"
                   render={<Link href={`/print?project=${project.slug}`} />}
                 >
                   Print this project
                 </Button>
               )}
-              {isOwner && renderOwnerControls()}
             </div>
           </div>
         </div>
@@ -854,7 +847,7 @@ export default async function ProjectDetailPage(props: {
             />
           )}
 
-          <Card>
+          <Card className="bg-muted/50">
             <CardContent className="space-y-5">
               <h2 className="text-base font-semibold">Discussion</h2>
               <CommentsSection
@@ -870,6 +863,10 @@ export default async function ProjectDetailPage(props: {
               />
             </CardContent>
           </Card>
+
+          <div className="flex justify-center pt-2">
+            <LicenseBadge license={project.license} />
+          </div>
         </div>
       </div>
     </div>

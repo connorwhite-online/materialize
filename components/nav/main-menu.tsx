@@ -212,7 +212,7 @@ export function MainMenuSidebar({
   return (
     <aside
       aria-label="Primary"
-      className="fixed top-8 bottom-8 left-4 z-30 hidden w-48 flex-col rounded-2xl bg-card p-2 shadow-lg shadow-foreground/5 ring-1 ring-foreground/10 nav:flex"
+      className="fixed top-4 bottom-4 left-4 z-30 hidden w-48 flex-col rounded-2xl bg-card p-2 shadow-lg shadow-foreground/5 ring-1 ring-foreground/10 nav:flex"
     >
       <div className="flex items-center justify-between gap-2 px-2 py-1">
         <Link

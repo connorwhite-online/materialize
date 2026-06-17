@@ -29,7 +29,7 @@ export function SourceCodeCard({ repoUrl }: { repoUrl: string }) {
       href={repoUrl}
       target="_blank"
       rel="noopener noreferrer"
-      className="group flex items-center gap-3 rounded-xl border border-border bg-card p-3 ring-1 ring-foreground/10 transition-colors hover:border-foreground/20 hover:bg-muted/40"
+      className="group flex items-center gap-3 rounded-xl border border-border bg-card p-2 ring-1 ring-foreground/10 transition-colors hover:border-foreground/20 hover:bg-muted/40"
     >
       <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-foreground text-background">
         <Github size={20} />

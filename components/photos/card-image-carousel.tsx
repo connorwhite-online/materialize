@@ -84,6 +84,10 @@ export function CardImageCarousel({
           alt={alt}
           fill
           sizes={carouselSizes}
+          // The `lg` variant is the detail-page hero — eager-load its
+          // cover so it doesn't lazy-pop on a cold (e.g. anon) first
+          // visit, where it isn't already in the browser cache.
+          priority={size === "lg"}
           className="object-cover"
         />
       </div>
@@ -106,6 +110,10 @@ export function CardImageCarousel({
               alt={alt}
               fill
               sizes={carouselSizes}
+              // Eager-load only the hero cover (first slide of the `lg`
+              // variant) so it's painted immediately on a cold/anon
+              // first visit instead of lazy-popping in.
+              priority={size === "lg" && i === 0}
               className="object-cover"
             />
           </div>
@@ -184,9 +192,9 @@ function ChevronPill({
       )}
     >
       {direction === "left" ? (
-        <ChevronLeft size={14} />
+        <ChevronLeft size={14} className="-translate-x-px" />
       ) : (
-        <ChevronRight size={14} />
+        <ChevronRight size={14} className="translate-x-px" />
       )}
     </button>
   );

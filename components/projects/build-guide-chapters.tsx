@@ -23,9 +23,7 @@ interface Props {
  * `content` ReactNodes — this component only owns the disclosure + TOC.
  */
 export function BuildGuideChapters({ intro, chapters }: Props) {
-  const [open, setOpen] = useState<Set<string>>(
-    () => new Set(chapters.map((c) => c.id))
-  );
+  const [open, setOpen] = useState<Set<string>>(() => new Set());
 
   const toggle = (id: string) =>
     setOpen((prev) => {

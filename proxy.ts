@@ -44,6 +44,12 @@ const isPublicRoute = createRouteMatcher([
   "/llms-full.txt",
   "/robots.txt",
   "/sitemap.xml",
+  // Public user / org vanity profiles live at the root: `/[handle]`
+  // (the canonical target the old `/u/[username]` + `/o/[slug]` routes
+  // now redirect to). A profile is a single root segment, so match
+  // exactly one segment and exclude the authed root routes
+  // (dashboard / checkout / orders / onboarding) so they stay gated.
+  /^\/(?!(?:dashboard|checkout|orders|onboarding|sign-in|sign-up|sso-callback|api)(?:[/?#]|$))[^/?#]+\/?$/,
 ]);
 
 export default clerkMiddleware(async (auth, req) => {

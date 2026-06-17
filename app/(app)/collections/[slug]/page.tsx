@@ -15,6 +15,8 @@ import { auth } from "@clerk/nextjs/server";
 import { isOrgMember } from "@/lib/authorization";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { OwnerBar } from "@/components/ui/owner-bar";
+import { CollectionSettingsMenu } from "@/components/profile/collection-settings-menu";
 import { getLicenseMeta } from "@/lib/licenses";
 
 type FileItem = {
@@ -70,14 +72,15 @@ export default async function CollectionPage(props: {
 
   if (!collection) notFound();
 
-  if (collection.visibility !== "public") {
-    const viewerCanSee =
-      !!viewerId &&
-      (viewerId === collection.userId ||
-        (collection.organizationId !== null &&
-          (await isOrgMember(viewerId, collection.organizationId)).member));
-    if (!viewerCanSee) notFound();
-  }
+  // Owner = creator or a member of the owning org. Drives both the
+  // private-visibility gate and the admin OwnerBar.
+  const isOwner =
+    !!viewerId &&
+    (viewerId === collection.userId ||
+      (collection.organizationId !== null &&
+        (await isOrgMember(viewerId, collection.organizationId)).member));
+
+  if (collection.visibility !== "public" && !isOwner) notFound();
 
   const [fileRows, projectRows] = await Promise.all([
     db
@@ -165,6 +168,23 @@ export default async function CollectionPage(props: {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
+      {/* Admin-only bar — visibility status + owner controls. */}
+      {isOwner && (
+        <div className="mb-6">
+          <OwnerBar
+            visibility={collection.visibility === "public" ? "public" : "private"}
+          >
+            <CollectionSettingsMenu
+              collectionId={collection.id}
+              name={collection.name}
+              description={collection.description}
+              visibility={
+                collection.visibility === "public" ? "public" : "private"
+              }
+            />
+          </OwnerBar>
+        </div>
+      )}
       <div className="mb-8">
         <h1 className="text-2xl font-bold">{collection.name}</h1>
         {collection.description && (

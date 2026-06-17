@@ -29,8 +29,14 @@ export interface ProjectTab {
 export function ProjectTabs({ tabs }: { tabs: ProjectTab[] }) {
   if (tabs.length === 0) return null;
   return (
-    <Tabs defaultValue={tabs[0].value} className="gap-4">
-      <TabsList variant="line" className="w-full justify-start border-b border-border">
+    // Single subtle container: rounded corners, subtle border, 8px
+    // padding. Tabs use the flat line style and content sits directly
+    // inside — no nested sub-boxes (kept deliberately un-nested).
+    <Tabs
+      defaultValue={tabs[0].value}
+      className="gap-2 rounded-2xl border border-border bg-card p-2"
+    >
+      <TabsList className="w-full justify-start">
         {tabs.map((tab) => (
           <TabsTrigger key={tab.value} value={tab.value}>
             {tab.label}
@@ -43,7 +49,7 @@ export function ProjectTabs({ tabs }: { tabs: ProjectTab[] }) {
         ))}
       </TabsList>
       {tabs.map((tab) => (
-        <TabsContent key={tab.value} value={tab.value} className="mt-0">
+        <TabsContent key={tab.value} value={tab.value} className="mt-0 rounded-xl">
           {tab.content}
         </TabsContent>
       ))}

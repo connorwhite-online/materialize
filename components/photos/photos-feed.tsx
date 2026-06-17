@@ -82,7 +82,9 @@ export function PhotosFeed({
         />
         <p className="text-xs text-muted-foreground">
           {uploadAs === "creator"
-            ? "Add a photo of this part"
+            ? targetType === "project"
+              ? "Add photo of this project"
+              : "Add photo of this file"
             : "Share a photo of your print"}
         </p>
       </div>

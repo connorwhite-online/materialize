@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { SettingsIcon } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -11,13 +10,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -109,41 +101,30 @@ export function CollectionSettingsMenu({
 
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="xs"
-              aria-label="Collection settings"
-              className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-            >
-              <SettingsIcon className="size-3.5" />
-            </Button>
-          }
-        />
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem
-            onClick={() => {
-              resetEdit();
-              setActive("edit");
-            }}
-          >
-            Edit collection
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            variant="destructive"
-            onClick={() => {
-              setConfirmName("");
-              setDeleteError(null);
-              setActive("delete");
-            }}
-          >
-            Delete collection
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <Button
+        variant="outline"
+        size="sm"
+        aria-label="Edit collection"
+        onClick={() => {
+          resetEdit();
+          setActive("edit");
+        }}
+      >
+        Edit
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        aria-label="Delete collection"
+        className="text-destructive hover:text-destructive"
+        onClick={() => {
+          setConfirmName("");
+          setDeleteError(null);
+          setActive("delete");
+        }}
+      >
+        Delete
+      </Button>
 
       <Dialog
         open={active === "edit"}
