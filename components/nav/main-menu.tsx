@@ -13,6 +13,7 @@ import { MenuExpand } from "@/components/icons/menu-expand";
 import { Browse } from "@/components/icons/browse";
 import { Materials } from "@/components/icons/materials";
 import { Print } from "@/components/icons/print";
+import { Wand } from "@/components/icons/wand";
 import { SidebarUserBlock } from "@/components/auth/sidebar-user-block";
 import { SandboxBadge } from "@/components/nav/sandbox-badge";
 import { cn } from "@/lib/utils";
@@ -27,15 +28,26 @@ type NavIcon = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>;
  * the sidebar's bottom user-block IS the profile link, and the
  * dropdown's hit-target is the avatar in the header at sub-lg.
  */
-const NAV_ITEMS: ReadonlyArray<{
-  href: string;
-  label: string;
-  Icon: NavIcon;
-}> = [
+type NavItem = { href: string; label: string; Icon: NavIcon };
+
+const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { href: "/files", label: "Browse", Icon: Browse },
   { href: "/materials", label: "Materials", Icon: Materials },
   { href: "/print", label: "Print", Icon: Print },
 ];
+
+// Experimental, owner-only Text-to-CAD entry. Only appended when the
+// server resolves `canUseTextToCad` and threads `textToCad` down — hidden
+// for everyone else (and the page itself 404s as a second gate).
+const TEXT_TO_CAD_ITEM: NavItem = {
+  href: "/text-to-cad",
+  label: "Text to CAD",
+  Icon: Wand,
+};
+
+function navItems(textToCad: boolean): ReadonlyArray<NavItem> {
+  return textToCad ? [...NAV_ITEMS, TEXT_TO_CAD_ITEM] : NAV_ITEMS;
+}
 
 /**
  * Pathname → page-label table. Only matches EXACT top-level routes —
@@ -93,12 +105,18 @@ function isActive(pathname: string | null, href: string): boolean {
  * user always sees where they are; we don't fall back to the
  * "Materialize" wordmark unless the path is genuinely unknown.
  */
-export function MainMenuTrigger() {
+export function MainMenuTrigger({
+  textToCad = false,
+}: {
+  /** Owner-only: append the experimental Text-to-CAD entry. */
+  textToCad?: boolean;
+}) {
   const pathname = usePathname();
   const { user, isLoaded } = useUser();
   const ownProfilePath =
     isLoaded && user?.username ? `/${user.username}` : null;
   const label = getPageLabel(pathname, ownProfilePath);
+  const items = navItems(textToCad);
   return (
     <div className="nav:hidden">
       <DropdownMenu>
@@ -139,7 +157,7 @@ export function MainMenuTrigger() {
           // of bigger spacing.
           className="flex min-w-48 flex-col gap-0.5 p-1.5"
         >
-          {NAV_ITEMS.map((item) => {
+          {items.map((item) => {
             const active = isActive(pathname, item.href);
             const { Icon } = item;
             return (
@@ -179,13 +197,17 @@ interface MainMenuSidebarProps {
   initialUnreadCount: number;
   /** True when Stripe is on test keys or CraftCloud is in mock mode. */
   sandbox?: boolean;
+  /** Owner-only: append the experimental Text-to-CAD entry. */
+  textToCad?: boolean;
 }
 
 export function MainMenuSidebar({
   initialUnreadCount,
   sandbox = false,
+  textToCad = false,
 }: MainMenuSidebarProps) {
   const pathname = usePathname();
+  const items = navItems(textToCad);
 
   return (
     <aside
@@ -203,7 +225,7 @@ export function MainMenuSidebar({
         {sandbox && <SandboxBadge />}
       </div>
       <nav className="mt-3 flex flex-col gap-0.5">
-        {NAV_ITEMS.map((item) => {
+        {items.map((item) => {
           const active = isActive(pathname, item.href);
           const { Icon } = item;
           return (
