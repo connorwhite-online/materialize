@@ -22,6 +22,7 @@ import { loadFileBySlug } from "./loader";
 import { ownsLoadedFile, userHasUsedFile } from "@/lib/entitlement";
 import { isOrgMember } from "@/lib/authorization";
 import { Card, CardContent } from "@/components/ui/card";
+import { OwnerBar } from "@/components/ui/owner-bar";
 import { ExpandableDescription } from "@/components/ui/expandable-description";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,8 +45,6 @@ import {
   type CommentRow,
 } from "@/components/comments/comments-section";
 import { UserAvatar } from "@/components/auth/user-avatar";
-import { Pencil } from "@/components/icons/pencil";
-import { Trash } from "@/components/icons/trash";
 import { LicenseBadge } from "@/components/licenses/license-badge";
 import { getCategoryLabel } from "@/lib/categories";
 import { getMaterialById } from "@/lib/materials";
@@ -143,7 +142,7 @@ export default async function FileDetailPage(props: {
   // depend on each other — fan them out in one roundtrip instead of
   // five sequential awaits. Photo URL signing still has to wait for
   // its row fetch, so it runs after.
-  const [assets, photos, buildRows, canPostBuild, canDownload] =
+  const [assets, photos, buildRows, canPostBuild, canDownload, parentProject] =
     await Promise.all([
       db.select().from(fileAssets).where(eq(fileAssets.fileId, file.id)),
       db
@@ -186,6 +185,13 @@ export default async function FileDetailPage(props: {
         userId: file.userId,
         organizationId: file.organizationId,
       }),
+      db
+        .select({ id: projects.id, name: projects.name, slug: projects.slug })
+        .from(projectFiles)
+        .innerJoin(projects, eq(projectFiles.projectId, projects.id))
+        .where(eq(projectFiles.fileId, file.id))
+        .limit(1)
+        .then((rows) => rows[0] ?? null),
     ]);
 
   // Sign R2 URLs in parallel for both gallery sources.
@@ -527,13 +533,22 @@ export default async function FileDetailPage(props: {
     ? getMaterialById(file.recommendedMaterialId)
     : null;
 
-  // CraftCloud materials for the "Recommended print material" picker in
-  // the file settings dialog. Owner-only — no need to load for visitors.
+  // CraftCloud materials and finish groups for the edit dialog.
+  // Owner-only — no need to load for visitors.
   let ccMaterials: Array<{ id: string; name: string; groupName: string }> = [];
+  let ccFinishGroups: Record<string, Array<{ id: string; name: string }>> = {};
   if (isOwner) {
     const catalog = await getCraftCloudCatalog();
     ccMaterials = catalog.groups.flatMap((g) =>
       g.materials.map((m) => ({ id: m.id, name: m.name, groupName: g.name }))
+    );
+    ccFinishGroups = Object.fromEntries(
+      catalog.groups.flatMap((g) =>
+        g.materials.map((m) => [
+          m.id,
+          m.finishGroups.map((fg) => ({ id: fg.id, name: fg.name })),
+        ])
+      )
     );
   }
 
@@ -627,6 +642,62 @@ export default async function FileDetailPage(props: {
         />
       )}
       <div className="flex flex-col gap-8">
+        {/* Admin-only bar — visibility status + owner controls, above
+            all page content. */}
+        {isOwner && (
+          <OwnerBar
+            visibility={file.visibility === "public" ? "public" : "private"}
+          >
+            <EditFileButton
+              fileId={file.id}
+              initial={{
+                name: file.name,
+                description: file.description,
+                tags: file.tags,
+                category: file.category,
+                price: file.price,
+                license: file.license,
+                visibility: file.visibility ?? "public",
+                recommendedMaterialId: file.recommendedMaterialId,
+                recommendedCcMaterialId: file.recommendedCcMaterialId,
+                recommendedCcFinishGroupId: file.recommendedCcFinishGroupId,
+                designTags: file.designTags,
+                minWallThickness: file.minWallThickness,
+                coverPhotoId: file.coverPhotoId,
+              }}
+              ccMaterials={ccMaterials}
+              ccFinishGroups={ccFinishGroups}
+              photos={photosWithUrls.map((p) => ({
+                id: p.id,
+                downloadUrl: p.downloadUrl,
+              }))}
+              hasBuyers={ownerBuyerCount > 0}
+              trigger={
+                <Button variant="outline" size="sm" aria-label="Edit file">
+                  Edit
+                </Button>
+              }
+            />
+            <DeleteFileButton
+              fileId={file.id}
+              fileName={file.name}
+              hasBuyers={ownerBuyerCount > 0}
+              buyerCount={ownerBuyerCount}
+              redirectTo={`/${file.username}`}
+              trigger={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive hover:text-destructive"
+                  aria-label="Delete file"
+                >
+                  Delete
+                </Button>
+              }
+            />
+          </OwnerBar>
+        )}
+
         {/* Hero — 3D preview left, file info right on md+ */}
         <div className="flex flex-col gap-6 md:grid md:grid-cols-[3fr_2fr] md:items-start md:gap-8">
           {/* 3D preview */}
@@ -657,7 +728,7 @@ export default async function FileDetailPage(props: {
                 <h1 className="text-2xl font-bold">{file.name}</h1>
                 {verifying && <VerifyingPill />}
               </div>
-              <div className="mt-2">
+              <div className="mt-2 space-y-1">
                 <Link
                   href={`/${file.username}`}
                   className="flex w-fit items-center gap-1.5 hover:underline"
@@ -672,6 +743,15 @@ export default async function FileDetailPage(props: {
                     {file.displayName || file.username}
                   </span>
                 </Link>
+                {parentProject && (
+                  <Link
+                    href={`/projects/${parentProject.slug}`}
+                    className="flex w-fit items-center gap-1 text-sm text-muted-foreground hover:underline"
+                  >
+                    <span className="text-muted-foreground/60">Part of</span>
+                    <span>{parentProject.name}</span>
+                  </Link>
+                )}
               </div>
               {primaryAsset && (
                 <p className="mt-3 text-sm text-muted-foreground">
@@ -688,28 +768,16 @@ export default async function FileDetailPage(props: {
                   </span>
                 </p>
               )}
-              <div className="mt-3 flex items-center gap-2">
-                {isOwner && (
-                  <span
-                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                      file.visibility === "public"
-                        ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                        : "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400"
-                    }`}
-                  >
-                    {file.visibility === "public" ? "Public" : "Private"}
-                  </span>
-                )}
-                <LicenseBadge license={file.license} />
-                {file.category && getCategoryLabel(file.category) && (
+              {file.category && getCategoryLabel(file.category) && (
+                <div className="mt-3">
                   <Link
                     href={`/files?category=${file.category}`}
                     className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
                   >
                     {getCategoryLabel(file.category)}
                   </Link>
-                )}
-              </div>
+                </div>
+              )}
             </div>
 
             {file.price > 0 && (
@@ -721,11 +789,12 @@ export default async function FileDetailPage(props: {
               </>
             )}
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-col gap-2">
               {canDownload && (
                 <Button
                   variant="outline"
                   size="sm"
+                  className="w-full"
                   render={<a href={`/files/${slug}/download`} />}
                 >
                   Download
@@ -734,64 +803,11 @@ export default async function FileDetailPage(props: {
               {assets[0] && (
                 <Button
                   size="sm"
+                  className="w-full"
                   render={<Link href={`/print/${assets[0].id}`} />}
                 >
                   Print this file
                 </Button>
-              )}
-              {isOwner && (
-                <div className="flex items-center gap-1">
-                  <EditFileButton
-                    fileId={file.id}
-                    initial={{
-                      name: file.name,
-                      description: file.description,
-                      tags: file.tags,
-                      category: file.category,
-                      price: file.price,
-                      license: file.license,
-                      visibility: file.visibility ?? "public",
-                      recommendedMaterialId: file.recommendedMaterialId,
-                      recommendedCcMaterialId: file.recommendedCcMaterialId,
-                      designTags: file.designTags,
-                      minWallThickness: file.minWallThickness,
-                      coverPhotoId: file.coverPhotoId,
-                    }}
-                    ccMaterials={ccMaterials}
-                    photos={photosWithUrls.map((p) => ({
-                      id: p.id,
-                      downloadUrl: p.downloadUrl,
-                    }))}
-                    hasBuyers={ownerBuyerCount > 0}
-                    trigger={
-                      <Button
-                        variant="ghost"
-                        size="icon-lg"
-                        className="rounded-[12px] p-2"
-                        aria-label="Edit file"
-                      >
-                        <Pencil className="size-5" />
-                      </Button>
-                    }
-                  />
-                  <DeleteFileButton
-                    fileId={file.id}
-                    fileName={file.name}
-                    hasBuyers={ownerBuyerCount > 0}
-                    buyerCount={ownerBuyerCount}
-                    redirectTo={`/${file.username}`}
-                    trigger={
-                      <Button
-                        variant="ghost"
-                        size="icon-lg"
-                        className="rounded-[12px] p-2 text-destructive hover:text-destructive"
-                        aria-label="Delete file"
-                      >
-                        <Trash className="size-5" />
-                      </Button>
-                    }
-                  />
-                </div>
               )}
             </div>
           </div>
@@ -866,6 +882,10 @@ export default async function FileDetailPage(props: {
             prints={printActivity}
             downloads={downloadActivity}
           />
+
+          <div className="flex justify-center pt-2">
+            <LicenseBadge license={file.license} />
+          </div>
         </div>
       </div>
     </div>

@@ -268,6 +268,7 @@ export const files = pgTable("files", {
   category: text("category"),
   recommendedMaterialId: text("recommended_material_id"), // from our materials metadata (editorial slug e.g. "pla-white")
   recommendedCcMaterialId: text("recommended_cc_material_id"), // direct CraftCloud material UUID (bypasses resolver)
+  recommendedCcFinishGroupId: text("recommended_cc_finish_group_id"), // CraftCloud finish group UUID for direct vendor jump
   designTags: text("design_tags").array(), // ["strong", "flexible", "heat-resistant", "watertight", "detailed"]
   minWallThickness: integer("min_wall_thickness"), // in 0.1mm units (e.g., 10 = 1.0mm)
   visibility: visibilityEnum("visibility").notNull().default("public"),

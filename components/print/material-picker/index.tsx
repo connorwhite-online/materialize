@@ -62,6 +62,13 @@ interface MaterialPickerProps {
    */
   preselectMaterialId?: string;
   /**
+   * CraftCloud finish group id. When provided alongside
+   * preselectMaterialId and a matching quote arrives, we jump
+   * straight past finish selection to vendor selection. The user
+   * can still press Back to return to the finish or material steps.
+   */
+  preselectFinishGroupId?: string;
+  /**
    * Fires when the user navigates back to the full material grid
    * after arriving via a preselect. Lets the parent drop its
    * scoped-material filter and refetch the unscoped quote set so
@@ -81,6 +88,7 @@ export function MaterialPicker({
   selectedQuote,
   onSelectQuote,
   preselectMaterialId,
+  preselectFinishGroupId,
   onClearPreselectScope,
 }: MaterialPickerProps) {
   const [step, setStep] = useState<PickerStep>("material");
@@ -108,12 +116,27 @@ export function MaterialPicker({
   useEffect(() => {
     if (!preselectMaterialId) return;
     if (preselectFiredRef.current) return;
+    // Jump all the way to vendor when a finish group is also specified
+    // and a matching quote exists for the (material, finish group) pair.
+    if (preselectFinishGroupId) {
+      const hit = quotes.find(
+        (q) =>
+          q.materialId === preselectMaterialId &&
+          q.finishGroupId === preselectFinishGroupId
+      );
+      if (!hit) return;
+      preselectFiredRef.current = true;
+      setMaterialId(preselectMaterialId);
+      setFinishGroupId(preselectFinishGroupId);
+      setStep("vendor");
+      return;
+    }
     const hit = quotes.find((q) => q.materialId === preselectMaterialId);
     if (!hit) return;
     preselectFiredRef.current = true;
     setMaterialId(preselectMaterialId);
     setStep("finish");
-  }, [preselectMaterialId, quotes]);
+  }, [preselectMaterialId, preselectFinishGroupId, quotes]);
 
   if (step === "material") {
     return (

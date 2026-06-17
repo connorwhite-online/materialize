@@ -80,6 +80,12 @@ interface QuoteConfiguratorProps {
    */
   preselectMaterialId?: string;
   /**
+   * CraftCloud finish group id. When provided alongside
+   * preselectMaterialId, MaterialPicker jumps straight to vendor
+   * selection, skipping both material and finish steps.
+   */
+  preselectFinishGroupId?: string;
+  /**
    * Fired after a successful Add to Cart. The parent uses this to
    * pivot /print into the "what next?" state and expand the
    * matching vendor slot in the cart stack.
@@ -136,6 +142,7 @@ export function QuoteConfigurator({
   hasCachedModel,
   geometryData: initialGeometryData,
   preselectMaterialId,
+  preselectFinishGroupId,
   onAddedToCart,
   rightAnnex,
   headerSlot,
@@ -1266,6 +1273,7 @@ export function QuoteConfigurator({
             selectedQuote={selectedQuote}
             onSelectQuote={setSelectedQuote}
             preselectMaterialId={preselectMaterialId}
+            preselectFinishGroupId={preselectFinishGroupId}
             onClearPreselectScope={() => setScopedMaterialId(null)}
           />
         </div>

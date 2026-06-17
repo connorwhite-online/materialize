@@ -39,6 +39,7 @@ export const loadFileBySlug = cache(async function loadFileBySlug(slug: string) 
       designTags: files.designTags,
       recommendedMaterialId: files.recommendedMaterialId,
       recommendedCcMaterialId: files.recommendedCcMaterialId,
+      recommendedCcFinishGroupId: files.recommendedCcFinishGroupId,
       minWallThickness: files.minWallThickness,
       visibility: files.visibility,
       coverPhotoId: files.coverPhotoId,

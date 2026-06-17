@@ -81,6 +81,7 @@ export const createListingSchema = z.object({
   category: categorySchema,
   recommendedMaterialId: z.string().optional(),
   recommendedCcMaterialId: z.string().optional(),
+  recommendedCcFinishGroupId: z.string().optional(),
   designTags: z.array(z.enum(DESIGN_TAG_OPTIONS)).optional(),
   minWallThickness: z.coerce
     .number()

@@ -17,6 +17,8 @@ interface FileAssetPrintShellProps {
     triangleCount?: number;
   } | null;
   preselectMaterialId?: string;
+  /** CraftCloud finish group id. When set alongside preselectMaterialId, the picker jumps to vendor. */
+  preselectFinishGroupId?: string;
   /**
    * Page-level header (h1 + filename meta + creator recommendation).
    * Always rendered here since a successful Add to Cart routes the
@@ -54,6 +56,7 @@ export function FileAssetPrintShell({
   hasCachedModel,
   geometryData,
   preselectMaterialId,
+  preselectFinishGroupId,
   configureHeader,
   projectSlug,
   checkoutModel = "single",
@@ -83,6 +86,7 @@ export function FileAssetPrintShell({
       hasCachedModel={hasCachedModel}
       geometryData={geometryData}
       preselectMaterialId={preselectMaterialId}
+      preselectFinishGroupId={preselectFinishGroupId}
       checkoutModel={checkoutModel}
       onAddedToCart={handleAddedToCart}
       headerSlot={configureHeader}

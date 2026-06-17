@@ -498,6 +498,8 @@ export async function updateFileListing(fileId: string, formData: FormData) {
         formData.get("recommendedMaterialId") || undefined,
       recommendedCcMaterialId:
         formData.get("recommendedCcMaterialId") || undefined,
+      recommendedCcFinishGroupId:
+        formData.get("recommendedCcFinishGroupId") || undefined,
       designTags: designTagValues.length > 0 ? designTagValues : undefined,
       minWallThickness: formData.get("minWallThickness") || undefined,
     });
@@ -546,6 +548,7 @@ export async function updateFileListing(fileId: string, formData: FormData) {
         category: parsed.data.category ?? null,
         recommendedMaterialId: parsed.data.recommendedMaterialId,
         recommendedCcMaterialId: parsed.data.recommendedCcMaterialId,
+        recommendedCcFinishGroupId: parsed.data.recommendedCcFinishGroupId,
         designTags: parsed.data.designTags,
         minWallThickness: parsed.data.minWallThickness,
         coverPhotoId: nextCoverPhotoId,

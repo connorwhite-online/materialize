@@ -41,6 +41,12 @@ export interface CcMaterialOption {
   groupName: string;
 }
 
+/** A CraftCloud finish group option for the finish-group picker. */
+export interface CcFinishGroupOption {
+  id: string;
+  name: string;
+}
+
 interface EditFileButtonProps {
   fileId: string;
   initial: {
@@ -55,6 +61,8 @@ interface EditFileButtonProps {
     recommendedMaterialId: string | null;
     /** Direct CraftCloud material UUID — bypasses fuzzy resolver in the print flow. */
     recommendedCcMaterialId: string | null;
+    /** CraftCloud finish group UUID — when set alongside CC material, print flow jumps to vendor. */
+    recommendedCcFinishGroupId: string | null;
     designTags: string[] | null;
     minWallThickness: number | null; // 0.1mm units
     /** Currently-set cover photo id (null = use auto-captured thumbnail). */
@@ -73,6 +81,13 @@ interface EditFileButtonProps {
    * the creator can pick an exact CraftCloud UUID rather than a near-match slug.
    */
   ccMaterials?: CcMaterialOption[];
+  /**
+   * Finish groups keyed by CraftCloud material id. When the creator
+   * picks a CC material, the finish group picker populates from this map
+   * so they can also pre-scope to a specific finish, which sends buyers
+   * directly to vendor selection.
+   */
+  ccFinishGroups?: Record<string, CcFinishGroupOption[]>;
   /**
    * Optional custom trigger element. Lets the call site swap in an
    * icon button or any other shape; defaults to a full-width outline
@@ -96,6 +111,7 @@ export function EditFileButton({
   photos,
   hasBuyers,
   ccMaterials,
+  ccFinishGroups,
   trigger,
 }: EditFileButtonProps) {
   const router = useRouter();
@@ -122,6 +138,9 @@ export function EditFileButton({
   const [recommendedCcMaterial, setRecommendedCcMaterial] = useState(
     initial.recommendedCcMaterialId ?? ""
   );
+  const [recommendedCcFinishGroup, setRecommendedCcFinishGroup] = useState(
+    initial.recommendedCcFinishGroupId ?? ""
+  );
   const [designTags, setDesignTags] = useState<string[]>(
     initial.designTags ?? []
   );
@@ -144,6 +163,7 @@ export function EditFileButton({
     setVisibility((initial.visibility as "public" | "private") || "public");
     setRecommendedMaterial(initial.recommendedMaterialId ?? "");
     setRecommendedCcMaterial(initial.recommendedCcMaterialId ?? "");
+    setRecommendedCcFinishGroup(initial.recommendedCcFinishGroupId ?? "");
     setDesignTags(initial.designTags ?? []);
     setMinWallThicknessMm(
       initial.minWallThickness ? (initial.minWallThickness / 10).toString() : ""
@@ -176,6 +196,9 @@ export function EditFileButton({
     }
     if (recommendedCcMaterial) {
       formData.set("recommendedCcMaterialId", recommendedCcMaterial);
+    }
+    if (recommendedCcFinishGroup) {
+      formData.set("recommendedCcFinishGroupId", recommendedCcFinishGroup);
     }
     for (const tag of designTags) {
       formData.append("designTags", tag);
@@ -434,9 +457,13 @@ export function EditFileButton({
               </p>
               <Select
                 value={recommendedCcMaterial || "none"}
-                onValueChange={(v) =>
-                  setRecommendedCcMaterial(!v || v === "none" ? "" : String(v))
-                }
+                onValueChange={(v) => {
+                  const next = !v || v === "none" ? "" : String(v);
+                  setRecommendedCcMaterial(next);
+                  // Clear finish group when material changes — the previous finish
+                  // group may not exist for the newly selected material.
+                  if (next !== recommendedCcMaterial) setRecommendedCcFinishGroup("");
+                }}
               >
                 <SelectTrigger id="edit-cc-material" className="w-full">
                   <SelectValue>
@@ -457,6 +484,42 @@ export function EditFileButton({
                   ))}
                 </SelectContent>
               </Select>
+              {/* Finish group picker — only shown when a CC material is selected
+                  and the catalog provides finish groups for it. */}
+              {recommendedCcMaterial && ccFinishGroups && (ccFinishGroups[recommendedCcMaterial]?.length ?? 0) > 1 && (
+                <div className="mt-3 space-y-1.5">
+                  <Label htmlFor="edit-cc-finish-group" className="text-xs">
+                    Recommended finish
+                  </Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Optional. When set, buyers land directly on vendor selection for this finish.
+                  </p>
+                  <Select
+                    value={recommendedCcFinishGroup || "none"}
+                    onValueChange={(v) =>
+                      setRecommendedCcFinishGroup(!v || v === "none" ? "" : String(v))
+                    }
+                  >
+                    <SelectTrigger id="edit-cc-finish-group" className="w-full">
+                      <SelectValue>
+                        {(value) => {
+                          if (!value || value === "none") return "Any finish — buyer decides";
+                          const fg = ccFinishGroups[recommendedCcMaterial]?.find((f) => f.id === value);
+                          return fg ? fg.name : value;
+                        }}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Any finish — buyer decides</SelectItem>
+                      {(ccFinishGroups[recommendedCcMaterial] ?? []).map((fg) => (
+                        <SelectItem key={fg.id} value={fg.id}>
+                          {fg.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
           ) : (
             <div className="space-y-1.5">

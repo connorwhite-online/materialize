@@ -12,7 +12,7 @@ import { DESIGN_TAG_LABELS } from "@/lib/validations/file";
 
 export default async function PrintConfigPage(props: {
   params: Promise<{ fileAssetId: string }>;
-  searchParams: Promise<{ material?: string; project?: string }>;
+  searchParams: Promise<{ material?: string; finish?: string; project?: string }>;
 }) {
   const { fileAssetId } = await props.params;
   // CraftCloud material id threaded from /materials/[slug]'s
@@ -24,7 +24,7 @@ export default async function PrintConfigPage(props: {
   // from (the "Print this project" flow). Forwarded so a successful
   // Add to Cart routes back into that hub instead of the personal
   // library, letting the user walk the project's files one by one.
-  const { material: preselectMaterialId, project: projectSlug } =
+  const { material: preselectMaterialId, finish: preselectFinishGroupId, project: projectSlug } =
     await props.searchParams;
 
   const { userId } = await auth();
@@ -43,6 +43,7 @@ export default async function PrintConfigPage(props: {
       fileStatus: files.status,
       recommendedMaterialId: files.recommendedMaterialId,
       recommendedCcMaterialId: files.recommendedCcMaterialId,
+      recommendedCcFinishGroupId: files.recommendedCcFinishGroupId,
       designTags: files.designTags,
       minWallThickness: files.minWallThickness,
     })
@@ -76,6 +77,14 @@ export default async function PrintConfigPage(props: {
     asset.recommendedCcMaterialId ??
     (await resolveRecommendedCraftCloudMaterialId(asset.recommendedMaterialId)) ??
     undefined;
+
+  // Finish group preselect: explicit ?finish= wins, then the DB value.
+  // Only used when a material preselect is also resolved — a finish group
+  // without a material has no effect in MaterialPicker.
+  const resolvedPreselectFinishGroupId =
+    resolvedPreselectMaterialId
+      ? (preselectFinishGroupId ?? asset.recommendedCcFinishGroupId ?? undefined)
+      : undefined;
 
   const configureHeader = (
     <div>
@@ -118,6 +127,7 @@ export default async function PrintConfigPage(props: {
         hasCachedModel={!!asset.craftCloudModelId}
         geometryData={asset.geometryData}
         preselectMaterialId={resolvedPreselectMaterialId}
+        preselectFinishGroupId={resolvedPreselectFinishGroupId}
         configureHeader={configureHeader}
         projectSlug={projectSlug}
         checkoutModel={getCheckoutModel()}
