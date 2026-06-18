@@ -11,6 +11,13 @@ const isPublicRoute = createRouteMatcher([
   "/print(.*)",
   "/collections(.*)",
   "/projects(.*)",
+  // Experimental owner-only text-to-CAD studio + scorecard. Public at the
+  // middleware layer so the pages run their own canUseTextToCad gate and
+  // notFound() for everyone else. The single-segment matcher below already
+  // lets `/text-to-cad` through; this entry also covers `/text-to-cad/eval`
+  // (and any future sub-routes), which would otherwise hit auth.protect()
+  // and redirect to sign-in — revealing the route instead of 404ing.
+  "/text-to-cad(.*)",
   "/u/(.*)",
   "/api/webhooks(.*)",
   "/api/craftcloud/(.*)",
