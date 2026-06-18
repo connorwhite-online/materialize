@@ -3,7 +3,14 @@
 import { Suspense, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Stage, Center, Grid } from "@react-three/drei";
-import { Box3, Plane, Vector3 } from "three";
+import {
+  Box3,
+  BufferGeometry,
+  DoubleSide,
+  Float32BufferAttribute,
+  Plane,
+  Vector3,
+} from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type * as THREE from "three";
 import { type ThreeEvent } from "@react-three/fiber";
@@ -20,11 +27,117 @@ import { ObjModel } from "./loaders/obj-model";
 import { ThreeMfModel } from "./loaders/threemf-model";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 
-/** A point annotation, in the model's own (mm) coordinate frame. */
+/** A selected flat face, in the model's own (mm) coordinate frame. */
 export interface ViewerAnnotation {
   id: string;
+  /** Face centroid (mm). */
   point: [number, number, number];
   normal: [number, number, number];
+  /** Bounding-box size of the selected face (mm). */
+  extent?: [number, number, number];
+  /** Flat triangle coords (mm) of the selected face, for the highlight overlay. */
+  positions?: number[];
+}
+
+/**
+ * Grow a flat face from a picked triangle: every triangle that faces the same
+ * way (within ~10°) and lies on the same plane. Crude vs true BRep topology,
+ * but it gives a Fusion-style "select this flat face" on a raw STL with no
+ * backend. Curved faces select only their near-coplanar band — a known limit
+ * until STEP face IDs (CON-182 v2). Coordinates are model-local (mm).
+ */
+function selectFlatFace(
+  geom: BufferGeometry,
+  pickedNormal: Vector3,
+  pickedPoint: Vector3
+): {
+  point: [number, number, number];
+  normal: [number, number, number];
+  extent: [number, number, number];
+  positions: number[];
+} {
+  const pos = geom.attributes.position;
+  const index = geom.index;
+  const triCount = index ? index.count / 3 : pos.count / 3;
+  const vertAt = (i: number, out: Vector3) =>
+    out.fromBufferAttribute(pos, index ? index.getX(i) : i);
+
+  const N = pickedNormal.clone().normalize();
+  const planeD = N.dot(pickedPoint);
+  if (!geom.boundingBox) geom.computeBoundingBox();
+  const size = new Vector3();
+  geom.boundingBox!.getSize(size);
+  const planeTol = (Math.max(size.x, size.y, size.z) || 1) * 0.01;
+
+  const a = new Vector3();
+  const b = new Vector3();
+  const c = new Vector3();
+  const ab = new Vector3();
+  const ac = new Vector3();
+  const tn = new Vector3();
+  const out: number[] = [];
+
+  for (let t = 0; t < triCount; t++) {
+    vertAt(t * 3, a);
+    vertAt(t * 3 + 1, b);
+    vertAt(t * 3 + 2, c);
+    tn.crossVectors(ab.subVectors(b, a), ac.subVectors(c, a)).normalize();
+    if (tn.dot(N) < 0.985) continue; // not co-facing (~10°)
+    if (Math.abs(N.dot(a) - planeD) > planeTol) continue; // not coplanar
+    out.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+  }
+
+  if (out.length === 0) {
+    return {
+      point: [pickedPoint.x, pickedPoint.y, pickedPoint.z],
+      normal: [N.x, N.y, N.z],
+      extent: [0, 0, 0],
+      positions: [],
+    };
+  }
+
+  const box = new Box3();
+  const v = new Vector3();
+  let cx = 0;
+  let cy = 0;
+  let cz = 0;
+  for (let i = 0; i < out.length; i += 3) {
+    box.expandByPoint(v.set(out[i], out[i + 1], out[i + 2]));
+    cx += out[i];
+    cy += out[i + 1];
+    cz += out[i + 2];
+  }
+  const n = out.length / 3;
+  const ext = new Vector3();
+  box.getSize(ext);
+  return {
+    point: [cx / n, cy / n, cz / n],
+    normal: [N.x, N.y, N.z],
+    extent: [ext.x, ext.y, ext.z],
+    positions: out,
+  };
+}
+
+/** Translucent overlay of a selected face's triangles (drawn on top). */
+function FaceHighlight({ positions }: { positions: number[] }) {
+  const geom = useMemo(() => {
+    const g = new BufferGeometry();
+    g.setAttribute("position", new Float32BufferAttribute(positions, 3));
+    return g;
+  }, [positions]);
+  return (
+    <mesh geometry={geom} renderOrder={999}>
+      <meshBasicMaterial
+        color="#2563eb"
+        transparent
+        opacity={0.4}
+        side={DoubleSide}
+        depthTest={false}
+        depthWrite={false}
+        toneMapped={false}
+      />
+    </mesh>
+  );
 }
 
 function PreviewUnavailable() {
@@ -64,12 +177,14 @@ interface ModelViewerProps {
   annotateMode?: boolean;
   /** Toggle handler for the annotate tool button. */
   onToggleAnnotate?: () => void;
-  /** Existing annotations to render as pins (model-space mm coords). */
+  /** Existing annotations to render as face highlights (model-space mm). */
   annotations?: ViewerAnnotation[];
-  /** Fired when the user clicks the model in annotate mode. */
+  /** Fired when the user selects a face in annotate mode. */
   onPick?: (pick: {
     point: [number, number, number];
     normal: [number, number, number];
+    extent: [number, number, number];
+    positions: number[];
   }) => void;
 }
 
@@ -150,6 +265,8 @@ function InspectModel({
   onPick?: (pick: {
     point: [number, number, number];
     normal: [number, number, number];
+    extent: [number, number, number];
+    positions: number[];
   }) => void;
   pinRadius: number;
 }) {
@@ -157,18 +274,17 @@ function InspectModel({
   const geomRef = useRef<THREE.BufferGeometry | null>(null);
   const done = useRef(false);
 
-  // Translate a click on the mesh into the model's own (mm) coordinate frame —
-  // worldToLocal unwinds the Center/Stage transforms, so the point matches the
+  // Select the flat face under the cursor, in the model's own (mm) frame —
+  // worldToLocal unwinds the Center/Stage transforms so the face matches the
   // build123d source coordinates the agent reasons about.
   const handleClick = (e: ThreeEvent<MouseEvent>) => {
     if (!annotateMode || !onPick) return;
     e.stopPropagation();
-    const local = e.object.worldToLocal(e.point.clone());
-    const n = e.face?.normal ?? new Vector3(0, 1, 0);
-    onPick({
-      point: [local.x, local.y, local.z],
-      normal: [n.x, n.y, n.z],
-    });
+    const mesh = e.object as THREE.Mesh;
+    const geom = mesh.geometry as BufferGeometry;
+    const local = mesh.worldToLocal(e.point.clone());
+    const faceNormal = e.face?.normal?.clone() ?? new Vector3(0, 1, 0);
+    onPick(selectFlatFace(geom, faceNormal, local));
   };
 
   useFrame(() => {
@@ -212,15 +328,25 @@ function InspectModel({
           geomRef.current = g;
         }}
       />
-      {/* Annotation pins — children of the same group, so model-space (mm)
-          coordinates place them on the geometry regardless of Center/Stage. */}
-      {(annotations ?? []).map((a) => (
-        <mesh key={a.id} position={a.point}>
-          <sphereGeometry args={[pinRadius, 16, 16]} />
-          {/* Basic material so pins stay vivid regardless of lighting/clipping. */}
-          <meshBasicMaterial color="#2563eb" toneMapped={false} />
-        </mesh>
-      ))}
+      {/* Selected-face highlights — children of the same group so model-space
+          (mm) coordinates land on the geometry regardless of Center/Stage. A
+          tiny pin marks the centroid; the overlay shows the whole face. */}
+      {(annotations ?? []).map((a) =>
+        a.positions && a.positions.length > 0 ? (
+          <group key={a.id}>
+            <FaceHighlight positions={a.positions} />
+            <mesh position={a.point}>
+              <sphereGeometry args={[pinRadius, 16, 16]} />
+              <meshBasicMaterial color="#1e40af" toneMapped={false} />
+            </mesh>
+          </group>
+        ) : (
+          <mesh key={a.id} position={a.point}>
+            <sphereGeometry args={[pinRadius, 16, 16]} />
+            <meshBasicMaterial color="#2563eb" toneMapped={false} />
+          </mesh>
+        )
+      )}
     </group>
   );
 }

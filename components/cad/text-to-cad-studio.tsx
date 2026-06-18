@@ -40,6 +40,13 @@ const ModelViewer = lazy(() =>
   }))
 );
 
+// Idle/working visual — a deforming wireframe blob shown before a model exists.
+const MaterializingBlob = lazy(() =>
+  import("@/components/cad/materializing-blob").then((mod) => ({
+    default: mod.MaterializingBlob,
+  }))
+);
+
 export interface StudioPart {
   name: string;
   fileAssetId: string;
@@ -362,14 +369,19 @@ export function TextToCadStudio({
     // Fold pinned annotations into the instruction sent to the agent, as
     // structured spatial feedback (the displayed turn keeps the clean text).
     const annoBlock = annotations.length
-      ? "\n\nAnnotated points on the current model (mm, model coordinates):\n" +
+      ? "\n\nAnnotated faces on the current model (mm, model coordinates):\n" +
         annotations
-          .map(
-            (a, i) =>
-              `#${i + 1} at (${a.point
-                .map((n) => n.toFixed(1))
-                .join(", ")}): ${a.note.trim() || "(address this location)"}`
-          )
+          .map((a, i) => {
+            const at = a.point.map((n) => n.toFixed(1)).join(", ");
+            const sz =
+              a.extent && a.extent.some((n) => n > 0)
+                ? `, ~${a.extent.map((n) => n.toFixed(0)).join("×")} mm`
+                : "";
+            const nrm = a.normal.map((n) => n.toFixed(2)).join(", ");
+            return `#${i + 1} — face centered at (${at})${sz}, normal (${nrm}): ${
+              a.note.trim() || "(address this face)"
+            }`;
+          })
           .join("\n")
       : "";
     const sentPrompt = text + annoBlock;
@@ -524,7 +536,14 @@ export function TextToCadStudio({
           <div className="mt-5 overflow-hidden rounded-xl border border-foreground/10">
             <div className="aspect-square w-full bg-muted/30">
               {generating ? (
-                <ProgressPanel events={progress} />
+                <div className="flex h-full w-full flex-col">
+                  <Suspense fallback={<div className="min-h-0 flex-1" />}>
+                    <MaterializingBlob className="min-h-0 flex-1" />
+                  </Suspense>
+                  <div className="shrink-0">
+                    <ProgressPanel events={progress} />
+                  </div>
+                </div>
               ) : activeAssetId ? (
                 <Suspense fallback={<ViewerSkeleton label="Loading model…" />}>
                   <ModelViewer
@@ -547,13 +566,16 @@ export function TextToCadStudio({
                   />
                 </Suspense>
               ) : (
-                <ViewerSkeleton
-                  label={
-                    activeThread
+                <div className="flex h-full w-full flex-col">
+                  <Suspense fallback={<div className="min-h-0 flex-1" />}>
+                    <MaterializingBlob className="min-h-0 flex-1" />
+                  </Suspense>
+                  <p className="shrink-0 px-6 pb-8 text-center text-sm text-muted-foreground">
+                    {activeThread
                       ? "No printable model in this build yet."
-                      : "Describe a part below to start."
-                  }
-                />
+                      : "Describe a part below to start."}
+                  </p>
+                </div>
               )}
             </div>
           </div>
@@ -663,8 +685,8 @@ export function TextToCadStudio({
               </div>
               {annotations.length === 0 ? (
                 <p className="mt-2 text-xs text-muted-foreground">
-                  Click the model to drop a pin, then describe the change for
-                  that spot. They&apos;ll be sent with your next message.
+                  Click a face on the model to select it, then describe the
+                  change for it. Selected faces are sent with your next message.
                 </p>
               ) : (
                 <ol className="mt-2 space-y-2">
@@ -682,7 +704,7 @@ export function TextToCadStudio({
                             )
                           )
                         }
-                        placeholder={`e.g. fillet this edge — at (${a.point
+                        placeholder={`e.g. round this face — at (${a.point
                           .map((n) => n.toFixed(0))
                           .join(", ")}) mm`}
                         className="min-w-0 flex-1 rounded-md border border-foreground/15 bg-card px-2 py-1 text-sm outline-none focus:border-foreground/30"
@@ -1002,7 +1024,7 @@ function ViewerSkeleton({ label }: { label: string }) {
 /** Renders the streamed harness transcript as a live checklist. */
 function ProgressPanel({ events }: { events: CadProgressEvent[] }) {
   return (
-    <div className="flex h-full w-full flex-col items-center justify-center gap-4 p-6">
+    <div className="flex w-full flex-col items-center gap-2 px-6 pb-6">
       <ul className="flex max-w-sm flex-col items-center gap-1.5 text-sm">
         {events.length === 0 && (
           <li className="flex items-center gap-2 text-muted-foreground">
