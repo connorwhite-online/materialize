@@ -9,8 +9,8 @@ import type * as THREE from "three";
 import { type ThreeEvent } from "@react-three/fiber";
 import {
   Grid3x3Icon,
-  MapPinIcon,
   MinusIcon,
+  MousePointer2Icon,
   PlusIcon,
   RulerIcon,
   ScissorsIcon,
@@ -270,8 +270,9 @@ export function ModelViewer({
   );
 
   // Pin radius scaled to the model so it reads on a 10mm part and a 200mm one.
+  // Small — it marks a point, not a blob.
   const pinRadius = bounds
-    ? Math.max(bounds.mm.x, bounds.mm.y, bounds.mm.z) / 45
+    ? Math.max(bounds.mm.x, bounds.mm.y, bounds.mm.z) / 130
     : 1;
 
   const zoomBy = (factor: number) => {
@@ -433,7 +434,7 @@ export function ModelViewer({
                     annotateMode ? "text-foreground" : "text-muted-foreground"
                   }`}
                 >
-                  <MapPinIcon className="size-4" />
+                  <MousePointer2Icon className="size-4" />
                 </button>
               </>
             )}
