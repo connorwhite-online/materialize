@@ -6,8 +6,10 @@ import { OrbitControls, Stage, Center, Grid } from "@react-three/drei";
 import { Box3, Plane, Vector3 } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type * as THREE from "three";
+import { type ThreeEvent } from "@react-three/fiber";
 import {
   Grid3x3Icon,
+  MapPinIcon,
   MinusIcon,
   PlusIcon,
   RulerIcon,
@@ -17,6 +19,13 @@ import { StlModel } from "./loaders/stl-model";
 import { ObjModel } from "./loaders/obj-model";
 import { ThreeMfModel } from "./loaders/threemf-model";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
+
+/** A point annotation, in the model's own (mm) coordinate frame. */
+export interface ViewerAnnotation {
+  id: string;
+  point: [number, number, number];
+  normal: [number, number, number];
+}
 
 function PreviewUnavailable() {
   return (
@@ -51,6 +60,17 @@ interface ModelViewerProps {
    * other call site is unchanged. STL only.
    */
   inspect?: boolean;
+  /** Annotation pin mode is active — clicks on the model drop a pin. */
+  annotateMode?: boolean;
+  /** Toggle handler for the annotate tool button. */
+  onToggleAnnotate?: () => void;
+  /** Existing annotations to render as pins (model-space mm coords). */
+  annotations?: ViewerAnnotation[];
+  /** Fired when the user clicks the model in annotate mode. */
+  onPick?: (pick: {
+    point: [number, number, number];
+    normal: [number, number, number];
+  }) => void;
 }
 
 function ModelMesh({
@@ -116,15 +136,40 @@ function InspectModel({
   color,
   planes,
   onBounds,
+  annotateMode,
+  annotations,
+  onPick,
+  pinRadius,
 }: {
   modelUrl: string;
   color?: string;
   planes: Plane[] | undefined;
   onBounds: (b: InspectBounds) => void;
+  annotateMode?: boolean;
+  annotations?: ViewerAnnotation[];
+  onPick?: (pick: {
+    point: [number, number, number];
+    normal: [number, number, number];
+  }) => void;
+  pinRadius: number;
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const geomRef = useRef<THREE.BufferGeometry | null>(null);
   const done = useRef(false);
+
+  // Translate a click on the mesh into the model's own (mm) coordinate frame —
+  // worldToLocal unwinds the Center/Stage transforms, so the point matches the
+  // build123d source coordinates the agent reasons about.
+  const handleClick = (e: ThreeEvent<MouseEvent>) => {
+    if (!annotateMode || !onPick) return;
+    e.stopPropagation();
+    const local = e.object.worldToLocal(e.point.clone());
+    const n = e.face?.normal ?? new Vector3(0, 1, 0);
+    onPick({
+      point: [local.x, local.y, local.z],
+      normal: [n.x, n.y, n.z],
+    });
+  };
 
   useFrame(() => {
     if (done.current || !groupRef.current || !geomRef.current) return;
@@ -158,7 +203,7 @@ function InspectModel({
   });
 
   return (
-    <group ref={groupRef}>
+    <group ref={groupRef} onClick={annotateMode ? handleClick : undefined}>
       <StlModel
         url={modelUrl}
         color={color}
@@ -167,6 +212,15 @@ function InspectModel({
           geomRef.current = g;
         }}
       />
+      {/* Annotation pins — children of the same group, so model-space (mm)
+          coordinates place them on the geometry regardless of Center/Stage. */}
+      {(annotations ?? []).map((a) => (
+        <mesh key={a.id} position={a.point}>
+          <sphereGeometry args={[pinRadius, 16, 16]} />
+          {/* Basic material so pins stay vivid regardless of lighting/clipping. */}
+          <meshBasicMaterial color="#2563eb" toneMapped={false} />
+        </mesh>
+      ))}
     </group>
   );
 }
@@ -180,6 +234,10 @@ export function ModelViewer({
   enableWheelZoom,
   showZoomControls = false,
   inspect = false,
+  annotateMode = false,
+  onToggleAnnotate,
+  annotations,
+  onPick,
 }: ModelViewerProps) {
   const isPreview = mode === "preview";
   // Wheel zoom defaults to true unless explicitly disabled. The
@@ -211,6 +269,11 @@ export function ModelViewer({
     [inspectable, sectionOn, plane]
   );
 
+  // Pin radius scaled to the model so it reads on a 10mm part and a 200mm one.
+  const pinRadius = bounds
+    ? Math.max(bounds.mm.x, bounds.mm.y, bounds.mm.z) / 45
+    : 1;
+
   const zoomBy = (factor: number) => {
     const controls = controlsRef.current;
     if (!controls) return;
@@ -228,7 +291,11 @@ export function ModelViewer({
   };
 
   return (
-    <div className={`relative ${className || "h-full w-full"}`}>
+    <div
+      className={`relative ${className || "h-full w-full"} ${
+        inspectable && annotateMode ? "cursor-crosshair" : ""
+      }`}
+    >
       <ErrorBoundary fallback={<PreviewUnavailable />}>
         <Canvas
           camera={{ position: [0, 0, 5], fov: 45 }}
@@ -255,6 +322,10 @@ export function ModelViewer({
                     color={materialColor}
                     planes={planes}
                     onBounds={setBounds}
+                    annotateMode={annotateMode}
+                    annotations={annotations}
+                    onPick={onPick}
+                    pinRadius={pinRadius}
                   />
                 ) : (
                   <ModelMesh
@@ -349,6 +420,23 @@ export function ModelViewer({
             >
               <ScissorsIcon className="size-4" />
             </button>
+            {onToggleAnnotate && (
+              <>
+                <div className="h-4 w-px bg-border/60" />
+                <button
+                  type="button"
+                  onClick={onToggleAnnotate}
+                  aria-label="Annotate"
+                  aria-pressed={annotateMode}
+                  title="Annotate — click the model to drop a pin"
+                  className={`flex h-8 w-8 items-center justify-center transition-colors hover:bg-foreground/5 ${
+                    annotateMode ? "text-foreground" : "text-muted-foreground"
+                  }`}
+                >
+                  <MapPinIcon className="size-4" />
+                </button>
+              </>
+            )}
           </div>
 
           {/* Cross-section slider — vertical, like a slicer's height handle:

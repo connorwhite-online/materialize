@@ -23,6 +23,7 @@ import {
   saveCadFileToProfile,
 } from "@/app/actions/cad-generation";
 import type { CadStreamEvent, CadProgressEvent } from "@/lib/cad/types";
+import type { ViewerAnnotation } from "@/components/viewer/model-viewer";
 import {
   CAD_FEEDBACK_TAGS,
   CAD_FEEDBACK_TAG_LABELS,
@@ -86,6 +87,11 @@ interface AttachedImage {
   mediaType: ImageMediaType;
 }
 
+/** A viewer pin plus the user's note, fed to the agent on the next revision. */
+interface StudioAnnotation extends ViewerAnnotation {
+  note: string;
+}
+
 function truncate(s: string, n = 40): string {
   return s.length > n ? `${s.slice(0, n).trimEnd()}…` : s;
 }
@@ -135,6 +141,8 @@ export function TextToCadStudio({
   const [selectedPartId, setSelectedPartId] = useState<string | null>(null);
   const [savingModel, setSavingModel] = useState(false);
   const [savedAssets, setSavedAssets] = useState<Set<string>>(new Set());
+  const [annotateMode, setAnnotateMode] = useState(false);
+  const [annotations, setAnnotations] = useState<StudioAnnotation[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -171,6 +179,13 @@ export function TextToCadStudio({
     viewedParts.find((p) => p.fileAssetId === selectedPartId)?.fileAssetId ??
     viewedTurn?.fileAssetId ??
     null;
+
+  // Annotations are tied to a specific model — drop them (and exit pin mode)
+  // whenever the viewed asset changes (new turn, switched part, opened build).
+  useEffect(() => {
+    setAnnotations([]);
+    setAnnotateMode(false);
+  }, [activeAssetId]);
 
   function startNewBuild() {
     abortRef.current?.abort();
@@ -343,6 +358,22 @@ export function TextToCadStudio({
     if (text.length < 3 || generating) return;
 
     const parentId = latestTurn?.id; // revise the latest turn when in a thread
+
+    // Fold pinned annotations into the instruction sent to the agent, as
+    // structured spatial feedback (the displayed turn keeps the clean text).
+    const annoBlock = annotations.length
+      ? "\n\nAnnotated points on the current model (mm, model coordinates):\n" +
+        annotations
+          .map(
+            (a, i) =>
+              `#${i + 1} at (${a.point
+                .map((n) => n.toFixed(1))
+                .join(", ")}): ${a.note.trim() || "(address this location)"}`
+          )
+          .join("\n")
+      : "";
+    const sentPrompt = text + annoBlock;
+
     setError(null);
     setProgress([]);
     setGenerating(true);
@@ -357,7 +388,7 @@ export function TextToCadStudio({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt: text,
+          prompt: sentPrompt,
           parentGenerationId: parentId,
           // Revisions inherit the build's current name; new builds get an
           // agent-written one server-side.
@@ -503,6 +534,15 @@ export function TextToCadStudio({
                     mode="detail"
                     showZoomControls
                     inspect
+                    annotateMode={annotateMode}
+                    onToggleAnnotate={() => setAnnotateMode((v) => !v)}
+                    annotations={annotations}
+                    onPick={(pick) =>
+                      setAnnotations((prev) => [
+                        ...prev,
+                        { id: crypto.randomUUID(), note: "", ...pick },
+                      ])
+                    }
                     className="h-full w-full"
                   />
                 </Suspense>
@@ -596,6 +636,72 @@ export function TextToCadStudio({
                 >
                   Open assembly project
                 </Link>
+              )}
+            </div>
+          )}
+
+          {/* Annotations — pin points on the model + notes; folded into the
+              next revision as structured spatial feedback for the agent. */}
+          {!generating && activeAssetId && (annotateMode || annotations.length > 0) && (
+            <div className="mt-4 rounded-xl border border-foreground/10 p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">
+                  Annotations{" "}
+                  <span className="text-muted-foreground">
+                    ({annotations.length})
+                  </span>
+                </span>
+                {annotations.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setAnnotations([])}
+                    className="cursor-pointer text-xs text-muted-foreground underline-offset-2 hover:underline"
+                  >
+                    Clear all
+                  </button>
+                )}
+              </div>
+              {annotations.length === 0 ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Click the model to drop a pin, then describe the change for
+                  that spot. They&apos;ll be sent with your next message.
+                </p>
+              ) : (
+                <ol className="mt-2 space-y-2">
+                  {annotations.map((a, i) => (
+                    <li key={a.id} className="flex items-start gap-2">
+                      <span className="mt-1.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-[#2563eb] text-[10px] font-medium text-white">
+                        {i + 1}
+                      </span>
+                      <input
+                        value={a.note}
+                        onChange={(e) =>
+                          setAnnotations((prev) =>
+                            prev.map((x) =>
+                              x.id === a.id ? { ...x, note: e.target.value } : x
+                            )
+                          )
+                        }
+                        placeholder={`e.g. fillet this edge — at (${a.point
+                          .map((n) => n.toFixed(0))
+                          .join(", ")}) mm`}
+                        className="min-w-0 flex-1 rounded-md border border-foreground/15 bg-card px-2 py-1 text-sm outline-none focus:border-foreground/30"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setAnnotations((prev) =>
+                            prev.filter((x) => x.id !== a.id)
+                          )
+                        }
+                        aria-label="Remove annotation"
+                        className="mt-1 cursor-pointer text-muted-foreground hover:text-foreground"
+                      >
+                        <XIcon className="size-4" />
+                      </button>
+                    </li>
+                  ))}
+                </ol>
               )}
             </div>
           )}
