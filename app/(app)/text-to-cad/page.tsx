@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { cadGenerations } from "@/lib/db/schema";
 import { generateDownloadUrl } from "@/lib/storage";
 import { canUseTextToCad } from "@/lib/features";
+import { isCadRating } from "@/lib/cad/feedback";
 import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
 import {
   TextToCadStudio,
@@ -34,6 +35,10 @@ export default async function TextToCadPage() {
       status: cadGenerations.status,
       renderStorageKey: cadGenerations.renderStorageKey,
       fileAssetId: cadGenerations.fileAssetId,
+      sourceCode: cadGenerations.sourceCode,
+      rating: cadGenerations.rating,
+      feedbackTags: cadGenerations.feedbackTags,
+      feedbackNote: cadGenerations.feedbackNote,
     })
     .from(cadGenerations)
     .where(eq(cadGenerations.userId, userId))
@@ -50,6 +55,10 @@ export default async function TextToCadPage() {
         ? await generateDownloadUrl(r.renderStorageKey)
         : null,
       fileAssetId: r.fileAssetId,
+      sourceCode: r.sourceCode,
+      rating: isCadRating(r.rating) ? r.rating : null,
+      feedbackTags: r.feedbackTags ?? [],
+      feedbackNote: r.feedbackNote,
     }))
   );
 

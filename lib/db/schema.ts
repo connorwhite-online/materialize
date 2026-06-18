@@ -1372,6 +1372,15 @@ export const cadGenerations = pgTable(
     // Stored in object storage like every other image — never inline — so
     // the history query stays small; a presigned URL is minted at read time.
     renderStorageKey: text("render_storage_key"),
+    // Owner feedback — the in-the-moment human eval signal. `rating` is
+    // "good"/"bad" (null = unrated); `feedbackTags` is a small set of
+    // structured failure-mode tags (see lib/cad/feedback.ts) that make the
+    // signal actionable; `feedbackNote` is freeform. This is the highest-
+    // value early eval data and feeds the scorecard at /text-to-cad/eval.
+    rating: text("rating"),
+    feedbackTags: jsonb("feedback_tags").$type<string[]>(),
+    feedbackNote: text("feedback_note"),
+    feedbackAt: timestamp("feedback_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
