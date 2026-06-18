@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Stage, Center, Grid } from "@react-three/drei";
 import {
@@ -39,87 +39,177 @@ export interface ViewerAnnotation {
   positions?: number[];
 }
 
-/**
- * Grow a flat face from a picked triangle: every triangle that faces the same
- * way (within ~10°) and lies on the same plane. Crude vs true BRep topology,
- * but it gives a Fusion-style "select this flat face" on a raw STL with no
- * backend. Curved faces select only their near-coplanar band — a known limit
- * until STEP face IDs (CON-182 v2). Coordinates are model-local (mm).
- */
-function selectFlatFace(
-  geom: BufferGeometry,
-  pickedNormal: Vector3,
-  pickedPoint: Vector3
-): {
+interface FaceData {
   point: [number, number, number];
   normal: [number, number, number];
   extent: [number, number, number];
   positions: number[];
-} {
+}
+
+interface FaceAdjacency {
+  normals: Float32Array; // per-triangle unit normal
+  adj: number[][]; // per-triangle edge-adjacent triangle indices
+}
+
+/**
+ * Build (and cache on the geometry) per-triangle normals + edge adjacency.
+ * STL is non-indexed with float-noisy duplicate verts, so we weld by a
+ * quantized position key before deriving shared-edge neighbors.
+ */
+function buildFaceAdjacency(geom: BufferGeometry): FaceAdjacency {
+  const cached = geom.userData.__faceAdj as FaceAdjacency | undefined;
+  if (cached) return cached;
+
   const pos = geom.attributes.position;
   const index = geom.index;
-  const triCount = index ? index.count / 3 : pos.count / 3;
-  const vertAt = (i: number, out: Vector3) =>
-    out.fromBufferAttribute(pos, index ? index.getX(i) : i);
+  const triCount = (index ? index.count : pos.count) / 3;
+  const vi = (i: number) => (index ? index.getX(i) : i);
 
-  const N = pickedNormal.clone().normalize();
-  const planeD = N.dot(pickedPoint);
   if (!geom.boundingBox) geom.computeBoundingBox();
   const size = new Vector3();
   geom.boundingBox!.getSize(size);
-  const planeTol = (Math.max(size.x, size.y, size.z) || 1) * 0.01;
+  const q = (Math.max(size.x, size.y, size.z) || 1) * 1e-5;
 
+  const v = new Vector3();
+  const vid = new Map<string, number>();
+  const canon = new Int32Array(triCount * 3);
+  for (let t = 0; t < triCount; t++) {
+    for (let k = 0; k < 3; k++) {
+      v.fromBufferAttribute(pos, vi(t * 3 + k));
+      const key = `${Math.round(v.x / q)},${Math.round(v.y / q)},${Math.round(
+        v.z / q
+      )}`;
+      let id = vid.get(key);
+      if (id === undefined) {
+        id = vid.size;
+        vid.set(key, id);
+      }
+      canon[t * 3 + k] = id;
+    }
+  }
+
+  const edgeMap = new Map<string, number[]>();
+  const eKey = (x: number, y: number) => (x < y ? `${x}_${y}` : `${y}_${x}`);
+  for (let t = 0; t < triCount; t++) {
+    const c0 = canon[t * 3];
+    const c1 = canon[t * 3 + 1];
+    const c2 = canon[t * 3 + 2];
+    for (const [x, y] of [
+      [c0, c1],
+      [c1, c2],
+      [c2, c0],
+    ]) {
+      const k = eKey(x, y);
+      const arr = edgeMap.get(k);
+      if (arr) arr.push(t);
+      else edgeMap.set(k, [t]);
+    }
+  }
+
+  const adj: number[][] = Array.from({ length: triCount }, () => []);
+  for (const arr of edgeMap.values()) {
+    for (let i = 0; i < arr.length; i++) {
+      for (let j = i + 1; j < arr.length; j++) {
+        adj[arr[i]].push(arr[j]);
+        adj[arr[j]].push(arr[i]);
+      }
+    }
+  }
+
+  const normals = new Float32Array(triCount * 3);
   const a = new Vector3();
   const b = new Vector3();
   const c = new Vector3();
   const ab = new Vector3();
   const ac = new Vector3();
   const tn = new Vector3();
-  const out: number[] = [];
-
   for (let t = 0; t < triCount; t++) {
-    vertAt(t * 3, a);
-    vertAt(t * 3 + 1, b);
-    vertAt(t * 3 + 2, c);
+    a.fromBufferAttribute(pos, vi(t * 3));
+    b.fromBufferAttribute(pos, vi(t * 3 + 1));
+    c.fromBufferAttribute(pos, vi(t * 3 + 2));
     tn.crossVectors(ab.subVectors(b, a), ac.subVectors(c, a)).normalize();
-    if (tn.dot(N) < 0.985) continue; // not co-facing (~10°)
-    if (Math.abs(N.dot(a) - planeD) > planeTol) continue; // not coplanar
-    out.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+    normals[t * 3] = tn.x;
+    normals[t * 3 + 1] = tn.y;
+    normals[t * 3 + 2] = tn.z;
   }
 
-  if (out.length === 0) {
-    return {
-      point: [pickedPoint.x, pickedPoint.y, pickedPoint.z],
-      normal: [N.x, N.y, N.z],
-      extent: [0, 0, 0],
-      positions: [],
-    };
+  const result: FaceAdjacency = { normals, adj };
+  geom.userData.__faceAdj = result;
+  return result;
+}
+
+/**
+ * Select the single CONNECTED flat face containing the clicked triangle —
+ * flood-fill through edge-adjacent neighbors whose normal stays within ~5° of
+ * the seed. Unlike a global coplanar filter, this grabs only the face you
+ * clicked (not other faces that happen to share its plane). Coordinates are
+ * model-local (mm). Curved faces stop at their curvature; true face identity
+ * needs STEP BRep topology (CON-182 v2).
+ */
+function selectConnectedFace(geom: BufferGeometry, faceIndex: number): FaceData {
+  const { normals, adj } = buildFaceAdjacency(geom);
+  const pos = geom.attributes.position;
+  const index = geom.index;
+  const vi = (i: number) => (index ? index.getX(i) : i);
+
+  const sn = new Vector3(
+    normals[faceIndex * 3],
+    normals[faceIndex * 3 + 1],
+    normals[faceIndex * 3 + 2]
+  );
+  const COS = Math.cos((5 * Math.PI) / 180);
+  const seen = new Set<number>([faceIndex]);
+  const stack = [faceIndex];
+  const tris: number[] = [];
+  const tn = new Vector3();
+  while (stack.length) {
+    const t = stack.pop()!;
+    tris.push(t);
+    for (const nb of adj[t]) {
+      if (seen.has(nb)) continue;
+      tn.set(normals[nb * 3], normals[nb * 3 + 1], normals[nb * 3 + 2]);
+      if (tn.dot(sn) >= COS) {
+        seen.add(nb);
+        stack.push(nb);
+      }
+    }
   }
 
-  const box = new Box3();
+  const out: number[] = [];
   const v = new Vector3();
+  const box = new Box3();
   let cx = 0;
   let cy = 0;
   let cz = 0;
-  for (let i = 0; i < out.length; i += 3) {
-    box.expandByPoint(v.set(out[i], out[i + 1], out[i + 2]));
-    cx += out[i];
-    cy += out[i + 1];
-    cz += out[i + 2];
+  for (const t of tris) {
+    for (let k = 0; k < 3; k++) {
+      v.fromBufferAttribute(pos, vi(t * 3 + k));
+      out.push(v.x, v.y, v.z);
+      box.expandByPoint(v);
+      cx += v.x;
+      cy += v.y;
+      cz += v.z;
+    }
   }
   const n = out.length / 3;
   const ext = new Vector3();
   box.getSize(ext);
   return {
     point: [cx / n, cy / n, cz / n],
-    normal: [N.x, N.y, N.z],
+    normal: [sn.x, sn.y, sn.z],
     extent: [ext.x, ext.y, ext.z],
     positions: out,
   };
 }
 
 /** Translucent overlay of a selected face's triangles (drawn on top). */
-function FaceHighlight({ positions }: { positions: number[] }) {
+function FaceHighlight({
+  positions,
+  color = "#2563eb",
+}: {
+  positions: number[];
+  color?: string;
+}) {
   const geom = useMemo(() => {
     const g = new BufferGeometry();
     g.setAttribute("position", new Float32BufferAttribute(positions, 3));
@@ -128,7 +218,7 @@ function FaceHighlight({ positions }: { positions: number[] }) {
   return (
     <mesh geometry={geom} renderOrder={999}>
       <meshBasicMaterial
-        color="#2563eb"
+        color={color}
         transparent
         opacity={0.4}
         side={DoubleSide}
@@ -173,18 +263,19 @@ interface ModelViewerProps {
    * other call site is unchanged. STL only.
    */
   inspect?: boolean;
-  /** Annotation pin mode is active — clicks on the model drop a pin. */
+  /** Annotate mode is active — clicks select a face and open a note input. */
   annotateMode?: boolean;
   /** Toggle handler for the annotate tool button. */
   onToggleAnnotate?: () => void;
-  /** Existing annotations to render as face highlights (model-space mm). */
+  /** Committed annotations to render as face highlights (model-space mm). */
   annotations?: ViewerAnnotation[];
-  /** Fired when the user selects a face in annotate mode. */
-  onPick?: (pick: {
+  /** Fired when the user commits a note on a selected face (inline input). */
+  onAnnotate?: (a: {
     point: [number, number, number];
     normal: [number, number, number];
     extent: [number, number, number];
     positions: number[];
+    note: string;
   }) => void;
 }
 
@@ -253,6 +344,7 @@ function InspectModel({
   onBounds,
   annotateMode,
   annotations,
+  pendingFace,
   onPick,
   pinRadius,
 }: {
@@ -262,11 +354,11 @@ function InspectModel({
   onBounds: (b: InspectBounds) => void;
   annotateMode?: boolean;
   annotations?: ViewerAnnotation[];
+  pendingFace?: FaceData | null;
   onPick?: (pick: {
-    point: [number, number, number];
-    normal: [number, number, number];
-    extent: [number, number, number];
-    positions: number[];
+    face: FaceData;
+    clientX: number;
+    clientY: number;
   }) => void;
   pinRadius: number;
 }) {
@@ -274,17 +366,19 @@ function InspectModel({
   const geomRef = useRef<THREE.BufferGeometry | null>(null);
   const done = useRef(false);
 
-  // Select the flat face under the cursor, in the model's own (mm) frame —
-  // worldToLocal unwinds the Center/Stage transforms so the face matches the
-  // build123d source coordinates the agent reasons about.
+  // Select the single connected flat face under the cursor (model mm frame) and
+  // report the click's screen position so the caller can open a note input
+  // right where the user clicked.
   const handleClick = (e: ThreeEvent<MouseEvent>) => {
-    if (!annotateMode || !onPick) return;
+    if (!annotateMode || !onPick || e.faceIndex == null) return;
     e.stopPropagation();
     const mesh = e.object as THREE.Mesh;
     const geom = mesh.geometry as BufferGeometry;
-    const local = mesh.worldToLocal(e.point.clone());
-    const faceNormal = e.face?.normal?.clone() ?? new Vector3(0, 1, 0);
-    onPick(selectFlatFace(geom, faceNormal, local));
+    onPick({
+      face: selectConnectedFace(geom, e.faceIndex),
+      clientX: e.nativeEvent.clientX,
+      clientY: e.nativeEvent.clientY,
+    });
   };
 
   useFrame(() => {
@@ -329,23 +423,20 @@ function InspectModel({
         }}
       />
       {/* Selected-face highlights — children of the same group so model-space
-          (mm) coordinates land on the geometry regardless of Center/Stage. A
-          tiny pin marks the centroid; the overlay shows the whole face. */}
+          (mm) coordinates land on the geometry regardless of Center/Stage. */}
       {(annotations ?? []).map((a) =>
         a.positions && a.positions.length > 0 ? (
-          <group key={a.id}>
-            <FaceHighlight positions={a.positions} />
-            <mesh position={a.point}>
-              <sphereGeometry args={[pinRadius, 16, 16]} />
-              <meshBasicMaterial color="#1e40af" toneMapped={false} />
-            </mesh>
-          </group>
+          <FaceHighlight key={a.id} positions={a.positions} />
         ) : (
           <mesh key={a.id} position={a.point}>
             <sphereGeometry args={[pinRadius, 16, 16]} />
             <meshBasicMaterial color="#2563eb" toneMapped={false} />
           </mesh>
         )
+      )}
+      {/* Brighter preview of the face being annotated right now. */}
+      {pendingFace && pendingFace.positions.length > 0 && (
+        <FaceHighlight positions={pendingFace.positions} color="#f59e0b" />
       )}
     </group>
   );
@@ -363,7 +454,7 @@ export function ModelViewer({
   annotateMode = false,
   onToggleAnnotate,
   annotations,
-  onPick,
+  onAnnotate,
 }: ModelViewerProps) {
   const isPreview = mode === "preview";
   // Wheel zoom defaults to true unless explicitly disabled. The
@@ -371,6 +462,43 @@ export function ModelViewer({
   const wheelZoom =
     enableWheelZoom === undefined ? !isPreview : enableWheelZoom;
   const controlsRef = useRef<OrbitControlsImpl>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // The face just clicked, awaiting a note. `x`/`y` are screen coords relative
+  // to the viewer wrapper, so the note input opens right where the user clicked.
+  const [pending, setPending] = useState<{
+    face: FaceData;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
+
+  const openPending = (pick: {
+    face: FaceData;
+    clientX: number;
+    clientY: number;
+  }) => {
+    const rect = wrapperRef.current?.getBoundingClientRect();
+    setNoteDraft("");
+    setPending({
+      face: pick.face,
+      x: pick.clientX - (rect?.left ?? 0),
+      y: pick.clientY - (rect?.top ?? 0),
+    });
+  };
+
+  const commitPending = () => {
+    if (pending) {
+      onAnnotate?.({ ...pending.face, note: noteDraft.trim() });
+    }
+    setPending(null);
+    setNoteDraft("");
+  };
+
+  // Drop the open input when annotate mode is turned off.
+  useEffect(() => {
+    if (!annotateMode) setPending(null);
+  }, [annotateMode]);
 
   // Inspection state (only meaningful when `inspect`). STL only.
   const inspectable = inspect && format === "stl";
@@ -419,6 +547,7 @@ export function ModelViewer({
 
   return (
     <div
+      ref={wrapperRef}
       className={`relative ${className || "h-full w-full"} ${
         inspectable && annotateMode ? "cursor-crosshair" : ""
       }`}
@@ -451,7 +580,8 @@ export function ModelViewer({
                     onBounds={setBounds}
                     annotateMode={annotateMode}
                     annotations={annotations}
-                    onPick={onPick}
+                    pendingFace={pending?.face ?? null}
+                    onPick={openPending}
                     pinRadius={pinRadius}
                   />
                 ) : (
@@ -598,6 +728,42 @@ export function ModelViewer({
               <RulerIcon className="size-3.5" />
               {bounds.mm.x.toFixed(1)} × {bounds.mm.y.toFixed(1)} ×{" "}
               {bounds.mm.z.toFixed(1)} mm
+            </div>
+          )}
+
+          {/* Inline note input — opens right where the user clicked. */}
+          {pending && (
+            <div
+              className="absolute z-40"
+              style={{
+                left: pending.x,
+                top: pending.y,
+                transform: "translate(-50%, 12px)",
+              }}
+            >
+              <input
+                autoFocus
+                value={noteDraft}
+                onChange={(e) => setNoteDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    commitPending();
+                  } else if (e.key === "Escape") {
+                    setPending(null);
+                    setNoteDraft("");
+                  }
+                }}
+                onBlur={() => {
+                  if (noteDraft.trim()) commitPending();
+                  else {
+                    setPending(null);
+                    setNoteDraft("");
+                  }
+                }}
+                placeholder="Describe this face…"
+                className="w-56 rounded-lg border border-foreground/20 bg-card px-2.5 py-1.5 text-sm shadow-lg outline-none focus:border-foreground/40"
+              />
             </div>
           )}
         </>

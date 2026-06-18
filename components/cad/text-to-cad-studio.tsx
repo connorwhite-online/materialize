@@ -556,10 +556,10 @@ export function TextToCadStudio({
                     annotateMode={annotateMode}
                     onToggleAnnotate={() => setAnnotateMode((v) => !v)}
                     annotations={annotations}
-                    onPick={(pick) =>
+                    onAnnotate={(a) =>
                       setAnnotations((prev) => [
                         ...prev,
-                        { id: crypto.randomUUID(), note: "", ...pick },
+                        { id: crypto.randomUUID(), ...a },
                       ])
                     }
                     className="h-full w-full"
@@ -927,6 +927,35 @@ export function TextToCadStudio({
                       <XIcon className="size-2.5" />
                     </button>
                   </div>
+                ))}
+              </div>
+            )}
+
+            {/* Annotation chips — make it obvious selected faces send with the
+                message. */}
+            {annotations.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-1.5 px-1">
+                {annotations.map((a, i) => (
+                  <span
+                    key={a.id}
+                    className="inline-flex max-w-[14rem] items-center gap-1 rounded-full border border-[#2563eb]/30 bg-[#2563eb]/10 py-0.5 pl-2 pr-1 text-xs text-foreground"
+                  >
+                    <span className="truncate">
+                      📍 {a.note.trim() || `Face ${i + 1}`}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setAnnotations((prev) =>
+                          prev.filter((x) => x.id !== a.id)
+                        )
+                      }
+                      aria-label="Remove annotation"
+                      className="flex size-3.5 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                    >
+                      <XIcon className="size-2.5" />
+                    </button>
+                  </span>
                 ))}
               </div>
             )}
