@@ -4,5 +4,12 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 pydantic==2.10.4
-build123d==0.8.0
+build123d==0.11.0
+# Pin the OpenCASCADE kernel explicitly. build123d only floors it
+# (cadquery-ocp-novtk>=7.9,<8.0), so an unpinned install drifts to whatever
+# is newest on PyPI. build123d 0.8.0 + the current OCP combo crashed at
+# runtime (TopoDS_Shape lost `HashCode` in OCC 7.8); 0.11.0 + novtk 7.9.3 is
+# the verified-working pair. The non-vtk OCP variant is what build123d 0.11
+# depends on and is enough for STL/STEP export — trimesh handles meshing.
+cadquery-ocp-novtk==7.9.3.1.1
 trimesh==4.5.3
