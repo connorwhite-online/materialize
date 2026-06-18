@@ -24,12 +24,14 @@ const MaterializeShaderMaterial = shaderMaterial(
   /* glsl */ `
     varying vec3 vNormal;
     varying vec3 vViewDir;
+    #include <clipping_planes_pars_vertex>
 
     void main() {
       vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
       vViewDir = normalize(-mvPosition.xyz);
       vNormal = normalize(normalMatrix * normal);
       gl_Position = projectionMatrix * mvPosition;
+      #include <clipping_planes_vertex>
     }
   `,
   // Fragment shader
@@ -42,11 +44,19 @@ const MaterializeShaderMaterial = shaderMaterial(
 
     varying vec3 vNormal;
     varying vec3 vViewDir;
+    #include <clipping_planes_pars_fragment>
 
     void main() {
+      // Discard fragments outside the active cross-section planes (no-op
+      // when none are set).
+      #include <clipping_planes_fragment>
+
       // Re-normalize after interpolation — the interpolated normal is
       // not unit length except at the vertices.
       vec3 N = normalize(vNormal);
+      // Flip the normal on back faces so the exposed interior (rendered
+      // double-sided under a cross-section) is lit correctly instead of black.
+      if (!gl_FrontFacing) N = -N;
       vec3 V = normalize(vViewDir);
 
       // Hemisphere lighting — warm top, cool bottom
@@ -75,12 +85,15 @@ interface MaterializeMaterialProps {
   baseColor?: string;
   accentColor?: string;
   fresnelColor?: string;
+  /** Active cross-section planes; renders double-sided so interiors show. */
+  clippingPlanes?: THREE.Plane[];
 }
 
 export function MaterializeMaterial({
   baseColor = "#d4d4d8",
   accentColor = "#a1a1aa",
   fresnelColor = "#e4e4e7",
+  clippingPlanes,
 }: MaterializeMaterialProps) {
   // drei's shaderMaterial factory makes a class whose constructor takes
   // no arguments — uniforms are exposed as property setters on the
@@ -96,6 +109,17 @@ export function MaterializeMaterial({
     m.uFresnelIntensity = 0.4;
     return m;
   }, [baseColor, accentColor, fresnelColor]);
+
+  // Apply clipping imperatively each render: toggling the plane count changes
+  // the shader's NUM_CLIPPING_PLANES define, so flip needsUpdate only on that
+  // transition (recompile). Mutating plane.constant live needs no recompile.
+  const clip = !!clippingPlanes && clippingPlanes.length > 0;
+  if (material.clipping !== clip) {
+    material.clipping = clip;
+    material.needsUpdate = true;
+  }
+  material.clippingPlanes = clip ? clippingPlanes! : null;
+  material.side = clip ? THREE.DoubleSide : THREE.FrontSide;
 
   return <primitive object={material} attach="material" />;
 }

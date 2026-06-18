@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useLoader } from "@react-three/fiber";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
-import { DoubleSide, type BufferGeometry, type Plane } from "three";
+import type { BufferGeometry, Plane } from "three";
 import { MaterializeMaterial } from "../materialize-material";
 
 interface StlModelProps {
@@ -38,20 +38,14 @@ export function StlModel({
 
   return (
     <mesh geometry={geometry}>
-      {clip ? (
-        // Matte, non-metallic + double-sided so the exposed interior is fully
-        // lit by the scene's lights. A metallic material would render black
-        // here because there's no environment map to reflect.
-        <meshStandardMaterial
-          color={color}
-          metalness={0}
-          roughness={0.6}
-          side={DoubleSide}
-          clippingPlanes={clippingPlanes}
-          clipShadows
+      {useCustomShader || clip ? (
+        // The custom shader is self-lit and (now) clipping-capable, so the
+        // cross-section looks identical to the normal view — just cut — rather
+        // than going black under a lit material with no environment map.
+        <MaterializeMaterial
+          baseColor={color}
+          clippingPlanes={clip ? clippingPlanes : undefined}
         />
-      ) : useCustomShader ? (
-        <MaterializeMaterial baseColor={color} />
       ) : (
         <meshPhysicalMaterial
           color={color}

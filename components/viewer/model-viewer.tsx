@@ -204,7 +204,12 @@ export function ModelViewer({
     plane.constant =
       bounds.worldMaxY - sectionT * (bounds.worldMaxY - bounds.worldMinY);
   }
-  const planes = inspectable && sectionOn ? [plane] : undefined;
+  // Stable array identity (only flips when the section toggles) so the
+  // material isn't rebuilt every frame as the slider moves.
+  const planes = useMemo(
+    () => (inspectable && sectionOn ? [plane] : undefined),
+    [inspectable, sectionOn, plane]
+  );
 
   const zoomBy = (factor: number) => {
     const controls = controlsRef.current;
@@ -346,20 +351,21 @@ export function ModelViewer({
             </button>
           </div>
 
-          {/* Cross-section slider — horizontal: left = whole model, right =
-              fully cut (sweeps the cut down from the top). */}
+          {/* Cross-section slider — vertical, like a slicer's height handle:
+              handle at the TOP = whole model; drag it DOWN to lower the cut
+              and expose the interior from the top. (Horizontal range rotated
+              -90°, so its max ends up at the top; value = 1 - cut depth.) */}
           {sectionOn && (
-            <div className="absolute left-1/2 top-3 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border/60 bg-background/40 px-3 py-1.5 backdrop-blur-md">
-              <ScissorsIcon className="size-3.5 text-muted-foreground" />
+            <div className="absolute right-3 top-1/2 flex h-40 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-border/60 bg-background/40 backdrop-blur-md">
               <input
                 type="range"
                 min={0}
                 max={1}
                 step={0.01}
-                value={sectionT}
-                onChange={(e) => setSectionT(Number(e.target.value))}
-                aria-label="Cross-section depth"
-                className="h-1.5 w-40 cursor-pointer accent-foreground"
+                value={1 - sectionT}
+                onChange={(e) => setSectionT(1 - Number(e.target.value))}
+                aria-label="Cross-section height"
+                className="w-32 -rotate-90 cursor-pointer accent-foreground"
               />
             </div>
           )}
