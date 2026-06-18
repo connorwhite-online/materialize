@@ -57,7 +57,7 @@ function Blob() {
   useFrame((_, delta) => {
     // Slow the deform: uTime drives the noise, so a smaller increment = gentler
     // morphing without affecting the rotation below.
-    if (matRef.current) matRef.current.uniforms.uTime.value += delta * 0.4;
+    if (matRef.current) matRef.current.uniforms.uTime.value += delta * 0.6;
     if (meshRef.current) {
       meshRef.current.rotation.y += delta * 0.07;
       meshRef.current.rotation.x += delta * 0.02;

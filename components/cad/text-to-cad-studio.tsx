@@ -894,7 +894,10 @@ export function TextToCadStudio({
 
       {/* Floating composer */}
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30">
-        <div className="pointer-events-auto mx-auto max-w-3xl px-4 pb-4">
+        {/* Mirror the page grid so the composer centers under the viewer
+            column and ignores the Builds sidebar (the empty 300px track). */}
+        <div className="mx-auto grid max-w-6xl gap-8 px-4 pb-4 lg:grid-cols-[1fr_300px]">
+          <div className="pointer-events-auto mx-auto w-full max-w-3xl">
           <div
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
@@ -991,6 +994,7 @@ export function TextToCadStudio({
               ? "Sending a message revises this build · ⌘/Ctrl + Enter"
               : "⌘/Ctrl + Enter to generate"}
           </p>
+          </div>
         </div>
       </div>
     </div>
