@@ -87,9 +87,8 @@ def _process_shape(shape, formats: list[str], tmp: str, stem: str) -> dict:
 
     stl_path = os.path.join(tmp, f"{stem}.stl")
     export_stl(shape, stl_path)
-    if "stl" in formats:
-        with open(stl_path, "rb") as f:
-            entry["files"]["stl"] = base64.b64encode(f.read()).decode()
+
+    # STEP comes straight from the OCC BRep (not the mesh) — keep it as-is.
     if "step" in formats:
         step_path = os.path.join(tmp, f"{stem}.step")
         export_step(shape, step_path)
@@ -98,8 +97,34 @@ def _process_shape(shape, formats: list[str], tmp: str, stem: str) -> dict:
 
     try:
         import trimesh
+        from trimesh import repair as trimesh_repair
 
         mesh = trimesh.load(stl_path, force="mesh")
+
+        # Best-effort cleanup so boolean-op artifacts (unwelded verts,
+        # degenerate/duplicate faces, flipped winding, small holes) don't
+        # hard-fail an otherwise-good model. Each step is independent and
+        # optional across trimesh versions; the repaired mesh becomes the
+        # printable STL we hand back.
+        if not mesh.is_watertight or not mesh.is_winding_consistent:
+            for step in (
+                lambda: mesh.merge_vertices(),
+                lambda: mesh.update_faces(mesh.nondegenerate_faces()),
+                lambda: mesh.update_faces(mesh.unique_faces()),
+                lambda: mesh.remove_unreferenced_vertices(),
+                lambda: trimesh_repair.fix_winding(mesh),
+                lambda: trimesh_repair.fix_normals(mesh),
+                lambda: trimesh_repair.fill_holes(mesh),
+            ):
+                try:
+                    step()
+                except Exception:  # noqa: BLE001
+                    pass
+            try:
+                mesh.export(stl_path)  # so files.stl matches what we validate
+            except Exception:  # noqa: BLE001
+                pass
+
         entry["validation"]["isWatertight"] = bool(mesh.is_watertight)
         entry["validation"]["isManifold"] = bool(mesh.is_winding_consistent)
         ext = mesh.extents
@@ -115,6 +140,12 @@ def _process_shape(shape, formats: list[str], tmp: str, stem: str) -> dict:
         entry["renderPng"] = _render(mesh)
     except Exception as mesh_err:  # noqa: BLE001
         entry["error"] = f"analysis: {mesh_err}"
+
+    # Encode the (possibly repaired) STL.
+    if "stl" in formats:
+        with open(stl_path, "rb") as f:
+            entry["files"]["stl"] = base64.b64encode(f.read()).decode()
+
     return entry
 
 
