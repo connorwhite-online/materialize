@@ -1,36 +1,54 @@
 import "server-only";
 
+import Anthropic from "@anthropic-ai/sdk";
+
 /**
- * Thin, defensive wrapper over the Claude Agent SDK's `query` for one-shot
- * text completions (the harness drives its own repair loop, so each call
- * is a single completion with no tools).
+ * Thin wrapper over the Anthropic Messages API for one-shot text completions
+ * (the harness drives its own plan/repair loop, so each call is a single
+ * completion with no tools).
  *
- * Auth resolution mirrors lib/email/client.ts's "stub when unconfigured"
- * philosophy, but the actual stubbing lives in the harness (it needs a
- * CAD-shaped fallback). Here we just report whether credentials exist and,
- * if so, run the model. The SDK reads credentials from the environment:
+ * Why the direct API, not the Agent SDK's `query()`: `query()` spawns a Claude
+ * Code subprocess per call — fine locally but heavy, occasionally wedged, and
+ * unproven on serverless. A plain HTTPS call is faster, reliable, and the
+ * production-clean path. See CON-174.
  *
- *   - CLAUDE_CODE_OAUTH_TOKEN — the owner's Claude Code subscription token
- *     (convenient for the private experiment).
- *   - ANTHROPIC_API_KEY — the production-clean path; swap to this before
- *     any public/multi-user exposure (ToS + independent billing).
- *
- * Dynamic import keeps the heavy native SDK out of the module graph until a
- * generation actually runs, so importing the harness (from a page/action)
- * stays cheap.
+ * Credentials (in priority order):
+ *   - ANTHROPIC_API_KEY — the API key; the intended path (independent billing,
+ *     correct ToS for a server). Read automatically by the SDK.
+ *   - CLAUDE_CODE_OAUTH_TOKEN — sent as a bearer `authToken` fallback so a
+ *     subscription-only setup still resolves credentials; prefer the API key.
+ * With neither, the harness uses its deterministic local stub (offline demo).
  */
 
-/** True when either supported credential is present in the environment. */
+// Default when a role doesn't pin a model (modelForRole -> CAD_MODEL_* ->
+// undefined). Sonnet 4.6 is the strong, fast default proven for CAD codegen;
+// override per role via the CAD_MODEL_* env vars.
+const DEFAULT_MODEL = "claude-sonnet-4-6";
+// build123d for a non-trivial part can run long; headroom avoids truncation.
+const MAX_TOKENS = 8192;
+
+/** True when a usable credential is present in the environment. */
 export function hasModelCredentials(): boolean {
   return !!(
-    process.env.CLAUDE_CODE_OAUTH_TOKEN || process.env.ANTHROPIC_API_KEY
+    process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_OAUTH_TOKEN
   );
+}
+
+let _client: Anthropic | null = null;
+function getClient(): Anthropic {
+  if (!_client) {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    _client = apiKey
+      ? new Anthropic({ apiKey })
+      : new Anthropic({ authToken: process.env.CLAUDE_CODE_OAUTH_TOKEN });
+  }
+  return _client;
 }
 
 export interface CompleteTextOptions {
   system: string;
   prompt: string;
-  /** Model id; defaults to the SDK's default when omitted. */
+  /** Model id; falls back to DEFAULT_MODEL when omitted. */
   model?: string;
   signal?: AbortSignal;
 }
@@ -43,41 +61,22 @@ export interface CompleteTextOptions {
 export async function completeText(opts: CompleteTextOptions): Promise<string> {
   if (!hasModelCredentials()) {
     throw new Error(
-      "No model credentials (set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY)"
+      "No model credentials (set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN)"
     );
   }
 
-  const { query } = await import("@anthropic-ai/claude-agent-sdk");
-
-  const abort = new AbortController();
-  if (opts.signal) {
-    if (opts.signal.aborted) abort.abort();
-    else opts.signal.addEventListener("abort", () => abort.abort());
-  }
-
-  const result = query({
-    prompt: opts.prompt,
-    options: {
-      abortController: abort,
-      systemPrompt: opts.system,
-      // No tools — this is a plain completion; the harness owns the loop.
-      allowedTools: [],
-      maxTurns: 1,
-      ...(opts.model ? { model: opts.model } : {}),
+  const message = await getClient().messages.create(
+    {
+      model: opts.model || DEFAULT_MODEL,
+      max_tokens: MAX_TOKENS,
+      system: opts.system,
+      messages: [{ role: "user", content: opts.prompt }],
     },
-  });
+    { signal: opts.signal }
+  );
 
-  let text = "";
-  for await (const message of result) {
-    if (message.type === "assistant") {
-      const content = message.message.content;
-      if (Array.isArray(content)) {
-        for (const block of content) {
-          const b = block as { type?: string; text?: string };
-          if (b.type === "text" && typeof b.text === "string") text += b.text;
-        }
-      }
-    }
-  }
-  return text;
+  return message.content
+    .filter((b): b is Anthropic.TextBlock => b.type === "text")
+    .map((b) => b.text)
+    .join("");
 }
