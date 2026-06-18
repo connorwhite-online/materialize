@@ -55,17 +55,19 @@ function Blob() {
   );
 
   useFrame((_, delta) => {
-    if (matRef.current) matRef.current.uniforms.uTime.value += delta;
+    // Slow the deform: uTime drives the noise, so a smaller increment = gentler
+    // morphing without affecting the rotation below.
+    if (matRef.current) matRef.current.uniforms.uTime.value += delta * 0.4;
     if (meshRef.current) {
-      meshRef.current.rotation.y += delta * 0.15;
-      meshRef.current.rotation.x += delta * 0.04;
+      meshRef.current.rotation.y += delta * 0.12;
+      meshRef.current.rotation.x += delta * 0.03;
     }
   });
 
   return (
     <mesh ref={meshRef}>
-      {/* detail 4 → dense-but-cheap triangulation for the wireframe look. */}
-      <icosahedronGeometry args={[1.3, 4]} />
+      {/* detail 5 → denser triangulation for a finer wireframe. */}
+      <icosahedronGeometry args={[1.3, 5]} />
       <shaderMaterial
         ref={matRef}
         wireframe
@@ -82,7 +84,9 @@ function Blob() {
 export function MaterializingBlob({ className }: { className?: string }) {
   return (
     <div className={className}>
-      <Canvas camera={{ position: [0, 0, 3.6], fov: 45 }} dpr={[1, 2]}>
+      {/* Camera pulled back so the blob reads as a small "entity" with room
+          around it, not a sphere filling the frame. */}
+      <Canvas camera={{ position: [0, 0, 8], fov: 45 }} dpr={[1, 2]}>
         <Blob />
       </Canvas>
     </div>
