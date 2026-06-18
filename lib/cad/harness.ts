@@ -2,10 +2,11 @@ import "server-only";
 
 import { completeText, hasModelCredentials } from "./model-client";
 import { runCadCode } from "./runner-client";
-import { SYSTEM_PROMPT, extractCode, gradeRun } from "./prompt";
+import { SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, extractCode, gradeRun } from "./prompt";
 import { buildKnowledgeBlock, type CadProcess } from "./knowledge";
 import { judgeAesthetics } from "./critique";
 import { selectExemplars, formatExemplars } from "./knowledge/exemplars";
+import { modelForRole, planStepEnabled, type CadRole } from "./models";
 import type { CadProgressEvent, CadRunResult } from "./types";
 
 /**
@@ -51,6 +52,8 @@ export interface HarnessResult {
   run?: CadRunResult;
   /** VLM aesthetic aggregate (0-100), null when the judge is off/unavailable. */
   aestheticScore?: number | null;
+  /** Per-role model usage for routing/telemetry (which model, how long). */
+  telemetry?: Array<{ role: CadRole; model?: string; ms: number }>;
   error?: string;
 }
 
@@ -74,7 +77,16 @@ function localFakeModel(prompt: string, prior?: string | null): string {
   ].join("\n");
 }
 
-function buildUserPrompt(input: HarnessInput): string {
+/** Prompt for the plan step — request a short design plan (no code). */
+function buildPlanPrompt(input: HarnessInput): string {
+  const knowledge = buildKnowledgeBlock({
+    prompt: input.prompt,
+    process: input.process,
+  });
+  return `Plan a parametric 3D model for this request: ${input.prompt}\n\nDesign guidance to honor:\n\n${knowledge}`;
+}
+
+function buildUserPrompt(input: HarnessInput, plan?: string): string {
   const task = input.priorSourceCode
     ? [
         "Revise the following build123d model per this instruction:",
@@ -93,6 +105,10 @@ function buildUserPrompt(input: HarnessInput): string {
   });
 
   let out = `${task}\n\nDesign guidance to follow:\n\n${knowledge}`;
+
+  if (plan) {
+    out += `\n\nFollow this plan:\n${plan}`;
+  }
 
   // On a fresh build, show the best-matching verified exemplar as a style
   // reference. (Revisions already have the prior code as their reference.)
@@ -123,6 +139,41 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
     }
   };
 
+  const telemetry: NonNullable<HarnessResult["telemetry"]> = [];
+  const timed = async <T>(
+    role: CadRole,
+    model: string | undefined,
+    fn: () => Promise<T>
+  ): Promise<T> => {
+    const t = Date.now();
+    try {
+      return await fn();
+    } finally {
+      telemetry.push({ role, model, ms: Date.now() - t });
+    }
+  };
+
+  // Plan-then-code: a short design plan up front (fresh builds only — revisions
+  // already have the prior code as their plan). Best-effort: a planning failure
+  // must not block generation. No-op without model credentials.
+  let plan: string | undefined;
+  if (useModel && !input.priorSourceCode && planStepEnabled()) {
+    const planModel = modelForRole("plan");
+    try {
+      const text = await timed("plan", planModel, () =>
+        completeText({
+          system: PLAN_SYSTEM_PROMPT,
+          prompt: buildPlanPrompt(input),
+          model: planModel,
+          signal: input.signal,
+        })
+      );
+      plan = text.trim() || undefined;
+    } catch {
+      plan = undefined;
+    }
+  }
+
   let lastCode = "";
   let lastRun: CadRunResult | undefined;
   let repairNote = "";
@@ -132,14 +183,21 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
 
     emit({ type: "phase", phase: "generating", attempt, maxAttempts });
     if (useModel) {
+      // Route the generate step by role: implement on the first pass, repair
+      // thereafter. Both default to the strong model until configured.
+      const role: CadRole = repairNote ? "repair" : "implement";
+      const model = modelForRole(role);
       const userPrompt = repairNote
-        ? `${buildUserPrompt(input)}\n\nThe previous attempt failed because ${repairNote}. Here is that code:\n\`\`\`python\n${lastCode}\n\`\`\`\nFix it.`
-        : buildUserPrompt(input);
-      const text = await completeText({
-        system: SYSTEM_PROMPT,
-        prompt: userPrompt,
-        signal: input.signal,
-      });
+        ? `${buildUserPrompt(input, plan)}\n\nThe previous attempt failed because ${repairNote}. Here is that code:\n\`\`\`python\n${lastCode}\n\`\`\`\nFix it.`
+        : buildUserPrompt(input, plan);
+      const text = await timed(role, model, () =>
+        completeText({
+          system: SYSTEM_PROMPT,
+          prompt: userPrompt,
+          model,
+          signal: input.signal,
+        })
+      );
       lastCode = extractCode(text);
     } else {
       // No credentials: deterministic local fallback, no repair value.
@@ -189,6 +247,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
         attempts: attempt,
         run: lastRun,
         aestheticScore,
+        telemetry,
       };
     }
 
@@ -206,5 +265,6 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
     attempts: maxAttempts,
     run: lastRun,
     error: repairNote || "generation failed",
+    telemetry,
   };
 }
