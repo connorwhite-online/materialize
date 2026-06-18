@@ -4,6 +4,7 @@ import { projects, projectPhotos } from "@/lib/db/schema";
 import { eq, and, asc } from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
 import { logError } from "@/lib/logger";
+import { thumbnailPlaceholderResponse } from "../../placeholder";
 
 /** Same guard as in /api/thumbnails/[fileId]/route.ts — see that file for rationale. */
 const UUID_RE =
@@ -65,7 +66,9 @@ export async function GET(
       .where(eq(projects.id, projectId));
 
     if (!project) {
-      return new Response("Not found", { status: 404 });
+      // Missing/deleted project: empty-tile placeholder, not 404
+      // (issue #63 — keeps the browse grid free of network failures).
+      return thumbnailPlaceholderResponse();
     }
 
     const publicListing =
@@ -73,7 +76,9 @@ export async function GET(
     if (!publicListing) {
       const { userId } = await auth();
       if (!userId || userId !== project.userId) {
-        return new Response("Not found", { status: 404 });
+        // Don't leak a draft/private cover to a stolen id — placeholder
+        // (reveals nothing) rather than 404, consistent with the file route.
+        return thumbnailPlaceholderResponse();
       }
     }
 
@@ -94,7 +99,8 @@ export async function GET(
         .from(projectPhotos)
         .where(eq(projectPhotos.id, requestedPhotoId));
       if (!photo || photo.projectId !== projectId) {
-        return new Response("Not found", { status: 404 });
+        // Stale/foreign ?photoId → empty tile, not a network failure.
+        return thumbnailPlaceholderResponse();
       }
       storageKey = photo.storageKey;
     } else if (project.coverPhotoId) {
@@ -146,7 +152,10 @@ export async function GET(
     }
 
     if (!storageKey) {
-      return new Response("Not found", { status: 404 });
+      // No cover, no curator photos, no legacy thumbnail key — there's
+      // nothing to serve (a project carousel requests the bare cover
+      // even when only build-guide photos exist). Empty tile, not 404.
+      return thumbnailPlaceholderResponse();
     }
 
     const signed = await generateDownloadUrl(storageKey, 60 * 60);
@@ -161,6 +170,10 @@ export async function GET(
 
     if (upstream.status === 304) {
       return new Response(null, { status: 304 });
+    }
+    // Recorded storage key, missing R2 object → empty tile, not 502.
+    if (upstream.status === 404) {
+      return thumbnailPlaceholderResponse();
     }
     if (!upstream.ok || !upstream.body) {
       logError("api/thumbnails/projects/[projectId].upstream", {
