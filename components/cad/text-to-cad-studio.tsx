@@ -5,20 +5,22 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import {
   AlertTriangleIcon,
+  ArrowUpIcon,
   CheckIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
   DownloadIcon,
-  ImageIcon,
   Loader2Icon,
+  PaperclipIcon,
   PencilIcon,
   PlusIcon,
   RotateCwIcon,
   XIcon,
 } from "lucide-react";
+import { ChevronDown } from "@/components/icons/chevron-down";
+import { ChevronRight } from "@/components/icons/chevron-right";
 import {
   recordCadFeedback,
   renameCadGeneration,
+  saveCadFileToProfile,
 } from "@/app/actions/cad-generation";
 import type { CadStreamEvent, CadProgressEvent } from "@/lib/cad/types";
 import {
@@ -131,11 +133,23 @@ export function TextToCadStudio({
   const [savingName, setSavingName] = useState(false);
   const [images, setImages] = useState<AttachedImage[]>([]);
   const [selectedPartId, setSelectedPartId] = useState<string | null>(null);
+  const [savingModel, setSavingModel] = useState(false);
+  const [savedAssets, setSavedAssets] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   // Abort an in-flight stream if the studio unmounts.
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  // Auto-grow the composer textarea with its content (capped), and shrink
+  // back when it's cleared after a send.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  }, [prompt]);
 
   const activeThread = threads.find((t) => t.rootId === activeRootId) ?? null;
   const turns = activeThread?.turns ?? [];
@@ -211,6 +225,19 @@ export function TextToCadStudio({
       prev.map((t) => (t.rootId === root ? { ...t, title: res.name } : t))
     );
     setRenaming(false);
+  }
+
+  async function saveToProfile() {
+    if (!activeAssetId || savingModel || savedAssets.has(activeAssetId)) return;
+    const assetId = activeAssetId;
+    setSavingModel(true);
+    const res = await saveCadFileToProfile({ fileAssetId: assetId });
+    setSavingModel(false);
+    if ("error" in res) {
+      setError(res.error);
+      return;
+    }
+    setSavedAssets((prev) => new Set(prev).add(assetId));
   }
 
   // Reflect a saved feedback edit into the in-memory threads so the panel
@@ -400,9 +427,6 @@ export function TextToCadStudio({
         <section className="min-w-0">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <h1 className="text-2xl font-semibold tracking-tight">
-                Text to CAD
-              </h1>
               {activeThread && !generating && viewedTurn?.fileAssetId ? (
                 renaming ? (
                   <div className="mt-1 flex items-center gap-2">
@@ -421,14 +445,14 @@ export function TextToCadStudio({
                       type="button"
                       onClick={saveName}
                       disabled={savingName}
-                      className="text-sm font-medium text-foreground disabled:opacity-50"
+                      className="cursor-pointer rounded-lg bg-foreground px-3 py-1.5 text-sm font-medium text-background disabled:opacity-50"
                     >
                       {savingName ? "Saving…" : "Save"}
                     </button>
                     <button
                       type="button"
                       onClick={() => setRenaming(false)}
-                      className="text-sm text-muted-foreground hover:text-foreground"
+                      className="cursor-pointer rounded-lg border border-foreground/15 px-3 py-1.5 text-sm text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                     >
                       Cancel
                     </button>
@@ -440,11 +464,11 @@ export function TextToCadStudio({
                       setNameDraft(threadLabel(activeThread));
                       setRenaming(true);
                     }}
-                    className="group mt-1 inline-flex max-w-full items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+                    className="group inline-flex max-w-full cursor-pointer items-center gap-2 text-xl font-semibold tracking-tight text-foreground"
                     title="Rename build"
                   >
                     <span className="truncate">{threadLabel(activeThread)}</span>
-                    <PencilIcon className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
+                    <PencilIcon className="size-4 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
                   </button>
                 )
               ) : (
@@ -532,9 +556,9 @@ export function TextToCadStudio({
             <div className="mt-4 flex flex-wrap gap-3">
               <Link
                 href={`/print/${activeAssetId}`}
-                className="rounded-lg bg-foreground px-4 py-2 text-sm font-medium text-background"
+                className="cursor-pointer rounded-lg bg-foreground px-4 py-2 text-sm font-medium text-background"
               >
-                {viewedParts.length > 1 ? "Print this part" : "Print this model"}
+                Print
               </Link>
               <a
                 href={`/api/files/preview/${activeAssetId}`}
@@ -544,15 +568,31 @@ export function TextToCadStudio({
                         ?.name
                     : activeThread && threadLabel(activeThread)) || "model"
                 }.stl`}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-foreground/15 px-4 py-2 text-sm hover:bg-foreground/5"
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-foreground/15 px-4 py-2 text-sm hover:bg-foreground/5"
               >
                 <DownloadIcon className="size-4" />
-                Download STL
+                Download
               </a>
+              <button
+                type="button"
+                onClick={saveToProfile}
+                disabled={savingModel || savedAssets.has(activeAssetId)}
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-foreground/15 px-4 py-2 text-sm hover:bg-foreground/5 disabled:opacity-60"
+              >
+                {savedAssets.has(activeAssetId) ? (
+                  <>
+                    <CheckIcon className="size-4" /> Saved
+                  </>
+                ) : savingModel ? (
+                  "Saving…"
+                ) : (
+                  "Save"
+                )}
+              </button>
               {viewedTurn?.projectSlug && (
                 <Link
                   href={`/projects/${viewedTurn.projectSlug}`}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-foreground/15 px-4 py-2 text-sm hover:bg-foreground/5"
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-foreground/15 px-4 py-2 text-sm hover:bg-foreground/5"
                 >
                   Open assembly project
                 </Link>
@@ -578,9 +618,9 @@ export function TextToCadStudio({
                 className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
               >
                 {showHistory ? (
-                  <ChevronDownIcon className="size-4" />
+                  <ChevronDown className="size-4" />
                 ) : (
-                  <ChevronRightIcon className="size-4" />
+                  <ChevronRight className="size-4" />
                 )}
                 Revision history ({turns.length})
               </button>
@@ -630,9 +670,9 @@ export function TextToCadStudio({
                 className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
               >
                 {showSource ? (
-                  <ChevronDownIcon className="size-4" />
+                  <ChevronDown className="size-4" />
                 ) : (
-                  <ChevronRightIcon className="size-4" />
+                  <ChevronRight className="size-4" />
                 )}
                 Parametric source
               </button>
@@ -666,13 +706,20 @@ export function TextToCadStudio({
               const thumb = [...t.turns]
                 .reverse()
                 .find((x) => x.renderUrl)?.renderUrl;
+              // Fall back to a live 3D preview of the latest part when there's
+              // no rendered PNG (e.g. local dev with no headless GL). Server-
+              // rendered thumbnails remain the scale solution — see CON-175.
+              const previewAssetId = [...t.turns]
+                .reverse()
+                .find((x) => x.status === "succeeded" && x.fileAssetId)
+                ?.fileAssetId;
               const isActive = t.rootId === activeRootId;
               return (
                 <li key={t.rootId}>
                   <button
                     type="button"
                     onClick={() => openThread(t)}
-                    className={`flex w-full items-center gap-3 rounded-lg border p-2 text-left transition-colors ${
+                    className={`flex w-full cursor-pointer items-center gap-3 rounded-lg border p-2 text-left transition-colors ${
                       isActive
                         ? "border-foreground/30 bg-foreground/5"
                         : "border-foreground/10 hover:bg-foreground/5"
@@ -685,6 +732,18 @@ export function TextToCadStudio({
                         alt=""
                         className="h-10 w-10 shrink-0 rounded bg-muted/40 object-contain"
                       />
+                    ) : previewAssetId ? (
+                      <div className="h-10 w-10 shrink-0 overflow-hidden rounded bg-muted/40">
+                        <Suspense fallback={<div className="h-full w-full" />}>
+                          <ModelViewer
+                            key={previewAssetId}
+                            modelUrl={`/api/files/preview/${previewAssetId}`}
+                            format="stl"
+                            mode="preview"
+                            className="h-full w-full"
+                          />
+                        </Suspense>
+                      </div>
                     ) : (
                       <div className="h-10 w-10 shrink-0 rounded bg-muted/40" />
                     )}
@@ -738,16 +797,39 @@ export function TextToCadStudio({
                 ))}
               </div>
             )}
-            <div className="flex items-end gap-2">
+            {/* Textarea on top — borderless, auto-grows with the prompt. */}
+            <textarea
+              ref={textareaRef}
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") submit();
+              }}
+              onPaste={(e) => {
+                const files = Array.from(e.clipboardData.files);
+                if (files.length && !generating) addFiles(files);
+              }}
+              rows={1}
+              maxLength={2000}
+              disabled={generating}
+              placeholder={
+                activeThread
+                  ? "Describe a change… e.g. make it 2mm taller, add a lanyard hole"
+                  : "Describe a part… e.g. a parametric phone stand for a 7mm-thick phone"
+              }
+              className="max-h-[200px] w-full resize-none border-0 bg-transparent px-2 py-1.5 text-sm outline-none disabled:opacity-60"
+            />
+            {/* Toolbar below the text: attach (left), send (right). */}
+            <div className="flex items-center justify-between px-1 pt-1">
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={generating || images.length >= MAX_IMAGES}
                 aria-label="Attach reference image"
                 title="Attach reference image"
-                className="flex size-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground hover:bg-foreground/5 hover:text-foreground disabled:opacity-40"
+                className="flex size-8 cursor-pointer items-center justify-center rounded-lg text-muted-foreground hover:bg-foreground/5 hover:text-foreground disabled:opacity-40"
               >
-                <ImageIcon className="size-4" />
+                <PaperclipIcon className="size-4" />
               </button>
               <input
                 ref={fileInputRef}
@@ -760,34 +842,19 @@ export function TextToCadStudio({
                   e.target.value = "";
                 }}
               />
-              <textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                onKeyDown={(e) => {
-                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") submit();
-                }}
-                onPaste={(e) => {
-                  const files = Array.from(e.clipboardData.files);
-                  if (files.length && !generating) addFiles(files);
-                }}
-                rows={1}
-                maxLength={2000}
-                disabled={generating}
-                placeholder={
-                  activeThread
-                    ? "Describe a change… e.g. make it 2mm taller, add a lanyard hole"
-                    : "Describe a part… e.g. a parametric phone stand for a 7mm-thick phone"
-                }
-                className="max-h-40 min-h-[2.5rem] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none disabled:opacity-60"
-              />
               <button
                 type="button"
                 onClick={submit}
                 disabled={generating || prompt.trim().length < 3}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
+                aria-label={composerLabel}
+                title={composerLabel}
+                className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-foreground text-background disabled:opacity-40"
               >
-                {generating && <Loader2Icon className="size-4 animate-spin" />}
-                {composerLabel}
+                {generating ? (
+                  <Loader2Icon className="size-4 animate-spin" />
+                ) : (
+                  <ArrowUpIcon className="size-4" />
+                )}
               </button>
             </div>
           </div>
@@ -830,8 +897,7 @@ function ViewerSkeleton({ label }: { label: string }) {
 function ProgressPanel({ events }: { events: CadProgressEvent[] }) {
   return (
     <div className="flex h-full w-full flex-col items-center justify-center gap-4 p-6">
-      <div className="size-12 animate-pulse rounded-xl border-2 border-dashed border-foreground/20" />
-      <ul className="w-full max-w-sm space-y-1.5 text-sm">
+      <ul className="flex max-w-sm flex-col items-center gap-1.5 text-sm">
         {events.length === 0 && (
           <li className="flex items-center gap-2 text-muted-foreground">
             <Loader2Icon className="size-4 animate-spin" />
@@ -842,13 +908,16 @@ function ProgressPanel({ events }: { events: CadProgressEvent[] }) {
           const isLast = i === events.length - 1;
           const d = describeEvent(ev);
           return (
-            <li key={i} className={`flex items-center gap-2 ${d.tone}`}>
+            <li
+              key={i}
+              className={`flex items-center justify-center gap-2 text-center ${d.tone}`}
+            >
               {isLast ? (
                 <Loader2Icon className="size-4 shrink-0 animate-spin" />
               ) : (
                 d.icon
               )}
-              <span className="min-w-0 flex-1">{d.text}</span>
+              <span>{d.text}</span>
             </li>
           );
         })}

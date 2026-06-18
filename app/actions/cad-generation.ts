@@ -127,6 +127,48 @@ export async function generateCadModel(input: {
 
 const MAX_NAME_LEN = 60;
 
+export type SaveCadResult = { ok: true } | { error: string };
+
+/**
+ * "Save to profile" for a generated model: finalize the file the asset belongs
+ * to (status published) so it leaves the studio's draft/editing space and
+ * becomes a kept item in the owner's library — but keep it PRIVATE so it stays
+ * off the public profile and the marketplace. Owner-only, idempotent. The user
+ * can make it public / adjust pricing later from normal file management.
+ */
+export async function saveCadFileToProfile(input: {
+  fileAssetId: string;
+}): Promise<SaveCadResult> {
+  const { userId } = await auth();
+  if (!userId) return { error: "Unauthorized" };
+
+  const user = (await currentUser()) as ClerkUserLike;
+  if (!canUseTextToCad(primaryEmail(user))) return { error: "Not found" };
+
+  try {
+    const [asset] = await db
+      .select({ fileId: fileAssets.fileId, ownerId: files.userId })
+      .from(fileAssets)
+      .leftJoin(files, eq(fileAssets.fileId, files.id))
+      .where(eq(fileAssets.id, input.fileAssetId))
+      .limit(1);
+    if (!asset?.fileId || asset.ownerId !== userId) {
+      return { error: "Model not found." };
+    }
+
+    await db
+      .update(files)
+      .set({ visibility: "private", status: "published", updatedAt: new Date() })
+      .where(and(eq(files.id, asset.fileId), eq(files.userId, userId)));
+
+    revalidatePath("/text-to-cad");
+    return { ok: true };
+  } catch (error) {
+    logError("saveCadFileToProfile", error);
+    return { error: "Save failed. Please try again." };
+  }
+}
+
 export type RenameCadResult = { name: string } | { error: string };
 
 /**
