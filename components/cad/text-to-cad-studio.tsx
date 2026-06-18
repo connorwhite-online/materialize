@@ -853,7 +853,7 @@ export function TextToCadStudio({
                 {generating ? (
                   <Loader2Icon className="size-4 animate-spin" />
                 ) : (
-                  <ArrowUpIcon className="size-4" />
+                  <ArrowUpIcon className="size-4" strokeWidth={2.5} />
                 )}
               </button>
             </div>
