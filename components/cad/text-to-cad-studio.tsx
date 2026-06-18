@@ -899,7 +899,7 @@ export function TextToCadStudio({
           viewer column and ignores the Builds sidebar (empty 300px track). */}
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 nav:pl-56">
         <div className="mx-auto grid max-w-6xl gap-8 px-4 pb-4 lg:grid-cols-[1fr_300px]">
-          <div className="pointer-events-auto mx-auto w-full max-w-3xl">
+          <div className="pointer-events-auto mx-auto w-full max-w-2xl">
           <div
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
