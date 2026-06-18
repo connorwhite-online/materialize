@@ -86,19 +86,24 @@ export async function persistGenerationSuccess(opts: {
     );
   }
 
-  // Title the thread first (root only) so the printable asset can be named
-  // from it. Best-effort — a missing title just falls back to "model".
-  const title = isRoot ? await generateThreadTitle(prompt) : null;
+  const bytes = new Uint8Array(Buffer.from(stlB64, "base64"));
+  const storageKey = `uploads/${userId}/${nanoid()}/model.stl`;
+
+  // Title the thread (root only, best-effort) and upload the STL together —
+  // they're independent, so the model call doesn't add latency on top of the
+  // R2 write. createDraftFileForPrint needs the title (for the name) and the
+  // upload (for the key), so we await both before it.
+  const [title] = await Promise.all([
+    isRoot ? generateThreadTitle(prompt) : Promise.resolve(null),
+    putObject(storageKey, bytes, "model/stl"),
+  ]);
+
   const displayName = (isRoot ? title : opts.nameOverride)?.trim() || undefined;
   // A filename-safe stem keeps the download name nice and avoids the
   // (filename, size) dedup colliding two different models both called
   // "model.stl".
   const stem =
     displayName?.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "") || "model";
-
-  const bytes = new Uint8Array(Buffer.from(stlB64, "base64"));
-  const storageKey = `uploads/${userId}/${nanoid()}/model.stl`;
-  await putObject(storageKey, bytes, "model/stl");
 
   const draft = await createDraftFileForPrint({
     storageKey,

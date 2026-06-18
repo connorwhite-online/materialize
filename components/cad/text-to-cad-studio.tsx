@@ -196,6 +196,9 @@ export function TextToCadStudio({
       setActiveRootId(ev.generationId);
     }
     setViewTurnId(ev.generationId);
+    // Clear the composer only now that the turn landed — on an error the
+    // user's typed instruction stays put so they can retry without retyping.
+    setPrompt("");
   }
 
   async function submit() {
@@ -206,7 +209,6 @@ export function TextToCadStudio({
     setError(null);
     setProgress([]);
     setGenerating(true);
-    setPrompt("");
     setShowHistory(false);
 
     const controller = new AbortController();

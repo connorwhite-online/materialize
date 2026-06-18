@@ -184,6 +184,10 @@ async def run(req: RunRequest, request: Request) -> dict:
     # promptly instead of always burning the full timeout budget.
     deadline = time.monotonic() + RUN_TIMEOUT_S
     payload: Optional[dict] = None
+    # Record WHY we stopped at the moment we decide, not afterward: reading
+    # liveness after the loop races a child that dies in the gap and would
+    # mislabel a real timeout as a crash.
+    timed_out = False
     while True:
         try:
             payload = out.get(timeout=0.25)
@@ -194,12 +198,8 @@ async def run(req: RunRequest, request: Request) -> dict:
                 break
             if time.monotonic() >= deadline:
                 # Still running past the budget — a genuine hang.
+                timed_out = True
                 break
-
-    # Capture liveness BEFORE we kill it: a child still alive here (with no
-    # payload) is a genuine hang; one already dead is a crash/OOM. Reading
-    # exitcode after terminate() can't tell them apart (both go negative).
-    hung = proc.is_alive()
 
     # SIGTERM, then escalate to SIGKILL if the child ignores it (a
     # build123d/OCC C-extension thread can swallow SIGTERM). Never join()
@@ -216,7 +216,7 @@ async def run(req: RunRequest, request: Request) -> dict:
 
     error = (
         f"timed out after {RUN_TIMEOUT_S}s"
-        if hung
+        if timed_out
         else "worker produced no result (likely OOM/crash)"
     )
     return {
