@@ -5,6 +5,7 @@ import { runCadCode } from "./runner-client";
 import { SYSTEM_PROMPT, extractCode, gradeRun } from "./prompt";
 import { buildKnowledgeBlock, type CadProcess } from "./knowledge";
 import { judgeAesthetics } from "./critique";
+import { selectExemplars, formatExemplars } from "./knowledge/exemplars";
 import type { CadProgressEvent, CadRunResult } from "./types";
 
 /**
@@ -91,7 +92,17 @@ function buildUserPrompt(input: HarnessInput): string {
     process: input.process,
   });
 
-  return `${task}\n\nDesign guidance to follow:\n\n${knowledge}`;
+  let out = `${task}\n\nDesign guidance to follow:\n\n${knowledge}`;
+
+  // On a fresh build, show the best-matching verified exemplar as a style
+  // reference. (Revisions already have the prior code as their reference.)
+  // Returns "" until exemplars are sidecar-verified, so this is a no-op now.
+  if (!input.priorSourceCode) {
+    const exemplars = formatExemplars(selectExemplars(input.prompt));
+    if (exemplars) out += `\n\n${exemplars}`;
+  }
+
+  return out;
 }
 
 /**
