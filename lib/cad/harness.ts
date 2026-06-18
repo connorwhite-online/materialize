@@ -3,6 +3,7 @@ import "server-only";
 import { completeText, hasModelCredentials } from "./model-client";
 import { runCadCode } from "./runner-client";
 import { SYSTEM_PROMPT, extractCode, gradeRun } from "./prompt";
+import { buildKnowledgeBlock, type CadProcess } from "./knowledge";
 import type { CadProgressEvent, CadRunResult } from "./types";
 
 /**
@@ -26,6 +27,12 @@ export interface HarnessInput {
   priorSourceCode?: string | null;
   maxAttempts?: number;
   signal?: AbortSignal;
+  /**
+   * Target CraftCloud process, if known at generation time. Drives which DFM
+   * block is injected; when omitted the harness uses the conservative
+   * multi-process envelope (generation often precedes material selection).
+   */
+  process?: CadProcess | null;
   /**
    * Called as the loop advances so the caller can stream status to the UI.
    * Best-effort and synchronous — the harness never awaits it and a throw
@@ -64,18 +71,24 @@ function localFakeModel(prompt: string, prior?: string | null): string {
 }
 
 function buildUserPrompt(input: HarnessInput): string {
-  if (input.priorSourceCode) {
-    return [
-      "Revise the following build123d model per this instruction:",
-      `Instruction: ${input.prompt}`,
-      "",
-      "Current code:",
-      "```python",
-      input.priorSourceCode,
-      "```",
-    ].join("\n");
-  }
-  return `Create a 3D model: ${input.prompt}`;
+  const task = input.priorSourceCode
+    ? [
+        "Revise the following build123d model per this instruction:",
+        `Instruction: ${input.prompt}`,
+        "",
+        "Current code:",
+        "```python",
+        input.priorSourceCode,
+        "```",
+      ].join("\n")
+    : `Create a 3D model: ${input.prompt}`;
+
+  const knowledge = buildKnowledgeBlock({
+    prompt: input.prompt,
+    process: input.process,
+  });
+
+  return `${task}\n\nDesign guidance to follow:\n\n${knowledge}`;
 }
 
 /**
