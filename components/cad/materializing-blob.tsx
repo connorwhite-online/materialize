@@ -59,15 +59,15 @@ function Blob() {
     // morphing without affecting the rotation below.
     if (matRef.current) matRef.current.uniforms.uTime.value += delta * 0.4;
     if (meshRef.current) {
-      meshRef.current.rotation.y += delta * 0.12;
-      meshRef.current.rotation.x += delta * 0.03;
+      meshRef.current.rotation.y += delta * 0.07;
+      meshRef.current.rotation.x += delta * 0.02;
     }
   });
 
   return (
     <mesh ref={meshRef}>
-      {/* detail 5 → denser triangulation for a finer wireframe. */}
-      <icosahedronGeometry args={[1.3, 5]} />
+      {/* detail 6 → fine triangulation for a dense wireframe. */}
+      <icosahedronGeometry args={[1.3, 6]} />
       <shaderMaterial
         ref={matRef}
         wireframe
