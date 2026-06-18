@@ -395,6 +395,7 @@ export function TextToCadStudio({
                     format="stl"
                     mode="detail"
                     showZoomControls
+                    inspect
                     className="h-full w-full"
                   />
                 </Suspense>

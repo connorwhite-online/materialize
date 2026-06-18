@@ -1,11 +1,18 @@
 "use client";
 
-import { Suspense, useRef } from "react";
-import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Stage, Center } from "@react-three/drei";
+import { Suspense, useMemo, useRef, useState } from "react";
+import { Canvas, useFrame } from "@react-three/fiber";
+import { OrbitControls, Stage, Center, Grid } from "@react-three/drei";
+import { Box3, Plane, Vector3 } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type * as THREE from "three";
-import { MinusIcon, PlusIcon } from "lucide-react";
+import {
+  Grid3x3Icon,
+  MinusIcon,
+  PlusIcon,
+  RulerIcon,
+  ScissorsIcon,
+} from "lucide-react";
 import { StlModel } from "./loaders/stl-model";
 import { ObjModel } from "./loaders/obj-model";
 import { ThreeMfModel } from "./loaders/threemf-model";
@@ -38,6 +45,12 @@ interface ModelViewerProps {
    * dolly in and out.
    */
   showZoomControls?: boolean;
+  /**
+   * Enable the inspection toolbar (grid, cross-section slider, dimensions
+   * readout). Opt-in — only the text-to-CAD studio turns this on, so every
+   * other call site is unchanged. STL only.
+   */
+  inspect?: boolean;
 }
 
 function ModelMesh({
@@ -79,6 +92,85 @@ function LoadingFallback() {
   );
 }
 
+/** Bounds measured from the loaded+placed model, in world units + true mm. */
+interface InspectBounds {
+  /** True model size in millimeters (from geometry, transform-independent). */
+  mm: { x: number; y: number; z: number };
+  /** World-space vertical extent (for the cross-section plane). */
+  worldMinY: number;
+  worldMaxY: number;
+  /** World-space footprint center + size (for placing the grid). */
+  center: [number, number, number];
+  footprint: { x: number; z: number };
+  /** world units per mm (so the grid can use true mm spacing). */
+  scale: number;
+}
+
+/**
+ * Renders the STL and measures its world + mm bounds once loaded. The world
+ * box is read after transforms (Center/Stage) are applied, so the cross-section
+ * plane and grid land correctly regardless of how the model was placed/scaled.
+ */
+function InspectModel({
+  modelUrl,
+  color,
+  planes,
+  onBounds,
+}: {
+  modelUrl: string;
+  color?: string;
+  planes: Plane[] | undefined;
+  onBounds: (b: InspectBounds) => void;
+}) {
+  const groupRef = useRef<THREE.Group>(null);
+  const geomRef = useRef<THREE.BufferGeometry | null>(null);
+  const done = useRef(false);
+
+  useFrame(() => {
+    if (done.current || !groupRef.current || !geomRef.current) return;
+    const group = groupRef.current;
+    group.updateWorldMatrix(true, true);
+    const world = new Box3().setFromObject(group);
+    if (!isFinite(world.min.y) || world.isEmpty()) return;
+
+    const geom = geomRef.current;
+    if (!geom.boundingBox) geom.computeBoundingBox();
+    const gb = geom.boundingBox!;
+    const mm = new Vector3();
+    gb.getSize(mm);
+    const worldSize = new Vector3();
+    world.getSize(worldSize);
+    const scale = mm.x > 0 ? worldSize.x / mm.x : 1;
+
+    onBounds({
+      mm: { x: mm.x, y: mm.y, z: mm.z },
+      worldMinY: world.min.y,
+      worldMaxY: world.max.y,
+      center: [
+        (world.min.x + world.max.x) / 2,
+        world.min.y,
+        (world.min.z + world.max.z) / 2,
+      ],
+      footprint: { x: worldSize.x, z: worldSize.z },
+      scale,
+    });
+    done.current = true;
+  });
+
+  return (
+    <group ref={groupRef}>
+      <StlModel
+        url={modelUrl}
+        color={color}
+        clippingPlanes={planes}
+        onGeometry={(g) => {
+          geomRef.current = g;
+        }}
+      />
+    </group>
+  );
+}
+
 export function ModelViewer({
   modelUrl,
   format,
@@ -87,6 +179,7 @@ export function ModelViewer({
   className,
   enableWheelZoom,
   showZoomControls = false,
+  inspect = false,
 }: ModelViewerProps) {
   const isPreview = mode === "preview";
   // Wheel zoom defaults to true unless explicitly disabled. The
@@ -94,6 +187,24 @@ export function ModelViewer({
   const wheelZoom =
     enableWheelZoom === undefined ? !isPreview : enableWheelZoom;
   const controlsRef = useRef<OrbitControlsImpl>(null);
+
+  // Inspection state (only meaningful when `inspect`). STL only.
+  const inspectable = inspect && format === "stl";
+  const [showGrid, setShowGrid] = useState(false);
+  const [sectionOn, setSectionOn] = useState(false);
+  const [sectionT, setSectionT] = useState(0); // 0 = nothing cut, 1 = all cut
+  const [bounds, setBounds] = useState<InspectBounds | null>(null);
+
+  // A single horizontal cross-section plane. normal (0,-1,0) keeps geometry
+  // below the cut height (constant), so raising `t` lowers the cut and exposes
+  // more interior from the top down. Mutated in place; the always-on frameloop
+  // picks up the change next frame.
+  const plane = useMemo(() => new Plane(new Vector3(0, -1, 0), 0), []);
+  if (bounds) {
+    plane.constant =
+      bounds.worldMaxY - sectionT * (bounds.worldMaxY - bounds.worldMinY);
+  }
+  const planes = inspectable && sectionOn ? [plane] : undefined;
 
   const zoomBy = (factor: number) => {
     const controls = controlsRef.current;
@@ -117,6 +228,9 @@ export function ModelViewer({
         <Canvas
           camera={{ position: [0, 0, 5], fov: 45 }}
           dpr={isPreview ? 1 : [1, 2]}
+          // Local clipping is needed for the cross-section tool; harmless
+          // (no-op) everywhere else since no material sets clippingPlanes.
+          gl={{ localClippingEnabled: true }}
         >
           <Suspense fallback={<LoadingFallback />}>
             <Stage
@@ -130,13 +244,38 @@ export function ModelViewer({
               environment={null}
             >
               <Center>
-                <ModelMesh
-                  modelUrl={modelUrl}
-                  format={format}
-                  materialColor={materialColor}
-                />
+                {inspectable ? (
+                  <InspectModel
+                    modelUrl={modelUrl}
+                    color={materialColor}
+                    planes={planes}
+                    onBounds={setBounds}
+                  />
+                ) : (
+                  <ModelMesh
+                    modelUrl={modelUrl}
+                    format={format}
+                    materialColor={materialColor}
+                  />
+                )}
               </Center>
             </Stage>
+            {inspectable && showGrid && bounds && (
+              <Grid
+                position={bounds.center}
+                args={[bounds.footprint.x * 3, bounds.footprint.z * 3]}
+                cellSize={10 * bounds.scale}
+                sectionSize={50 * bounds.scale}
+                cellThickness={0.6}
+                sectionThickness={1}
+                cellColor="#9aa0a6"
+                sectionColor="#6b7280"
+                fadeDistance={bounds.footprint.x * 12}
+                fadeStrength={1}
+                followCamera={false}
+                infiniteGrid={false}
+              />
+            )}
           </Suspense>
           <OrbitControls
             ref={controlsRef}
@@ -147,6 +286,7 @@ export function ModelViewer({
           />
         </Canvas>
       </ErrorBoundary>
+
       {showZoomControls && (
         <div className="absolute bottom-3 left-3 flex items-center gap-0 overflow-hidden rounded-full border border-border/60 bg-background/40 backdrop-blur-md">
           <button
@@ -167,6 +307,65 @@ export function ModelViewer({
             <MinusIcon className="size-4" />
           </button>
         </div>
+      )}
+
+      {inspectable && (
+        <>
+          {/* Inspection toolbar */}
+          <div className="absolute right-3 top-3 flex items-center gap-0 overflow-hidden rounded-full border border-border/60 bg-background/40 backdrop-blur-md">
+            <button
+              type="button"
+              onClick={() => setShowGrid((v) => !v)}
+              aria-label="Toggle grid"
+              aria-pressed={showGrid}
+              title="Grid (10mm)"
+              className={`flex h-8 w-8 items-center justify-center transition-colors hover:bg-foreground/5 ${
+                showGrid ? "text-foreground" : "text-muted-foreground"
+              }`}
+            >
+              <Grid3x3Icon className="size-4" />
+            </button>
+            <div className="h-4 w-px bg-border/60" />
+            <button
+              type="button"
+              onClick={() => setSectionOn((v) => !v)}
+              aria-label="Toggle cross-section"
+              aria-pressed={sectionOn}
+              title="Cross-section"
+              className={`flex h-8 w-8 items-center justify-center transition-colors hover:bg-foreground/5 ${
+                sectionOn ? "text-foreground" : "text-muted-foreground"
+              }`}
+            >
+              <ScissorsIcon className="size-4" />
+            </button>
+          </div>
+
+          {/* Cross-section slider */}
+          {sectionOn && (
+            <div className="absolute right-3 top-14 flex flex-col items-center gap-2 rounded-full border border-border/60 bg-background/40 px-2 py-3 backdrop-blur-md">
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={sectionT}
+                onChange={(e) => setSectionT(Number(e.target.value))}
+                aria-label="Cross-section depth"
+                // Vertical slider; top = no cut, bottom = fully cut.
+                className="h-32 w-2 cursor-pointer accent-foreground [writing-mode:vertical-lr]"
+              />
+            </div>
+          )}
+
+          {/* Dimensions readout (true mm) */}
+          {bounds && (
+            <div className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-full border border-border/60 bg-background/40 px-2.5 py-1 text-[11px] tabular-nums text-muted-foreground backdrop-blur-md">
+              <RulerIcon className="size-3.5" />
+              {bounds.mm.x.toFixed(1)} × {bounds.mm.y.toFixed(1)} ×{" "}
+              {bounds.mm.z.toFixed(1)} mm
+            </div>
+          )}
+        </>
       )}
     </div>
   );
