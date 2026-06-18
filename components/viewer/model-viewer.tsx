@@ -262,7 +262,13 @@ export function ModelViewer({
             </Stage>
             {inspectable && showGrid && bounds && (
               <Grid
-                position={bounds.center}
+                // Drop the grid a hair below the model base so it doesn't
+                // z-fight with a flat bottom face.
+                position={[
+                  bounds.center[0],
+                  bounds.worldMinY - 0.5 * bounds.scale,
+                  bounds.center[2],
+                ]}
                 args={[bounds.footprint.x * 3, bounds.footprint.z * 3]}
                 cellSize={10 * bounds.scale}
                 sectionSize={50 * bounds.scale}
@@ -340,9 +346,11 @@ export function ModelViewer({
             </button>
           </div>
 
-          {/* Cross-section slider */}
+          {/* Cross-section slider — horizontal: left = whole model, right =
+              fully cut (sweeps the cut down from the top). */}
           {sectionOn && (
-            <div className="absolute right-3 top-14 flex flex-col items-center gap-2 rounded-full border border-border/60 bg-background/40 px-2 py-3 backdrop-blur-md">
+            <div className="absolute left-1/2 top-3 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border/60 bg-background/40 px-3 py-1.5 backdrop-blur-md">
+              <ScissorsIcon className="size-3.5 text-muted-foreground" />
               <input
                 type="range"
                 min={0}
@@ -351,9 +359,15 @@ export function ModelViewer({
                 value={sectionT}
                 onChange={(e) => setSectionT(Number(e.target.value))}
                 aria-label="Cross-section depth"
-                // Vertical slider; top = no cut, bottom = fully cut.
-                className="h-32 w-2 cursor-pointer accent-foreground [writing-mode:vertical-lr]"
+                className="h-1.5 w-40 cursor-pointer accent-foreground"
               />
+            </div>
+          )}
+
+          {/* Grid cell-size legend (per-line numeric ticks are a follow-up). */}
+          {showGrid && (
+            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-border/60 bg-background/40 px-2.5 py-1 text-[11px] tabular-nums text-muted-foreground backdrop-blur-md">
+              grid: 10 mm
             </div>
           )}
 

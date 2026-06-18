@@ -38,7 +38,19 @@ export function StlModel({
 
   return (
     <mesh geometry={geometry}>
-      {useCustomShader && !clip ? (
+      {clip ? (
+        // Matte, non-metallic + double-sided so the exposed interior is fully
+        // lit by the scene's lights. A metallic material would render black
+        // here because there's no environment map to reflect.
+        <meshStandardMaterial
+          color={color}
+          metalness={0}
+          roughness={0.6}
+          side={DoubleSide}
+          clippingPlanes={clippingPlanes}
+          clipShadows
+        />
+      ) : useCustomShader ? (
         <MaterializeMaterial baseColor={color} />
       ) : (
         <meshPhysicalMaterial
@@ -47,9 +59,6 @@ export function StlModel({
           roughness={0.38}
           clearcoat={0.4}
           clearcoatRoughness={0.25}
-          side={clip ? DoubleSide : undefined}
-          clippingPlanes={clip ? clippingPlanes : undefined}
-          clipShadows
         />
       )}
     </mesh>
