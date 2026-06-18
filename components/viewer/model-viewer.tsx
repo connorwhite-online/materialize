@@ -2,12 +2,14 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { OrbitControls, Stage, Center, Grid } from "@react-three/drei";
+import { OrbitControls, Stage, Center, Grid, Line } from "@react-three/drei";
 import {
   Box3,
   BufferGeometry,
   DoubleSide,
+  EdgesGeometry,
   Float32BufferAttribute,
+  Line3,
   Plane,
   Vector3,
 } from "three";
@@ -27,22 +29,34 @@ import { ObjModel } from "./loaders/obj-model";
 import { ThreeMfModel } from "./loaders/threemf-model";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 
-/** A selected flat face, in the model's own (mm) coordinate frame. */
-export interface ViewerAnnotation {
-  id: string;
-  /** Face centroid (mm). */
-  point: [number, number, number];
-  normal: [number, number, number];
-  /** Bounding-box size of the selected face (mm). */
-  extent?: [number, number, number];
-  /** Flat triangle coords (mm) of the selected face, for the highlight overlay. */
-  positions?: number[];
-}
+type Vec3 = [number, number, number];
+
+/** A selected face or edge, in the model's own (mm) coordinate frame. */
+export type PickResult =
+  | {
+      kind: "face";
+      /** Face centroid (mm). */
+      point: Vec3;
+      normal: Vec3;
+      /** Bounding-box size of the face (mm). */
+      extent: Vec3;
+      /** Flat triangle coords (mm) for the highlight overlay. */
+      positions: number[];
+    }
+  | {
+      kind: "edge";
+      /** Edge midpoint (mm). */
+      point: Vec3;
+      /** Edge endpoints (mm) + length. */
+      edge: { a: Vec3; b: Vec3; length: number };
+    };
+
+export type ViewerAnnotation = { id: string } & PickResult;
 
 interface FaceData {
-  point: [number, number, number];
-  normal: [number, number, number];
-  extent: [number, number, number];
+  point: Vec3;
+  normal: Vec3;
+  extent: Vec3;
   positions: number[];
 }
 
@@ -230,6 +244,87 @@ function FaceHighlight({
   );
 }
 
+/** Feature edges (sharp dihedral angles) of the model, cached on the geometry. */
+function getFeatureEdges(geom: BufferGeometry): EdgesGeometry {
+  let eg = geom.userData.__edgesGeom as EdgesGeometry | undefined;
+  if (!eg) {
+    // 25° threshold → real CAD edges, not tessellation seams on curved faces.
+    eg = new EdgesGeometry(geom, 25);
+    geom.userData.__edgesGeom = eg;
+  }
+  return eg;
+}
+
+/** Nearest feature edge segment to a model-space point (null if none close). */
+function selectNearestEdge(
+  geom: BufferGeometry,
+  point: Vector3
+): Extract<PickResult, { kind: "edge" }> | null {
+  const eg = getFeatureEdges(geom);
+  const pos = eg.attributes.position;
+  const segCount = pos.count / 2;
+  if (segCount === 0) return null;
+  if (!geom.boundingBox) geom.computeBoundingBox();
+  const size = new Vector3();
+  geom.boundingBox!.getSize(size);
+  const thr = (Math.max(size.x, size.y, size.z) || 1) * 0.06;
+
+  const A = new Vector3();
+  const B = new Vector3();
+  const line = new Line3();
+  const closest = new Vector3();
+  let best = Infinity;
+  let bi = -1;
+  for (let s = 0; s < segCount; s++) {
+    A.fromBufferAttribute(pos, s * 2);
+    B.fromBufferAttribute(pos, s * 2 + 1);
+    line.set(A, B);
+    line.closestPointToPoint(point, true, closest);
+    const d = closest.distanceTo(point);
+    if (d < best) {
+      best = d;
+      bi = s;
+    }
+  }
+  if (bi < 0 || best > thr) return null;
+  A.fromBufferAttribute(pos, bi * 2);
+  B.fromBufferAttribute(pos, bi * 2 + 1);
+  return {
+    kind: "edge",
+    point: [(A.x + B.x) / 2, (A.y + B.y) / 2, (A.z + B.z) / 2],
+    edge: {
+      a: [A.x, A.y, A.z],
+      b: [B.x, B.y, B.z],
+      length: A.distanceTo(B),
+    },
+  };
+}
+
+/** Bright overlay of a selected edge (fat line, on top). */
+function EdgeHighlight({
+  a,
+  b,
+  color = "#2563eb",
+}: {
+  a: Vec3;
+  b: Vec3;
+  color?: string;
+}) {
+  return (
+    <Line points={[a, b]} color={color} lineWidth={4} depthTest={false} />
+  );
+}
+
+/** Faint guide showing all selectable feature edges (edge mode only). */
+function FeatureEdges({ geom }: { geom: BufferGeometry }) {
+  const eg = useMemo(() => getFeatureEdges(geom), [geom]);
+  return (
+    <lineSegments geometry={eg}>
+      <lineBasicMaterial color="#64748b" transparent opacity={0.55} />
+    </lineSegments>
+  );
+}
+
 function PreviewUnavailable() {
   return (
     <div className="flex h-full w-full items-center justify-center bg-muted/20">
@@ -267,16 +362,10 @@ interface ModelViewerProps {
   annotateMode?: boolean;
   /** Toggle handler for the annotate tool button. */
   onToggleAnnotate?: () => void;
-  /** Committed annotations to render as face highlights (model-space mm). */
+  /** Committed annotations to render as highlights (model-space mm). */
   annotations?: ViewerAnnotation[];
-  /** Fired when the user commits a note on a selected face (inline input). */
-  onAnnotate?: (a: {
-    point: [number, number, number];
-    normal: [number, number, number];
-    extent: [number, number, number];
-    positions: number[];
-    note: string;
-  }) => void;
+  /** Fired when the user commits a note on a selected face/edge. */
+  onAnnotate?: (a: PickResult & { note: string }) => void;
 }
 
 function ModelMesh({
@@ -343,39 +432,47 @@ function InspectModel({
   planes,
   onBounds,
   annotateMode,
+  target,
   annotations,
-  pendingFace,
+  pending,
   onPick,
-  pinRadius,
 }: {
   modelUrl: string;
   color?: string;
   planes: Plane[] | undefined;
   onBounds: (b: InspectBounds) => void;
   annotateMode?: boolean;
+  target: "face" | "edge";
   annotations?: ViewerAnnotation[];
-  pendingFace?: FaceData | null;
+  pending?: PickResult | null;
   onPick?: (pick: {
-    face: FaceData;
+    result: PickResult;
     clientX: number;
     clientY: number;
   }) => void;
-  pinRadius: number;
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const geomRef = useRef<THREE.BufferGeometry | null>(null);
+  const [geom, setGeom] = useState<BufferGeometry | null>(null);
   const done = useRef(false);
 
-  // Select the single connected flat face under the cursor (model mm frame) and
-  // report the click's screen position so the caller can open a note input
-  // right where the user clicked.
+  // Click = select; drag = rotate. r3f fires onClick even after a drag, so gate
+  // on pointer travel (e.delta) to keep orbit-rotate usable in annotate mode.
   const handleClick = (e: ThreeEvent<MouseEvent>) => {
-    if (!annotateMode || !onPick || e.faceIndex == null) return;
+    if (!annotateMode || !onPick || e.delta > 4) return;
     e.stopPropagation();
     const mesh = e.object as THREE.Mesh;
-    const geom = mesh.geometry as BufferGeometry;
+    const g = mesh.geometry as BufferGeometry;
+    const local = mesh.worldToLocal(e.point.clone());
+    let result: PickResult | null = null;
+    if (target === "edge") {
+      result = selectNearestEdge(g, local);
+    } else if (e.faceIndex != null) {
+      result = { kind: "face", ...selectConnectedFace(g, e.faceIndex) };
+    }
+    if (!result) return;
     onPick({
-      face: selectConnectedFace(geom, e.faceIndex),
+      result,
       clientX: e.nativeEvent.clientX,
       clientY: e.nativeEvent.clientY,
     });
@@ -388,9 +485,9 @@ function InspectModel({
     const world = new Box3().setFromObject(group);
     if (!isFinite(world.min.y) || world.isEmpty()) return;
 
-    const geom = geomRef.current;
-    if (!geom.boundingBox) geom.computeBoundingBox();
-    const gb = geom.boundingBox!;
+    const g = geomRef.current;
+    if (!g.boundingBox) g.computeBoundingBox();
+    const gb = g.boundingBox!;
     const mm = new Vector3();
     gb.getSize(mm);
     const worldSize = new Vector3();
@@ -420,23 +517,27 @@ function InspectModel({
         clippingPlanes={planes}
         onGeometry={(g) => {
           geomRef.current = g;
+          setGeom(g);
         }}
       />
-      {/* Selected-face highlights — children of the same group so model-space
-          (mm) coordinates land on the geometry regardless of Center/Stage. */}
+      {/* Faint guide of all selectable edges while in edge mode. */}
+      {annotateMode && target === "edge" && geom && <FeatureEdges geom={geom} />}
+
+      {/* Committed annotation highlights (face overlay or edge line). */}
       {(annotations ?? []).map((a) =>
-        a.positions && a.positions.length > 0 ? (
-          <FaceHighlight key={a.id} positions={a.positions} />
+        a.kind === "edge" ? (
+          <EdgeHighlight key={a.id} a={a.edge.a} b={a.edge.b} />
         ) : (
-          <mesh key={a.id} position={a.point}>
-            <sphereGeometry args={[pinRadius, 16, 16]} />
-            <meshBasicMaterial color="#2563eb" toneMapped={false} />
-          </mesh>
+          <FaceHighlight key={a.id} positions={a.positions} />
         )
       )}
-      {/* Brighter preview of the face being annotated right now. */}
-      {pendingFace && pendingFace.positions.length > 0 && (
-        <FaceHighlight positions={pendingFace.positions} color="#f59e0b" />
+
+      {/* Brighter preview of the face/edge being annotated right now. */}
+      {pending?.kind === "face" && pending.positions.length > 0 && (
+        <FaceHighlight positions={pending.positions} color="#f59e0b" />
+      )}
+      {pending?.kind === "edge" && (
+        <EdgeHighlight a={pending.edge.a} b={pending.edge.b} color="#f59e0b" />
       )}
     </group>
   );
@@ -464,24 +565,27 @@ export function ModelViewer({
   const controlsRef = useRef<OrbitControlsImpl>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
-  // The face just clicked, awaiting a note. `x`/`y` are screen coords relative
-  // to the viewer wrapper, so the note input opens right where the user clicked.
+  // What kind of geometry the annotate tool selects.
+  const [target, setTarget] = useState<"face" | "edge">("face");
+
+  // The face/edge just clicked, awaiting a note. `x`/`y` are screen coords
+  // relative to the viewer wrapper, so the note input opens at the click.
   const [pending, setPending] = useState<{
-    face: FaceData;
+    result: PickResult;
     x: number;
     y: number;
   } | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
 
   const openPending = (pick: {
-    face: FaceData;
+    result: PickResult;
     clientX: number;
     clientY: number;
   }) => {
     const rect = wrapperRef.current?.getBoundingClientRect();
     setNoteDraft("");
     setPending({
-      face: pick.face,
+      result: pick.result,
       x: pick.clientX - (rect?.left ?? 0),
       y: pick.clientY - (rect?.top ?? 0),
     });
@@ -489,7 +593,7 @@ export function ModelViewer({
 
   const commitPending = () => {
     if (pending) {
-      onAnnotate?.({ ...pending.face, note: noteDraft.trim() });
+      onAnnotate?.({ ...pending.result, note: noteDraft.trim() });
     }
     setPending(null);
     setNoteDraft("");
@@ -522,12 +626,6 @@ export function ModelViewer({
     () => (inspectable && sectionOn ? [plane] : undefined),
     [inspectable, sectionOn, plane]
   );
-
-  // Pin radius scaled to the model so it reads on a 10mm part and a 200mm one.
-  // Small — it marks a point, not a blob.
-  const pinRadius = bounds
-    ? Math.max(bounds.mm.x, bounds.mm.y, bounds.mm.z) / 130
-    : 1;
 
   const zoomBy = (factor: number) => {
     const controls = controlsRef.current;
@@ -579,10 +677,10 @@ export function ModelViewer({
                     planes={planes}
                     onBounds={setBounds}
                     annotateMode={annotateMode}
+                    target={target}
                     annotations={annotations}
-                    pendingFace={pending?.face ?? null}
+                    pending={pending?.result ?? null}
                     onPick={openPending}
-                    pinRadius={pinRadius}
                   />
                 ) : (
                   <ModelMesh
@@ -685,7 +783,7 @@ export function ModelViewer({
                   onClick={onToggleAnnotate}
                   aria-label="Annotate"
                   aria-pressed={annotateMode}
-                  title="Annotate — click the model to drop a pin"
+                  title="Annotate — click a face or edge to add a note"
                   className={`flex h-8 w-8 items-center justify-center transition-colors hover:bg-foreground/5 ${
                     annotateMode ? "text-foreground" : "text-muted-foreground"
                   }`}
@@ -695,6 +793,25 @@ export function ModelViewer({
               </>
             )}
           </div>
+
+          {/* Face / Edge target toggle — only while annotating. */}
+          {onToggleAnnotate && annotateMode && (
+            <div className="absolute right-3 top-12 flex items-center gap-0 overflow-hidden rounded-full border border-border/60 bg-background/40 text-xs backdrop-blur-md">
+              {(["face", "edge"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setTarget(t)}
+                  aria-pressed={target === t}
+                  className={`px-3 py-1 capitalize transition-colors hover:bg-foreground/5 ${
+                    target === t ? "text-foreground" : "text-muted-foreground"
+                  }`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Cross-section slider — vertical, like a slicer's height handle:
               handle at the TOP = whole model; drag it DOWN to lower the cut

@@ -94,10 +94,8 @@ interface AttachedImage {
   mediaType: ImageMediaType;
 }
 
-/** A viewer pin plus the user's note, fed to the agent on the next revision. */
-interface StudioAnnotation extends ViewerAnnotation {
-  note: string;
-}
+/** A selected face/edge plus the user's note, fed to the agent on revision. */
+type StudioAnnotation = ViewerAnnotation & { note: string };
 
 function truncate(s: string, n = 40): string {
   return s.length > n ? `${s.slice(0, n).trimEnd()}…` : s;
@@ -368,19 +366,25 @@ export function TextToCadStudio({
 
     // Fold pinned annotations into the instruction sent to the agent, as
     // structured spatial feedback (the displayed turn keeps the clean text).
+    const fmt = (p: readonly number[]) => p.map((n) => n.toFixed(1)).join(", ");
     const annoBlock = annotations.length
-      ? "\n\nAnnotated faces on the current model (mm, model coordinates):\n" +
+      ? "\n\nAnnotated selections on the current model (mm, model coordinates):\n" +
         annotations
           .map((a, i) => {
-            const at = a.point.map((n) => n.toFixed(1)).join(", ");
-            const sz =
-              a.extent && a.extent.some((n) => n > 0)
-                ? `, ~${a.extent.map((n) => n.toFixed(0)).join("×")} mm`
-                : "";
-            const nrm = a.normal.map((n) => n.toFixed(2)).join(", ");
-            return `#${i + 1} — face centered at (${at})${sz}, normal (${nrm}): ${
-              a.note.trim() || "(address this face)"
-            }`;
+            const note = a.note.trim();
+            if (a.kind === "edge") {
+              return `#${i + 1} — edge from (${fmt(a.edge.a)}) to (${fmt(
+                a.edge.b
+              )}), length ${a.edge.length.toFixed(1)} mm: ${
+                note || "(address this edge)"
+              }`;
+            }
+            const sz = a.extent.some((n) => n > 0)
+              ? `, ~${a.extent.map((n) => n.toFixed(0)).join("×")} mm`
+              : "";
+            return `#${i + 1} — face centered at (${fmt(a.point)})${sz}, normal (${a.normal
+              .map((n) => n.toFixed(2))
+              .join(", ")}): ${note || "(address this face)"}`;
           })
           .join("\n")
       : "";
@@ -685,8 +689,10 @@ export function TextToCadStudio({
               </div>
               {annotations.length === 0 ? (
                 <p className="mt-2 text-xs text-muted-foreground">
-                  Click a face on the model to select it, then describe the
-                  change for it. Selected faces are sent with your next message.
+                  Pick <span className="font-medium">Face</span> or{" "}
+                  <span className="font-medium">Edge</span> in the viewer, click
+                  the model, and describe the change. Selections are sent with
+                  your next message.
                 </p>
               ) : (
                 <ol className="mt-2 space-y-2">
@@ -704,7 +710,9 @@ export function TextToCadStudio({
                             )
                           )
                         }
-                        placeholder={`e.g. round this face — at (${a.point
+                        placeholder={`e.g. ${
+                          a.kind === "edge" ? "fillet this edge" : "round this face"
+                        } — at (${a.point
                           .map((n) => n.toFixed(0))
                           .join(", ")}) mm`}
                         className="min-w-0 flex-1 rounded-md border border-foreground/15 bg-card px-2 py-1 text-sm outline-none focus:border-foreground/30"
@@ -941,7 +949,8 @@ export function TextToCadStudio({
                     className="inline-flex max-w-[14rem] items-center gap-1 rounded-full border border-[#2563eb]/30 bg-[#2563eb]/10 py-0.5 pl-2 pr-1 text-xs text-foreground"
                   >
                     <span className="truncate">
-                      📍 {a.note.trim() || `Face ${i + 1}`}
+                      📍 {a.note.trim() ||
+                        `${a.kind === "edge" ? "Edge" : "Face"} ${i + 1}`}
                     </span>
                     <button
                       type="button"
@@ -976,7 +985,7 @@ export function TextToCadStudio({
               disabled={generating}
               placeholder={
                 activeThread
-                  ? "Describe a change… e.g. make it 2mm taller, add a lanyard hole"
+                  ? "What do you want to change?"
                   : "Describe a part… e.g. a parametric phone stand for a 7mm-thick phone"
               }
               className="max-h-[200px] w-full resize-none border-0 bg-transparent px-2 py-1.5 text-sm outline-none disabled:opacity-60"
