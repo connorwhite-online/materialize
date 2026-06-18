@@ -43,6 +43,7 @@ export default async function TextToCadEvalPage() {
       rating: cadGenerations.rating,
       feedbackTags: cadGenerations.feedbackTags,
       attempts: cadGenerations.attempts,
+      aestheticScore: cadGenerations.aestheticScore,
       fileAssetId: cadGenerations.fileAssetId,
     })
     .from(cadGenerations)
@@ -58,6 +59,18 @@ export default async function TextToCadEvalPage() {
     total === 0
       ? 0
       : gens.reduce((s, g) => s + (g.attempts ?? 0), 0) / total;
+
+  // Aesthetic score (VLM judge), averaged over rows that have one.
+  const scored = gens.filter(
+    (g): g is typeof g & { aestheticScore: number } =>
+      typeof g.aestheticScore === "number"
+  );
+  const avgAesthetic =
+    scored.length === 0
+      ? null
+      : Math.round(
+          scored.reduce((s, g) => s + g.aestheticScore, 0) / scored.length
+        );
 
   // Tag frequency across all feedback.
   const tagCounts = {} as Record<CadFeedbackTag, number>;
@@ -102,6 +115,14 @@ export default async function TextToCadEvalPage() {
       label: "Print-through",
       value: pct(printedCount, succeeded),
       sub: `${printedCount} of ${succeeded} valid models ordered`,
+    },
+    {
+      label: "Aesthetic score",
+      value: avgAesthetic === null ? "—" : `${avgAesthetic}/100`,
+      sub:
+        scored.length === 0
+          ? "VLM judge off / no scores yet"
+          : `avg over ${scored.length} judged`,
     },
     { label: "Avg attempts", value: avgAttempts.toFixed(2) },
   ];

@@ -4,6 +4,7 @@ import { completeText, hasModelCredentials } from "./model-client";
 import { runCadCode } from "./runner-client";
 import { SYSTEM_PROMPT, extractCode, gradeRun } from "./prompt";
 import { buildKnowledgeBlock, type CadProcess } from "./knowledge";
+import { judgeAesthetics } from "./critique";
 import type { CadProgressEvent, CadRunResult } from "./types";
 
 /**
@@ -47,6 +48,8 @@ export interface HarnessResult {
   attempts: number;
   /** The last sidecar run (carries files, render, geometry, validation). */
   run?: CadRunResult;
+  /** VLM aesthetic aggregate (0-100), null when the judge is off/unavailable. */
+  aestheticScore?: number | null;
   error?: string;
 }
 
@@ -145,7 +148,37 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
       validation: lastRun.validation,
     });
     if (grade.pass) {
-      return { ok: true, sourceCode: lastCode, attempts: attempt, run: lastRun };
+      // Geometrically valid — now (optionally) judge it aesthetically. The
+      // judge is gated off by default, so this is a no-op unless enabled.
+      const judgement = await judgeAesthetics({
+        renderPng: lastRun.renderPng,
+        prompt: input.prompt,
+        signal: input.signal,
+      });
+      const aestheticScore = judgement.available
+        ? (judgement.score ?? null)
+        : null;
+
+      // Spend a repair turn on a visually-weak (but printable) result when we
+      // have budget and a model. Otherwise accept it.
+      if (
+        judgement.available &&
+        judgement.pass === false &&
+        useModel &&
+        attempt < maxAttempts
+      ) {
+        repairNote = `the design is printable but visually weak — ${judgement.feedback}`;
+        emit({ type: "repairing", attempt, maxAttempts, reason: repairNote });
+        continue;
+      }
+
+      return {
+        ok: true,
+        sourceCode: lastCode,
+        attempts: attempt,
+        run: lastRun,
+        aestheticScore,
+      };
     }
 
     repairNote = grade.failures.join("; ");

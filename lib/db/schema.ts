@@ -1386,6 +1386,9 @@ export const cadGenerations = pgTable(
     feedbackTags: jsonb("feedback_tags").$type<string[]>(),
     feedbackNote: text("feedback_note"),
     feedbackAt: timestamp("feedback_at", { withTimezone: true }),
+    // VLM aesthetic-judge aggregate (0-100), null when the judge is off or
+    // unavailable. Surfaced as the average aesthetic score on the scorecard.
+    aestheticScore: integer("aesthetic_score"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
