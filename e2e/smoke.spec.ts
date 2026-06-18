@@ -60,15 +60,16 @@ test.describe("response headers", () => {
 
   test("thumbnail route is reachable without auth", async ({ request }) => {
     // A non-existent fileId is the safest probe — we don't need a
-    // seeded asset to exercise the route. The 404 path still runs
-    // through middleware + Next routing, and confirms the route is
-    // reachable from anon. (Cache-Control on the 302 redirect path
-    // is verified by `cache-control on redirect` below.)
+    // seeded asset to exercise the route. A valid-format id that backs
+    // no row now returns a 200 transparent-PNG placeholder (issue #63)
+    // rather than 404, so browse cards never emit a same-origin
+    // network failure for a stale preview-seed reference. 302 is still
+    // accepted for older redirect-style responses.
     const res = await request.get(
       "/api/thumbnails/00000000-0000-0000-0000-000000000000",
       { maxRedirects: 0 }
     );
-    expect([302, 404]).toContain(res.status());
+    expect([200, 302, 404]).toContain(res.status());
   });
 
   test("thumbnail route returns 404 for a malformed fileId, not a DB error (sentry 7484237159)", async ({

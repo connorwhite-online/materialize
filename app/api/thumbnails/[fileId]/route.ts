@@ -4,6 +4,7 @@ import { files, filePhotos } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
 import { logError } from "@/lib/logger";
+import { thumbnailPlaceholderResponse } from "../placeholder";
 
 /**
  * Matches a canonical UUID v4 string (case-insensitive).
@@ -88,15 +89,24 @@ export async function GET(
       .leftJoin(filePhotos, eq(filePhotos.id, files.coverPhotoId))
       .where(eq(files.id, fileId));
 
+    // No row, or a row that has never had a thumbnail captured: there
+    // is no real image to serve. Return a transparent placeholder
+    // (200) rather than 404 so a stale preview-seed row can't trip the
+    // browser-review "zero network failures" assertion (issue #63).
+    // Indistinguishable from the non-owner-draft case below, which
+    // keeps the route from fingerprinting which ids back a real row.
     if (!row || !row.thumbnailUrl) {
-      return new Response("Not found", { status: 404 });
+      return thumbnailPlaceholderResponse();
     }
 
     const isDraft = row.status !== "published";
     if (isDraft) {
       const { userId } = await auth();
       if (!userId || userId !== row.userId) {
-        return new Response("Not found", { status: 404 });
+        // Don't surface work-in-progress artwork to a leaked id — but
+        // serve a placeholder rather than 404 (no artwork leaks, and
+        // it stays consistent with the missing-row path above).
+        return thumbnailPlaceholderResponse();
       }
     }
 
@@ -118,7 +128,10 @@ export async function GET(
         .from(filePhotos)
         .where(and(eq(filePhotos.id, requestedPhotoId), eq(filePhotos.fileId, fileId)));
       if (!photo) {
-        return new Response("Not found", { status: 404 });
+        // Stale ?photoId (deleted/foreign photo): placeholder, not 404,
+        // so a card carousel pointing at a since-removed photo degrades
+        // to an empty tile instead of a network failure.
+        return thumbnailPlaceholderResponse();
       }
       storageKey = photo.storageKey;
     } else if (row.coverPhotoId && row.coverStorageKey) {
@@ -146,6 +159,13 @@ export async function GET(
 
     if (upstream.status === 304) {
       return new Response(null, { status: 304 });
+    }
+    // The thumbnailUrl is recorded but the backing R2 object is gone
+    // (the exact "stale preview seed" gap in issue #63). Treat a
+    // missing object as an empty tile, not a failure. Other upstream
+    // statuses (5xx, auth) are genuine infra problems and still 502.
+    if (upstream.status === 404) {
+      return thumbnailPlaceholderResponse();
     }
     if (!upstream.ok || !upstream.body) {
       logError("api/thumbnails/[fileId].upstream", {

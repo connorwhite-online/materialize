@@ -112,15 +112,76 @@ describe("GET /api/thumbnails/[fileId]", () => {
   });
 
   describe("valid UUID fileId", () => {
-    it("returns 404 when the file does not exist", async () => {
+    it("serves a transparent placeholder (200) when the file does not exist (issue #63)", async () => {
       // Override the default mock: DB query succeeds but returns empty.
+      // A valid-format id that backs no row used to 404; it now returns
+      // a transparent PNG so a stale preview-seed reference can't trip
+      // the browser-review "zero network failures" assertion.
       mockDbWhere.mockResolvedValue([]);
       const { req, context } = makeRequest("00000000-0000-0000-0000-000000000000");
       const res = await GET(req, context);
 
-      expect(res.status).toBe(404);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Content-Type")).toBe("image/png");
       // DB WAS queried — the UUID passed validation.
       expect(mockDbWhere).toHaveBeenCalled();
+    });
+
+    it("serves a placeholder (200) when the backing R2 object is missing (issue #63)", async () => {
+      // thumbnailUrl is recorded but the signed-URL fetch 404s — the
+      // exact "stale preview seed" gap. The route must degrade to an
+      // empty tile, not the 502 it would return for a real infra error.
+      const fileId = "ba14f9ed-106b-46e3-8abc-123456789012";
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(new Response("missing", { status: 404 }));
+
+      mockDbWhere.mockResolvedValueOnce([
+        {
+          id: fileId,
+          thumbnailUrl: `/api/thumbnails/${fileId}`,
+          status: "published",
+          userId: "user-1",
+          coverPhotoId: null,
+          coverStorageKey: null,
+        },
+      ]);
+
+      const { req, context } = makeRequest(fileId);
+      const res = await GET(req, context);
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Content-Type")).toBe("image/png");
+
+      fetchSpy.mockRestore();
+    });
+
+    it("still 502s when the upstream fails for a non-404 reason", async () => {
+      // A genuine infra failure (R2 5xx) is a real problem — it must
+      // NOT be masked by the placeholder, which is reserved for a
+      // genuinely-absent object (404).
+      const fileId = "ba14f9ed-106b-46e3-8abc-123456789012";
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(new Response("boom", { status: 503 }));
+
+      mockDbWhere.mockResolvedValueOnce([
+        {
+          id: fileId,
+          thumbnailUrl: `/api/thumbnails/${fileId}`,
+          status: "published",
+          userId: "user-1",
+          coverPhotoId: null,
+          coverStorageKey: null,
+        },
+      ]);
+
+      const { req, context } = makeRequest(fileId);
+      const res = await GET(req, context);
+
+      expect(res.status).toBe(502);
+
+      fetchSpy.mockRestore();
     });
 
     it("streams upstream bytes for a published file with a thumbnail", async () => {
