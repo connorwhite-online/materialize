@@ -18,6 +18,19 @@ Rules:
 - Do not call show_object, export, or any file I/O — just build \`result\`.
 - Target the build123d 0.11+ API: for a symmetric/two-sided extrude use \`extrude(..., both=True)\` (there is no \`symmetric=\` argument).`;
 
+/**
+ * Plan-then-code: the harness first asks for a short design plan (no code),
+ * then feeds it into the implementation step. Decomposition/CoT measurably
+ * improves the resulting build123d, especially for non-trivial parts — and the
+ * "plan" role is the natural seam a specialized model could fill later.
+ */
+export const PLAN_SYSTEM_PROMPT = `You are a CAD engineer PLANNING a parametric build123d model before any code is written. Output a SHORT plan (about 5-10 lines, NO code):
+- the key named dimensions and their values (mm)
+- the base shape and the ordered operations (extrude / revolve / loft / shell / fillet / chamfer / holes / patterns)
+- which edges get fillets vs chamfers, and the small radius family to reuse
+- printability notes for the target process (walls, overhangs, drain/escape holes, base chamfer)
+Honor the design guidance you are given. Be concrete and terse. Do NOT write build123d code.`;
+
 /** Pull the first fenced code block out of a model response, else return as-is. */
 export function extractCode(text: string): string {
   const fenced = text.match(/```(?:python|py)?\s*\n([\s\S]*?)```/i);
