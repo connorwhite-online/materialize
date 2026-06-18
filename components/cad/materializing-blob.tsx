@@ -66,8 +66,9 @@ function Blob() {
 
   return (
     <mesh ref={meshRef}>
-      {/* detail 6 → fine triangulation for a dense wireframe. */}
-      <icosahedronGeometry args={[1.3, 6]} />
+      {/* detail 7 → very fine triangulation; rounder + denser wireframe.
+          (This is about the practical ceiling — detail 8 quadruples again.) */}
+      <icosahedronGeometry args={[1.3, 7]} />
       <shaderMaterial
         ref={matRef}
         wireframe
