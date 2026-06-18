@@ -64,8 +64,68 @@ def _apply_limits() -> None:
         pass
 
 
+def _process_shape(shape, formats: list[str], tmp: str, stem: str) -> dict:
+    """Export + measure + render one solid. Returns the per-part payload
+    (files, render, geometry, validity). Shared by the single-`result` path
+    and each member of a multi-part `parts` assembly."""
+    entry: dict = {
+        "files": {},
+        "renderPng": None,
+        "geometry": None,
+        "validation": {
+            "compiled": True,
+            "isSolid": False,
+            "isWatertight": False,
+            "isManifold": False,
+        },
+        "error": None,
+    }
+    from build123d import export_stl, export_step
+
+    volume = float(getattr(shape, "volume", 0.0) or 0.0)
+    entry["validation"]["isSolid"] = volume > 0.0
+
+    stl_path = os.path.join(tmp, f"{stem}.stl")
+    export_stl(shape, stl_path)
+    if "stl" in formats:
+        with open(stl_path, "rb") as f:
+            entry["files"]["stl"] = base64.b64encode(f.read()).decode()
+    if "step" in formats:
+        step_path = os.path.join(tmp, f"{stem}.step")
+        export_step(shape, step_path)
+        with open(step_path, "rb") as f:
+            entry["files"]["step"] = base64.b64encode(f.read()).decode()
+
+    try:
+        import trimesh
+
+        mesh = trimesh.load(stl_path, force="mesh")
+        entry["validation"]["isWatertight"] = bool(mesh.is_watertight)
+        entry["validation"]["isManifold"] = bool(mesh.is_winding_consistent)
+        ext = mesh.extents
+        entry["geometry"] = {
+            "dimensions": {
+                "x": float(ext[0]),
+                "y": float(ext[1]),
+                "z": float(ext[2]),
+            },
+            "volume": float(mesh.volume),
+            "triangleCount": int(len(mesh.faces)),
+        }
+        entry["renderPng"] = _render(mesh)
+    except Exception as mesh_err:  # noqa: BLE001
+        entry["error"] = f"analysis: {mesh_err}"
+    return entry
+
+
 def _execute(code: str, formats: list[str], out: "mp.Queue") -> None:
-    """Child-process worker: exec the script, export, measure, validate."""
+    """Child-process worker: exec the script, export, measure, validate.
+
+    Output contract: the script assigns either `result` (a single solid) OR
+    `parts` (a dict {name: solid} for a multi-part assembly). For an assembly
+    the top-level fields mirror the first part (so single-part consumers keep
+    working) and the full per-part breakdown is returned under `parts`.
+    """
     _apply_limits()
     result_payload: dict = {
         "ok": False,
@@ -82,68 +142,57 @@ def _execute(code: str, formats: list[str], out: "mp.Queue") -> None:
     }
     try:
         import build123d as b3d  # noqa: F401
-        from build123d import export_stl, export_step
 
         ns: dict = {}
         exec(compile(code, "<generated>", "exec"), ns, ns)  # noqa: S102
         result_payload["validation"]["compiled"] = True
 
-        shape = ns.get("result")
-        if shape is None:
-            result_payload["error"] = "script did not assign `result`"
-            out.put(result_payload)
-            return
-
-        volume = float(getattr(shape, "volume", 0.0) or 0.0)
-        is_solid = volume > 0.0
-        result_payload["validation"]["isSolid"] = is_solid
+        single = ns.get("result")
+        parts_ns = ns.get("parts")
 
         with tempfile.TemporaryDirectory() as tmp:
-            stl_path = os.path.join(tmp, "model.stl")
-            # Always export STL — we need it for printing + analysis.
-            export_stl(shape, stl_path)
-            if "stl" in formats:
-                with open(stl_path, "rb") as f:
-                    result_payload["files"]["stl"] = base64.b64encode(
-                        f.read()
-                    ).decode()
-            if "step" in formats:
-                step_path = os.path.join(tmp, "model.step")
-                export_step(shape, step_path)
-                with open(step_path, "rb") as f:
-                    result_payload["files"]["step"] = base64.b64encode(
-                        f.read()
-                    ).decode()
-
-            # Mesh-level checks + stats + best-effort render via trimesh.
-            try:
-                import trimesh
-
-                mesh = trimesh.load(stl_path, force="mesh")
-                result_payload["validation"]["isWatertight"] = bool(
-                    mesh.is_watertight
-                )
-                result_payload["validation"]["isManifold"] = bool(
-                    mesh.is_winding_consistent
-                )
-                ext = mesh.extents
-                result_payload["geometry"] = {
-                    "dimensions": {
-                        "x": float(ext[0]),
-                        "y": float(ext[1]),
-                        "z": float(ext[2]),
-                    },
-                    "volume": float(mesh.volume),
-                    "triangleCount": int(len(mesh.faces)),
+            if single is not None:
+                entry = _process_shape(single, formats, tmp, "model")
+                result_payload["files"] = entry["files"]
+                result_payload["renderPng"] = entry["renderPng"]
+                result_payload["geometry"] = entry["geometry"]
+                result_payload["validation"] = entry["validation"]
+                if entry["error"]:
+                    result_payload["error"] = entry["error"]
+                result_payload["ok"] = entry["validation"]["isSolid"]
+            elif isinstance(parts_ns, dict) and parts_ns:
+                parts: list[dict] = []
+                all_ok = True
+                for i, (name, shape) in enumerate(parts_ns.items()):
+                    stem = "".join(
+                        c if c.isalnum() else "-" for c in str(name)
+                    ).strip("-") or f"part{i}"
+                    entry = _process_shape(shape, formats, tmp, stem)
+                    parts.append({"name": str(name), **entry})
+                    all_ok = all_ok and entry["validation"]["isSolid"]
+                # Top-level mirrors the first part for single-part consumers.
+                first = parts[0]
+                result_payload["files"] = first["files"]
+                result_payload["renderPng"] = first["renderPng"]
+                result_payload["geometry"] = first["geometry"]
+                # Aggregate validity = AND across parts.
+                result_payload["validation"] = {
+                    "compiled": True,
+                    "isSolid": all(p["validation"]["isSolid"] for p in parts),
+                    "isWatertight": all(
+                        p["validation"]["isWatertight"] for p in parts
+                    ),
+                    "isManifold": all(
+                        p["validation"]["isManifold"] for p in parts
+                    ),
                 }
-                result_payload["renderPng"] = _render(mesh)
-            except Exception as mesh_err:  # noqa: BLE001
-                # Export succeeded but analysis failed — still a usable model.
-                result_payload["error"] = f"analysis: {mesh_err}"
+                result_payload["parts"] = parts
+                result_payload["ok"] = all_ok
+            else:
+                result_payload["error"] = (
+                    "script did not assign `result` or a non-empty `parts` dict"
+                )
 
-        result_payload["ok"] = (
-            is_solid and result_payload["validation"]["compiled"]
-        )
         out.put(result_payload)
     except Exception as err:  # noqa: BLE001
         result_payload["error"] = str(err)

@@ -21,6 +21,17 @@ export interface CadValidation {
   isManifold: boolean;
 }
 
+/** One member of a multi-part assembly. */
+export interface CadPart {
+  /** Part name from the script's `parts` dict key. */
+  name: string;
+  files: Partial<Record<CadOutputFormat, string>>;
+  renderPng?: string;
+  geometry?: CadGeometry;
+  validation: CadValidation;
+  error?: string;
+}
+
 /** Result of executing one CAD script in the sidecar. */
 export interface CadRunResult {
   ok: boolean;
@@ -30,6 +41,13 @@ export interface CadRunResult {
   renderPng?: string;
   geometry?: CadGeometry;
   validation: CadValidation;
+  /**
+   * Multi-part assembly breakdown — present when the script assigned a `parts`
+   * dict instead of a single `result`. Top-level files/render/geometry mirror
+   * the first part; `validation`/`ok` are the AND across all parts. The
+   * persist layer bundles these into a Project (PR follow-up).
+   */
+  parts?: CadPart[];
   /** stderr / exception message when compile or export failed. */
   error?: string;
 }
