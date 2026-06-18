@@ -18,21 +18,22 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
-import { nanoid } from "nanoid";
 
 import { db } from "@/lib/db";
-import { cadGenerations } from "@/lib/db/schema";
+import { cadGenerations, fileAssets, files } from "@/lib/db/schema";
 import { logError } from "@/lib/logger";
 import { canUseTextToCad } from "@/lib/features";
 import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
+import { runHarness } from "@/lib/cad/harness";
+import {
+  persistGenerationFailure,
+  persistGenerationSuccess,
+} from "@/lib/cad/persist";
 import {
   isCadFeedbackTag,
   isCadRating,
   type CadRating,
 } from "@/lib/cad/feedback";
-import { runHarness } from "@/lib/cad/harness";
-import { putObject, generateDownloadUrl } from "@/lib/storage";
-import { createDraftFileForPrint } from "@/app/actions/files";
 
 export type GenerateCadResult =
   | { error: string; generationId?: string }
@@ -42,6 +43,7 @@ export type GenerateCadResult =
       fileSlug: string;
       renderUrl: string | null;
       sourceCode: string;
+      title: string | null;
     };
 
 export async function generateCadModel(input: {
@@ -92,95 +94,130 @@ export async function generateCadModel(input: {
     .returning({ id: cadGenerations.id });
   const generationId = row.id;
 
-  const fail = async (message: string, sourceCode = "", attempts = 0) => {
-    await db
-      .update(cadGenerations)
-      .set({
-        status: "failed",
-        sourceCode: sourceCode || null,
-        attempts,
-        error: message,
-        updatedAt: new Date(),
-      })
-      .where(eq(cadGenerations.id, generationId));
-    return { error: message, generationId };
-  };
-
   try {
     const result = await runHarness({ prompt, priorSourceCode });
 
     if (!result.ok || !result.run) {
-      return fail(
+      return persistGenerationFailure(
+        generationId,
         result.error ?? "Could not produce a valid model.",
         result.sourceCode,
         result.attempts
       );
     }
 
-    const stlB64 = result.run.files.stl;
-    if (!stlB64) {
-      return fail("Model produced no printable output.", result.sourceCode, result.attempts);
-    }
-
-    const bytes = new Uint8Array(Buffer.from(stlB64, "base64"));
-    const storageKey = `uploads/${userId}/${nanoid()}/model.stl`;
-    await putObject(storageKey, bytes, "model/stl");
-
-    const draft = await createDraftFileForPrint({
-      storageKey,
-      originalFilename: "model.stl",
-      format: "stl",
-      fileSize: bytes.byteLength,
+    const persisted = await persistGenerationSuccess({
+      userId,
+      generationId,
+      prompt,
+      isRoot: !input.parentGenerationId,
+      result,
     });
-    if ("error" in draft) {
-      return fail(draft.error, result.sourceCode, result.attempts);
-    }
 
-    // Store the preview render in R2 (not inline in the DB) and mint a
-    // short-lived URL for immediate display. Best-effort: a render failure
-    // must not fail an otherwise-good generation.
-    let renderStorageKey: string | null = null;
-    let renderUrl: string | null = null;
-    if (result.run.renderPng) {
-      try {
-        renderStorageKey = `cad-renders/${userId}/${nanoid()}.png`;
-        await putObject(
-          renderStorageKey,
-          new Uint8Array(Buffer.from(result.run.renderPng, "base64")),
-          "image/png"
-        );
-        renderUrl = await generateDownloadUrl(renderStorageKey);
-      } catch (err) {
-        logError("generateCadModel.render", err);
-        renderStorageKey = null;
-        renderUrl = null;
-      }
+    revalidatePath("/text-to-cad");
+    return persisted;
+  } catch (error) {
+    logError("generateCadModel", error);
+    return persistGenerationFailure(
+      generationId,
+      "Generation failed. Please try again."
+    );
+  }
+}
+
+const MAX_NAME_LEN = 60;
+
+export type RenameCadResult = { name: string } | { error: string };
+
+/**
+ * Rename a text-to-CAD build. Updates the file the given asset belongs to (so
+ * the profile/library shows the new name) AND the thread's root title (so the
+ * studio sidebar matches) — to the user these are one thing: the build's name.
+ * Owner-only; the slug is intentionally left stable so existing links survive.
+ */
+export async function renameCadGeneration(input: {
+  fileAssetId: string;
+  name: string;
+}): Promise<RenameCadResult> {
+  const { userId } = await auth();
+  if (!userId) return { error: "Unauthorized" };
+
+  const user = (await currentUser()) as ClerkUserLike;
+  if (!canUseTextToCad(primaryEmail(user))) {
+    return { error: "Not found" };
+  }
+
+  const name = input.name?.trim() ?? "";
+  if (name.length < 1) return { error: "Name can't be empty." };
+  if (name.length > MAX_NAME_LEN) return { error: "Name is too long." };
+
+  try {
+    // Resolve the file behind the asset and confirm ownership.
+    const [asset] = await db
+      .select({ fileId: fileAssets.fileId, ownerId: files.userId })
+      .from(fileAssets)
+      .leftJoin(files, eq(fileAssets.fileId, files.id))
+      .where(eq(fileAssets.id, input.fileAssetId))
+      .limit(1);
+    if (!asset?.fileId || asset.ownerId !== userId) {
+      return { error: "Model not found." };
     }
 
     await db
-      .update(cadGenerations)
-      .set({
-        status: "succeeded",
-        sourceCode: result.sourceCode,
-        attempts: result.attempts,
-        fileAssetId: draft.fileAssetId,
-        renderStorageKey,
-        updatedAt: new Date(),
+      .update(files)
+      .set({ name, updatedAt: new Date() })
+      .where(and(eq(files.id, asset.fileId), eq(files.userId, userId)));
+
+    // Walk the generation that produced this asset up to its thread root and
+    // retitle it, so the sidebar label tracks the rename.
+    const [gen] = await db
+      .select({
+        id: cadGenerations.id,
+        parentGenerationId: cadGenerations.parentGenerationId,
       })
-      .where(eq(cadGenerations.id, generationId));
+      .from(cadGenerations)
+      .where(
+        and(
+          eq(cadGenerations.fileAssetId, input.fileAssetId),
+          eq(cadGenerations.userId, userId)
+        )
+      )
+      .limit(1);
+
+    if (gen) {
+      let rootId = gen.id;
+      let parentId = gen.parentGenerationId;
+      const seen = new Set<string>([rootId]);
+      while (parentId && !seen.has(parentId)) {
+        seen.add(parentId);
+        const [parent] = await db
+          .select({
+            id: cadGenerations.id,
+            parentGenerationId: cadGenerations.parentGenerationId,
+          })
+          .from(cadGenerations)
+          .where(
+            and(
+              eq(cadGenerations.id, parentId),
+              eq(cadGenerations.userId, userId)
+            )
+          )
+          .limit(1);
+        if (!parent) break;
+        rootId = parent.id;
+        parentId = parent.parentGenerationId;
+      }
+      await db
+        .update(cadGenerations)
+        .set({ title: name, updatedAt: new Date() })
+        .where(eq(cadGenerations.id, rootId));
+    }
 
     revalidatePath("/text-to-cad");
-
-    return {
-      generationId,
-      fileAssetId: draft.fileAssetId,
-      fileSlug: draft.fileSlug,
-      renderUrl,
-      sourceCode: result.sourceCode,
-    };
+    return { name };
   } catch (error) {
-    logError("generateCadModel", error);
-    return fail("Generation failed. Please try again.");
+    logError("renameCadGeneration", error);
+    return { error: "Rename failed. Please try again." };
   }
 }
 
@@ -195,9 +232,9 @@ export interface CadFeedbackInput {
 
 /**
  * Record (or update) the owner's feedback on a generation — the in-the-
- * moment human eval signal. Gated like every other text-to-CAD surface,
- * and the WHERE clause pins userId so a caller can only rate their own
- * rows. Idempotent: re-saving overwrites.
+ * moment human eval signal surfaced on the scorecard at /text-to-cad/eval.
+ * Gated like every other text-to-CAD surface, and the WHERE clause pins
+ * userId so a caller can only rate their own rows. Idempotent.
  */
 export async function recordCadFeedback(
   input: CadFeedbackInput

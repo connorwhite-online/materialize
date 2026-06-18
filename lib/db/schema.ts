@@ -1349,6 +1349,11 @@ export const cadGenerations = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     prompt: text("prompt").notNull(),
+    // Short, agent-written title summarizing the whole thread. Set once on
+    // the ROOT generation (parentGenerationId IS NULL) after its first
+    // success; revision rows leave it null and inherit the root's title at
+    // read time. Best-effort — null when the summarizer is unavailable.
+    title: text("title"),
     // CAD program dialect the harness emitted (e.g. "build123d"). Plain
     // text + default so adding engines later needs no enum migration.
     engine: text("engine").notNull().default("build123d"),

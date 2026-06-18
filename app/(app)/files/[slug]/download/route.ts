@@ -89,13 +89,26 @@ export async function GET(
 
   const { userId } = await auth();
 
-  const [file] = await db
-    .select()
-    .from(files)
-    .where(and(eq(files.slug, slug), eq(files.status, "published")));
+  const [file] = await db.select().from(files).where(eq(files.slug, slug));
 
   if (!file) {
     return new Response("Not found", { status: 404 });
+  }
+
+  // Unpublished files (e.g. text-to-CAD drafts in the owner's library) are
+  // reachable only by the owner or an org member — never via the entitlement
+  // check below, which treats any price-0 file as world-downloadable. Hide
+  // their existence from everyone else with a 404. Published files keep their
+  // original behavior (entitlement decides).
+  if (file.status !== "published") {
+    const isOwner = !!userId && file.userId === userId;
+    const isOrgFile =
+      !isOwner && !!userId && !!file.organizationId
+        ? (await isOrgMember(userId, file.organizationId)).member
+        : false;
+    if (!isOwner && !isOrgFile) {
+      return new Response("Not found", { status: 404 });
+    }
   }
 
   if (!(await ownsLoadedFile(userId, file))) {

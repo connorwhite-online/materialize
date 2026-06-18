@@ -15,7 +15,8 @@ Rules:
 - Make it PARAMETRIC: declare key dimensions as named variables at the top so they can be tuned later.
 - Design for 3D printing: a flat base where sensible, no zero-thickness walls, reasonable minimum wall thickness (>= 1.5 mm), units in millimeters.
 - Keep it a single watertight solid unless the prompt clearly asks for separate parts.
-- Do not call show_object, export, or any file I/O — just build \`result\`.`;
+- Do not call show_object, export, or any file I/O — just build \`result\`.
+- Target the build123d 0.11+ API: for a symmetric/two-sided extrude use \`extrude(..., both=True)\` (there is no \`symmetric=\` argument).`;
 
 /** Pull the first fenced code block out of a model response, else return as-is. */
 export function extractCode(text: string): string {

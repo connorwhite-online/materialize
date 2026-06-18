@@ -25,8 +25,10 @@ plan's "out of scope for v0" note.
 import base64
 import multiprocessing as mp
 import os
+import queue as queue_mod
 import resource
 import tempfile
+import time
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
@@ -170,43 +172,64 @@ async def run(req: RunRequest, request: Request) -> dict:
     out: "mp.Queue" = ctx.Queue()
     proc = ctx.Process(target=_execute, args=(req.code, req.formats, out))
     proc.start()
-    proc.join(RUN_TIMEOUT_S)
 
+    # Read the result BEFORE joining. The child's payload (STL + STEP, both
+    # base64) routinely exceeds the OS pipe buffer (~64 KB), and a
+    # multiprocessing.Queue.put() that large only completes once a reader
+    # drains the pipe. Joining first deadlocks the child on its feeder thread,
+    # which then looks like a wall-clock timeout for any non-trivial model
+    # (a small box squeaks under the buffer and hides the bug). See the
+    # multiprocessing docs: "Joining processes that use queues". We poll so
+    # that a child which crashes/OOMs without producing output is detected
+    # promptly instead of always burning the full timeout budget.
+    deadline = time.monotonic() + RUN_TIMEOUT_S
+    payload: Optional[dict] = None
+    # Record WHY we stopped at the moment we decide, not afterward: reading
+    # liveness after the loop races a child that dies in the gap and would
+    # mislabel a real timeout as a crash.
+    timed_out = False
+    while True:
+        try:
+            payload = out.get(timeout=0.25)
+            break
+        except queue_mod.Empty:
+            if not proc.is_alive():
+                # Exited without putting a result — crash/OOM/segfault.
+                break
+            if time.monotonic() >= deadline:
+                # Still running past the budget — a genuine hang.
+                timed_out = True
+                break
+
+    # SIGTERM, then escalate to SIGKILL if the child ignores it (a
+    # build123d/OCC C-extension thread can swallow SIGTERM). Never join()
+    # without a timeout — that would hang the worker forever.
     if proc.is_alive():
-        # SIGTERM, then escalate to SIGKILL if the child ignores it (a
-        # build123d/OCC C-extension thread can swallow SIGTERM). Never
-        # join() without a timeout — that would hang the worker forever.
         proc.terminate()
         proc.join(5)
         if proc.is_alive():
             proc.kill()
-            proc.join()
-        return {
-            "ok": False,
-            "files": {},
-            "validation": {
-                "compiled": False,
-                "isSolid": False,
-                "isWatertight": False,
-                "isManifold": False,
-            },
-            "error": f"timed out after {RUN_TIMEOUT_S}s",
-        }
+    proc.join()
 
-    try:
-        return out.get_nowait()
-    except Exception:  # noqa: BLE001
-        return {
-            "ok": False,
-            "files": {},
-            "validation": {
-                "compiled": False,
-                "isSolid": False,
-                "isWatertight": False,
-                "isManifold": False,
-            },
-            "error": "worker produced no result (likely OOM/crash)",
-        }
+    if payload is not None:
+        return payload
+
+    error = (
+        f"timed out after {RUN_TIMEOUT_S}s"
+        if timed_out
+        else "worker produced no result (likely OOM/crash)"
+    )
+    return {
+        "ok": False,
+        "files": {},
+        "validation": {
+            "compiled": False,
+            "isSolid": False,
+            "isWatertight": False,
+            "isManifold": False,
+        },
+        "error": error,
+    }
 
 
 @app.get("/health")

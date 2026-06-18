@@ -13,6 +13,10 @@ vi.mock("@/lib/features", () => ({
 // these — mock them so importing the action doesn't drag in the harness /
 // storage / files chains.
 vi.mock("@/lib/cad/harness", () => ({ runHarness: vi.fn() }));
+vi.mock("@/lib/cad/persist", () => ({
+  persistGenerationSuccess: vi.fn(),
+  persistGenerationFailure: vi.fn(),
+}));
 vi.mock("@/lib/storage", () => ({
   putObject: vi.fn(),
   generateDownloadUrl: vi.fn(),

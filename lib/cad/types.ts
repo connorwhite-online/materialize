@@ -33,3 +33,51 @@ export interface CadRunResult {
   /** stderr / exception message when compile or export failed. */
   error?: string;
 }
+
+/**
+ * Progress emitted by the harness loop, streamed to the studio so the user
+ * sees what's happening (write code -> run kernel -> validate -> repair).
+ * Pure data — shared by the harness (emitter), the streaming route (relay),
+ * and the client (renderer), so all three agree on one contract.
+ */
+export type CadProgressEvent =
+  | {
+      type: "phase";
+      /** `generating` = model writing code; `executing` = sidecar running it. */
+      phase: "generating" | "executing";
+      attempt: number;
+      maxAttempts: number;
+    }
+  | {
+      type: "validation";
+      attempt: number;
+      maxAttempts: number;
+      pass: boolean;
+      failures: string[];
+      validation: CadValidation;
+    }
+  | {
+      type: "repairing";
+      /** Attempt that just failed; the next one is `attempt + 1`. */
+      attempt: number;
+      maxAttempts: number;
+      reason: string;
+    };
+
+/** Terminal payload the streaming route appends after the harness finishes. */
+export interface CadDoneEvent {
+  type: "done";
+  generationId: string;
+  fileAssetId: string;
+  fileSlug: string;
+  renderUrl: string | null;
+  sourceCode: string;
+  /** Thread title — non-null only for a thread's first (root) generation. */
+  title: string | null;
+}
+
+/** Full event union carried over the SSE stream from /api/cad/generate. */
+export type CadStreamEvent =
+  | CadProgressEvent
+  | CadDoneEvent
+  | { type: "error"; error: string; generationId?: string };

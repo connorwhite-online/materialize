@@ -3,7 +3,7 @@ import "server-only";
 import { completeText, hasModelCredentials } from "./model-client";
 import { runCadCode } from "./runner-client";
 import { SYSTEM_PROMPT, extractCode, gradeRun } from "./prompt";
-import type { CadRunResult } from "./types";
+import type { CadProgressEvent, CadRunResult } from "./types";
 
 /**
  * The text-to-CAD harness. The harness — not a bespoke model — is the
@@ -26,6 +26,12 @@ export interface HarnessInput {
   priorSourceCode?: string | null;
   maxAttempts?: number;
   signal?: AbortSignal;
+  /**
+   * Called as the loop advances so the caller can stream status to the UI.
+   * Best-effort and synchronous — the harness never awaits it and a throw
+   * here must not derail a generation.
+   */
+  onProgress?: (event: CadProgressEvent) => void;
 }
 
 export interface HarnessResult {
@@ -81,6 +87,15 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
   const maxAttempts = input.maxAttempts ?? MAX_ATTEMPTS_DEFAULT;
   const useModel = hasModelCredentials();
 
+  // Swallow listener errors — progress is cosmetic, never load-bearing.
+  const emit = (event: CadProgressEvent) => {
+    try {
+      input.onProgress?.(event);
+    } catch {
+      /* ignore */
+    }
+  };
+
   let lastCode = "";
   let lastRun: CadRunResult | undefined;
   let repairNote = "";
@@ -88,6 +103,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     if (input.signal?.aborted) break;
 
+    emit({ type: "phase", phase: "generating", attempt, maxAttempts });
     if (useModel) {
       const userPrompt = repairNote
         ? `${buildUserPrompt(input)}\n\nThe previous attempt failed because ${repairNote}. Here is that code:\n\`\`\`python\n${lastCode}\n\`\`\`\nFix it.`
@@ -103,9 +119,18 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
       lastCode = localFakeModel(input.prompt, input.priorSourceCode);
     }
 
+    emit({ type: "phase", phase: "executing", attempt, maxAttempts });
     lastRun = await runCadCode(lastCode, ["stl", "step"], input.signal);
 
     const grade = gradeRun(lastRun);
+    emit({
+      type: "validation",
+      attempt,
+      maxAttempts,
+      pass: grade.pass,
+      failures: grade.failures,
+      validation: lastRun.validation,
+    });
     if (grade.pass) {
       return { ok: true, sourceCode: lastCode, attempts: attempt, run: lastRun };
     }
@@ -113,6 +138,9 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
     repairNote = grade.failures.join("; ");
     // The local fallback is deterministic — repairing it is pointless.
     if (!useModel) break;
+    if (attempt < maxAttempts) {
+      emit({ type: "repairing", attempt, maxAttempts, reason: repairNote });
+    }
   }
 
   return {
