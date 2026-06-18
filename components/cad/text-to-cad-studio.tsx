@@ -1,211 +1,685 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import Link from "next/link";
-import { generateCadModel } from "@/app/actions/cad-generation";
+import {
+  AlertTriangleIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  DownloadIcon,
+  Loader2Icon,
+  PencilIcon,
+  PlusIcon,
+  RotateCwIcon,
+} from "lucide-react";
+import { renameCadGeneration } from "@/app/actions/cad-generation";
+import type { CadStreamEvent, CadProgressEvent } from "@/lib/cad/types";
 
-export interface StudioGeneration {
+// The 3D viewer pulls in three.js / react-three-fiber — lazy-load it so the
+// studio shell (and its bundle) stays light until a model is on screen.
+const ModelViewer = lazy(() =>
+  import("@/components/viewer/model-viewer").then((mod) => ({
+    default: mod.ModelViewer,
+  }))
+);
+
+export interface StudioTurn {
   id: string;
   prompt: string;
   status: "pending" | "succeeded" | "failed";
   renderUrl: string | null;
   fileAssetId: string | null;
+  sourceCode: string | null;
+  error: string | null;
 }
 
-interface CurrentResult {
-  generationId: string;
-  fileAssetId: string;
-  fileSlug: string;
-  renderUrl: string | null;
-  sourceCode: string;
+export interface StudioThread {
+  rootId: string;
+  title: string | null;
+  lastActivity: number;
+  turns: StudioTurn[];
+}
+
+function truncate(s: string, n = 40): string {
+  return s.length > n ? `${s.slice(0, n).trimEnd()}…` : s;
+}
+
+function threadLabel(t: StudioThread): string {
+  return t.title?.trim() || truncate(t.turns[0]?.prompt ?? "Untitled build");
 }
 
 /**
- * The experimental text-to-CAD studio (owner-gated). Prompt -> generated
- * parametric model -> preview + "Print this model" into the existing quote
- * flow. Picking a prior generation seeds an "edit existing" revision.
+ * Experimental, owner-gated text-to-CAD studio. A chat-style surface: a
+ * floating composer drives a thread of generations (the first message starts
+ * a build, every later message revises it), with a live 3D viewer, streamed
+ * harness progress, an agent-titled thread list, and per-turn revision
+ * history. Each successful turn mints a printable asset that flows into the
+ * existing /print/[fileAssetId] quote pipeline.
  */
 export function TextToCadStudio({
-  initialGenerations,
+  initialThreads,
 }: {
-  initialGenerations: StudioGeneration[];
+  initialThreads: StudioThread[];
 }) {
+  const [threads, setThreads] = useState<StudioThread[]>(initialThreads);
+  // Open the most recent build on load (like reopening a chat); "New build"
+  // resets to a blank canvas.
+  const [activeRootId, setActiveRootId] = useState<string | null>(
+    initialThreads[0]?.rootId ?? null
+  );
+  const [viewTurnId, setViewTurnId] = useState<string | null>(() => {
+    const first = initialThreads[0];
+    if (!first) return null;
+    return (
+      [...first.turns]
+        .reverse()
+        .find((x) => x.status === "succeeded" && x.fileAssetId)?.id ?? null
+    );
+  });
   const [prompt, setPrompt] = useState("");
-  const [parent, setParent] = useState<StudioGeneration | null>(null);
+  const [progress, setProgress] = useState<CadProgressEvent[]>([]);
+  const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [current, setCurrent] = useState<CurrentResult | null>(null);
-  const [history, setHistory] = useState<StudioGeneration[]>(initialGenerations);
-  const [pending, startTransition] = useTransition();
+  const [showHistory, setShowHistory] = useState(false);
+  const [showSource, setShowSource] = useState(true);
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [savingName, setSavingName] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
 
-  function submit() {
-    if (prompt.trim().length < 3 || pending) return;
+  // Abort an in-flight stream if the studio unmounts.
+  useEffect(() => () => abortRef.current?.abort(), []);
+
+  const activeThread = threads.find((t) => t.rootId === activeRootId) ?? null;
+  const turns = activeThread?.turns ?? [];
+  const latestTurn = turns[turns.length - 1] ?? null;
+
+  // Which turn's model fills the viewer: the explicitly selected one, else the
+  // most recent successful turn in the active thread.
+  const viewedTurn =
+    (viewTurnId
+      ? turns.find((t) => t.id === viewTurnId && t.fileAssetId)
+      : null) ??
+    [...turns].reverse().find((t) => t.status === "succeeded" && t.fileAssetId) ??
+    null;
+
+  function startNewBuild() {
+    abortRef.current?.abort();
+    setGenerating(false);
+    setActiveRootId(null);
+    setViewTurnId(null);
+    setProgress([]);
     setError(null);
-    const submittedPrompt = prompt;
-    startTransition(async () => {
-      const res = await generateCadModel({
-        prompt: submittedPrompt,
-        parentGenerationId: parent?.id,
-      });
-      if ("error" in res) {
-        setError(res.error);
-        return;
-      }
-      setCurrent(res);
-      setHistory((h) => [
-        {
-          id: res.generationId,
-          prompt: submittedPrompt,
-          status: "succeeded",
-          renderUrl: res.renderUrl,
-          fileAssetId: res.fileAssetId,
-        },
-        ...h,
-      ]);
-      setPrompt("");
-      setParent(null);
-    });
+    setPrompt("");
+    setShowHistory(false);
+    setRenaming(false);
   }
 
-  return (
-    <div className="mx-auto grid max-w-5xl gap-8 px-4 py-8 lg:grid-cols-[1fr_320px]">
-      <section>
-        <h1 className="text-2xl font-semibold tracking-tight">Text to CAD</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Describe a part in plain language. Experimental — owner preview.
-        </p>
+  function openThread(t: StudioThread) {
+    if (generating) return;
+    setActiveRootId(t.rootId);
+    const lastGood = [...t.turns]
+      .reverse()
+      .find((x) => x.status === "succeeded" && x.fileAssetId);
+    setViewTurnId(lastGood?.id ?? null);
+    setProgress([]);
+    setError(null);
+    setShowHistory(false);
+    setRenaming(false);
+  }
 
-        {parent && (
-          <div className="mt-4 flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2 text-sm">
-            <span className="truncate">
-              Editing: <span className="text-muted-foreground">{parent.prompt}</span>
-            </span>
+  async function saveName() {
+    const next = nameDraft.trim();
+    if (!activeThread || !viewedTurn?.fileAssetId || next.length < 1) {
+      setRenaming(false);
+      return;
+    }
+    if (next === threadLabel(activeThread)) {
+      setRenaming(false);
+      return;
+    }
+    setSavingName(true);
+    const res = await renameCadGeneration({
+      fileAssetId: viewedTurn.fileAssetId,
+      name: next,
+    });
+    setSavingName(false);
+    if ("error" in res) {
+      setError(res.error);
+      return;
+    }
+    const root = activeRootId;
+    setThreads((prev) =>
+      prev.map((t) => (t.rootId === root ? { ...t, title: res.name } : t))
+    );
+    setRenaming(false);
+  }
+
+  function applyDone(
+    ev: Extract<CadStreamEvent, { type: "done" }>,
+    submittedPrompt: string,
+    parentId: string | undefined
+  ) {
+    const newTurn: StudioTurn = {
+      id: ev.generationId,
+      prompt: submittedPrompt,
+      status: "succeeded",
+      renderUrl: ev.renderUrl,
+      fileAssetId: ev.fileAssetId,
+      sourceCode: ev.sourceCode,
+      error: null,
+    };
+    const now = Date.now();
+
+    if (parentId) {
+      // Revision: append to the active thread.
+      setThreads((prev) =>
+        prev
+          .map((t) =>
+            t.rootId === activeRootId
+              ? { ...t, turns: [...t.turns, newTurn], lastActivity: now }
+              : t
+          )
+          .sort((a, b) => b.lastActivity - a.lastActivity)
+      );
+    } else {
+      // New build: open a fresh thread.
+      const thread: StudioThread = {
+        rootId: ev.generationId,
+        title: ev.title,
+        lastActivity: now,
+        turns: [newTurn],
+      };
+      setThreads((prev) => [thread, ...prev]);
+      setActiveRootId(ev.generationId);
+    }
+    setViewTurnId(ev.generationId);
+    // Clear the composer only now that the turn landed — on an error the
+    // user's typed instruction stays put so they can retry without retyping.
+    setPrompt("");
+  }
+
+  async function submit() {
+    const text = prompt.trim();
+    if (text.length < 3 || generating) return;
+
+    const parentId = latestTurn?.id; // revise the latest turn when in a thread
+    setError(null);
+    setProgress([]);
+    setGenerating(true);
+    setShowHistory(false);
+
+    const controller = new AbortController();
+    abortRef.current?.abort();
+    abortRef.current = controller;
+
+    try {
+      const res = await fetch("/api/cad/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: text,
+          parentGenerationId: parentId,
+          // Revisions inherit the build's current name; new builds get an
+          // agent-written one server-side.
+          name: parentId && activeThread ? threadLabel(activeThread) : undefined,
+        }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok || !res.body) {
+        setError((await res.text()) || "Generation failed.");
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let sep: number;
+        while ((sep = buf.indexOf("\n\n")) !== -1) {
+          const frame = buf.slice(0, sep);
+          buf = buf.slice(sep + 2);
+          const dataLine = frame
+            .split("\n")
+            .find((l) => l.startsWith("data:"));
+          if (!dataLine) continue;
+          let ev: CadStreamEvent;
+          try {
+            ev = JSON.parse(dataLine.slice(5).trim());
+          } catch {
+            continue;
+          }
+          if (ev.type === "done") {
+            applyDone(ev, text, parentId);
+          } else if (ev.type === "error") {
+            setError(ev.error);
+          } else {
+            setProgress((p) => [...p, ev]);
+          }
+        }
+      }
+    } catch (err) {
+      if ((err as Error)?.name !== "AbortError") {
+        setError("Generation failed. Please try again.");
+      }
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  const composerLabel = generating
+    ? "Generating…"
+    : activeThread
+      ? "Revise"
+      : "Generate";
+
+  return (
+    <div className="relative min-h-[calc(100vh-4rem)]">
+      <div className="mx-auto grid max-w-6xl gap-8 px-4 pb-44 pt-6 lg:grid-cols-[1fr_300px]">
+        {/* Main column */}
+        <section className="min-w-0">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h1 className="text-2xl font-semibold tracking-tight">
+                Text to CAD
+              </h1>
+              {activeThread && !generating && viewedTurn?.fileAssetId ? (
+                renaming ? (
+                  <div className="mt-1 flex items-center gap-2">
+                    <input
+                      value={nameDraft}
+                      autoFocus
+                      maxLength={60}
+                      onChange={(e) => setNameDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") saveName();
+                        if (e.key === "Escape") setRenaming(false);
+                      }}
+                      className="w-56 rounded-md border border-foreground/20 bg-card px-2 py-1 text-sm outline-none focus:border-foreground/40"
+                    />
+                    <button
+                      type="button"
+                      onClick={saveName}
+                      disabled={savingName}
+                      className="text-sm font-medium text-foreground disabled:opacity-50"
+                    >
+                      {savingName ? "Saving…" : "Save"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRenaming(false)}
+                      className="text-sm text-muted-foreground hover:text-foreground"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNameDraft(threadLabel(activeThread));
+                      setRenaming(true);
+                    }}
+                    className="group mt-1 inline-flex max-w-full items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+                    title="Rename build"
+                  >
+                    <span className="truncate">{threadLabel(activeThread)}</span>
+                    <PencilIcon className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
+                  </button>
+                )
+              ) : (
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {activeThread
+                    ? threadLabel(activeThread)
+                    : "Describe a part in plain language. Experimental — owner preview."}
+                </p>
+              )}
+            </div>
             <button
               type="button"
-              onClick={() => setParent(null)}
-              className="ml-3 shrink-0 text-muted-foreground underline-offset-2 hover:underline"
+              onClick={startNewBuild}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-foreground/15 px-3 py-1.5 text-sm hover:bg-foreground/5"
             >
-              Clear
+              <PlusIcon className="size-4" />
+              New build
             </button>
           </div>
-        )}
 
-        <textarea
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          onKeyDown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") submit();
-          }}
-          rows={4}
-          maxLength={2000}
-          placeholder={
-            parent
-              ? "e.g. make it 2cm taller and add a drain hole"
-              : "e.g. a parametric phone stand for a 7mm-thick phone"
-          }
-          className="mt-3 w-full resize-y rounded-xl border border-foreground/15 bg-card p-3 text-sm outline-none focus:border-foreground/30"
-        />
+          {/* Viewer / progress / empty state */}
+          <div className="mt-5 overflow-hidden rounded-xl border border-foreground/10">
+            <div className="aspect-square w-full bg-muted/30">
+              {generating ? (
+                <ProgressPanel events={progress} />
+              ) : viewedTurn?.fileAssetId ? (
+                <Suspense fallback={<ViewerSkeleton label="Loading model…" />}>
+                  <ModelViewer
+                    key={viewedTurn.fileAssetId}
+                    modelUrl={`/api/files/preview/${viewedTurn.fileAssetId}`}
+                    format="stl"
+                    mode="detail"
+                    showZoomControls
+                    className="h-full w-full"
+                  />
+                </Suspense>
+              ) : (
+                <ViewerSkeleton
+                  label={
+                    activeThread
+                      ? "No printable model in this build yet."
+                      : "Describe a part below to start."
+                  }
+                />
+              )}
+            </div>
+          </div>
 
-        <div className="mt-3 flex items-center gap-3">
-          <button
-            type="button"
-            onClick={submit}
-            disabled={pending || prompt.trim().length < 3}
-            className="rounded-lg bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
-          >
-            {pending ? "Generating…" : parent ? "Revise model" : "Generate"}
-          </button>
-          <span className="text-xs text-muted-foreground">⌘/Ctrl + Enter</span>
-        </div>
+          {error && (
+            <p className="mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {error}
+            </p>
+          )}
 
-        {error && (
-          <p className="mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {error}
-          </p>
-        )}
-
-        {current && (
-          <div className="mt-6 rounded-xl border border-foreground/10 p-4">
-            {current.renderUrl && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={current.renderUrl}
-                alt="Generated model preview"
-                className="mb-4 w-full rounded-lg bg-muted/40 object-contain"
-              />
-            )}
-            <div className="flex flex-wrap gap-3">
+          {/* Actions for the viewed model */}
+          {!generating && viewedTurn?.fileAssetId && (
+            <div className="mt-4 flex flex-wrap gap-3">
               <Link
-                href={`/print/${current.fileAssetId}`}
+                href={`/print/${viewedTurn.fileAssetId}`}
                 className="rounded-lg bg-foreground px-4 py-2 text-sm font-medium text-background"
               >
                 Print this model
               </Link>
+              <a
+                href={`/api/files/preview/${viewedTurn.fileAssetId}`}
+                download={`${
+                  activeThread ? threadLabel(activeThread) : "model"
+                }.stl`}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-foreground/15 px-4 py-2 text-sm hover:bg-foreground/5"
+              >
+                <DownloadIcon className="size-4" />
+                Download STL
+              </a>
+            </div>
+          )}
+
+          {/* Revision history — collapsed until opened */}
+          {!generating && turns.length > 0 && (
+            <div className="mt-5">
               <button
                 type="button"
-                onClick={() => {
-                  setParent({
-                    id: current.generationId,
-                    prompt: "",
-                    status: "succeeded",
-                    renderUrl: current.renderUrl,
-                    fileAssetId: current.fileAssetId,
-                  });
-                }}
-                className="rounded-lg border border-foreground/15 px-4 py-2 text-sm"
+                onClick={() => setShowHistory((v) => !v)}
+                className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
               >
-                Edit
-              </button>
-            </div>
-            <pre className="mt-4 max-h-72 overflow-auto rounded-lg bg-muted/40 p-3 text-xs">
-              {current.sourceCode}
-            </pre>
-          </div>
-        )}
-      </section>
-
-      <aside>
-        <h2 className="text-sm font-medium text-muted-foreground">History</h2>
-        <ul className="mt-3 flex flex-col gap-2">
-          {history.length === 0 && (
-            <li className="text-sm text-muted-foreground">No generations yet.</li>
-          )}
-          {history.map((g) => (
-            <li
-              key={g.id}
-              className="flex items-center gap-3 rounded-lg border border-foreground/10 p-2"
-            >
-              {g.renderUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={g.renderUrl}
-                  alt=""
-                  className="h-10 w-10 shrink-0 rounded bg-muted/40 object-contain"
-                />
-              ) : (
-                <div className="h-10 w-10 shrink-0 rounded bg-muted/40" />
-              )}
-              <span className="min-w-0 flex-1 truncate text-xs">{g.prompt}</span>
-              <div className="flex shrink-0 gap-1.5">
-                {g.fileAssetId && (
-                  <Link
-                    href={`/print/${g.fileAssetId}`}
-                    className="text-xs text-muted-foreground underline-offset-2 hover:underline"
-                  >
-                    Print
-                  </Link>
+                {showHistory ? (
+                  <ChevronDownIcon className="size-4" />
+                ) : (
+                  <ChevronRightIcon className="size-4" />
                 )}
-                <button
-                  type="button"
-                  onClick={() => setParent(g)}
-                  className="text-xs text-muted-foreground underline-offset-2 hover:underline"
-                >
-                  Edit
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </aside>
+                Revision history ({turns.length})
+              </button>
+              {showHistory && (
+                <ol className="mt-2 space-y-1.5">
+                  {turns.map((t, i) => {
+                    const isViewed = viewedTurn?.id === t.id;
+                    const selectable = t.status === "succeeded" && !!t.fileAssetId;
+                    return (
+                      <li key={t.id}>
+                        <button
+                          type="button"
+                          disabled={!selectable}
+                          onClick={() => setViewTurnId(t.id)}
+                          className={`flex w-full items-start gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                            isViewed
+                              ? "border-foreground/30 bg-foreground/5"
+                              : "border-foreground/10 hover:bg-foreground/5"
+                          } ${selectable ? "" : "opacity-60"}`}
+                        >
+                          <span className="mt-0.5 shrink-0 text-xs text-muted-foreground">
+                            {i === 0 ? "Start" : `#${i}`}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate">{t.prompt}</span>
+                            {t.status === "failed" && (
+                              <span className="text-xs text-destructive">
+                                {t.error ?? "failed"}
+                              </span>
+                            )}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
+            </div>
+          )}
+
+          {/* Source code — collapsible */}
+          {!generating && viewedTurn?.sourceCode && (
+            <div className="mt-5">
+              <button
+                type="button"
+                onClick={() => setShowSource((v) => !v)}
+                className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
+              >
+                {showSource ? (
+                  <ChevronDownIcon className="size-4" />
+                ) : (
+                  <ChevronRightIcon className="size-4" />
+                )}
+                Parametric source
+              </button>
+              {showSource && (
+                <pre className="mt-2 max-h-72 overflow-auto rounded-lg bg-muted/40 p-3 text-xs">
+                  {viewedTurn.sourceCode}
+                </pre>
+              )}
+            </div>
+          )}
+        </section>
+
+        {/* Thread list */}
+        <aside>
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium text-muted-foreground">Builds</h2>
+            <button
+              type="button"
+              onClick={startNewBuild}
+              aria-label="New build"
+              className="flex size-7 items-center justify-center rounded-md border border-foreground/15 hover:bg-foreground/5"
+            >
+              <PlusIcon className="size-4" />
+            </button>
+          </div>
+          <ul className="mt-3 flex flex-col gap-2">
+            {threads.length === 0 && (
+              <li className="text-sm text-muted-foreground">No builds yet.</li>
+            )}
+            {threads.map((t) => {
+              const thumb = [...t.turns]
+                .reverse()
+                .find((x) => x.renderUrl)?.renderUrl;
+              const isActive = t.rootId === activeRootId;
+              return (
+                <li key={t.rootId}>
+                  <button
+                    type="button"
+                    onClick={() => openThread(t)}
+                    className={`flex w-full items-center gap-3 rounded-lg border p-2 text-left transition-colors ${
+                      isActive
+                        ? "border-foreground/30 bg-foreground/5"
+                        : "border-foreground/10 hover:bg-foreground/5"
+                    }`}
+                  >
+                    {thumb ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={thumb}
+                        alt=""
+                        className="h-10 w-10 shrink-0 rounded bg-muted/40 object-contain"
+                      />
+                    ) : (
+                      <div className="h-10 w-10 shrink-0 rounded bg-muted/40" />
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">
+                        {threadLabel(t)}
+                      </span>
+                      <span className="block text-xs text-muted-foreground">
+                        {t.turns.length} revision
+                        {t.turns.length === 1 ? "" : "s"}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </aside>
+      </div>
+
+      {/* Floating composer */}
+      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30">
+        <div className="pointer-events-auto mx-auto max-w-3xl px-4 pb-4">
+          <div className="flex items-end gap-2 rounded-2xl border border-foreground/15 bg-card/95 p-2 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80">
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") submit();
+              }}
+              rows={1}
+              maxLength={2000}
+              disabled={generating}
+              placeholder={
+                activeThread
+                  ? "Describe a change… e.g. make it 2mm taller, add a lanyard hole"
+                  : "Describe a part… e.g. a parametric phone stand for a 7mm-thick phone"
+              }
+              className="max-h-40 min-h-[2.5rem] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none disabled:opacity-60"
+            />
+            <button
+              type="button"
+              onClick={submit}
+              disabled={generating || prompt.trim().length < 3}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
+            >
+              {generating && <Loader2Icon className="size-4 animate-spin" />}
+              {composerLabel}
+            </button>
+          </div>
+          <p className="mt-1.5 px-2 text-center text-xs text-muted-foreground">
+            {activeThread
+              ? "Sending a message revises this build · ⌘/Ctrl + Enter"
+              : "⌘/Ctrl + Enter to generate"}
+          </p>
+        </div>
+      </div>
     </div>
   );
+}
+
+function ViewerSkeleton({ label }: { label: string }) {
+  return (
+    <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-muted-foreground">
+      <svg
+        width="96"
+        height="96"
+        viewBox="0 0 100 100"
+        fill="none"
+        className="opacity-40"
+        aria-hidden
+      >
+        <path
+          d="M50 8 L88 30 L88 70 L50 92 L12 70 L12 30 Z M50 8 L50 50 M50 50 L88 30 M50 50 L12 30"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinejoin="round"
+          strokeDasharray="4 4"
+        />
+      </svg>
+      <p className="px-6 text-center text-sm">{label}</p>
+    </div>
+  );
+}
+
+/** Renders the streamed harness transcript as a live checklist. */
+function ProgressPanel({ events }: { events: CadProgressEvent[] }) {
+  return (
+    <div className="flex h-full w-full flex-col items-center justify-center gap-4 p-6">
+      <div className="size-12 animate-pulse rounded-xl border-2 border-dashed border-foreground/20" />
+      <ul className="w-full max-w-sm space-y-1.5 text-sm">
+        {events.length === 0 && (
+          <li className="flex items-center gap-2 text-muted-foreground">
+            <Loader2Icon className="size-4 animate-spin" />
+            Starting…
+          </li>
+        )}
+        {events.map((ev, i) => {
+          const isLast = i === events.length - 1;
+          const d = describeEvent(ev);
+          return (
+            <li key={i} className={`flex items-center gap-2 ${d.tone}`}>
+              {isLast ? (
+                <Loader2Icon className="size-4 shrink-0 animate-spin" />
+              ) : (
+                d.icon
+              )}
+              <span className="min-w-0 flex-1">{d.text}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function describeEvent(ev: CadProgressEvent): {
+  text: string;
+  icon: ReactNode;
+  tone: string;
+} {
+  switch (ev.type) {
+    case "phase":
+      return ev.phase === "generating"
+        ? {
+            text:
+              ev.attempt > 1
+                ? `Rewriting parametric code (attempt ${ev.attempt}/${ev.maxAttempts})…`
+                : "Writing parametric code…",
+            icon: <CheckIcon className="size-4 shrink-0 text-muted-foreground" />,
+            tone: "text-foreground",
+          }
+        : {
+            text: "Running geometry kernel (build123d)…",
+            icon: <CheckIcon className="size-4 shrink-0 text-muted-foreground" />,
+            tone: "text-foreground",
+          };
+    case "validation":
+      return ev.pass
+        ? {
+            text: "Solid is watertight & manifold",
+            icon: <CheckIcon className="size-4 shrink-0 text-emerald-600" />,
+            tone: "text-foreground",
+          }
+        : {
+            text: `Issues: ${ev.failures.join(", ") || "invalid solid"}`,
+            icon: (
+              <AlertTriangleIcon className="size-4 shrink-0 text-amber-600" />
+            ),
+            tone: "text-muted-foreground",
+          };
+    case "repairing":
+      return {
+        text: `Repairing — attempt ${ev.attempt + 1} of ${ev.maxAttempts}…`,
+        icon: <RotateCwIcon className="size-4 shrink-0 text-muted-foreground" />,
+        tone: "text-foreground",
+      };
+  }
 }

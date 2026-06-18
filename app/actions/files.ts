@@ -820,6 +820,13 @@ export async function createDraftFileForPrint(params: {
   format: "stl" | "obj" | "3mf" | "step" | "amf";
   fileSize: number;
   fileUnit?: "mm" | "cm" | "in";
+  /**
+   * Explicit listing name. When omitted we derive it from the filename
+   * (the upload-to-print default). The text-to-CAD studio passes the
+   * agent-written thread title here so the profile shows a real name
+   * instead of "model".
+   */
+  displayName?: string;
 }): Promise<
   | { fileAssetId: string; fileSlug: string }
   | { error: string }
@@ -884,7 +891,8 @@ export async function createDraftFileForPrint(params: {
       };
     }
 
-    const name = deriveListingName(params.originalFilename);
+    const name =
+      params.displayName?.trim() || deriveListingName(params.originalFilename);
     const slug = buildListingSlug(name, nanoid(6));
 
     const [pref] = await db
