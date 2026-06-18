@@ -1,6 +1,10 @@
 import "server-only";
 
-import { completeText, hasModelCredentials } from "./model-client";
+import {
+  completeText,
+  hasModelCredentials,
+  type PromptImage,
+} from "./model-client";
 import { runCadCode } from "./runner-client";
 import { SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, extractCode, gradeRun } from "./prompt";
 import { buildKnowledgeBlock, type CadProcess } from "./knowledge";
@@ -41,6 +45,8 @@ export interface HarnessInput {
    * revision corrects known problems (CON-181). No-op on a fresh build.
    */
   priorFeedback?: PriorFeedback | null;
+  /** Reference images the user attached, passed to the generate steps. */
+  images?: PromptImage[] | null;
   maxAttempts?: number;
   signal?: AbortSignal;
   /**
@@ -194,6 +200,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
           system: PLAN_SYSTEM_PROMPT,
           prompt: buildPlanPrompt(input),
           model: planModel,
+          images: input.images ?? undefined,
           signal: input.signal,
         })
       );
@@ -224,6 +231,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
           system: SYSTEM_PROMPT,
           prompt: userPrompt,
           model,
+          images: input.images ?? undefined,
           signal: input.signal,
         })
       );

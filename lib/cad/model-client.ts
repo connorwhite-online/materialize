@@ -45,11 +45,19 @@ function getClient(): Anthropic {
   return _client;
 }
 
+/** A reference image (base64, no data: prefix) passed alongside the prompt. */
+export interface PromptImage {
+  data: string;
+  mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+}
+
 export interface CompleteTextOptions {
   system: string;
   prompt: string;
   /** Model id; falls back to DEFAULT_MODEL when omitted. */
   model?: string;
+  /** Reference images to include in the user turn (multimodal). */
+  images?: PromptImage[];
   signal?: AbortSignal;
 }
 
@@ -65,12 +73,22 @@ export async function completeText(opts: CompleteTextOptions): Promise<string> {
     );
   }
 
+  const content: Anthropic.ContentBlockParam[] = [
+    { type: "text", text: opts.prompt },
+  ];
+  for (const img of opts.images ?? []) {
+    content.push({
+      type: "image",
+      source: { type: "base64", media_type: img.mediaType, data: img.data },
+    });
+  }
+
   const message = await getClient().messages.create(
     {
       model: opts.model || DEFAULT_MODEL,
       max_tokens: MAX_TOKENS,
       system: opts.system,
-      messages: [{ role: "user", content: opts.prompt }],
+      messages: [{ role: "user", content }],
     },
     { signal: opts.signal }
   );

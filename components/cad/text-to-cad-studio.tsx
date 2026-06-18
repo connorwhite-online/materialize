@@ -9,10 +9,12 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   DownloadIcon,
+  ImageIcon,
   Loader2Icon,
   PencilIcon,
   PlusIcon,
   RotateCwIcon,
+  XIcon,
 } from "lucide-react";
 import {
   recordCadFeedback,
@@ -53,6 +55,24 @@ export interface StudioThread {
   title: string | null;
   lastActivity: number;
   turns: StudioTurn[];
+}
+
+type ImageMediaType = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+const ALLOWED_IMAGE_TYPES: ImageMediaType[] = [
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+];
+const MAX_IMAGES = 4;
+
+interface AttachedImage {
+  id: string;
+  /** data: URL for the thumbnail. */
+  dataUrl: string;
+  /** base64 payload (no data: prefix) sent to the model. */
+  data: string;
+  mediaType: ImageMediaType;
 }
 
 function truncate(s: string, n = 40): string {
@@ -100,6 +120,8 @@ export function TextToCadStudio({
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
+  const [images, setImages] = useState<AttachedImage[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   // Abort an in-flight stream if the studio unmounts.
@@ -126,6 +148,7 @@ export function TextToCadStudio({
     setProgress([]);
     setError(null);
     setPrompt("");
+    setImages([]);
     setShowHistory(false);
     setRenaming(false);
   }
@@ -227,8 +250,43 @@ export function TextToCadStudio({
     }
     setViewTurnId(ev.generationId);
     // Clear the composer only now that the turn landed — on an error the
-    // user's typed instruction stays put so they can retry without retyping.
+    // user's typed instruction (and any attached refs) stay put to retry.
     setPrompt("");
+    setImages([]);
+  }
+
+  async function addFiles(files: FileList | File[] | null | undefined) {
+    if (!files) return;
+    const incoming = Array.from(files).filter((f) =>
+      ALLOWED_IMAGE_TYPES.includes(f.type as ImageMediaType)
+    );
+    for (const f of incoming) {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result));
+        r.onerror = reject;
+        r.readAsDataURL(f);
+      });
+      const comma = dataUrl.indexOf(",");
+      const data = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+      setImages((prev) =>
+        prev.length >= MAX_IMAGES
+          ? prev
+          : [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                dataUrl,
+                data,
+                mediaType: f.type as ImageMediaType,
+              },
+            ]
+      );
+    }
+  }
+
+  function removeImage(id: string) {
+    setImages((prev) => prev.filter((i) => i.id !== id));
   }
 
   async function submit() {
@@ -255,6 +313,9 @@ export function TextToCadStudio({
           // Revisions inherit the build's current name; new builds get an
           // agent-written one server-side.
           name: parentId && activeThread ? threadLabel(activeThread) : undefined,
+          images: images.length
+            ? images.map((i) => ({ data: i.data, mediaType: i.mediaType }))
+            : undefined,
         }),
         signal: controller.signal,
       });
@@ -587,32 +648,88 @@ export function TextToCadStudio({
       {/* Floating composer */}
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30">
         <div className="pointer-events-auto mx-auto max-w-3xl px-4 pb-4">
-          <div className="flex items-end gap-2 rounded-2xl border border-foreground/15 bg-card/95 p-2 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80">
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={(e) => {
-                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") submit();
-              }}
-              rows={1}
-              maxLength={2000}
-              disabled={generating}
-              placeholder={
-                activeThread
-                  ? "Describe a change… e.g. make it 2mm taller, add a lanyard hole"
-                  : "Describe a part… e.g. a parametric phone stand for a 7mm-thick phone"
-              }
-              className="max-h-40 min-h-[2.5rem] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none disabled:opacity-60"
-            />
-            <button
-              type="button"
-              onClick={submit}
-              disabled={generating || prompt.trim().length < 3}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
-            >
-              {generating && <Loader2Icon className="size-4 animate-spin" />}
-              {composerLabel}
-            </button>
+          <div
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (!generating) addFiles(e.dataTransfer.files);
+            }}
+            className="rounded-2xl border border-foreground/15 bg-card/95 p-2 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80"
+          >
+            {images.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-2 px-1">
+                {images.map((img) => (
+                  <div key={img.id} className="relative">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={img.dataUrl}
+                      alt="reference"
+                      className="h-12 w-12 rounded-md border border-foreground/10 object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeImage(img.id)}
+                      aria-label="Remove image"
+                      className="absolute -right-1.5 -top-1.5 flex size-4 items-center justify-center rounded-full bg-foreground text-background"
+                    >
+                      <XIcon className="size-2.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex items-end gap-2">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={generating || images.length >= MAX_IMAGES}
+                aria-label="Attach reference image"
+                title="Attach reference image"
+                className="flex size-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground hover:bg-foreground/5 hover:text-foreground disabled:opacity-40"
+              >
+                <ImageIcon className="size-4" />
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/gif,image/webp"
+                multiple
+                hidden
+                onChange={(e) => {
+                  addFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+              <textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") submit();
+                }}
+                onPaste={(e) => {
+                  const files = Array.from(e.clipboardData.files);
+                  if (files.length && !generating) addFiles(files);
+                }}
+                rows={1}
+                maxLength={2000}
+                disabled={generating}
+                placeholder={
+                  activeThread
+                    ? "Describe a change… e.g. make it 2mm taller, add a lanyard hole"
+                    : "Describe a part… e.g. a parametric phone stand for a 7mm-thick phone"
+                }
+                className="max-h-40 min-h-[2.5rem] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none disabled:opacity-60"
+              />
+              <button
+                type="button"
+                onClick={submit}
+                disabled={generating || prompt.trim().length < 3}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
+              >
+                {generating && <Loader2Icon className="size-4 animate-spin" />}
+                {composerLabel}
+              </button>
+            </div>
           </div>
           <p className="mt-1.5 px-2 text-center text-xs text-muted-foreground">
             {activeThread

@@ -7,6 +7,7 @@ import { logError } from "@/lib/logger";
 import { canUseTextToCad } from "@/lib/features";
 import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
 import { runHarness, type PriorFeedback } from "@/lib/cad/harness";
+import type { PromptImage } from "@/lib/cad/model-client";
 import {
   persistGenerationFailure,
   persistGenerationSuccess,
@@ -45,7 +46,12 @@ export async function POST(request: Request) {
     return new Response("Not found", { status: 404 });
   }
 
-  let body: { prompt?: string; parentGenerationId?: string; name?: string };
+  let body: {
+    prompt?: string;
+    parentGenerationId?: string;
+    name?: string;
+    images?: PromptImage[];
+  };
   try {
     body = await request.json();
   } catch {
@@ -59,6 +65,22 @@ export async function POST(request: Request) {
   if (prompt.length > 2000) {
     return new Response("Prompt is too long.", { status: 400 });
   }
+
+  // Sanitize reference images: allowed types only, capped count.
+  const ALLOWED_IMAGE_TYPES = [
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+  ];
+  const images: PromptImage[] = (body.images ?? [])
+    .filter(
+      (i) =>
+        i &&
+        typeof i.data === "string" &&
+        ALLOWED_IMAGE_TYPES.includes(i.mediaType)
+    )
+    .slice(0, 4);
 
   // When revising, load the parent's source to seed the harness — and verify
   // it belongs to the caller.
@@ -116,6 +138,7 @@ export async function POST(request: Request) {
           prompt,
           priorSourceCode,
           priorFeedback,
+          images: images.length ? images : undefined,
           signal: request.signal,
           onProgress: (event) => send(event),
         });
