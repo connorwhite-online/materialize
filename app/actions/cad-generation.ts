@@ -29,6 +29,11 @@ import {
   persistGenerationFailure,
   persistGenerationSuccess,
 } from "@/lib/cad/persist";
+import {
+  isCadFeedbackTag,
+  isCadRating,
+  type CadRating,
+} from "@/lib/cad/feedback";
 
 export type GenerateCadResult =
   | { error: string; generationId?: string }
@@ -213,5 +218,64 @@ export async function renameCadGeneration(input: {
   } catch (error) {
     logError("renameCadGeneration", error);
     return { error: "Rename failed. Please try again." };
+  }
+}
+
+export interface CadFeedbackInput {
+  generationId: string;
+  /** "good" | "bad" | null to clear. */
+  rating: CadRating | null;
+  /** Structured failure-mode tags; unknown tags are dropped. */
+  tags: string[];
+  note?: string | null;
+}
+
+/**
+ * Record (or update) the owner's feedback on a generation — the in-the-
+ * moment human eval signal surfaced on the scorecard at /text-to-cad/eval.
+ * Gated like every other text-to-CAD surface, and the WHERE clause pins
+ * userId so a caller can only rate their own rows. Idempotent.
+ */
+export async function recordCadFeedback(
+  input: CadFeedbackInput
+): Promise<{ ok: true } | { error: string }> {
+  const { userId } = await auth();
+  if (!userId) return { error: "Unauthorized" };
+
+  const user = (await currentUser()) as ClerkUserLike;
+  if (!canUseTextToCad(primaryEmail(user))) return { error: "Not found" };
+
+  const rating = isCadRating(input.rating) ? input.rating : null;
+  const tags = Array.from(
+    new Set((input.tags ?? []).filter(isCadFeedbackTag))
+  ).slice(0, 12);
+  const note = (input.note ?? "").trim().slice(0, 1000) || null;
+
+  try {
+    const updated = await db
+      .update(cadGenerations)
+      .set({
+        rating,
+        feedbackTags: tags,
+        feedbackNote: note,
+        feedbackAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(cadGenerations.id, input.generationId),
+          eq(cadGenerations.userId, userId)
+        )
+      )
+      .returning({ id: cadGenerations.id });
+
+    if (updated.length === 0) return { error: "Not found" };
+
+    revalidatePath("/text-to-cad");
+    revalidatePath("/text-to-cad/eval");
+    return { ok: true };
+  } catch (error) {
+    logError("recordCadFeedback", error);
+    return { error: "Could not save feedback." };
   }
 }

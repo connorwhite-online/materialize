@@ -1,6 +1,6 @@
 "use client";
 
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, useTransition } from "react";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import {
@@ -14,8 +14,18 @@ import {
   PlusIcon,
   RotateCwIcon,
 } from "lucide-react";
-import { renameCadGeneration } from "@/app/actions/cad-generation";
+import {
+  recordCadFeedback,
+  renameCadGeneration,
+} from "@/app/actions/cad-generation";
 import type { CadStreamEvent, CadProgressEvent } from "@/lib/cad/types";
+import {
+  CAD_FEEDBACK_TAGS,
+  CAD_FEEDBACK_TAG_LABELS,
+  type CadFeedbackTag,
+  type CadRating,
+} from "@/lib/cad/feedback";
+import { cn } from "@/lib/utils";
 
 // The 3D viewer pulls in three.js / react-three-fiber — lazy-load it so the
 // studio shell (and its bundle) stays light until a model is on screen.
@@ -33,6 +43,9 @@ export interface StudioTurn {
   fileAssetId: string | null;
   sourceCode: string | null;
   error: string | null;
+  rating: CadRating | null;
+  feedbackTags: string[];
+  feedbackNote: string | null;
 }
 
 export interface StudioThread {
@@ -157,6 +170,20 @@ export function TextToCadStudio({
     setRenaming(false);
   }
 
+  // Reflect a saved feedback edit into the in-memory threads so the panel
+  // and history stay consistent without a refetch.
+  function applyFeedback(
+    turnId: string,
+    patch: Pick<StudioTurn, "rating" | "feedbackTags" | "feedbackNote">
+  ) {
+    setThreads((prev) =>
+      prev.map((t) => ({
+        ...t,
+        turns: t.turns.map((x) => (x.id === turnId ? { ...x, ...patch } : x)),
+      }))
+    );
+  }
+
   function applyDone(
     ev: Extract<CadStreamEvent, { type: "done" }>,
     submittedPrompt: string,
@@ -170,6 +197,9 @@ export function TextToCadStudio({
       fileAssetId: ev.fileAssetId,
       sourceCode: ev.sourceCode,
       error: null,
+      rating: null,
+      feedbackTags: [],
+      feedbackNote: null,
     };
     const now = Date.now();
 
@@ -406,6 +436,15 @@ export function TextToCadStudio({
                 Download STL
               </a>
             </div>
+          )}
+
+          {/* Feedback — the in-the-moment eval signal (feeds /text-to-cad/eval) */}
+          {!generating && viewedTurn?.status === "succeeded" && (
+            <TurnFeedback
+              key={viewedTurn.id}
+              turn={viewedTurn}
+              onSaved={(patch) => applyFeedback(viewedTurn.id, patch)}
+            />
           )}
 
           {/* Revision history — collapsed until opened */}
@@ -682,4 +721,138 @@ function describeEvent(ev: CadProgressEvent): {
         tone: "text-foreground",
       };
   }
+}
+
+/**
+ * Per-turn feedback widget — the in-the-moment human eval signal. Seeded
+ * from the turn (remounted via `key` when the viewed turn changes), saves
+ * through recordCadFeedback, and reports saved values up so the in-memory
+ * threads stay in sync. Rolls up on /text-to-cad/eval.
+ */
+function TurnFeedback({
+  turn,
+  onSaved,
+}: {
+  turn: StudioTurn;
+  onSaved: (
+    patch: Pick<StudioTurn, "rating" | "feedbackTags" | "feedbackNote">
+  ) => void;
+}) {
+  const [rating, setRating] = useState<CadRating | null>(turn.rating);
+  const [tags, setTags] = useState<CadFeedbackTag[]>(
+    turn.feedbackTags.filter((t): t is CadFeedbackTag =>
+      (CAD_FEEDBACK_TAGS as readonly string[]).includes(t)
+    )
+  );
+  const [note, setNote] = useState(turn.feedbackNote ?? "");
+  const [saved, setSaved] = useState(false);
+  const [saving, startSaving] = useTransition();
+
+  function toggleTag(tag: CadFeedbackTag) {
+    setSaved(false);
+    setTags((t) => (t.includes(tag) ? t.filter((x) => x !== tag) : [...t, tag]));
+  }
+
+  function save() {
+    startSaving(async () => {
+      const res = await recordCadFeedback({
+        generationId: turn.id,
+        rating,
+        tags,
+        note,
+      });
+      if ("ok" in res) {
+        setSaved(true);
+        onSaved({
+          rating,
+          feedbackTags: tags,
+          feedbackNote: note.trim() || null,
+        });
+      }
+    });
+  }
+
+  return (
+    <div className="mt-5 rounded-lg border border-foreground/10 p-3">
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-medium text-muted-foreground">
+          How did it do?
+        </span>
+        <button
+          type="button"
+          aria-pressed={rating === "good"}
+          onClick={() => {
+            setSaved(false);
+            setRating((r) => (r === "good" ? null : "good"));
+          }}
+          className={cn(
+            "rounded-md border px-2 py-1 text-sm",
+            rating === "good"
+              ? "border-foreground/40 bg-foreground/5"
+              : "border-foreground/15"
+          )}
+        >
+          👍
+        </button>
+        <button
+          type="button"
+          aria-pressed={rating === "bad"}
+          onClick={() => {
+            setSaved(false);
+            setRating((r) => (r === "bad" ? null : "bad"));
+          }}
+          className={cn(
+            "rounded-md border px-2 py-1 text-sm",
+            rating === "bad"
+              ? "border-foreground/40 bg-foreground/5"
+              : "border-foreground/15"
+          )}
+        >
+          👎
+        </button>
+      </div>
+
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {CAD_FEEDBACK_TAGS.map((tag) => (
+          <button
+            key={tag}
+            type="button"
+            aria-pressed={tags.includes(tag)}
+            onClick={() => toggleTag(tag)}
+            className={cn(
+              "rounded-full border px-2 py-0.5 text-xs",
+              tags.includes(tag)
+                ? "border-foreground/40 bg-foreground/5"
+                : "border-foreground/15 text-muted-foreground"
+            )}
+          >
+            {CAD_FEEDBACK_TAG_LABELS[tag]}
+          </button>
+        ))}
+      </div>
+
+      <input
+        value={note}
+        onChange={(e) => {
+          setSaved(false);
+          setNote(e.target.value);
+        }}
+        maxLength={1000}
+        placeholder="Optional note…"
+        className="mt-2 w-full rounded-md border border-foreground/15 bg-card px-2 py-1 text-xs outline-none focus:border-foreground/30"
+      />
+
+      <div className="mt-2 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving}
+          className="rounded-md border border-foreground/15 px-3 py-1 text-xs font-medium disabled:opacity-50"
+        >
+          {saving ? "Saving…" : "Save feedback"}
+        </button>
+        {saved && <span className="text-xs text-muted-foreground">Saved ✓</span>}
+      </div>
+    </div>
+  );
 }

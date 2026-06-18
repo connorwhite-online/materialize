@@ -8,6 +8,7 @@ import { withDbRetry } from "@/lib/db/retry";
 import { cadGenerations } from "@/lib/db/schema";
 import { generateDownloadUrl } from "@/lib/storage";
 import { canUseTextToCad } from "@/lib/features";
+import { isCadRating } from "@/lib/cad/feedback";
 import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
 import {
   TextToCadStudio,
@@ -41,6 +42,9 @@ export default async function TextToCadPage() {
         sourceCode: cadGenerations.sourceCode,
         parentGenerationId: cadGenerations.parentGenerationId,
         error: cadGenerations.error,
+        rating: cadGenerations.rating,
+        feedbackTags: cadGenerations.feedbackTags,
+        feedbackNote: cadGenerations.feedbackNote,
         createdAt: cadGenerations.createdAt,
       })
       .from(cadGenerations)
@@ -65,6 +69,9 @@ export default async function TextToCadPage() {
       fileAssetId: r.fileAssetId,
       sourceCode: r.sourceCode,
       error: r.error,
+      rating: isCadRating(r.rating) ? r.rating : null,
+      feedbackTags: r.feedbackTags ?? [],
+      feedbackNote: r.feedbackNote,
       parentGenerationId: r.parentGenerationId,
       title: r.title,
       createdAt: r.createdAt.getTime(),
@@ -108,6 +115,9 @@ export default async function TextToCadPage() {
           fileAssetId: m.fileAssetId,
           sourceCode: m.sourceCode,
           error: m.error,
+          rating: m.rating,
+          feedbackTags: m.feedbackTags,
+          feedbackNote: m.feedbackNote,
         })),
       };
     })
