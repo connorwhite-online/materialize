@@ -150,6 +150,7 @@ export async function persistGenerationSuccess(opts: {
       attempts: result.attempts,
       fileAssetId: draft.fileAssetId,
       renderStorageKey,
+      aestheticScore: result.aestheticScore ?? null,
       ...(isRoot ? { title } : {}),
       updatedAt: new Date(),
     })
