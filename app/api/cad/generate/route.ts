@@ -6,7 +6,7 @@ import { cadGenerations } from "@/lib/db/schema";
 import { logError } from "@/lib/logger";
 import { canUseTextToCad } from "@/lib/features";
 import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
-import { runHarness } from "@/lib/cad/harness";
+import { runHarness, type PriorFeedback } from "@/lib/cad/harness";
 import {
   persistGenerationFailure,
   persistGenerationSuccess,
@@ -63,11 +63,15 @@ export async function POST(request: Request) {
   // When revising, load the parent's source to seed the harness — and verify
   // it belongs to the caller.
   let priorSourceCode: string | null = null;
+  let priorFeedback: PriorFeedback | null = null;
   if (body.parentGenerationId) {
     const [parent] = await db
       .select({
         sourceCode: cadGenerations.sourceCode,
         userId: cadGenerations.userId,
+        rating: cadGenerations.rating,
+        feedbackTags: cadGenerations.feedbackTags,
+        feedbackNote: cadGenerations.feedbackNote,
       })
       .from(cadGenerations)
       .where(eq(cadGenerations.id, body.parentGenerationId))
@@ -76,6 +80,12 @@ export async function POST(request: Request) {
       return new Response("Original model not found.", { status: 404 });
     }
     priorSourceCode = parent.sourceCode;
+    // Carry the parent's feedback into the revision so the model corrects it.
+    priorFeedback = {
+      rating: parent.rating,
+      tags: parent.feedbackTags,
+      note: parent.feedbackNote,
+    };
   }
 
   const isRoot = !body.parentGenerationId;
@@ -105,6 +115,7 @@ export async function POST(request: Request) {
         const result = await runHarness({
           prompt,
           priorSourceCode,
+          priorFeedback,
           signal: request.signal,
           onProgress: (event) => send(event),
         });
