@@ -177,6 +177,8 @@ export async function POST(request: Request) {
           renderUrl: persisted.renderUrl,
           sourceCode: persisted.sourceCode,
           title: persisted.title,
+          parts: persisted.parts,
+          projectSlug: persisted.projectSlug,
         });
       } catch (error) {
         // A client disconnect aborts the request signal — not a real failure.

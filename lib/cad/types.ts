@@ -92,6 +92,10 @@ export interface CadDoneEvent {
   sourceCode: string;
   /** Thread title — non-null only for a thread's first (root) generation. */
   title: string | null;
+  /** Present (length > 1) when the result was a multi-part assembly. */
+  parts?: { name: string; fileAssetId: string; fileSlug: string }[];
+  /** Slug of the Project bundling an assembly's parts, when created. */
+  projectSlug?: string | null;
 }
 
 /** Full event union carried over the SSE stream from /api/cad/generate. */

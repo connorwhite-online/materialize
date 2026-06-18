@@ -37,6 +37,11 @@ const ModelViewer = lazy(() =>
   }))
 );
 
+export interface StudioPart {
+  name: string;
+  fileAssetId: string;
+}
+
 export interface StudioTurn {
   id: string;
   prompt: string;
@@ -48,6 +53,10 @@ export interface StudioTurn {
   rating: CadRating | null;
   feedbackTags: string[];
   feedbackNote: string | null;
+  /** Multi-part assembly members (length > 1); empty for a single solid. */
+  parts: StudioPart[];
+  /** Project bundling an assembly's parts, when one was created. */
+  projectSlug: string | null;
 }
 
 export interface StudioThread {
@@ -121,6 +130,7 @@ export function TextToCadStudio({
   const [nameDraft, setNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
   const [images, setImages] = useState<AttachedImage[]>([]);
+  const [selectedPartId, setSelectedPartId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -140,6 +150,14 @@ export function TextToCadStudio({
     [...turns].reverse().find((t) => t.status === "succeeded" && t.fileAssetId) ??
     null;
 
+  // For an assembly, the viewer/print/download act on the selected part; for a
+  // single solid (or a stale selection) fall back to the turn's primary asset.
+  const viewedParts = viewedTurn?.parts ?? [];
+  const activeAssetId =
+    viewedParts.find((p) => p.fileAssetId === selectedPartId)?.fileAssetId ??
+    viewedTurn?.fileAssetId ??
+    null;
+
   function startNewBuild() {
     abortRef.current?.abort();
     setGenerating(false);
@@ -149,6 +167,7 @@ export function TextToCadStudio({
     setError(null);
     setPrompt("");
     setImages([]);
+    setSelectedPartId(null);
     setShowHistory(false);
     setRenaming(false);
   }
@@ -162,6 +181,7 @@ export function TextToCadStudio({
     setViewTurnId(lastGood?.id ?? null);
     setProgress([]);
     setError(null);
+    setSelectedPartId(null);
     setShowHistory(false);
     setRenaming(false);
   }
@@ -223,6 +243,8 @@ export function TextToCadStudio({
       rating: null,
       feedbackTags: [],
       feedbackNote: null,
+      parts: ev.parts ?? [],
+      projectSlug: ev.projectSlug ?? null,
     };
     const now = Date.now();
 
@@ -448,11 +470,11 @@ export function TextToCadStudio({
             <div className="aspect-square w-full bg-muted/30">
               {generating ? (
                 <ProgressPanel events={progress} />
-              ) : viewedTurn?.fileAssetId ? (
+              ) : activeAssetId ? (
                 <Suspense fallback={<ViewerSkeleton label="Loading model…" />}>
                   <ModelViewer
-                    key={viewedTurn.fileAssetId}
-                    modelUrl={`/api/files/preview/${viewedTurn.fileAssetId}`}
+                    key={activeAssetId}
+                    modelUrl={`/api/files/preview/${activeAssetId}`}
                     format="stl"
                     mode="detail"
                     showZoomControls
@@ -472,31 +494,69 @@ export function TextToCadStudio({
             </div>
           </div>
 
+          {/* Assembly part selector — switch which part the viewer/actions
+              target. Shown only for multi-part builds. */}
+          {!generating && viewedParts.length > 1 && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="text-xs text-muted-foreground">
+                {viewedParts.length} parts:
+              </span>
+              {viewedParts.map((p) => {
+                const isActive = p.fileAssetId === activeAssetId;
+                return (
+                  <button
+                    key={p.fileAssetId}
+                    type="button"
+                    onClick={() => setSelectedPartId(p.fileAssetId)}
+                    className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                      isActive
+                        ? "border-foreground/30 bg-foreground/5 text-foreground"
+                        : "border-foreground/10 text-muted-foreground hover:bg-foreground/5"
+                    }`}
+                  >
+                    {p.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {error && (
             <p className="mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {error}
             </p>
           )}
 
-          {/* Actions for the viewed model */}
-          {!generating && viewedTurn?.fileAssetId && (
+          {/* Actions for the viewed model (the selected part, for assemblies) */}
+          {!generating && activeAssetId && (
             <div className="mt-4 flex flex-wrap gap-3">
               <Link
-                href={`/print/${viewedTurn.fileAssetId}`}
+                href={`/print/${activeAssetId}`}
                 className="rounded-lg bg-foreground px-4 py-2 text-sm font-medium text-background"
               >
-                Print this model
+                {viewedParts.length > 1 ? "Print this part" : "Print this model"}
               </Link>
               <a
-                href={`/api/files/preview/${viewedTurn.fileAssetId}`}
+                href={`/api/files/preview/${activeAssetId}`}
                 download={`${
-                  activeThread ? threadLabel(activeThread) : "model"
+                  (viewedParts.length > 1
+                    ? viewedParts.find((p) => p.fileAssetId === activeAssetId)
+                        ?.name
+                    : activeThread && threadLabel(activeThread)) || "model"
                 }.stl`}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-foreground/15 px-4 py-2 text-sm hover:bg-foreground/5"
               >
                 <DownloadIcon className="size-4" />
                 Download STL
               </a>
+              {viewedTurn?.projectSlug && (
+                <Link
+                  href={`/projects/${viewedTurn.projectSlug}`}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-foreground/15 px-4 py-2 text-sm hover:bg-foreground/5"
+                >
+                  Open assembly project
+                </Link>
+              )}
             </div>
           )}
 
