@@ -6,11 +6,11 @@
     },
     {
       "path": "/api/cron/sweep-fingerprint-stragglers",
-      "schedule": "0 * * * *"
+      "schedule": "0 */6 * * *"
     },
     {
       "path": "/api/cron/retry-failed-refunds",
-      "schedule": "0 * * * *"
+      "schedule": "0 */6 * * *"
     },
     {
       "path": "/api/cron/reconcile-production-payments",

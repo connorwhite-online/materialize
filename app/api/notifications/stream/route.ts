@@ -6,12 +6,16 @@ import { notifications } from "@/lib/db/schema";
 import { logError } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
-// Hold the SSE stream open up to ~25s (see STREAM_TTL_MS); 60s is the
-// platform ceiling so we have headroom if ever needed.
+// Hold the SSE stream open up to ~55s (see STREAM_TTL_MS); 60s is the
+// platform ceiling so we keep ~5s headroom before the platform kills
+// it. Longer-lived connections mean each tab reconnects (and re-runs
+// loadSnapshot + re-issues LISTEN) less than half as often, which cuts
+// the per-tab Neon query churn roughly in half with no UX change — the
+// heartbeat keeps the connection healthy across the longer window.
 export const maxDuration = 60;
 
 const RECENT_LIMIT = 20;
-const STREAM_TTL_MS = 25_000;
+const STREAM_TTL_MS = 55_000;
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const RECONNECT_HINT_MS = 3_000;
 
