@@ -1,9 +1,13 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { currentUser } from "@clerk/nextjs/server";
 import {
   isTextToCadEnabled,
   emailHasTextToCadAccess,
   canUseTextToCad,
+  resolveTextToCadAccess,
 } from "@/lib/features";
+
+type CurrentUserResult = Awaited<ReturnType<typeof currentUser>>;
 
 // These functions read process.env at call time, so each test sets the
 // env it needs and we restore afterwards. No module mocking required.
@@ -74,4 +78,57 @@ describe("canUseTextToCad (both gates AND-ed)", () => {
       expect(canUseTextToCad(email)).toBe(expected);
     }
   );
+});
+
+/**
+ * Regression: the unguarded `currentUser()` in app/(app)/layout.tsx
+ * threw the Clerk "can't detect usage of clerkMiddleware()" error
+ * (Sentry 7488668107) and 500'd every authed page once
+ * TEXT_TO_CAD_ENABLED was flipped on in production. The sibling
+ * `getMyUnreadNotificationCount` already guards `auth()`; this gate
+ * must fail closed the same way.
+ */
+describe("resolveTextToCadAccess", () => {
+  it("never calls currentUser() when the kill switch is off", async () => {
+    delete process.env.TEXT_TO_CAD_ENABLED;
+    process.env.TEXT_TO_CAD_ALLOWED_EMAILS = "a@x.com";
+    vi.mocked(currentUser).mockClear();
+
+    await expect(resolveTextToCadAccess()).resolves.toBe(false);
+    expect(currentUser).not.toHaveBeenCalled();
+  });
+
+  it("returns false (does not throw) when currentUser() throws the Clerk middleware-context error", async () => {
+    process.env.TEXT_TO_CAD_ENABLED = "true";
+    process.env.TEXT_TO_CAD_ALLOWED_EMAILS = "a@x.com";
+    vi.mocked(currentUser).mockRejectedValueOnce(
+      new Error(
+        "Clerk: auth() was called but Clerk can't detect usage of clerkMiddleware()."
+      )
+    );
+
+    await expect(resolveTextToCadAccess()).resolves.toBe(false);
+  });
+
+  it("grants access when the flag is on and the email is allow-listed", async () => {
+    process.env.TEXT_TO_CAD_ENABLED = "true";
+    process.env.TEXT_TO_CAD_ALLOWED_EMAILS = "owner@x.com";
+    vi.mocked(currentUser).mockResolvedValueOnce({
+      primaryEmailAddressId: "e1",
+      emailAddresses: [{ id: "e1", emailAddress: "owner@x.com" }],
+    } as unknown as CurrentUserResult);
+
+    await expect(resolveTextToCadAccess()).resolves.toBe(true);
+  });
+
+  it("denies a signed-in user whose email is not allow-listed", async () => {
+    process.env.TEXT_TO_CAD_ENABLED = "true";
+    process.env.TEXT_TO_CAD_ALLOWED_EMAILS = "owner@x.com";
+    vi.mocked(currentUser).mockResolvedValueOnce({
+      primaryEmailAddressId: "e1",
+      emailAddresses: [{ id: "e1", emailAddress: "stranger@y.com" }],
+    } as unknown as CurrentUserResult);
+
+    await expect(resolveTextToCadAccess()).resolves.toBe(false);
+  });
 });

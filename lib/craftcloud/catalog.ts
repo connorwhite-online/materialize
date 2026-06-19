@@ -150,35 +150,50 @@ export interface CraftCloudCatalog {
 let cachedCatalog: CraftCloudCatalog | null = null;
 let cachedProviders: Map<string, Provider> | null = null;
 
-async function fetchCatalogJson(): Promise<CatalogResponse> {
-  const res = await fetch(`${CUSTOMER_API_BASE}/material-catalog`, {
-    // Next.js data cache — shared across requests, revalidates daily.
-    next: { revalidate: CATALOG_TTL_SECONDS },
-    headers: {
-      // Without a reasonable UA the edge sometimes serves a challenge.
-      "User-Agent":
-        "Mozilla/5.0 (compatible; MaterializeServer/1.0; +https://materialize.cc)",
-      Accept: "application/json",
-    },
-  });
-  if (!res.ok) {
-    throw new Error(`material-catalog fetch failed: ${res.status}`);
+// CraftCloud's edge intermittently serves a 403/429 challenge to
+// datacenter IPs — most visibly during `next build`, where a single
+// cold prerender fetch from a Vercel build IP can be challenged and
+// 403 even though the endpoint needs no auth. A couple of quick
+// retries clear the transient challenge; a persistent failure still
+// throws so callers (and the strict quote path) see the real outage.
+const FETCH_RETRY_STATUSES = new Set([403, 429, 500, 502, 503, 504]);
+const FETCH_MAX_ATTEMPTS = 3;
+
+async function fetchCatalogResource(
+  path: string,
+  label: string
+): Promise<Response> {
+  let lastStatus = 0;
+  for (let attempt = 1; attempt <= FETCH_MAX_ATTEMPTS; attempt++) {
+    const res = await fetch(`${CUSTOMER_API_BASE}${path}`, {
+      // Next.js data cache — shared across requests, revalidates daily.
+      next: { revalidate: CATALOG_TTL_SECONDS },
+      headers: {
+        // Without a reasonable UA the edge sometimes serves a challenge.
+        "User-Agent":
+          "Mozilla/5.0 (compatible; MaterializeServer/1.0; +https://materialize.cc)",
+        Accept: "application/json",
+      },
+    });
+    if (res.ok) return res;
+    lastStatus = res.status;
+    if (!FETCH_RETRY_STATUSES.has(res.status)) break;
+    if (attempt < FETCH_MAX_ATTEMPTS) {
+      // Short linear backoff (150ms, 300ms). The challenge clears
+      // almost immediately, so we don't need long waits.
+      await new Promise((r) => setTimeout(r, 150 * attempt));
+    }
   }
+  throw new Error(`${label} fetch failed: ${lastStatus}`);
+}
+
+async function fetchCatalogJson(): Promise<CatalogResponse> {
+  const res = await fetchCatalogResource("/material-catalog", "material-catalog");
   return (await res.json()) as CatalogResponse;
 }
 
 async function fetchProvidersJson(): Promise<Provider[]> {
-  const res = await fetch(`${CUSTOMER_API_BASE}/provider`, {
-    next: { revalidate: CATALOG_TTL_SECONDS },
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (compatible; MaterializeServer/1.0; +https://materialize.cc)",
-      Accept: "application/json",
-    },
-  });
-  if (!res.ok) {
-    throw new Error(`provider fetch failed: ${res.status}`);
-  }
+  const res = await fetchCatalogResource("/provider", "provider");
   return (await res.json()) as Provider[];
 }
 
