@@ -128,6 +128,8 @@ When an issue has a genuine fork the maintainer should own — a policy choice, 
 
 The `Needs Decision` label is also applied to anything else genuinely waiting on the maintainer — an open PR pending their review, a verification only they can run — and removed once they act. It is the maintainer's single filterable inbox of "what needs me." (A real workflow *state* can't be created via the Linear API; if the maintainer adds a `Needs Decision` workflow state in Team Settings → Workflow, use that instead and move issues into/out of it.)
 
+**Hard rule — no bare asks.** Whenever the `Needs Decision` label goes on (audit fork, PR review, or verification), the issue MUST carry a decision block the maintainer can act on without opening the code: **numbered options, each with its concrete tradeoff, and one explicitly recommended option** (default first). "Please look at this" / "what do you think?" is not a decision — if you can't frame the choices and pick a recommendation, the issue isn't ready for the label. Even a review ask gets framed as options ("merge as-is / change approach X / defer because Y — recommend …").
+
 This is the no-stall path: ambiguous work waits on a comment, not on a live back-and-forth, and gets picked up automatically on the next go. Prefer it over either guessing (risks shipping the wrong call) or interrupting the maintainer mid-wave.
 
 ## Daily routine (unattended)
