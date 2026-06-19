@@ -13,14 +13,23 @@ interface Props {
   className?: string;
 }
 
+/** How often the dot re-checks the unread count while the tab is visible. */
+const POLL_INTERVAL_MS = 90_000;
+
 /**
  * UserAvatar with a small unread-notification dot in the top-right.
- * Subscribes to /api/notifications/stream so the dot reflects new
- * notifications in real time. Same SSE transport as the prior bell;
- * we just listen for snapshots and read `unreadCount` off them.
+ * Polls /api/notifications/unread-count every POLL_INTERVAL_MS so the
+ * dot reflects new notifications without holding any persistent
+ * connection.
  *
- * The connection is closed while the tab is hidden so a backgrounded
- * tab doesn't hold an open stream — matches the bell's prior pattern.
+ * This replaced an SSE/LISTEN stream: that kept an open Postgres
+ * connection per visible tab, preventing Neon from auto-suspending the
+ * whole time anyone had the app open. Polling lets the DB sleep
+ * between checks; the cost is up to one interval of badge latency.
+ *
+ * Polling is paused while the tab is hidden (no wasted requests on a
+ * backgrounded tab) and fires once immediately on becoming visible so
+ * a returning user sees a fresh count right away.
  */
 export function AvatarWithUnreadDot({
   initialUnreadCount,
@@ -36,50 +45,57 @@ export function AvatarWithUnreadDot({
   }, [initialUnreadCount]);
 
   useEffect(() => {
-    if (typeof window === "undefined" || typeof EventSource === "undefined") {
-      return;
-    }
-    let es: EventSource | null = null;
+    if (typeof window === "undefined") return;
     let cancelled = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
 
-    const open = () => {
-      if (cancelled || es) return;
+    const refresh = async () => {
+      if (cancelled) return;
       if (typeof document !== "undefined" && document.hidden) return;
-      es = new EventSource("/api/notifications/stream", {
-        withCredentials: true,
-      });
-      es.onmessage = (ev) => {
-        try {
-          const data = JSON.parse(ev.data) as { unreadCount: number };
-          if (typeof data.unreadCount === "number") {
-            setUnreadCount(data.unreadCount);
-          }
-        } catch {
-          // Malformed frame — skip; next snapshot overrides.
+      try {
+        const res = await fetch("/api/notifications/unread-count", {
+          credentials: "same-origin",
+          cache: "no-store",
+        });
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { unreadCount?: number };
+        if (!cancelled && typeof data.unreadCount === "number") {
+          setUnreadCount(data.unreadCount);
         }
-      };
+      } catch {
+        // Transient network failure — the next tick retries.
+      }
     };
 
-    const close = () => {
-      if (es) {
-        es.close();
-        es = null;
+    const start = () => {
+      if (timer) return;
+      timer = setInterval(refresh, POLL_INTERVAL_MS);
+    };
+    const stop = () => {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
       }
     };
 
     const onVisibility = () => {
       if (typeof document === "undefined") return;
-      if (document.hidden) close();
-      else open();
+      if (document.hidden) {
+        stop();
+      } else {
+        // Catch up immediately, then resume the interval.
+        void refresh();
+        start();
+      }
     };
 
     document.addEventListener("visibilitychange", onVisibility);
-    open();
+    start();
 
     return () => {
       cancelled = true;
       document.removeEventListener("visibilitychange", onVisibility);
-      close();
+      stop();
     };
   }, []);
 
