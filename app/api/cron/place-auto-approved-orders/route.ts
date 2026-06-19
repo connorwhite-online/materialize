@@ -54,6 +54,20 @@ export async function GET(request: Request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Agent-initiated ordering (CON-152) is experimental and OFF by
+  // default (MATERIALIZE_AGENT_BILLING_ENABLED). When it's off, no
+  // order can ever reach `auto_approved` (the auto path is gated on
+  // the same switch), so this sweep has nothing to do — return before
+  // touching the database. This matters for cost: a per-minute cron
+  // that queries Neon on every tick prevents the database from
+  // scaling to zero and burns the entire free-tier compute quota.
+  // The schedule is also removed from vercel.json while the feature
+  // is dark; this guard makes re-adding it safe (it self-resumes the
+  // moment the switch is flipped on).
+  if (process.env.MATERIALIZE_AGENT_BILLING_ENABLED !== "true") {
+    return Response.json({ skipped: "agent billing disabled" });
+  }
+
   try {
     const now = new Date();
 

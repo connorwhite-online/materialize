@@ -60,6 +60,10 @@ import { GET } from "../route";
 
 beforeEach(() => {
   process.env.CRON_SECRET = "test-secret";
+  // The sweep is gated behind the agent-billing kill switch; enable it
+  // so the placement-logic tests below exercise the DB path. The
+  // "skips when disabled" test clears it explicitly.
+  process.env.MATERIALIZE_AGENT_BILLING_ENABLED = "true";
   claimReturn = [];
   stuckSelectReturn = [];
   handlerMock.mockReset();
@@ -88,6 +92,21 @@ describe("place-auto-approved-orders cron", () => {
     delete process.env.CRON_SECRET;
     const res = await GET(makeRequest("Bearer anything"));
     expect(res.status).toBe(500);
+  });
+
+  it("skips (no DB touch) when agent billing is disabled", async () => {
+    delete process.env.MATERIALIZE_AGENT_BILLING_ENABLED;
+    // If the guard didn't short-circuit, the handler would be reachable
+    // for any claimed row — assert it's never called and the body marks
+    // the skip. This is the cost guard: no DB query on a per-invocation
+    // basis when the experimental feature is off.
+    claimReturn = [{ id: "would-place" }];
+
+    const res = await GET(makeRequest("Bearer test-secret"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ skipped: "agent billing disabled" });
+    expect(handlerMock).not.toHaveBeenCalled();
   });
 
   it("returns 200 with zero work when no rows are due", async () => {
