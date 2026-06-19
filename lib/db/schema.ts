@@ -237,6 +237,19 @@ export const users = pgTable("users", {
   // route.ts`) looks up the user by stripeAccountId only — without
   // this every Connect account event scans the full users table.
   index("users_stripe_account_id_idx").on(table.stripeAccountId),
+  // Trigram GIN indexes powering the global search ILIKE on
+  // username/displayName (app/api/search). Without these, every
+  // substring search is a sequential scan; pg_trgm's gin_trgm_ops
+  // supports both LIKE and ILIKE. The pg_trgm extension is created in
+  // the same migration.
+  index("users_username_trgm_idx").using(
+    "gin",
+    sql`${table.username} gin_trgm_ops`
+  ),
+  index("users_display_name_trgm_idx").using(
+    "gin",
+    sql`${table.displayName} gin_trgm_ops`
+  ),
 ]);
 
 export const files = pgTable("files", {
@@ -304,6 +317,10 @@ export const files = pgTable("files", {
   index("files_slug_idx").on(table.slug),
   index("files_flagged_at_idx").on(table.flaggedAt),
   index("files_category_idx").on(table.category),
+  // Trigram GIN index for the global search ILIKE on files.name
+  // (app/api/search) — turns substring search from a seq scan into an
+  // index scan. pg_trgm extension created in the same migration.
+  index("files_name_trgm_idx").using("gin", sql`${table.name} gin_trgm_ops`),
   // Partial composite indexes for the hot browse queries (CON-167).
   // The WHERE clause restricts the index to publicly visible rows so
   // it stays small and the planner can use it without a residual filter.
@@ -386,6 +403,11 @@ export const projects = pgTable("projects", {
   index("projects_status_idx").on(table.status),
   index("projects_slug_idx").on(table.slug),
   index("projects_category_idx").on(table.category),
+  // Trigram GIN index for the global search ILIKE on projects.name.
+  index("projects_name_trgm_idx").using(
+    "gin",
+    sql`${table.name} gin_trgm_ops`
+  ),
   // Partial composite index for the hot browse query (CON-167).
   // Mirrors the files partial index: category browse + created_at sort
   // on the publicly visible subset.
@@ -833,6 +855,11 @@ export const collections = pgTable("collections", {
   index("collections_organization_id_idx").on(table.organizationId),
   index("collections_slug_idx").on(table.slug),
   index("collections_category_idx").on(table.category),
+  // Trigram GIN index for the global search ILIKE on collections.name.
+  index("collections_name_trgm_idx").using(
+    "gin",
+    sql`${table.name} gin_trgm_ops`
+  ),
   // Partial composite index for the hot browse query (CON-167).
   // Collections only filter on visibility (no status column), so the
   // WHERE clause is narrower than the files/projects equivalents.
