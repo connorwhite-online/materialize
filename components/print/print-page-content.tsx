@@ -298,7 +298,10 @@ export function PrintPageContent({
       )}
 
       <div className="grid items-start gap-8 lg:grid-cols-3">
-        <div className="lg:col-span-2">
+        {/* min-w-0 so the recent-files carousel's overflow-x-auto
+            scrolls inside the column instead of blowing out the grid
+            track and forcing horizontal page scroll on mobile. */}
+        <div className="min-w-0 lg:col-span-2">
           {isActive && picked ? (
             <ActiveColumn
               picked={picked}
@@ -339,7 +342,7 @@ export function PrintPageContent({
             />
           )}
         </div>
-        <div className="lg:sticky lg:top-6">
+        <div className="min-w-0 lg:sticky lg:top-6">
           <CartSlotStack expandedVendorId={expandedVendorId} />
         </div>
       </div>
