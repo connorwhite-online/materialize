@@ -125,16 +125,15 @@ export function MainMenuTrigger({
           className="-ml-2 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 leading-none transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         >
           {label === null ? (
-            // Wordmark mode — own profile (authed home) and any
-            // path we don't have a label for. PPFuji's caps occupy
-            // the upper portion of the em-box, so items-center on
-            // the flex misaligns the wordmark against the caret's
-            // geometric center; nudge it up to match the visual
-            // midline.
+            // Wordmark mode — own profile (authed home) and any path we
+            // don't have a label for. Lowercase PP Frama Black; the DOM
+            // text stays "Materialize" (a11y / SEO) and `lowercase`
+            // renders it as "materialize".
             <span
-              className="text-xl tracking-tight bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-transparent leading-none -translate-y-[2px]"
+              className="text-xl lowercase tracking-tight bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-transparent leading-none"
               style={{
-                fontFamily: "var(--font-display), system-ui, sans-serif",
+                fontFamily: "var(--font-frama-black), system-ui, sans-serif",
+                fontWeight: 900,
               }}
             >
               Materialize
@@ -217,8 +216,11 @@ export function MainMenuSidebar({
       <div className="flex items-center justify-between gap-2 px-2 py-1">
         <Link
           href="/"
-          className="text-xl tracking-tight bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-transparent leading-none -translate-y-[2px]"
-          style={{ fontFamily: "var(--font-display), system-ui, sans-serif" }}
+          className="text-xl lowercase tracking-tight bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-transparent leading-none"
+          style={{
+            fontFamily: "var(--font-frama-black), system-ui, sans-serif",
+            fontWeight: 900,
+          }}
         >
           Materialize
         </Link>
