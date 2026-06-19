@@ -128,6 +128,26 @@ When an issue has a genuine fork the maintainer should own — a policy choice, 
 
 This is the no-stall path: ambiguous work waits on a comment, not on a live back-and-forth, and gets picked up automatically on the next go. Prefer it over either guessing (risks shipping the wrong call) or interrupting the maintainer mid-wave.
 
+## Daily routine (unattended)
+
+`daily` is the scheduled trigger's invocation — it runs the whole loop end-to-end with **no human in the loop**. Standing order of operations, every run:
+
+1. **Reconcile first — keep Linear honest.** Before any new work, sweep the board against the code. This is non-negotiable board hygiene, because issues drift to fixed-but-unmarked fast:
+   - Recently-merged PRs → move their issues to `Done`.
+   - Every `In Progress` and `Todo` issue: open the cited code. If the finding is already fixed, close it (`Done` if it shipped, `Canceled`/`Duplicate` with a one-line reason if it was fixed independently or is obsolete). If in-scope files drifted, refresh the excerpts + `Planned at` SHA.
+   - Promote any `🔵 OPEN QUESTION` the maintainer has answered (see "Decisions by comment").
+   - An issue sitting in `In Progress` with an **open** PR (not merged) is legitimately in flight — leave it, but note the PR so it's clear why.
+2. **Dispatch the ready set.** Fan out executors (≤4) on `Todo` issues whose dependencies are `Done`; review each PR, open it, move the issue to `In Progress`. Never merge.
+3. **Refill when thin.** If fewer than ~3 clean ready issues remain, run a scoped audit of the next un-audited area (rotate through the codebase) to file fresh issues for the next run. **Excluded paths (do not audit):** `app/(app)/text-to-cad/**`, `cad-runner/**`, `lib/cad/**`, `components/cad/**` — actively rewritten elsewhere; auditing them produces stale findings.
+4. **Post a run summary** — a Linear comment on a tracking issue (or the project): what was closed, what shipped (with PR links), what was filed, and what open questions await a decision.
+
+**Operating rules for unattended runs:**
+
+- **Never block on a human.** A fork becomes a `🔵 OPEN QUESTION` comment, not a halt; take the safe default where the skill defines one and move on.
+- **Never merge, never push to a protected branch, never auto-decide a money or security tradeoff.** Those stay the maintainer's — surface them, don't resolve them.
+- **Idempotent.** Every run re-derives state from Linear + git, so a skipped day just means a larger next sweep — never a stuck pipeline.
+- **Leave the board cleaner than you found it, every run.** Linear is the source of truth; an unattended run that ships code but lets the board rot has failed half its job.
+
 ## Invocation variants
 
 - **Bare** (`/codebase-health`) → Recon → deep Audit → Vet → file Linear issues. Stops before dispatch (filing is the natural review checkpoint).
@@ -137,6 +157,7 @@ This is the no-stall path: ambiguous work waits on a comment, not on a live back
 - **`next`** (or `features`, `roadmap`) → audit only the direction category in depth; selected ones become spike/design issues, not build-everything issues.
 - **`issue <description>`** → skip the audit; investigate just enough to specify one thing, file one Linear issue.
 - **`dispatch [issue|all]`** → run Phase 5. `dispatch CON-123` for one; `dispatch all` fans out every ready `Todo` issue respecting dependencies. Requires a host that can spawn worktree subagents; if yours can't, say so and hand the issues to humans.
+- **`daily`** → the unattended scheduled run: reconcile → dispatch ready set → refill if thin → run summary. See "Daily routine (unattended)" above. Operates non-interactively; surfaces forks as `🔵 OPEN QUESTION` comments instead of stopping.
 - **`reconcile`** → sync Linear states with merged PRs, retire/refresh.
 - **`review-pr <url|issue>`** → review an executor's (or human's) PR against its Linear issue without having dispatched it.
 
