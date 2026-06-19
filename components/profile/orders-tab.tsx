@@ -14,8 +14,10 @@ import { getMaterialById } from "@/lib/materials";
 import { formatOrderNumber } from "@/lib/utils/order-number";
 import { DraftCartCard } from "./draft-cart-card";
 
-const STATUS_LABELS: Record<string, string> = {
+export const STATUS_LABELS: Record<string, string> = {
   quoting: "Quoting",
+  awaiting_agent_approval: "Awaiting Approval",
+  auto_approved: "Approved — Placing Soon",
   cart_created: "Pending Payment",
   awaiting_production_payment: "Awaiting production payment",
   ordered: "Confirmed",
@@ -27,11 +29,13 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: "Cancelled",
 };
 
-const STATUS_VARIANT: Record<
+export const STATUS_VARIANT: Record<
   string,
   "default" | "secondary" | "destructive" | "outline"
 > = {
   quoting: "outline",
+  awaiting_agent_approval: "outline",
+  auto_approved: "secondary",
   cart_created: "outline",
   awaiting_production_payment: "outline",
   ordered: "secondary",
