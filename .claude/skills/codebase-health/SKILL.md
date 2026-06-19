@@ -26,7 +26,7 @@ Discover at runtime, but the defaults for this repo are:
 - **Team**: `Connorwhite` (key `CON`)
 - **Project**: `Materialize` (use `Iterate` or another when auditing that repo)
 - **Workflow states**: `Backlog` → `Todo` → `In Progress` → `Done`; plus `Canceled`, `Duplicate`
-- **Labels** (map findings onto these — do not invent new ones unless a category has no home): `Bug`, `Improvement`, `Feature`, `DX`, `Observability`
+- **Labels** (map findings onto these — do not invent new ones unless a category has no home): `Bug`, `Improvement`, `Feature`, `DX`, `Observability` (plus `Security`, `Testing`, `Performance`, `Tech Debt`, `a11y` which also exist). Reserved meta-label: **`Needs Decision`** — applied to anything awaiting the maintainer (see "Decisions by comment"), never a finding category.
 
 Always confirm these with `list_teams` / `list_issue_statuses` / `list_issue_labels` / `list_projects` at the start of a run — IDs and labels drift.
 
@@ -122,9 +122,11 @@ Process what happened since last run: for each open issue, check whether its PR 
 
 When an issue has a genuine fork the maintainer should own — a policy choice, an approach with real tradeoffs, a "delete vs surface" call — do **not** guess and do **not** block the wave. Instead:
 
-1. Keep the issue in **`Backlog`** and post a Linear comment that starts with **`🔵 OPEN QUESTION`**: state the fork in one line, list 2–4 concrete options with their tradeoffs, give a recommendation, and inline enough context that the maintainer can decide from the comment alone (no need to open the code).
+1. Keep the issue in **`Backlog`** and post a Linear comment that starts with **`🔵 OPEN QUESTION`**: state the fork in one line, list 2–4 concrete options with their tradeoffs, give a recommendation, and inline enough context that the maintainer can decide from the comment alone (no need to open the code). **Add the `Needs Decision` label** so the maintainer can pin a Linear view of everything waiting on them.
 2. The maintainer resolves it by **replying in Linear** with their choice ("Option B", or a sentence).
-3. **Every run scans for resolutions first.** At the start of Recon — and always in `dispatch`/`reconcile` — read comments on open issues. An issue whose latest `🔵 OPEN QUESTION` has a maintainer reply *after* it is **decided**: fold the decision into the issue spec, move it to `Todo`, and treat it as a ready dispatch candidate this wave. Post a `✅ RESOLVED — <decision>` comment so it isn't re-asked, then dispatch it like any other ready issue.
+3. **Every run scans for resolutions first.** At the start of Recon — and always in `dispatch`/`reconcile` — read comments on open issues. An issue whose latest `🔵 OPEN QUESTION` has a maintainer reply *after* it is **decided**: fold the decision into the issue spec, move it to `Todo`, **remove the `Needs Decision` label**, and treat it as a ready dispatch candidate this wave. Post a `✅ RESOLVED — <decision>` comment so it isn't re-asked, then dispatch it like any other ready issue.
+
+The `Needs Decision` label is also applied to anything else genuinely waiting on the maintainer — an open PR pending their review, a verification only they can run — and removed once they act. It is the maintainer's single filterable inbox of "what needs me." (A real workflow *state* can't be created via the Linear API; if the maintainer adds a `Needs Decision` workflow state in Team Settings → Workflow, use that instead and move issues into/out of it.)
 
 This is the no-stall path: ambiguous work waits on a comment, not on a live back-and-forth, and gets picked up automatically on the next go. Prefer it over either guessing (risks shipping the wrong call) or interrupting the maintainer mid-wave.
 
