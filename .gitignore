@@ -51,9 +51,10 @@ next-env.d.ts
 /.clerk/
 
 # claude code workspace config — settings.local.json stays local,
-# but the checked-in SessionStart hook + settings.json are shared
+# but the checked-in SessionStart hook + settings.json + shared skills are shared
 /.claude/*
 !/.claude/settings.json
 !/.claude/hooks/
+!/.claude/skills/
 .iterate/*
 !.iterate/config.json
