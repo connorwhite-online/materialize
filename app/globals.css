@@ -372,6 +372,23 @@
     -webkit-text-size-adjust: 100%;
     overscroll-behavior-x: none;
   }
+  /* Every heading renders in PP Frama (--font-heading). The family
+     ships a single Regular cut, and font-synthesis-weight:none stops
+     the browser from faux-bolding the font-bold / font-semibold
+     utilities these headings carry — so page titles, file/project
+     names, section headers, etc. all render in true Frama Regular
+     (the approved look) without per-heading class changes. The home
+     hero <h1> sets its display/script fonts inline on its spans, so it
+     stays PPFuji and is unaffected. */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-heading);
+    font-synthesis-weight: none;
+  }
   ::selection {
     background: oklch(0.205 0 0 / 0.12);
   }
