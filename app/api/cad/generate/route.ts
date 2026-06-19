@@ -179,6 +179,7 @@ export async function POST(request: Request) {
           title: persisted.title,
           parts: persisted.parts,
           projectSlug: persisted.projectSlug,
+          remeshed: persisted.remeshed,
         });
       } catch (error) {
         // A client disconnect aborts the request signal — not a real failure.

@@ -67,6 +67,8 @@ export interface StudioTurn {
   parts: StudioPart[];
   /** Project bundling an assembly's parts, when one was created. */
   projectSlug: string | null;
+  /** True when the result was voxel-remeshed (an approximation). */
+  remeshed: boolean;
 }
 
 export interface StudioThread {
@@ -292,6 +294,7 @@ export function TextToCadStudio({
       feedbackNote: null,
       parts: ev.parts ?? [],
       projectSlug: ev.projectSlug ?? null,
+      remeshed: ev.remeshed ?? false,
     };
     const now = Date.now();
 
@@ -614,6 +617,16 @@ export function TextToCadStudio({
           {error && (
             <p className="mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {error}
+            </p>
+          )}
+
+          {/* Approximation notice — the result came from the voxel-remesh
+              fallback (organic/complex shape repair couldn't close). */}
+          {!generating && viewedTurn?.remeshed && (
+            <p className="mt-3 flex items-center gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
+              <AlertTriangleIcon className="size-4 shrink-0" />
+              Approximated — this complex shape was re-meshed to be printable, so
+              fine detail and exact dimensions may differ.
             </p>
           )}
 

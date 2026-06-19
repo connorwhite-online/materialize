@@ -198,6 +198,7 @@ def _execute(code: str, formats: list[str], out: "mp.Queue") -> None:
         "files": {},
         "renderPng": None,
         "geometry": None,
+        "remeshed": False,
         "validation": {
             "compiled": False,
             "isSolid": False,
@@ -223,6 +224,7 @@ def _execute(code: str, formats: list[str], out: "mp.Queue") -> None:
                 result_payload["renderPng"] = entry["renderPng"]
                 result_payload["geometry"] = entry["geometry"]
                 result_payload["validation"] = entry["validation"]
+                result_payload["remeshed"] = bool(entry.get("remeshed"))
                 if entry["error"]:
                     result_payload["error"] = entry["error"]
                 result_payload["ok"] = entry["validation"]["isSolid"]
@@ -253,6 +255,7 @@ def _execute(code: str, formats: list[str], out: "mp.Queue") -> None:
                     ),
                 }
                 result_payload["parts"] = parts
+                result_payload["remeshed"] = any(p.get("remeshed") for p in parts)
                 result_payload["ok"] = all_ok
             else:
                 result_payload["error"] = (

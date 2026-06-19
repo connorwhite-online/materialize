@@ -76,6 +76,8 @@ export default async function TextToCadPage() {
       // assembly shows its primary part (the full set lives in its Project).
       parts: [],
       projectSlug: null,
+      // Not persisted (no column yet) — the badge shows in-session only.
+      remeshed: false,
       parentGenerationId: r.parentGenerationId,
       title: r.title,
       createdAt: r.createdAt.getTime(),
@@ -124,6 +126,7 @@ export default async function TextToCadPage() {
           feedbackNote: m.feedbackNote,
           parts: m.parts,
           projectSlug: m.projectSlug,
+          remeshed: m.remeshed,
         })),
       };
     })

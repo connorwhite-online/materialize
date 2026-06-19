@@ -47,6 +47,8 @@ export interface PersistedGeneration {
   parts?: GeneratedPart[];
   /** Slug of the Project bundling an assembly's parts, when created. */
   projectSlug?: string | null;
+  /** True when the result was voxel-remeshed (an approximation). */
+  remeshed?: boolean;
 }
 
 export interface PersistError {
@@ -196,6 +198,7 @@ export async function persistGenerationSuccess(opts: {
     renderUrl,
     sourceCode: result.sourceCode,
     title,
+    remeshed: result.run?.remeshed ?? false,
   };
 }
 
@@ -339,5 +342,6 @@ async function persistAssembly(opts: {
       fileSlug: c.fileSlug,
     })),
     projectSlug,
+    remeshed: result.run?.remeshed ?? false,
   };
 }
