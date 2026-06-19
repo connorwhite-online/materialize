@@ -9,6 +9,7 @@ import { Materials } from "@/components/icons/materials";
 import { Print } from "@/components/icons/print";
 import { Wand } from "@/components/icons/wand";
 import { AvatarWithUnreadDot } from "@/components/auth/avatar-with-unread-dot";
+import { SandboxBadge } from "@/components/nav/sandbox-badge";
 import { useCart } from "@/components/print/cart-context";
 import { useAuthModal } from "@/components/auth/auth-modal";
 import { cn } from "@/lib/utils";
@@ -53,13 +54,15 @@ function isActive(pathname: string | null, href: string): boolean {
 }
 
 const TAB_BASE =
-  "relative flex h-12 w-12 items-center justify-center rounded-2xl transition-colors";
+  "relative flex h-12 w-12 items-center justify-center rounded-full transition-colors";
 
 interface MobileTabBarProps {
   /** Server-fetched unread notification count for the dot indicator. */
   initialUnreadCount: number;
   /** Owner-only: append the experimental Text-to-CAD tab. */
   textToCad?: boolean;
+  /** True when Stripe is on test keys or CraftCloud is in mock mode. */
+  sandbox?: boolean;
 }
 
 /**
@@ -76,6 +79,7 @@ interface MobileTabBarProps {
 export function MobileTabBar({
   initialUnreadCount,
   textToCad = false,
+  sandbox = false,
 }: MobileTabBarProps) {
   const pathname = usePathname();
   const { user, isLoaded, isSignedIn } = useUser();
@@ -91,11 +95,13 @@ export function MobileTabBar({
   return (
     // pointer-events-none on the wrapper so the area beside the pills
     // stays click-through to page content; each pill re-enables it.
-    <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex items-center justify-center gap-2 px-4 nav:hidden">
+    // The nav is centered on its own; the cart is absolutely positioned
+    // to the right so its appearance never shifts or shrinks the nav.
+    <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex items-center justify-center px-4 nav:hidden">
       <nav
         aria-label="Primary"
         className={cn(
-          "pointer-events-auto flex items-center gap-1 rounded-[1.75rem] p-1.5",
+          "pointer-events-auto flex shrink-0 items-center gap-1 rounded-full p-1.5",
           "bg-muted/70 backdrop-blur-xl dark:bg-input/40",
           "shadow-lg shadow-foreground/10 ring-1 ring-foreground/10"
         )}
@@ -136,18 +142,25 @@ export function MobileTabBar({
                 : "hover:bg-background/60"
             )}
           >
-            <AvatarWithUnreadDot
-              initialUnreadCount={initialUnreadCount}
-              seed={user.username || user.id}
-              imageUrl={user.hasImage ? user.imageUrl : null}
-              displayName={
-                user.fullName ||
-                user.username ||
-                user.primaryEmailAddress?.emailAddress ||
-                "Profile"
-              }
-              className="h-7 w-7"
-            />
+            {/* Inner relative wrapper so the sandbox badge anchors to the
+                avatar's corner, not the (larger) tap-target button. */}
+            <span className="relative inline-flex">
+              <AvatarWithUnreadDot
+                initialUnreadCount={initialUnreadCount}
+                seed={user.username || user.id}
+                imageUrl={user.hasImage ? user.imageUrl : null}
+                displayName={
+                  user.fullName ||
+                  user.username ||
+                  user.primaryEmailAddress?.emailAddress ||
+                  "Profile"
+                }
+                className="h-7 w-7"
+              />
+              {sandbox && (
+                <SandboxBadge className="absolute -right-1.5 -top-1.5 z-10 p-0.5 ring-2 ring-muted dark:ring-input" />
+              )}
+            </span>
           </Link>
         ) : (
           <button
@@ -162,13 +175,20 @@ export function MobileTabBar({
               !isLoaded && "opacity-0"
             )}
           >
-            <CircleUserRound size={24} strokeWidth={1.75} />
+            <span className="relative inline-flex">
+              <CircleUserRound size={24} strokeWidth={1.75} />
+              {sandbox && (
+                <SandboxBadge className="absolute -right-2 -top-2 z-10 p-0.5 ring-2 ring-muted dark:ring-input" />
+              )}
+            </span>
           </button>
         )}
       </nav>
 
-      {/* Cart — a separate pill to the right of the nav, shown only
-          when there's something in it, with a count badge. */}
+      {/* Cart — a separate pill pinned to the right of the bar, shown
+          only when there's something in it, with a count badge.
+          Absolutely positioned so it overlays without nudging the
+          centered nav. */}
       {cart && cart.itemCount > 0 && (
         <button
           type="button"
@@ -177,7 +197,7 @@ export function MobileTabBar({
             cart.itemCount === 1 ? "item" : "items"
           })`}
           className={cn(
-            "pointer-events-auto relative flex h-[3.75rem] w-[3.75rem] items-center justify-center rounded-[1.75rem]",
+            "pointer-events-auto absolute right-4 top-1/2 flex h-[3.75rem] w-[3.75rem] -translate-y-1/2 items-center justify-center rounded-full",
             "bg-muted/70 backdrop-blur-xl dark:bg-input/40",
             "shadow-lg shadow-foreground/10 ring-1 ring-foreground/10",
             "text-foreground transition-colors hover:bg-muted"
