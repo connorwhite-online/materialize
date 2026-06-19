@@ -21,6 +21,8 @@ import { formatOrderNumber } from "@/lib/utils/order-number";
 
 const STATUS_LABELS: Record<string, string> = {
   quoting: "Quoting",
+  awaiting_agent_approval: "Awaiting Approval",
+  auto_approved: "Approved — Placing Soon",
   cart_created: "Pending Payment",
   awaiting_production_payment: "Awaiting production payment",
   ordered: "Confirmed",
