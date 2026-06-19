@@ -9,6 +9,7 @@ import { Materials } from "@/components/icons/materials";
 import { Print } from "@/components/icons/print";
 import { Wand } from "@/components/icons/wand";
 import { AvatarWithUnreadDot } from "@/components/auth/avatar-with-unread-dot";
+import { SandboxBadge } from "@/components/nav/sandbox-badge";
 import { useCart } from "@/components/print/cart-context";
 import { useAuthModal } from "@/components/auth/auth-modal";
 import { cn } from "@/lib/utils";
@@ -53,13 +54,15 @@ function isActive(pathname: string | null, href: string): boolean {
 }
 
 const TAB_BASE =
-  "relative flex h-12 w-12 items-center justify-center rounded-2xl transition-colors";
+  "relative flex h-12 w-12 items-center justify-center rounded-full transition-colors";
 
 interface MobileTabBarProps {
   /** Server-fetched unread notification count for the dot indicator. */
   initialUnreadCount: number;
   /** Owner-only: append the experimental Text-to-CAD tab. */
   textToCad?: boolean;
+  /** True when Stripe is on test keys or CraftCloud is in mock mode. */
+  sandbox?: boolean;
 }
 
 /**
@@ -76,6 +79,7 @@ interface MobileTabBarProps {
 export function MobileTabBar({
   initialUnreadCount,
   textToCad = false,
+  sandbox = false,
 }: MobileTabBarProps) {
   const pathname = usePathname();
   const { user, isLoaded, isSignedIn } = useUser();
@@ -136,18 +140,25 @@ export function MobileTabBar({
                 : "hover:bg-background/60"
             )}
           >
-            <AvatarWithUnreadDot
-              initialUnreadCount={initialUnreadCount}
-              seed={user.username || user.id}
-              imageUrl={user.hasImage ? user.imageUrl : null}
-              displayName={
-                user.fullName ||
-                user.username ||
-                user.primaryEmailAddress?.emailAddress ||
-                "Profile"
-              }
-              className="h-7 w-7"
-            />
+            {/* Inner relative wrapper so the sandbox badge anchors to the
+                avatar's corner, not the (larger) tap-target button. */}
+            <span className="relative inline-flex">
+              <AvatarWithUnreadDot
+                initialUnreadCount={initialUnreadCount}
+                seed={user.username || user.id}
+                imageUrl={user.hasImage ? user.imageUrl : null}
+                displayName={
+                  user.fullName ||
+                  user.username ||
+                  user.primaryEmailAddress?.emailAddress ||
+                  "Profile"
+                }
+                className="h-7 w-7"
+              />
+              {sandbox && (
+                <SandboxBadge className="absolute -right-1.5 -top-1.5 z-10 p-0.5 ring-2 ring-muted dark:ring-input" />
+              )}
+            </span>
           </Link>
         ) : (
           <button
@@ -162,7 +173,12 @@ export function MobileTabBar({
               !isLoaded && "opacity-0"
             )}
           >
-            <CircleUserRound size={24} strokeWidth={1.75} />
+            <span className="relative inline-flex">
+              <CircleUserRound size={24} strokeWidth={1.75} />
+              {sandbox && (
+                <SandboxBadge className="absolute -right-2 -top-2 z-10 p-0.5 ring-2 ring-muted dark:ring-input" />
+              )}
+            </span>
           </button>
         )}
       </nav>

@@ -2,7 +2,6 @@ import { CartProvider } from "@/components/print/cart-context";
 import { CartPanel } from "@/components/print/cart-panel";
 import { MainMenuSidebar } from "@/components/nav/main-menu";
 import { MobileTabBar } from "@/components/nav/mobile-tab-bar";
-import { SandboxBadge } from "@/components/nav/sandbox-badge";
 import { getMyUnreadNotificationCount } from "@/lib/notifications/queries";
 import { isSandboxMode } from "@/lib/env";
 import { resolveTextToCadAccess } from "@/lib/features";
@@ -38,15 +37,9 @@ export default async function AppLayout({
       <div className="flex min-h-screen flex-col nav:pl-56">
         {/*
           Sandbox heads-up. At nav+ it rides inside the sidebar rail
-          (passed to MainMenuSidebar); on sub-nav the mobile header is
-          gone, so it floats top-left so a tester can still tell at a
-          glance that no card will be charged.
+          (passed to MainMenuSidebar); on sub-nav it pips the top-right
+          corner of the profile avatar in the MobileTabBar.
         */}
-        {sandbox && (
-          <div className="fixed left-4 top-4 z-40 nav:hidden">
-            <SandboxBadge />
-          </div>
-        )}
         <MainMenuSidebar
           initialUnreadCount={initialUnreadCount}
           sandbox={sandbox}
@@ -61,6 +54,7 @@ export default async function AppLayout({
         <MobileTabBar
           initialUnreadCount={initialUnreadCount}
           textToCad={textToCad}
+          sandbox={sandbox}
         />
         <CartPanel />
       </div>
