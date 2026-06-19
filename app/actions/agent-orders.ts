@@ -16,6 +16,7 @@ import { findMaterialConfig, findProvider } from "@/lib/craftcloud/catalog";
 import { sendCancellationConfirmedEmail } from "@/lib/mcp/email";
 import { logError } from "@/lib/logger";
 import { revalidatePath } from "next/cache";
+import { deriveAppUrl } from "@/lib/utils/request-url";
 
 const SESSION_CLAIM_PREFIX = "session_claim:";
 
@@ -162,7 +163,7 @@ async function mintStripeSession(params: {
   email: string;
 }): Promise<{ id: string; url: string } | { error: string }> {
   const { order, email } = params;
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const appUrl = await deriveAppUrl();
 
   let fileDisplayName: string | null = null;
   if (order.fileAssetId) {
