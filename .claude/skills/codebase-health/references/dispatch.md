@@ -13,8 +13,9 @@ The founding rule survives unchanged: **the advisor never edits source code and 
 ### Select the ready set
 
 1. Pull the backlog: `list_issues` for project `Materialize`, state `Todo`.
-2. Drop any issue whose `Depends on` (Linear "blocked by" relation, or the body line) is not yet `Done`. **Never dispatch an issue whose blocker is open** — a half-built dependency makes the executor improvise, which is exactly what the issue's STOP conditions forbid.
-3. The remaining issues are the **ready set**. `dispatch CON-123` runs just one; `dispatch all` runs the whole ready set.
+2. **Promote resolved open questions.** Scan comments on `Backlog` issues for a `🔵 OPEN QUESTION` whose latest maintainer reply decides it (see SKILL.md "Decisions by comment"). Fold the decision into the issue spec, move it to `Todo`, post `✅ RESOLVED — <decision>`, and add it to the ready set.
+3. Drop any issue whose `Depends on` (Linear "blocked by" relation, or the body line) is not yet `Done`. **Never dispatch an issue whose blocker is open** — a half-built dependency makes the executor improvise, which is exactly what the issue's STOP conditions forbid.
+4. The remaining issues are the **ready set**. `dispatch CON-123` runs just one; `dispatch all` runs the whole ready set.
 
 ### Preconditions (check before dispatching any)
 
