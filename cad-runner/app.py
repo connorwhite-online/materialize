@@ -125,6 +125,41 @@ def _process_shape(shape, formats: list[str], tmp: str, stem: str) -> dict:
             except Exception:  # noqa: BLE001
                 pass
 
+        # Last-resort fallback for organic/complex results that repair can't
+        # close: voxelize the solid and marching-cubes it back to a guaranteed-
+        # watertight mesh. Trades crisp detail for an always-printable result,
+        # so it only runs when the model would otherwise FAIL. Disable with
+        # CAD_VOXEL_FALLBACK=false.
+        if (
+            not mesh.is_watertight
+            and os.environ.get("CAD_VOXEL_FALLBACK", "true") != "false"
+        ):
+            try:
+                ext0 = mesh.extents
+                max_dim = float(max(ext0)) or 1.0
+                res = int(os.environ.get("CAD_VOXEL_RES", "80"))
+                # Clamp so a thin/large model can't blow up the voxel grid.
+                vox_per_axis = [max(1.0, e / (max_dim / res)) for e in ext0]
+                while vox_per_axis[0] * vox_per_axis[1] * vox_per_axis[2] > 6e6:
+                    res = int(res * 0.8)
+                    vox_per_axis = [
+                        max(1.0, e / (max_dim / res)) for e in ext0
+                    ]
+                pitch = max_dim / res
+                vg = mesh.voxelized(pitch=pitch).fill()
+                remeshed = vg.marching_cubes
+                # marching_cubes returns index space; map back to model (mm).
+                remeshed.apply_transform(vg.transform)
+                if remeshed.is_watertight:
+                    mesh = remeshed
+                    entry["remeshed"] = True
+                    try:
+                        mesh.export(stl_path)
+                    except Exception:  # noqa: BLE001
+                        pass
+            except Exception:  # noqa: BLE001
+                pass
+
         entry["validation"]["isWatertight"] = bool(mesh.is_watertight)
         entry["validation"]["isManifold"] = bool(mesh.is_winding_consistent)
         ext = mesh.extents
