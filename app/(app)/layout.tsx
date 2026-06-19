@@ -8,9 +8,7 @@ import {
 import { SandboxBadge } from "@/components/nav/sandbox-badge";
 import { getMyUnreadNotificationCount } from "@/lib/notifications/queries";
 import { isSandboxMode } from "@/lib/env";
-import { currentUser } from "@clerk/nextjs/server";
-import { canUseTextToCad, isTextToCadEnabled } from "@/lib/features";
-import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
+import { resolveTextToCadAccess } from "@/lib/features";
 
 /**
  * Progressive-blur layer table for the mobile header backdrop.
@@ -86,12 +84,11 @@ export default async function AppLayout({
   const sandbox = isSandboxMode();
   // Owner-only experimental nav entry. Resolved server-side and threaded
   // down; the page itself re-checks the gate and 404s as a second layer.
-  // Gate the currentUser() backend call on the env kill-switch first — it's
-  // a fast env read and false by default, so the default-off deployment
-  // pays nothing here (currentUser runs on every request under /(app)).
-  const textToCad = isTextToCadEnabled()
-    ? canUseTextToCad(primaryEmail((await currentUser()) as ClerkUserLike))
-    : false;
+  // resolveTextToCadAccess() gates the currentUser() backend call on the
+  // env kill-switch first (fast env read, false by default) AND swallows
+  // a thrown currentUser() — both matter because this runs on every authed
+  // request under /(app) and an unguarded throw 500s the entire page.
+  const textToCad = await resolveTextToCadAccess();
   return (
     <CartProvider>
       {/*

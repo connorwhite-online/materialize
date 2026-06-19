@@ -1,5 +1,8 @@
 import "server-only";
 
+import { currentUser } from "@clerk/nextjs/server";
+import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
+
 /**
  * Feature gating for experimental, owner-only surfaces.
  *
@@ -51,4 +54,31 @@ export function emailHasTextToCadAccess(
  */
 export function canUseTextToCad(email: string | null | undefined): boolean {
   return isTextToCadEnabled() && emailHasTextToCadAccess(email);
+}
+
+/**
+ * Resolve whether the current request's user may see the text-to-CAD
+ * surfaces, safe to call from a layout/page that renders on every route.
+ *
+ * `currentUser()` makes a Clerk Backend API call and, like `auth()`,
+ * throws "auth() was called but Clerk can't detect usage of
+ * clerkMiddleware()" when the Clerk proxy context isn't wired up for a
+ * request (Sentry 7488668107 — same failure mode guarded in
+ * `getMyUnreadNotificationCount`). It only does real work for signed-in
+ * users, so an unguarded throw here 500s every authed page under
+ * `app/(app)/layout.tsx`. We fail closed: any throw → no access, which
+ * is the correct default for an owner-only experimental gate. The
+ * env kill switch is checked first so the default-off deployment never
+ * makes the backend call at all.
+ */
+export async function resolveTextToCadAccess(): Promise<boolean> {
+  if (!isTextToCadEnabled()) return false;
+  try {
+    const user = (await currentUser()) as ClerkUserLike;
+    return canUseTextToCad(primaryEmail(user));
+  } catch {
+    // currentUser() can throw when the Clerk proxy context is absent.
+    // Fail closed rather than crash the layout.
+    return false;
+  }
 }
