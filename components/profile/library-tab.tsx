@@ -118,7 +118,12 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
       })
       .from(collections)
       .where(and(...collectionConditions))
-      .orderBy(desc(collections.createdAt)),
+      .orderBy(desc(collections.createdAt))
+      // Same defensive cap as the files/purchases queries above: the
+      // collection ids fan out into per-collection asset/photo lookups
+      // below, so an unbounded set multiplies the query cost. 500 is
+      // far beyond any real library.
+      .limit(LIBRARY_MAX_FILES),
     db
       .select({
         id: projects.id,
@@ -134,7 +139,10 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
       .leftJoin(projectFiles, eq(projectFiles.projectId, projects.id))
       .where(and(...projectConditions))
       .groupBy(projects.id)
-      .orderBy(desc(projects.createdAt)),
+      .orderBy(desc(projects.createdAt))
+      // Defensive cap mirroring the files/purchases queries — the
+      // project ids feed per-project asset/photo lookups below.
+      .limit(LIBRARY_MAX_FILES),
     isOwner
       ? db
           .select({

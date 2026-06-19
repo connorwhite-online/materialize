@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { unstable_cache } from "next/cache";
 import { db } from "@/lib/db";
 import {
   files,
@@ -15,6 +16,18 @@ import { categoryIdsMatchingQuery } from "@/lib/categories";
 import { logError } from "@/lib/logger";
 
 const PER_CATEGORY_LIMIT = 8;
+/**
+ * Short cache window for the DB half of search. The home bar fires a
+ * request on every keystroke and crawlers/agents replay popular
+ * queries, so identical queries repeat constantly. Search results are
+ * global (published/public, not per-viewer), so a query string is a
+ * complete cache key and a 60s TTL collapses those duplicates into one
+ * set of substring ILIKE scans per minute — the single biggest lever
+ * on search's Neon cost short of adding a trigram index. 60s of
+ * staleness (a brand-new listing not appearing instantly in search) is
+ * imperceptible for this surface.
+ */
+const SEARCH_CACHE_TTL_SECONDS = 60;
 /** Drop empty queries; one character is fine — see PREFIX_ONLY_LENGTH. */
 const MIN_QUERY_LENGTH = 1;
 /** Cap query length to prevent pathological regex-like patterns. */
@@ -95,42 +108,27 @@ export interface SearchResponse {
 }
 
 /**
- * Global search used by the home bottom bar. Returns up to
- * PER_CATEGORY_LIMIT hits per type. Each axis is independent —
- * materials search is in-memory over CraftCloud's cached catalog,
- * files + users hit the DB with ilike.
+ * The DB half of search: the four substring-ILIKE scans (files,
+ * projects, collections, users). Pulled out and wrapped in
+ * `unstable_cache` so identical query strings — which the keystroke-
+ * driven home bar and crawlers produce in bulk — reuse one result set
+ * for SEARCH_CACHE_TTL_SECONDS instead of re-scanning every time.
+ * Purely a function of the query string; results are global, so the
+ * query is a complete cache key.
  */
-export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const rawQ = (url.searchParams.get("q") ?? "").trim();
+const searchDb = unstable_cache(
+  async (q: string) => {
+    // Escape %/_/\\ so user input can't function as ilike wildcards,
+    // then choose pattern shape based on query length.
+    const escaped = escapeLikePattern(q);
+    const isPrefixOnly = q.length < PREFIX_ONLY_LENGTH;
+    const pattern = isPrefixOnly ? `${escaped}%` : `%${escaped}%`;
+    // Categories whose label/keywords match the query bridge into the
+    // results (e.g. "drone" surfaces the Hobby & RC shelf). Empty list →
+    // the inArray clause is simply omitted below.
+    const matchedCategoryIds = categoryIdsMatchingQuery(q);
 
-  // Return empty instead of erroring on too-short/too-long queries —
-  // the home search bar fires continuously as the user types, so we
-  // want to no-op quietly below the threshold rather than flashing
-  // an error.
-  if (rawQ.length < MIN_QUERY_LENGTH || rawQ.length > MAX_QUERY_LENGTH) {
-    return NextResponse.json<SearchResponse>({
-      files: [],
-      projects: [],
-      collections: [],
-      users: [],
-      materials: [],
-    });
-  }
-
-  const q = rawQ;
-  // Escape %/_/\\ so user input can't function as ilike wildcards,
-  // then choose pattern shape based on query length.
-  const escaped = escapeLikePattern(q);
-  const isPrefixOnly = q.length < PREFIX_ONLY_LENGTH;
-  const pattern = isPrefixOnly ? `${escaped}%` : `%${escaped}%`;
-  // Categories whose label/keywords match the query bridge into the
-  // results (e.g. "drone" surfaces the Hobby & RC shelf). Empty list →
-  // the inArray clause is simply omitted below.
-  const matchedCategoryIds = categoryIdsMatchingQuery(q);
-
-  try {
-    const [fileRows, projectRows, collectionRows, userRows, catalog] = await Promise.all([
+    const [fileRows, projectRows, collectionRows, userRows] = await Promise.all([
       db
         .select({
           id: files.id,
@@ -247,8 +245,45 @@ export async function GET(request: Request) {
           )
         )
         .limit(PER_CATEGORY_LIMIT),
-      getCraftCloudCatalog(),
     ]);
+
+    return { fileRows, projectRows, collectionRows, userRows };
+  },
+  ["global-search-db"],
+  { revalidate: SEARCH_CACHE_TTL_SECONDS }
+);
+
+/**
+ * Global search used by the home bottom bar. Returns up to
+ * PER_CATEGORY_LIMIT hits per type. Each axis is independent —
+ * materials search is in-memory over CraftCloud's cached catalog; the
+ * file/project/collection/user scans run through the cached `searchDb`
+ * helper above.
+ */
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const rawQ = (url.searchParams.get("q") ?? "").trim();
+
+  // Return empty instead of erroring on too-short/too-long queries —
+  // the home search bar fires continuously as the user types, so we
+  // want to no-op quietly below the threshold rather than flashing
+  // an error.
+  if (rawQ.length < MIN_QUERY_LENGTH || rawQ.length > MAX_QUERY_LENGTH) {
+    return NextResponse.json<SearchResponse>({
+      files: [],
+      projects: [],
+      collections: [],
+      users: [],
+      materials: [],
+    });
+  }
+
+  const q = rawQ;
+  const isPrefixOnly = q.length < PREFIX_ONLY_LENGTH;
+
+  try {
+    const [{ fileRows, projectRows, collectionRows, userRows }, catalog] =
+      await Promise.all([searchDb(q), getCraftCloudCatalog()]);
 
     // Material search runs over the in-memory catalog. Match on
     // material name OR group name, case-insensitive. Mirror the

@@ -1,7 +1,7 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
-import { eq, and, isNull, inArray, sql } from "drizzle-orm";
+import { eq, and, isNull, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { notifications } from "@/lib/db/schema";
@@ -9,27 +9,12 @@ import { logError } from "@/lib/logger";
 
 type Result = { ok: true } | { error: string };
 
-/**
- * Fire a `notifications` channel NOTIFY from the mark-read actions
- * so the SSE handler in /api/notifications/stream re-fetches and
- * pushes the new unread count to OTHER tabs / devices belonging to
- * the same user. The trigger on INSERT (migration 0019) emits an
- * `id` alongside `userId`; we omit `id` here so the SSE listener
- * treats it as a generic "snapshot may have changed" event and re-
- * fetches without trying to single-out a specific row.
- *
- * Best-effort — wrapped in try/catch because the actual DB mutation
- * already succeeded by the time we get here; a NOTIFY failure
- * should not bubble up to the user.
- */
-async function notifyReadChange(userId: string) {
-  try {
-    const payload = JSON.stringify({ userId });
-    await db.execute(sql`SELECT pg_notify('notifications', ${payload})`);
-  } catch (error) {
-    logError("notifyReadChange", error);
-  }
-}
+// Note: the mark-read actions used to fire a `pg_notify('notifications')`
+// so the SSE stream could push the new unread count to other tabs. The
+// stream was replaced by a periodic poll (AvatarWithUnreadDot), so the
+// NOTIFY had no listener and was a wasted DB round-trip per mark-read —
+// removed. Cross-tab read state now reconciles on the next poll, and
+// the current tab updates immediately via revalidatePath below.
 
 /**
  * Mark a single notification as read. The bell calls this when the
@@ -54,7 +39,6 @@ export async function markNotificationRead(notificationId: string): Promise<Resu
           isNull(notifications.readAt)
         )
       );
-    await notifyReadChange(userId);
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (error) {
@@ -78,7 +62,6 @@ export async function markAllNotificationsRead(): Promise<Result> {
       .where(
         and(eq(notifications.userId, userId), isNull(notifications.readAt))
       );
-    await notifyReadChange(userId);
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (error) {
@@ -110,7 +93,6 @@ export async function markNotificationsRead(
           isNull(notifications.readAt)
         )
       );
-    await notifyReadChange(userId);
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (error) {
