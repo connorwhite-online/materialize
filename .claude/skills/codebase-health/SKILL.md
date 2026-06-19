@@ -118,6 +118,16 @@ This is the fan-out. **Read [references/dispatch.md](references/dispatch.md) bef
 
 Process what happened since last run: for each open issue, check whether its PR merged (→ confirm `Done`), whether the finding was fixed independently (→ `Canceled`/`Duplicate` with a reason), or whether in-scope files drifted (→ refresh the excerpts and `Planned at` SHA in the body). Retire dead findings. See [references/dispatch.md](references/dispatch.md).
 
+## Decisions by comment (ambiguous issues)
+
+When an issue has a genuine fork the maintainer should own — a policy choice, an approach with real tradeoffs, a "delete vs surface" call — do **not** guess and do **not** block the wave. Instead:
+
+1. Keep the issue in **`Backlog`** and post a Linear comment that starts with **`🔵 OPEN QUESTION`**: state the fork in one line, list 2–4 concrete options with their tradeoffs, give a recommendation, and inline enough context that the maintainer can decide from the comment alone (no need to open the code).
+2. The maintainer resolves it by **replying in Linear** with their choice ("Option B", or a sentence).
+3. **Every run scans for resolutions first.** At the start of Recon — and always in `dispatch`/`reconcile` — read comments on open issues. An issue whose latest `🔵 OPEN QUESTION` has a maintainer reply *after* it is **decided**: fold the decision into the issue spec, move it to `Todo`, and treat it as a ready dispatch candidate this wave. Post a `✅ RESOLVED — <decision>` comment so it isn't re-asked, then dispatch it like any other ready issue.
+
+This is the no-stall path: ambiguous work waits on a comment, not on a live back-and-forth, and gets picked up automatically on the next go. Prefer it over either guessing (risks shipping the wrong call) or interrupting the maintainer mid-wave.
+
 ## Invocation variants
 
 - **Bare** (`/codebase-health`) → Recon → deep Audit → Vet → file Linear issues. Stops before dispatch (filing is the natural review checkpoint).
