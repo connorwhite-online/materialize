@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
-import { ShoppingCartIcon, CircleUserRound } from "lucide-react";
+import { CircleUserRound } from "lucide-react";
 import { Browse } from "@/components/icons/browse";
 import { Materials } from "@/components/icons/materials";
 import { Print } from "@/components/icons/print";
@@ -69,8 +69,8 @@ interface MobileTabBarProps {
  * App-like bottom navigation for sub-nav viewports (hidden at nav+,
  * where the floating sidebar rail takes over). Icon-only tabs sit in
  * a translucent, blurred, rounded pill anchored to the bottom of the
- * screen; the cart rides in a separate pill to the right and only
- * appears when there's something in it.
+ * screen. There's no separate cart button: carts live inline on the
+ * /print page, so a count badge pips the Print tab instead.
  *
  * Replaces the old dropdown "page-title + caret" trigger that lived in
  * the mobile header — primary nav is now a persistent, thumb-reachable
@@ -91,13 +91,12 @@ export function MobileTabBar({
     isLoaded && user?.username ? `/${user.username}` : null;
   const profileActive =
     !!ownProfilePath && pathname === ownProfilePath;
+  const cartCount = cart?.itemCount ?? 0;
 
   return (
-    // pointer-events-none on the wrapper so the area beside the pills
-    // stays click-through to page content; each pill re-enables it.
-    // The nav is centered on its own; the cart is absolutely positioned
-    // to the right so its appearance never shifts or shrinks the nav.
-    <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex items-center justify-center px-4 nav:hidden">
+    // pointer-events-none on the wrapper so the area beside the nav
+    // stays click-through to page content; the nav re-enables it.
+    <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex items-center justify-center px-4 nav:hidden">
       <nav
         aria-label="Primary"
         className={cn(
@@ -109,11 +108,16 @@ export function MobileTabBar({
         {items.map((item) => {
           const active = isActive(pathname, item.href);
           const { Icon } = item;
+          // Cart count pips the Print tab — tapping through surfaces the
+          // carts inline on /print, so there's no standalone cart button.
+          const showCart = item.href === "/print" && cartCount > 0;
           return (
             <Link
               key={item.href}
               href={item.href}
-              aria-label={item.label}
+              aria-label={
+                showCart ? `${item.label} (${cartCount} in cart)` : item.label
+              }
               aria-current={active ? "page" : undefined}
               className={cn(
                 TAB_BASE,
@@ -123,6 +127,11 @@ export function MobileTabBar({
               )}
             >
               <Icon size={24} />
+              {showCart && (
+                <span className="absolute right-1 top-1 min-w-[1.125rem] rounded-full bg-primary px-1 py-0.5 text-center text-[0.625rem] font-semibold leading-none text-primary-foreground ring-2 ring-muted dark:ring-input">
+                  {cartCount > 99 ? "99+" : cartCount}
+                </span>
+              )}
             </Link>
           );
         })}
@@ -184,31 +193,6 @@ export function MobileTabBar({
           </button>
         )}
       </nav>
-
-      {/* Cart — a separate pill pinned to the right of the bar, shown
-          only when there's something in it, with a count badge.
-          Absolutely positioned so it overlays without nudging the
-          centered nav. */}
-      {cart && cart.itemCount > 0 && (
-        <button
-          type="button"
-          onClick={cart.open}
-          aria-label={`Cart (${cart.itemCount} ${
-            cart.itemCount === 1 ? "item" : "items"
-          })`}
-          className={cn(
-            "pointer-events-auto absolute right-4 top-1/2 flex h-[3.75rem] w-[3.75rem] -translate-y-1/2 items-center justify-center rounded-full",
-            "bg-muted/70 backdrop-blur-xl dark:bg-input/40",
-            "shadow-lg shadow-foreground/10 ring-1 ring-foreground/10",
-            "text-foreground transition-colors hover:bg-muted"
-          )}
-        >
-          <ShoppingCartIcon className="h-6 w-6" />
-          <span className="absolute right-1 top-1 min-w-5 rounded-full bg-primary px-1.5 py-0.5 text-center text-xs font-semibold leading-none text-primary-foreground ring-2 ring-muted">
-            {cart.itemCount > 99 ? "99+" : cart.itemCount}
-          </span>
-        </button>
-      )}
     </div>
   );
 }

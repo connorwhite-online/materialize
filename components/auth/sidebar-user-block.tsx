@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useUser } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
-import { CartButton } from "@/components/print/cart-button";
 import { AvatarWithUnreadDot } from "./avatar-with-unread-dot";
 import { useAuthModal } from "./auth-modal";
 
@@ -15,10 +14,11 @@ import { useAuthModal } from "./auth-modal";
  * also the authed home, so it doubles as a "go home" affordance).
  *
  * The Profile entry that used to live in the nav list is gone -- this
- * block IS the profile link. The cart icon still rides along when
- * populated, sitting above the user row. An unread-notification dot
- * pips the avatar's top-right when there are unseen notifications;
- * the full inbox lives at /u/<username>?tab=notifications.
+ * block IS the profile link. Cart access isn't here: carts live inline
+ * on /print and a count badge pips the Print nav entry. An
+ * unread-notification dot pips the avatar's top-right when there are
+ * unseen notifications; the full inbox lives at
+ * /u/<username>?tab=notifications.
  */
 interface Props {
   /**
@@ -48,7 +48,6 @@ export function SidebarUserBlock({ initialUnreadCount }: Props) {
     const profileHref = user.username ? `/${user.username}` : "/";
     return (
       <div className="flex flex-col gap-1.5">
-        <CartButton />
         <Link
           href={profileHref}
           aria-label="Your profile"
@@ -76,7 +75,6 @@ export function SidebarUserBlock({ initialUnreadCount }: Props) {
 
   return (
     <div className="flex flex-col gap-1.5">
-      <CartButton />
       <Button
         size="sm"
         className="w-full"
