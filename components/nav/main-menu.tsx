@@ -8,6 +8,7 @@ import { Print } from "@/components/icons/print";
 import { Wand } from "@/components/icons/wand";
 import { SidebarUserBlock } from "@/components/auth/sidebar-user-block";
 import { SandboxBadge } from "@/components/nav/sandbox-badge";
+import { useCart } from "@/components/print/cart-context";
 import { cn } from "@/lib/utils";
 
 import type { ComponentType, SVGProps } from "react";
@@ -83,6 +84,8 @@ export function MainMenuSidebar({
 }: MainMenuSidebarProps) {
   const pathname = usePathname();
   const items = navItems(textToCad);
+  const cart = useCart();
+  const cartCount = cart?.itemCount ?? 0;
 
   return (
     <aside
@@ -106,6 +109,9 @@ export function MainMenuSidebar({
         {items.map((item) => {
           const active = isActive(pathname, item.href);
           const { Icon } = item;
+          // Cart count pips the Print entry's icon — carts live inline
+          // on /print, so there's no standalone cart button.
+          const showCart = item.href === "/print" && cartCount > 0;
           return (
             <Link
               key={item.href}
@@ -118,8 +124,18 @@ export function MainMenuSidebar({
                   : "text-muted-foreground hover:bg-muted/40 hover:text-foreground"
               )}
             >
-              <Icon size={18} className="shrink-0" />
+              <span className="relative inline-flex shrink-0">
+                <Icon size={18} />
+                {showCart && (
+                  <span className="absolute -right-1.5 -top-1.5 min-w-4 rounded-full bg-primary px-1 py-0.5 text-center text-[0.625rem] font-semibold leading-none text-primary-foreground ring-2 ring-card">
+                    {cartCount > 99 ? "99+" : cartCount}
+                  </span>
+                )}
+              </span>
               {item.label}
+              {showCart && (
+                <span className="sr-only">{cartCount} in cart</span>
+              )}
             </Link>
           );
         })}
