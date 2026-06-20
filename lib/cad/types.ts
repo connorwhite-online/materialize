@@ -48,6 +48,8 @@ export interface CadRunResult {
    * persist layer bundles these into a Project (PR follow-up).
    */
   parts?: CadPart[];
+  /** True when the watertight result came from the voxel-remesh fallback. */
+  remeshed?: boolean;
   /** stderr / exception message when compile or export failed. */
   error?: string;
 }
@@ -92,6 +94,12 @@ export interface CadDoneEvent {
   sourceCode: string;
   /** Thread title — non-null only for a thread's first (root) generation. */
   title: string | null;
+  /** Present (length > 1) when the result was a multi-part assembly. */
+  parts?: { name: string; fileAssetId: string; fileSlug: string }[];
+  /** Slug of the Project bundling an assembly's parts, when created. */
+  projectSlug?: string | null;
+  /** True when the result was voxel-remeshed (an approximation). */
+  remeshed?: boolean;
 }
 
 /** Full event union carried over the SSE stream from /api/cad/generate. */

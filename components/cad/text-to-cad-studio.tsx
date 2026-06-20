@@ -5,20 +5,25 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import {
   AlertTriangleIcon,
+  ArrowUpIcon,
   CheckIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
   DownloadIcon,
   Loader2Icon,
+  PaperclipIcon,
   PencilIcon,
   PlusIcon,
   RotateCwIcon,
+  XIcon,
 } from "lucide-react";
+import { ChevronDown } from "@/components/icons/chevron-down";
+import { ChevronRight } from "@/components/icons/chevron-right";
 import {
   recordCadFeedback,
   renameCadGeneration,
+  saveCadFileToProfile,
 } from "@/app/actions/cad-generation";
 import type { CadStreamEvent, CadProgressEvent } from "@/lib/cad/types";
+import type { ViewerAnnotation } from "@/components/viewer/model-viewer";
 import {
   CAD_FEEDBACK_TAGS,
   CAD_FEEDBACK_TAG_LABELS,
@@ -35,6 +40,18 @@ const ModelViewer = lazy(() =>
   }))
 );
 
+// Idle/working visual — a deforming wireframe blob shown before a model exists.
+const MaterializingBlob = lazy(() =>
+  import("@/components/cad/materializing-blob").then((mod) => ({
+    default: mod.MaterializingBlob,
+  }))
+);
+
+export interface StudioPart {
+  name: string;
+  fileAssetId: string;
+}
+
 export interface StudioTurn {
   id: string;
   prompt: string;
@@ -46,6 +63,12 @@ export interface StudioTurn {
   rating: CadRating | null;
   feedbackTags: string[];
   feedbackNote: string | null;
+  /** Multi-part assembly members (length > 1); empty for a single solid. */
+  parts: StudioPart[];
+  /** Project bundling an assembly's parts, when one was created. */
+  projectSlug: string | null;
+  /** True when the result was voxel-remeshed (an approximation). */
+  remeshed: boolean;
 }
 
 export interface StudioThread {
@@ -54,6 +77,27 @@ export interface StudioThread {
   lastActivity: number;
   turns: StudioTurn[];
 }
+
+type ImageMediaType = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+const ALLOWED_IMAGE_TYPES: ImageMediaType[] = [
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+];
+const MAX_IMAGES = 4;
+
+interface AttachedImage {
+  id: string;
+  /** data: URL for the thumbnail. */
+  dataUrl: string;
+  /** base64 payload (no data: prefix) sent to the model. */
+  data: string;
+  mediaType: ImageMediaType;
+}
+
+/** A selected face/edge plus the user's note, fed to the agent on revision. */
+type StudioAnnotation = ViewerAnnotation & { note: string };
 
 function truncate(s: string, n = 40): string {
   return s.length > n ? `${s.slice(0, n).trimEnd()}…` : s;
@@ -100,10 +144,27 @@ export function TextToCadStudio({
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
+  const [images, setImages] = useState<AttachedImage[]>([]);
+  const [selectedPartId, setSelectedPartId] = useState<string | null>(null);
+  const [savingModel, setSavingModel] = useState(false);
+  const [savedAssets, setSavedAssets] = useState<Set<string>>(new Set());
+  const [annotateMode, setAnnotateMode] = useState(false);
+  const [annotations, setAnnotations] = useState<StudioAnnotation[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   // Abort an in-flight stream if the studio unmounts.
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  // Auto-grow the composer textarea with its content (capped), and shrink
+  // back when it's cleared after a send.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  }, [prompt]);
 
   const activeThread = threads.find((t) => t.rootId === activeRootId) ?? null;
   const turns = activeThread?.turns ?? [];
@@ -118,6 +179,21 @@ export function TextToCadStudio({
     [...turns].reverse().find((t) => t.status === "succeeded" && t.fileAssetId) ??
     null;
 
+  // For an assembly, the viewer/print/download act on the selected part; for a
+  // single solid (or a stale selection) fall back to the turn's primary asset.
+  const viewedParts = viewedTurn?.parts ?? [];
+  const activeAssetId =
+    viewedParts.find((p) => p.fileAssetId === selectedPartId)?.fileAssetId ??
+    viewedTurn?.fileAssetId ??
+    null;
+
+  // Annotations are tied to a specific model — drop them (and exit pin mode)
+  // whenever the viewed asset changes (new turn, switched part, opened build).
+  useEffect(() => {
+    setAnnotations([]);
+    setAnnotateMode(false);
+  }, [activeAssetId]);
+
   function startNewBuild() {
     abortRef.current?.abort();
     setGenerating(false);
@@ -126,6 +202,8 @@ export function TextToCadStudio({
     setProgress([]);
     setError(null);
     setPrompt("");
+    setImages([]);
+    setSelectedPartId(null);
     setShowHistory(false);
     setRenaming(false);
   }
@@ -139,6 +217,7 @@ export function TextToCadStudio({
     setViewTurnId(lastGood?.id ?? null);
     setProgress([]);
     setError(null);
+    setSelectedPartId(null);
     setShowHistory(false);
     setRenaming(false);
   }
@@ -168,6 +247,19 @@ export function TextToCadStudio({
       prev.map((t) => (t.rootId === root ? { ...t, title: res.name } : t))
     );
     setRenaming(false);
+  }
+
+  async function saveToProfile() {
+    if (!activeAssetId || savingModel || savedAssets.has(activeAssetId)) return;
+    const assetId = activeAssetId;
+    setSavingModel(true);
+    const res = await saveCadFileToProfile({ fileAssetId: assetId });
+    setSavingModel(false);
+    if ("error" in res) {
+      setError(res.error);
+      return;
+    }
+    setSavedAssets((prev) => new Set(prev).add(assetId));
   }
 
   // Reflect a saved feedback edit into the in-memory threads so the panel
@@ -200,6 +292,9 @@ export function TextToCadStudio({
       rating: null,
       feedbackTags: [],
       feedbackNote: null,
+      parts: ev.parts ?? [],
+      projectSlug: ev.projectSlug ?? null,
+      remeshed: ev.remeshed ?? false,
     };
     const now = Date.now();
 
@@ -227,8 +322,43 @@ export function TextToCadStudio({
     }
     setViewTurnId(ev.generationId);
     // Clear the composer only now that the turn landed — on an error the
-    // user's typed instruction stays put so they can retry without retyping.
+    // user's typed instruction (and any attached refs) stay put to retry.
     setPrompt("");
+    setImages([]);
+  }
+
+  async function addFiles(files: FileList | File[] | null | undefined) {
+    if (!files) return;
+    const incoming = Array.from(files).filter((f) =>
+      ALLOWED_IMAGE_TYPES.includes(f.type as ImageMediaType)
+    );
+    for (const f of incoming) {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result));
+        r.onerror = reject;
+        r.readAsDataURL(f);
+      });
+      const comma = dataUrl.indexOf(",");
+      const data = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+      setImages((prev) =>
+        prev.length >= MAX_IMAGES
+          ? prev
+          : [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                dataUrl,
+                data,
+                mediaType: f.type as ImageMediaType,
+              },
+            ]
+      );
+    }
+  }
+
+  function removeImage(id: string) {
+    setImages((prev) => prev.filter((i) => i.id !== id));
   }
 
   async function submit() {
@@ -236,6 +366,33 @@ export function TextToCadStudio({
     if (text.length < 3 || generating) return;
 
     const parentId = latestTurn?.id; // revise the latest turn when in a thread
+
+    // Fold pinned annotations into the instruction sent to the agent, as
+    // structured spatial feedback (the displayed turn keeps the clean text).
+    const fmt = (p: readonly number[]) => p.map((n) => n.toFixed(1)).join(", ");
+    const annoBlock = annotations.length
+      ? "\n\nAnnotated selections on the current model (mm, model coordinates):\n" +
+        annotations
+          .map((a, i) => {
+            const note = a.note.trim();
+            if (a.kind === "edge") {
+              return `#${i + 1} — edge from (${fmt(a.edge.a)}) to (${fmt(
+                a.edge.b
+              )}), length ${a.edge.length.toFixed(1)} mm: ${
+                note || "(address this edge)"
+              }`;
+            }
+            const sz = a.extent.some((n) => n > 0)
+              ? `, ~${a.extent.map((n) => n.toFixed(0)).join("×")} mm`
+              : "";
+            return `#${i + 1} — face centered at (${fmt(a.point)})${sz}, normal (${a.normal
+              .map((n) => n.toFixed(2))
+              .join(", ")}): ${note || "(address this face)"}`;
+          })
+          .join("\n")
+      : "";
+    const sentPrompt = text + annoBlock;
+
     setError(null);
     setProgress([]);
     setGenerating(true);
@@ -250,11 +407,14 @@ export function TextToCadStudio({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt: text,
+          prompt: sentPrompt,
           parentGenerationId: parentId,
           // Revisions inherit the build's current name; new builds get an
           // agent-written one server-side.
           name: parentId && activeThread ? threadLabel(activeThread) : undefined,
+          images: images.length
+            ? images.map((i) => ({ data: i.data, mediaType: i.mediaType }))
+            : undefined,
         }),
         signal: controller.signal,
       });
@@ -317,9 +477,6 @@ export function TextToCadStudio({
         <section className="min-w-0">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <h1 className="text-2xl font-semibold tracking-tight">
-                Text to CAD
-              </h1>
               {activeThread && !generating && viewedTurn?.fileAssetId ? (
                 renaming ? (
                   <div className="mt-1 flex items-center gap-2">
@@ -338,14 +495,14 @@ export function TextToCadStudio({
                       type="button"
                       onClick={saveName}
                       disabled={savingName}
-                      className="text-sm font-medium text-foreground disabled:opacity-50"
+                      className="cursor-pointer rounded-lg bg-foreground px-3 py-1.5 text-sm font-medium text-background disabled:opacity-50"
                     >
                       {savingName ? "Saving…" : "Save"}
                     </button>
                     <button
                       type="button"
                       onClick={() => setRenaming(false)}
-                      className="text-sm text-muted-foreground hover:text-foreground"
+                      className="cursor-pointer rounded-lg border border-foreground/15 px-3 py-1.5 text-sm text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                     >
                       Cancel
                     </button>
@@ -357,11 +514,11 @@ export function TextToCadStudio({
                       setNameDraft(threadLabel(activeThread));
                       setRenaming(true);
                     }}
-                    className="group mt-1 inline-flex max-w-full items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+                    className="group inline-flex max-w-full cursor-pointer items-center gap-2 text-xl font-semibold tracking-tight text-foreground"
                     title="Rename build"
                   >
                     <span className="truncate">{threadLabel(activeThread)}</span>
-                    <PencilIcon className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
+                    <PencilIcon className="size-4 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
                   </button>
                 )
               ) : (
@@ -386,29 +543,76 @@ export function TextToCadStudio({
           <div className="mt-5 overflow-hidden rounded-xl border border-foreground/10">
             <div className="aspect-square w-full bg-muted/30">
               {generating ? (
-                <ProgressPanel events={progress} />
-              ) : viewedTurn?.fileAssetId ? (
+                <div className="flex h-full w-full flex-col">
+                  <Suspense fallback={<div className="min-h-0 flex-1" />}>
+                    <MaterializingBlob className="min-h-0 flex-1" />
+                  </Suspense>
+                  <div className="shrink-0">
+                    <ProgressPanel events={progress} />
+                  </div>
+                </div>
+              ) : activeAssetId ? (
                 <Suspense fallback={<ViewerSkeleton label="Loading model…" />}>
                   <ModelViewer
-                    key={viewedTurn.fileAssetId}
-                    modelUrl={`/api/files/preview/${viewedTurn.fileAssetId}`}
+                    key={activeAssetId}
+                    modelUrl={`/api/files/preview/${activeAssetId}`}
                     format="stl"
                     mode="detail"
                     showZoomControls
+                    inspect
+                    annotateMode={annotateMode}
+                    onToggleAnnotate={() => setAnnotateMode((v) => !v)}
+                    annotations={annotations}
+                    onAnnotate={(a) =>
+                      setAnnotations((prev) => [
+                        ...prev,
+                        { id: crypto.randomUUID(), ...a },
+                      ])
+                    }
                     className="h-full w-full"
                   />
                 </Suspense>
               ) : (
-                <ViewerSkeleton
-                  label={
-                    activeThread
+                <div className="flex h-full w-full flex-col">
+                  <Suspense fallback={<div className="min-h-0 flex-1" />}>
+                    <MaterializingBlob className="min-h-0 flex-1" />
+                  </Suspense>
+                  <p className="shrink-0 px-6 pb-8 text-center text-sm text-muted-foreground">
+                    {activeThread
                       ? "No printable model in this build yet."
-                      : "Describe a part below to start."
-                  }
-                />
+                      : "Describe a part below to start."}
+                  </p>
+                </div>
               )}
             </div>
           </div>
+
+          {/* Assembly part selector — switch which part the viewer/actions
+              target. Shown only for multi-part builds. */}
+          {!generating && viewedParts.length > 1 && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="text-xs text-muted-foreground">
+                {viewedParts.length} parts:
+              </span>
+              {viewedParts.map((p) => {
+                const isActive = p.fileAssetId === activeAssetId;
+                return (
+                  <button
+                    key={p.fileAssetId}
+                    type="button"
+                    onClick={() => setSelectedPartId(p.fileAssetId)}
+                    className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                      isActive
+                        ? "border-foreground/30 bg-foreground/5 text-foreground"
+                        : "border-foreground/10 text-muted-foreground hover:bg-foreground/5"
+                    }`}
+                  >
+                    {p.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {error && (
             <p className="mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -416,25 +620,132 @@ export function TextToCadStudio({
             </p>
           )}
 
-          {/* Actions for the viewed model */}
-          {!generating && viewedTurn?.fileAssetId && (
+          {/* Approximation notice — the result came from the voxel-remesh
+              fallback (organic/complex shape repair couldn't close). */}
+          {!generating && viewedTurn?.remeshed && (
+            <p className="mt-3 flex items-center gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
+              <AlertTriangleIcon className="size-4 shrink-0" />
+              Approximated — this complex shape was re-meshed to be printable, so
+              fine detail and exact dimensions may differ.
+            </p>
+          )}
+
+          {/* Actions for the viewed model (the selected part, for assemblies) */}
+          {!generating && activeAssetId && (
             <div className="mt-4 flex flex-wrap gap-3">
               <Link
-                href={`/print/${viewedTurn.fileAssetId}`}
-                className="rounded-lg bg-foreground px-4 py-2 text-sm font-medium text-background"
+                href={`/print/${activeAssetId}`}
+                className="cursor-pointer rounded-lg bg-foreground px-4 py-2 text-sm font-medium text-background"
               >
-                Print this model
+                Print
               </Link>
               <a
-                href={`/api/files/preview/${viewedTurn.fileAssetId}`}
+                href={`/api/files/preview/${activeAssetId}`}
                 download={`${
-                  activeThread ? threadLabel(activeThread) : "model"
+                  (viewedParts.length > 1
+                    ? viewedParts.find((p) => p.fileAssetId === activeAssetId)
+                        ?.name
+                    : activeThread && threadLabel(activeThread)) || "model"
                 }.stl`}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-foreground/15 px-4 py-2 text-sm hover:bg-foreground/5"
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-foreground/15 px-4 py-2 text-sm hover:bg-foreground/5"
               >
                 <DownloadIcon className="size-4" />
-                Download STL
+                Download
               </a>
+              <button
+                type="button"
+                onClick={saveToProfile}
+                disabled={savingModel || savedAssets.has(activeAssetId)}
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-foreground/15 px-4 py-2 text-sm hover:bg-foreground/5 disabled:opacity-60"
+              >
+                {savedAssets.has(activeAssetId) ? (
+                  <>
+                    <CheckIcon className="size-4" /> Saved
+                  </>
+                ) : savingModel ? (
+                  "Saving…"
+                ) : (
+                  "Save"
+                )}
+              </button>
+              {viewedTurn?.projectSlug && (
+                <Link
+                  href={`/projects/${viewedTurn.projectSlug}`}
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-foreground/15 px-4 py-2 text-sm hover:bg-foreground/5"
+                >
+                  Open assembly project
+                </Link>
+              )}
+            </div>
+          )}
+
+          {/* Annotations — pin points on the model + notes; folded into the
+              next revision as structured spatial feedback for the agent. */}
+          {!generating && activeAssetId && (annotateMode || annotations.length > 0) && (
+            <div className="mt-4 rounded-xl border border-foreground/10 p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">
+                  Annotations{" "}
+                  <span className="text-muted-foreground">
+                    ({annotations.length})
+                  </span>
+                </span>
+                {annotations.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setAnnotations([])}
+                    className="cursor-pointer text-xs text-muted-foreground underline-offset-2 hover:underline"
+                  >
+                    Clear all
+                  </button>
+                )}
+              </div>
+              {annotations.length === 0 ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Pick <span className="font-medium">Face</span> or{" "}
+                  <span className="font-medium">Edge</span> in the viewer, click
+                  the model, and describe the change. Selections are sent with
+                  your next message.
+                </p>
+              ) : (
+                <ol className="mt-2 space-y-2">
+                  {annotations.map((a, i) => (
+                    <li key={a.id} className="flex items-start gap-2">
+                      <span className="mt-1.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-[#2563eb] text-[10px] font-medium text-white">
+                        {i + 1}
+                      </span>
+                      <input
+                        value={a.note}
+                        onChange={(e) =>
+                          setAnnotations((prev) =>
+                            prev.map((x) =>
+                              x.id === a.id ? { ...x, note: e.target.value } : x
+                            )
+                          )
+                        }
+                        placeholder={`e.g. ${
+                          a.kind === "edge" ? "fillet this edge" : "round this face"
+                        } — at (${a.point
+                          .map((n) => n.toFixed(0))
+                          .join(", ")}) mm`}
+                        className="min-w-0 flex-1 rounded-md border border-foreground/15 bg-card px-2 py-1 text-sm outline-none focus:border-foreground/30"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setAnnotations((prev) =>
+                            prev.filter((x) => x.id !== a.id)
+                          )
+                        }
+                        aria-label="Remove annotation"
+                        className="mt-1 cursor-pointer text-muted-foreground hover:text-foreground"
+                      >
+                        <XIcon className="size-4" />
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              )}
             </div>
           )}
 
@@ -456,9 +767,9 @@ export function TextToCadStudio({
                 className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
               >
                 {showHistory ? (
-                  <ChevronDownIcon className="size-4" />
+                  <ChevronDown className="size-4" />
                 ) : (
-                  <ChevronRightIcon className="size-4" />
+                  <ChevronRight className="size-4" />
                 )}
                 Revision history ({turns.length})
               </button>
@@ -508,9 +819,9 @@ export function TextToCadStudio({
                 className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
               >
                 {showSource ? (
-                  <ChevronDownIcon className="size-4" />
+                  <ChevronDown className="size-4" />
                 ) : (
-                  <ChevronRightIcon className="size-4" />
+                  <ChevronRight className="size-4" />
                 )}
                 Parametric source
               </button>
@@ -544,13 +855,20 @@ export function TextToCadStudio({
               const thumb = [...t.turns]
                 .reverse()
                 .find((x) => x.renderUrl)?.renderUrl;
+              // Fall back to a live 3D preview of the latest part when there's
+              // no rendered PNG (e.g. local dev with no headless GL). Server-
+              // rendered thumbnails remain the scale solution — see CON-175.
+              const previewAssetId = [...t.turns]
+                .reverse()
+                .find((x) => x.status === "succeeded" && x.fileAssetId)
+                ?.fileAssetId;
               const isActive = t.rootId === activeRootId;
               return (
                 <li key={t.rootId}>
                   <button
                     type="button"
                     onClick={() => openThread(t)}
-                    className={`flex w-full items-center gap-3 rounded-lg border p-2 text-left transition-colors ${
+                    className={`flex w-full cursor-pointer items-center gap-3 rounded-lg border p-2 text-left transition-colors ${
                       isActive
                         ? "border-foreground/30 bg-foreground/5"
                         : "border-foreground/10 hover:bg-foreground/5"
@@ -563,6 +881,18 @@ export function TextToCadStudio({
                         alt=""
                         className="h-10 w-10 shrink-0 rounded bg-muted/40 object-contain"
                       />
+                    ) : previewAssetId ? (
+                      <div className="h-10 w-10 shrink-0 overflow-hidden rounded bg-muted/40">
+                        <Suspense fallback={<div className="h-full w-full" />}>
+                          <ModelViewer
+                            key={previewAssetId}
+                            modelUrl={`/api/files/preview/${previewAssetId}`}
+                            format="stl"
+                            mode="preview"
+                            className="h-full w-full"
+                          />
+                        </Suspense>
+                      </div>
                     ) : (
                       <div className="h-10 w-10 shrink-0 rounded bg-muted/40" />
                     )}
@@ -584,40 +914,140 @@ export function TextToCadStudio({
       </div>
 
       {/* Floating composer */}
-      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30">
-        <div className="pointer-events-auto mx-auto max-w-3xl px-4 pb-4">
-          <div className="flex items-end gap-2 rounded-2xl border border-foreground/15 bg-card/95 p-2 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80">
+      {/* nav:pl-56 matches the app layout's left sidebar gutter so this
+          viewport-fixed bar lines up with the page's content area; the inner
+          grid then mirrors the page grid so the composer centers under the
+          viewer column and ignores the Builds sidebar (empty 300px track). */}
+      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 nav:pl-56">
+        <div className="mx-auto grid max-w-6xl gap-8 px-4 pb-4 lg:grid-cols-[1fr_300px]">
+          <div className="pointer-events-auto mx-auto w-full max-w-2xl">
+          <div
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (!generating) addFiles(e.dataTransfer.files);
+            }}
+            className="rounded-2xl border border-foreground/15 bg-card/95 p-2 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80"
+          >
+            {images.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-2 px-1">
+                {images.map((img) => (
+                  <div key={img.id} className="relative">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={img.dataUrl}
+                      alt="reference"
+                      className="h-12 w-12 rounded-md border border-foreground/10 object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeImage(img.id)}
+                      aria-label="Remove image"
+                      className="absolute -right-1.5 -top-1.5 flex size-4 items-center justify-center rounded-full bg-foreground text-background"
+                    >
+                      <XIcon className="size-2.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Annotation chips — make it obvious selected faces send with the
+                message. */}
+            {annotations.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-1.5 px-1">
+                {annotations.map((a, i) => (
+                  <span
+                    key={a.id}
+                    className="inline-flex max-w-[14rem] items-center gap-1 rounded-full border border-[#2563eb]/30 bg-[#2563eb]/10 py-0.5 pl-2 pr-1 text-xs text-foreground"
+                  >
+                    <span className="truncate">
+                      📍 {a.note.trim() ||
+                        `${a.kind === "edge" ? "Edge" : "Face"} ${i + 1}`}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setAnnotations((prev) =>
+                          prev.filter((x) => x.id !== a.id)
+                        )
+                      }
+                      aria-label="Remove annotation"
+                      className="flex size-3.5 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                    >
+                      <XIcon className="size-2.5" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            {/* Textarea on top — borderless, auto-grows with the prompt. */}
             <textarea
+              ref={textareaRef}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={(e) => {
                 if ((e.metaKey || e.ctrlKey) && e.key === "Enter") submit();
+              }}
+              onPaste={(e) => {
+                const files = Array.from(e.clipboardData.files);
+                if (files.length && !generating) addFiles(files);
               }}
               rows={1}
               maxLength={2000}
               disabled={generating}
               placeholder={
                 activeThread
-                  ? "Describe a change… e.g. make it 2mm taller, add a lanyard hole"
+                  ? "What do you want to change?"
                   : "Describe a part… e.g. a parametric phone stand for a 7mm-thick phone"
               }
-              className="max-h-40 min-h-[2.5rem] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none disabled:opacity-60"
+              className="max-h-[200px] w-full resize-none border-0 bg-transparent px-2 py-1.5 text-sm outline-none disabled:opacity-60"
             />
-            <button
-              type="button"
-              onClick={submit}
-              disabled={generating || prompt.trim().length < 3}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
-            >
-              {generating && <Loader2Icon className="size-4 animate-spin" />}
-              {composerLabel}
-            </button>
+            {/* Toolbar below the text: attach (left), send (right). */}
+            <div className="flex items-center justify-between px-1 pt-1">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={generating || images.length >= MAX_IMAGES}
+                aria-label="Attach reference image"
+                title="Attach reference image"
+                className="flex size-8 cursor-pointer items-center justify-center rounded-lg text-muted-foreground hover:bg-foreground/5 hover:text-foreground disabled:opacity-40"
+              >
+                <PaperclipIcon className="size-4" />
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/gif,image/webp"
+                multiple
+                hidden
+                onChange={(e) => {
+                  addFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+              <button
+                type="button"
+                onClick={submit}
+                disabled={generating || prompt.trim().length < 3}
+                aria-label={composerLabel}
+                title={composerLabel}
+                className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-foreground text-background disabled:opacity-40"
+              >
+                {generating ? (
+                  <Loader2Icon className="size-4 animate-spin" />
+                ) : (
+                  <ArrowUpIcon className="size-4" strokeWidth={2.5} />
+                )}
+              </button>
+            </div>
           </div>
           <p className="mt-1.5 px-2 text-center text-xs text-muted-foreground">
             {activeThread
               ? "Sending a message revises this build · ⌘/Ctrl + Enter"
               : "⌘/Ctrl + Enter to generate"}
           </p>
+          </div>
         </div>
       </div>
     </div>
@@ -651,9 +1081,8 @@ function ViewerSkeleton({ label }: { label: string }) {
 /** Renders the streamed harness transcript as a live checklist. */
 function ProgressPanel({ events }: { events: CadProgressEvent[] }) {
   return (
-    <div className="flex h-full w-full flex-col items-center justify-center gap-4 p-6">
-      <div className="size-12 animate-pulse rounded-xl border-2 border-dashed border-foreground/20" />
-      <ul className="w-full max-w-sm space-y-1.5 text-sm">
+    <div className="flex w-full flex-col items-center gap-2 px-6 pb-6">
+      <ul className="flex max-w-sm flex-col items-center gap-1.5 text-sm">
         {events.length === 0 && (
           <li className="flex items-center gap-2 text-muted-foreground">
             <Loader2Icon className="size-4 animate-spin" />
@@ -664,13 +1093,16 @@ function ProgressPanel({ events }: { events: CadProgressEvent[] }) {
           const isLast = i === events.length - 1;
           const d = describeEvent(ev);
           return (
-            <li key={i} className={`flex items-center gap-2 ${d.tone}`}>
+            <li
+              key={i}
+              className={`flex items-center justify-center gap-2 text-center ${d.tone}`}
+            >
               {isLast ? (
                 <Loader2Icon className="size-4 shrink-0 animate-spin" />
               ) : (
                 d.icon
               )}
-              <span className="min-w-0 flex-1">{d.text}</span>
+              <span>{d.text}</span>
             </li>
           );
         })}

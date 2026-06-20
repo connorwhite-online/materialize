@@ -15,6 +15,8 @@ Rules:
 - Make it PARAMETRIC: declare key dimensions as named variables at the top so they can be tuned later.
 - Design for 3D printing: a flat base where sensible, no zero-thickness walls, reasonable minimum wall thickness (>= 1.5 mm), units in millimeters.
 - Keep it a single watertight solid unless the prompt clearly asks for separate parts.
+- When the request clearly needs SEPARATE printed parts (e.g. a two-piece enclosure = lid + base, or a hinge with two halves), assign a dict named \`parts\` INSTEAD of \`result\` — e.g. \`parts = {"lid": <solid>, "base": <solid>}\`, one entry per independently-printed part, each its own watertight solid. Use \`result\` for everything else; never assign both.
+- For organic or character subjects (animals, figures, faces, creatures), do NOT attempt photoreal detail — build123d is a CAD kernel, not a sculptor. Approximate the form as a STYLIZED composition of a FEW primitive solids (spheres, ellipsoids via scaled spheres, cylinders, cones, tapered/lofted shapes) fused into a single watertight body with smooth boolean unions. Favor a clean, recognizable, printable silhouette over fine features, and avoid many tiny overlapping booleans — they produce non-watertight geometry and fail.
 - Do not call show_object, export, or any file I/O — just build \`result\`.
 - Target the build123d 0.11+ API: for a symmetric/two-sided extrude use \`extrude(..., both=True)\` (there is no \`symmetric=\` argument).`;
 

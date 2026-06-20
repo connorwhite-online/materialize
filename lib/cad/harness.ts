@@ -1,13 +1,25 @@
 import "server-only";
 
-import { completeText, hasModelCredentials } from "./model-client";
+import {
+  completeText,
+  hasModelCredentials,
+  type PromptImage,
+} from "./model-client";
 import { runCadCode } from "./runner-client";
 import { SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, extractCode, gradeRun } from "./prompt";
 import { buildKnowledgeBlock, type CadProcess } from "./knowledge";
 import { judgeAesthetics } from "./critique";
 import { selectExemplars, formatExemplars } from "./knowledge/exemplars";
 import { modelForRole, planStepEnabled, type CadRole } from "./models";
+import { CAD_FEEDBACK_TAG_LABELS, type CadFeedbackTag } from "./feedback";
 import type { CadProgressEvent, CadRunResult } from "./types";
+
+/** Owner feedback on the version being revised (CON-181). */
+export interface PriorFeedback {
+  rating?: string | null;
+  tags?: string[] | null;
+  note?: string | null;
+}
 
 /**
  * The text-to-CAD harness. The harness — not a bespoke model — is the
@@ -28,6 +40,13 @@ export interface HarnessInput {
   prompt: string;
   /** When editing an existing generation, its source code to revise. */
   priorSourceCode?: string | null;
+  /**
+   * Owner feedback on the version being revised — folded into the prompt so a
+   * revision corrects known problems (CON-181). No-op on a fresh build.
+   */
+  priorFeedback?: PriorFeedback | null;
+  /** Reference images the user attached, passed to the generate steps. */
+  images?: PromptImage[] | null;
   maxAttempts?: number;
   signal?: AbortSignal;
   /**
@@ -110,6 +129,22 @@ function buildUserPrompt(input: HarnessInput, plan?: string): string {
     out += `\n\nFollow this plan:\n${plan}`;
   }
 
+  // Fold the owner's feedback on the prior version into the revise prompt so
+  // the model actually corrects what was flagged (CON-181).
+  const fb = input.priorFeedback;
+  if (fb) {
+    const tagLabels = (fb.tags ?? [])
+      .map((t) => CAD_FEEDBACK_TAG_LABELS[t as CadFeedbackTag] ?? t)
+      .filter(Boolean);
+    const note = fb.note?.trim();
+    if (fb.rating === "bad" || tagLabels.length > 0 || note) {
+      const lines = ["The previous version received this feedback — fix it:"];
+      if (tagLabels.length > 0) lines.push(`- Problems: ${tagLabels.join(", ")}`);
+      if (note) lines.push(`- Note: ${note}`);
+      out += `\n\n${lines.join("\n")}`;
+    }
+  }
+
   // On a fresh build, show the best-matching verified exemplar as a style
   // reference. (Revisions already have the prior code as their reference.)
   // Returns "" until exemplars are sidecar-verified, so this is a no-op now.
@@ -165,6 +200,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
           system: PLAN_SYSTEM_PROMPT,
           prompt: buildPlanPrompt(input),
           model: planModel,
+          images: input.images ?? undefined,
           signal: input.signal,
         })
       );
@@ -195,6 +231,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
           system: SYSTEM_PROMPT,
           prompt: userPrompt,
           model,
+          images: input.images ?? undefined,
           signal: input.signal,
         })
       );

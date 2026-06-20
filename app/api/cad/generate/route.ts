@@ -6,7 +6,8 @@ import { cadGenerations } from "@/lib/db/schema";
 import { logError } from "@/lib/logger";
 import { canUseTextToCad } from "@/lib/features";
 import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
-import { runHarness } from "@/lib/cad/harness";
+import { runHarness, type PriorFeedback } from "@/lib/cad/harness";
+import type { PromptImage } from "@/lib/cad/model-client";
 import {
   persistGenerationFailure,
   persistGenerationSuccess,
@@ -45,7 +46,12 @@ export async function POST(request: Request) {
     return new Response("Not found", { status: 404 });
   }
 
-  let body: { prompt?: string; parentGenerationId?: string; name?: string };
+  let body: {
+    prompt?: string;
+    parentGenerationId?: string;
+    name?: string;
+    images?: PromptImage[];
+  };
   try {
     body = await request.json();
   } catch {
@@ -60,14 +66,34 @@ export async function POST(request: Request) {
     return new Response("Prompt is too long.", { status: 400 });
   }
 
+  // Sanitize reference images: allowed types only, capped count.
+  const ALLOWED_IMAGE_TYPES = [
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+  ];
+  const images: PromptImage[] = (body.images ?? [])
+    .filter(
+      (i) =>
+        i &&
+        typeof i.data === "string" &&
+        ALLOWED_IMAGE_TYPES.includes(i.mediaType)
+    )
+    .slice(0, 4);
+
   // When revising, load the parent's source to seed the harness — and verify
   // it belongs to the caller.
   let priorSourceCode: string | null = null;
+  let priorFeedback: PriorFeedback | null = null;
   if (body.parentGenerationId) {
     const [parent] = await db
       .select({
         sourceCode: cadGenerations.sourceCode,
         userId: cadGenerations.userId,
+        rating: cadGenerations.rating,
+        feedbackTags: cadGenerations.feedbackTags,
+        feedbackNote: cadGenerations.feedbackNote,
       })
       .from(cadGenerations)
       .where(eq(cadGenerations.id, body.parentGenerationId))
@@ -76,6 +102,12 @@ export async function POST(request: Request) {
       return new Response("Original model not found.", { status: 404 });
     }
     priorSourceCode = parent.sourceCode;
+    // Carry the parent's feedback into the revision so the model corrects it.
+    priorFeedback = {
+      rating: parent.rating,
+      tags: parent.feedbackTags,
+      note: parent.feedbackNote,
+    };
   }
 
   const isRoot = !body.parentGenerationId;
@@ -105,6 +137,8 @@ export async function POST(request: Request) {
         const result = await runHarness({
           prompt,
           priorSourceCode,
+          priorFeedback,
+          images: images.length ? images : undefined,
           signal: request.signal,
           onProgress: (event) => send(event),
         });
@@ -143,6 +177,9 @@ export async function POST(request: Request) {
           renderUrl: persisted.renderUrl,
           sourceCode: persisted.sourceCode,
           title: persisted.title,
+          parts: persisted.parts,
+          projectSlug: persisted.projectSlug,
+          remeshed: persisted.remeshed,
         });
       } catch (error) {
         // A client disconnect aborts the request signal — not a real failure.

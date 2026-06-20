@@ -87,9 +87,8 @@ def _process_shape(shape, formats: list[str], tmp: str, stem: str) -> dict:
 
     stl_path = os.path.join(tmp, f"{stem}.stl")
     export_stl(shape, stl_path)
-    if "stl" in formats:
-        with open(stl_path, "rb") as f:
-            entry["files"]["stl"] = base64.b64encode(f.read()).decode()
+
+    # STEP comes straight from the OCC BRep (not the mesh) — keep it as-is.
     if "step" in formats:
         step_path = os.path.join(tmp, f"{stem}.step")
         export_step(shape, step_path)
@@ -98,8 +97,69 @@ def _process_shape(shape, formats: list[str], tmp: str, stem: str) -> dict:
 
     try:
         import trimesh
+        from trimesh import repair as trimesh_repair
 
         mesh = trimesh.load(stl_path, force="mesh")
+
+        # Best-effort cleanup so boolean-op artifacts (unwelded verts,
+        # degenerate/duplicate faces, flipped winding, small holes) don't
+        # hard-fail an otherwise-good model. Each step is independent and
+        # optional across trimesh versions; the repaired mesh becomes the
+        # printable STL we hand back.
+        if not mesh.is_watertight or not mesh.is_winding_consistent:
+            for step in (
+                lambda: mesh.merge_vertices(),
+                lambda: mesh.update_faces(mesh.nondegenerate_faces()),
+                lambda: mesh.update_faces(mesh.unique_faces()),
+                lambda: mesh.remove_unreferenced_vertices(),
+                lambda: trimesh_repair.fix_winding(mesh),
+                lambda: trimesh_repair.fix_normals(mesh),
+                lambda: trimesh_repair.fill_holes(mesh),
+            ):
+                try:
+                    step()
+                except Exception:  # noqa: BLE001
+                    pass
+            try:
+                mesh.export(stl_path)  # so files.stl matches what we validate
+            except Exception:  # noqa: BLE001
+                pass
+
+        # Last-resort fallback for organic/complex results that repair can't
+        # close: voxelize the solid and marching-cubes it back to a guaranteed-
+        # watertight mesh. Trades crisp detail for an always-printable result,
+        # so it only runs when the model would otherwise FAIL. Disable with
+        # CAD_VOXEL_FALLBACK=false.
+        if (
+            not mesh.is_watertight
+            and os.environ.get("CAD_VOXEL_FALLBACK", "true") != "false"
+        ):
+            try:
+                ext0 = mesh.extents
+                max_dim = float(max(ext0)) or 1.0
+                res = int(os.environ.get("CAD_VOXEL_RES", "80"))
+                # Clamp so a thin/large model can't blow up the voxel grid.
+                vox_per_axis = [max(1.0, e / (max_dim / res)) for e in ext0]
+                while vox_per_axis[0] * vox_per_axis[1] * vox_per_axis[2] > 6e6:
+                    res = int(res * 0.8)
+                    vox_per_axis = [
+                        max(1.0, e / (max_dim / res)) for e in ext0
+                    ]
+                pitch = max_dim / res
+                vg = mesh.voxelized(pitch=pitch).fill()
+                remeshed = vg.marching_cubes
+                # marching_cubes returns index space; map back to model (mm).
+                remeshed.apply_transform(vg.transform)
+                if remeshed.is_watertight:
+                    mesh = remeshed
+                    entry["remeshed"] = True
+                    try:
+                        mesh.export(stl_path)
+                    except Exception:  # noqa: BLE001
+                        pass
+            except Exception:  # noqa: BLE001
+                pass
+
         entry["validation"]["isWatertight"] = bool(mesh.is_watertight)
         entry["validation"]["isManifold"] = bool(mesh.is_winding_consistent)
         ext = mesh.extents
@@ -115,6 +175,12 @@ def _process_shape(shape, formats: list[str], tmp: str, stem: str) -> dict:
         entry["renderPng"] = _render(mesh)
     except Exception as mesh_err:  # noqa: BLE001
         entry["error"] = f"analysis: {mesh_err}"
+
+    # Encode the (possibly repaired) STL.
+    if "stl" in formats:
+        with open(stl_path, "rb") as f:
+            entry["files"]["stl"] = base64.b64encode(f.read()).decode()
+
     return entry
 
 
@@ -132,6 +198,7 @@ def _execute(code: str, formats: list[str], out: "mp.Queue") -> None:
         "files": {},
         "renderPng": None,
         "geometry": None,
+        "remeshed": False,
         "validation": {
             "compiled": False,
             "isSolid": False,
@@ -157,6 +224,7 @@ def _execute(code: str, formats: list[str], out: "mp.Queue") -> None:
                 result_payload["renderPng"] = entry["renderPng"]
                 result_payload["geometry"] = entry["geometry"]
                 result_payload["validation"] = entry["validation"]
+                result_payload["remeshed"] = bool(entry.get("remeshed"))
                 if entry["error"]:
                     result_payload["error"] = entry["error"]
                 result_payload["ok"] = entry["validation"]["isSolid"]
@@ -187,6 +255,7 @@ def _execute(code: str, formats: list[str], out: "mp.Queue") -> None:
                     ),
                 }
                 result_payload["parts"] = parts
+                result_payload["remeshed"] = any(p.get("remeshed") for p in parts)
                 result_payload["ok"] = all_ok
             else:
                 result_payload["error"] = (
