@@ -545,7 +545,7 @@ export function TextToCadStudio({
               {generating ? (
                 <div className="relative h-full w-full">
                   <Suspense fallback={<div className="h-full w-full" />}>
-                    <MaterializingBlob className="h-full w-full" />
+                    <MaterializingBlob className="h-full w-full" active />
                   </Suspense>
                   <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
                     <div className="glass rounded-2xl px-5 py-4 shadow-lg">

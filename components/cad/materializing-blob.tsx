@@ -42,9 +42,12 @@ const FRAG = /* glsl */ `
   }
 `;
 
-function Blob() {
+function Blob({ active }: { active: boolean }) {
   const matRef = useRef<THREE.ShaderMaterial>(null);
   const meshRef = useRef<THREE.Mesh>(null);
+  // Eased deform speed/amplitude so it accelerates when generation starts.
+  const speed = useRef(0.6);
+  const amp = useRef(0.16);
   const uniforms = useMemo(
     () => ({
       uTime: { value: 0 },
@@ -55,12 +58,19 @@ function Blob() {
   );
 
   useFrame((_, delta) => {
-    // Slow the deform: uTime drives the noise, so a smaller increment = gentler
-    // morphing without affecting the rotation below.
-    if (matRef.current) matRef.current.uniforms.uTime.value += delta * 0.6;
+    // Ease toward the target deform speed/amp — gentle when idle, faster and
+    // more turbulent while a shape is generating ("working harder").
+    const k = Math.min(1, delta * 2.5);
+    speed.current += ((active ? 1.7 : 0.6) - speed.current) * k;
+    amp.current += ((active ? 0.24 : 0.16) - amp.current) * k;
+    if (matRef.current) {
+      matRef.current.uniforms.uTime.value += delta * speed.current;
+      matRef.current.uniforms.uAmp.value = amp.current;
+    }
     if (meshRef.current) {
-      meshRef.current.rotation.y += delta * 0.07;
-      meshRef.current.rotation.x += delta * 0.02;
+      const rot = active ? 0.12 : 0.07;
+      meshRef.current.rotation.y += delta * rot;
+      meshRef.current.rotation.x += delta * rot * 0.3;
     }
   });
 
@@ -82,13 +92,20 @@ function Blob() {
   );
 }
 
-export function MaterializingBlob({ className }: { className?: string }) {
+export function MaterializingBlob({
+  className,
+  active = false,
+}: {
+  className?: string;
+  /** Speed up + churn harder while a shape is generating. */
+  active?: boolean;
+}) {
   return (
     <div className={className}>
       {/* Camera pulled back so the blob reads as a small "entity" with room
           around it, not a sphere filling the frame. */}
       <Canvas camera={{ position: [0, 0, 8], fov: 45 }} dpr={[1, 2]}>
-        <Blob />
+        <Blob active={active} />
       </Canvas>
     </div>
   );
