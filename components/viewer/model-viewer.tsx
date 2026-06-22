@@ -4,13 +4,20 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Stage, Center, Grid, Line } from "@react-three/drei";
 import {
+  AlwaysStencilFunc,
+  BackSide,
   Box3,
   BufferGeometry,
+  DecrementWrapStencilOp,
   DoubleSide,
   EdgesGeometry,
   Float32BufferAttribute,
+  FrontSide,
+  IncrementWrapStencilOp,
   Line3,
+  NotEqualStencilFunc,
   Plane,
+  ReplaceStencilOp,
   Vector3,
 } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
@@ -325,6 +332,91 @@ function FeatureEdges({ geom }: { geom: BufferGeometry }) {
   );
 }
 
+/**
+ * Writes the model's cross-section footprint into the stencil buffer (back
+ * faces increment, front faces decrement → non-zero exactly where the cut
+ * passes through solid material). Renders no color/depth; a cap quad drawn
+ * afterward (where stencil != 0) fills the section so a solid reads as solid
+ * and a shell reads as its wall band. Lives in the model's transformed group
+ * so it lines up with the clipped mesh. (three.js webgl_clipping_stencil.)
+ */
+function SectionStencil({
+  geom,
+  planes,
+}: {
+  geom: BufferGeometry;
+  planes: Plane[];
+}) {
+  return (
+    <group>
+      <mesh geometry={geom} renderOrder={1}>
+        <meshBasicMaterial
+          depthWrite={false}
+          depthTest={false}
+          colorWrite={false}
+          side={BackSide}
+          clippingPlanes={planes}
+          stencilWrite
+          stencilFunc={AlwaysStencilFunc}
+          stencilFail={IncrementWrapStencilOp}
+          stencilZFail={IncrementWrapStencilOp}
+          stencilZPass={IncrementWrapStencilOp}
+        />
+      </mesh>
+      <mesh geometry={geom} renderOrder={1}>
+        <meshBasicMaterial
+          depthWrite={false}
+          depthTest={false}
+          colorWrite={false}
+          side={FrontSide}
+          clippingPlanes={planes}
+          stencilWrite
+          stencilFunc={AlwaysStencilFunc}
+          stencilFail={DecrementWrapStencilOp}
+          stencilZFail={DecrementWrapStencilOp}
+          stencilZPass={DecrementWrapStencilOp}
+        />
+      </mesh>
+    </group>
+  );
+}
+
+/**
+ * The filled cross-section cap — a quad at the cut plane (world space), drawn
+ * only where SectionStencil marked solid, then resetting the stencil. Unlit
+ * basic material (the scene has no real lights for a lit one).
+ */
+function SectionCap({
+  center,
+  cutY,
+  size,
+}: {
+  center: [number, number, number];
+  cutY: number;
+  size: number;
+}) {
+  return (
+    <mesh
+      position={[center[0], cutY, center[2]]}
+      rotation={[-Math.PI / 2, 0, 0]}
+      renderOrder={2}
+    >
+      <planeGeometry args={[size, size]} />
+      <meshBasicMaterial
+        color="#9ca3af"
+        side={DoubleSide}
+        toneMapped={false}
+        stencilWrite
+        stencilRef={0}
+        stencilFunc={NotEqualStencilFunc}
+        stencilFail={ReplaceStencilOp}
+        stencilZFail={ReplaceStencilOp}
+        stencilZPass={ReplaceStencilOp}
+      />
+    </mesh>
+  );
+}
+
 function PreviewUnavailable() {
   return (
     <div className="flex h-full w-full items-center justify-center bg-muted/20">
@@ -520,6 +612,11 @@ function InspectModel({
           setGeom(g);
         }}
       />
+      {/* Stencil-fill the cross-section so solid reads as solid (the cap quad
+          is drawn at the Canvas level). */}
+      {planes && planes.length > 0 && geom && (
+        <SectionStencil geom={geom} planes={planes} />
+      )}
       {/* Faint guide of all selectable edges while in edge mode. */}
       {annotateMode && target === "edge" && geom && <FeatureEdges geom={geom} />}
 
@@ -656,7 +753,7 @@ export function ModelViewer({
           dpr={isPreview ? 1 : [1, 2]}
           // Local clipping is needed for the cross-section tool; harmless
           // (no-op) everywhere else since no material sets clippingPlanes.
-          gl={{ localClippingEnabled: true }}
+          gl={{ localClippingEnabled: true, stencil: true }}
         >
           <Suspense fallback={<LoadingFallback />}>
             <Stage
@@ -711,6 +808,17 @@ export function ModelViewer({
                 fadeStrength={1}
                 followCamera={false}
                 infiniteGrid={false}
+              />
+            )}
+            {/* Filled cross-section cap at the cut plane (world space). */}
+            {inspectable && sectionOn && bounds && (
+              <SectionCap
+                center={bounds.center}
+                cutY={
+                  bounds.worldMaxY -
+                  sectionT * (bounds.worldMaxY - bounds.worldMinY)
+                }
+                size={Math.max(bounds.footprint.x, bounds.footprint.z) * 1.5}
               />
             )}
           </Suspense>
