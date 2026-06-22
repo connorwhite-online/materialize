@@ -543,12 +543,14 @@ export function TextToCadStudio({
           <div className="mt-5 overflow-hidden rounded-xl border border-foreground/10">
             <div className="aspect-square w-full bg-muted/30">
               {generating ? (
-                <div className="flex h-full w-full flex-col">
-                  <Suspense fallback={<div className="min-h-0 flex-1" />}>
-                    <MaterializingBlob className="min-h-0 flex-1" />
+                <div className="relative h-full w-full">
+                  <Suspense fallback={<div className="h-full w-full" />}>
+                    <MaterializingBlob className="h-full w-full" />
                   </Suspense>
-                  <div className="shrink-0">
-                    <ProgressPanel events={progress} />
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
+                    <div className="glass rounded-2xl px-5 py-4 shadow-lg">
+                      <ProgressPanel events={progress} />
+                    </div>
                   </div>
                 </div>
               ) : activeAssetId ? (
@@ -1081,7 +1083,7 @@ function ViewerSkeleton({ label }: { label: string }) {
 /** Renders the streamed harness transcript as a live checklist. */
 function ProgressPanel({ events }: { events: CadProgressEvent[] }) {
   return (
-    <div className="flex w-full flex-col items-center gap-2 px-6 pb-6">
+    <div className="flex flex-col items-center gap-2">
       <ul className="flex max-w-sm flex-col items-center gap-1.5 text-sm">
         {events.length === 0 && (
           <li className="flex items-center gap-2 text-muted-foreground">

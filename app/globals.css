@@ -36,6 +36,8 @@
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
+  --color-glass: var(--glass);
+  --color-glass-border: var(--glass-border);
   --color-destructive: var(--destructive);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
@@ -94,6 +96,10 @@
   --border: oklch(0.922 0.01 80);
   --input: oklch(0.922 0.01 80);
   --ring: oklch(0.708 0.012 80);
+  /* Frosted-glass surface: translucent + blurred (apply via `.glass`).
+     More see-through than --card so it reads as glass over content. */
+  --glass: oklch(0.99 0.006 80 / 0.55);
+  --glass-border: oklch(0.922 0.01 80 / 0.6);
   --chart-1: oklch(0.87 0.01 80);
   --chart-2: oklch(0.556 0.012 80);
   --chart-3: oklch(0.439 0.012 80);
@@ -141,6 +147,8 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0.008 80);
+  --glass: oklch(0.22 0.006 80 / 0.5);
+  --glass-border: oklch(1 0 0 / 0.14);
   --chart-1: oklch(0.87 0.008 80);
   --chart-2: oklch(0.556 0.008 80);
   --chart-3: oklch(0.439 0.008 80);
@@ -309,6 +317,15 @@
 }
 
 @layer components {
+  /* Frosted-glass surface — translucent fill + backdrop blur + hairline
+     border, theme-aware via the --glass tokens. Pair with a rounded radius
+     and (usually) a shadow. Globally reusable. */
+  .glass {
+    background-color: var(--glass);
+    border: 1px solid var(--glass-border);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+  }
   /* Apply on top of an existing background-color. The gradient is an
      overlay that doesn't fight whatever color the consumer set. */
   .depth-raised {
