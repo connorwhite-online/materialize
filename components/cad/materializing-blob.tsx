@@ -1,17 +1,29 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import * as THREE from "three";
+import {
+  STUDIO_CAMERA,
+  STUDIO_TARGET_SIZE,
+  frameBakeGeometry,
+  frameSamples,
+} from "./studio-frame";
 
 /**
- * A wireframe icosahedron whose mesh slowly deforms via a noise displacement —
- * the idle/"working" visual for the text-to-CAD studio. When handed a `morphUrl`
- * (the freshly generated STL), it morphs: every vertex flies from its deforming
- * sphere position onto a matching point on the generated shape's surface, so the
- * result appears to materialize OUT of the cloud. The studio then crossfades to
- * the crisp model (whose geometry is already warm in the loader cache).
+ * The studio's deforming "loader" + morph renderer. One canvas, one fixed
+ * camera, everything normalized to the shared studio frame so it lines up
+ * pixel-for-pixel with the crisp <ModelViewer fixedFrame> — the morph hand-off
+ * is then seamless (no reload / zoom / rescale).
+ *
+ * Three cases, all unified:
+ *  - fresh build  → a wireframe icosahedron "blob" deforms, then morphs into
+ *    the generated shape.
+ *  - revision     → the PREVIOUS model (solid, same shader as the crisp viewer)
+ *    deforms in place, then reshapes into the new model — reads as "editing
+ *    this object."
+ *  - idle/empty   → the calm wireframe blob.
  */
 
 const VERT = /* glsl */ `
@@ -20,8 +32,9 @@ const VERT = /* glsl */ `
   uniform float uMorph;
   attribute vec3 aTarget;
   varying float vD;
+  varying vec3 vNormal;
+  varying vec3 vViewDir;
 
-  // Cheap, smooth pseudo-noise from layered sines — no texture, GPU-friendly.
   float n(vec3 p) {
     return sin(p.x * 2.0 + uTime)
          * sin(p.y * 2.0 + uTime * 1.2)
@@ -32,147 +45,107 @@ const VERT = /* glsl */ `
     float d = n(position * 1.4 + uTime * 0.15);
     vD = d;
     vec3 displaced = position + normal * d * uAmp;
-    // Morph from the deforming sphere onto the generated shape's surface.
     vec3 pos = mix(displaced, aTarget, uMorph);
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+    vec4 mv = modelViewMatrix * vec4(pos, 1.0);
+    vViewDir = normalize(-mv.xyz);
+    vNormal = normalize(normalMatrix * normal);
+    gl_Position = projectionMatrix * mv;
   }
 `;
 
-const FRAG = /* glsl */ `
+// Wireframe blob fragment — translucent, tinted by the noise displacement.
+const FRAG_WIRE = /* glsl */ `
   uniform vec3 uColor;
   varying float vD;
-
   void main() {
     float a = clamp(0.5 + 0.3 * vD, 0.18, 0.85);
     gl_FragColor = vec4(uColor, a);
   }
 `;
 
-const BLOB_RADIUS = 1.3;
-const BLOB_DETAIL = 6; // ~245k verts; dense wireframe, snappy morph compute.
-const MORPH_DURATION = 1.3; // seconds
+// Solid fragment — the SAME self-lit shading as MaterializeMaterial (the crisp
+// viewer), so a deforming solid revision matches the model it morphs into.
+const FRAG_SOLID = /* glsl */ `
+  uniform vec3 uBaseColor;
+  uniform vec3 uAccentColor;
+  uniform vec3 uFresnelColor;
+  varying vec3 vNormal;
+  varying vec3 vViewDir;
+  void main() {
+    vec3 N = normalize(vNormal);
+    if (!gl_FrontFacing) N = -N;
+    vec3 V = normalize(vViewDir);
+    float hemisphere = N.y * 0.5 + 0.5;
+    vec3 baseLight = mix(uAccentColor, uBaseColor, hemisphere);
+    vec3 lightDir = normalize(vec3(0.5, 0.8, 0.6));
+    baseLight += vec3(0.18) * max(dot(N, lightDir), 0.0);
+    float fresnel = pow(1.0 - max(dot(N, V), 0.0), 2.5) * 0.4;
+    vec3 color = mix(baseLight, uFresnelColor, fresnel);
+    gl_FragColor = vec4(color, 1.0);
+  }
+`;
+
+const BLOB_RADIUS = STUDIO_TARGET_SIZE / 2; // fills the frame like a model does
+const BLOB_DETAIL = 6;
+const MORPH_DURATION = 1.2;
 
 function smoothstep(t: number) {
   const x = Math.min(1, Math.max(0, t));
   return x * x * (3 - 2 * x);
 }
 
-/** Area-weighted surface samples of a mesh (model space). */
-function sampleSurface(geom: THREE.BufferGeometry, n: number): THREE.Vector3[] {
-  const pos = geom.attributes.position;
-  const index = geom.index;
-  const triCount = (index ? index.count : pos.count) / 3;
-  const vi = (i: number) => (index ? index.getX(i) : i);
-
-  const a = new THREE.Vector3();
-  const b = new THREE.Vector3();
-  const c = new THREE.Vector3();
-  const ab = new THREE.Vector3();
-  const ac = new THREE.Vector3();
-  const cum = new Float32Array(triCount);
-  let total = 0;
-  for (let t = 0; t < triCount; t++) {
-    a.fromBufferAttribute(pos, vi(t * 3));
-    b.fromBufferAttribute(pos, vi(t * 3 + 1));
-    c.fromBufferAttribute(pos, vi(t * 3 + 2));
-    const area = ab.subVectors(b, a).cross(ac.subVectors(c, a)).length() * 0.5;
-    total += area;
-    cum[t] = total;
-  }
-
-  const out: THREE.Vector3[] = [];
-  for (let i = 0; i < n; i++) {
-    // Stratified target area + binary search for the triangle.
-    const target = ((i + Math.random()) / n) * total;
-    let lo = 0;
-    let hi = triCount - 1;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      if (cum[mid] < target) lo = mid + 1;
-      else hi = mid;
-    }
-    a.fromBufferAttribute(pos, vi(lo * 3));
-    b.fromBufferAttribute(pos, vi(lo * 3 + 1));
-    c.fromBufferAttribute(pos, vi(lo * 3 + 2));
-    let u = Math.random();
-    let v = Math.random();
-    if (u + v > 1) {
-      u = 1 - u;
-      v = 1 - v;
-    }
-    out.push(
-      new THREE.Vector3()
-        .copy(a)
-        .addScaledVector(ab.subVectors(b, a), u)
-        .addScaledVector(ac.subVectors(c, a), v)
-    );
-  }
-  return out;
-}
-
-/** Stable ordering key: latitude band, then longitude. */
+/** Stable ordering key around the sphere: latitude band, then longitude. */
 function angleKey(v: { x: number; y: number; z: number }): number {
   const r = Math.hypot(v.x, v.y, v.z) || 1;
-  const elevation = Math.asin(Math.max(-1, Math.min(1, v.y / r))); // -π/2..π/2
-  const azimuth = Math.atan2(v.z, v.x); // -π..π
-  // Pack: elevation dominates, azimuth breaks ties.
+  const elevation = Math.asin(Math.max(-1, Math.min(1, v.y / r)));
+  const azimuth = Math.atan2(v.z, v.x);
   return elevation * 100 + azimuth;
 }
 
 /**
- * Build the per-vertex morph targets: sample the model surface, normalize it to
- * the blob's scale, and match samples to blob vertices by angular position so
- * the cloud "wraps" onto the shape. Duplicate (non-indexed) blob verts at the
- * same position share a target to avoid tearing.
+ * Per-vertex morph targets: framed surface samples of the new model, matched to
+ * the base mesh's vertices by angular position so the cloud "wraps" onto the
+ * shape. Duplicate base verts (same position) share a target to avoid tearing.
  */
 function computeMorphTargets(
-  blobGeom: THREE.BufferGeometry,
+  baseGeom: THREE.BufferGeometry,
   modelGeom: THREE.BufferGeometry
 ): Float32Array {
-  const bpos = blobGeom.attributes.position;
+  const bpos = baseGeom.attributes.position;
   const vCount = bpos.count;
 
-  // Unique blob positions (welded by quantized key).
-  const uniqueKeyToIndex = new Map<string, number>();
+  const keyToUnique = new Map<string, number>();
   const uniqueBase: THREE.Vector3[] = [];
   const vertToUnique = new Int32Array(vCount);
   const tmp = new THREE.Vector3();
   for (let i = 0; i < vCount; i++) {
     tmp.fromBufferAttribute(bpos, i);
-    const key = `${Math.round(tmp.x * 1e4)},${Math.round(
-      tmp.y * 1e4
-    )},${Math.round(tmp.z * 1e4)}`;
-    let u = uniqueKeyToIndex.get(key);
+    const key = `${Math.round(tmp.x * 1e3)},${Math.round(
+      tmp.y * 1e3
+    )},${Math.round(tmp.z * 1e3)}`;
+    let u = keyToUnique.get(key);
     if (u === undefined) {
       u = uniqueBase.length;
-      uniqueKeyToIndex.set(key, u);
+      keyToUnique.set(key, u);
       uniqueBase.push(tmp.clone());
     }
     vertToUnique[i] = u;
   }
   const U = uniqueBase.length;
 
-  // Sample + normalize the model to the blob's scale (centered, ~same radius).
-  const samples = sampleSurface(modelGeom, U);
-  const centroid = new THREE.Vector3();
-  for (const s of samples) centroid.add(s);
-  centroid.multiplyScalar(1 / U);
-  let maxR = 1e-6;
-  for (const s of samples) maxR = Math.max(maxR, s.distanceTo(centroid));
-  const scale = (BLOB_RADIUS * 1.05) / maxR;
-  for (const s of samples) s.sub(centroid).multiplyScalar(scale);
+  // Framed samples of the new model (same normalization the crisp viewer uses).
+  const samples = frameSamples(modelGeom, U);
 
-  // Match by angular order so vertices land on a corresponding surface region.
-  const blobOrder = [...Array(U).keys()].sort(
+  const baseOrder = [...Array(U).keys()].sort(
     (x, y) => angleKey(uniqueBase[x]) - angleKey(uniqueBase[y])
   );
   const sampleOrder = [...Array(U).keys()].sort(
     (x, y) => angleKey(samples[x]) - angleKey(samples[y])
   );
   const uniqueTarget: THREE.Vector3[] = new Array(U);
-  for (let k = 0; k < U; k++) uniqueTarget[blobOrder[k]] = samples[sampleOrder[k]];
+  for (let k = 0; k < U; k++)
+    uniqueTarget[baseOrder[k]] = samples[sampleOrder[k]];
 
-  // Expand to every (possibly duplicated) blob vertex.
   const target = new Float32Array(vCount * 3);
   for (let i = 0; i < vCount; i++) {
     const s = uniqueTarget[vertToUnique[i]];
@@ -183,11 +156,26 @@ function computeMorphTargets(
   return target;
 }
 
-function Blob({
+/** Attach (or reset) an aTarget attribute = a copy of the base positions. */
+function seedTarget(geom: THREE.BufferGeometry) {
+  geom.setAttribute(
+    "aTarget",
+    new THREE.BufferAttribute(
+      (geom.attributes.position.array as Float32Array).slice(),
+      3
+    )
+  );
+}
+
+function TransitionMesh({
+  baseGeom,
+  solid,
   active,
   morphUrl,
   onMorphComplete,
 }: {
+  baseGeom: THREE.BufferGeometry;
+  solid: boolean;
   active: boolean;
   morphUrl?: string | null;
   onMorphComplete?: () => void;
@@ -195,42 +183,33 @@ function Blob({
   const matRef = useRef<THREE.ShaderMaterial>(null);
   const meshRef = useRef<THREE.Mesh>(null);
   const speed = useRef(0.6);
-  const amp = useRef(0.16);
-  const morphProgress = useRef(0); // 0..1, advances once targets are ready
+  const amp = useRef(0);
+  const morphProgress = useRef(0);
   const morphing = useRef(false);
   const completed = useRef(false);
 
-  const geom = useMemo(() => {
-    const g = new THREE.IcosahedronGeometry(BLOB_RADIUS, BLOB_DETAIL);
-    // Seed aTarget with base positions so uMorph is a no-op until a real
-    // target is computed.
-    g.setAttribute(
-      "aTarget",
-      new THREE.BufferAttribute(
-        (g.attributes.position.array as Float32Array).slice(),
-        3
-      )
-    );
-    return g;
-  }, []);
+  // Gentler wobble on a detailed solid; bigger on the abstract blob.
+  const idleAmp = solid ? 0.012 : 0.16;
+  const activeAmp = solid ? 0.06 : 0.24;
 
   const uniforms = useMemo(
     () => ({
       uTime: { value: 0 },
-      uAmp: { value: 0.16 },
+      uAmp: { value: idleAmp },
       uMorph: { value: 0 },
       uColor: { value: new THREE.Color("#8aa0e8") },
+      uBaseColor: { value: new THREE.Color("#d4d4d8") },
+      uAccentColor: { value: new THREE.Color("#a1a1aa") },
+      uFresnelColor: { value: new THREE.Color("#e4e4e7") },
     }),
-    []
+    [idleAmp]
   );
 
-  // Load the target STL, compute morph targets, and start the morph. On any
-  // failure, complete immediately so the studio still reveals the model.
+  // Load the morph target, compute correspondence, run the morph. Fail-open:
+  // any error completes immediately so the studio still reveals the model.
   useEffect(() => {
     if (!morphUrl) return;
     let cancelled = false;
-    // The blob persists across generations — reset morph state so a stale
-    // "completed" ref from a previous build doesn't skip this morph.
     morphing.current = false;
     completed.current = false;
     morphProgress.current = 0;
@@ -241,8 +220,11 @@ function Blob({
       (modelGeom) => {
         if (cancelled) return;
         try {
-          const targets = computeMorphTargets(geom, modelGeom);
-          geom.setAttribute("aTarget", new THREE.BufferAttribute(targets, 3));
+          const targets = computeMorphTargets(baseGeom, modelGeom);
+          baseGeom.setAttribute(
+            "aTarget",
+            new THREE.BufferAttribute(targets, 3)
+          );
           morphProgress.current = 0;
           morphing.current = true;
         } catch {
@@ -252,30 +234,28 @@ function Blob({
       undefined,
       () => onMorphComplete?.()
     );
-    // Safety: never strand on the loader if something hangs.
     const safety = setTimeout(() => onMorphComplete?.(), 8000);
     return () => {
       cancelled = true;
       clearTimeout(safety);
     };
-  }, [morphUrl, geom, onMorphComplete]);
+  }, [morphUrl, baseGeom, onMorphComplete]);
 
   useFrame((_, delta) => {
     const k = Math.min(1, delta * 2.5);
     speed.current += ((active ? 1.7 : 0.6) - speed.current) * k;
-    amp.current += ((active ? 0.24 : 0.16) - amp.current) * k;
+    amp.current += ((active ? activeAmp : idleAmp) - amp.current) * k;
 
-    if (matRef.current) {
-      matRef.current.uniforms.uTime.value += delta * speed.current;
-      matRef.current.uniforms.uAmp.value = amp.current;
+    const m = matRef.current;
+    if (m) {
+      m.uniforms.uTime.value += delta * speed.current;
+      m.uniforms.uAmp.value = amp.current;
       if (morphing.current) {
         morphProgress.current = Math.min(
           1,
           morphProgress.current + delta / MORPH_DURATION
         );
-        matRef.current.uniforms.uMorph.value = smoothstep(
-          morphProgress.current
-        );
+        m.uniforms.uMorph.value = smoothstep(morphProgress.current);
         if (morphProgress.current >= 1 && !completed.current) {
           completed.current = true;
           onMorphComplete?.();
@@ -283,47 +263,126 @@ function Blob({
       }
     }
     if (meshRef.current) {
-      const rot = active ? 0.12 : 0.07;
+      const rot = active ? 0.1 : 0.06;
       meshRef.current.rotation.y += delta * rot;
       meshRef.current.rotation.x += delta * rot * 0.3;
     }
   });
 
   return (
-    <mesh ref={meshRef} geometry={geom}>
-      <shaderMaterial
-        ref={matRef}
-        wireframe
-        transparent
-        depthWrite={false}
-        uniforms={uniforms}
-        vertexShader={VERT}
-        fragmentShader={FRAG}
-      />
+    <mesh ref={meshRef} geometry={baseGeom}>
+      {solid ? (
+        <shaderMaterial
+          ref={matRef}
+          uniforms={uniforms}
+          vertexShader={VERT}
+          fragmentShader={FRAG_SOLID}
+        />
+      ) : (
+        <shaderMaterial
+          ref={matRef}
+          wireframe
+          transparent
+          depthWrite={false}
+          uniforms={uniforms}
+          vertexShader={VERT}
+          fragmentShader={FRAG_WIRE}
+        />
+      )}
     </mesh>
+  );
+}
+
+/** Picks the base geometry: the previous model (solid) or the blob (wireframe). */
+function TransitionScene({
+  sourceUrl,
+  active,
+  morphUrl,
+  onMorphComplete,
+}: {
+  sourceUrl?: string | null;
+  active: boolean;
+  morphUrl?: string | null;
+  onMorphComplete?: () => void;
+}) {
+  const blob = useMemo(() => {
+    const g = new THREE.IcosahedronGeometry(BLOB_RADIUS, BLOB_DETAIL);
+    seedTarget(g);
+    return g;
+  }, []);
+
+  // Loaded+baked previous model, tagged with the url it came from so a stale
+  // geometry is never used after sourceUrl changes (no synchronous reset needed).
+  const [loaded, setLoaded] = useState<{
+    url: string;
+    geom: THREE.BufferGeometry;
+  } | null>(null);
+
+  // Load + frame-bake the previous model for the revise-in-place deform.
+  useEffect(() => {
+    if (!sourceUrl) return;
+    let cancelled = false;
+    new STLLoader().load(
+      sourceUrl,
+      (g) => {
+        if (cancelled) return;
+        const baked = frameBakeGeometry(g);
+        seedTarget(baked);
+        setLoaded({ url: sourceUrl, geom: baked });
+      },
+      undefined,
+      () => {}
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [sourceUrl]);
+
+  const sourceGeom =
+    sourceUrl && loaded?.url === sourceUrl ? loaded.geom : null;
+  const useSolid = !!sourceGeom;
+  const baseGeom = sourceGeom ?? blob;
+
+  return (
+    <>
+      <ambientLight intensity={0.7} />
+      <TransitionMesh
+        key={useSolid ? "solid" : "blob"}
+        baseGeom={baseGeom}
+        solid={useSolid}
+        active={active}
+        morphUrl={morphUrl}
+        onMorphComplete={onMorphComplete}
+      />
+    </>
   );
 }
 
 export function MaterializingBlob({
   className,
   active = false,
+  sourceUrl,
   morphUrl,
   onMorphComplete,
 }: {
   className?: string;
-  /** Speed up + churn harder while a shape is generating. */
+  /** Deform harder/faster while a shape is generating. */
   active?: boolean;
-  /** STL to morph into once generation is done (null = keep deforming). */
+  /** Previous model to deform in place (revision). Null = wireframe blob. */
+  sourceUrl?: string | null;
+  /** New model to morph into once generation is done. */
   morphUrl?: string | null;
   /** Fired when the morph finishes (or fails) — cue to reveal the model. */
   onMorphComplete?: () => void;
 }) {
   return (
     <div className={className}>
-      {/* Camera pulled back so the blob reads as a small "entity" with room
-          around it, not a sphere filling the frame. */}
-      <Canvas camera={{ position: [0, 0, 8], fov: 45 }} dpr={[1, 2]}>
-        <Blob
+      <Canvas
+        camera={{ position: STUDIO_CAMERA.position, fov: STUDIO_CAMERA.fov }}
+        dpr={[1, 2]}
+      >
+        <TransitionScene
+          sourceUrl={sourceUrl}
           active={active}
           morphUrl={morphUrl}
           onMorphComplete={onMorphComplete}

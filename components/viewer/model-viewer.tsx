@@ -1,8 +1,20 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
+import {
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { Canvas, useFrame, useLoader } from "@react-three/fiber";
 import { OrbitControls, Stage, Center, Grid, Line } from "@react-three/drei";
+import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
+import {
+  STUDIO_CAMERA,
+  frameTransformFor,
+} from "@/components/cad/studio-frame";
 import {
   AlwaysStencilFunc,
   BackSide,
@@ -458,6 +470,37 @@ interface ModelViewerProps {
   annotations?: ViewerAnnotation[];
   /** Fired when the user commits a note on a selected face/edge. */
   onAnnotate?: (a: PickResult & { note: string }) => void;
+  /**
+   * Studio-only fixed framing: replace `<Stage adjustCamera>` (which fits each
+   * model differently and animates the camera on mount) with a fixed camera +
+   * deterministic normalization, so this viewer lines up pixel-for-pixel with
+   * the studio's deforming-loader canvas and the morph hand-off has no
+   * reload/zoom pop. Inspect-only; default off (every other call site unchanged).
+   */
+  fixedFrame?: boolean;
+}
+
+/**
+ * Wrap the model in a group scaled+centered so its longest axis fits the shared
+ * studio target size. Computed synchronously from the (loader-cached) geometry
+ * so the very first rendered frame is already correctly framed — no unscaled
+ * flash. The geometry keeps its real mm coords (dimensions readout depends on
+ * that); only the wrapping group is transformed.
+ */
+function FixedFrameModel({
+  url,
+  children,
+}: {
+  url: string;
+  children: ReactNode;
+}) {
+  const geometry = useLoader(STLLoader, url);
+  const frame = useMemo(() => frameTransformFor(geometry), [geometry]);
+  return (
+    <group scale={frame.scale} position={frame.position}>
+      {children}
+    </group>
+  );
 }
 
 function ModelMesh({
@@ -653,6 +696,7 @@ export function ModelViewer({
   onToggleAnnotate,
   annotations,
   onAnnotate,
+  fixedFrame = false,
 }: ModelViewerProps) {
   const isPreview = mode === "preview";
   // Wheel zoom defaults to true unless explicitly disabled. The
@@ -749,25 +793,24 @@ export function ModelViewer({
     >
       <ErrorBoundary fallback={<PreviewUnavailable />}>
         <Canvas
-          camera={{ position: [0, 0, 5], fov: 45 }}
+          camera={
+            fixedFrame
+              ? { position: STUDIO_CAMERA.position, fov: STUDIO_CAMERA.fov }
+              : { position: [0, 0, 5], fov: 45 }
+          }
           dpr={isPreview ? 1 : [1, 2]}
           // Local clipping is needed for the cross-section tool; harmless
           // (no-op) everywhere else since no material sets clippingPlanes.
           gl={{ localClippingEnabled: true, stencil: true }}
         >
           <Suspense fallback={<LoadingFallback />}>
-            <Stage
-              adjustCamera={1.2}
-              intensity={0.5}
-              // No IBL environment: drei's "city" preset fetches an HDR
-              // from an external CDN (raw.githack.com) that drops CORS
-              // headers, spamming the console and failing intermittently.
-              // Stage still provides its three-point light rig (ambient +
-              // spot + point), which is plenty for matte print previews.
-              environment={null}
-            >
-              <Center>
-                {inspectable ? (
+            {fixedFrame && inspectable ? (
+              // Studio: fixed camera + deterministic fit (no Stage), so this
+              // viewer registers with the deforming-loader canvas. MaterializeMaterial
+              // is self-lit, so a touch of ambient is all the rig needs.
+              <>
+                <ambientLight intensity={0.7} />
+                <FixedFrameModel url={modelUrl}>
                   <InspectModel
                     modelUrl={modelUrl}
                     color={materialColor}
@@ -779,15 +822,42 @@ export function ModelViewer({
                     pending={pending?.result ?? null}
                     onPick={openPending}
                   />
-                ) : (
-                  <ModelMesh
-                    modelUrl={modelUrl}
-                    format={format}
-                    materialColor={materialColor}
-                  />
-                )}
-              </Center>
-            </Stage>
+                </FixedFrameModel>
+              </>
+            ) : (
+              <Stage
+                adjustCamera={1.2}
+                intensity={0.5}
+                // No IBL environment: drei's "city" preset fetches an HDR
+                // from an external CDN (raw.githack.com) that drops CORS
+                // headers, spamming the console and failing intermittently.
+                // Stage still provides its three-point light rig (ambient +
+                // spot + point), which is plenty for matte print previews.
+                environment={null}
+              >
+                <Center>
+                  {inspectable ? (
+                    <InspectModel
+                      modelUrl={modelUrl}
+                      color={materialColor}
+                      planes={planes}
+                      onBounds={setBounds}
+                      annotateMode={annotateMode}
+                      target={target}
+                      annotations={annotations}
+                      pending={pending?.result ?? null}
+                      onPick={openPending}
+                    />
+                  ) : (
+                    <ModelMesh
+                      modelUrl={modelUrl}
+                      format={format}
+                      materialColor={materialColor}
+                    />
+                  )}
+                </Center>
+              </Stage>
+            )}
             {inspectable && showGrid && bounds && (
               <Grid
                 // Drop the grid a hair below the model base so it doesn't

@@ -143,6 +143,9 @@ export function TextToCadStudio({
     assetId: string;
     phase: "morph" | "reveal";
   } | null>(null);
+  // The model to deform in place while generating a REVISION (the shape being
+  // edited). Null on a fresh build → the wireframe blob deforms instead.
+  const [sourceAssetId, setSourceAssetId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [showSource, setShowSource] = useState(true);
@@ -211,6 +214,7 @@ export function TextToCadStudio({
     abortRef.current?.abort();
     setGenerating(false);
     setTransition(null);
+    setSourceAssetId(null);
     setActiveRootId(null);
     setViewTurnId(null);
     setProgress([]);
@@ -225,6 +229,7 @@ export function TextToCadStudio({
   function openThread(t: StudioThread) {
     if (generating) return;
     setTransition(null);
+    setSourceAssetId(null);
     setActiveRootId(t.rootId);
     const lastGood = [...t.turns]
       .reverse()
@@ -414,6 +419,10 @@ export function TextToCadStudio({
 
     setError(null);
     setProgress([]);
+    // A revision deforms the model currently on screen (edit-in-place); a fresh
+    // build has none, so the wireframe blob deforms instead.
+    setSourceAssetId(parentId ? activeAssetId : null);
+    setTransition(null);
     setGenerating(true);
     setShowHistory(false);
 
@@ -483,14 +492,17 @@ export function TextToCadStudio({
     }
   }
 
-  // Viewer layering. The blob covers idle / generating / morphing; the model
-  // is mounted underneath once the morph is past (reveal phase) or when there's
-  // no transition in flight. Never show the (old) model while generating.
-  const showBlob = generating || transition !== null;
+  // Viewer layering. The crisp fixed-frame model is the BASE layer; the
+  // transition canvas (deforming loader / morph) overlays it during work and
+  // fades out on reveal — same camera + frame, so the hand-off has no pop.
+  const showTransition = generating || transition !== null;
+  const reviseInPlace = !!sourceAssetId; // revision: opaque solid over the model
+  // Keep the crisp model mounted underneath EXCEPT under the fresh-build
+  // wireframe blob (transparent — the model would show through it); reveal it
+  // again as the blob morph resolves.
   const showModel =
-    !generating &&
-    (transition === null || transition.phase === "reveal") &&
-    !!activeAssetId;
+    !!activeAssetId &&
+    (!showTransition || reviseInPlace || transition?.phase === "reveal");
 
   const composerLabel = generating
     ? "Generating…"
@@ -570,9 +582,9 @@ export function TextToCadStudio({
           {/* Viewer / progress / empty state */}
           <div className="mt-5 overflow-hidden rounded-xl border border-foreground/10">
             <div className="relative aspect-square w-full bg-muted/30">
-              {/* Model layer — mounted underneath once we're past the morph
-                  (or with no transition at all), so the blob can crossfade
-                  onto a crisp, already-loading viewer. */}
+              {/* Crisp model — the BASE layer (fixed frame). Stays mounted
+                  under the transition so the morph fades to reveal it with no
+                  remount/zoom; on a revision it's the shape being deformed. */}
               {showModel && activeAssetId && (
                 <Suspense fallback={<ViewerSkeleton label="Loading model…" />}>
                   <ModelViewer
@@ -582,6 +594,7 @@ export function TextToCadStudio({
                     mode="detail"
                     showZoomControls
                     inspect
+                    fixedFrame
                     annotateMode={annotateMode}
                     onToggleAnnotate={() => setAnnotateMode((v) => !v)}
                     annotations={annotations}
@@ -596,9 +609,10 @@ export function TextToCadStudio({
                 </Suspense>
               )}
 
-              {/* Blob layer — idle / generating / morphing. Fades out during
-                  the reveal phase as the model takes over beneath it. */}
-              {showBlob && (
+              {/* Transition overlay — deforming loader (blob for a fresh build,
+                  the previous solid model for a revision) → morph into the new
+                  shape. Same frame as the model layer; fades out on reveal. */}
+              {showTransition && (
                 <div
                   className={`absolute inset-0 transition-opacity duration-500 ${
                     transition?.phase === "reveal" ? "opacity-0" : "opacity-100"
@@ -608,6 +622,11 @@ export function TextToCadStudio({
                     <MaterializingBlob
                       className="h-full w-full"
                       active
+                      sourceUrl={
+                        sourceAssetId
+                          ? `/api/files/preview/${sourceAssetId}`
+                          : null
+                      }
                       morphUrl={
                         transition
                           ? `/api/files/preview/${transition.assetId}`
@@ -631,7 +650,7 @@ export function TextToCadStudio({
               )}
 
               {/* Empty state — no model, nothing generating. */}
-              {!showBlob && !showModel && (
+              {!showTransition && !showModel && (
                 <div className="flex h-full w-full flex-col">
                   <Suspense fallback={<div className="min-h-0 flex-1" />}>
                     <MaterializingBlob className="min-h-0 flex-1" />
