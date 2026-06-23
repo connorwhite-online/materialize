@@ -9,6 +9,7 @@ import { runCadCode } from "./runner-client";
 import { SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, extractCode, gradeRun } from "./prompt";
 import { buildKnowledgeBlock, type CadProcess } from "./knowledge";
 import { judgeAesthetics } from "./critique";
+import { conceptImage, CONCEPT_IMAGE_NOTE } from "./concept";
 import { selectExemplars, formatExemplars } from "./knowledge/exemplars";
 import { modelForRole, planStepEnabled, type CadRole } from "./models";
 import { CAD_FEEDBACK_TAG_LABELS, type CadFeedbackTag } from "./feedback";
@@ -216,6 +217,18 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
     }
   };
 
+  // Per-prompt concept image (fresh builds only): a beautiful product render the
+  // generator builds TOWARD — taste injection that hand-authored code exemplars
+  // can't provide. Best-effort + gated by FAL_KEY; null when disabled/failed.
+  const conceptImg =
+    useModel && !input.priorSourceCode
+      ? await conceptImage(input.prompt, input.signal)
+      : null;
+  const withConcept = (base?: PromptImage[] | null): PromptImage[] | undefined => {
+    const imgs = [...(base ?? []), ...(conceptImg ? [conceptImg] : [])];
+    return imgs.length ? imgs : undefined;
+  };
+
   // Plan-then-code: a short design plan up front (fresh builds only — revisions
   // already have the prior code as their plan). Best-effort: a planning failure
   // must not block generation. No-op without model credentials.
@@ -226,9 +239,11 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
       const text = await timed("plan", planModel, () =>
         completeText({
           system: PLAN_SYSTEM_PROMPT,
-          prompt: buildPlanPrompt(input),
+          prompt: conceptImg
+            ? `${buildPlanPrompt(input)}\n\n${CONCEPT_IMAGE_NOTE}`
+            : buildPlanPrompt(input),
           model: planModel,
-          images: input.images ?? undefined,
+          images: withConcept(input.images),
           signal: input.signal,
         })
       );
@@ -275,6 +290,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
         : buildUserPrompt(input, plan);
       const images: PromptImage[] = [
         ...(input.images ?? []),
+        ...(conceptImg ? [conceptImg] : []),
         ...(priorRender
           ? [{ data: priorRender, mediaType: "image/png" as const }]
           : []),
@@ -282,7 +298,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
       const text = await timed(role, model, () =>
         completeText({
           system: SYSTEM_PROMPT,
-          prompt: userPrompt,
+          prompt: conceptImg ? `${userPrompt}\n\n${CONCEPT_IMAGE_NOTE}` : userPrompt,
           model,
           images: images.length ? images : undefined,
           signal: input.signal,
