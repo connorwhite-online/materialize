@@ -58,7 +58,8 @@ describe("CAD_EXEMPLARS authoring invariants", () => {
     for (const e of CAD_EXEMPLARS) {
       // Single solid (`result =`) or a multi-part assembly (`parts =`).
       expect(e.code).toMatch(/(?:result|parts)\s*=/);
-      expect(e.code).toMatch(/from build123d import \*/);
+      // B-rep exemplars import build123d; mesh-mode (TPMS/lattice) uses trimesh.
+      expect(e.code).toMatch(/from build123d import \*|import trimesh/);
       // Gate: an exemplar is only shipped once scripts/verify-exemplars.ts
       // confirms it compiles to a valid watertight solid. Keep new exemplars
       // out of this array (verified:false) until they pass.

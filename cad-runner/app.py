@@ -37,7 +37,9 @@ from pydantic import BaseModel
 app = FastAPI(title="materialize-cad-runner")
 
 # Defaults; override via env in the deployment.
-RUN_TIMEOUT_S = int(os.environ.get("CAD_RUN_TIMEOUT_S", "30"))
+# 60s wall clock: a dense mesh-mode marching-cubes grid or a heavy build123d
+# loft/boolean can need well over the old 30s. CPU limit tracks it (below).
+RUN_TIMEOUT_S = int(os.environ.get("CAD_RUN_TIMEOUT_S", "60"))
 # RLIMIT_AS caps *virtual* address space, not RSS. Python + build123d +
 # OpenCASCADE map well over 1 GB of address space at import time, so a 1 GB
 # cap can ENOMEM before user code even runs. Default to 4 GB; the container
@@ -45,7 +47,9 @@ RUN_TIMEOUT_S = int(os.environ.get("CAD_RUN_TIMEOUT_S", "30"))
 MEM_LIMIT_BYTES = int(
     os.environ.get("CAD_RUN_MEM_BYTES", str(4 * 1024 * 1024 * 1024))
 )
-CPU_LIMIT_S = int(os.environ.get("CAD_RUN_CPU_S", "25"))
+# Track the wall-clock budget — CPU-bound work (marching cubes, OCC booleans)
+# would otherwise hit SIGXCPU long before the wall-clock terminate fires.
+CPU_LIMIT_S = int(os.environ.get("CAD_RUN_CPU_S", "55"))
 RUNNER_SECRET = os.environ.get("CAD_RUNNER_SECRET", "")
 
 
@@ -80,26 +84,34 @@ def _process_shape(shape, formats: list[str], tmp: str, stem: str) -> dict:
         },
         "error": None,
     }
-    from build123d import export_stl, export_step
-
-    volume = float(getattr(shape, "volume", 0.0) or 0.0)
-    entry["validation"]["isSolid"] = volume > 0.0
+    import trimesh
+    from trimesh import repair as trimesh_repair
 
     stl_path = os.path.join(tmp, f"{stem}.stl")
-    export_stl(shape, stl_path)
-
-    # STEP comes straight from the OCC BRep (not the mesh) — keep it as-is.
-    if "step" in formats:
-        step_path = os.path.join(tmp, f"{stem}.step")
-        export_step(shape, step_path)
-        with open(step_path, "rb") as f:
-            entry["files"]["step"] = base64.b64encode(f.read()).decode()
+    # `result` may be a build123d solid (B-rep) OR a trimesh.Trimesh (mesh mode:
+    # implicit/TPMS/lattice/organic geometry the CAD kernel can't express). Mesh
+    # mode has no BRep, so no STEP — STL comes straight off the mesh.
+    is_mesh = isinstance(shape, trimesh.Trimesh)
 
     try:
-        import trimesh
-        from trimesh import repair as trimesh_repair
+        if is_mesh:
+            mesh = shape
+            entry["validation"]["isSolid"] = float(abs(mesh.volume) or 0.0) > 0.0
+            mesh.export(stl_path)
+        else:
+            from build123d import export_stl, export_step
 
-        mesh = trimesh.load(stl_path, force="mesh")
+            entry["validation"]["isSolid"] = (
+                float(getattr(shape, "volume", 0.0) or 0.0) > 0.0
+            )
+            export_stl(shape, stl_path)
+            # STEP comes straight from the OCC BRep (not the mesh).
+            if "step" in formats:
+                step_path = os.path.join(tmp, f"{stem}.step")
+                export_step(shape, step_path)
+                with open(step_path, "rb") as f:
+                    entry["files"]["step"] = base64.b64encode(f.read()).decode()
+            mesh = trimesh.load(stl_path, force="mesh")
 
         # Best-effort cleanup so boolean-op artifacts (unwelded verts,
         # degenerate/duplicate faces, flipped winding, small holes) don't

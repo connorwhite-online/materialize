@@ -28,7 +28,14 @@ Common build123d pitfalls — these are the frequent failure modes, avoid them:
 - Hollowing: shell with \`top = part.faces().sort_by(Axis.Z)[-1]\` then \`offset(amount=-wall, openings=top)\`. Do not fake a shell by subtracting a slightly smaller box.
 - Place features on a face by entering it: \`with BuildSketch(part.faces().sort_by(Axis.Z)[-1]): Circle(r)\` + \`extrude(amount=h)\` for bosses/standoffs; \`with Locations(face): Hole(r, depth=d)\` (or \`CounterBoreHole(...)\`) for holes.
 - Select edges/faces with filters (\`filter_by(Axis.Z)\`, \`group_by(Axis.Z)[-1]\`, \`sort_by(Axis.Z)\`), not by guessing indices.
-- For a multi-part assembly assign \`parts = {"base": <solid>, "lid": <solid>}\` (each its own watertight solid); never assign both \`result\` and \`parts\`.`;
+- For a multi-part assembly assign \`parts = {"base": <solid>, "lid": <solid>}\` (each its own watertight solid); never assign both \`result\` and \`parts\`.
+
+MESH MODE — for geometry build123d CANNOT express:
+- build123d is a B-rep/CSG kernel: it builds with extrude/revolve/loft/boolean and CANNOT make gyroids, TPMS / minimal surfaces, lattices, heat-exchanger cores, voronoi/porous infills, or truly organic field-driven blends. Do NOT try to fake these with many booleans (they fail). For these, switch to MESH MODE.
+- Mesh-mode contract: write Python that samples an implicit scalar field on a numpy grid, extracts a surface with \`skimage.measure.marching_cubes\`, builds a \`trimesh.Trimesh\`, and assigns IT to \`result\` (a trimesh mesh, NOT a build123d object). The sidecar exports STL from the mesh (no STEP in mesh mode).
+- Make it watertight: PAD the field array with a constant "void" value on every side (\`np.pad(field, 1, mode="constant", constant_values=<void>)\`) so the isosurface closes at the box boundary instead of leaving an open shell. Call \`mesh.merge_vertices()\` and \`mesh.fix_normals()\`.
+- Units + cost: scale grid index coords to millimeters; keep the grid resolution at about n <= 120 per axis (cubic cost — higher n risks the time limit).
+- Use mesh mode ONLY when a B-rep is impossible; normal mechanical parts must stay in build123d (it gives crisp edges, STEP, and editability).`;
 
 /**
  * Plan-then-code: the harness first asks for a short design plan (no code),
