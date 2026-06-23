@@ -492,17 +492,15 @@ export function TextToCadStudio({
     }
   }
 
-  // Viewer layering. The crisp fixed-frame model is the BASE layer; the
-  // transition canvas (deforming loader / morph) overlays it during work and
-  // fades out on reveal — same camera + frame, so the hand-off has no pop.
+  // Viewer layering. Exactly ONE of the two renders while work is in flight:
+  // the transition canvas (deforming loader / morph) OWNS the frame during
+  // generating + morph, then fades out on reveal as the crisp model takes over.
+  // Showing the crisp model underneath a deforming overlay made the wobbling
+  // silhouette reveal the static model at its edges — a ghost "second copy".
   const showTransition = generating || transition !== null;
-  const reviseInPlace = !!sourceAssetId; // revision: opaque solid over the model
-  // Keep the crisp model mounted underneath EXCEPT under the fresh-build
-  // wireframe blob (transparent — the model would show through it); reveal it
-  // again as the blob morph resolves.
   const showModel =
     !!activeAssetId &&
-    (!showTransition || reviseInPlace || transition?.phase === "reveal");
+    (!showTransition || transition?.phase === "reveal");
 
   const composerLabel = generating
     ? "Generating…"

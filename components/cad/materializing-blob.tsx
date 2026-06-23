@@ -325,6 +325,8 @@ function TransitionScene({
     url: string;
     geom: THREE.BufferGeometry;
   } | null>(null);
+  // Url whose source load failed — fall back to the blob rather than hang.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
 
   // Load + frame-bake the previous model for the revise-in-place deform.
   useEffect(() => {
@@ -339,7 +341,9 @@ function TransitionScene({
         setLoaded({ url: sourceUrl, geom: baked });
       },
       undefined,
-      () => {}
+      () => {
+        if (!cancelled) setFailedUrl(sourceUrl);
+      }
     );
     return () => {
       cancelled = true;
@@ -350,18 +354,25 @@ function TransitionScene({
     sourceUrl && loaded?.url === sourceUrl ? loaded.geom : null;
   const useSolid = !!sourceGeom;
   const baseGeom = sourceGeom ?? blob;
+  // A revision expects a solid source; render nothing until it's loaded so we
+  // never flash the wireframe blob before the solid appears — unless the load
+  // failed, in which case fall back to the blob so the morph still proceeds.
+  const waitingForSource =
+    !!sourceUrl && !sourceGeom && failedUrl !== sourceUrl;
 
   return (
     <>
       <ambientLight intensity={0.7} />
-      <TransitionMesh
-        key={useSolid ? "solid" : "blob"}
-        baseGeom={baseGeom}
-        solid={useSolid}
-        active={active}
-        morphUrl={morphUrl}
-        onMorphComplete={onMorphComplete}
-      />
+      {!waitingForSource && (
+        <TransitionMesh
+          key={useSolid ? "solid" : "blob"}
+          baseGeom={baseGeom}
+          solid={useSolid}
+          active={active}
+          morphUrl={morphUrl}
+          onMorphComplete={onMorphComplete}
+        />
+      )}
     </>
   );
 }
