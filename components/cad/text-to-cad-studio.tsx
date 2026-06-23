@@ -997,7 +997,15 @@ export function TextToCadStudio({
                 <PlusIcon className="size-4" />
               </button>
             </div>
-            <ul className="mt-3 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
+            <ul
+              className="mt-3 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-0.5 py-1"
+              style={{
+                maskImage:
+                  "linear-gradient(to bottom, transparent 0, black 14px, black calc(100% - 14px), transparent 100%)",
+                WebkitMaskImage:
+                  "linear-gradient(to bottom, transparent 0, black 14px, black calc(100% - 14px), transparent 100%)",
+              }}
+            >
               {threads.length === 0 && (
                 <li className="text-sm text-muted-foreground">No builds yet.</li>
               )}

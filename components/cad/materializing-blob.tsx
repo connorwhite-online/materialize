@@ -1,29 +1,26 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import * as THREE from "three";
 import {
   STUDIO_CAMERA,
   STUDIO_TARGET_SIZE,
-  frameBakeGeometry,
   frameSamples,
 } from "./studio-frame";
 
 /**
- * The studio's deforming "loader" + morph renderer. One canvas, one fixed
- * camera, everything normalized to the shared studio frame so it lines up
- * pixel-for-pixel with the crisp <ModelViewer fixedFrame> — the morph hand-off
- * is then seamless (no reload / zoom / rescale).
+ * GPU point-cloud loader + morph renderer — the app's universal "3D is loading /
+ * forming" placeholder. A dense cloud of points deforms (a malleable, forming
+ * shape) and can morph between shapes: a sphere of points (fresh / generic) or
+ * the surface points of an existing model (revision) → the generated shape's
+ * surface points → crossfade to the crisp model.
  *
- * Three cases, all unified:
- *  - fresh build  → a wireframe icosahedron "blob" deforms, then morphs into
- *    the generated shape.
- *  - revision     → the PREVIOUS model (solid, same shader as the crisp viewer)
- *    deforms in place, then reshapes into the new model — reads as "editing
- *    this object."
- *  - idle/empty   → the calm wireframe blob.
+ * Hyper-performant by construction: ONE draw call, all motion in the vertex
+ * shader (deform + morph via uniforms), nothing per-frame on the CPU. Points are
+ * soft round sprites with distance attenuation. Reusable via `PointCloudScene`
+ * (drop into any Canvas) — the studio wraps it in its own fixed-frame Canvas.
  */
 
 const VERT = /* glsl */ `
@@ -31,11 +28,12 @@ const VERT = /* glsl */ `
   uniform float uAmp;
   uniform float uMorph;
   uniform float uFreq;
+  uniform float uSize;
+  uniform float uPixel;
   attribute vec3 aTarget;
   varying float vD;
-  varying vec3 vNormal;
-  varying vec3 vViewDir;
 
+  // Cheap layered-sine pseudo-noise — no texture, GPU-friendly.
   float n(vec3 p) {
     return sin(p.x * 2.0 + uTime)
          * sin(p.y * 2.0 + uTime * 1.2)
@@ -43,55 +41,33 @@ const VERT = /* glsl */ `
   }
 
   void main() {
-    // uFreq compensates for blob size so the ripple density (not just the
-    // amplitude) stays constant regardless of radius.
     float d = n(position * uFreq + uTime * 0.15);
     vD = d;
-    vec3 displaced = position + normal * d * uAmp;
+    vec3 dir = normalize(position + 1e-5);
+    vec3 displaced = position + dir * d * uAmp;
     vec3 pos = mix(displaced, aTarget, uMorph);
     vec4 mv = modelViewMatrix * vec4(pos, 1.0);
-    vViewDir = normalize(-mv.xyz);
-    vNormal = normalize(normalMatrix * normal);
     gl_Position = projectionMatrix * mv;
+    // Perspective size attenuation (smaller with depth).
+    gl_PointSize = uSize * uPixel * (1.0 / max(0.1, -mv.z));
   }
 `;
 
-// Wireframe blob fragment — translucent, tinted by the noise displacement.
-const FRAG_WIRE = /* glsl */ `
+const FRAG = /* glsl */ `
   uniform vec3 uColor;
   varying float vD;
   void main() {
-    float a = clamp(0.5 + 0.3 * vD, 0.18, 0.85);
+    // Soft round sprite: discard outside the disc, alpha falls off to the edge.
+    vec2 c = gl_PointCoord - 0.5;
+    float r2 = dot(c, c);
+    if (r2 > 0.25) discard;
+    float a = smoothstep(0.25, 0.02, r2) * clamp(0.6 + 0.35 * vD, 0.3, 0.95);
     gl_FragColor = vec4(uColor, a);
   }
 `;
 
-// Solid fragment — the SAME self-lit shading as MaterializeMaterial (the crisp
-// viewer), so a deforming solid revision matches the model it morphs into.
-const FRAG_SOLID = /* glsl */ `
-  uniform vec3 uBaseColor;
-  uniform vec3 uAccentColor;
-  uniform vec3 uFresnelColor;
-  varying vec3 vNormal;
-  varying vec3 vViewDir;
-  void main() {
-    vec3 N = normalize(vNormal);
-    if (!gl_FrontFacing) N = -N;
-    vec3 V = normalize(vViewDir);
-    float hemisphere = N.y * 0.5 + 0.5;
-    vec3 baseLight = mix(uAccentColor, uBaseColor, hemisphere);
-    vec3 lightDir = normalize(vec3(0.5, 0.8, 0.6));
-    baseLight += vec3(0.18) * max(dot(N, lightDir), 0.0);
-    float fresnel = pow(1.0 - max(dot(N, V), 0.0), 2.5) * 0.4;
-    vec3 color = mix(baseLight, uFresnelColor, fresnel);
-    gl_FragColor = vec4(color, 1.0);
-  }
-`;
-
-// Smaller than the model's frame fit so the fresh-build blob reads as a compact
-// "forming" entity with margin; the morph then grows it out into the full shape.
 const BLOB_RADIUS = STUDIO_TARGET_SIZE * 0.34;
-const BLOB_DETAIL = 6;
+const POINT_COUNT = 20000; // dense cloud; one draw call so cost is trivial
 const MORPH_DURATION = 1.2;
 
 function smoothstep(t: number) {
@@ -100,104 +76,90 @@ function smoothstep(t: number) {
 }
 
 /** Stable ordering key around the sphere: latitude band, then longitude. */
-function angleKey(v: { x: number; y: number; z: number }): number {
-  const r = Math.hypot(v.x, v.y, v.z) || 1;
-  const elevation = Math.asin(Math.max(-1, Math.min(1, v.y / r)));
-  const azimuth = Math.atan2(v.z, v.x);
-  return elevation * 100 + azimuth;
+function angleKey(x: number, y: number, z: number): number {
+  const r = Math.hypot(x, y, z) || 1;
+  return Math.asin(Math.max(-1, Math.min(1, y / r))) * 100 + Math.atan2(z, x);
 }
 
-/**
- * Per-vertex morph targets: framed surface samples of the new model, matched to
- * the base mesh's vertices by angular position so the cloud "wraps" onto the
- * shape. Duplicate base verts (same position) share a target to avoid tearing.
- */
-function computeMorphTargets(
-  baseGeom: THREE.BufferGeometry,
+/** Evenly-distributed points on a sphere (golden-angle spiral). */
+function fibonacciSphere(count: number, radius: number): Float32Array {
+  const pos = new Float32Array(count * 3);
+  const phi = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < count; i++) {
+    const y = 1 - (i / (count - 1)) * 2;
+    const r = Math.sqrt(Math.max(0, 1 - y * y));
+    const t = phi * i;
+    pos[i * 3] = Math.cos(t) * r * radius;
+    pos[i * 3 + 1] = y * radius;
+    pos[i * 3 + 2] = Math.sin(t) * r * radius;
+  }
+  return pos;
+}
+
+/** A points geometry from a position buffer, with aTarget seeded to itself. */
+function pointGeometry(pos: Float32Array): THREE.BufferGeometry {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  g.setAttribute("aTarget", new THREE.BufferAttribute(pos.slice(), 3));
+  return g;
+}
+
+/** Morph targets: framed surface samples of the new model, matched to the base
+ *  points by angular position so the cloud flows coherently onto the shape. */
+function computePointTargets(
+  basePos: THREE.BufferAttribute | THREE.InterleavedBufferAttribute,
   modelGeom: THREE.BufferGeometry
 ): Float32Array {
-  const bpos = baseGeom.attributes.position;
-  const vCount = bpos.count;
-
-  const keyToUnique = new Map<string, number>();
-  const uniqueBase: THREE.Vector3[] = [];
-  const vertToUnique = new Int32Array(vCount);
-  const tmp = new THREE.Vector3();
-  for (let i = 0; i < vCount; i++) {
-    tmp.fromBufferAttribute(bpos, i);
-    const key = `${Math.round(tmp.x * 1e3)},${Math.round(
-      tmp.y * 1e3
-    )},${Math.round(tmp.z * 1e3)}`;
-    let u = keyToUnique.get(key);
-    if (u === undefined) {
-      u = uniqueBase.length;
-      keyToUnique.set(key, u);
-      uniqueBase.push(tmp.clone());
-    }
-    vertToUnique[i] = u;
-  }
-  const U = uniqueBase.length;
-
-  // Framed samples of the new model (same normalization the crisp viewer uses).
-  const samples = frameSamples(modelGeom, U);
-
-  const baseOrder = [...Array(U).keys()].sort(
-    (x, y) => angleKey(uniqueBase[x]) - angleKey(uniqueBase[y])
+  const N = basePos.count;
+  const samples = frameSamples(modelGeom, N);
+  const baseOrder = [...Array(N).keys()].sort(
+    (i, j) =>
+      angleKey(basePos.getX(i), basePos.getY(i), basePos.getZ(i)) -
+      angleKey(basePos.getX(j), basePos.getY(j), basePos.getZ(j))
   );
-  const sampleOrder = [...Array(U).keys()].sort(
-    (x, y) => angleKey(samples[x]) - angleKey(samples[y])
+  const sampleOrder = [...Array(N).keys()].sort(
+    (i, j) =>
+      angleKey(samples[i].x, samples[i].y, samples[i].z) -
+      angleKey(samples[j].x, samples[j].y, samples[j].z)
   );
-  const uniqueTarget: THREE.Vector3[] = new Array(U);
-  for (let k = 0; k < U; k++)
-    uniqueTarget[baseOrder[k]] = samples[sampleOrder[k]];
-
-  const target = new Float32Array(vCount * 3);
-  for (let i = 0; i < vCount; i++) {
-    const s = uniqueTarget[vertToUnique[i]];
-    target[i * 3] = s.x;
-    target[i * 3 + 1] = s.y;
-    target[i * 3 + 2] = s.z;
+  const target = new Float32Array(N * 3);
+  for (let k = 0; k < N; k++) {
+    const s = samples[sampleOrder[k]];
+    const b = baseOrder[k];
+    target[b * 3] = s.x;
+    target[b * 3 + 1] = s.y;
+    target[b * 3 + 2] = s.z;
   }
   return target;
 }
 
-/** Attach (or reset) an aTarget attribute = a copy of the base positions. */
-function seedTarget(geom: THREE.BufferGeometry) {
-  geom.setAttribute(
-    "aTarget",
-    new THREE.BufferAttribute(
-      (geom.attributes.position.array as Float32Array).slice(),
-      3
-    )
-  );
-}
-
-function TransitionMesh({
+function PointCloud({
   baseGeom,
-  solid,
   active,
+  idleAmp,
+  activeAmp,
+  freq,
+  color = "#8aa0e8",
   morphUrl,
   onMorphComplete,
 }: {
   baseGeom: THREE.BufferGeometry;
-  solid: boolean;
   active: boolean;
+  idleAmp: number;
+  activeAmp: number;
+  freq: number;
+  color?: string;
   morphUrl?: string | null;
   onMorphComplete?: () => void;
 }) {
   const matRef = useRef<THREE.ShaderMaterial>(null);
-  const meshRef = useRef<THREE.Mesh>(null);
+  const pointsRef = useRef<THREE.Points>(null);
   const speed = useRef(0.6);
-  const amp = useRef(0);
+  const amp = useRef(idleAmp);
   const morphProgress = useRef(0);
   const morphing = useRef(false);
   const completed = useRef(false);
-
-  // Gentler wobble on a detailed solid; bigger on the abstract blob. Higher
-  // noise frequency on the (smaller) blob keeps its surface lively.
-  const idleAmp = solid ? 0.012 : 0.18;
-  const activeAmp = solid ? 0.06 : 0.3;
-  const freq = solid ? 1.4 : 2.1;
+  const pixelRatio = useThree((s) => s.gl.getPixelRatio());
 
   const uniforms = useMemo(
     () => ({
@@ -205,16 +167,15 @@ function TransitionMesh({
       uAmp: { value: idleAmp },
       uMorph: { value: 0 },
       uFreq: { value: freq },
-      uColor: { value: new THREE.Color("#8aa0e8") },
-      uBaseColor: { value: new THREE.Color("#d4d4d8") },
-      uAccentColor: { value: new THREE.Color("#a1a1aa") },
-      uFresnelColor: { value: new THREE.Color("#e4e4e7") },
+      uSize: { value: 9.0 },
+      uPixel: { value: pixelRatio },
+      uColor: { value: new THREE.Color(color) },
     }),
-    [idleAmp, freq]
+    [idleAmp, freq, color, pixelRatio]
   );
 
   // Load the morph target, compute correspondence, run the morph. Fail-open:
-  // any error completes immediately so the studio still reveals the model.
+  // any error completes immediately so the caller still proceeds.
   useEffect(() => {
     if (!morphUrl) return;
     let cancelled = false;
@@ -228,11 +189,11 @@ function TransitionMesh({
       (modelGeom) => {
         if (cancelled) return;
         try {
-          const targets = computeMorphTargets(baseGeom, modelGeom);
-          baseGeom.setAttribute(
-            "aTarget",
-            new THREE.BufferAttribute(targets, 3)
+          const targets = computePointTargets(
+            baseGeom.attributes.position,
+            modelGeom
           );
+          baseGeom.setAttribute("aTarget", new THREE.BufferAttribute(targets, 3));
           morphProgress.current = 0;
           morphing.current = true;
         } catch {
@@ -270,65 +231,54 @@ function TransitionMesh({
         }
       }
     }
-    if (meshRef.current) {
+    if (pointsRef.current) {
       const rot = active ? 0.1 : 0.06;
-      meshRef.current.rotation.y += delta * rot;
-      meshRef.current.rotation.x += delta * rot * 0.3;
+      pointsRef.current.rotation.y += delta * rot;
+      pointsRef.current.rotation.x += delta * rot * 0.3;
     }
   });
 
   return (
-    <mesh ref={meshRef} geometry={baseGeom}>
-      {solid ? (
-        <shaderMaterial
-          ref={matRef}
-          uniforms={uniforms}
-          vertexShader={VERT}
-          fragmentShader={FRAG_SOLID}
-        />
-      ) : (
-        <shaderMaterial
-          ref={matRef}
-          wireframe
-          transparent
-          depthWrite={false}
-          uniforms={uniforms}
-          vertexShader={VERT}
-          fragmentShader={FRAG_WIRE}
-        />
-      )}
-    </mesh>
+    <points ref={pointsRef} geometry={baseGeom}>
+      <shaderMaterial
+        ref={matRef}
+        transparent
+        depthWrite={false}
+        uniforms={uniforms}
+        vertexShader={VERT}
+        fragmentShader={FRAG}
+      />
+    </points>
   );
 }
 
-/** Picks the base geometry: the previous model (solid) or the blob (wireframe). */
-function TransitionScene({
+/**
+ * Reusable point-cloud scene (NO Canvas) — drop into any Canvas as a "forming"
+ * loader. With no sourceUrl it's a deforming sphere; with sourceUrl it forms
+ * from an existing model's surface; morphUrl morphs it onto the generated shape.
+ */
+export function PointCloudScene({
   sourceUrl,
-  active,
+  active = true,
   morphUrl,
   onMorphComplete,
 }: {
   sourceUrl?: string | null;
-  active: boolean;
+  active?: boolean;
   morphUrl?: string | null;
   onMorphComplete?: () => void;
 }) {
-  const blob = useMemo(() => {
-    const g = new THREE.IcosahedronGeometry(BLOB_RADIUS, BLOB_DETAIL);
-    seedTarget(g);
-    return g;
-  }, []);
-
-  // Loaded+baked previous model, tagged with the url it came from so a stale
-  // geometry is never used after sourceUrl changes (no synchronous reset needed).
+  const blob = useMemo(
+    () => pointGeometry(fibonacciSphere(POINT_COUNT, BLOB_RADIUS)),
+    []
+  );
   const [loaded, setLoaded] = useState<{
     url: string;
     geom: THREE.BufferGeometry;
   } | null>(null);
-  // Url whose source load failed — fall back to the blob rather than hang.
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
 
-  // Load + frame-bake the previous model for the revise-in-place deform.
+  // Build a point cloud from the previous model's framed surface (revision).
   useEffect(() => {
     if (!sourceUrl) return;
     let cancelled = false;
@@ -336,9 +286,14 @@ function TransitionScene({
       sourceUrl,
       (g) => {
         if (cancelled) return;
-        const baked = frameBakeGeometry(g);
-        seedTarget(baked);
-        setLoaded({ url: sourceUrl, geom: baked });
+        const samples = frameSamples(g, POINT_COUNT);
+        const pos = new Float32Array(POINT_COUNT * 3);
+        for (let i = 0; i < POINT_COUNT; i++) {
+          pos[i * 3] = samples[i].x;
+          pos[i * 3 + 1] = samples[i].y;
+          pos[i * 3 + 2] = samples[i].z;
+        }
+        setLoaded({ url: sourceUrl, geom: pointGeometry(pos) });
       },
       undefined,
       () => {
@@ -350,25 +305,25 @@ function TransitionScene({
     };
   }, [sourceUrl]);
 
-  const sourceGeom =
-    sourceUrl && loaded?.url === sourceUrl ? loaded.geom : null;
-  const useSolid = !!sourceGeom;
-  const baseGeom = sourceGeom ?? blob;
-  // A revision expects a solid source; render nothing until it's loaded so we
-  // never flash the wireframe blob before the solid appears — unless the load
-  // failed, in which case fall back to the blob so the morph still proceeds.
-  const waitingForSource =
-    !!sourceUrl && !sourceGeom && failedUrl !== sourceUrl;
+  const sourceGeom = sourceUrl && loaded?.url === sourceUrl ? loaded.geom : null;
+  const isSource = !!sourceGeom;
+  // Wait for the source surface to load before showing anything (revision);
+  // fall back to the blob if it fails.
+  const waiting = !!sourceUrl && !sourceGeom && failedUrl !== sourceUrl;
 
   return (
     <>
       <ambientLight intensity={0.7} />
-      {!waitingForSource && (
-        <TransitionMesh
-          key={useSolid ? "solid" : "blob"}
-          baseGeom={baseGeom}
-          solid={useSolid}
+      {!waiting && (
+        <PointCloud
+          key={isSource ? "src" : "blob"}
+          baseGeom={sourceGeom ?? blob}
           active={active}
+          // Surface clouds are already shaped — wobble gently; the blob is
+          // abstract — wobble more, at a higher noise frequency for liveliness.
+          idleAmp={isSource ? 0.05 : 0.18}
+          activeAmp={isSource ? 0.14 : 0.32}
+          freq={isSource ? 1.6 : 2.1}
           morphUrl={morphUrl}
           onMorphComplete={onMorphComplete}
         />
@@ -377,6 +332,8 @@ function TransitionScene({
   );
 }
 
+/** Studio loader — the point-cloud scene in its own fixed-frame Canvas so it
+ *  registers pixel-for-pixel with <ModelViewer fixedFrame>. */
 export function MaterializingBlob({
   className,
   active = false,
@@ -385,13 +342,9 @@ export function MaterializingBlob({
   onMorphComplete,
 }: {
   className?: string;
-  /** Deform harder/faster while a shape is generating. */
   active?: boolean;
-  /** Previous model to deform in place (revision). Null = wireframe blob. */
   sourceUrl?: string | null;
-  /** New model to morph into once generation is done. */
   morphUrl?: string | null;
-  /** Fired when the morph finishes (or fails) — cue to reveal the model. */
   onMorphComplete?: () => void;
 }) {
   return (
@@ -400,7 +353,7 @@ export function MaterializingBlob({
         camera={{ position: STUDIO_CAMERA.position, fov: STUDIO_CAMERA.fov }}
         dpr={[1, 2]}
       >
-        <TransitionScene
+        <PointCloudScene
           sourceUrl={sourceUrl}
           active={active}
           morphUrl={morphUrl}

@@ -15,6 +15,7 @@ import {
   STUDIO_CAMERA,
   frameTransformFor,
 } from "@/components/cad/studio-frame";
+import { PointCloudScene } from "@/components/cad/materializing-blob";
 import {
   AlwaysStencilFunc,
   BackSide,
@@ -534,12 +535,8 @@ function ModelMesh({
 }
 
 function LoadingFallback() {
-  return (
-    <mesh>
-      <sphereGeometry args={[0.5, 16, 16]} />
-      <meshStandardMaterial color="#666" wireframe />
-    </mesh>
-  );
+  // Universal "3D is loading" placeholder: a softly deforming point cloud.
+  return <PointCloudScene active />;
 }
 
 /** Bounds measured from the loaded+placed model, in world units + true mm. */
