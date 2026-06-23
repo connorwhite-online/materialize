@@ -178,6 +178,9 @@ function repairHintFor(note: string): string {
   if (/buildpart|buildsketch/.test(n) && /(combined|builder|part.{0,3}attribute|can.?t be)/.test(n)) {
     return "A BuildPart/BuildSketch is a builder, not a Shape — don't add/subtract/combine the builders. Use `.part` (e.g. `part.part`, or `a.part + b.part`), or build everything in ONE BuildPart with nested add/subtract modes.";
   }
+  if (/no result|oom|crash|killed|memory|timed out/.test(n)) {
+    return "The previous attempt CRASHED or hung the geometry kernel — it was too heavy. Drastically SIMPLIFY: far fewer boolean operations, no large loops or dense patterns, coarser detail, simple primitives. Build the simplest geometry that still reads as the requested object.";
+  }
   return "";
 }
 
