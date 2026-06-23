@@ -269,12 +269,60 @@ def _execute(code: str, formats: list[str], out: "mp.Queue") -> None:
 
 
 def _render(mesh) -> Optional[str]:
-    """Best-effort offscreen PNG (base64). Returns None where headless GL
-    isn't available — the UI tolerates a missing render."""
+    """Headless clay-style preview PNG (base64).
+
+    Uses matplotlib's Agg backend rather than trimesh's `scene.save_image`,
+    which needs a live OpenGL/pyglet context and silently fails headless (on
+    macOS dev and most servers) — leaving every render empty. That empty
+    render is load-bearing now: the VLM aesthetic judge and the repair loop
+    feed on it, so a real (if simple) Lambert-shaded 3/4 view matters more
+    than photoreal GL. Returns None on any failure — callers tolerate it."""
     try:
-        scene = mesh.scene()
-        png = scene.save_image(resolution=(640, 480))
-        return base64.b64encode(png).decode()
+        import io
+
+        import numpy as np
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+        tris = mesh.triangles  # (n, 3, 3)
+        if len(tris) == 0:
+            return None
+
+        # Cheap Lambert shading against a fixed key light for a clay read.
+        light = np.array([0.4, 0.5, 0.75])
+        light = light / np.linalg.norm(light)
+        shade = np.clip(np.abs(mesh.face_normals @ light), 0.15, 1.0)
+        base = np.array([0.62, 0.64, 0.67])  # neutral gray
+        colors = np.clip(base[None, :] * (0.45 + 0.6 * shade)[:, None], 0, 1)
+
+        fig = plt.figure(figsize=(6.4, 4.8), dpi=100)
+        ax = fig.add_subplot(111, projection="3d")
+        ax.add_collection3d(
+            Poly3DCollection(tris, facecolors=colors, edgecolors="none")
+        )
+
+        bounds = mesh.bounds  # (2, 3) min/max
+        center = bounds.mean(axis=0)
+        span = float((bounds[1] - bounds[0]).max()) * 0.6 or 1.0
+        ax.set_xlim(center[0] - span, center[0] + span)
+        ax.set_ylim(center[1] - span, center[1] + span)
+        ax.set_zlim(center[2] - span, center[2] + span)
+        try:
+            ax.set_box_aspect((1, 1, 1))
+        except Exception:  # noqa: BLE001 — older mpl lacks set_box_aspect
+            pass
+        ax.view_init(elev=22, azim=-55)
+        ax.set_axis_off()
+
+        buf = io.BytesIO()
+        fig.savefig(
+            buf, format="png", bbox_inches="tight", pad_inches=0, transparent=True
+        )
+        plt.close(fig)
+        return base64.b64encode(buf.getvalue()).decode()
     except Exception:  # noqa: BLE001
         return None
 

@@ -1,7 +1,7 @@
 import "server-only";
 
-import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import { hasModelCredentials } from "./model-client";
+import { completeText, hasModelCredentials } from "./model-client";
+import { modelForRole } from "./models";
 import { logError } from "@/lib/logger";
 
 /**
@@ -129,63 +129,26 @@ export function parseJudgement(text: string): {
   return { score: aggregate, pass, perDimension, feedback: fixes.join("; ") };
 }
 
-/** Run the vision model on the render. Defensively typed; the integration
- * point to verify against a live model before enabling the flag. */
+/**
+ * Run the vision model on the render via the Messages API (completeText) — the
+ * same path the generator uses. Deliberately NOT the Agent SDK query(): that
+ * spawns a Claude Code subprocess that hangs when the harness itself runs
+ * inside Claude Code. Model precedence: CAD_AESTHETIC_JUDGE_MODEL -> the
+ * `critique` role -> SDK default. Bias toward a different model than the
+ * generator to limit self-preference bias.
+ */
 async function runVisionJudge(
   prompt: string,
   pngBase64: string,
   signal?: AbortSignal
 ): Promise<string> {
-  const { query } = await import("@anthropic-ai/claude-agent-sdk");
-  const abort = new AbortController();
-  if (signal) {
-    if (signal.aborted) abort.abort();
-    else signal.addEventListener("abort", () => abort.abort());
-  }
-
-  async function* input(): AsyncGenerator<SDKUserMessage> {
-    yield {
-      type: "user",
-      parent_tool_use_id: null,
-      message: {
-        role: "user",
-        content: [
-          { type: "text", text: `Requested object: ${prompt}` },
-          {
-            type: "image",
-            source: { type: "base64", media_type: "image/png", data: pngBase64 },
-          },
-        ],
-      },
-    };
-  }
-
-  const result = query({
-    prompt: input(),
-    options: {
-      abortController: abort,
-      systemPrompt: CRITIQUE_RUBRIC,
-      allowedTools: [],
-      maxTurns: 1,
-      ...(process.env.CAD_AESTHETIC_JUDGE_MODEL
-        ? { model: process.env.CAD_AESTHETIC_JUDGE_MODEL }
-        : {}),
-    },
+  return completeText({
+    system: CRITIQUE_RUBRIC,
+    prompt: `Requested object: ${prompt}`,
+    model: process.env.CAD_AESTHETIC_JUDGE_MODEL || modelForRole("critique"),
+    images: [{ data: pngBase64, mediaType: "image/png" }],
+    signal,
   });
-
-  let text = "";
-  for await (const message of result) {
-    if (message.type === "assistant") {
-      const content = message.message.content;
-      if (Array.isArray(content)) {
-        for (const block of content) {
-          const b = block as { type?: string; text?: string };
-          if (b.type === "text" && typeof b.text === "string") text += b.text;
-        }
-      }
-    }
-  }
-  return text;
 }
 
 export async function judgeAesthetics(opts: {

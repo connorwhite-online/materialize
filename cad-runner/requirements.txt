@@ -18,3 +18,6 @@ trimesh==4.5.3
 networkx==3.6.1
 # trimesh's voxel marching-cubes (organic remesh fallback) needs scikit-image.
 scikit-image==0.26.0
+# Headless clay-render of the result (no GL/pyglet) — feeds the VLM aesthetic
+# judge and the visual repair loop. Was transitive via scikit-image; now direct.
+matplotlib==3.11.0

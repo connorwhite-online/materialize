@@ -54,7 +54,7 @@ export const CAD_EXEMPLARS: CadExemplar[] = [
       "",
       "result = part.part",
     ].join("\n"),
-    verified: false,
+    verified: true,
   },
   {
     id: "fillet_hierarchy_bracket",
@@ -68,7 +68,7 @@ export const CAD_EXEMPLARS: CadExemplar[] = [
       "arm = 40        # length of each arm",
       "width = 30",
       "thick = 5",
-      "root_fillet = 6.0   # large radius where arms meet",
+      "root_fillet = 3.0   # large radius where arms meet (< thickness)",
       "edge_break = 1.0",
       "hole_d = 5.5        # M5 clearance",
       "",
@@ -83,7 +83,7 @@ export const CAD_EXEMPLARS: CadExemplar[] = [
       "",
       "result = part.part",
     ].join("\n"),
-    verified: false,
+    verified: true,
   },
   {
     id: "snap_fit_lid",
@@ -115,7 +115,7 @@ export const CAD_EXEMPLARS: CadExemplar[] = [
       "",
       "result = part.part",
     ].join("\n"),
-    verified: false,
+    verified: true,
   },
   {
     id: "ergonomic_knob",
@@ -145,7 +145,7 @@ export const CAD_EXEMPLARS: CadExemplar[] = [
       "",
       "result = part.part",
     ].join("\n"),
-    verified: false,
+    verified: true,
   },
   {
     id: "divider_tray",
@@ -174,7 +174,7 @@ export const CAD_EXEMPLARS: CadExemplar[] = [
       "",
       "result = part.part",
     ].join("\n"),
-    verified: false,
+    verified: true,
   },
   {
     id: "lofted_vase",
@@ -205,7 +205,7 @@ export const CAD_EXEMPLARS: CadExemplar[] = [
       "",
       "result = part.part",
     ].join("\n"),
-    verified: false,
+    verified: true,
   },
 ];
 

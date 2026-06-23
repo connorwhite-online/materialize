@@ -147,7 +147,8 @@ function buildUserPrompt(input: HarnessInput, plan?: string): string {
 
   // On a fresh build, show the best-matching verified exemplar as a style
   // reference. (Revisions already have the prior code as their reference.)
-  // Returns "" until exemplars are sidecar-verified, so this is a no-op now.
+  // The exemplars are sidecar-verified (scripts/verify-exemplars.ts), so this
+  // now injects a matching example when one scores > 0 for the prompt.
   if (!input.priorSourceCode) {
     const exemplars = formatExemplars(selectExemplars(input.prompt));
     if (exemplars) out += `\n\n${exemplars}`;
@@ -223,15 +224,39 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
       // thereafter. Both default to the strong model until configured.
       const role: CadRole = repairNote ? "repair" : "implement";
       const model = modelForRole(role);
+      // On a repair turn, show the model a render of its OWN previous attempt
+      // (when one exists) — text errors alone leave it blind to the actual
+      // form. A render only exists once the run produced a valid solid, so
+      // this kicks in mainly for "printable but visually weak" repairs.
+      const priorRender = repairNote ? lastRun?.renderPng : undefined;
       const userPrompt = repairNote
-        ? `${buildUserPrompt(input, plan)}\n\nThe previous attempt failed because ${repairNote}. Here is that code:\n\`\`\`python\n${lastCode}\n\`\`\`\nFix it.`
+        ? [
+            buildUserPrompt(input, plan),
+            "",
+            `The previous attempt failed because ${repairNote}. Here is that code:`,
+            "```python",
+            lastCode,
+            "```",
+            priorRender
+              ? "A render of that previous attempt is attached — use it to see what is actually wrong with the form, then fix it."
+              : "",
+            "Fix it.",
+          ]
+            .filter(Boolean)
+            .join("\n")
         : buildUserPrompt(input, plan);
+      const images: PromptImage[] = [
+        ...(input.images ?? []),
+        ...(priorRender
+          ? [{ data: priorRender, mediaType: "image/png" as const }]
+          : []),
+      ];
       const text = await timed(role, model, () =>
         completeText({
           system: SYSTEM_PROMPT,
           prompt: userPrompt,
           model,
-          images: input.images ?? undefined,
+          images: images.length ? images : undefined,
           signal: input.signal,
         })
       );
