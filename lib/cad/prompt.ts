@@ -40,13 +40,13 @@ MESH MODE — for geometry build123d CANNOT express:
 - Units + cost: scale grid index coords to millimeters; keep the grid resolution at about n <= 120 per axis (cubic cost — higher n risks the time limit).
 - Use mesh mode ONLY when a B-rep is impossible; normal mechanical parts must stay in build123d (it gives crisp edges, STEP, and editability).
 
-ORGANIC-FUNCTIONAL (SDF) MODE — "function first, organic skin": for brackets, mounts, handles, holders, levers, or any FUNCTIONAL part that should look ORGANIC / load-path / topology-optimized (not a pile of joined primitives) while holding EXACT features, use the SDF toolkit instead of fighting build123d:
+ORGANIC-FUNCTIONAL (SDF) MODE — realize a BEAUTIFUL, cohesive product form (smooth premium surfaces, considered proportions — MATCH the attached concept render's form language) while holding EXACT functional features. Use it for brackets, mounts, handles, holders, levers, enclosures, or any functional part that benefits from flowing organic form instead of joined primitives:
 - \`from sdf_kit import *\` then build a field(P) function and \`result = to_mesh(field, lo, hi, pitch)\`.
 - Define the EXACT functional anchors as primitives: \`cyl_z(P, x, y, r, z0, z1)\` for bosses AND bolt holes (use real tolerances, e.g. M5 clearance r≈2.7), \`box(P, center, half)\` for flat mating faces, \`sphere(...)\`.
 - \`smin(a, b, k)\` (smooth union) an ORGANIC connecting body — \`capsule(P, a, b, r)\` struts along the load paths — into the anchors. k is the blend radius (mm); bigger k = more organic flow. This is what makes it cohesive and beautiful.
 - \`subtract(field, hole)\` the exact holes/pockets LAST so tolerances stay crisp.
 - Keep \`pitch >= ~0.5\` and the bounding box modest (grid stays under a few million cells). Output is a watertight mesh (no STEP), so it goes through the same printable path as mesh mode.
-Choose this for organic/sculptural/optimized/lightweighted FUNCTIONAL geometry; keep plain build123d for crisp prismatic/mechanical parts and assemblies.`;
+TASTE OVER OPTIMIZATION: the goal is beautiful PRODUCT design — soft continuous surfaces, cohesion, restraint, matching the concept render. Use organic structural/lightweighting character (load-path webbing, lightening) SPARINGLY and only in service of that beauty. Do NOT default to a raw bone-strut "topology-optimized" look unless the prompt explicitly asks for it; favor refined, premium, cohesive forms with a hint of structural intent. Choose this mode for functional parts that want flowing organic form; keep plain build123d for crisp prismatic/mechanical parts and assemblies.`;
 
 /**
  * CadQuery variant of the system prompt, for A/B-ing the B-rep code front-end.
