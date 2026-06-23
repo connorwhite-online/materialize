@@ -9,6 +9,7 @@ import {
   DownloadIcon,
   EllipsisVerticalIcon,
   Loader2Icon,
+  MessageSquareTextIcon,
   PaperclipIcon,
   PencilIcon,
   PlusIcon,
@@ -154,6 +155,12 @@ export function TextToCadStudio({
   const [showSource, setShowSource] = useState(true);
   // Which build's three-dot menu is open in the sidebar.
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  // Eval feedback: auto-prompt per turn until rated/dismissed, then collapse to
+  // an edit affordance. `feedbackEditing` force-opens the panel for a turn.
+  const [feedbackDismissed, setFeedbackDismissed] = useState<Set<string>>(
+    new Set()
+  );
+  const [feedbackEditing, setFeedbackEditing] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
@@ -603,7 +610,7 @@ export function TextToCadStudio({
 
           {/* Viewer / progress / empty state */}
           <div className="mt-5 overflow-hidden rounded-xl border border-foreground/10">
-            <div className="relative aspect-square w-full bg-muted/30">
+            <div className="relative aspect-[4/3] w-full bg-muted/30">
               {/* Crisp model — the BASE layer (fixed frame). Stays mounted
                   under the transition so the morph fades to reveal it with no
                   remount/zoom; on a revision it's the shape being deformed. */}
@@ -849,14 +856,52 @@ export function TextToCadStudio({
             </div>
           )}
 
-          {/* Feedback — the in-the-moment eval signal (feeds /text-to-cad/eval) */}
-          {!generating && viewedTurn?.status === "succeeded" && (
-            <TurnFeedback
-              key={viewedTurn.id}
-              turn={viewedTurn}
-              onSaved={(patch) => applyFeedback(viewedTurn.id, patch)}
-            />
-          )}
+          {/* Feedback — the in-the-moment eval signal (feeds /text-to-cad/eval).
+              Auto-prompts after each generation until rated or dismissed, then
+              collapses to a small edit affordance. */}
+          {!generating &&
+            viewedTurn?.status === "succeeded" &&
+            (() => {
+              const vt = viewedTurn;
+              const rated =
+                !!vt.rating ||
+                vt.feedbackTags.length > 0 ||
+                !!vt.feedbackNote;
+              const open =
+                feedbackEditing === vt.id ||
+                (!rated && !feedbackDismissed.has(vt.id));
+              return open ? (
+                <TurnFeedback
+                  key={vt.id}
+                  turn={vt}
+                  onSaved={(patch) => {
+                    applyFeedback(vt.id, patch);
+                    setFeedbackEditing(null);
+                  }}
+                  onDismiss={() => {
+                    setFeedbackDismissed((s) => new Set(s).add(vt.id));
+                    setFeedbackEditing(null);
+                  }}
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setFeedbackEditing(vt.id)}
+                  className="mt-5 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <MessageSquareTextIcon className="size-3.5" />
+                  {rated
+                    ? `Feedback ${
+                        vt.rating === "good"
+                          ? "👍"
+                          : vt.rating === "bad"
+                            ? "👎"
+                            : "saved"
+                      } · edit`
+                    : "Add feedback"}
+                </button>
+              );
+            })()}
 
         </section>
 
@@ -1247,11 +1292,13 @@ function describeEvent(ev: CadProgressEvent): {
 function TurnFeedback({
   turn,
   onSaved,
+  onDismiss,
 }: {
   turn: StudioTurn;
   onSaved: (
     patch: Pick<StudioTurn, "rating" | "feedbackTags" | "feedbackNote">
   ) => void;
+  onDismiss?: () => void;
 }) {
   const [rating, setRating] = useState<CadRating | null>(turn.rating);
   const [tags, setTags] = useState<CadFeedbackTag[]>(
@@ -1291,8 +1338,18 @@ function TurnFeedback({
     <div className="mt-5 rounded-lg border border-foreground/10 p-3">
       <div className="flex items-center gap-2">
         <span className="text-xs font-medium text-muted-foreground">
-          How did it do?
+          How did this turn out?
         </span>
+        {onDismiss && (
+          <button
+            type="button"
+            onClick={onDismiss}
+            aria-label="Dismiss feedback"
+            className="order-last ml-auto flex size-6 items-center justify-center rounded-md text-muted-foreground/70 hover:bg-foreground/10 hover:text-foreground"
+          >
+            <XIcon className="size-3.5" />
+          </button>
+        )}
         <button
           type="button"
           aria-pressed={rating === "good"}
