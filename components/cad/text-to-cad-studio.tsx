@@ -863,7 +863,7 @@ export function TextToCadStudio({
         {/* Right sidebar — revisions + parametric source for the current build,
             then the build history. self-start keeps it at content height instead
             of stretching to match the (tall) viewer column. */}
-        <aside className="flex flex-col gap-5 self-start">
+        <aside className="flex flex-col gap-5 self-start lg:sticky lg:top-6 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto">
           {/* Revisions for the current build */}
           {!generating && turns.length > 0 && (
             <div>
