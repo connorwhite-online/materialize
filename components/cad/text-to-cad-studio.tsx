@@ -138,6 +138,13 @@ export function TextToCadStudio({
   const [prompt, setPrompt] = useState("");
   const [progress, setProgress] = useState<CadProgressEvent[]>([]);
   const [generating, setGenerating] = useState(false);
+  // Loader→model handoff: on a fresh result the deforming blob morphs into the
+  // generated shape ("morph"), then the crisp ModelViewer is mounted underneath
+  // and the blob is faded out ("reveal").
+  const [transition, setTransition] = useState<{
+    assetId: string;
+    phase: "morph" | "reveal";
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [showSource, setShowSource] = useState(true);
@@ -156,6 +163,14 @@ export function TextToCadStudio({
 
   // Abort an in-flight stream if the studio unmounts.
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  // Once the morph finishes and the model is mounted underneath, give it a
+  // beat to load, then clear the transition (unmounts the faded-out blob).
+  useEffect(() => {
+    if (transition?.phase !== "reveal") return;
+    const t = setTimeout(() => setTransition(null), 550);
+    return () => clearTimeout(t);
+  }, [transition]);
 
   // Auto-grow the composer textarea with its content (capped), and shrink
   // back when it's cleared after a send.
@@ -197,6 +212,7 @@ export function TextToCadStudio({
   function startNewBuild() {
     abortRef.current?.abort();
     setGenerating(false);
+    setTransition(null);
     setActiveRootId(null);
     setViewTurnId(null);
     setProgress([]);
@@ -210,6 +226,7 @@ export function TextToCadStudio({
 
   function openThread(t: StudioThread) {
     if (generating) return;
+    setTransition(null);
     setActiveRootId(t.rootId);
     const lastGood = [...t.turns]
       .reverse()
@@ -321,6 +338,10 @@ export function TextToCadStudio({
       setActiveRootId(ev.generationId);
     }
     setViewTurnId(ev.generationId);
+    // Kick off the loader→model morph (the blob is still on screen here; it
+    // morphs into this asset, then we crossfade to the real viewer). No asset
+    // means nothing to morph into — fall straight through to the empty state.
+    setTransition(ev.fileAssetId ? { assetId: ev.fileAssetId, phase: "morph" } : null);
     // Clear the composer only now that the turn landed — on an error the
     // user's typed instruction (and any attached refs) stay put to retry.
     setPrompt("");
@@ -464,6 +485,15 @@ export function TextToCadStudio({
     }
   }
 
+  // Viewer layering. The blob covers idle / generating / morphing; the model
+  // is mounted underneath once the morph is past (reveal phase) or when there's
+  // no transition in flight. Never show the (old) model while generating.
+  const showBlob = generating || transition !== null;
+  const showModel =
+    !generating &&
+    (transition === null || transition.phase === "reveal") &&
+    !!activeAssetId;
+
   const composerLabel = generating
     ? "Generating…"
     : activeThread
@@ -541,19 +571,11 @@ export function TextToCadStudio({
 
           {/* Viewer / progress / empty state */}
           <div className="mt-5 overflow-hidden rounded-xl border border-foreground/10">
-            <div className="aspect-square w-full bg-muted/30">
-              {generating ? (
-                <div className="relative h-full w-full">
-                  <Suspense fallback={<div className="h-full w-full" />}>
-                    <MaterializingBlob className="h-full w-full" active />
-                  </Suspense>
-                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
-                    <div className="glass rounded-2xl px-5 py-4 shadow-lg">
-                      <ProgressPanel events={progress} />
-                    </div>
-                  </div>
-                </div>
-              ) : activeAssetId ? (
+            <div className="relative aspect-square w-full bg-muted/30">
+              {/* Model layer — mounted underneath once we're past the morph
+                  (or with no transition at all), so the blob can crossfade
+                  onto a crisp, already-loading viewer. */}
+              {showModel && activeAssetId && (
                 <Suspense fallback={<ViewerSkeleton label="Loading model…" />}>
                   <ModelViewer
                     key={activeAssetId}
@@ -571,10 +593,47 @@ export function TextToCadStudio({
                         { id: crypto.randomUUID(), ...a },
                       ])
                     }
-                    className="h-full w-full"
+                    className="absolute inset-0 h-full w-full"
                   />
                 </Suspense>
-              ) : (
+              )}
+
+              {/* Blob layer — idle / generating / morphing. Fades out during
+                  the reveal phase as the model takes over beneath it. */}
+              {showBlob && (
+                <div
+                  className={`absolute inset-0 transition-opacity duration-500 ${
+                    transition?.phase === "reveal" ? "opacity-0" : "opacity-100"
+                  }`}
+                >
+                  <Suspense fallback={<div className="h-full w-full" />}>
+                    <MaterializingBlob
+                      className="h-full w-full"
+                      active
+                      morphUrl={
+                        transition
+                          ? `/api/files/preview/${transition.assetId}`
+                          : null
+                      }
+                      onMorphComplete={() =>
+                        setTransition((t) =>
+                          t ? { ...t, phase: "reveal" } : null
+                        )
+                      }
+                    />
+                  </Suspense>
+                  {generating && !transition && (
+                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
+                      <div className="glass rounded-2xl px-5 py-4 shadow-lg">
+                        <ProgressPanel events={progress} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Empty state — no model, nothing generating. */}
+              {!showBlob && !showModel && (
                 <div className="flex h-full w-full flex-col">
                   <Suspense fallback={<div className="min-h-0 flex-1" />}>
                     <MaterializingBlob className="min-h-0 flex-1" />
