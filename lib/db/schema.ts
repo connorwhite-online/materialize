@@ -1368,6 +1368,13 @@ export const cadGenerations = pgTable(
     fileAssetId: uuid("file_asset_id").references(() => fileAssets.id, {
       onDelete: "set null",
     }),
+    // For a multi-part assembly, the Project bundling the part files. The row's
+    // fileAssetId is only the PRIMARY part, so without this the history loader
+    // can't rebuild the parts on reload and an assembly collapses to one file.
+    // SET NULL if the project is later deleted.
+    projectId: uuid("project_id").references(() => projects.id, {
+      onDelete: "set null",
+    }),
     status: cadGenerationStatusEnum("status").notNull().default("pending"),
     // Failure message surfaced back to the studio UI when status=failed.
     error: text("error"),
