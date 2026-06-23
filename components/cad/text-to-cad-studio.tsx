@@ -7,15 +7,18 @@ import {
   ArrowUpIcon,
   CheckIcon,
   DownloadIcon,
+  EllipsisVerticalIcon,
   Loader2Icon,
   PaperclipIcon,
   PencilIcon,
   PlusIcon,
+  Trash2Icon,
   XIcon,
 } from "lucide-react";
 import { ChevronDown } from "@/components/icons/chevron-down";
 import { ChevronRight } from "@/components/icons/chevron-right";
 import {
+  deleteCadBuild,
   recordCadFeedback,
   renameCadGeneration,
   saveCadFileToProfile,
@@ -149,6 +152,8 @@ export function TextToCadStudio({
   const [error, setError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [showSource, setShowSource] = useState(true);
+  // Which build's three-dot menu is open in the sidebar.
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
@@ -164,6 +169,14 @@ export function TextToCadStudio({
 
   // Abort an in-flight stream if the studio unmounts.
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  // Close the build three-dot menu on any outside click.
+  useEffect(() => {
+    if (!openMenuId) return;
+    const close = () => setOpenMenuId(null);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [openMenuId]);
 
   // Once the morph finishes and the model is mounted underneath, give it a
   // beat to load, then clear the transition (unmounts the faded-out blob).
@@ -240,6 +253,17 @@ export function TextToCadStudio({
     setSelectedPartId(null);
     setShowHistory(false);
     setRenaming(false);
+  }
+
+  // Delete a build (root + revisions) from history. Optimistic; if it was the
+  // open build, reset to a blank canvas.
+  async function deleteBuild(t: StudioThread) {
+    setOpenMenuId(null);
+    const ids = t.turns.map((x) => x.id);
+    setThreads((prev) => prev.filter((x) => x.rootId !== t.rootId));
+    if (activeRootId === t.rootId) startNewBuild();
+    const res = await deleteCadBuild({ generationIds: ids });
+    if ("error" in res) setError(res.error);
   }
 
   async function saveName() {
@@ -834,9 +858,15 @@ export function TextToCadStudio({
             />
           )}
 
-          {/* Revision history — collapsed until opened */}
+        </section>
+
+        {/* Right sidebar — revisions + parametric source for the current build,
+            then the build history. self-start keeps it at content height instead
+            of stretching to match the (tall) viewer column. */}
+        <aside className="flex flex-col gap-5 self-start">
+          {/* Revisions for the current build */}
           {!generating && turns.length > 0 && (
-            <div className="mt-5">
+            <div>
               <button
                 type="button"
                 onClick={() => setShowHistory((v) => !v)}
@@ -847,7 +877,7 @@ export function TextToCadStudio({
                 ) : (
                   <ChevronRight className="size-4" />
                 )}
-                Revision history ({turns.length})
+                Revisions ({turns.length})
               </button>
               {showHistory && (
                 <ol className="mt-2 space-y-1.5">
@@ -886,9 +916,9 @@ export function TextToCadStudio({
             </div>
           )}
 
-          {/* Source code — collapsible */}
+          {/* Parametric source for the current build — collapsible */}
           {!generating && viewedTurn?.sourceCode && (
-            <div className="mt-5">
+            <div>
               <button
                 type="button"
                 onClick={() => setShowSource((v) => !v)}
@@ -908,84 +938,94 @@ export function TextToCadStudio({
               )}
             </div>
           )}
-        </section>
 
-        {/* Thread list */}
-        <aside>
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-medium text-muted-foreground">Builds</h2>
-            <button
-              type="button"
-              onClick={startNewBuild}
-              aria-label="New build"
-              className="flex size-7 items-center justify-center rounded-md border border-foreground/15 hover:bg-foreground/5"
-            >
-              <PlusIcon className="size-4" />
-            </button>
-          </div>
-          <ul className="mt-3 flex flex-col gap-2">
-            {threads.length === 0 && (
-              <li className="text-sm text-muted-foreground">No builds yet.</li>
-            )}
-            {threads.map((t) => {
-              const thumb = [...t.turns]
-                .reverse()
-                .find((x) => x.renderUrl)?.renderUrl;
-              // Fall back to a live 3D preview of the latest part when there's
-              // no rendered PNG (e.g. local dev with no headless GL). Server-
-              // rendered thumbnails remain the scale solution — see CON-175.
-              const previewAssetId = [...t.turns]
-                .reverse()
-                .find((x) => x.status === "succeeded" && x.fileAssetId)
-                ?.fileAssetId;
-              const isActive = t.rootId === activeRootId;
-              return (
-                <li key={t.rootId}>
-                  <button
-                    type="button"
-                    onClick={() => openThread(t)}
-                    className={`flex w-full cursor-pointer items-center gap-3 rounded-lg border p-2 text-left transition-colors ${
-                      isActive
-                        ? "border-foreground/30 bg-foreground/5"
-                        : "border-foreground/10 hover:bg-foreground/5"
-                    }`}
-                  >
-                    {thumb ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={thumb}
-                        alt=""
-                        className="h-10 w-10 shrink-0 rounded bg-muted/40 object-contain"
-                      />
-                    ) : previewAssetId ? (
-                      <div className="h-10 w-10 shrink-0 overflow-hidden rounded bg-muted/40">
-                        <Suspense fallback={<div className="h-full w-full" />}>
-                          <ModelViewer
-                            key={previewAssetId}
-                            modelUrl={`/api/files/preview/${previewAssetId}`}
-                            format="stl"
-                            mode="preview"
-                            className="h-full w-full"
-                          />
-                        </Suspense>
+          {/* Build history */}
+          <div>
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-medium text-muted-foreground">Builds</h2>
+              <button
+                type="button"
+                onClick={startNewBuild}
+                aria-label="New build"
+                className="flex size-7 items-center justify-center rounded-md border border-foreground/15 hover:bg-foreground/5"
+              >
+                <PlusIcon className="size-4" />
+              </button>
+            </div>
+            <ul className="mt-3 flex flex-col gap-2">
+              {threads.length === 0 && (
+                <li className="text-sm text-muted-foreground">No builds yet.</li>
+              )}
+              {threads.map((t) => {
+                // Still PNG render captured per generation (newest with one).
+                const thumb = [...t.turns]
+                  .reverse()
+                  .find((x) => x.renderUrl)?.renderUrl;
+                const isActive = t.rootId === activeRootId;
+                return (
+                  <li key={t.rootId} className="relative">
+                    <button
+                      type="button"
+                      onClick={() => openThread(t)}
+                      className={`flex w-full cursor-pointer items-center gap-3 rounded-lg border p-2 pr-9 text-left transition-colors ${
+                        isActive
+                          ? "border-foreground/30 bg-foreground/5"
+                          : "border-foreground/10 hover:bg-foreground/5"
+                      }`}
+                    >
+                      {thumb ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={thumb}
+                          alt=""
+                          className="h-10 w-10 shrink-0 rounded bg-muted/40 object-contain"
+                        />
+                      ) : (
+                        <div className="h-10 w-10 shrink-0 rounded bg-muted/40" />
+                      )}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">
+                          {threadLabel(t)}
+                        </span>
+                        <span className="block text-xs text-muted-foreground">
+                          {t.turns.length} revision
+                          {t.turns.length === 1 ? "" : "s"}
+                        </span>
+                      </span>
+                    </button>
+
+                    {/* Three-dot menu (delete) */}
+                    <button
+                      type="button"
+                      aria-label="Build options"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenMenuId((id) => (id === t.rootId ? null : t.rootId));
+                      }}
+                      className="absolute right-1.5 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground/70 hover:bg-foreground/10 hover:text-foreground"
+                    >
+                      <EllipsisVerticalIcon className="size-4" />
+                    </button>
+                    {openMenuId === t.rootId && (
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="absolute right-1.5 top-10 z-20 min-w-[130px] rounded-lg border border-foreground/15 bg-card p-1 shadow-lg"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => deleteBuild(t)}
+                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
+                        >
+                          <Trash2Icon className="size-4" />
+                          Delete build
+                        </button>
                       </div>
-                    ) : (
-                      <div className="h-10 w-10 shrink-0 rounded bg-muted/40" />
                     )}
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">
-                        {threadLabel(t)}
-                      </span>
-                      <span className="block text-xs text-muted-foreground">
-                        {t.turns.length} revision
-                        {t.turns.length === 1 ? "" : "s"}
-                      </span>
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
         </aside>
       </div>
 
