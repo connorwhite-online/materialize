@@ -30,6 +30,7 @@ const VERT = /* glsl */ `
   uniform float uTime;
   uniform float uAmp;
   uniform float uMorph;
+  uniform float uFreq;
   attribute vec3 aTarget;
   varying float vD;
   varying vec3 vNormal;
@@ -42,7 +43,9 @@ const VERT = /* glsl */ `
   }
 
   void main() {
-    float d = n(position * 1.4 + uTime * 0.15);
+    // uFreq compensates for blob size so the ripple density (not just the
+    // amplitude) stays constant regardless of radius.
+    float d = n(position * uFreq + uTime * 0.15);
     vD = d;
     vec3 displaced = position + normal * d * uAmp;
     vec3 pos = mix(displaced, aTarget, uMorph);
@@ -190,21 +193,24 @@ function TransitionMesh({
   const morphing = useRef(false);
   const completed = useRef(false);
 
-  // Gentler wobble on a detailed solid; bigger on the abstract blob.
-  const idleAmp = solid ? 0.012 : 0.16;
-  const activeAmp = solid ? 0.06 : 0.24;
+  // Gentler wobble on a detailed solid; bigger on the abstract blob. Higher
+  // noise frequency on the (smaller) blob keeps its surface lively.
+  const idleAmp = solid ? 0.012 : 0.18;
+  const activeAmp = solid ? 0.06 : 0.3;
+  const freq = solid ? 1.4 : 2.1;
 
   const uniforms = useMemo(
     () => ({
       uTime: { value: 0 },
       uAmp: { value: idleAmp },
       uMorph: { value: 0 },
+      uFreq: { value: freq },
       uColor: { value: new THREE.Color("#8aa0e8") },
       uBaseColor: { value: new THREE.Color("#d4d4d8") },
       uAccentColor: { value: new THREE.Color("#a1a1aa") },
       uFresnelColor: { value: new THREE.Color("#e4e4e7") },
     }),
-    [idleAmp]
+    [idleAmp, freq]
   );
 
   // Load the morph target, compute correspondence, run the morph. Fail-open:
