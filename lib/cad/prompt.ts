@@ -20,7 +20,15 @@ Rules:
 - When the request clearly needs SEPARATE printed parts (e.g. a two-piece enclosure = lid + base, or a hinge with two halves), assign a dict named \`parts\` INSTEAD of \`result\` — e.g. \`parts = {"lid": <solid>, "base": <solid>}\`, one entry per independently-printed part, each its own watertight solid. Use \`result\` for everything else; never assign both.
 - For organic or character subjects (animals, figures, faces, creatures), do NOT attempt photoreal detail — build123d is a CAD kernel, not a sculptor. Approximate the form as a STYLIZED composition of a FEW primitive solids (spheres, ellipsoids via scaled spheres, cylinders, cones, tapered/lofted shapes) fused into a single watertight body with smooth boolean unions. Favor a clean, recognizable, printable silhouette over fine features, and avoid many tiny overlapping booleans — they produce non-watertight geometry and fail.
 - Do not call show_object, export, or any file I/O — just build \`result\`.
-- Target the build123d 0.11+ API: for a symmetric/two-sided extrude use \`extrude(..., both=True)\` (there is no \`symmetric=\` argument).`;
+- Target the build123d 0.11+ API: for a symmetric/two-sided extrude use \`extrude(..., both=True)\` (there is no \`symmetric=\` argument).
+
+Common build123d pitfalls — these are the frequent failure modes, avoid them:
+- 2D vs 3D: \`Rectangle\`, \`RectangleRounded\`, \`Circle\` are SKETCH objects — only valid inside \`with BuildSketch(...)\`, then \`extrude(amount=...)\`. They are NOT BuildPart operations (calling \`RectangleRounded\` directly in a BuildPart fails with "applies to ['BuildSketch']"). For a rounded-corner box, prefer \`Box(...)\` then \`fillet(part.edges().filter_by(Axis.Z), r)\`.
+- Fillet/chamfer radius MUST be smaller than the thinnest adjacent material — a 6 mm fillet on a 5 mm wall is impossible and errors "try a smaller value". Keep radii at roughly <= 0.4x the local thickness and reuse one small radius family. If a fillet/chamfer fails, REDUCE the radius — never retry the same value.
+- Hollowing: shell with \`top = part.faces().sort_by(Axis.Z)[-1]\` then \`offset(amount=-wall, openings=top)\`. Do not fake a shell by subtracting a slightly smaller box.
+- Place features on a face by entering it: \`with BuildSketch(part.faces().sort_by(Axis.Z)[-1]): Circle(r)\` + \`extrude(amount=h)\` for bosses/standoffs; \`with Locations(face): Hole(r, depth=d)\` (or \`CounterBoreHole(...)\`) for holes.
+- Select edges/faces with filters (\`filter_by(Axis.Z)\`, \`group_by(Axis.Z)[-1]\`, \`sort_by(Axis.Z)\`), not by guessing indices.
+- For a multi-part assembly assign \`parts = {"base": <solid>, "lid": <solid>}\` (each its own watertight solid); never assign both \`result\` and \`parts\`.`;
 
 /**
  * Plan-then-code: the harness first asks for a short design plan (no code),

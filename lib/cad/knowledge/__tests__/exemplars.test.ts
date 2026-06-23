@@ -56,7 +56,8 @@ describe("CAD_EXEMPLARS authoring invariants", () => {
   it("every exemplar assigns `result`, imports build123d, and is sidecar-verified", () => {
     expect(CAD_EXEMPLARS.length).toBeGreaterThanOrEqual(6);
     for (const e of CAD_EXEMPLARS) {
-      expect(e.code).toMatch(/result\s*=/);
+      // Single solid (`result =`) or a multi-part assembly (`parts =`).
+      expect(e.code).toMatch(/(?:result|parts)\s*=/);
       expect(e.code).toMatch(/from build123d import \*/);
       // Gate: an exemplar is only shipped once scripts/verify-exemplars.ts
       // confirms it compiles to a valid watertight solid. Keep new exemplars
