@@ -5,9 +5,12 @@ import Link from "next/link";
 import {
   AlertTriangleIcon,
   ArrowUpIcon,
+  BoxesIcon,
   CheckIcon,
+  Code2Icon,
   DownloadIcon,
   EllipsisVerticalIcon,
+  HistoryIcon,
   Loader2Icon,
   MessageSquareTextIcon,
   PaperclipIcon,
@@ -153,6 +156,7 @@ export function TextToCadStudio({
   const [error, setError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [showSource, setShowSource] = useState(true);
+  const [showBuilds, setShowBuilds] = useState(true);
   // Which build's three-dot menu is open in the sidebar.
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   // Eval feedback: auto-prompt per turn until rated/dismissed, then collapse to
@@ -540,10 +544,10 @@ export function TextToCadStudio({
       : "Generate";
 
   return (
-    <div className="relative min-h-[calc(100vh-4rem)]">
-      <div className="mx-auto grid max-w-6xl gap-8 px-4 pb-44 pt-6 lg:grid-cols-[1fr_300px]">
+    <div className="relative min-h-[calc(100vh-4rem)] lg:h-[calc(100vh-4rem)] lg:overflow-hidden">
+      <div className="mx-auto grid max-w-6xl gap-8 px-4 pb-44 pt-6 lg:h-full lg:min-h-0 lg:pb-0 lg:grid-cols-[1fr_300px]">
         {/* Main column */}
-        <section className="min-w-0">
+        <section className="min-w-0 lg:min-h-0 lg:overflow-y-auto lg:pb-36">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               {activeThread && !generating && viewedTurn?.fileAssetId ? (
@@ -610,7 +614,7 @@ export function TextToCadStudio({
 
           {/* Viewer / progress / empty state */}
           <div className="mt-5 overflow-hidden rounded-xl border border-foreground/10">
-            <div className="relative aspect-[4/3] w-full bg-muted/30">
+            <div className="relative aspect-[4/3] w-full bg-muted/30 lg:aspect-auto lg:h-[clamp(260px,46vh,520px)]">
               {/* Crisp model — the BASE layer (fixed frame). Stays mounted
                   under the transition so the morph fades to reveal it with no
                   remount/zoom; on a revision it's the shape being deformed. */}
@@ -737,6 +741,53 @@ export function TextToCadStudio({
             </p>
           )}
 
+          {/* Feedback — the in-the-moment eval signal (feeds /text-to-cad/eval).
+              Sits ABOVE the actions; auto-prompts after each generation until
+              rated or dismissed, then collapses to a small edit affordance. */}
+          {!generating &&
+            viewedTurn?.status === "succeeded" &&
+            (() => {
+              const vt = viewedTurn;
+              const rated =
+                !!vt.rating ||
+                vt.feedbackTags.length > 0 ||
+                !!vt.feedbackNote;
+              const open =
+                feedbackEditing === vt.id ||
+                (!rated && !feedbackDismissed.has(vt.id));
+              return open ? (
+                <TurnFeedback
+                  key={vt.id}
+                  turn={vt}
+                  onSaved={(patch) => {
+                    applyFeedback(vt.id, patch);
+                    setFeedbackEditing(null);
+                  }}
+                  onDismiss={() => {
+                    setFeedbackDismissed((s) => new Set(s).add(vt.id));
+                    setFeedbackEditing(null);
+                  }}
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setFeedbackEditing(vt.id)}
+                  className="mt-4 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <MessageSquareTextIcon className="size-3.5" />
+                  {rated
+                    ? `Feedback ${
+                        vt.rating === "good"
+                          ? "👍"
+                          : vt.rating === "bad"
+                            ? "👎"
+                            : "saved"
+                      } · edit`
+                    : "Add feedback"}
+                </button>
+              );
+            })()}
+
           {/* Actions for the viewed model (the selected part, for assemblies) */}
           {!generating && activeAssetId && (
             <div className="mt-4 flex flex-wrap gap-3">
@@ -856,53 +907,6 @@ export function TextToCadStudio({
             </div>
           )}
 
-          {/* Feedback — the in-the-moment eval signal (feeds /text-to-cad/eval).
-              Auto-prompts after each generation until rated or dismissed, then
-              collapses to a small edit affordance. */}
-          {!generating &&
-            viewedTurn?.status === "succeeded" &&
-            (() => {
-              const vt = viewedTurn;
-              const rated =
-                !!vt.rating ||
-                vt.feedbackTags.length > 0 ||
-                !!vt.feedbackNote;
-              const open =
-                feedbackEditing === vt.id ||
-                (!rated && !feedbackDismissed.has(vt.id));
-              return open ? (
-                <TurnFeedback
-                  key={vt.id}
-                  turn={vt}
-                  onSaved={(patch) => {
-                    applyFeedback(vt.id, patch);
-                    setFeedbackEditing(null);
-                  }}
-                  onDismiss={() => {
-                    setFeedbackDismissed((s) => new Set(s).add(vt.id));
-                    setFeedbackEditing(null);
-                  }}
-                />
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setFeedbackEditing(vt.id)}
-                  className="mt-5 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-                >
-                  <MessageSquareTextIcon className="size-3.5" />
-                  {rated
-                    ? `Feedback ${
-                        vt.rating === "good"
-                          ? "👍"
-                          : vt.rating === "bad"
-                            ? "👎"
-                            : "saved"
-                      } · edit`
-                    : "Add feedback"}
-                </button>
-              );
-            })()}
-
         </section>
 
         {/* Right sidebar — revisions + parametric source for the current build,
@@ -915,14 +919,15 @@ export function TextToCadStudio({
               <button
                 type="button"
                 onClick={() => setShowHistory((v) => !v)}
-                className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
+                className="flex w-full items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
               >
+                <HistoryIcon className="size-4 shrink-0" />
+                <span>Revisions ({turns.length})</span>
                 {showHistory ? (
-                  <ChevronDown className="size-4" />
+                  <ChevronDown className="ml-auto size-4 shrink-0" />
                 ) : (
-                  <ChevronRight className="size-4" />
+                  <ChevronRight className="ml-auto size-4 shrink-0" />
                 )}
-                Revisions ({turns.length})
               </button>
               {showHistory && (
                 <ol className="mt-2 space-y-1.5 lg:max-h-56 lg:overflow-y-auto">
@@ -967,14 +972,15 @@ export function TextToCadStudio({
               <button
                 type="button"
                 onClick={() => setShowSource((v) => !v)}
-                className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
+                className="flex w-full items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
               >
+                <Code2Icon className="size-4 shrink-0" />
+                <span>Parametric source</span>
                 {showSource ? (
-                  <ChevronDown className="size-4" />
+                  <ChevronDown className="ml-auto size-4 shrink-0" />
                 ) : (
-                  <ChevronRight className="size-4" />
+                  <ChevronRight className="ml-auto size-4 shrink-0" />
                 )}
-                Parametric source
               </button>
               {showSource && (
                 <pre className="mt-2 max-h-72 overflow-auto rounded-lg bg-muted/40 p-3 text-xs">
@@ -984,19 +990,22 @@ export function TextToCadStudio({
             </div>
           )}
 
-          {/* Build history — header fixed, list scrolls */}
+          {/* Build history — collapsible; header fixed, list scrolls */}
           <div className="flex min-h-0 flex-1 flex-col">
-            <div className="flex shrink-0 items-center justify-between">
-              <h2 className="text-sm font-medium text-muted-foreground">Builds</h2>
-              <button
-                type="button"
-                onClick={startNewBuild}
-                aria-label="New build"
-                className="flex size-7 items-center justify-center rounded-md border border-foreground/15 hover:bg-foreground/5"
-              >
-                <PlusIcon className="size-4" />
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => setShowBuilds((v) => !v)}
+              className="flex w-full shrink-0 items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
+            >
+              <BoxesIcon className="size-4 shrink-0" />
+              <span>Builds ({threads.length})</span>
+              {showBuilds ? (
+                <ChevronDown className="ml-auto size-4 shrink-0" />
+              ) : (
+                <ChevronRight className="ml-auto size-4 shrink-0" />
+              )}
+            </button>
+            {showBuilds && (
             <ul
               className="mt-3 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-0.5 py-1"
               style={{
@@ -1078,6 +1087,7 @@ export function TextToCadStudio({
                 );
               })}
             </ul>
+            )}
           </div>
         </aside>
       </div>
