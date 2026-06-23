@@ -34,7 +34,10 @@ export interface PriorFeedback {
  * with the eval runner).
  */
 
-const MAX_ATTEMPTS_DEFAULT = 3;
+// Complex parts often clear a sequence of distinct build123d gotchas; give the
+// repair loop room to cross several hurdles (each repair turn gets a targeted
+// hint). Only failing generations use the extra turns — success exits early.
+const MAX_ATTEMPTS_DEFAULT = 4;
 
 export interface HarnessInput {
   prompt: string;
@@ -171,6 +174,9 @@ function repairHintFor(note: string): string {
   }
   if (/slot/.test(n) && /width|height/.test(n)) {
     return "Slot/SlotOverall require width > height. Swap the dimensions and rotate the sketch 90°, or build the slot from a Rectangle + two Circles instead.";
+  }
+  if (/buildpart|buildsketch/.test(n) && /(combined|builder|part.{0,3}attribute|can.?t be)/.test(n)) {
+    return "A BuildPart/BuildSketch is a builder, not a Shape — don't add/subtract/combine the builders. Use `.part` (e.g. `part.part`, or `a.part + b.part`), or build everything in ONE BuildPart with nested add/subtract modes.";
   }
   return "";
 }

@@ -13,7 +13,7 @@ Rules:
 - Use the build123d library (\`from build123d import *\`).
 - Assign the final solid to a variable named \`result\`.
 - Make it PARAMETRIC: declare key dimensions as named variables at the top so they can be tuned later.
-- Design for 3D printing: a flat base where sensible, no zero-thickness walls, reasonable minimum wall thickness (>= 1.5 mm), units in millimeters.
+- Design for 3D printing: a flat base where sensible, no zero-thickness walls, reasonable minimum wall thickness (>= 1.5 mm), units in millimeters. Prefer SELF-SUPPORTING geometry — avoid large unsupported overhangs and shallow spans that would need support material (keep overhangs steeper than ~45° from horizontal, or add fillets/gussets so they self-support). Make load-bearing features (legs, arms, connectors, clamps) thick enough not to snap when printed (>= ~3 mm), and give tall/splayed parts a stable footprint so the print doesn't tip or need a raft.
 - Function first: when the prompt gives no specific form or aesthetic spec, start from the functional measurements — the dimensions, clearances, and fit tolerances the part must satisfy (add sensible clearance, ~0.2-0.4 mm, around anything it must hold or mate with). Then drape clean, organic curvature (smooth fillets, gentle tapers/lofts) over that functional envelope and connect the walls into one cohesive, flowing form. Beauty wraps function and must never compromise the required fits.
 - Optimize for the lightest design that is still functionally adequate — minimal material, shell/hollow where it doesn't weaken the part, no needless bulk — unless the user specifies otherwise.
 - Keep it a single watertight solid unless the prompt clearly asks for separate parts.
@@ -29,6 +29,7 @@ Common build123d pitfalls — these are the frequent failure modes, avoid them:
 - Place features on a face by entering it: \`with BuildSketch(part.faces().sort_by(Axis.Z)[-1]): Circle(r)\` + \`extrude(amount=h)\` for bosses/standoffs; \`with Locations(face): Hole(r, depth=d)\` (or \`CounterBoreHole(...)\`) for holes.
 - Select edges/faces with filters (\`filter_by(Axis.Z)\`, \`group_by(Axis.Z)[-1]\`, \`sort_by(Axis.Z)\`), not by guessing indices.
 - \`Slot\` / \`SlotOverall\` / \`SlotCenterToCenter\` are stadium (rounded-rectangle) shapes that REQUIRE width > height. For a tall, narrow slot, swap the dimensions and rotate it 90°, or use a \`Rectangle\` + two \`Circle\`s instead.
+- A \`BuildPart()\` / \`BuildSketch()\` context is a BUILDER, not a Shape — never add/subtract/combine the builder objects (error: "BuildPart is a builder of Shapes and can't be combined"). Get the geometry from \`.part\` / \`.sketch\` (\`result = part.part\`, or combine finished solids as \`a.part + b.part\`). Strongly prefer building ONE cohesive part inside a single \`BuildPart\` using nested \`add\`/\`subtract\` modes instead of combining multiple builders.
 - For a multi-part assembly assign \`parts = {"base": <solid>, "lid": <solid>}\` (each its own watertight solid); never assign both \`result\` and \`parts\`.
 - Build only what a CSG kernel can express. If the request asks for things build123d CANNOT do — topology optimization, generative/organic-optimized geometry, FLEXIBLE or ARTICULATED joints, print-in-place mechanisms, springs/living hinges — do NOT attempt them literally (they fail). Instead build a clean, RIGID, simplified version that captures the function (e.g. a fixed clamp at a sensible angle instead of a "pivotable" one), and rely on fillets/tapers for any "organic" feel.
 
@@ -52,7 +53,7 @@ Rules:
 - Use CadQuery (\`import cadquery as cq\`).
 - Assign the final model to a variable named \`result\` (a cq.Workplane or cq.Shape).
 - Make it PARAMETRIC: declare key dimensions as named variables at the top so they can be tuned later.
-- Design for 3D printing: a flat base where sensible, no zero-thickness walls, reasonable minimum wall thickness (>= 1.5 mm), units in millimeters.
+- Design for 3D printing: a flat base where sensible, no zero-thickness walls, reasonable minimum wall thickness (>= 1.5 mm), units in millimeters. Prefer SELF-SUPPORTING geometry — avoid large unsupported overhangs and shallow spans that would need support material (keep overhangs steeper than ~45° from horizontal, or add fillets/gussets so they self-support). Make load-bearing features (legs, arms, connectors, clamps) thick enough not to snap when printed (>= ~3 mm), and give tall/splayed parts a stable footprint so the print doesn't tip or need a raft.
 - Function first: when the prompt gives no specific form, start from the functional measurements (dimensions, clearances, fit tolerances; add ~0.2-0.4 mm clearance around anything it must hold or mate with), then drape clean fillets/tapers over that envelope into one cohesive form. Beauty wraps function and must never compromise fits.
 - Optimize for the lightest design that is still functionally adequate (shell/hollow where it doesn't weaken the part, no needless bulk) unless the user specifies otherwise.
 - Keep it a single watertight solid.
