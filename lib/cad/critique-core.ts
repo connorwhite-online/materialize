@@ -9,37 +9,38 @@
 
 export const AESTHETIC_DIMENSIONS = [
   "recognizability",
-  "geometric_coherence",
   "proportion",
-  "edge_surface",
-  "intentional",
+  "cohesion",
+  "surfacing",
+  "refinement",
 ] as const;
 export type AestheticDimension = (typeof AESTHETIC_DIMENSIONS)[number];
 
 const WEIGHTS: Record<AestheticDimension, number> = {
-  recognizability: 2,
-  geometric_coherence: 2,
-  proportion: 1,
-  edge_surface: 1,
-  intentional: 1,
+  recognizability: 1,
+  proportion: 2,
+  cohesion: 2,
+  surfacing: 1,
+  refinement: 1,
 };
 
-/** Aggregate (0-100) at/above which a part passes the aesthetic gate. */
-export const PASS_THRESHOLD = 70;
+/** Aggregate (0-100) at/above which a part passes the aesthetic gate. Set high
+ *  — this is a product-design bar; weak-but-valid parts should earn a repair. */
+export const PASS_THRESHOLD = 75;
 /** Any single dimension at/below this (0-5) fails regardless of the mean. */
 const PER_DIMENSION_FLOOR = 1;
 
-export const CRITIQUE_RUBRIC = `You are judging a NEUTRAL GRAY CLAY render of a 3D-printable CAD part for industrial-design quality. Judge form, proportion, and finish — NOT color, material realism, or lighting. Clean minimalism is GOOD; do not reward added detail or visual complexity for its own sake.
+export const CRITIQUE_RUBRIC = `You are an industrial/product designer judging a NEUTRAL GRAY CLAY render of a 3D-printable part. Judge the DESIGN — form, proportion, resolution, finish — NOT color, material, or lighting. Reward clean, intentional, restrained product design; do NOT reward busyness or added detail for its own sake.
 
 Score each dimension 0-5 (0 worst, 5 best):
-- recognizability: is it unambiguously the requested object? (5 = instantly correct)
-- geometric_coherence: clean continuous solid, no holes/floating bits/artifacts (5 = flawless)
-- proportion: believable, intentional scale relationships (5 = well-proportioned)
-- edge_surface: crisp/intentional edges and fillets, smooth surfaces, not lumpy or raw-sharp (5 = deliberate)
-- intentional: reads as a deliberately designed, printable part, not a generative accident (5 = looks designed)
+- recognizability: is it unambiguously the requested object/part? (5 = instantly correct)
+- proportion: believable, balanced, intentional proportions and stance — it reads right and sits right (5 = beautifully proportioned)
+- cohesion: ONE cohesive, fully-resolved form — every feature connects and belongs; NO disjointed, floating, stray, or unmerged pieces (5 = seamless single object, 0 = scattered/disconnected parts)
+- surfacing: deliberate edge treatment — a consistent fillet/chamfer hierarchy, crisp intentional edges, smooth continuous surfaces, no lumps or raw sharp edges (5 = refined)
+- refinement: reads as a deliberately designed, desirable product — restrained and considered, not a generative accident or over-busy (5 = looks designed)
 
 Output ONLY strict JSON, no prose:
-{"recognizability":{"score":N,"reason":"...","fix":"..."},"geometric_coherence":{...},"proportion":{...},"edge_surface":{...},"intentional":{...}}
+{"recognizability":{"score":N,"reason":"...","fix":"..."},"proportion":{...},"cohesion":{...},"surfacing":{...},"refinement":{...}}
 A longer reason does not mean a lower score.`;
 
 export interface DimensionScore {

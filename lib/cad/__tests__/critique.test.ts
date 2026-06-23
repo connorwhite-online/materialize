@@ -9,10 +9,10 @@ import {
 function judgeJson(scores: Record<string, number>): string {
   const dims = [
     "recognizability",
-    "geometric_coherence",
     "proportion",
-    "edge_surface",
-    "intentional",
+    "cohesion",
+    "surfacing",
+    "refinement",
   ];
   const obj: Record<string, unknown> = {};
   for (const d of dims) obj[d] = { score: scores[d], reason: "r", fix: `fix ${d}` };
@@ -24,25 +24,25 @@ describe("parseJudgement", () => {
     const r = parseJudgement(
       judgeJson({
         recognizability: 5,
-        geometric_coherence: 5,
-        proportion: 4,
-        edge_surface: 4,
-        intentional: 4,
+        proportion: 5,
+        cohesion: 5,
+        surfacing: 4,
+        refinement: 4,
       })
     );
     expect(r).not.toBeNull();
-    expect(r!.score).toBe(91); // (5*2+5*2+4+4+4)/7/5*100
+    expect(r!.score).toBe(94); // (5*1+5*2+5*2+4*1+4*1)/7/5*100
     expect(r!.pass).toBe(true);
   });
 
   it("fails on the per-dimension floor even when the mean is high", () => {
     const r = parseJudgement(
       judgeJson({
-        recognizability: 1, // <= floor
-        geometric_coherence: 5,
+        recognizability: 5,
         proportion: 5,
-        edge_surface: 5,
-        intentional: 5,
+        cohesion: 1, // <= floor (disjointed parts)
+        surfacing: 5,
+        refinement: 5,
       })
     );
     expect(r!.pass).toBe(false);
@@ -52,14 +52,14 @@ describe("parseJudgement", () => {
     const r = parseJudgement(
       judgeJson({
         recognizability: 5,
-        geometric_coherence: 5,
         proportion: 2,
-        edge_surface: 3,
-        intentional: 5,
+        cohesion: 3,
+        surfacing: 5,
+        refinement: 5,
       })
     );
     expect(r!.feedback).toMatch(/proportion: fix proportion/);
-    expect(r!.feedback).toMatch(/edge_surface: fix edge_surface/);
+    expect(r!.feedback).toMatch(/cohesion: fix cohesion/);
     expect(r!.feedback).not.toMatch(/recognizability/);
   });
 
@@ -67,10 +67,10 @@ describe("parseJudgement", () => {
     const r = parseJudgement(
       `Here is my assessment:\n${judgeJson({
         recognizability: 9,
-        geometric_coherence: 5,
         proportion: 5,
-        edge_surface: 5,
-        intentional: 5,
+        cohesion: 5,
+        surfacing: 5,
+        refinement: 5,
       })}\nThanks!`
     );
     expect(r).not.toBeNull();
