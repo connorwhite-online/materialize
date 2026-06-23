@@ -85,7 +85,9 @@ const FRAG_SOLID = /* glsl */ `
   }
 `;
 
-const BLOB_RADIUS = STUDIO_TARGET_SIZE / 2; // fills the frame like a model does
+// Smaller than the model's frame fit so the fresh-build blob reads as a compact
+// "forming" entity with margin; the morph then grows it out into the full shape.
+const BLOB_RADIUS = STUDIO_TARGET_SIZE * 0.34;
 const BLOB_DETAIL = 6;
 const MORPH_DURATION = 1.2;
 
