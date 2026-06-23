@@ -1,7 +1,6 @@
 "use client";
 
 import { lazy, Suspense, useEffect, useRef, useState, useTransition } from "react";
-import type { ReactNode } from "react";
 import Link from "next/link";
 import {
   AlertTriangleIcon,
@@ -12,7 +11,6 @@ import {
   PaperclipIcon,
   PencilIcon,
   PlusIcon,
-  RotateCwIcon,
   XIcon,
 } from "lucide-react";
 import { ChevronDown } from "@/components/icons/chevron-down";
@@ -1141,77 +1139,44 @@ function ViewerSkeleton({ label }: { label: string }) {
 
 /** Renders the streamed harness transcript as a live checklist. */
 function ProgressPanel({ events }: { events: CadProgressEvent[] }) {
+  // Only ever show the current step — the live status, not a transcript.
+  const current = events[events.length - 1];
+  const d = current
+    ? describeEvent(current)
+    : { text: "Getting started", sub: null as string | null };
   return (
-    <div className="flex flex-col items-center gap-2">
-      <ul className="flex max-w-sm flex-col items-center gap-1.5 text-sm">
-        {events.length === 0 && (
-          <li className="flex items-center gap-2 text-muted-foreground">
-            <Loader2Icon className="size-4 animate-spin" />
-            Starting…
-          </li>
+    <div className="flex items-center gap-3 text-sm">
+      <Loader2Icon className="size-4 shrink-0 animate-spin text-muted-foreground" />
+      <div className="flex flex-col">
+        <span className="font-medium text-foreground">{d.text}</span>
+        {d.sub && (
+          <span className="text-xs text-muted-foreground">{d.sub}</span>
         )}
-        {events.map((ev, i) => {
-          const isLast = i === events.length - 1;
-          const d = describeEvent(ev);
-          return (
-            <li
-              key={i}
-              className={`flex items-center justify-center gap-2 text-center ${d.tone}`}
-            >
-              {isLast ? (
-                <Loader2Icon className="size-4 shrink-0 animate-spin" />
-              ) : (
-                d.icon
-              )}
-              <span>{d.text}</span>
-            </li>
-          );
-        })}
-      </ul>
+      </div>
     </div>
   );
 }
 
 function describeEvent(ev: CadProgressEvent): {
   text: string;
-  icon: ReactNode;
-  tone: string;
+  sub: string | null;
 } {
   switch (ev.type) {
     case "phase":
-      return ev.phase === "generating"
-        ? {
-            text:
-              ev.attempt > 1
-                ? `Rewriting parametric code (attempt ${ev.attempt}/${ev.maxAttempts})…`
-                : "Writing parametric code…",
-            icon: <CheckIcon className="size-4 shrink-0 text-muted-foreground" />,
-            tone: "text-foreground",
-          }
-        : {
-            text: "Running geometry kernel (build123d)…",
-            icon: <CheckIcon className="size-4 shrink-0 text-muted-foreground" />,
-            tone: "text-foreground",
-          };
+      if (ev.phase === "generating") {
+        return ev.attempt > 1
+          ? { text: "Refining the design", sub: `Pass ${ev.attempt} of ${ev.maxAttempts}` }
+          : { text: "Designing your model", sub: null };
+      }
+      return { text: "Shaping the geometry", sub: null };
     case "validation":
       return ev.pass
-        ? {
-            text: "Solid is watertight & manifold",
-            icon: <CheckIcon className="size-4 shrink-0 text-emerald-600" />,
-            tone: "text-foreground",
-          }
-        : {
-            text: `Issues: ${ev.failures.join(", ") || "invalid solid"}`,
-            icon: (
-              <AlertTriangleIcon className="size-4 shrink-0 text-amber-600" />
-            ),
-            tone: "text-muted-foreground",
-          };
+        ? { text: "Almost there", sub: null }
+        : { text: "Tidying up a few details", sub: null };
     case "repairing":
       return {
-        text: `Repairing — attempt ${ev.attempt + 1} of ${ev.maxAttempts}…`,
-        icon: <RotateCwIcon className="size-4 shrink-0 text-muted-foreground" />,
-        tone: "text-foreground",
+        text: "Refining the design",
+        sub: `Pass ${ev.attempt + 1} of ${ev.maxAttempts}`,
       };
   }
 }
