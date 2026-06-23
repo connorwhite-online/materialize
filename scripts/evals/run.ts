@@ -21,6 +21,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import {
   SYSTEM_PROMPT,
+  SYSTEM_PROMPT_CADQUERY,
   extractCode,
   gradeRun,
   type RunGrade,
@@ -35,6 +36,10 @@ import type { CadRunResult } from "../../lib/cad/types";
 import { EVAL_CASES, type EvalCase, type EvalTier } from "./cases";
 
 const RUNNER_URL = process.env.CAD_RUNNER_URL;
+// A/B the B-rep front-end: build123d (default) vs cadquery. Point CAD_RUNNER_URL
+// at the matching sidecar (cadquery runs in its own venv on another port).
+const ENGINE = process.env.CAD_EVAL_ENGINE === "cadquery" ? "cadquery" : "build123d";
+const SYSTEM = ENGINE === "cadquery" ? SYSTEM_PROMPT_CADQUERY : SYSTEM_PROMPT;
 const GEN_MODEL =
   process.env.CAD_MODEL_IMPLEMENT ||
   process.env.CAD_MODEL_DEFAULT ||
@@ -67,8 +72,11 @@ function textOf(msg: Anthropic.Message): string {
 function buildUserPrompt(prompt: string): string {
   const knowledge = buildKnowledgeBlock({ prompt });
   let out = `Create a 3D model: ${prompt}\n\nDesign guidance to follow:\n\n${knowledge}`;
-  const exemplars = formatExemplars(selectExemplars(prompt));
-  if (exemplars) out += `\n\n${exemplars}`;
+  // Exemplars are build123d source — only inject them for that engine.
+  if (ENGINE === "build123d") {
+    const exemplars = formatExemplars(selectExemplars(prompt));
+    if (exemplars) out += `\n\n${exemplars}`;
+  }
   return out;
 }
 
@@ -76,7 +84,7 @@ async function generate(prompt: string): Promise<string> {
   const msg = await client.messages.create({
     model: GEN_MODEL,
     max_tokens: 8192,
-    system: SYSTEM_PROMPT,
+    system: SYSTEM,
     messages: [{ role: "user", content: buildUserPrompt(prompt) }],
   });
   return extractCode(textOf(msg));
@@ -121,7 +129,7 @@ async function runCode(code: string): Promise<CadRunResult> {
   const res = await fetch(`${RUNNER_URL}/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code, formats: ["stl"] }),
+    body: JSON.stringify({ code, formats: ["stl"], engine: ENGINE }),
   });
   if (!res.ok) throw new Error(`runner ${res.status}: ${await res.text()}`);
   return (await res.json()) as CadRunResult;
@@ -173,7 +181,9 @@ async function main() {
     "assembly",
     "implicit",
   ];
-  console.log("\n=== Scorecard (validity | mean aesthetic) ===");
+  console.log(
+    `\n=== Scorecard [engine: ${ENGINE}, model: ${GEN_MODEL}] (validity | mean aesthetic) ===`
+  );
   for (const tier of tiers) {
     const inTier = results.filter((r) => r.c.tier === tier);
     if (inTier.length === 0) continue;

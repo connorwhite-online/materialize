@@ -56,6 +56,10 @@ RUNNER_SECRET = os.environ.get("CAD_RUNNER_SECRET", "")
 class RunRequest(BaseModel):
     code: str
     formats: list[str] = ["stl", "step"]
+    # Which code dialect the script is written in. "build123d" (default) or
+    # "cadquery" — both ride OpenCASCADE; only the export call differs. Lets the
+    # harness route to a different B-rep front-end (and A/B them) with one sidecar.
+    engine: str = "build123d"
 
 
 def _apply_limits() -> None:
@@ -68,7 +72,9 @@ def _apply_limits() -> None:
         pass
 
 
-def _process_shape(shape, formats: list[str], tmp: str, stem: str) -> dict:
+def _process_shape(
+    shape, formats: list[str], tmp: str, stem: str, engine: str = "build123d"
+) -> dict:
     """Export + measure + render one solid. Returns the per-part payload
     (files, render, geometry, validity). Shared by the single-`result` path
     and each member of a multi-part `parts` assembly."""
@@ -98,6 +104,19 @@ def _process_shape(shape, formats: list[str], tmp: str, stem: str) -> dict:
             mesh = shape
             entry["validation"]["isSolid"] = float(abs(mesh.volume) or 0.0) > 0.0
             mesh.export(stl_path)
+        elif engine == "cadquery":
+            import cadquery as cq
+
+            # CadQuery rides the same OCCT kernel; only the export call differs.
+            cq.exporters.export(shape, stl_path)
+            if "step" in formats:
+                step_path = os.path.join(tmp, f"{stem}.step")
+                cq.exporters.export(shape, step_path)
+                with open(step_path, "rb") as f:
+                    entry["files"]["step"] = base64.b64encode(f.read()).decode()
+            mesh = trimesh.load(stl_path, force="mesh")
+            # isSolid from the loaded mesh (uniform across engines).
+            entry["validation"]["isSolid"] = float(abs(mesh.volume) or 0.0) > 0.0
         else:
             from build123d import export_stl, export_step
 
@@ -196,7 +215,9 @@ def _process_shape(shape, formats: list[str], tmp: str, stem: str) -> dict:
     return entry
 
 
-def _execute(code: str, formats: list[str], out: "mp.Queue") -> None:
+def _execute(
+    code: str, formats: list[str], out: "mp.Queue", engine: str = "build123d"
+) -> None:
     """Child-process worker: exec the script, export, measure, validate.
 
     Output contract: the script assigns either `result` (a single solid) OR
@@ -220,7 +241,13 @@ def _execute(code: str, formats: list[str], out: "mp.Queue") -> None:
         "error": None,
     }
     try:
-        import build123d as b3d  # noqa: F401
+        # Warm the kernel for the chosen engine (the script also imports what it
+        # needs). Only the requested one is imported, so a cadquery-only venv
+        # doesn't need build123d installed and vice-versa.
+        if engine == "cadquery":
+            import cadquery as _cq  # noqa: F401
+        else:
+            import build123d as b3d  # noqa: F401
 
         ns: dict = {}
         exec(compile(code, "<generated>", "exec"), ns, ns)  # noqa: S102
@@ -231,7 +258,7 @@ def _execute(code: str, formats: list[str], out: "mp.Queue") -> None:
 
         with tempfile.TemporaryDirectory() as tmp:
             if single is not None:
-                entry = _process_shape(single, formats, tmp, "model")
+                entry = _process_shape(single, formats, tmp, "model", engine)
                 result_payload["files"] = entry["files"]
                 result_payload["renderPng"] = entry["renderPng"]
                 result_payload["geometry"] = entry["geometry"]
@@ -247,7 +274,7 @@ def _execute(code: str, formats: list[str], out: "mp.Queue") -> None:
                     stem = "".join(
                         c if c.isalnum() else "-" for c in str(name)
                     ).strip("-") or f"part{i}"
-                    entry = _process_shape(shape, formats, tmp, stem)
+                    entry = _process_shape(shape, formats, tmp, stem, engine)
                     parts.append({"name": str(name), **entry})
                     all_ok = all_ok and entry["validation"]["isSolid"]
                 # Top-level mirrors the first part for single-part consumers.
@@ -348,7 +375,9 @@ async def run(req: RunRequest, request: Request) -> dict:
 
     ctx = mp.get_context("spawn")
     out: "mp.Queue" = ctx.Queue()
-    proc = ctx.Process(target=_execute, args=(req.code, req.formats, out))
+    proc = ctx.Process(
+        target=_execute, args=(req.code, req.formats, out, req.engine)
+    )
     proc.start()
 
     # Read the result BEFORE joining. The child's payload (STL + STEP, both
