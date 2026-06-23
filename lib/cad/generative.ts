@@ -18,18 +18,39 @@ import { logError } from "@/lib/logger";
  *
  * Uses the @fal-ai/client SDK, not raw REST: fal's queue result endpoint 404s
  * for nested model ids (verified), and the SDK also handles image upload to fal
- * storage. Default model is Rodin (hyper3d), which does BOTH text and image and
- * was verified end-to-end; "Shaded"/medium quality keeps the mesh lean (~5 MB
- * vs ~14 MB textured). Gated entirely by FAL_KEY — with no key nothing here runs.
+ * storage.
+ *
+ * COST/QUALITY: the default is Hunyuan3D-2 white-mesh image-to-3D ($0.16, good
+ * geometry) — for a text prompt we first do a quick text-to-image (flux schnell,
+ * ~$0.003), so ~$0.16/generation. (Trellis is cheaper at $0.02 but reconstructed
+ * flat slabs from generated images — not usable. Rodin/hyper3d is higher quality
+ * but ~$0.40-2/gen; opt in via FAL_TEXT_TO_3D_MODEL=fal-ai/hyper3d/rodin, which
+ * switches the text path to that model directly.)
+ *
+ * Gated entirely by FAL_KEY — with no key nothing here runs.
  */
 
-const TEXT_MODEL = process.env.FAL_TEXT_TO_3D_MODEL || "fal-ai/hyper3d/rodin";
-const IMAGE_MODEL = process.env.FAL_IMAGE_TO_3D_MODEL || "fal-ai/hyper3d/rodin";
+const IMAGE_MODEL = process.env.FAL_IMAGE_TO_3D_MODEL || "fal-ai/hunyuan3d/v2";
+const TEXT_TO_IMAGE_MODEL =
+  process.env.FAL_TEXT_TO_IMAGE_MODEL || "fal-ai/flux/schnell";
+// Opt-in: a direct text-to-3D model (e.g. fal-ai/hyper3d/rodin). When unset,
+// text prompts go through the cheap text-to-image -> image-to-3D pipeline.
+const DIRECT_TEXT_TO_3D = process.env.FAL_TEXT_TO_3D_MODEL || null;
 /** Generated meshes have arbitrary scale; fit the longest axis to this (mm). */
 const DEFAULT_PRINT_SIZE_MM = 60;
 
 export function generativeEnabled(): boolean {
   return !!process.env.FAL_KEY;
+}
+
+/** Pull the first image URL out of a text-to-image response (flux et al.). */
+function res2Images(data: Record<string, unknown> | undefined): string | null {
+  const images = data?.images;
+  if (Array.isArray(images) && images[0]) {
+    const u = (images[0] as { url?: unknown }).url;
+    if (typeof u === "string") return u;
+  }
+  return null;
 }
 
 /** Pull the mesh URL out of the shapes fal models return. */
@@ -91,38 +112,50 @@ export async function runGenerative(opts: {
     }
   };
   const hasImage = !!opts.images?.length;
-  const note = `# Generated with fal.ai (${hasImage ? IMAGE_MODEL : TEXT_MODEL})\n# Prompt: ${opts.prompt}\n# Organic/sculptural form — generative mesh, not parametric build123d.`;
+  const pathLabel = hasImage
+    ? IMAGE_MODEL
+    : DIRECT_TEXT_TO_3D || `${TEXT_TO_IMAGE_MODEL} -> ${IMAGE_MODEL}`;
+  const note = `# Generated with fal.ai (${pathLabel})\n# Prompt: ${opts.prompt}\n# Organic/sculptural form — generative mesh, not parametric build123d.`;
 
   try {
     fal.config({ credentials: process.env.FAL_KEY });
     emit({ type: "phase", phase: "generating", attempt: 1, maxAttempts: 1 });
 
-    // Lean output (no PBR textures, medium poly) — we only need geometry, and
-    // it keeps the mesh small enough to hand to the sidecar inline.
-    const common = {
-      material: "Shaded",
-      quality: "medium",
-      geometry_file_format: "glb",
-    };
-    let input: Record<string, unknown>;
-    let model: string;
+    // Resolve a reference image, then image-to-3D — the cheap path. An attached
+    // image is used directly; a text prompt gets a quick text-to-image first
+    // (unless a premium direct text-to-3D model is configured).
+    let imageUrl: string | null = null;
     if (hasImage) {
       const img = opts.images![0];
       const blob = new Blob([Buffer.from(img.data, "base64")], {
         type: img.mediaType,
       });
-      const imageUrl = await fal.storage.upload(blob);
-      model = IMAGE_MODEL;
-      input = { input_image_urls: [imageUrl], ...common };
-    } else {
-      model = TEXT_MODEL;
-      input = { prompt: opts.prompt, ...common };
+      imageUrl = await fal.storage.upload(blob);
+    } else if (!DIRECT_TEXT_TO_3D) {
+      const t2i = await fal.subscribe(TEXT_TO_IMAGE_MODEL, {
+        input: {
+          prompt: `${opts.prompt}, a single 3D object, centered, full body, plain neutral background, soft studio lighting, product render`,
+          image_size: "square_hd",
+          num_inference_steps: 4,
+        },
+        abortSignal: opts.signal,
+      });
+      const data = res2Images(t2i.data as Record<string, unknown>);
+      if (!data) throw new Error("text-to-image returned no image");
+      imageUrl = data;
     }
 
-    const res = await fal.subscribe(model, {
-      input,
-      abortSignal: opts.signal,
-    });
+    const res = await fal.subscribe(
+      imageUrl ? IMAGE_MODEL : (DIRECT_TEXT_TO_3D as string),
+      {
+        // Hunyuan3D-2 input shape (white mesh = geometry only, cheaper/smaller).
+        // A different FAL_IMAGE_TO_3D_MODEL may need different param names.
+        input: imageUrl
+          ? { input_image_url: imageUrl, textured_mesh: false }
+          : { prompt: opts.prompt },
+        abortSignal: opts.signal,
+      }
+    );
     const url = meshUrlOf(res.data as Record<string, unknown>);
     if (!url) throw new Error("fal returned no mesh url");
 
