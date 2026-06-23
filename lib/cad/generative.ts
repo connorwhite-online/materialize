@@ -1,5 +1,6 @@
 import "server-only";
 
+import { fal } from "@fal-ai/client";
 import { completeText, type PromptImage } from "./model-client";
 import { modelForRole } from "./models";
 import { runCadCode } from "./runner-client";
@@ -10,22 +11,20 @@ import { logError } from "@/lib/logger";
 /**
  * Generative-mesh backend (fal.ai). For ORGANIC / sculptural / character forms
  * that a B-rep kernel (build123d) fundamentally cannot make, we call a
- * text/image-to-3D model, download the resulting GLB, and run it through the
+ * text/image-to-3D model, download the resulting mesh, and run it through the
  * SAME sidecar mesh pipeline (trimesh repair -> watertight -> render) the
  * lattice/mesh-mode path uses. Output is a printable STL like any other
  * generation (no editable STEP — generative meshes aren't parametric).
  *
- * fal is an aggregator: one key fronts Trellis / Hunyuan3D / Tripo, so the
- * model ids are env-overridable for A/B. Gated entirely by FAL_KEY: with no
- * key, generativeEnabled() is false and nothing here runs.
+ * Uses the @fal-ai/client SDK, not raw REST: fal's queue result endpoint 404s
+ * for nested model ids (verified), and the SDK also handles image upload to fal
+ * storage. Default model is Rodin (hyper3d), which does BOTH text and image and
+ * was verified end-to-end; "Shaded"/medium quality keeps the mesh lean (~5 MB
+ * vs ~14 MB textured). Gated entirely by FAL_KEY — with no key nothing here runs.
  */
 
-/** Text-to-3D when there's no reference image; image-to-3D when there is. */
-const TEXT_MODEL =
-  process.env.FAL_TEXT_TO_3D_MODEL || "fal-ai/tripo3d/tripo/v2.5/text-to-3d";
-const IMAGE_MODEL = process.env.FAL_IMAGE_TO_3D_MODEL || "fal-ai/trellis";
-const FAL_POLL_MS = 2500;
-const FAL_TIMEOUT_MS = 240_000;
+const TEXT_MODEL = process.env.FAL_TEXT_TO_3D_MODEL || "fal-ai/hyper3d/rodin";
+const IMAGE_MODEL = process.env.FAL_IMAGE_TO_3D_MODEL || "fal-ai/hyper3d/rodin";
 /** Generated meshes have arbitrary scale; fit the longest axis to this (mm). */
 const DEFAULT_PRINT_SIZE_MM = 60;
 
@@ -33,59 +32,15 @@ export function generativeEnabled(): boolean {
   return !!process.env.FAL_KEY;
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/** Submit to fal's queue and poll to completion; returns the result payload. */
-async function falRun(
-  model: string,
-  input: Record<string, unknown>,
-  signal?: AbortSignal
-): Promise<Record<string, unknown>> {
-  const key = process.env.FAL_KEY;
-  if (!key) throw new Error("FAL_KEY not set");
-  const auth = { Authorization: `Key ${key}` };
-
-  const submit = await fetch(`https://queue.fal.run/${model}`, {
-    method: "POST",
-    headers: { ...auth, "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-    signal,
-  });
-  if (!submit.ok) {
-    throw new Error(`fal submit ${submit.status}: ${await submit.text()}`);
-  }
-  const { status_url, response_url } = (await submit.json()) as {
-    status_url: string;
-    response_url: string;
-  };
-
-  const deadline = Date.now() + FAL_TIMEOUT_MS;
-  for (;;) {
-    if (signal?.aborted) throw new Error("aborted");
-    if (Date.now() > deadline) throw new Error("fal generation timed out");
-    await sleep(FAL_POLL_MS);
-    const s = await fetch(status_url, { headers: auth, signal });
-    if (!s.ok) continue;
-    const sj = (await s.json()) as { status?: string };
-    if (sj.status === "COMPLETED") break;
-    if (sj.status === "FAILED" || sj.status === "ERROR") {
-      throw new Error(`fal generation failed: ${JSON.stringify(sj)}`);
-    }
-  }
-
-  const res = await fetch(response_url, { headers: auth, signal });
-  if (!res.ok) throw new Error(`fal result ${res.status}: ${await res.text()}`);
-  return (await res.json()) as Record<string, unknown>;
-}
-
-/** Pull the mesh URL out of the various shapes fal models return. */
-function meshUrlOf(payload: Record<string, unknown>): string | null {
-  const out = (payload.output as Record<string, unknown>) ?? payload;
-  const candidates = [out.model_mesh, out.model_glb, out.mesh, out.glb];
+/** Pull the mesh URL out of the shapes fal models return. */
+function meshUrlOf(data: Record<string, unknown> | undefined): string | null {
+  if (!data) return null;
+  const candidates = [data.model_mesh, data.model_glb, data.mesh, data.glb];
   for (const c of candidates) {
     if (typeof c === "string") return c;
-    if (c && typeof c === "object" && typeof (c as { url?: string }).url === "string") {
-      return (c as { url: string }).url;
+    if (c && typeof c === "object") {
+      const url = (c as { url?: unknown }).url;
+      if (typeof url === "string") return url;
     }
   }
   return null;
@@ -119,7 +74,7 @@ export async function shouldUseGenerative(
 }
 
 /**
- * Run the generative backend end-to-end: fal -> GLB -> sidecar mesh pipeline.
+ * Run the generative backend end-to-end: fal -> mesh -> sidecar mesh pipeline.
  * Returns a HarnessResult so the route persists it exactly like a code result.
  */
 export async function runGenerative(opts: {
@@ -135,20 +90,40 @@ export async function runGenerative(opts: {
       /* progress is cosmetic */
     }
   };
-  const note = `# Generated with fal.ai (${opts.images?.length ? IMAGE_MODEL : TEXT_MODEL})\n# Prompt: ${opts.prompt}\n# Organic/sculptural form — generative mesh, not parametric build123d.`;
+  const hasImage = !!opts.images?.length;
+  const note = `# Generated with fal.ai (${hasImage ? IMAGE_MODEL : TEXT_MODEL})\n# Prompt: ${opts.prompt}\n# Organic/sculptural form — generative mesh, not parametric build123d.`;
 
   try {
+    fal.config({ credentials: process.env.FAL_KEY });
     emit({ type: "phase", phase: "generating", attempt: 1, maxAttempts: 1 });
-    const img = opts.images?.[0];
-    const payload = img
-      ? await falRun(
-          IMAGE_MODEL,
-          { image_url: `data:${img.mediaType};base64,${img.data}` },
-          opts.signal
-        )
-      : await falRun(TEXT_MODEL, { prompt: opts.prompt }, opts.signal);
 
-    const url = meshUrlOf(payload);
+    // Lean output (no PBR textures, medium poly) — we only need geometry, and
+    // it keeps the mesh small enough to hand to the sidecar inline.
+    const common = {
+      material: "Shaded",
+      quality: "medium",
+      geometry_file_format: "glb",
+    };
+    let input: Record<string, unknown>;
+    let model: string;
+    if (hasImage) {
+      const img = opts.images![0];
+      const blob = new Blob([Buffer.from(img.data, "base64")], {
+        type: img.mediaType,
+      });
+      const imageUrl = await fal.storage.upload(blob);
+      model = IMAGE_MODEL;
+      input = { input_image_urls: [imageUrl], ...common };
+    } else {
+      model = TEXT_MODEL;
+      input = { prompt: opts.prompt, ...common };
+    }
+
+    const res = await fal.subscribe(model, {
+      input,
+      abortSignal: opts.signal,
+    });
+    const url = meshUrlOf(res.data as Record<string, unknown>);
     if (!url) throw new Error("fal returned no mesh url");
 
     const dl = await fetch(url, { signal: opts.signal });
@@ -168,8 +143,7 @@ export async function runGenerative(opts: {
       "import trimesh, io, base64",
       `_d = base64.b64decode("${b64}")`,
       `_m = trimesh.load(io.BytesIO(_d), file_type="${fileType}", force="mesh")`,
-      "_ext = _m.extents",
-      "_longest = float(max(_ext)) or 1.0",
+      "_longest = float(max(_m.extents)) or 1.0",
       `_m.apply_scale(${DEFAULT_PRINT_SIZE_MM}.0 / _longest)`,
       "result = _m",
     ].join("\n");
