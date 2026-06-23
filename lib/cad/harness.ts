@@ -158,6 +158,21 @@ function buildUserPrompt(input: HarnessInput, plan?: string): string {
 }
 
 /**
+ * Targeted repair guidance for known, recurring failure classes — a generic
+ * "fix it" lets the model retry the same mistake. Returns "" for unknown errors.
+ */
+function repairHintFor(note: string): string {
+  const n = note.toLowerCase();
+  if (/(fillet|chamfer)/.test(n) && /(smaller|max_fillet|radius|length|valid)/.test(n)) {
+    return "That fillet/chamfer radius is too large for the geometry. REDUCE it substantially (at least halve it, and keep it well under the thinnest adjacent wall), apply it to fewer/specific edges, or wrap it in try/except and fall back to max_fillet() — do NOT retry the same radius.";
+  }
+  if (/rectanglerounded/.test(n) && /buildsketch/.test(n)) {
+    return "RectangleRounded is a sketch primitive — use it INSIDE `with BuildSketch(...)` then extrude, not as a BuildPart operation.";
+  }
+  return "";
+}
+
+/**
  * Run the generate -> execute -> validate -> repair loop. Returns the last
  * attempt's code + run regardless of success so the caller can persist the
  * full record (the failed code is still useful flywheel data).
@@ -237,6 +252,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
             "```python",
             lastCode,
             "```",
+            repairHintFor(repairNote),
             priorRender
               ? "A render of that previous attempt is attached — use it to see what is actually wrong with the form, then fix it."
               : "",
