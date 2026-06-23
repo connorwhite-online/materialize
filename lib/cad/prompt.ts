@@ -28,7 +28,9 @@ Common build123d pitfalls — these are the frequent failure modes, avoid them:
 - Hollowing: shell with \`top = part.faces().sort_by(Axis.Z)[-1]\` then \`offset(amount=-wall, openings=top)\`. Do not fake a shell by subtracting a slightly smaller box.
 - Place features on a face by entering it: \`with BuildSketch(part.faces().sort_by(Axis.Z)[-1]): Circle(r)\` + \`extrude(amount=h)\` for bosses/standoffs; \`with Locations(face): Hole(r, depth=d)\` (or \`CounterBoreHole(...)\`) for holes.
 - Select edges/faces with filters (\`filter_by(Axis.Z)\`, \`group_by(Axis.Z)[-1]\`, \`sort_by(Axis.Z)\`), not by guessing indices.
+- \`Slot\` / \`SlotOverall\` / \`SlotCenterToCenter\` are stadium (rounded-rectangle) shapes that REQUIRE width > height. For a tall, narrow slot, swap the dimensions and rotate it 90°, or use a \`Rectangle\` + two \`Circle\`s instead.
 - For a multi-part assembly assign \`parts = {"base": <solid>, "lid": <solid>}\` (each its own watertight solid); never assign both \`result\` and \`parts\`.
+- Build only what a CSG kernel can express. If the request asks for things build123d CANNOT do — topology optimization, generative/organic-optimized geometry, FLEXIBLE or ARTICULATED joints, print-in-place mechanisms, springs/living hinges — do NOT attempt them literally (they fail). Instead build a clean, RIGID, simplified version that captures the function (e.g. a fixed clamp at a sensible angle instead of a "pivotable" one), and rely on fillets/tapers for any "organic" feel.
 
 MESH MODE — for geometry build123d CANNOT express:
 - build123d is a B-rep/CSG kernel: it builds with extrude/revolve/loft/boolean and CANNOT make gyroids, TPMS / minimal surfaces, lattices, heat-exchanger cores, voronoi/porous infills, or truly organic field-driven blends. Do NOT try to fake these with many booleans (they fail). For these, switch to MESH MODE.

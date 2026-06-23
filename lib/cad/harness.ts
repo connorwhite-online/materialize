@@ -169,6 +169,9 @@ function repairHintFor(note: string): string {
   if (/rectanglerounded/.test(n) && /buildsketch/.test(n)) {
     return "RectangleRounded is a sketch primitive — use it INSIDE `with BuildSketch(...)` then extrude, not as a BuildPart operation.";
   }
+  if (/slot/.test(n) && /width|height/.test(n)) {
+    return "Slot/SlotOverall require width > height. Swap the dimensions and rotate the sketch 90°, or build the slot from a Rectangle + two Circles instead.";
+  }
   return "";
 }
 
