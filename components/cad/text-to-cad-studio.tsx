@@ -908,7 +908,7 @@ export function TextToCadStudio({
         {/* Right sidebar — revisions + parametric source for the current build,
             then the build history. self-start keeps it at content height instead
             of stretching to match the (tall) viewer column. */}
-        <aside className="flex flex-col gap-5 self-start lg:sticky lg:top-6 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto">
+        <aside className="flex flex-col gap-5 self-start lg:sticky lg:top-6 lg:max-h-[calc(100vh-7rem)] lg:min-h-0">
           {/* Revisions for the current build */}
           {!generating && turns.length > 0 && (
             <div>
@@ -925,7 +925,7 @@ export function TextToCadStudio({
                 Revisions ({turns.length})
               </button>
               {showHistory && (
-                <ol className="mt-2 space-y-1.5">
+                <ol className="mt-2 space-y-1.5 lg:max-h-56 lg:overflow-y-auto">
                   {turns.map((t, i) => {
                     const isViewed = viewedTurn?.id === t.id;
                     const selectable = t.status === "succeeded" && !!t.fileAssetId;
@@ -984,9 +984,9 @@ export function TextToCadStudio({
             </div>
           )}
 
-          {/* Build history */}
-          <div>
-            <div className="flex items-center justify-between">
+          {/* Build history — header fixed, list scrolls */}
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="flex shrink-0 items-center justify-between">
               <h2 className="text-sm font-medium text-muted-foreground">Builds</h2>
               <button
                 type="button"
@@ -997,7 +997,7 @@ export function TextToCadStudio({
                 <PlusIcon className="size-4" />
               </button>
             </div>
-            <ul className="mt-3 flex flex-col gap-2">
+            <ul className="mt-3 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
               {threads.length === 0 && (
                 <li className="text-sm text-muted-foreground">No builds yet.</li>
               )}
