@@ -80,8 +80,8 @@ export async function shouldUseGenerative(
     const verdict = await completeText({
       system:
         "You route a 3D-model request to the right engine. Reply with ONE word:\n" +
-        "ORGANIC — an organic, sculptural, character, creature, figurine, anatomical, or freeform-artistic form best made by a generative 3D model.\n" +
-        "MECHANICAL — a functional/parametric/geometric part (bracket, enclosure, gear, mount, clip, container, tool, fixture, lattice/infill). When in doubt, MECHANICAL.\n" +
+        "ORGANIC — a NON-functional sculptural / character / creature / figurine / decorative / anatomical form with no precise functional features (best made by a generative 3D model).\n" +
+        "MECHANICAL — ANY functional/parametric part, INCLUDING ones meant to look organic, sculptural, topology-optimized, or lightweighted (bracket, mount, handle, holder, enclosure, clip, gear, tool, fixture, lattice). These are built with the CAD/SDF toolkit, which can do organic functional form. When in doubt, MECHANICAL.\n" +
         "Reply with only the single word.",
       prompt,
       model: modelForRole("plan"),
