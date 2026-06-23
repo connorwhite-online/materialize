@@ -35,7 +35,7 @@ export async function conceptImage(
       input: {
         prompt:
           prompt +
-          " -- industrial product design concept, a single clean minimalist object, refined proportions, soft unified fillets, premium matte finish, neutral studio lighting, plain seamless background, no text",
+          " -- the EMPTY product itself ALONE (no contents, no items inside, no extra objects, no people); industrial product design concept, a single clean minimalist object, refined proportions, soft unified fillets, premium matte finish, neutral studio lighting, plain seamless background, no text",
         image_size: "square_hd",
         num_inference_steps: 4,
         output_format: "png",

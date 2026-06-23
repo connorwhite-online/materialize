@@ -134,7 +134,7 @@ export async function runGenerative(opts: {
     } else if (!DIRECT_TEXT_TO_3D) {
       const t2i = await fal.subscribe(TEXT_TO_IMAGE_MODEL, {
         input: {
-          prompt: `${opts.prompt}, a single 3D object, centered, full body, plain neutral background, soft studio lighting, product render`,
+          prompt: `${opts.prompt}, the EMPTY product itself ALONE — no contents, no items inside it, no extra objects, no people; a single 3D object, centered, full body, plain neutral background, soft studio lighting, product render`,
           image_size: "square_hd",
           num_inference_steps: 4,
         },
