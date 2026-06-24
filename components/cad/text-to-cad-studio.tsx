@@ -976,7 +976,7 @@ export function TextToCadStudio({
         {/* Right sidebar — revisions + parametric source for the current build,
             then the build history. self-start keeps it at content height instead
             of stretching to match the (tall) viewer column. */}
-        <aside className="flex flex-col gap-5 self-start lg:sticky lg:top-6 lg:max-h-[calc(100vh-7rem)] lg:min-h-0">
+        <aside className="flex min-w-0 flex-col gap-5 self-start lg:sticky lg:top-6 lg:max-h-[calc(100vh-7rem)] lg:min-h-0">
           {/* Revisions for the current build */}
           {!generating && turns.length > 0 && (
             <div>
@@ -1187,7 +1187,9 @@ export function TextToCadStudio({
                   ? "What do you want to change?"
                   : "Describe a part… e.g. a parametric phone stand for a 7mm-thick phone"
               }
-              className="max-h-[200px] w-full resize-none border-0 bg-transparent px-2 py-1.5 text-sm outline-none disabled:opacity-60"
+              // text-base (16px) on mobile prevents iOS Safari from auto-
+              // zooming when the field is focused (it zooms any input < 16px).
+              className="max-h-[200px] w-full resize-none border-0 bg-transparent px-2 py-1.5 text-base outline-none disabled:opacity-60 nav:text-sm"
             />
             {/* Toolbar below the text: attach (left), send (right). */}
             <div className="flex items-center justify-between px-1 pt-1">
@@ -1228,7 +1230,9 @@ export function TextToCadStudio({
               </button>
             </div>
           </div>
-          <p className="mt-1.5 px-2 text-center text-xs text-muted-foreground">
+          {/* Keyboard-shortcut hint — desktop only; on mobile there's no
+              ⌘/Ctrl+Enter and the line just clutters the composer. */}
+          <p className="mt-1.5 hidden px-2 text-center text-xs text-muted-foreground nav:block">
             {activeThread
               ? "Sending a message revises this build · ⌘/Ctrl + Enter"
               : "⌘/Ctrl + Enter to generate"}
