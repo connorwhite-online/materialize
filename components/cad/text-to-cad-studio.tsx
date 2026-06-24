@@ -157,6 +157,9 @@ export function TextToCadStudio({
   const [showHistory, setShowHistory] = useState(false);
   const [showSource, setShowSource] = useState(true);
   const [showBuilds, setShowBuilds] = useState(true);
+  // Mobile-only: the Builds history dropdown that pops down from the header
+  // icon (the desktop sidebar Builds block is hidden below `lg`).
+  const [showBuildsMenu, setShowBuildsMenu] = useState(false);
   // Which build's three-dot menu is open in the sidebar.
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   // Eval feedback: auto-prompt per turn until rated/dismissed, then collapse to
@@ -188,6 +191,15 @@ export function TextToCadStudio({
     document.addEventListener("click", close);
     return () => document.removeEventListener("click", close);
   }, [openMenuId]);
+
+  // Close the mobile Builds dropdown on any outside click (the trigger and
+  // the panel stopPropagation so their own clicks don't immediately close it).
+  useEffect(() => {
+    if (!showBuildsMenu) return;
+    const close = () => setShowBuildsMenu(false);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [showBuildsMenu]);
 
   // Once the morph finishes and the model is mounted underneath, give it a
   // beat to load, then clear the transition (unmounts the faded-out blob).
@@ -247,6 +259,7 @@ export function TextToCadStudio({
     setImages([]);
     setSelectedPartId(null);
     setShowHistory(false);
+    setShowBuildsMenu(false);
     setRenaming(false);
   }
 
@@ -545,7 +558,7 @@ export function TextToCadStudio({
 
   return (
     <div className="relative min-h-[calc(100vh-4rem)] lg:h-[calc(100vh-4rem)] lg:overflow-hidden">
-      <div className="mx-auto grid max-w-6xl gap-8 px-4 pb-44 pt-6 lg:h-full lg:min-h-0 lg:pb-0 lg:grid-cols-[1fr_300px]">
+      <div className="mx-auto grid max-w-6xl gap-8 px-4 pb-60 pt-6 lg:h-full lg:min-h-0 lg:pb-0 lg:grid-cols-[1fr_300px]">
         {/* Main column */}
         <section className="min-w-0 lg:min-h-0 lg:overflow-y-auto lg:pb-36">
           <div className="flex items-start justify-between gap-4">
@@ -602,14 +615,65 @@ export function TextToCadStudio({
                 </p>
               )}
             </div>
-            <button
-              type="button"
-              onClick={startNewBuild}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-foreground/15 px-3 py-1.5 text-sm hover:bg-foreground/5"
-            >
-              <PlusIcon className="size-4" />
-              New build
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              {/* Builds history — mobile only; pops a scrollable dropdown down
+                  from this icon. At lg+ the Builds sidebar block takes over. */}
+              <div className="relative lg:hidden">
+                <button
+                  type="button"
+                  aria-label="Builds history"
+                  title="Builds history"
+                  aria-expanded={showBuildsMenu}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOpenMenuId(null);
+                    setShowBuildsMenu((v) => !v);
+                  }}
+                  className="inline-flex size-9 items-center justify-center rounded-lg border border-foreground/15 hover:bg-foreground/5"
+                >
+                  <HistoryIcon className="size-4" />
+                </button>
+                {showBuildsMenu && (
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    className="absolute right-0 top-11 z-40 w-72 max-w-[calc(100vw-2rem)] rounded-xl border border-foreground/15 bg-card p-2 shadow-xl"
+                  >
+                    <div className="mb-1.5 flex items-center gap-2 px-1 text-sm font-medium text-muted-foreground">
+                      <BoxesIcon className="size-4 shrink-0" />
+                      <span>Builds ({threads.length})</span>
+                    </div>
+                    <ul className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto px-0.5 py-1">
+                      <BuildsList
+                        threads={threads}
+                        activeRootId={activeRootId}
+                        openMenuId={openMenuId}
+                        onOpenThread={(t) => {
+                          openThread(t);
+                          setShowBuildsMenu(false);
+                        }}
+                        onToggleMenu={(id) =>
+                          setOpenMenuId((m) => (m === id ? null : id))
+                        }
+                        onDelete={(t) => {
+                          deleteBuild(t);
+                          setShowBuildsMenu(false);
+                        }}
+                      />
+                    </ul>
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={startNewBuild}
+                aria-label="New build"
+                title="New build"
+                className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-foreground/15 px-2.5 text-sm hover:bg-foreground/5 lg:px-3"
+              >
+                <PlusIcon className="size-4" />
+                <span className="hidden lg:inline">New build</span>
+              </button>
+            </div>
           </div>
 
           {/* Viewer / progress / empty state */}
@@ -990,8 +1054,9 @@ export function TextToCadStudio({
             </div>
           )}
 
-          {/* Build history — collapsible; header fixed, list scrolls */}
-          <div className="flex min-h-0 flex-1 flex-col">
+          {/* Build history — collapsible; header fixed, list scrolls. Hidden
+              below lg, where the header history icon opens it as a dropdown. */}
+          <div className="hidden min-h-0 flex-1 flex-col lg:flex">
             <button
               type="button"
               onClick={() => setShowBuilds((v) => !v)}
@@ -1015,77 +1080,16 @@ export function TextToCadStudio({
                   "linear-gradient(to bottom, transparent 0, black 14px, black calc(100% - 14px), transparent 100%)",
               }}
             >
-              {threads.length === 0 && (
-                <li className="text-sm text-muted-foreground">No builds yet.</li>
-              )}
-              {threads.map((t) => {
-                // Still PNG render captured per generation (newest with one).
-                const thumb = [...t.turns]
-                  .reverse()
-                  .find((x) => x.renderUrl)?.renderUrl;
-                const isActive = t.rootId === activeRootId;
-                return (
-                  <li key={t.rootId} className="relative">
-                    <button
-                      type="button"
-                      onClick={() => openThread(t)}
-                      className={`flex w-full cursor-pointer items-center gap-3 rounded-lg border p-2 pr-9 text-left transition-colors ${
-                        isActive
-                          ? "border-foreground/30 bg-foreground/5"
-                          : "border-foreground/10 hover:bg-foreground/5"
-                      }`}
-                    >
-                      {thumb ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={thumb}
-                          alt=""
-                          className="h-10 w-10 shrink-0 rounded bg-muted/40 object-contain"
-                        />
-                      ) : (
-                        <div className="h-10 w-10 shrink-0 rounded bg-muted/40" />
-                      )}
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium">
-                          {threadLabel(t)}
-                        </span>
-                        <span className="block text-xs text-muted-foreground">
-                          {t.turns.length} revision
-                          {t.turns.length === 1 ? "" : "s"}
-                        </span>
-                      </span>
-                    </button>
-
-                    {/* Three-dot menu (delete) */}
-                    <button
-                      type="button"
-                      aria-label="Build options"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setOpenMenuId((id) => (id === t.rootId ? null : t.rootId));
-                      }}
-                      className="absolute right-1.5 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground/70 hover:bg-foreground/10 hover:text-foreground"
-                    >
-                      <EllipsisVerticalIcon className="size-4" />
-                    </button>
-                    {openMenuId === t.rootId && (
-                      <div
-                        onClick={(e) => e.stopPropagation()}
-                        className="absolute right-1.5 top-10 z-20 min-w-[130px] rounded-lg border border-foreground/15 bg-card p-1 shadow-lg"
-                      >
-                        <button
-                          type="button"
-                          onClick={() => deleteBuild(t)}
-                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
-                        >
-                          <Trash2Icon className="size-4" />
-                          Delete build
-                        </button>
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
+              <BuildsList
+                threads={threads}
+                activeRootId={activeRootId}
+                openMenuId={openMenuId}
+                onOpenThread={openThread}
+                onToggleMenu={(id) =>
+                  setOpenMenuId((m) => (m === id ? null : id))
+                }
+                onDelete={deleteBuild}
+              />
             </ul>
             )}
           </div>
@@ -1098,7 +1102,10 @@ export function TextToCadStudio({
           grid then mirrors the page grid so the composer centers under the
           viewer column and ignores the Builds sidebar (empty 300px track). */}
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 nav:pl-56">
-        <div className="mx-auto grid max-w-6xl gap-8 px-4 pb-4 lg:grid-cols-[1fr_300px]">
+        {/* Sub-nav viewports show the floating MobileTabBar pill (bottom-6,
+            z-40); lift the composer above it so its controls stay tappable.
+            At nav+ the pill is gone and the sidebar rail takes over. */}
+        <div className="mx-auto grid max-w-6xl gap-8 px-4 pb-28 nav:pb-4 lg:grid-cols-[1fr_300px]">
           <div className="pointer-events-auto mx-auto w-full max-w-2xl">
           <div
             onDragOver={(e) => e.preventDefault()}
@@ -1230,6 +1237,102 @@ export function TextToCadStudio({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * The build-history list items (thumbnail, label, revision count, and a
+ * three-dot delete menu). Shared by the desktop Builds sidebar and the mobile
+ * header dropdown so both stay in sync. Renders bare <li>s into a caller-owned
+ * <ul> (which controls scroll/mask), including the empty state.
+ */
+function BuildsList({
+  threads,
+  activeRootId,
+  openMenuId,
+  onOpenThread,
+  onToggleMenu,
+  onDelete,
+}: {
+  threads: StudioThread[];
+  activeRootId: string | null;
+  openMenuId: string | null;
+  onOpenThread: (t: StudioThread) => void;
+  onToggleMenu: (rootId: string) => void;
+  onDelete: (t: StudioThread) => void;
+}) {
+  if (threads.length === 0) {
+    return <li className="text-sm text-muted-foreground">No builds yet.</li>;
+  }
+  return (
+    <>
+      {threads.map((t) => {
+        // Still PNG render captured per generation (newest with one).
+        const thumb = [...t.turns].reverse().find((x) => x.renderUrl)?.renderUrl;
+        const isActive = t.rootId === activeRootId;
+        return (
+          <li key={t.rootId} className="relative">
+            <button
+              type="button"
+              onClick={() => onOpenThread(t)}
+              className={`flex w-full cursor-pointer items-center gap-3 rounded-lg border p-2 pr-9 text-left transition-colors ${
+                isActive
+                  ? "border-foreground/30 bg-foreground/5"
+                  : "border-foreground/10 hover:bg-foreground/5"
+              }`}
+            >
+              {thumb ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={thumb}
+                  alt=""
+                  className="h-10 w-10 shrink-0 rounded bg-muted/40 object-contain"
+                />
+              ) : (
+                <div className="h-10 w-10 shrink-0 rounded bg-muted/40" />
+              )}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium">
+                  {threadLabel(t)}
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  {t.turns.length} revision
+                  {t.turns.length === 1 ? "" : "s"}
+                </span>
+              </span>
+            </button>
+
+            {/* Three-dot menu (delete) */}
+            <button
+              type="button"
+              aria-label="Build options"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleMenu(t.rootId);
+              }}
+              className="absolute right-1.5 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground/70 hover:bg-foreground/10 hover:text-foreground"
+            >
+              <EllipsisVerticalIcon className="size-4" />
+            </button>
+            {openMenuId === t.rootId && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className="absolute right-1.5 top-10 z-20 min-w-[130px] rounded-lg border border-foreground/15 bg-card p-1 shadow-lg"
+              >
+                <button
+                  type="button"
+                  onClick={() => onDelete(t)}
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
+                >
+                  <Trash2Icon className="size-4" />
+                  Delete build
+                </button>
+              </div>
+            )}
+          </li>
+        );
+      })}
+    </>
   );
 }
 
