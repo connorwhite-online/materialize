@@ -1148,13 +1148,11 @@ export function QuoteConfigurator({
                   </Label>
                   {/*
                     Plain input rather than <Input> so it can wear the
-                    same depth-raised pill as the Ship-to <Select>
-                    sitting next to it. The default Input is depth-
-                    sunken — at the same h-10 the inset shadow reads
-                    visually shorter than the raised select, so the
-                    two pills don't line up as a matched pair. Same
-                    height, padding, radius, and focus-shadow as
-                    SelectTrigger.
+                    same flat frosted pill as the Ship-to <Select>
+                    sitting next to it (translucent card fill + blur +
+                    crisp focus ring). Same height, padding, radius, and
+                    focus treatment as SelectTrigger so the two line up
+                    as a matched pair.
                   */}
                   <input
                     id="quantity"
@@ -1186,7 +1184,7 @@ export function QuoteConfigurator({
                     }}
                     // text-base on phones (iOS auto-zooms < 16px),
                     // text-sm on md+ to match the rest of the row.
-                    className="depth-raised h-10 w-20 rounded-xl border border-border bg-card px-3.5 py-1 text-base md:text-sm outline-none transition-shadow duration-200 ease-out focus-visible:shadow-[var(--shadow-raised),var(--shadow-focus-ring)]"
+                    className="h-10 w-20 rounded-xl border border-border bg-card/60 backdrop-blur-sm px-3.5 py-1 text-base md:text-sm outline-none transition-[color,box-shadow,border-color] duration-150 ease-out hover:bg-card focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 dark:border-input dark:bg-input/30"
                   />
                   <span id="quantity-range-hint" className="sr-only">
                     Enter a quantity between 1 and 100.
