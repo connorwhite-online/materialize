@@ -1,16 +1,36 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
-import { OrbitControls, Stage, Center, Grid, Line } from "@react-three/drei";
 import {
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { Canvas, useFrame, useLoader } from "@react-three/fiber";
+import { OrbitControls, Stage, Center, Grid, Line } from "@react-three/drei";
+import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
+import {
+  STUDIO_CAMERA,
+  frameTransformFor,
+} from "@/components/cad/studio-frame";
+import { PointCloudScene } from "@/components/cad/materializing-blob";
+import {
+  AlwaysStencilFunc,
+  BackSide,
   Box3,
   BufferGeometry,
+  DecrementWrapStencilOp,
   DoubleSide,
   EdgesGeometry,
   Float32BufferAttribute,
+  FrontSide,
+  IncrementWrapStencilOp,
   Line3,
+  NotEqualStencilFunc,
   Plane,
+  ReplaceStencilOp,
   Vector3,
 } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
@@ -325,6 +345,91 @@ function FeatureEdges({ geom }: { geom: BufferGeometry }) {
   );
 }
 
+/**
+ * Writes the model's cross-section footprint into the stencil buffer (back
+ * faces increment, front faces decrement → non-zero exactly where the cut
+ * passes through solid material). Renders no color/depth; a cap quad drawn
+ * afterward (where stencil != 0) fills the section so a solid reads as solid
+ * and a shell reads as its wall band. Lives in the model's transformed group
+ * so it lines up with the clipped mesh. (three.js webgl_clipping_stencil.)
+ */
+function SectionStencil({
+  geom,
+  planes,
+}: {
+  geom: BufferGeometry;
+  planes: Plane[];
+}) {
+  return (
+    <group>
+      <mesh geometry={geom} renderOrder={1}>
+        <meshBasicMaterial
+          depthWrite={false}
+          depthTest={false}
+          colorWrite={false}
+          side={BackSide}
+          clippingPlanes={planes}
+          stencilWrite
+          stencilFunc={AlwaysStencilFunc}
+          stencilFail={IncrementWrapStencilOp}
+          stencilZFail={IncrementWrapStencilOp}
+          stencilZPass={IncrementWrapStencilOp}
+        />
+      </mesh>
+      <mesh geometry={geom} renderOrder={1}>
+        <meshBasicMaterial
+          depthWrite={false}
+          depthTest={false}
+          colorWrite={false}
+          side={FrontSide}
+          clippingPlanes={planes}
+          stencilWrite
+          stencilFunc={AlwaysStencilFunc}
+          stencilFail={DecrementWrapStencilOp}
+          stencilZFail={DecrementWrapStencilOp}
+          stencilZPass={DecrementWrapStencilOp}
+        />
+      </mesh>
+    </group>
+  );
+}
+
+/**
+ * The filled cross-section cap — a quad at the cut plane (world space), drawn
+ * only where SectionStencil marked solid, then resetting the stencil. Unlit
+ * basic material (the scene has no real lights for a lit one).
+ */
+function SectionCap({
+  center,
+  cutY,
+  size,
+}: {
+  center: [number, number, number];
+  cutY: number;
+  size: number;
+}) {
+  return (
+    <mesh
+      position={[center[0], cutY, center[2]]}
+      rotation={[-Math.PI / 2, 0, 0]}
+      renderOrder={2}
+    >
+      <planeGeometry args={[size, size]} />
+      <meshBasicMaterial
+        color="#9ca3af"
+        side={DoubleSide}
+        toneMapped={false}
+        stencilWrite
+        stencilRef={0}
+        stencilFunc={NotEqualStencilFunc}
+        stencilFail={ReplaceStencilOp}
+        stencilZFail={ReplaceStencilOp}
+        stencilZPass={ReplaceStencilOp}
+      />
+    </mesh>
+  );
+}
+
 function PreviewUnavailable() {
   return (
     <div className="flex h-full w-full items-center justify-center bg-muted/20">
@@ -366,6 +471,37 @@ interface ModelViewerProps {
   annotations?: ViewerAnnotation[];
   /** Fired when the user commits a note on a selected face/edge. */
   onAnnotate?: (a: PickResult & { note: string }) => void;
+  /**
+   * Studio-only fixed framing: replace `<Stage adjustCamera>` (which fits each
+   * model differently and animates the camera on mount) with a fixed camera +
+   * deterministic normalization, so this viewer lines up pixel-for-pixel with
+   * the studio's deforming-loader canvas and the morph hand-off has no
+   * reload/zoom pop. Inspect-only; default off (every other call site unchanged).
+   */
+  fixedFrame?: boolean;
+}
+
+/**
+ * Wrap the model in a group scaled+centered so its longest axis fits the shared
+ * studio target size. Computed synchronously from the (loader-cached) geometry
+ * so the very first rendered frame is already correctly framed — no unscaled
+ * flash. The geometry keeps its real mm coords (dimensions readout depends on
+ * that); only the wrapping group is transformed.
+ */
+function FixedFrameModel({
+  url,
+  children,
+}: {
+  url: string;
+  children: ReactNode;
+}) {
+  const geometry = useLoader(STLLoader, url);
+  const frame = useMemo(() => frameTransformFor(geometry), [geometry]);
+  return (
+    <group scale={frame.scale} position={frame.position}>
+      {children}
+    </group>
+  );
 }
 
 function ModelMesh({
@@ -399,12 +535,8 @@ function ModelMesh({
 }
 
 function LoadingFallback() {
-  return (
-    <mesh>
-      <sphereGeometry args={[0.5, 16, 16]} />
-      <meshStandardMaterial color="#666" wireframe />
-    </mesh>
-  );
+  // Universal "3D is loading" placeholder: a softly deforming point cloud.
+  return <PointCloudScene active />;
 }
 
 /** Bounds measured from the loaded+placed model, in world units + true mm. */
@@ -520,6 +652,11 @@ function InspectModel({
           setGeom(g);
         }}
       />
+      {/* Stencil-fill the cross-section so solid reads as solid (the cap quad
+          is drawn at the Canvas level). */}
+      {planes && planes.length > 0 && geom && (
+        <SectionStencil geom={geom} planes={planes} />
+      )}
       {/* Faint guide of all selectable edges while in edge mode. */}
       {annotateMode && target === "edge" && geom && <FeatureEdges geom={geom} />}
 
@@ -556,6 +693,7 @@ export function ModelViewer({
   onToggleAnnotate,
   annotations,
   onAnnotate,
+  fixedFrame = false,
 }: ModelViewerProps) {
   const isPreview = mode === "preview";
   // Wheel zoom defaults to true unless explicitly disabled. The
@@ -652,25 +790,24 @@ export function ModelViewer({
     >
       <ErrorBoundary fallback={<PreviewUnavailable />}>
         <Canvas
-          camera={{ position: [0, 0, 5], fov: 45 }}
+          camera={
+            fixedFrame
+              ? { position: STUDIO_CAMERA.position, fov: STUDIO_CAMERA.fov }
+              : { position: [0, 0, 5], fov: 45 }
+          }
           dpr={isPreview ? 1 : [1, 2]}
           // Local clipping is needed for the cross-section tool; harmless
           // (no-op) everywhere else since no material sets clippingPlanes.
-          gl={{ localClippingEnabled: true }}
+          gl={{ localClippingEnabled: true, stencil: true }}
         >
           <Suspense fallback={<LoadingFallback />}>
-            <Stage
-              adjustCamera={1.2}
-              intensity={0.5}
-              // No IBL environment: drei's "city" preset fetches an HDR
-              // from an external CDN (raw.githack.com) that drops CORS
-              // headers, spamming the console and failing intermittently.
-              // Stage still provides its three-point light rig (ambient +
-              // spot + point), which is plenty for matte print previews.
-              environment={null}
-            >
-              <Center>
-                {inspectable ? (
+            {fixedFrame && inspectable ? (
+              // Studio: fixed camera + deterministic fit (no Stage), so this
+              // viewer registers with the deforming-loader canvas. MaterializeMaterial
+              // is self-lit, so a touch of ambient is all the rig needs.
+              <>
+                <ambientLight intensity={0.7} />
+                <FixedFrameModel url={modelUrl}>
                   <InspectModel
                     modelUrl={modelUrl}
                     color={materialColor}
@@ -682,15 +819,42 @@ export function ModelViewer({
                     pending={pending?.result ?? null}
                     onPick={openPending}
                   />
-                ) : (
-                  <ModelMesh
-                    modelUrl={modelUrl}
-                    format={format}
-                    materialColor={materialColor}
-                  />
-                )}
-              </Center>
-            </Stage>
+                </FixedFrameModel>
+              </>
+            ) : (
+              <Stage
+                adjustCamera={1.2}
+                intensity={0.5}
+                // No IBL environment: drei's "city" preset fetches an HDR
+                // from an external CDN (raw.githack.com) that drops CORS
+                // headers, spamming the console and failing intermittently.
+                // Stage still provides its three-point light rig (ambient +
+                // spot + point), which is plenty for matte print previews.
+                environment={null}
+              >
+                <Center>
+                  {inspectable ? (
+                    <InspectModel
+                      modelUrl={modelUrl}
+                      color={materialColor}
+                      planes={planes}
+                      onBounds={setBounds}
+                      annotateMode={annotateMode}
+                      target={target}
+                      annotations={annotations}
+                      pending={pending?.result ?? null}
+                      onPick={openPending}
+                    />
+                  ) : (
+                    <ModelMesh
+                      modelUrl={modelUrl}
+                      format={format}
+                      materialColor={materialColor}
+                    />
+                  )}
+                </Center>
+              </Stage>
+            )}
             {inspectable && showGrid && bounds && (
               <Grid
                 // Drop the grid a hair below the model base so it doesn't
@@ -711,6 +875,17 @@ export function ModelViewer({
                 fadeStrength={1}
                 followCamera={false}
                 infiniteGrid={false}
+              />
+            )}
+            {/* Filled cross-section cap at the cut plane (world space). */}
+            {inspectable && sectionOn && bounds && (
+              <SectionCap
+                center={bounds.center}
+                cutY={
+                  bounds.worldMaxY -
+                  sectionT * (bounds.worldMaxY - bounds.worldMinY)
+                }
+                size={Math.max(bounds.footprint.x, bounds.footprint.z) * 1.5}
               />
             )}
           </Suspense>

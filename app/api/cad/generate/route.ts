@@ -7,6 +7,11 @@ import { logError } from "@/lib/logger";
 import { canUseTextToCad } from "@/lib/features";
 import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
 import { runHarness, type PriorFeedback } from "@/lib/cad/harness";
+import {
+  generativeEnabled,
+  shouldUseGenerative,
+  runGenerative,
+} from "@/lib/cad/generative";
 import type { PromptImage } from "@/lib/cad/model-client";
 import {
   persistGenerationFailure,
@@ -134,14 +139,28 @@ export async function POST(request: Request) {
       };
 
       try {
-        const result = await runHarness({
-          prompt,
-          priorSourceCode,
-          priorFeedback,
-          images: images.length ? images : undefined,
-          signal: request.signal,
-          onProgress: (event) => send(event),
-        });
+        // Route organic/sculptural forms to the generative backend (fal.ai)
+        // when it's enabled; everything else stays on build123d. The classifier
+        // only runs when FAL_KEY is set, so otherwise there's zero overhead.
+        const useGenerative =
+          generativeEnabled() &&
+          (await shouldUseGenerative(prompt, request.signal));
+
+        const result = useGenerative
+          ? await runGenerative({
+              prompt,
+              images: images.length ? images : undefined,
+              signal: request.signal,
+              onProgress: (event) => send(event),
+            })
+          : await runHarness({
+              prompt,
+              priorSourceCode,
+              priorFeedback,
+              images: images.length ? images : undefined,
+              signal: request.signal,
+              onProgress: (event) => send(event),
+            });
 
         if (!result.ok || !result.run) {
           const failed = await persistGenerationFailure(

@@ -17,7 +17,7 @@
 
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { cadGenerations, fileAssets, files } from "@/lib/db/schema";
@@ -319,5 +319,39 @@ export async function recordCadFeedback(
   } catch (error) {
     logError("recordCadFeedback", error);
     return { error: "Could not save feedback." };
+  }
+}
+
+/**
+ * Delete a build from the studio history — removes the generation rows for the
+ * thread (root + revisions). The underlying library files/assets are left
+ * intact (they may be saved/printed); this only clears the build from history.
+ */
+export async function deleteCadBuild(input: {
+  generationIds: string[];
+}): Promise<{ ok: true } | { error: string }> {
+  const { userId } = await auth();
+  if (!userId) return { error: "Unauthorized" };
+
+  const user = (await currentUser()) as ClerkUserLike;
+  if (!canUseTextToCad(primaryEmail(user))) return { error: "Not found" };
+
+  const ids = Array.from(new Set(input.generationIds)).filter(Boolean);
+  if (ids.length === 0) return { error: "Nothing to delete" };
+
+  try {
+    await db
+      .delete(cadGenerations)
+      .where(
+        and(
+          inArray(cadGenerations.id, ids),
+          eq(cadGenerations.userId, userId)
+        )
+      );
+    revalidatePath("/text-to-cad");
+    return { ok: true };
+  } catch (error) {
+    logError("deleteCadBuild", error);
+    return { error: "Could not delete build." };
   }
 }

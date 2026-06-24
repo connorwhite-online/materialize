@@ -268,6 +268,7 @@ async function persistAssembly(opts: {
 
   // Bundle the linkable parts into a Project (private draft, like the files).
   let projectSlug: string | null = null;
+  let projectId: string | null = null;
   const linkable = created.filter((c) => c.fileId);
   if (linkable.length > 0) {
     try {
@@ -289,6 +290,7 @@ async function persistAssembly(opts: {
         }))
       );
       projectSlug = project.slug;
+      projectId = project.id;
     } catch (err) {
       // A Project is an organizational nicety — the individual part files
       // already exist, so don't fail the generation if bundling trips.
@@ -322,6 +324,7 @@ async function persistAssembly(opts: {
       sourceCode: result.sourceCode,
       attempts: result.attempts,
       fileAssetId: created[0].fileAssetId,
+      projectId,
       renderStorageKey,
       aestheticScore: result.aestheticScore ?? null,
       ...(isRoot ? { title } : {}),

@@ -9,7 +9,13 @@ import type { ExpectedDims } from "../../lib/cad/prompt";
  * when the prompt states explicit sizes — the cheap, automatic part of the
  * manufacturability oracle. Omit it when the prompt is open-ended.
  */
-export type EvalTier = "primitive" | "bracket" | "container" | "mechanical";
+export type EvalTier =
+  | "primitive"
+  | "bracket"
+  | "container"
+  | "mechanical"
+  | "assembly"
+  | "implicit";
 
 export interface EvalCase {
   id: string;
@@ -53,5 +59,21 @@ export const EVAL_CASES: EvalCase[] = [
     id: "hex-nut-m8",
     tier: "mechanical",
     prompt: "an M8 hex nut, 13mm across flats, 6.5mm thick, with a clearance bore",
+  },
+  // Frontier / capability-tracking cases — the hard end of the harness. These
+  // exercise the multi-part contract and mesh mode (D); a regression here means
+  // a capability was lost, not just a quality dip.
+  {
+    id: "enclosure-assembly",
+    tier: "assembly",
+    prompt:
+      "a two-part electronics enclosure (separate base and lid), about 90x60x30mm, with 2.4mm walls, a USB-C port cutout in one side, and four internal PCB standoffs",
+  },
+  {
+    id: "gyroid-core",
+    tier: "implicit",
+    prompt:
+      "a 40mm cube gyroid TPMS lattice for a heat-exchanger core, ~3 unit cells per axis",
+    expectedDims: { x: 40, y: 40, z: 40 },
   },
 ];

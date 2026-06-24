@@ -1,23 +1,28 @@
 "use client";
 
 import { lazy, Suspense, useEffect, useRef, useState, useTransition } from "react";
-import type { ReactNode } from "react";
 import Link from "next/link";
 import {
   AlertTriangleIcon,
   ArrowUpIcon,
+  BoxesIcon,
   CheckIcon,
+  Code2Icon,
   DownloadIcon,
+  EllipsisVerticalIcon,
+  HistoryIcon,
   Loader2Icon,
+  MessageSquareTextIcon,
   PaperclipIcon,
   PencilIcon,
   PlusIcon,
-  RotateCwIcon,
+  Trash2Icon,
   XIcon,
 } from "lucide-react";
 import { ChevronDown } from "@/components/icons/chevron-down";
 import { ChevronRight } from "@/components/icons/chevron-right";
 import {
+  deleteCadBuild,
   recordCadFeedback,
   renameCadGeneration,
   saveCadFileToProfile,
@@ -138,9 +143,28 @@ export function TextToCadStudio({
   const [prompt, setPrompt] = useState("");
   const [progress, setProgress] = useState<CadProgressEvent[]>([]);
   const [generating, setGenerating] = useState(false);
+  // Loader→model handoff: on a fresh result the deforming blob morphs into the
+  // generated shape ("morph"), then the crisp ModelViewer is mounted underneath
+  // and the blob is faded out ("reveal").
+  const [transition, setTransition] = useState<{
+    assetId: string;
+    phase: "morph" | "reveal";
+  } | null>(null);
+  // The model to deform in place while generating a REVISION (the shape being
+  // edited). Null on a fresh build → the wireframe blob deforms instead.
+  const [sourceAssetId, setSourceAssetId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [showSource, setShowSource] = useState(true);
+  const [showBuilds, setShowBuilds] = useState(true);
+  // Which build's three-dot menu is open in the sidebar.
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  // Eval feedback: auto-prompt per turn until rated/dismissed, then collapse to
+  // an edit affordance. `feedbackEditing` force-opens the panel for a turn.
+  const [feedbackDismissed, setFeedbackDismissed] = useState<Set<string>>(
+    new Set()
+  );
+  const [feedbackEditing, setFeedbackEditing] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
@@ -156,6 +180,22 @@ export function TextToCadStudio({
 
   // Abort an in-flight stream if the studio unmounts.
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  // Close the build three-dot menu on any outside click.
+  useEffect(() => {
+    if (!openMenuId) return;
+    const close = () => setOpenMenuId(null);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [openMenuId]);
+
+  // Once the morph finishes and the model is mounted underneath, give it a
+  // beat to load, then clear the transition (unmounts the faded-out blob).
+  useEffect(() => {
+    if (transition?.phase !== "reveal") return;
+    const t = setTimeout(() => setTransition(null), 550);
+    return () => clearTimeout(t);
+  }, [transition]);
 
   // Auto-grow the composer textarea with its content (capped), and shrink
   // back when it's cleared after a send.
@@ -197,6 +237,8 @@ export function TextToCadStudio({
   function startNewBuild() {
     abortRef.current?.abort();
     setGenerating(false);
+    setTransition(null);
+    setSourceAssetId(null);
     setActiveRootId(null);
     setViewTurnId(null);
     setProgress([]);
@@ -210,6 +252,8 @@ export function TextToCadStudio({
 
   function openThread(t: StudioThread) {
     if (generating) return;
+    setTransition(null);
+    setSourceAssetId(null);
     setActiveRootId(t.rootId);
     const lastGood = [...t.turns]
       .reverse()
@@ -220,6 +264,17 @@ export function TextToCadStudio({
     setSelectedPartId(null);
     setShowHistory(false);
     setRenaming(false);
+  }
+
+  // Delete a build (root + revisions) from history. Optimistic; if it was the
+  // open build, reset to a blank canvas.
+  async function deleteBuild(t: StudioThread) {
+    setOpenMenuId(null);
+    const ids = t.turns.map((x) => x.id);
+    setThreads((prev) => prev.filter((x) => x.rootId !== t.rootId));
+    if (activeRootId === t.rootId) startNewBuild();
+    const res = await deleteCadBuild({ generationIds: ids });
+    if ("error" in res) setError(res.error);
   }
 
   async function saveName() {
@@ -321,6 +376,10 @@ export function TextToCadStudio({
       setActiveRootId(ev.generationId);
     }
     setViewTurnId(ev.generationId);
+    // Kick off the loader→model morph (the blob is still on screen here; it
+    // morphs into this asset, then we crossfade to the real viewer). No asset
+    // means nothing to morph into — fall straight through to the empty state.
+    setTransition(ev.fileAssetId ? { assetId: ev.fileAssetId, phase: "morph" } : null);
     // Clear the composer only now that the turn landed — on an error the
     // user's typed instruction (and any attached refs) stay put to retry.
     setPrompt("");
@@ -395,6 +454,10 @@ export function TextToCadStudio({
 
     setError(null);
     setProgress([]);
+    // A revision deforms the model currently on screen (edit-in-place); a fresh
+    // build has none, so the wireframe blob deforms instead.
+    setSourceAssetId(parentId ? activeAssetId : null);
+    setTransition(null);
     setGenerating(true);
     setShowHistory(false);
 
@@ -464,6 +527,16 @@ export function TextToCadStudio({
     }
   }
 
+  // Viewer layering. Exactly ONE of the two renders while work is in flight:
+  // the transition canvas (deforming loader / morph) OWNS the frame during
+  // generating + morph, then fades out on reveal as the crisp model takes over.
+  // Showing the crisp model underneath a deforming overlay made the wobbling
+  // silhouette reveal the static model at its edges — a ghost "second copy".
+  const showTransition = generating || transition !== null;
+  const showModel =
+    !!activeAssetId &&
+    (!showTransition || transition?.phase === "reveal");
+
   const composerLabel = generating
     ? "Generating…"
     : activeThread
@@ -471,10 +544,10 @@ export function TextToCadStudio({
       : "Generate";
 
   return (
-    <div className="relative min-h-[calc(100vh-4rem)]">
-      <div className="mx-auto grid max-w-6xl gap-8 px-4 pb-44 pt-6 lg:grid-cols-[1fr_300px]">
+    <div className="relative min-h-[calc(100vh-4rem)] lg:h-[calc(100vh-4rem)] lg:overflow-hidden">
+      <div className="mx-auto grid max-w-6xl gap-8 px-4 pb-44 pt-6 lg:h-full lg:min-h-0 lg:pb-0 lg:grid-cols-[1fr_300px]">
         {/* Main column */}
-        <section className="min-w-0">
+        <section className="min-w-0 lg:min-h-0 lg:overflow-y-auto lg:pb-36">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               {activeThread && !generating && viewedTurn?.fileAssetId ? (
@@ -541,17 +614,11 @@ export function TextToCadStudio({
 
           {/* Viewer / progress / empty state */}
           <div className="mt-5 overflow-hidden rounded-xl border border-foreground/10">
-            <div className="aspect-square w-full bg-muted/30">
-              {generating ? (
-                <div className="flex h-full w-full flex-col">
-                  <Suspense fallback={<div className="min-h-0 flex-1" />}>
-                    <MaterializingBlob className="min-h-0 flex-1" />
-                  </Suspense>
-                  <div className="shrink-0">
-                    <ProgressPanel events={progress} />
-                  </div>
-                </div>
-              ) : activeAssetId ? (
+            <div className="relative aspect-[4/3] w-full bg-muted/30 lg:aspect-auto lg:h-[clamp(260px,46vh,520px)]">
+              {/* Crisp model — the BASE layer (fixed frame). Stays mounted
+                  under the transition so the morph fades to reveal it with no
+                  remount/zoom; on a revision it's the shape being deformed. */}
+              {showModel && activeAssetId && (
                 <Suspense fallback={<ViewerSkeleton label="Loading model…" />}>
                   <ModelViewer
                     key={activeAssetId}
@@ -560,6 +627,7 @@ export function TextToCadStudio({
                     mode="detail"
                     showZoomControls
                     inspect
+                    fixedFrame
                     annotateMode={annotateMode}
                     onToggleAnnotate={() => setAnnotateMode((v) => !v)}
                     annotations={annotations}
@@ -569,10 +637,53 @@ export function TextToCadStudio({
                         { id: crypto.randomUUID(), ...a },
                       ])
                     }
-                    className="h-full w-full"
+                    className="absolute inset-0 h-full w-full"
                   />
                 </Suspense>
-              ) : (
+              )}
+
+              {/* Transition overlay — deforming loader (blob for a fresh build,
+                  the previous solid model for a revision) → morph into the new
+                  shape. Same frame as the model layer; fades out on reveal. */}
+              {showTransition && (
+                <div
+                  className={`absolute inset-0 transition-opacity duration-500 ${
+                    transition?.phase === "reveal" ? "opacity-0" : "opacity-100"
+                  }`}
+                >
+                  <Suspense fallback={<div className="h-full w-full" />}>
+                    <MaterializingBlob
+                      className="h-full w-full"
+                      active
+                      sourceUrl={
+                        sourceAssetId
+                          ? `/api/files/preview/${sourceAssetId}`
+                          : null
+                      }
+                      morphUrl={
+                        transition
+                          ? `/api/files/preview/${transition.assetId}`
+                          : null
+                      }
+                      onMorphComplete={() =>
+                        setTransition((t) =>
+                          t ? { ...t, phase: "reveal" } : null
+                        )
+                      }
+                    />
+                  </Suspense>
+                  {generating && !transition && (
+                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
+                      <div className="glass rounded-2xl px-5 py-4 shadow-lg">
+                        <ProgressPanel events={progress} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Empty state — no model, nothing generating. */}
+              {!showTransition && !showModel && (
                 <div className="flex h-full w-full flex-col">
                   <Suspense fallback={<div className="min-h-0 flex-1" />}>
                     <MaterializingBlob className="min-h-0 flex-1" />
@@ -629,6 +740,53 @@ export function TextToCadStudio({
               fine detail and exact dimensions may differ.
             </p>
           )}
+
+          {/* Feedback — the in-the-moment eval signal (feeds /text-to-cad/eval).
+              Sits ABOVE the actions; auto-prompts after each generation until
+              rated or dismissed, then collapses to a small edit affordance. */}
+          {!generating &&
+            viewedTurn?.status === "succeeded" &&
+            (() => {
+              const vt = viewedTurn;
+              const rated =
+                !!vt.rating ||
+                vt.feedbackTags.length > 0 ||
+                !!vt.feedbackNote;
+              const open =
+                feedbackEditing === vt.id ||
+                (!rated && !feedbackDismissed.has(vt.id));
+              return open ? (
+                <TurnFeedback
+                  key={vt.id}
+                  turn={vt}
+                  onSaved={(patch) => {
+                    applyFeedback(vt.id, patch);
+                    setFeedbackEditing(null);
+                  }}
+                  onDismiss={() => {
+                    setFeedbackDismissed((s) => new Set(s).add(vt.id));
+                    setFeedbackEditing(null);
+                  }}
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setFeedbackEditing(vt.id)}
+                  className="mt-4 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <MessageSquareTextIcon className="size-3.5" />
+                  {rated
+                    ? `Feedback ${
+                        vt.rating === "good"
+                          ? "👍"
+                          : vt.rating === "bad"
+                            ? "👎"
+                            : "saved"
+                      } · edit`
+                    : "Add feedback"}
+                </button>
+              );
+            })()}
 
           {/* Actions for the viewed model (the selected part, for assemblies) */}
           {!generating && activeAssetId && (
@@ -749,32 +907,30 @@ export function TextToCadStudio({
             </div>
           )}
 
-          {/* Feedback — the in-the-moment eval signal (feeds /text-to-cad/eval) */}
-          {!generating && viewedTurn?.status === "succeeded" && (
-            <TurnFeedback
-              key={viewedTurn.id}
-              turn={viewedTurn}
-              onSaved={(patch) => applyFeedback(viewedTurn.id, patch)}
-            />
-          )}
+        </section>
 
-          {/* Revision history — collapsed until opened */}
+        {/* Right sidebar — revisions + parametric source for the current build,
+            then the build history. self-start keeps it at content height instead
+            of stretching to match the (tall) viewer column. */}
+        <aside className="flex flex-col gap-5 self-start lg:sticky lg:top-6 lg:max-h-[calc(100vh-7rem)] lg:min-h-0">
+          {/* Revisions for the current build */}
           {!generating && turns.length > 0 && (
-            <div className="mt-5">
+            <div>
               <button
                 type="button"
                 onClick={() => setShowHistory((v) => !v)}
-                className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
+                className="flex w-full items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
               >
+                <HistoryIcon className="size-4 shrink-0" />
+                <span>Revisions ({turns.length})</span>
                 {showHistory ? (
-                  <ChevronDown className="size-4" />
+                  <ChevronDown className="ml-auto size-4 shrink-0" />
                 ) : (
-                  <ChevronRight className="size-4" />
+                  <ChevronRight className="ml-auto size-4 shrink-0" />
                 )}
-                Revision history ({turns.length})
               </button>
               {showHistory && (
-                <ol className="mt-2 space-y-1.5">
+                <ol className="mt-2 space-y-1.5 lg:max-h-56 lg:overflow-y-auto">
                   {turns.map((t, i) => {
                     const isViewed = viewedTurn?.id === t.id;
                     const selectable = t.status === "succeeded" && !!t.fileAssetId;
@@ -810,20 +966,21 @@ export function TextToCadStudio({
             </div>
           )}
 
-          {/* Source code — collapsible */}
+          {/* Parametric source for the current build — collapsible */}
           {!generating && viewedTurn?.sourceCode && (
-            <div className="mt-5">
+            <div>
               <button
                 type="button"
                 onClick={() => setShowSource((v) => !v)}
-                className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
+                className="flex w-full items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
               >
+                <Code2Icon className="size-4 shrink-0" />
+                <span>Parametric source</span>
                 {showSource ? (
-                  <ChevronDown className="size-4" />
+                  <ChevronDown className="ml-auto size-4 shrink-0" />
                 ) : (
-                  <ChevronRight className="size-4" />
+                  <ChevronRight className="ml-auto size-4 shrink-0" />
                 )}
-                Parametric source
               </button>
               {showSource && (
                 <pre className="mt-2 max-h-72 overflow-auto rounded-lg bg-muted/40 p-3 text-xs">
@@ -832,84 +989,106 @@ export function TextToCadStudio({
               )}
             </div>
           )}
-        </section>
 
-        {/* Thread list */}
-        <aside>
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-medium text-muted-foreground">Builds</h2>
+          {/* Build history — collapsible; header fixed, list scrolls */}
+          <div className="flex min-h-0 flex-1 flex-col">
             <button
               type="button"
-              onClick={startNewBuild}
-              aria-label="New build"
-              className="flex size-7 items-center justify-center rounded-md border border-foreground/15 hover:bg-foreground/5"
+              onClick={() => setShowBuilds((v) => !v)}
+              className="flex w-full shrink-0 items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
             >
-              <PlusIcon className="size-4" />
+              <BoxesIcon className="size-4 shrink-0" />
+              <span>Builds ({threads.length})</span>
+              {showBuilds ? (
+                <ChevronDown className="ml-auto size-4 shrink-0" />
+              ) : (
+                <ChevronRight className="ml-auto size-4 shrink-0" />
+              )}
             </button>
-          </div>
-          <ul className="mt-3 flex flex-col gap-2">
-            {threads.length === 0 && (
-              <li className="text-sm text-muted-foreground">No builds yet.</li>
-            )}
-            {threads.map((t) => {
-              const thumb = [...t.turns]
-                .reverse()
-                .find((x) => x.renderUrl)?.renderUrl;
-              // Fall back to a live 3D preview of the latest part when there's
-              // no rendered PNG (e.g. local dev with no headless GL). Server-
-              // rendered thumbnails remain the scale solution — see CON-175.
-              const previewAssetId = [...t.turns]
-                .reverse()
-                .find((x) => x.status === "succeeded" && x.fileAssetId)
-                ?.fileAssetId;
-              const isActive = t.rootId === activeRootId;
-              return (
-                <li key={t.rootId}>
-                  <button
-                    type="button"
-                    onClick={() => openThread(t)}
-                    className={`flex w-full cursor-pointer items-center gap-3 rounded-lg border p-2 text-left transition-colors ${
-                      isActive
-                        ? "border-foreground/30 bg-foreground/5"
-                        : "border-foreground/10 hover:bg-foreground/5"
-                    }`}
-                  >
-                    {thumb ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={thumb}
-                        alt=""
-                        className="h-10 w-10 shrink-0 rounded bg-muted/40 object-contain"
-                      />
-                    ) : previewAssetId ? (
-                      <div className="h-10 w-10 shrink-0 overflow-hidden rounded bg-muted/40">
-                        <Suspense fallback={<div className="h-full w-full" />}>
-                          <ModelViewer
-                            key={previewAssetId}
-                            modelUrl={`/api/files/preview/${previewAssetId}`}
-                            format="stl"
-                            mode="preview"
-                            className="h-full w-full"
-                          />
-                        </Suspense>
+            {showBuilds && (
+            <ul
+              className="mt-3 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-0.5 py-1"
+              style={{
+                maskImage:
+                  "linear-gradient(to bottom, transparent 0, black 14px, black calc(100% - 14px), transparent 100%)",
+                WebkitMaskImage:
+                  "linear-gradient(to bottom, transparent 0, black 14px, black calc(100% - 14px), transparent 100%)",
+              }}
+            >
+              {threads.length === 0 && (
+                <li className="text-sm text-muted-foreground">No builds yet.</li>
+              )}
+              {threads.map((t) => {
+                // Still PNG render captured per generation (newest with one).
+                const thumb = [...t.turns]
+                  .reverse()
+                  .find((x) => x.renderUrl)?.renderUrl;
+                const isActive = t.rootId === activeRootId;
+                return (
+                  <li key={t.rootId} className="relative">
+                    <button
+                      type="button"
+                      onClick={() => openThread(t)}
+                      className={`flex w-full cursor-pointer items-center gap-3 rounded-lg border p-2 pr-9 text-left transition-colors ${
+                        isActive
+                          ? "border-foreground/30 bg-foreground/5"
+                          : "border-foreground/10 hover:bg-foreground/5"
+                      }`}
+                    >
+                      {thumb ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={thumb}
+                          alt=""
+                          className="h-10 w-10 shrink-0 rounded bg-muted/40 object-contain"
+                        />
+                      ) : (
+                        <div className="h-10 w-10 shrink-0 rounded bg-muted/40" />
+                      )}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">
+                          {threadLabel(t)}
+                        </span>
+                        <span className="block text-xs text-muted-foreground">
+                          {t.turns.length} revision
+                          {t.turns.length === 1 ? "" : "s"}
+                        </span>
+                      </span>
+                    </button>
+
+                    {/* Three-dot menu (delete) */}
+                    <button
+                      type="button"
+                      aria-label="Build options"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenMenuId((id) => (id === t.rootId ? null : t.rootId));
+                      }}
+                      className="absolute right-1.5 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground/70 hover:bg-foreground/10 hover:text-foreground"
+                    >
+                      <EllipsisVerticalIcon className="size-4" />
+                    </button>
+                    {openMenuId === t.rootId && (
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="absolute right-1.5 top-10 z-20 min-w-[130px] rounded-lg border border-foreground/15 bg-card p-1 shadow-lg"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => deleteBuild(t)}
+                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
+                        >
+                          <Trash2Icon className="size-4" />
+                          Delete build
+                        </button>
                       </div>
-                    ) : (
-                      <div className="h-10 w-10 shrink-0 rounded bg-muted/40" />
                     )}
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">
-                        {threadLabel(t)}
-                      </span>
-                      <span className="block text-xs text-muted-foreground">
-                        {t.turns.length} revision
-                        {t.turns.length === 1 ? "" : "s"}
-                      </span>
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+                  </li>
+                );
+              })}
+            </ul>
+            )}
+          </div>
         </aside>
       </div>
 
@@ -1080,77 +1259,44 @@ function ViewerSkeleton({ label }: { label: string }) {
 
 /** Renders the streamed harness transcript as a live checklist. */
 function ProgressPanel({ events }: { events: CadProgressEvent[] }) {
+  // Only ever show the current step — the live status, not a transcript.
+  const current = events[events.length - 1];
+  const d = current
+    ? describeEvent(current)
+    : { text: "Getting started", sub: null as string | null };
   return (
-    <div className="flex w-full flex-col items-center gap-2 px-6 pb-6">
-      <ul className="flex max-w-sm flex-col items-center gap-1.5 text-sm">
-        {events.length === 0 && (
-          <li className="flex items-center gap-2 text-muted-foreground">
-            <Loader2Icon className="size-4 animate-spin" />
-            Starting…
-          </li>
+    <div className="flex items-center gap-3 text-sm">
+      <Loader2Icon className="size-4 shrink-0 animate-spin text-muted-foreground" />
+      <div className="flex flex-col">
+        <span className="font-medium text-foreground">{d.text}</span>
+        {d.sub && (
+          <span className="text-xs text-muted-foreground">{d.sub}</span>
         )}
-        {events.map((ev, i) => {
-          const isLast = i === events.length - 1;
-          const d = describeEvent(ev);
-          return (
-            <li
-              key={i}
-              className={`flex items-center justify-center gap-2 text-center ${d.tone}`}
-            >
-              {isLast ? (
-                <Loader2Icon className="size-4 shrink-0 animate-spin" />
-              ) : (
-                d.icon
-              )}
-              <span>{d.text}</span>
-            </li>
-          );
-        })}
-      </ul>
+      </div>
     </div>
   );
 }
 
 function describeEvent(ev: CadProgressEvent): {
   text: string;
-  icon: ReactNode;
-  tone: string;
+  sub: string | null;
 } {
   switch (ev.type) {
     case "phase":
-      return ev.phase === "generating"
-        ? {
-            text:
-              ev.attempt > 1
-                ? `Rewriting parametric code (attempt ${ev.attempt}/${ev.maxAttempts})…`
-                : "Writing parametric code…",
-            icon: <CheckIcon className="size-4 shrink-0 text-muted-foreground" />,
-            tone: "text-foreground",
-          }
-        : {
-            text: "Running geometry kernel (build123d)…",
-            icon: <CheckIcon className="size-4 shrink-0 text-muted-foreground" />,
-            tone: "text-foreground",
-          };
+      if (ev.phase === "generating") {
+        return ev.attempt > 1
+          ? { text: "Refining the design", sub: `Pass ${ev.attempt} of ${ev.maxAttempts}` }
+          : { text: "Designing your model", sub: null };
+      }
+      return { text: "Shaping the geometry", sub: null };
     case "validation":
       return ev.pass
-        ? {
-            text: "Solid is watertight & manifold",
-            icon: <CheckIcon className="size-4 shrink-0 text-emerald-600" />,
-            tone: "text-foreground",
-          }
-        : {
-            text: `Issues: ${ev.failures.join(", ") || "invalid solid"}`,
-            icon: (
-              <AlertTriangleIcon className="size-4 shrink-0 text-amber-600" />
-            ),
-            tone: "text-muted-foreground",
-          };
+        ? { text: "Almost there", sub: null }
+        : { text: "Tidying up a few details", sub: null };
     case "repairing":
       return {
-        text: `Repairing — attempt ${ev.attempt + 1} of ${ev.maxAttempts}…`,
-        icon: <RotateCwIcon className="size-4 shrink-0 text-muted-foreground" />,
-        tone: "text-foreground",
+        text: "Refining the design",
+        sub: `Pass ${ev.attempt + 1} of ${ev.maxAttempts}`,
       };
   }
 }
@@ -1164,11 +1310,13 @@ function describeEvent(ev: CadProgressEvent): {
 function TurnFeedback({
   turn,
   onSaved,
+  onDismiss,
 }: {
   turn: StudioTurn;
   onSaved: (
     patch: Pick<StudioTurn, "rating" | "feedbackTags" | "feedbackNote">
   ) => void;
+  onDismiss?: () => void;
 }) {
   const [rating, setRating] = useState<CadRating | null>(turn.rating);
   const [tags, setTags] = useState<CadFeedbackTag[]>(
@@ -1208,8 +1356,18 @@ function TurnFeedback({
     <div className="mt-5 rounded-lg border border-foreground/10 p-3">
       <div className="flex items-center gap-2">
         <span className="text-xs font-medium text-muted-foreground">
-          How did it do?
+          How did this turn out?
         </span>
+        {onDismiss && (
+          <button
+            type="button"
+            onClick={onDismiss}
+            aria-label="Dismiss feedback"
+            className="order-last ml-auto flex size-6 items-center justify-center rounded-md text-muted-foreground/70 hover:bg-foreground/10 hover:text-foreground"
+          >
+            <XIcon className="size-3.5" />
+          </button>
+        )}
         <button
           type="button"
           aria-pressed={rating === "good"}

@@ -37,7 +37,9 @@ from pydantic import BaseModel
 app = FastAPI(title="materialize-cad-runner")
 
 # Defaults; override via env in the deployment.
-RUN_TIMEOUT_S = int(os.environ.get("CAD_RUN_TIMEOUT_S", "30"))
+# 60s wall clock: a dense mesh-mode marching-cubes grid or a heavy build123d
+# loft/boolean can need well over the old 30s. CPU limit tracks it (below).
+RUN_TIMEOUT_S = int(os.environ.get("CAD_RUN_TIMEOUT_S", "60"))
 # RLIMIT_AS caps *virtual* address space, not RSS. Python + build123d +
 # OpenCASCADE map well over 1 GB of address space at import time, so a 1 GB
 # cap can ENOMEM before user code even runs. Default to 4 GB; the container
@@ -45,13 +47,19 @@ RUN_TIMEOUT_S = int(os.environ.get("CAD_RUN_TIMEOUT_S", "30"))
 MEM_LIMIT_BYTES = int(
     os.environ.get("CAD_RUN_MEM_BYTES", str(4 * 1024 * 1024 * 1024))
 )
-CPU_LIMIT_S = int(os.environ.get("CAD_RUN_CPU_S", "25"))
+# Track the wall-clock budget — CPU-bound work (marching cubes, OCC booleans)
+# would otherwise hit SIGXCPU long before the wall-clock terminate fires.
+CPU_LIMIT_S = int(os.environ.get("CAD_RUN_CPU_S", "55"))
 RUNNER_SECRET = os.environ.get("CAD_RUNNER_SECRET", "")
 
 
 class RunRequest(BaseModel):
     code: str
     formats: list[str] = ["stl", "step"]
+    # Which code dialect the script is written in. "build123d" (default) or
+    # "cadquery" — both ride OpenCASCADE; only the export call differs. Lets the
+    # harness route to a different B-rep front-end (and A/B them) with one sidecar.
+    engine: str = "build123d"
 
 
 def _apply_limits() -> None:
@@ -64,7 +72,9 @@ def _apply_limits() -> None:
         pass
 
 
-def _process_shape(shape, formats: list[str], tmp: str, stem: str) -> dict:
+def _process_shape(
+    shape, formats: list[str], tmp: str, stem: str, engine: str = "build123d"
+) -> dict:
     """Export + measure + render one solid. Returns the per-part payload
     (files, render, geometry, validity). Shared by the single-`result` path
     and each member of a multi-part `parts` assembly."""
@@ -80,26 +90,47 @@ def _process_shape(shape, formats: list[str], tmp: str, stem: str) -> dict:
         },
         "error": None,
     }
-    from build123d import export_stl, export_step
-
-    volume = float(getattr(shape, "volume", 0.0) or 0.0)
-    entry["validation"]["isSolid"] = volume > 0.0
+    import trimesh
+    from trimesh import repair as trimesh_repair
 
     stl_path = os.path.join(tmp, f"{stem}.stl")
-    export_stl(shape, stl_path)
-
-    # STEP comes straight from the OCC BRep (not the mesh) — keep it as-is.
-    if "step" in formats:
-        step_path = os.path.join(tmp, f"{stem}.step")
-        export_step(shape, step_path)
-        with open(step_path, "rb") as f:
-            entry["files"]["step"] = base64.b64encode(f.read()).decode()
+    # `result` may be a build123d solid (B-rep) OR a trimesh.Trimesh (mesh mode:
+    # implicit/TPMS/lattice/organic geometry the CAD kernel can't express). Mesh
+    # mode has no BRep, so no STEP — STL comes straight off the mesh.
+    is_mesh = isinstance(shape, trimesh.Trimesh)
 
     try:
-        import trimesh
-        from trimesh import repair as trimesh_repair
+        if is_mesh:
+            mesh = shape
+            entry["validation"]["isSolid"] = float(abs(mesh.volume) or 0.0) > 0.0
+            mesh.export(stl_path)
+        elif engine == "cadquery":
+            import cadquery as cq
 
-        mesh = trimesh.load(stl_path, force="mesh")
+            # CadQuery rides the same OCCT kernel; only the export call differs.
+            cq.exporters.export(shape, stl_path)
+            if "step" in formats:
+                step_path = os.path.join(tmp, f"{stem}.step")
+                cq.exporters.export(shape, step_path)
+                with open(step_path, "rb") as f:
+                    entry["files"]["step"] = base64.b64encode(f.read()).decode()
+            mesh = trimesh.load(stl_path, force="mesh")
+            # isSolid from the loaded mesh (uniform across engines).
+            entry["validation"]["isSolid"] = float(abs(mesh.volume) or 0.0) > 0.0
+        else:
+            from build123d import export_stl, export_step
+
+            entry["validation"]["isSolid"] = (
+                float(getattr(shape, "volume", 0.0) or 0.0) > 0.0
+            )
+            export_stl(shape, stl_path)
+            # STEP comes straight from the OCC BRep (not the mesh).
+            if "step" in formats:
+                step_path = os.path.join(tmp, f"{stem}.step")
+                export_step(shape, step_path)
+                with open(step_path, "rb") as f:
+                    entry["files"]["step"] = base64.b64encode(f.read()).decode()
+            mesh = trimesh.load(stl_path, force="mesh")
 
         # Best-effort cleanup so boolean-op artifacts (unwelded verts,
         # degenerate/duplicate faces, flipped winding, small holes) don't
@@ -184,7 +215,9 @@ def _process_shape(shape, formats: list[str], tmp: str, stem: str) -> dict:
     return entry
 
 
-def _execute(code: str, formats: list[str], out: "mp.Queue") -> None:
+def _execute(
+    code: str, formats: list[str], out: "mp.Queue", engine: str = "build123d"
+) -> None:
     """Child-process worker: exec the script, export, measure, validate.
 
     Output contract: the script assigns either `result` (a single solid) OR
@@ -208,7 +241,13 @@ def _execute(code: str, formats: list[str], out: "mp.Queue") -> None:
         "error": None,
     }
     try:
-        import build123d as b3d  # noqa: F401
+        # Warm the kernel for the chosen engine (the script also imports what it
+        # needs). Only the requested one is imported, so a cadquery-only venv
+        # doesn't need build123d installed and vice-versa.
+        if engine == "cadquery":
+            import cadquery as _cq  # noqa: F401
+        else:
+            import build123d as b3d  # noqa: F401
 
         ns: dict = {}
         exec(compile(code, "<generated>", "exec"), ns, ns)  # noqa: S102
@@ -219,7 +258,7 @@ def _execute(code: str, formats: list[str], out: "mp.Queue") -> None:
 
         with tempfile.TemporaryDirectory() as tmp:
             if single is not None:
-                entry = _process_shape(single, formats, tmp, "model")
+                entry = _process_shape(single, formats, tmp, "model", engine)
                 result_payload["files"] = entry["files"]
                 result_payload["renderPng"] = entry["renderPng"]
                 result_payload["geometry"] = entry["geometry"]
@@ -235,7 +274,7 @@ def _execute(code: str, formats: list[str], out: "mp.Queue") -> None:
                     stem = "".join(
                         c if c.isalnum() else "-" for c in str(name)
                     ).strip("-") or f"part{i}"
-                    entry = _process_shape(shape, formats, tmp, stem)
+                    entry = _process_shape(shape, formats, tmp, stem, engine)
                     parts.append({"name": str(name), **entry})
                     all_ok = all_ok and entry["validation"]["isSolid"]
                 # Top-level mirrors the first part for single-part consumers.
@@ -269,12 +308,60 @@ def _execute(code: str, formats: list[str], out: "mp.Queue") -> None:
 
 
 def _render(mesh) -> Optional[str]:
-    """Best-effort offscreen PNG (base64). Returns None where headless GL
-    isn't available — the UI tolerates a missing render."""
+    """Headless clay-style preview PNG (base64).
+
+    Uses matplotlib's Agg backend rather than trimesh's `scene.save_image`,
+    which needs a live OpenGL/pyglet context and silently fails headless (on
+    macOS dev and most servers) — leaving every render empty. That empty
+    render is load-bearing now: the VLM aesthetic judge and the repair loop
+    feed on it, so a real (if simple) Lambert-shaded 3/4 view matters more
+    than photoreal GL. Returns None on any failure — callers tolerate it."""
     try:
-        scene = mesh.scene()
-        png = scene.save_image(resolution=(640, 480))
-        return base64.b64encode(png).decode()
+        import io
+
+        import numpy as np
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+        tris = mesh.triangles  # (n, 3, 3)
+        if len(tris) == 0:
+            return None
+
+        # Cheap Lambert shading against a fixed key light for a clay read.
+        light = np.array([0.4, 0.5, 0.75])
+        light = light / np.linalg.norm(light)
+        shade = np.clip(np.abs(mesh.face_normals @ light), 0.15, 1.0)
+        base = np.array([0.62, 0.64, 0.67])  # neutral gray
+        colors = np.clip(base[None, :] * (0.45 + 0.6 * shade)[:, None], 0, 1)
+
+        fig = plt.figure(figsize=(6.4, 4.8), dpi=100)
+        ax = fig.add_subplot(111, projection="3d")
+        ax.add_collection3d(
+            Poly3DCollection(tris, facecolors=colors, edgecolors="none")
+        )
+
+        bounds = mesh.bounds  # (2, 3) min/max
+        center = bounds.mean(axis=0)
+        span = float((bounds[1] - bounds[0]).max()) * 0.6 or 1.0
+        ax.set_xlim(center[0] - span, center[0] + span)
+        ax.set_ylim(center[1] - span, center[1] + span)
+        ax.set_zlim(center[2] - span, center[2] + span)
+        try:
+            ax.set_box_aspect((1, 1, 1))
+        except Exception:  # noqa: BLE001 — older mpl lacks set_box_aspect
+            pass
+        ax.view_init(elev=22, azim=-55)
+        ax.set_axis_off()
+
+        buf = io.BytesIO()
+        fig.savefig(
+            buf, format="png", bbox_inches="tight", pad_inches=0, transparent=True
+        )
+        plt.close(fig)
+        return base64.b64encode(buf.getvalue()).decode()
     except Exception:  # noqa: BLE001
         return None
 
@@ -288,7 +375,9 @@ async def run(req: RunRequest, request: Request) -> dict:
 
     ctx = mp.get_context("spawn")
     out: "mp.Queue" = ctx.Queue()
-    proc = ctx.Process(target=_execute, args=(req.code, req.formats, out))
+    proc = ctx.Process(
+        target=_execute, args=(req.code, req.formats, out, req.engine)
+    )
     proc.start()
 
     # Read the result BEFORE joining. The child's payload (STL + STEP, both
