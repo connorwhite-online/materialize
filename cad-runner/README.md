@@ -35,6 +35,25 @@ CAD_RUNNER_USE_MOCK=false
 Leave `CAD_RUNNER_USE_MOCK` unset (or `true`) and the app uses an in-process
 mock — no sidecar needed for local UI/pipeline work.
 
+## Deploy to Railway
+
+`railway.toml` (next to this file) drives the deploy. Create a service from
+this repo and **set its Root Directory to `cad-runner`** — that's the only
+manual setting; Railway then builds the Dockerfile and healthchecks `/health`.
+The container binds Railway's injected `$PORT` (Dockerfile `CMD`), so no port
+config is needed.
+
+Then wire the two sides:
+
+- On the **Railway service**: `CAD_RUNNER_SECRET=<long random token>`. Restrict
+  egress — this service needs no outbound network. Give it generous memory.
+- On the **Vercel app**: `CAD_RUNNER_URL=https://<service>.up.railway.app`,
+  `CAD_RUNNER_SECRET=<same token>`, and leave `CAD_RUNNER_USE_MOCK` unset/false.
+
+Migration `0043` (`cad_generations.project_id`) applies automatically on the
+Vercel build (`npm run db:migrate`). Optional generation backends stay inert
+until their keys are set: `FAL_KEY`, `CAD_AESTHETIC_JUDGE=true`.
+
 ## Security
 
 Executes model-generated Python. The **container** is the trust boundary:

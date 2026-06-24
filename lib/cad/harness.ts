@@ -9,6 +9,7 @@ import { runCadCode } from "./runner-client";
 import { SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, extractCode, gradeRun } from "./prompt";
 import { buildKnowledgeBlock, type CadProcess } from "./knowledge";
 import { judgeAesthetics } from "./critique";
+import { conceptImage, CONCEPT_IMAGE_NOTE } from "./concept";
 import { selectExemplars, formatExemplars } from "./knowledge/exemplars";
 import { modelForRole, planStepEnabled, type CadRole } from "./models";
 import { CAD_FEEDBACK_TAG_LABELS, type CadFeedbackTag } from "./feedback";
@@ -34,7 +35,10 @@ export interface PriorFeedback {
  * with the eval runner).
  */
 
-const MAX_ATTEMPTS_DEFAULT = 3;
+// Complex parts often clear a sequence of distinct build123d gotchas; give the
+// repair loop room to cross several hurdles (each repair turn gets a targeted
+// hint). Only failing generations use the extra turns — success exits early.
+const MAX_ATTEMPTS_DEFAULT = 4;
 
 export interface HarnessInput {
   prompt: string;
@@ -147,13 +151,38 @@ function buildUserPrompt(input: HarnessInput, plan?: string): string {
 
   // On a fresh build, show the best-matching verified exemplar as a style
   // reference. (Revisions already have the prior code as their reference.)
-  // Returns "" until exemplars are sidecar-verified, so this is a no-op now.
+  // The exemplars are sidecar-verified (scripts/verify-exemplars.ts), so this
+  // now injects a matching example when one scores > 0 for the prompt.
   if (!input.priorSourceCode) {
     const exemplars = formatExemplars(selectExemplars(input.prompt));
     if (exemplars) out += `\n\n${exemplars}`;
   }
 
   return out;
+}
+
+/**
+ * Targeted repair guidance for known, recurring failure classes — a generic
+ * "fix it" lets the model retry the same mistake. Returns "" for unknown errors.
+ */
+function repairHintFor(note: string): string {
+  const n = note.toLowerCase();
+  if (/(fillet|chamfer)/.test(n) && /(smaller|max_fillet|radius|length|valid)/.test(n)) {
+    return "That fillet/chamfer radius is too large for the geometry. REDUCE it substantially (at least halve it, and keep it well under the thinnest adjacent wall), apply it to fewer/specific edges, or wrap it in try/except and fall back to max_fillet() — do NOT retry the same radius.";
+  }
+  if (/rectanglerounded/.test(n) && /buildsketch/.test(n)) {
+    return "RectangleRounded is a sketch primitive — use it INSIDE `with BuildSketch(...)` then extrude, not as a BuildPart operation.";
+  }
+  if (/slot/.test(n) && /width|height/.test(n)) {
+    return "Slot/SlotOverall require width > height. Swap the dimensions and rotate the sketch 90°, or build the slot from a Rectangle + two Circles instead.";
+  }
+  if (/buildpart|buildsketch/.test(n) && /(combined|builder|part.{0,3}attribute|can.?t be)/.test(n)) {
+    return "A BuildPart/BuildSketch is a builder, not a Shape — don't add/subtract/combine the builders. Use `.part` (e.g. `part.part`, or `a.part + b.part`), or build everything in ONE BuildPart with nested add/subtract modes.";
+  }
+  if (/no result|oom|crash|killed|memory|timed out/.test(n)) {
+    return "The previous attempt CRASHED or hung the geometry kernel — it was too heavy. Drastically SIMPLIFY: far fewer boolean operations, no large loops or dense patterns, coarser detail, simple primitives. Build the simplest geometry that still reads as the requested object.";
+  }
+  return "";
 }
 
 /**
@@ -188,6 +217,18 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
     }
   };
 
+  // Per-prompt concept image (fresh builds only): a beautiful product render the
+  // generator builds TOWARD — taste injection that hand-authored code exemplars
+  // can't provide. Best-effort + gated by FAL_KEY; null when disabled/failed.
+  const conceptImg =
+    useModel && !input.priorSourceCode
+      ? await conceptImage(input.prompt, input.signal)
+      : null;
+  const withConcept = (base?: PromptImage[] | null): PromptImage[] | undefined => {
+    const imgs = [...(base ?? []), ...(conceptImg ? [conceptImg] : [])];
+    return imgs.length ? imgs : undefined;
+  };
+
   // Plan-then-code: a short design plan up front (fresh builds only — revisions
   // already have the prior code as their plan). Best-effort: a planning failure
   // must not block generation. No-op without model credentials.
@@ -198,9 +239,11 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
       const text = await timed("plan", planModel, () =>
         completeText({
           system: PLAN_SYSTEM_PROMPT,
-          prompt: buildPlanPrompt(input),
+          prompt: conceptImg
+            ? `${buildPlanPrompt(input)}\n\n${CONCEPT_IMAGE_NOTE}`
+            : buildPlanPrompt(input),
           model: planModel,
-          images: input.images ?? undefined,
+          images: withConcept(input.images),
           signal: input.signal,
         })
       );
@@ -223,15 +266,41 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
       // thereafter. Both default to the strong model until configured.
       const role: CadRole = repairNote ? "repair" : "implement";
       const model = modelForRole(role);
+      // On a repair turn, show the model a render of its OWN previous attempt
+      // (when one exists) — text errors alone leave it blind to the actual
+      // form. A render only exists once the run produced a valid solid, so
+      // this kicks in mainly for "printable but visually weak" repairs.
+      const priorRender = repairNote ? lastRun?.renderPng : undefined;
       const userPrompt = repairNote
-        ? `${buildUserPrompt(input, plan)}\n\nThe previous attempt failed because ${repairNote}. Here is that code:\n\`\`\`python\n${lastCode}\n\`\`\`\nFix it.`
+        ? [
+            buildUserPrompt(input, plan),
+            "",
+            `The previous attempt failed because ${repairNote}. Here is that code:`,
+            "```python",
+            lastCode,
+            "```",
+            repairHintFor(repairNote),
+            priorRender
+              ? "A render of that previous attempt is attached — use it to see what is actually wrong with the form, then fix it."
+              : "",
+            "Fix it.",
+          ]
+            .filter(Boolean)
+            .join("\n")
         : buildUserPrompt(input, plan);
+      const images: PromptImage[] = [
+        ...(input.images ?? []),
+        ...(conceptImg ? [conceptImg] : []),
+        ...(priorRender
+          ? [{ data: priorRender, mediaType: "image/png" as const }]
+          : []),
+      ];
       const text = await timed(role, model, () =>
         completeText({
           system: SYSTEM_PROMPT,
-          prompt: userPrompt,
+          prompt: conceptImg ? `${userPrompt}\n\n${CONCEPT_IMAGE_NOTE}` : userPrompt,
           model,
-          images: input.images ?? undefined,
+          images: images.length ? images : undefined,
           signal: input.signal,
         })
       );

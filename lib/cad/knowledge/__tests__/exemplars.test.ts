@@ -34,9 +34,12 @@ describe("selectExemplars", () => {
     expect(selectExemplars("a turbine blade", { pool })).toEqual([]);
   });
 
-  it("returns nothing from the real (currently unverified) exemplar set", () => {
-    // Guard: until exemplars are sidecar-verified, none reach a prompt.
-    expect(selectExemplars("an enclosure box")).toEqual([]);
+  it("surfaces a matching verified exemplar from the real set", () => {
+    // The real exemplars are now sidecar-verified (scripts/verify-exemplars.ts),
+    // so a matching prompt reaches the model as a style reference.
+    const picked = selectExemplars("an enclosure box");
+    expect(picked.length).toBeGreaterThan(0);
+    expect(picked.every((e) => e.verified)).toBe(true);
   });
 });
 
@@ -50,12 +53,18 @@ describe("formatExemplars", () => {
 });
 
 describe("CAD_EXEMPLARS authoring invariants", () => {
-  it("every exemplar assigns `result` and ships unverified until sidecar-checked", () => {
+  it("every exemplar assigns `result`, imports build123d, and is sidecar-verified", () => {
     expect(CAD_EXEMPLARS.length).toBeGreaterThanOrEqual(6);
     for (const e of CAD_EXEMPLARS) {
-      expect(e.code).toMatch(/result\s*=/);
-      expect(e.code).toMatch(/from build123d import \*/);
-      expect(e.verified).toBe(false);
+      // Single solid (`result =`) or a multi-part assembly (`parts =`).
+      expect(e.code).toMatch(/(?:result|parts)\s*=/);
+      // B-rep exemplars import build123d; mesh-mode uses trimesh; organic-
+      // functional uses the SDF toolkit.
+      expect(e.code).toMatch(/from build123d import \*|import trimesh|from sdf_kit import/);
+      // Gate: an exemplar is only shipped once scripts/verify-exemplars.ts
+      // confirms it compiles to a valid watertight solid. Keep new exemplars
+      // out of this array (verified:false) until they pass.
+      expect(e.verified).toBe(true);
       expect(e.keywords.length).toBeGreaterThan(0);
     }
   });
