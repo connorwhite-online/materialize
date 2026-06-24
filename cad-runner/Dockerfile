@@ -7,6 +7,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 libglu1-mesa libxrender1 libxext6 libsm6 \
     && rm -rf /var/lib/apt/lists/*
 
+# Tame the scientific-Python stack's VIRTUAL-memory footprint so it fits inside
+# the per-run RLIMIT_AS cap (app.py). glibc malloc reserves up to
+# 8 x ncpu x 64MB of arenas, and BLAS/OpenMP reserve per-thread pools — on a
+# multi-core host that's several GB of address space mapped at import, which
+# can trip the cap and abort OpenCASCADE before any user code runs (the symptom
+# is "worker produced no result"). One arena + single-threaded BLAS keeps it
+# lean; the CAD workload is OpenCASCADE-bound, not BLAS-bound, so this costs
+# effectively nothing. These are baked into the image so deployments don't have
+# to hand-set them.
+ENV MALLOC_ARENA_MAX=2 \
+    OMP_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1 \
+    NUMEXPR_NUM_THREADS=1
+
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
