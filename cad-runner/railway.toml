@@ -1,0 +1,27 @@
+# Railway deploy config for the CAD execution sidecar.
+#
+# In the Railway service, set Root Directory to `cad-runner` so this file and
+# the Dockerfile next to it are the ones Railway uses (the repo root is the
+# Next.js app, which must NOT be built here). With the root directory set,
+# everything below is automatic — no manual port or healthcheck wiring.
+#
+# After it's up, set on the service:
+#   CAD_RUNNER_SECRET = <a long random token>   (also set the same on Vercel)
+# and on the Vercel app:
+#   CAD_RUNNER_URL    = https://<this-service>.up.railway.app
+#   CAD_RUNNER_SECRET = <same token>
+# Leave CAD_RUNNER_USE_MOCK unset/false in prod.
+#
+# Security: this container runs model-generated Python. It needs NO outbound
+# network (LLM/fal.ai calls happen from the Next app), so restrict egress on
+# the service. Give it generous memory — CAD runs are RAM-hungry.
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3

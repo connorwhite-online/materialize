@@ -22,4 +22,7 @@ EXPOSE 8000
 # outbound network, a read-only root filesystem, and memory/CPU caps.
 # Those container-level controls are the real trust boundary; the
 # per-run rlimits + timeout in app.py are a second layer.
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+# Shell form so ${PORT} expands at runtime: Railway (and most PaaS) inject
+# the listening port via $PORT and probe the healthcheck on it. Falls back to
+# 8000 for local `docker run`.
+CMD uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000}
