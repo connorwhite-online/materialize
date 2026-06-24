@@ -50,8 +50,10 @@
   --color-primary: var(--primary);
   --color-popover-foreground: var(--popover-foreground);
   --color-popover: var(--popover);
+  --color-popover-translucent: var(--popover-translucent);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+  --color-card-translucent: var(--card-translucent);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -85,6 +87,12 @@
   --card-foreground: oklch(0.145 0.008 80);
   --popover: oklch(1 0.006 80);
   --popover-foreground: oklch(0.145 0.008 80);
+  /* Translucent surface fills for frosted-glass floating layers
+     (dialogs, popovers, dropdowns). Pair with backdrop-blur — the
+     blur is what turns the opacity into glass. Tuned to ~0.72 so
+     content reads through softly without losing contrast on text. */
+  --card-translucent: oklch(1 0.006 80 / 0.7);
+  --popover-translucent: oklch(1 0.006 80 / 0.72);
   --primary: oklch(0.205 0.008 80);
   --primary-foreground: oklch(0.985 0.006 80);
   --secondary: oklch(0.95 0.008 80);
@@ -132,6 +140,10 @@
   --card-foreground: oklch(0.985 0.005 80);
   --popover: oklch(0.205 0.006 80);
   --popover-foreground: oklch(0.985 0.005 80);
+  /* Dark-mode glass sits a touch more opaque (0.78/0.8) — dark
+     translucent surfaces lose legibility faster than light ones. */
+  --card-translucent: oklch(0.205 0.006 80 / 0.78);
+  --popover-translucent: oklch(0.205 0.006 80 / 0.8);
   --primary: oklch(0.922 0.005 80);
   --primary-foreground: oklch(0.205 0.006 80);
   --secondary: oklch(0.269 0.007 80);
@@ -159,149 +171,73 @@
   --sidebar-ring: oklch(0.556 0.008 80);
 }
 
-/* Depth system — three-dimensional UI primitives.
-   `raised` reads as a clickable surface (button, select trigger, card)
-   that sits clearly above its parent canvas: a polished top-edge
-   highlight, a real soft drop shadow, and a top→bottom gradient with
-   enough delta to feel like a slightly convex pillow. `sunken` reads
-   as an editable recess (input, textarea, search): a darker fill, a
-   visible inner shadow at the top, and a faint highlight at the
-   bottom edge. */
+/* Surface system — flat + frosted.
+   The app used to model controls as physical objects (convex "raised"
+   buttons, concave "sunken" inputs) via bevel gradients and inset rim
+   shadows. That 3D language is retired: controls are now flat, defined
+   by hairline borders and flat fills, and genuine elevation is reserved
+   for floating layers (cards, dialogs, popovers) which get a soft
+   layered-transparent drop shadow + frosted translucency. The same
+   token + utility names are kept so the change propagates everywhere
+   the .depth-* utilities are used without touching every call site. */
 :root {
-  /* Rim-bevel shadow for clickable controls (button, select trigger).
-     Sharp 1px polish line on top, secondary highlight just under it,
-     and a *blurred* underbelly shadow at the bottom that diffuses
-     upward into the surface so it never reads as a 1px stroke. No
-     drop shadow underneath — the button reads as a discrete shape
-     with edge lighting rather than a floating object. */
-  --shadow-raised:
-    0 3px 4px -2px oklch(1 0 0 / 0.85) inset,
-    0 0 6px 0 oklch(0 0 0 / 0.05) inset,
-    0 -3px 5px -2px oklch(0 0 0 / 0.08) inset;
-  --shadow-raised-hover:
-    0 3px 5px -2px oklch(1 0 0 / 0.95) inset,
-    0 0 7px 0 oklch(0 0 0 / 0.06) inset,
-    0 -3px 6px -2px oklch(0 0 0 / 0.1) inset;
-  /* Drop-shadow stack for surfaces that actually float above a canvas
-     (cards, dialogs, popovers). Used by .depth-surface only. */
+  /* Controls (button, select trigger) are flat — no shadow at rest.
+     Separation comes from the border + fill. Hover earns a whisper of
+     lift so the control still feels tactile under the cursor. */
+  --shadow-raised: 0 0 0 0 transparent;
+  --shadow-raised-hover: 0 1px 2px 0 oklch(0 0 0 / 0.06);
+  /* Floating surfaces (cards, dialogs, popovers) keep real elevation,
+     but as a clean soft drop shadow — no inset bevel highlight, which
+     was the main "3D pillow" tell. Layered transparency reads natural
+     across light/dark and any background. */
   --shadow-surface:
-    0 1px 0 0 oklch(1 0 0 / 0.9) inset,
-    0 1px 2px -1px oklch(0 0 0 / 0.06),
-    0 4px 10px -3px oklch(0 0 0 / 0.05),
-    0 12px 24px -8px oklch(0 0 0 / 0.05);
-  --shadow-sunken:
-    0 0 4px 0 oklch(0 0 0 / 0.05) inset,
-    0 2px 3px 0 oklch(0 0 0 / 0.05) inset,
-    0 -1px 0 0 oklch(1 0 0 / 0.5) inset;
-  /* Focus halo — recessed lighting effect. Inset blurred shadows so
-     the input feels lit from its inner perimeter inward, like LED
-     strips glowing along the edges of the recess. Composes with the
-     existing depth-sunken / depth-raised insets without conflict. */
-  --shadow-focus-ring:
-    0 0 5px 0 oklch(0.55 0.04 250 / 0.55) inset,
-    0 0 12px 0 oklch(0.55 0.04 250 / 0.22) inset;
-  /* Inverted raised treatment for dark-filled buttons (the default
-     variant in light mode, where the surface is too dark for the
-     bright white insets to read as polish). Mirrors the dark-mode
-     raised tokens. */
-  --shadow-raised-on-dark:
-    0 3px 5px -2px oklch(1 0 0 / 0.18) inset,
-    0 0 8px 0 oklch(0 0 0 / 0.3) inset,
-    0 -3px 6px -2px oklch(0 0 0 / 0.45) inset;
-  --shadow-raised-on-dark-hover:
-    0 3px 6px -2px oklch(1 0 0 / 0.24) inset,
-    0 0 9px 0 oklch(0 0 0 / 0.35) inset,
-    0 -3px 7px -2px oklch(0 0 0 / 0.55) inset;
-  --gradient-raised-on-dark: linear-gradient(
-    180deg,
-    oklch(1 0 0 / 0.05) 0%,
-    oklch(1 0 0 / 0.012) 40%,
-    oklch(0 0 0 / 0.12) 100%
-  );
-  --gradient-raised: linear-gradient(
-    180deg,
-    oklch(1 0 0 / 0.35) 0%,
-    oklch(1 0 0 / 0.08) 40%,
-    oklch(0 0 0 / 0.025) 100%
-  );
-  /* Surface gradient is the same shape as raised but much softer.
-     Calibrated for big containers (cards, dialogs) where the controls
-     gradient would read as a heavy wash across the whole surface. */
-  --gradient-surface: linear-gradient(
-    180deg,
-    oklch(1 0 0 / 0.1) 0%,
-    oklch(1 0 0 / 0.02) 45%,
-    oklch(0 0 0 / 0.008) 100%
-  );
-  --gradient-sunken: linear-gradient(
-    180deg,
-    oklch(0 0 0 / 0.02) 0%,
-    oklch(0 0 0 / 0.005) 60%,
-    oklch(1 0 0 / 0.015) 100%
-  );
+    0 1px 2px -1px oklch(0 0 0 / 0.05),
+    0 4px 12px -4px oklch(0 0 0 / 0.06),
+    0 10px 28px -10px oklch(0 0 0 / 0.05);
+  /* Inputs are flat too — recess language dropped. */
+  --shadow-sunken: 0 0 0 0 transparent;
+  /* Focus ring — a crisp outer ring (not an inset glow), matching the
+     ring buttons already use so focus reads consistently across every
+     control. Composes as a box-shadow so it can stack with utilities. */
+  --shadow-focus-ring: 0 0 0 3px oklch(0.708 0.012 80 / 0.4);
+  /* Dark-filled buttons (primary in light mode): flat, no inset polish. */
+  --shadow-raised-on-dark: 0 0 0 0 transparent;
+  --shadow-raised-on-dark-hover: 0 1px 2px 0 oklch(0 0 0 / 0.18);
+  /* Gradients retired — flat fills only. Kept as `none` so the
+     .depth-* utilities that reference them become no-ops. */
+  --gradient-raised-on-dark: none;
+  --gradient-raised: none;
+  --gradient-surface: none;
+  --gradient-sunken: none;
 }
 
 .dark {
-  --shadow-raised:
-    0 3px 5px -2px oklch(1 0 0 / 0.18) inset,
-    0 0 8px 0 oklch(0 0 0 / 0.3) inset,
-    0 -3px 6px -2px oklch(0 0 0 / 0.45) inset;
-  --shadow-raised-hover:
-    0 3px 6px -2px oklch(1 0 0 / 0.24) inset,
-    0 0 9px 0 oklch(0 0 0 / 0.35) inset,
-    0 -3px 7px -2px oklch(0 0 0 / 0.55) inset;
+  --shadow-raised: 0 0 0 0 transparent;
+  --shadow-raised-hover: 0 1px 2px 0 oklch(0 0 0 / 0.4);
+  /* Dark surfaces lean on a deeper, softer drop shadow to separate
+     from the near-black canvas. Still flat — no inset highlight. */
   --shadow-surface:
-    0 1px 0 0 oklch(1 0 0 / 0.1) inset,
     0 1px 2px -1px oklch(0 0 0 / 0.5),
-    0 6px 14px -4px oklch(0 0 0 / 0.45),
-    0 18px 32px -10px oklch(0 0 0 / 0.4);
-  --shadow-sunken:
-    0 0 6px 0 oklch(0 0 0 / 0.3) inset,
-    0 2px 4px 0 oklch(0 0 0 / 0.32) inset,
-    0 -1px 0 0 oklch(1 0 0 / 0.05) inset;
-  --shadow-focus-ring:
-    0 0 6px 0 oklch(0.7 0.05 250 / 0.6) inset,
-    0 0 14px 0 oklch(0.7 0.05 250 / 0.28) inset;
-  /* In dark mode the primary button is *light*, so it gets the
-     light-on-dark raised treatment instead. */
-  --shadow-raised-on-dark:
-    0 3px 4px -2px oklch(1 0 0 / 0.85) inset,
-    0 0 6px 0 oklch(0 0 0 / 0.05) inset,
-    0 -3px 5px -2px oklch(0 0 0 / 0.08) inset;
-  --shadow-raised-on-dark-hover:
-    0 3px 5px -2px oklch(1 0 0 / 0.95) inset,
-    0 0 7px 0 oklch(0 0 0 / 0.06) inset,
-    0 -3px 6px -2px oklch(0 0 0 / 0.1) inset;
-  --gradient-raised-on-dark: linear-gradient(
-    180deg,
-    oklch(1 0 0 / 0.35) 0%,
-    oklch(1 0 0 / 0.08) 40%,
-    oklch(0 0 0 / 0.025) 100%
-  );
-  --gradient-raised: linear-gradient(
-    180deg,
-    oklch(1 0 0 / 0.05) 0%,
-    oklch(1 0 0 / 0.012) 40%,
-    oklch(0 0 0 / 0.12) 100%
-  );
-  --gradient-surface: linear-gradient(
-    180deg,
-    oklch(1 0 0 / 0.018) 0%,
-    oklch(1 0 0 / 0.005) 45%,
-    oklch(0 0 0 / 0.025) 100%
-  );
-  --gradient-sunken: linear-gradient(
-    180deg,
-    oklch(0 0 0 / 0.28) 0%,
-    oklch(0 0 0 / 0.12) 55%,
-    oklch(0 0 0 / 0.04) 100%
-  );
+    0 6px 16px -4px oklch(0 0 0 / 0.45),
+    0 16px 32px -12px oklch(0 0 0 / 0.4);
+  --shadow-sunken: 0 0 0 0 transparent;
+  --shadow-focus-ring: 0 0 0 3px oklch(0.556 0.008 80 / 0.5);
+  --shadow-raised-on-dark: 0 0 0 0 transparent;
+  --shadow-raised-on-dark-hover: 0 1px 2px 0 oklch(0 0 0 / 0.4);
+  --gradient-raised-on-dark: none;
+  --gradient-raised: none;
+  --gradient-surface: none;
+  --gradient-sunken: none;
 }
 
 @theme inline {
   --shadow-raised: var(--shadow-raised);
   --shadow-raised-hover: var(--shadow-raised-hover);
   --shadow-sunken: var(--shadow-sunken);
+  /* Registered as a real shadow utility (`shadow-surface`) so it
+     composes with `ring-*` through Tailwind's shared shadow chain —
+     a component-layer box-shadow would be clobbered by the ring. */
+  --shadow-surface: var(--shadow-surface);
   /* Custom breakpoint used to swap the mobile top-nav for the
      desktop sidebar. Sits between Tailwind's lg (1024px) and xl
      (1280px) — at 1024 the page already feels cramped with both
@@ -312,15 +248,14 @@
 }
 
 @layer components {
-  /* Apply on top of an existing background-color. The gradient is an
-     overlay that doesn't fight whatever color the consumer set. */
+  /* Flat clickable controls (button, select trigger). The gradient
+     tokens are `none` now, so these resolve to a flat fill + (at rest)
+     no shadow; the names are kept so existing call sites stay valid. */
   .depth-raised {
     background-image: var(--gradient-raised);
     box-shadow: var(--shadow-raised);
   }
-  /* For dark-filled buttons (primary in light mode, etc.) — uses
-     the inverse-of-page raised tokens so the inset highlights read
-     as polish instead of a halo on a black surface. */
+  /* Dark-filled buttons (primary in light mode). Flat. */
   .depth-raised-on-dark {
     background-image: var(--gradient-raised-on-dark);
     box-shadow: var(--shadow-raised-on-dark);
@@ -328,8 +263,8 @@
   .depth-raised-on-dark:hover {
     box-shadow: var(--shadow-raised-on-dark-hover);
   }
-  /* Floating containers (cards, dialogs, popovers). Real soft drop
-     shadow + softer gradient than the controls. */
+  /* Floating containers (cards, dialogs, popovers). Soft layered drop
+     shadow, no bevel — genuine elevation without the 3D pillow. */
   .depth-surface {
     background-image: var(--gradient-surface);
     box-shadow: var(--shadow-surface);
@@ -337,9 +272,27 @@
   .depth-raised-hover:hover {
     box-shadow: var(--shadow-raised-hover);
   }
+  /* Flat editable fields (input, textarea). */
   .depth-sunken {
     background-image: var(--gradient-sunken);
     box-shadow: var(--shadow-sunken);
+  }
+  /* Frosted glass for floating overlay layers (dialogs, select /
+     dropdown popovers). Handles ONLY the translucent fill + backdrop
+     blur so the page content reads through softly; pair it with the
+     `shadow-surface` utility for elevation (kept separate so the
+     shadow composes with `ring-*` instead of being clobbered by it).
+     Falls back to the solid popover fill where backdrop-filter is
+     unsupported. */
+  .glass-surface {
+    background-color: var(--popover);
+  }
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    .glass-surface {
+      background-color: var(--popover-translucent);
+      -webkit-backdrop-filter: blur(20px) saturate(1.8);
+      backdrop-filter: blur(20px) saturate(1.8);
+    }
   }
 }
 
@@ -388,6 +341,13 @@
   h6 {
     font-family: var(--font-heading);
     font-synthesis-weight: none;
+    /* Distribute heading text evenly across lines instead of leaving a
+       short orphan on the last line. */
+    text-wrap: balance;
+  }
+  /* Avoid single-word orphans in body copy. */
+  p {
+    text-wrap: pretty;
   }
   ::selection {
     background: oklch(0.205 0 0 / 0.12);
