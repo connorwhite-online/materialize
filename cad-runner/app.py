@@ -41,11 +41,14 @@ app = FastAPI(title="materialize-cad-runner")
 # loft/boolean can need well over the old 30s. CPU limit tracks it (below).
 RUN_TIMEOUT_S = int(os.environ.get("CAD_RUN_TIMEOUT_S", "60"))
 # RLIMIT_AS caps *virtual* address space, not RSS. Python + build123d +
-# OpenCASCADE map well over 1 GB of address space at import time, so a 1 GB
-# cap can ENOMEM before user code even runs. Default to 4 GB; the container
-# memory limit (Dockerfile) is the real physical-RAM bound.
+# OpenCASCADE (plus numpy/scipy/BLAS) map well over 1 GB of address space at
+# import time, so a low cap can ENOMEM before user code even runs. Default to
+# 8 GB of headroom — virtual space is cheap (it's not physical RAM), and the
+# Dockerfile's MALLOC_ARENA_MAX + single-threaded BLAS keep the actual mapped
+# footprint small. The platform's container memory limit is the real
+# physical-RAM bound; this rlimit only stops a single runaway script.
 MEM_LIMIT_BYTES = int(
-    os.environ.get("CAD_RUN_MEM_BYTES", str(4 * 1024 * 1024 * 1024))
+    os.environ.get("CAD_RUN_MEM_BYTES", str(8 * 1024 * 1024 * 1024))
 )
 # Track the wall-clock budget — CPU-bound work (marching cubes, OCC booleans)
 # would otherwise hit SIGXCPU long before the wall-clock terminate fires.
