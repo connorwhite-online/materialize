@@ -17,10 +17,22 @@
  *
  * The agent's job:
  *   1. `gh pr diff $PR_NUMBER` to see what changed
- *   2. Map touched files to user-visible routes
- *   3. Drive Chromium through each route, collect console errors,
- *      failed network requests, and visual sanity checks
- *   4. Post (or edit) a marker-tagged review comment with findings
+ *   2. Map touched files to user-visible routes (resolving dynamic
+ *      `[slug]` segments to real values) and write them to
+ *      `.agent-out/routes.json`
+ *   3. Run scripts/pr-review/capture-screenshots.ts, which shoots each
+ *      route at mobile/tablet/desktop widths and records console
+ *      errors + same-origin request failures into
+ *      `.agent-out/capture-report.json`
+ *   4. Post (or edit) a marker-tagged review comment with findings +
+ *      a screenshot index pointing at the uploaded artifact
+ *
+ * Why a committed capturer instead of an agent-authored spec: the
+ * original prompt asked the agent to write its own Playwright spec to
+ * take screenshots. When that spec didn't compile, ran out of budget,
+ * or was skipped, .agent-out/ stayed empty and the artifact upload
+ * produced an empty file. Capture is now deterministic; the agent only
+ * decides *which* routes to shoot.
  *
  * Guardrails:
  *   - Allowed tools: Read, Write, Edit, Bash, Grep, Glob — same
@@ -51,6 +63,10 @@ interface RunContext {
   previewUrl: string;
   prHeadSha: string;
   baseRef: string;
+  /** Name of the uploaded artifact (matches the workflow's upload step). */
+  artifactName: string;
+  /** URL of the workflow run whose artifacts hold the screenshots. */
+  artifactRunUrl: string;
 }
 
 function loadContext(): RunContext {
@@ -65,7 +81,18 @@ function loadContext(): RunContext {
       } PR_HEAD_SHA=${prHeadSha ?? "(unset)"}`
     );
   }
-  return { prNumber, previewUrl, prHeadSha, baseRef };
+  // Mirror the workflow's artifact name so the comment can point the
+  // reviewer at the exact artifact to download. Kept in sync with
+  // `.github/workflows/pr-browser-review.yml` (upload-artifact `name:`).
+  const artifactName = `pr-browser-review-${prNumber}-${prHeadSha}`;
+  // GitHub sets these default env vars in every Actions step; fall back
+  // to sensible defaults for local/dry runs.
+  const server = process.env.GITHUB_SERVER_URL || "https://github.com";
+  const repo = process.env.GITHUB_REPOSITORY || "";
+  const runId = process.env.GITHUB_RUN_ID || "";
+  const artifactRunUrl =
+    repo && runId ? `${server}/${repo}/actions/runs/${runId}` : "(run URL unavailable)";
+  return { prNumber, previewUrl, prHeadSha, baseRef, artifactName, artifactRunUrl };
 }
 
 interface DiffSnapshot {
@@ -166,59 +193,106 @@ based on the diff.
    change is purely under \`lib/\`, \`scripts/\`, or other
    non-rendering paths, say so in the comment and exit cleanly.
 
-2. **Reproduce.** Write a throwaway Playwright spec at
-   \`.agent-out/review.spec.ts\` that visits each in-scope route
-   against the preview and:
-     - asserts no uncaught console errors
-     - asserts no failed (4xx/5xx) requests to the same origin (3rd
-       party 4xx is noise — filter)
-     - takes a screenshot of each route into \`.agent-out/screens/\`
-     - exercises any obvious interactive bits the diff implies
-       (form submits, dialog opens, etc.) — keep it shallow, this
-       isn't full E2E, it's a smoke check.
+2. **Capture screenshots (deterministic — do NOT write your own
+   spec).** Capture is handled by a committed script,
+   \`scripts/pr-review/capture-screenshots.ts\`. Your only job is to
+   tell it which routes to shoot. Write the in-scope routes — with
+   every \`[dynamic]\` segment already substituted for a REAL value —
+   to \`.agent-out/routes.json\` as a JSON array:
 
-   Use \`page.goto("/some/path")\` — the config's baseURL resolves
-   it to the preview. Run with:
-
-   \`\`\`
-   PLAYWRIGHT_BASE_URL=${ctx.previewUrl} PLAYWRIGHT_NO_WEBSERVER=1 \\
-     npx playwright test --config=playwright.config.ts \\
-     .agent-out/review.spec.ts --reporter=line
+   \`\`\`json
+   [
+     { "path": "/", "label": "Home" },
+     { "path": "/files/some-real-published-slug", "label": "File detail" }
+   ]
    \`\`\`
 
-   \`PLAYWRIGHT_NO_WEBSERVER=1\` is critical — without it the config
-   tries to boot \`npm run dev\` on localhost:3000 and the run dies.
+   Rules for \`routes.json\`:
+     - Resolve dynamic segments to a real value (find a published slug
+       via \`gh pr diff\`, a grep, or a DB sample). Routes still
+       containing \`[\` or \`]\` are skipped by the capturer.
+     - Keep it tight — the routes the diff actually affects, ideally
+       2–6 entries. Every route is shot at 3 widths, so this isn't
+       free.
+     - Even for a single route, you MUST write this file. An empty or
+       missing file means an empty artifact — the exact bug we're
+       fixing. Writing it is not optional.
+
+   Then run the capturer (it reads \`PREVIEW_URL\` and the Vercel
+   bypass secret from the environment — both are already set):
+
+   \`\`\`
+   npx tsx scripts/pr-review/capture-screenshots.ts
+   \`\`\`
+
+   It writes a full-page PNG per route per width into
+   \`.agent-out/screens/\` (named \`<idx>-<slug>-<width>.png\`, widths:
+   mobile 390 / tablet 768 / desktop 1440) and a findings file at
+   \`.agent-out/capture-report.json\` containing, per route, the
+   captured screenshot paths plus any same-origin 4xx/5xx requests and
+   uncaught console errors. READ that report — it is the source for
+   both your "Result" line and the screenshot index below. You do not
+   need to write or run any Playwright spec yourself.
+
+   If you need to exercise an interactive bit the diff implies (a form
+   submit, a dialog open) that a plain page load won't reveal, you may
+   add that route to \`routes.json\` at the post-interaction URL, or
+   note in the comment that it needs manual verification — but keep
+   the smoke shallow and do not hand-roll a test harness.
 
    ### Authed routes
 
-   For surfaces gated by Clerk (anything under \`/dashboard\`, edit
-   dialogs, library — when the diff implies one of these), import
-   the fixtures helpers from \`../e2e/fixtures\` and the testing
-   shim from \`@clerk/testing/playwright\`:
+   The capturer shoots anon sessions by default. For surfaces gated
+   by Clerk (anything under \`/dashboard\`, edit dialogs, library —
+   when the diff implies one of these) the capturer can reuse a
+   signed-in session if you hand it a Playwright storage state. Do
+   this ONLY when an authed route is genuinely in scope:
+
+   1. **Hard gate first.** Verify the preview is wired to Clerk TEST
+      keys, not prod: the env value of
+      \`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY\` must start with
+      \`pk_test_\`. If it doesn't, skip authed coverage entirely and
+      note in the comment that the preview appears to use production
+      Clerk keys (minting test users against prod would pollute the
+      real user table). Anon coverage still proceeds normally.
+
+   2. **Mint a session → storage state.** Write a tiny one-shot
+      script at \`.agent-out/auth-setup.ts\` that uses the e2e
+      fixtures to create a test user, sign in, and dump the browser
+      storage state, then run it with \`npx tsx\`:
 
    \`\`\`ts
+   import { chromium } from "playwright";
+   import { clerkSetup, clerk } from "@clerk/testing/playwright";
    import {
      createClerkTestUser, deleteClerkTestUser,
      seedAppUserForClerkId, deleteAppUserRow,
    } from "../e2e/fixtures";
-   import { clerk } from "@clerk/testing/playwright";
 
-   // beforeAll: mint a fresh test user + seed app row
-   // beforeEach: page.goto("/"); await clerk.signIn({ page,
-   //   signInParams: { strategy: "email_code", identifier: user.email } });
-   // afterAll:  deleteAppUserRow + deleteClerkTestUser
+   // mint user + seed app row (see e2e/library.spec.ts for the pattern),
+   // launch a context with the Vercel bypass headers, page.goto("/"),
+   // await clerk.signIn({ page, signInParams: { strategy: "email_code",
+   //   identifier: user.email } }), then:
+   //   await context.storageState({ path: ".agent-out/auth-state.json" });
+   // Keep the created user id around so you can clean it up after capture.
    \`\`\`
 
-   See \`e2e/library.spec.ts\` for the full pattern.
+   3. **Capture with it.** Re-run the capturer with the authed
+      routes in \`routes.json\` and the storage state pointed at:
 
-   **Hard gate before attempting any authed flow**: verify the
-   preview is wired to Clerk TEST keys, not prod. Check the env
-   value of \`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY\` exposed to this
-   workflow — if it doesn't start with \`pk_test_\`, skip authed
-   coverage entirely and note in the comment that the preview
-   appears to use production Clerk keys (creating test users
-   against prod would pollute the real user table). Anon
-   coverage still proceeds.
+   \`\`\`
+   PR_REVIEW_STORAGE_STATE=.agent-out/auth-state.json \\
+     npx tsx scripts/pr-review/capture-screenshots.ts
+   \`\`\`
+
+   4. **Always clean up** the Clerk test user + app row afterward
+      (\`deleteAppUserRow\` + \`deleteClerkTestUser\`), even if capture
+      failed.
+
+   If any of this is shaky or out of budget, skip authed and note in
+   the comment which authed surfaces still need a manual look. Anon
+   screenshots are the priority — don't sink the whole run chasing an
+   authed session.
 
 3. **Report.** Post a single PR review comment with this exact
    markdown structure:
@@ -233,10 +307,31 @@ based on the diff.
 
    <if findings/failures, a bulleted list>
 
+   ### 📸 Screenshots
+
+   Captured at 3 widths — **mobile 390** / **tablet 768** /
+   **desktop 1440**. Download the full-resolution set from the
+   [workflow run artifacts](${ctx.artifactRunUrl}) → artifact
+   \`${ctx.artifactName}\` → \`.agent-out/screens/\`.
+
+   | Route | Screenshots (in artifact) |
+   | --- | --- |
+   | \`/\` | \`1-home-{mobile,tablet,desktop}.png\` |
+   <one row per route from capture-report.json; list the captured
+   png filenames for that route. If a route failed to capture, say so
+   in the cell.>
+
    <Optional: short notes the human reviewer should know>
 
    _Preview: ${ctx.previewUrl}_
    \`\`\`
+
+   Build the screenshot table from \`.agent-out/capture-report.json\`
+   (the \`screenshots\` map on each route entry gives you the exact
+   png filenames). The artifact is uploaded by the workflow after this
+   step, so the link works once the run finishes. Do NOT try to inline
+   the images — they live in the downloadable artifact, not as
+   attachments.
 
    Post via \`gh pr comment ${ctx.prNumber} --body-file <path>\`.
    BEFORE posting, look for an existing comment containing
@@ -257,10 +352,11 @@ based on the diff.
 
 3. **Authed flows are gated, not forbidden.** Use the
    \`e2e/fixtures.ts\` helpers + \`clerk.signIn\` from
-   \`@clerk/testing/playwright\` for authed routes — see the spec
-   section above. The \`pk_test_\` check is the only hard gate:
-   if it fails, skip authed and note it. Always clean up users +
-   app rows in \`afterAll\` even if assertions fail.
+   \`@clerk/testing/playwright\` to mint a storage state for authed
+   routes — see the "Authed routes" section above. The \`pk_test_\`
+   check is the only hard gate: if it fails, skip authed and note it.
+   Always clean up the Clerk test user + app row afterward even if
+   capture fails.
 
 4. **Filter noise aggressively.** Sentry/Clerk/analytics 3rd-party
    requests fail in test environments routinely; they're not
@@ -271,20 +367,22 @@ based on the diff.
    one line of result, max 5 bullets of findings. The full agent
    transcript lives in the workflow log if anyone wants depth.
 
-6. **Time budget.** You have ~20 minutes wall-clock. Don't write a
-   full E2E suite — write the smallest spec that exercises the
-   in-scope routes and run it once. If the spec doesn't compile,
-   fix the spec, don't keep iterating forever.
+6. **Time budget.** You have ~20 minutes wall-clock. Capture is
+   already deterministic — your time goes to picking the right routes,
+   resolving dynamic slugs, and reading the report. Don't hand-roll a
+   Playwright spec; the only script you run for screenshots is
+   \`scripts/pr-review/capture-screenshots.ts\`.
 
 7. **Always write \`.agent-out/summary.md\`** with: scope decision,
-   spec path, run result, comment URL. The workflow uploads
+   routes captured, run result, comment URL. The workflow uploads
    \`.agent-out/\` as an artifact so this is the audit trail.
 
 # Workflow
 
 Standard tools: Read, Write, Edit, Bash, Grep, Glob. Start by
-reading AGENTS.md for project conventions, then the changed files
-to understand intent, then write + run the spec.`;
+reading AGENTS.md for project conventions, then the changed files to
+understand intent, then write \`.agent-out/routes.json\` and run the
+capturer.`;
 }
 
 async function main() {

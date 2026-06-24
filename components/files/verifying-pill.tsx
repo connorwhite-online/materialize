@@ -3,7 +3,12 @@
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 
-const POLL_INTERVAL_MS = 3_000;
+// 6s, not 3s: the geometry fingerprint usually lands in 1-3s, so the
+// first or second poll still catches it, but each poll is a full
+// `router.refresh()` that re-runs the DB-backed listing server
+// component — halving the cadence halves that per-upload Neon query
+// burst with no meaningful hit to perceived latency.
+const POLL_INTERVAL_MS = 6_000;
 const POLL_TIMEOUT_MS = 60_000;
 
 /**

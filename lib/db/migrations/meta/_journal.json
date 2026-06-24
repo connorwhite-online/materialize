@@ -300,7 +300,14 @@
       "idx": 42,
       "version": "7",
       "when": 1786000300000,
-      "tag": "0042_greedy_zaladane",
+      "tag": "0042_search_trgm_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1786000400000,
+      "tag": "0043_greedy_zaladane",
       "breakpoints": true
     }
   ]

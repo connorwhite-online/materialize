@@ -1,5 +1,9 @@
-import { getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
+import {
+  getCraftCloudCatalog,
+  type MaterialGroup,
+} from "@/lib/craftcloud/catalog";
 import { CatalogBrowser } from "@/components/materials/catalog-browser";
+import { logError } from "@/lib/logger";
 
 export const metadata = {
   title: "Materials | Materialize",
@@ -7,19 +11,38 @@ export const metadata = {
     "Browse 3D printing materials — plastics, metals, resins, composites, and more.",
 };
 
+// ISR rather than a one-shot static build. The catalog comes from
+// CraftCloud's edge, which intermittently 403-challenges datacenter
+// IPs — a cold prerender during `next build` can be challenged and,
+// without this, would fail the whole deploy. Revalidating on a daily
+// cadence means a build that fell back to the empty state (below)
+// self-heals on the next revalidation instead of being frozen empty
+// until the next deploy. Mirrors sitemap.ts's daily revalidate.
+export const revalidate = 86_400;
+
 export default async function MaterialsPage() {
-  const catalog = await getCraftCloudCatalog();
-  const totalMaterials = catalog.groups.reduce(
-    (sum, g) => sum + g.materials.length,
-    0
-  );
+  // The catalog fetch can throw (CraftCloud outage / edge challenge).
+  // Degrade to an empty browse view rather than 500 the page or fail
+  // the build — same resilience contract sitemap.ts uses. The strict,
+  // throwing catalog is still what the quote hot-path depends on; we
+  // only soften it here, at the marketing surface.
+  let groups: MaterialGroup[] = [];
+  try {
+    const catalog = await getCraftCloudCatalog();
+    groups = catalog.groups;
+  } catch (e) {
+    logError("materials:catalog", e);
+  }
+
+  const totalMaterials = groups.reduce((sum, g) => sum + g.materials.length, 0);
+  const unavailable = groups.length === 0;
 
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "ItemList",
     name: "Materialize materials catalog",
     numberOfItems: totalMaterials,
-    itemListElement: catalog.groups.flatMap((g) =>
+    itemListElement: groups.flatMap((g) =>
       g.materials.map((m, idx) => ({
         "@type": "ListItem",
         position: idx + 1,
@@ -38,13 +61,13 @@ export default async function MaterialsPage() {
       <div className="mb-8">
         <h1 className="text-2xl font-bold">Materials</h1>
         <p className="mt-1 text-muted-foreground">
-          Browse {totalMaterials} 3D printing materials across{" "}
-          {catalog.groups.length} families. Each with unique properties for
-          your project.
+          {unavailable
+            ? "Our material catalog is temporarily unavailable. Please check back in a moment."
+            : `Browse ${totalMaterials} 3D printing materials across ${groups.length} families. Each with unique properties for your project.`}
         </p>
       </div>
 
-      <CatalogBrowser groups={catalog.groups} />
+      {!unavailable && <CatalogBrowser groups={groups} />}
     </div>
   );
 }

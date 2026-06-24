@@ -136,10 +136,15 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: pr-browser-review-${{ steps.resolve-pr.outputs.pr_number }}-${{ github.event.deployment.sha }}
-          path: |
-            .agent-out/
-            test-results/
-            playwright-report/
+          # Screenshots (`.agent-out/screens/`), the capture findings
+          # report (`.agent-out/capture-report.json`), the resolved
+          # route manifest, and the agent summary all live under
+          # `.agent-out/`. The deterministic capturer
+          # (scripts/pr-review/capture-screenshots.ts) guarantees this
+          # is populated whenever there are in-scope routes — the old
+          # "empty artifact" bug came from relying on an agent-authored
+          # spec that often produced nothing.
+          path: .agent-out/
           # `.agent-out/` is dot-prefixed; upload-artifact treats those
           # as hidden and skips them by default. Same gotcha hit on the
           # sentry-fixer rollout.

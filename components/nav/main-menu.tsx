@@ -2,20 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useUser } from "@clerk/nextjs";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { MenuExpand } from "@/components/icons/menu-expand";
 import { Browse } from "@/components/icons/browse";
 import { Materials } from "@/components/icons/materials";
 import { Print } from "@/components/icons/print";
 import { Wand } from "@/components/icons/wand";
 import { SidebarUserBlock } from "@/components/auth/sidebar-user-block";
 import { SandboxBadge } from "@/components/nav/sandbox-badge";
+import { useCart } from "@/components/print/cart-context";
 import { cn } from "@/lib/utils";
 
 import type { ComponentType, SVGProps } from "react";
@@ -23,10 +16,10 @@ import type { ComponentType, SVGProps } from "react";
 type NavIcon = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>;
 
 /**
- * Top-level destinations shown in both the dropdown trigger menu
- * (sub-lg) and the sidebar nav (lg+). Profile isn't here on purpose:
- * the sidebar's bottom user-block IS the profile link, and the
- * dropdown's hit-target is the avatar in the header at sub-lg.
+ * Top-level destinations for the sidebar nav (nav+). Profile isn't
+ * here on purpose: the sidebar's bottom user-block IS the profile
+ * link. Below the nav breakpoint the floating MobileTabBar carries
+ * the same destinations as icon-only tabs.
  */
 type NavItem = { href: string; label: string; Icon: NavIcon };
 
@@ -50,41 +43,10 @@ function navItems(textToCad: boolean): ReadonlyArray<NavItem> {
 }
 
 /**
- * Pathname → page-label table. Only matches EXACT top-level routes —
- * detail pages like /files/<slug> or /materials/<slug> are not
- * "Browse" or "Materials" listings, they have their own h1 and the
- * trigger should fall back to the wordmark there.
- */
-const PAGE_LABELS: Record<string, string> = {
-  "/files": "Browse",
-  "/materials": "Materials",
-  "/print": "Print",
-  "/dashboard": "Dashboard",
-  "/collections": "Collections",
-  "/projects": "Projects",
-};
-
-/**
- * Resolve the trigger button's text. Returning `null` means "show
- * the brand wordmark instead" — used for the user's own profile
- * (their authed home), every detail page, and any path that
- * isn't one of the top-level destinations above.
- */
-function getPageLabel(
-  pathname: string | null,
-  ownProfilePath: string | null
-): string | null {
-  if (!pathname) return null;
-  if (ownProfilePath && pathname === ownProfilePath) return null;
-  return PAGE_LABELS[pathname] ?? null;
-}
-
-/**
  * Exact-match active state. Detail pages like /files/<slug> are
  * NOT the Browse listing — they have their own h1 and the nav
  * shouldn't highlight Browse just because the URL starts with
- * /files. Same rule as getPageLabel above so the trigger label
- * and the nav highlight always agree on what "active" means.
+ * /files.
  */
 function isActive(pathname: string | null, href: string): boolean {
   return pathname === href;
@@ -92,96 +54,10 @@ function isActive(pathname: string | null, href: string): boolean {
 
 // Sidebar lives in the reserved gutter the layout opens up at
 // `nav:pl-56`. Below the `nav` breakpoint (1080px, defined in
-// globals.css) the rail is hidden and the dropdown trigger in
-// the header carries the same nav. We use a custom breakpoint
-// instead of lg so the rail doesn't appear until the page has
-// enough room for both content + sidebar without feeling cramped.
-
-/**
- * Brand+menu trigger that occupies the left of the header on
- * sub-nav viewports. The whole [page-title text + caret] block is
- * one button — single hit-target, rounded hover bg, opens the
- * dropdown. Page title comes from `getPageLabel(pathname)` so the
- * user always sees where they are; we don't fall back to the
- * "Materialize" wordmark unless the path is genuinely unknown.
- */
-export function MainMenuTrigger({
-  textToCad = false,
-}: {
-  /** Owner-only: append the experimental Text-to-CAD entry. */
-  textToCad?: boolean;
-}) {
-  const pathname = usePathname();
-  const { user, isLoaded } = useUser();
-  const ownProfilePath =
-    isLoaded && user?.username ? `/${user.username}` : null;
-  const label = getPageLabel(pathname, ownProfilePath);
-  const items = navItems(textToCad);
-  return (
-    <div className="nav:hidden">
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          aria-label="Open menu"
-          className="-ml-2 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 leading-none transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-        >
-          {label === null ? (
-            // Wordmark mode — own profile (authed home) and any
-            // path we don't have a label for. PPFuji's caps occupy
-            // the upper portion of the em-box, so items-center on
-            // the flex misaligns the wordmark against the caret's
-            // geometric center; nudge it up to match the visual
-            // midline.
-            <span
-              className="text-xl tracking-tight bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-transparent leading-none -translate-y-[2px]"
-              style={{
-                fontFamily: "var(--font-display), system-ui, sans-serif",
-              }}
-            >
-              Materialize
-            </span>
-          ) : (
-            <span className="text-xl font-semibold leading-none tracking-tight text-foreground">
-              {label}
-            </span>
-          )}
-          <MenuExpand
-            size={16}
-            className="shrink-0 text-muted-foreground"
-          />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="start"
-          sideOffset={8}
-          // gap-0.5 = 2px between items so they're individually
-          // distinguishable as rows without the visual heaviness
-          // of bigger spacing.
-          className="flex min-w-48 flex-col gap-0.5 p-1.5"
-        >
-          {items.map((item) => {
-            const active = isActive(pathname, item.href);
-            const { Icon } = item;
-            return (
-              <DropdownMenuItem
-                key={item.href}
-                render={<Link href={item.href} />}
-                className={cn(
-                  // py-1.5 (was py-2) — tightens the row height a
-                  // touch while still leaving comfortable tap area
-                  // on mobile.
-                  "flex items-center gap-2.5 px-3 py-1.5 text-base",
-                  active && "bg-muted/60 text-foreground"
-                )}
-              >
-                <Icon size={18} className="shrink-0" />
-                {item.label}
-              </DropdownMenuItem>
-            );
-          })}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
-  );
-}
+// globals.css) the rail is hidden and the floating MobileTabBar
+// carries the same nav. We use a custom breakpoint instead of lg so
+// the rail doesn't appear until the page has enough room for both
+// content + sidebar without feeling cramped.
 
 /**
  * Floating left-rail at nav+ — a rounded card with a soft drop
@@ -208,6 +84,8 @@ export function MainMenuSidebar({
 }: MainMenuSidebarProps) {
   const pathname = usePathname();
   const items = navItems(textToCad);
+  const cart = useCart();
+  const cartCount = cart?.itemCount ?? 0;
 
   return (
     <aside
@@ -217,8 +95,11 @@ export function MainMenuSidebar({
       <div className="flex items-center justify-between gap-2 px-2 py-1">
         <Link
           href="/"
-          className="text-xl tracking-tight bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-transparent leading-none -translate-y-[2px]"
-          style={{ fontFamily: "var(--font-display), system-ui, sans-serif" }}
+          className="text-xl lowercase tracking-tight bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-transparent leading-none"
+          style={{
+            fontFamily: "var(--font-frama-black), system-ui, sans-serif",
+            fontWeight: 900,
+          }}
         >
           Materialize
         </Link>
@@ -228,6 +109,9 @@ export function MainMenuSidebar({
         {items.map((item) => {
           const active = isActive(pathname, item.href);
           const { Icon } = item;
+          // Cart count pips the Print entry's icon — carts live inline
+          // on /print, so there's no standalone cart button.
+          const showCart = item.href === "/print" && cartCount > 0;
           return (
             <Link
               key={item.href}
@@ -240,8 +124,18 @@ export function MainMenuSidebar({
                   : "text-muted-foreground hover:bg-muted/40 hover:text-foreground"
               )}
             >
-              <Icon size={18} className="shrink-0" />
+              <span className="relative inline-flex shrink-0">
+                <Icon size={18} />
+                {showCart && (
+                  <span className="absolute -right-1.5 -top-1.5 min-w-4 rounded-full bg-primary px-1 py-0.5 text-center text-[0.625rem] font-semibold leading-none text-primary-foreground ring-2 ring-card">
+                    {cartCount > 99 ? "99+" : cartCount}
+                  </span>
+                )}
+              </span>
               {item.label}
+              {showCart && (
+                <span className="sr-only">{cartCount} in cart</span>
+              )}
             </Link>
           );
         })}

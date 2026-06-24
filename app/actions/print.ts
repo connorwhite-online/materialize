@@ -36,7 +36,7 @@ import { printOrders, printOrderItems, cartItems, fileAssets, files } from "@/li
 import { eq, and, inArray, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
-import { headers } from "next/headers";
+import { deriveAppUrl } from "@/lib/utils/request-url";
 import {
   createCart,
   createOrder,
@@ -565,22 +565,6 @@ function dedupeShippingSum(
   return items.reduce((sum, i) => sum + i.shippingSubtotal, 0);
 }
 
-/**
- * Derive the redirect base URL from the live request rather than a
- * build-time env var. NEXT_PUBLIC_APP_URL bakes at build time and,
- * when unset in production, the fallback "http://localhost:3000"
- * got embedded into the Stripe session's success/cancel URLs — so
- * every customer post-payment landed on a dead localhost page.
- * Mirrors the pattern in app/(app)/dashboard/settings/tokens/page.tsx.
- */
-async function deriveAppUrl(): Promise<string> {
-  const h = await headers();
-  const host = h.get("x-forwarded-host") ?? h.get("host");
-  const proto = h.get("x-forwarded-proto") ?? "https";
-  return host
-    ? `${proto}://${host}`
-    : process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-}
 
 async function createStripeSessionForOrder(
   order: typeof printOrders.$inferSelect,

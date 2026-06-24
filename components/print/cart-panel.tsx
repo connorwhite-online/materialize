@@ -16,6 +16,7 @@ import { MinusIcon, PlusIcon, TrashIcon } from "lucide-react";
 import { checkoutVendorGroup } from "@/app/actions/print";
 import { dedupeShippingByShipId } from "@/lib/pricing/shipping";
 import { useRouter } from "next/navigation";
+import { cn } from "@/lib/utils";
 
 const SERVICE_FEE_RATE = 0.03;
 
@@ -139,14 +140,27 @@ function CartPanelInner() {
       <DialogContent
         aria-label="Cart"
         showCloseButton={false}
-        className="fixed right-4 top-16 left-auto translate-x-0 translate-y-0 w-[380px] max-h-[calc(100vh-5rem)] overflow-y-auto rounded-xl p-0 max-md:left-4 max-md:right-4 max-md:w-auto sm:max-w-none data-open:animate-in data-open:fade-in data-open:slide-in-from-top-2 data-closed:animate-out data-closed:fade-out data-closed:slide-out-to-top-2 duration-200"
+        className={cn(
+          // Mobile: a bottom sheet anchored above the floating tab bar,
+          // spanning the width so the cart reads at a comfortable size
+          // rather than as a cramped floating card.
+          "fixed inset-x-2 bottom-24 top-auto translate-x-0 translate-y-0 w-auto max-h-[70vh] overflow-y-auto rounded-3xl p-0",
+          "data-open:animate-in data-open:fade-in data-open:slide-in-from-bottom-4 data-closed:animate-out data-closed:fade-out data-closed:slide-out-to-bottom-4 duration-200",
+          // Desktop: the compact card pinned to the top-right.
+          "md:inset-x-auto md:bottom-auto md:top-16 md:right-4 md:left-auto md:w-[380px] md:max-h-[calc(100vh-5rem)] md:rounded-xl md:data-open:slide-in-from-top-2 md:data-closed:slide-out-to-top-2",
+          "sm:max-w-none"
+        )}
       >
-        <div className="flex items-center justify-between p-4 pb-2">
-          <DialogTitle className="text-sm font-semibold">Cart</DialogTitle>
+        {/* Grab-handle affordance — bottom-sheet only. */}
+        <div className="mx-auto mt-2.5 h-1 w-10 shrink-0 rounded-full bg-muted-foreground/30 md:hidden" />
+        <div className="flex items-center justify-between p-4 pb-2 md:pt-4">
+          <DialogTitle className="text-base font-semibold md:text-sm">
+            Cart
+          </DialogTitle>
           <button
             onClick={close}
             aria-label="Close cart"
-            className="rounded-md p-1 text-muted-foreground hover:text-foreground transition-colors"
+            className="-mr-1 rounded-md p-1.5 text-muted-foreground hover:text-foreground transition-colors"
           >
             <svg
               aria-hidden="true"
@@ -416,7 +430,7 @@ function VendorGroup({
       <Button
         onClick={handleCheckout}
         disabled={checkingOut || materializing}
-        className="w-full mt-3"
+        className="mt-3 h-11 w-full md:h-9"
         size="sm"
       >
         {materializing
