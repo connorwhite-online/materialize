@@ -25,7 +25,7 @@ import {
 // Experimental owner-only surface — keep it out of search indexes even if
 // the gate is ever misconfigured.
 export const metadata: Metadata = {
-  title: "Text to CAD",
+  title: "Prometheus",
   robots: { index: false, follow: false },
 };
 

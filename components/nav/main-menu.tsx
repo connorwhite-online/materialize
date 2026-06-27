@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { Browse } from "@/components/icons/browse";
 import { Materials } from "@/components/icons/materials";
 import { Print } from "@/components/icons/print";
-import { Wand } from "@/components/icons/wand";
+import { Galaxy } from "@/components/icons/galaxy";
 import { SidebarUserBlock } from "@/components/auth/sidebar-user-block";
 import { SandboxBadge } from "@/components/nav/sandbox-badge";
 import { useCart } from "@/components/print/cart-context";
@@ -29,13 +29,13 @@ const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { href: "/print", label: "Print", Icon: Print },
 ];
 
-// Experimental, owner-only Text-to-CAD entry. Only appended when the
-// server resolves `canUseTextToCad` and threads `textToCad` down — hidden
-// for everyone else (and the page itself 404s as a second gate).
+// Experimental, owner-only Prometheus (text-to-CAD) entry. Only appended
+// when the server resolves `canUseTextToCad` and threads `textToCad` down —
+// hidden for everyone else (and the page itself 404s as a second gate).
 const TEXT_TO_CAD_ITEM: NavItem = {
-  href: "/text-to-cad",
-  label: "Text to CAD",
-  Icon: Wand,
+  href: "/prometheus",
+  label: "Prometheus",
+  Icon: Galaxy,
 };
 
 function navItems(textToCad: boolean): ReadonlyArray<NavItem> {

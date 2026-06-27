@@ -15,7 +15,7 @@ import {
 } from "@/lib/cad/feedback";
 
 export const metadata: Metadata = {
-  title: "Text to CAD — Scorecard",
+  title: "Prometheus — Scorecard",
   robots: { index: false, follow: false },
 };
 
@@ -133,10 +133,10 @@ export default async function TextToCadEvalPage() {
     <div className="mx-auto max-w-3xl px-4 py-8">
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold tracking-tight">
-          Text to CAD — Scorecard
+          Prometheus — Scorecard
         </h1>
         <Link
-          href="/text-to-cad"
+          href="/prometheus"
           className="text-xs text-muted-foreground underline-offset-2 hover:underline"
         >
           ← Studio

@@ -704,7 +704,7 @@ function ProjectCard({ project }: { project: ProjectRow }) {
           ) : (
             <div className="flex h-full w-full items-center justify-center">
               {/* Stacked-file placeholder */}
-              <div className="relative h-16 w-14">
+              <div className="relative h-28 w-24">
                 {/* Back card */}
                 {thumbs[2] ? (
                   <div className="absolute inset-0 translate-x-2.5 translate-y-2 rotate-6 overflow-hidden rounded-md border border-border">
@@ -820,7 +820,7 @@ function UserCard({ user }: { user: UserRow }) {
   return (
     <Link
       href={`/${user.username}`}
-      className="group flex items-center gap-2.5 rounded-l-full rounded-r-xl border border-border bg-card p-1.5 pr-3 transition-colors hover:border-foreground/20 hover:bg-muted/30"
+      className="group flex items-center gap-2.5 rounded-l-full rounded-r-2xl border border-border bg-card p-1.5 pr-3 transition-colors hover:border-foreground/20 hover:bg-muted/30"
     >
       <UserAvatar
         seed={user.username}

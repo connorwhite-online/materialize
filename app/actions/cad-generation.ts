@@ -114,7 +114,7 @@ export async function generateCadModel(input: {
       result,
     });
 
-    revalidatePath("/text-to-cad");
+    revalidatePath("/prometheus");
     return persisted;
   } catch (error) {
     logError("generateCadModel", error);
@@ -161,7 +161,7 @@ export async function saveCadFileToProfile(input: {
       .set({ visibility: "private", status: "published", updatedAt: new Date() })
       .where(and(eq(files.id, asset.fileId), eq(files.userId, userId)));
 
-    revalidatePath("/text-to-cad");
+    revalidatePath("/prometheus");
     return { ok: true };
   } catch (error) {
     logError("saveCadFileToProfile", error);
@@ -255,7 +255,7 @@ export async function renameCadGeneration(input: {
         .where(eq(cadGenerations.id, rootId));
     }
 
-    revalidatePath("/text-to-cad");
+    revalidatePath("/prometheus");
     return { name };
   } catch (error) {
     logError("renameCadGeneration", error);
@@ -313,8 +313,8 @@ export async function recordCadFeedback(
 
     if (updated.length === 0) return { error: "Not found" };
 
-    revalidatePath("/text-to-cad");
-    revalidatePath("/text-to-cad/eval");
+    revalidatePath("/prometheus");
+    revalidatePath("/prometheus/eval");
     return { ok: true };
   } catch (error) {
     logError("recordCadFeedback", error);
@@ -348,7 +348,7 @@ export async function deleteCadBuild(input: {
           eq(cadGenerations.userId, userId)
         )
       );
-    revalidatePath("/text-to-cad");
+    revalidatePath("/prometheus");
     return { ok: true };
   } catch (error) {
     logError("deleteCadBuild", error);

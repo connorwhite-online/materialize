@@ -1,13 +1,20 @@
 "use client";
 
-import { lazy, Suspense, useEffect, useRef, useState, useTransition } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import {
   AlertTriangleIcon,
   ArrowUpIcon,
-  BoxesIcon,
   CheckIcon,
-  Code2Icon,
   DownloadIcon,
   EllipsisVerticalIcon,
   HistoryIcon,
@@ -19,8 +26,12 @@ import {
   Trash2Icon,
   XIcon,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { ChevronDown } from "@/components/icons/chevron-down";
 import { ChevronRight } from "@/components/icons/chevron-right";
+import { ClockRewind } from "@/components/icons/clock-rewind";
+import { EditSparkle } from "@/components/icons/edit-sparkle";
+import { Layers } from "@/components/icons/layers";
 import {
   deleteCadBuild,
   recordCadFeedback,
@@ -112,6 +123,45 @@ function threadLabel(t: StudioThread): string {
   return t.title?.trim() || truncate(t.turns[0]?.prompt ?? "Untitled build");
 }
 
+// Resume-on-return: a cold visit to the studio starts a fresh build, but if
+// you were just here and bounced away, coming back within this window restores
+// the build you were on. The timestamp is refreshed on every selection change
+// and when you leave (SPA nav / tab hide / reload), so it measures time-away.
+const RESUME_STORAGE_KEY = "prometheus:last-session";
+const RESUME_GRACE_MS = 2 * 60_000;
+
+type ResumeState = {
+  rootId: string | null;
+  viewTurnId: string | null;
+  ts: number;
+};
+
+/**
+ * Read the persisted selection iff it's recent enough to count as "came right
+ * back" AND the build still exists. Returns null on a cold visit → new build.
+ */
+function readRecentResume(threads: StudioThread[]): ResumeState | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(RESUME_STORAGE_KEY);
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as Partial<ResumeState> | null;
+    if (!saved || typeof saved.ts !== "number") return null;
+    if (Date.now() - saved.ts > RESUME_GRACE_MS) return null;
+    // Only resume a build that's still in the list (it may have been deleted).
+    if (saved.rootId && !threads.some((t) => t.rootId === saved.rootId)) {
+      return null;
+    }
+    return {
+      rootId: saved.rootId ?? null,
+      viewTurnId: saved.viewTurnId ?? null,
+      ts: saved.ts,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Experimental, owner-gated text-to-CAD studio. A chat-style surface: a
  * floating composer drives a thread of generations (the first message starts
@@ -126,20 +176,14 @@ export function TextToCadStudio({
   initialThreads: StudioThread[];
 }) {
   const [threads, setThreads] = useState<StudioThread[]>(initialThreads);
-  // Open the most recent build on load (like reopening a chat); "New build"
-  // resets to a blank canvas.
+  // Cold visit → start a fresh build (blank canvas). Only resume the last
+  // build if you were just here and came right back (see readRecentResume).
   const [activeRootId, setActiveRootId] = useState<string | null>(
-    initialThreads[0]?.rootId ?? null
+    () => readRecentResume(initialThreads)?.rootId ?? null
   );
-  const [viewTurnId, setViewTurnId] = useState<string | null>(() => {
-    const first = initialThreads[0];
-    if (!first) return null;
-    return (
-      [...first.turns]
-        .reverse()
-        .find((x) => x.status === "succeeded" && x.fileAssetId)?.id ?? null
-    );
-  });
+  const [viewTurnId, setViewTurnId] = useState<string | null>(
+    () => readRecentResume(initialThreads)?.viewTurnId ?? null
+  );
   const [prompt, setPrompt] = useState("");
   const [progress, setProgress] = useState<CadProgressEvent[]>([]);
   const [generating, setGenerating] = useState(false);
@@ -183,6 +227,44 @@ export function TextToCadStudio({
 
   // Abort an in-flight stream if the studio unmounts.
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  // Persist the current selection for resume-on-return. Refs hold the latest
+  // values so the leave-time writers (unmount / pagehide) don't capture stale
+  // state from their setup-time closure.
+  const activeRootIdRef = useRef(activeRootId);
+  activeRootIdRef.current = activeRootId;
+  const viewTurnIdRef = useRef(viewTurnId);
+  viewTurnIdRef.current = viewTurnId;
+  const persistResume = useCallback(() => {
+    try {
+      window.sessionStorage.setItem(
+        RESUME_STORAGE_KEY,
+        JSON.stringify({
+          rootId: activeRootIdRef.current,
+          viewTurnId: viewTurnIdRef.current,
+          ts: Date.now(),
+        } satisfies ResumeState)
+      );
+    } catch {
+      // sessionStorage can throw (private mode / quota); resume is best-effort.
+    }
+  }, []);
+  // Stamp on every selection change (so a quick return restores it) and again
+  // when leaving — SPA nav (cleanup), full reload/close (pagehide), or tab hide
+  // — so the grace window measures time-away, not time-since-last-click.
+  useEffect(() => {
+    persistResume();
+    const onHide = () => {
+      if (document.visibilityState === "hidden") persistResume();
+    };
+    window.addEventListener("pagehide", persistResume);
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      window.removeEventListener("pagehide", persistResume);
+      document.removeEventListener("visibilitychange", onHide);
+      persistResume();
+    };
+  }, [activeRootId, viewTurnId, persistResume]);
 
   // Close the build three-dot menu on any outside click.
   useEffect(() => {
@@ -600,19 +682,23 @@ export function TextToCadStudio({
                       setNameDraft(threadLabel(activeThread));
                       setRenaming(true);
                     }}
-                    className="group inline-flex max-w-full cursor-pointer items-center gap-2 text-xl font-semibold tracking-tight text-foreground"
+                    className="group inline-flex max-w-full cursor-pointer items-center gap-2 font-heading text-xl font-normal tracking-tight text-foreground"
                     title="Rename build"
                   >
                     <span className="truncate">{threadLabel(activeThread)}</span>
                     <PencilIcon className="size-4 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
                   </button>
                 )
-              ) : (
+              ) : activeThread ? (
                 <p className="mt-1 text-sm text-muted-foreground">
-                  {activeThread
-                    ? threadLabel(activeThread)
-                    : "Describe a part in plain language. Experimental — owner preview."}
+                  {threadLabel(activeThread)}
                 </p>
+              ) : (
+                // Empty state: just the heading, matching the post-generation
+                // build title's size/font so the page doesn't visibly shift.
+                <h1 className="mt-1 font-heading text-xl font-normal tracking-tight text-foreground">
+                  New Build
+                </h1>
               )}
             </div>
             <div className="flex shrink-0 items-center gap-2">
@@ -639,7 +725,7 @@ export function TextToCadStudio({
                     className="absolute right-0 top-11 z-40 w-72 max-w-[calc(100vw-2rem)] rounded-xl border border-foreground/15 bg-card p-2 shadow-xl"
                   >
                     <div className="mb-1.5 flex items-center gap-2 px-1 text-sm font-medium text-muted-foreground">
-                      <BoxesIcon className="size-4 shrink-0" />
+                      <ClockRewind className="size-4 shrink-0" />
                       <span>Builds ({threads.length})</span>
                     </div>
                     <ul className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto px-0.5 py-1">
@@ -663,16 +749,17 @@ export function TextToCadStudio({
                   </div>
                 )}
               </div>
-              <button
+              <Button
                 type="button"
+                variant="outline"
                 onClick={startNewBuild}
                 aria-label="New build"
                 title="New build"
-                className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-foreground/15 px-2.5 text-sm hover:bg-foreground/5 lg:px-3"
+                className="shrink-0 rounded-lg px-2.5 lg:px-3"
               >
                 <PlusIcon className="size-4" />
                 <span className="hidden lg:inline">New build</span>
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -752,11 +839,11 @@ export function TextToCadStudio({
                   <Suspense fallback={<div className="min-h-0 flex-1" />}>
                     <MaterializingBlob className="min-h-0 flex-1" />
                   </Suspense>
-                  <p className="shrink-0 px-6 pb-8 text-center text-sm text-muted-foreground">
-                    {activeThread
-                      ? "No printable model in this build yet."
-                      : "Describe a part below to start."}
-                  </p>
+                  {activeThread && (
+                    <p className="shrink-0 px-6 pb-8 text-center text-sm text-muted-foreground">
+                      No printable model in this build yet.
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -976,16 +1063,16 @@ export function TextToCadStudio({
         {/* Right sidebar — revisions + parametric source for the current build,
             then the build history. self-start keeps it at content height instead
             of stretching to match the (tall) viewer column. */}
-        <aside className="flex min-w-0 flex-col gap-5 self-start lg:sticky lg:top-6 lg:max-h-[calc(100vh-7rem)] lg:min-h-0">
+        <aside className="flex min-w-0 flex-col gap-5 self-start lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:min-h-0">
           {/* Revisions for the current build */}
           {!generating && turns.length > 0 && (
             <div>
               <button
                 type="button"
                 onClick={() => setShowHistory((v) => !v)}
-                className="flex w-full items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
+                className="flex w-full cursor-pointer items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
               >
-                <HistoryIcon className="size-4 shrink-0" />
+                <EditSparkle className="size-4 shrink-0" />
                 <span>Revisions ({turns.length})</span>
                 {showHistory ? (
                   <ChevronDown className="ml-auto size-4 shrink-0" />
@@ -1036,9 +1123,9 @@ export function TextToCadStudio({
               <button
                 type="button"
                 onClick={() => setShowSource((v) => !v)}
-                className="flex w-full items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
+                className="flex w-full cursor-pointer items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
               >
-                <Code2Icon className="size-4 shrink-0" />
+                <Layers className="size-4 shrink-0" />
                 <span>Parametric source</span>
                 {showSource ? (
                   <ChevronDown className="ml-auto size-4 shrink-0" />
@@ -1060,9 +1147,9 @@ export function TextToCadStudio({
             <button
               type="button"
               onClick={() => setShowBuilds((v) => !v)}
-              className="flex w-full shrink-0 items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
+              className="flex w-full shrink-0 cursor-pointer items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
             >
-              <BoxesIcon className="size-4 shrink-0" />
+              <ClockRewind className="size-4 shrink-0" />
               <span>Builds ({threads.length})</span>
               {showBuilds ? (
                 <ChevronDown className="ml-auto size-4 shrink-0" />
@@ -1074,10 +1161,12 @@ export function TextToCadStudio({
             <ul
               className="mt-3 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-0.5 py-1"
               style={{
+                // Bottom-only fade: the top feather dimmed the first row even
+                // when the list wasn't scrolled, which read as a render glitch.
                 maskImage:
-                  "linear-gradient(to bottom, transparent 0, black 14px, black calc(100% - 14px), transparent 100%)",
+                  "linear-gradient(to bottom, black 0, black calc(100% - 14px), transparent 100%)",
                 WebkitMaskImage:
-                  "linear-gradient(to bottom, transparent 0, black 14px, black calc(100% - 14px), transparent 100%)",
+                  "linear-gradient(to bottom, black 0, black calc(100% - 14px), transparent 100%)",
               }}
             >
               <BuildsList
@@ -1185,7 +1274,7 @@ export function TextToCadStudio({
               placeholder={
                 activeThread
                   ? "What do you want to change?"
-                  : "Describe a part… e.g. a parametric phone stand for a 7mm-thick phone"
+                  : "What do you want to bring into existence?"
               }
               // text-base (16px) on mobile prevents iOS Safari from auto-
               // zooming when the field is focused (it zooms any input < 16px).
@@ -1230,13 +1319,6 @@ export function TextToCadStudio({
               </button>
             </div>
           </div>
-          {/* Keyboard-shortcut hint — desktop only; on mobile there's no
-              ⌘/Ctrl+Enter and the line just clutters the composer. */}
-          <p className="mt-1.5 hidden px-2 text-center text-xs text-muted-foreground nav:block">
-            {activeThread
-              ? "Sending a message revises this build · ⌘/Ctrl + Enter"
-              : "⌘/Ctrl + Enter to generate"}
-          </p>
           </div>
         </div>
       </div>
@@ -1265,6 +1347,10 @@ function BuildsList({
   onToggleMenu: (rootId: string) => void;
   onDelete: (t: StudioThread) => void;
 }) {
+  // Anchor rect for the open menu, captured from the trigger button. The
+  // menu renders in a portal with fixed positioning so it isn't clipped by
+  // the scrolling, mask-faded <ul> it lives inside.
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
   if (threads.length === 0) {
     return <li className="text-sm text-muted-foreground">No builds yet.</li>;
   }
@@ -1312,27 +1398,37 @@ function BuildsList({
               aria-label="Build options"
               onClick={(e) => {
                 e.stopPropagation();
+                setAnchorRect(e.currentTarget.getBoundingClientRect());
                 onToggleMenu(t.rootId);
               }}
-              className="absolute right-1.5 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground/70 hover:bg-foreground/10 hover:text-foreground"
+              className="absolute right-1.5 top-1/2 flex size-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 hover:bg-foreground/10 hover:text-foreground"
             >
               <EllipsisVerticalIcon className="size-4" />
             </button>
-            {openMenuId === t.rootId && (
-              <div
-                onClick={(e) => e.stopPropagation()}
-                className="absolute right-1.5 top-10 z-20 min-w-[130px] rounded-lg border border-foreground/15 bg-card p-1 shadow-lg"
-              >
-                <button
-                  type="button"
-                  onClick={() => onDelete(t)}
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
+            {openMenuId === t.rootId &&
+              anchorRect &&
+              typeof document !== "undefined" &&
+              createPortal(
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    position: "fixed",
+                    top: anchorRect.bottom + 4,
+                    left: anchorRect.right - 140,
+                  }}
+                  className="z-50 min-w-[140px] rounded-lg border border-foreground/15 bg-card p-1 shadow-lg"
                 >
-                  <Trash2Icon className="size-4" />
-                  Delete build
-                </button>
-              </div>
-            )}
+                  <button
+                    type="button"
+                    onClick={() => onDelete(t)}
+                    className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
+                  >
+                    <Trash2Icon className="size-4" />
+                    Delete build
+                  </button>
+                </div>,
+                document.body
+              )}
           </li>
         );
       })}

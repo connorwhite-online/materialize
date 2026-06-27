@@ -7,7 +7,7 @@ import { CircleUserRound } from "lucide-react";
 import { Browse } from "@/components/icons/browse";
 import { Materials } from "@/components/icons/materials";
 import { Print } from "@/components/icons/print";
-import { Wand } from "@/components/icons/wand";
+import { Galaxy } from "@/components/icons/galaxy";
 import { AvatarWithUnreadDot } from "@/components/auth/avatar-with-unread-dot";
 import { SandboxBadge } from "@/components/nav/sandbox-badge";
 import { useCart } from "@/components/print/cart-context";
@@ -32,12 +32,12 @@ const TAB_ITEMS: ReadonlyArray<TabItem> = [
   { href: "/print", label: "Print", Icon: Print },
 ];
 
-// Experimental, owner-only Text-to-CAD tab. Only appended when the
-// server resolves `canUseTextToCad` and threads `textToCad` down.
+// Experimental, owner-only Prometheus (text-to-CAD) tab. Only appended when
+// the server resolves `canUseTextToCad` and threads `textToCad` down.
 const TEXT_TO_CAD_ITEM: TabItem = {
-  href: "/text-to-cad",
-  label: "Text to CAD",
-  Icon: Wand,
+  href: "/prometheus",
+  label: "Prometheus",
+  Icon: Galaxy,
 };
 
 function tabItems(textToCad: boolean): ReadonlyArray<TabItem> {
