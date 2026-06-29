@@ -6,6 +6,7 @@ import { Browse } from "@/components/icons/browse";
 import { Materials } from "@/components/icons/materials";
 import { Print } from "@/components/icons/print";
 import { Galaxy } from "@/components/icons/galaxy";
+import { Logomark } from "@/components/icons/logomark";
 import { SidebarUserBlock } from "@/components/auth/sidebar-user-block";
 import { SandboxBadge } from "@/components/nav/sandbox-badge";
 import { useCart } from "@/components/print/cart-context";
@@ -95,13 +96,10 @@ export function MainMenuSidebar({
       <div className="flex items-center justify-between gap-2 px-2 py-1">
         <Link
           href="/"
-          className="text-xl lowercase tracking-tight bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-transparent leading-none"
-          style={{
-            fontFamily: "var(--font-frama-black), system-ui, sans-serif",
-            fontWeight: 900,
-          }}
+          aria-label="Materialize — home"
+          className="flex items-center px-1 py-0.5 text-foreground transition-opacity hover:opacity-80"
         >
-          Materialize
+          <Logomark height={20} />
         </Link>
         {sandbox && <SandboxBadge />}
       </div>

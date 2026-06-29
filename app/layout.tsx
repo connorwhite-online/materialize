@@ -18,23 +18,17 @@ const fuji = localFont({
   variable: "--font-display",
   display: "swap",
 });
-// PP Frama — the new app typeface (Pangram Pangram). Two cuts loaded:
-//   - Regular (--font-frama) drives the heading font (--font-heading in
-//     globals.css), so the existing `font-heading` utility across the
-//     UI (card / dialog / alert / section titles) renders in Frama
-//     Regular. A single 400 face means medium/heading weights collapse
-//     to Regular — the intended "Regular for headings" look.
-//   - Black (--font-frama-black) is the nav wordmark / logo only.
+// PP Frama — the new app typeface (Pangram Pangram). Regular (--font-frama)
+// drives the heading font (--font-heading in globals.css), so the existing
+// `font-heading` utility across the UI (card / dialog / alert / section
+// titles) renders in Frama Regular. A single 400 face means medium/heading
+// weights collapse to Regular — the intended "Regular for headings" look.
+// (The Black cut previously powered the nav wordmark, now replaced by the
+// <Logomark /> SVG, so it's no longer loaded.)
 const framaRegular = localFont({
   src: "../public/PPFrama-Regular.otf",
   variable: "--font-frama",
   weight: "400",
-  display: "swap",
-});
-const framaBlack = localFont({
-  src: "../public/PPFrama-Black.otf",
-  variable: "--font-frama-black",
-  weight: "900",
   display: "swap",
 });
 // PP Playground Light (--font-script) is only used on the home hero
@@ -105,7 +99,7 @@ export default function RootLayout({
     <ClerkProvider>
       <html
         lang="en"
-        className={`${fuji.variable} ${framaRegular.variable} ${framaBlack.variable} h-full antialiased`}
+        className={`${fuji.variable} ${framaRegular.variable} h-full antialiased`}
         suppressHydrationWarning
       >
         <body className="min-h-full flex flex-col">
