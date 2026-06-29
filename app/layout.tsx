@@ -76,6 +76,11 @@ export const metadata: Metadata = {
     title: SITE_NAME,
     description: SITE_DESCRIPTION,
   },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    startupImage: "/launch.png",
+  },
 };
 
 // Tell the browser the soft keyboard should overlay our layout

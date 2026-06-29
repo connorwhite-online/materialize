@@ -15,14 +15,5 @@ export default function manifest(): MetadataRoute.Manifest {
         type: "image/png",
       },
     ],
-    screenshots: [
-      {
-        src: "/launch.png",
-        sizes: "1080x1920",
-        type: "image/png",
-        // @ts-expect-error — "splash" is a valid form_factor per the spec but not yet in TS types
-        form_factor: "narrow",
-      },
-    ],
   };
 }
