@@ -23,10 +23,10 @@ This repo already runs this pattern by hand (see the Materialize/Iterate Linear 
 
 Discover at runtime, but the defaults for this repo are:
 
-- **Team**: `Connorwhite` (key `CON`)
-- **Project**: `Materialize` (use `Iterate` or another when auditing that repo)
+- **Team**: `Materialize` (key `MTR`)
+- **Project**: route each finding to the feature/cross-cutting project it belongs to — `Print Quote Pipeline`, `Checkout, Payments & Order Lifecycle`, `Agent Orders & MCP`, `Text-to-CAD Studio`, `Marketplace: Listings, Purchases & Disputes`, `Creator Tools: Projects, Collections & Build Guides`, `Accounts, Profiles & Orgs`, `3D Viewer & Rendering`, `Testing & E2E`, `Observability & Ops`, or `Platform: Infra, DevX & Environment`. The `📋 Overview & Ways of Working` project holds no issues — never file there. (Use the `Iterate` team/project when auditing that repo.)
 - **Workflow states**: `Backlog` → `Todo` → `In Progress` → `Done`; plus `Canceled`, `Duplicate`
-- **Labels** (map findings onto these — do not invent new ones unless a category has no home): `Bug`, `Improvement`, `Feature`, `DX`, `Observability` (plus `Security`, `Testing`, `Performance`, `Tech Debt`, `a11y` which also exist). Reserved meta-label: **`Needs Decision`** — applied to anything awaiting the maintainer (see "Decisions by comment"), never a finding category.
+- **Labels** (map findings onto these — do not invent new ones unless a category has no home): `Bug`, `Improvement`, `Feature`, `DX`, `Observability`, `Accessibility`, `Performance`, `Security` (and `Tech Debt`/`Testing` if a category has no better home). Reserved meta-label: **`Needs Decision`** — applied to anything awaiting the maintainer (see "Decisions by comment"), never a finding category.
 
 Always confirm these with `list_teams` / `list_issue_statuses` / `list_issue_labels` / `list_projects` at the start of a run — IDs and labels drift.
 
@@ -100,8 +100,8 @@ For each selected finding, create one Linear issue using [references/issue-templ
 
 - **Open every cited file yourself** before writing — subagent line numbers are leads, not facts. A wrong excerpt becomes a wrong issue that fails its own drift check. Excerpts come from your own reads.
 - Stamp `git rev-parse --short HEAD` in the body (the executor drift-checks against it).
-- **Team** `Connorwhite`, **project** `Materialize`, state **`Todo`** for ready work (or **`Backlog`** for not-yet-actionable / blocked-on-dependency), **label** from the category→label map (see playbook). Set **priority** from leverage (Urgent/High/Medium/Low).
-- **Encode dependencies** with Linear issue relations ("blocked by") where the API supports it, and always restate them in the body ("Depends on CON-XXX — do not start until that is Done").
+- **Team** `Materialize` (key `MTR`), **project** = the matching feature/cross-cutting project (see Linear coordinates), state **`Todo`** for ready work (or **`Backlog`** for not-yet-actionable / blocked-on-dependency), **label** from the category→label map (see playbook). Set **priority** from leverage (Urgent/High/Medium/Low).
+- **Encode dependencies** with Linear issue relations ("blocked by") where the API supports it, and always restate them in the body ("Depends on MTR-XXX — do not start until that is Done").
 - After filing all issues, post a single **run-summary** (a Linear comment on a tracking issue, or update the project description's audit section) listing the issues created, execution order, dependency graph, and **findings considered and rejected** (one line each, so they aren't re-audited next run).
 
 Do not file 30 issues nobody asked for. A short list of high-confidence, high-leverage issues beats a long one.
@@ -111,7 +111,7 @@ Do not file 30 issues nobody asked for. A short list of high-confidence, high-le
 This is the fan-out. **Read [references/dispatch.md](references/dispatch.md) before the first dispatch.** In short:
 
 - Select ready issues (`Todo`, dependencies `Done`), respecting the dependency graph — never dispatch an issue whose blocker is still open.
-- For each, spawn **one** executor subagent (`subagent_type: general-purpose`, `isolation: "worktree"`, `model: sonnet` default / `haiku` for trivial S issues). **Run independent issues concurrently** (multiple Agent calls in one message) up to a sane cap (≤4 in flight). Each executor gets the full issue body inlined, implements only the in-scope files, runs the verification gates, commits in its worktree, **opens its own PR** (one PR per issue, body links the issue with `CON-XXX`), and moves the issue to `In Progress`.
+- For each, spawn **one** executor subagent (`subagent_type: general-purpose`, `isolation: "worktree"`, `model: sonnet` default / `haiku` for trivial S issues). **Run independent issues concurrently** (multiple Agent calls in one message) up to a sane cap (≤4 in flight). Each executor gets the full issue body inlined, implements only the in-scope files, runs the verification gates, commits in its worktree, **opens its own PR** (one PR per issue, body links the issue with `MTR-XXX`), and moves the issue to `In Progress`.
 - **Review each PR like a tech lead**: re-run the issue's done criteria, check scope (`git diff --stat` against the in-scope list — any out-of-scope file fails review), read the diff against intent, audit the new tests. Verdict: **approve** (comment on the PR + leave the Linear issue for the human to merge → `Done`), **revise** (send the same executor specific feedback, max 2 rounds), or **block** (move issue back, comment why, refine the issue). **Merging is always the human's decision.**
 
 ### `reconcile` — keep Linear and the repo in sync
@@ -160,7 +160,7 @@ This is the no-stall path: ambiguous work waits on a comment, not on a live back
 - **`branch`** → audit only the current branch's changes (`git diff --name-only $(git merge-base origin/<default> HEAD)..HEAD` + direct importers). Tag findings `introduced` vs `pre-existing`. Good as a pre-PR pass.
 - **`next`** (or `features`, `roadmap`) → audit only the direction category in depth; selected ones become spike/design issues, not build-everything issues.
 - **`issue <description>`** → skip the audit; investigate just enough to specify one thing, file one Linear issue.
-- **`dispatch [issue|all]`** → run Phase 5. `dispatch CON-123` for one; `dispatch all` fans out every ready `Todo` issue respecting dependencies. Requires a host that can spawn worktree subagents; if yours can't, say so and hand the issues to humans.
+- **`dispatch [issue|all]`** → run Phase 5. `dispatch MTR-123` for one; `dispatch all` fans out every ready `Todo` issue respecting dependencies. Requires a host that can spawn worktree subagents; if yours can't, say so and hand the issues to humans.
 - **`daily`** → the unattended scheduled run: reconcile → dispatch ready set → refill if thin → run summary. See "Daily routine (unattended)" above. Operates non-interactively; surfaces forks as `🔵 OPEN QUESTION` comments instead of stopping.
 - **`reconcile`** → sync Linear states with merged PRs, retire/refresh.
 - **`review-pr <url|issue>`** → review an executor's (or human's) PR against its Linear issue without having dispatched it.

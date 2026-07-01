@@ -16,8 +16,8 @@ Three properties make an issue executable by a weaker model:
 
 | Field | Value |
 |---|---|
-| **Team** | `Connorwhite` |
-| **Project** | `Materialize` (or the repo being audited) |
+| **Team** | `Materialize` (key `MTR`) |
+| **Project** | the matching feature/cross-cutting project (Print Quote Pipeline, Checkout Payments & Order Lifecycle, Agent Orders & MCP, Text-to-CAD Studio, Marketplace, Creator Tools, Accounts/Profiles/Orgs, 3D Viewer & Rendering, Testing & E2E, Observability & Ops, Platform: Infra DevX & Environment) — or the repo being audited |
 | **State** | `Todo` if ready to execute now; `Backlog` if blocked on a dependency or a maintainer decision (direction/spike issues) |
 | **Label** | from the category→label map in the playbook |
 | **Priority** | Urgent / High / Medium / Low, from leverage (security HIGH → at least High) |
@@ -36,7 +36,7 @@ Keep the **title** specific and outcome-shaped — it's what the maintainer scan
 > verification command and confirm the expected result before the next step.
 > Touch only the files listed in scope. If any STOP condition occurs, stop
 > and report on the issue — do not improvise. Open a PR whose description
-> contains `CON-NNN` so it links here. Do not merge.
+> contains `MTR-NNN` so it links here. Do not merge.
 >
 > **Drift check (run first)**: `git diff --stat <Planned-at SHA>..HEAD -- <in-scope paths>`
 > If any in-scope file changed since this issue was written, compare the
@@ -48,7 +48,7 @@ Keep the **title** specific and outcome-shaped — it's what the maintainer scan
 - **Priority**: Urgent | High | Medium | Low
 - **Effort**: S | M | L
 - **Risk**: LOW | MED | HIGH
-- **Depends on**: CON-NNN (or "none") — do not start until that issue is Done
+- **Depends on**: MTR-NNN (or "none") — do not start until that issue is Done
 - **Category**: bug | security | perf | tests | tech-debt | migration | dx | observability | docs | direction
 - **Planned at**: commit `<short SHA>`, <YYYY-MM-DD>
 
@@ -94,9 +94,9 @@ The facts the executor needs, inlined — never "as discussed" or "see audit":
 
 ## Git & PR workflow
 
-- Branch: `claude/CON-NNN-<slug>` off the default branch.
+- Branch: `claude/MTR-NNN-<slug>` off the default branch.
 - Commit per logical unit; match the repo's commit style (see `git log`).
-- Open **one PR** for this issue; PR description must contain `CON-NNN`.
+- Open **one PR** for this issue; PR description must contain `MTR-NNN`.
 - Do NOT merge, and do NOT push to a protected branch.
 
 ## Steps
@@ -124,7 +124,7 @@ Machine-checkable. ALL must hold:
 - [ ] `npx vitest run` passes; new tests for <X> exist and pass
 - [ ] `grep -rn "<old pattern>" <dir>` returns no matches (if applicable)
 - [ ] No files outside the in-scope list are modified (`git status`)
-- [ ] A PR is open referencing CON-NNN
+- [ ] A PR is open referencing MTR-NNN
 
 ## STOP conditions
 

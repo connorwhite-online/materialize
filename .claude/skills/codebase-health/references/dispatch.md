@@ -12,10 +12,10 @@ The founding rule survives unchanged: **the advisor never edits source code and 
 
 ### Select the ready set
 
-1. Pull the backlog: `list_issues` for project `Materialize`, state `Todo`.
+1. Pull the backlog: `list_issues` for team `Materialize` (`MTR`), state `Todo` — across the feature/cross-cutting projects (see SKILL.md "Linear coordinates").
 2. **Promote resolved open questions.** Scan comments on `Backlog` issues for a `🔵 OPEN QUESTION` whose latest maintainer reply decides it (see SKILL.md "Decisions by comment"). Fold the decision into the issue spec, move it to `Todo`, post `✅ RESOLVED — <decision>`, and add it to the ready set.
 3. Drop any issue whose `Depends on` (Linear "blocked by" relation, or the body line) is not yet `Done`. **Never dispatch an issue whose blocker is open** — a half-built dependency makes the executor improvise, which is exactly what the issue's STOP conditions forbid.
-4. The remaining issues are the **ready set**. `dispatch CON-123` runs just one; `dispatch all` runs the whole ready set.
+4. The remaining issues are the **ready set**. `dispatch MTR-123` runs just one; `dispatch all` runs the whole ready set.
 
 ### Preconditions (check before dispatching any)
 
@@ -28,13 +28,13 @@ The founding rule survives unchanged: **the advisor never edits source code and 
 For each issue in the ready set, spawn **one** executor:
 
 - `subagent_type: "general-purpose"`, `isolation: "worktree"`.
-- `model`: **`sonnet`** by default; **`haiku`** for trivial S-effort issues; honor a model the user named (`dispatch CON-123 haiku`).
+- `model`: **`sonnet`** by default; **`haiku`** for trivial S-effort issues; honor a model the user named (`dispatch MTR-123 haiku`).
 - **Run independent issues concurrently** — multiple `Agent` calls in a single message — up to **≤4 in flight**. More than that and review quality (yours) degrades and worktrees thrash. Queue the rest.
 - **Dependency-ordered**: only dispatch an issue once its blockers are `Done` *and merged*. If A blocks B, B waits for A's PR to merge, not just for A's executor to finish — an unmerged worktree isn't on the branch B forks from.
 
 The executor prompt must contain:
 
-1. **The full Linear issue body, inlined.** The worktree has only committed files; the executor may not have Linear access. Never assume it can fetch the issue — paste the body. (Also tell it the issue id `CON-NNN` so its PR can link.)
+1. **The full Linear issue body, inlined.** The worktree has only committed files; the executor may not have Linear access. Never assume it can fetch the issue — paste the body. (Also tell it the issue id `MTR-NNN` so its PR can link.)
 2. The executor preamble:
 
    > You are the executor for the Linear issue below. Follow it step by step.
@@ -44,7 +44,7 @@ The executor prompt must contain:
    > Fresh worktrees share git history but not `node_modules` — run `npm install`
    > first. The real gate is `npm run build` (full type-check), tests are
    > `npx vitest run`. Commit in the worktree following the issue's git workflow,
-   > then open ONE pull request whose description contains `CON-NNN` so it links
+   > then open ONE pull request whose description contains `MTR-NNN` so it links
    > to the issue. Do NOT merge and do NOT push to a protected branch. Before
    > reporting, audit every claim against an actual tool result — only report
    > what you can point to; if a verification failed or was skipped, say so.
