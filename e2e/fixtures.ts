@@ -125,23 +125,44 @@ export interface ClerkTestUserFixture {
  *
  * Pair with `deleteClerkTestUser()` in afterAll so we don't
  * accumulate users in the Clerk dashboard.
+ *
+ * Pass `fixedEmail` for a spec that needs a STABLE address across runs
+ * (e.g. one an env-var allow-list references, like
+ * `TEXT_TO_CAD_ALLOWED_EMAILS` — see text-to-cad.spec.ts). If a user with
+ * that email already exists (a prior run's `afterAll` didn't reach —
+ * crashed run, manual interrupt), we reuse it instead of erroring on
+ * Clerk's duplicate-email rejection; the password won't match a reused
+ * user; unaffected callers use `email_code` sign-in like `library.spec.ts`,
+ * which never touches the password.
  */
-export async function createClerkTestUser(): Promise<ClerkTestUserFixture> {
+export async function createClerkTestUser(
+  fixedEmail?: string
+): Promise<ClerkTestUserFixture> {
   ensureEnv();
   const secretKey = process.env.CLERK_SECRET_KEY;
   if (!secretKey) throw new Error("CLERK_SECRET_KEY not set");
   const clerk = createClerkClient({ secretKey });
   const stamp = Date.now();
   const rand = Math.random().toString(36).slice(2, 10);
-  const email = `e2e+clerk_test+${stamp}_${rand}@example.com`;
+  const email = fixedEmail ?? `e2e+clerk_test+${stamp}_${rand}@example.com`;
   // 16-char random password with mixed character classes —
   // satisfies Clerk's default password complexity rules.
   const password = `Te$t${Math.random().toString(36).slice(2, 10)}Aa1!`;
-  const user = await clerk.users.createUser({
-    emailAddress: [email],
-    password,
-  });
-  return { userId: user.id, email, password };
+  try {
+    const user = await clerk.users.createUser({
+      emailAddress: [email],
+      password,
+    });
+    return { userId: user.id, email, password };
+  } catch (err) {
+    if (!fixedEmail) throw err;
+    const existing = await clerk.users.getUserList({
+      emailAddress: [fixedEmail],
+    });
+    const found = existing.data[0];
+    if (!found) throw err;
+    return { userId: found.id, email: fixedEmail, password };
+  }
 }
 
 /**
