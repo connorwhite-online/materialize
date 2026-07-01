@@ -8,6 +8,28 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 Materialize is a 3D-print marketplace + instant-quote flow. Users upload models, browse/purchase files from other creators, and order physical prints through third-party manufacturers (CraftCloud). Revenue comes from a 3% service fee on print orders.
 
+## Working with Linear (required)
+
+Work on this repo is tracked in the **Materialize** Linear team (key `MTR`, workspace `connorwhite`). This is not optional bookkeeping — it is how the roadmap stays legible. Every non-trivial change maps to an issue, and you keep that issue's status honest as you work.
+
+**Before you start coding:**
+
+1. **Find or file the issue.** Search MTR first (`list_issues`, team `Materialize`). If nothing covers the work, create one in the right project before starting — title = the outcome, body = enough for a cold executor (file:line pointers, acceptance criteria). Don't do untracked work.
+2. **Claim it.** Move it to **In Progress** and assign yourself when you begin. States: `Backlog` → `Todo` → `In Progress` → `Done` (plus `Canceled`, `Duplicate`).
+3. **Keep status honest.** Update as you go; don't leave merged work in In Progress, and don't mark `Done` until it's merged/verified.
+4. **Link the PR.** Put `MTR-###` in the PR title or body so Linear links the branch/PR automatically (the issue's suggested `connorwhitestudio/mtr-###-…` branch name does this for free).
+5. **Right project + label.** File into the feature/cross-cutting project it belongs to, and tag the concern label(s).
+
+**Projects** (what we're building):
+
+- **Print Quote Pipeline** · **Checkout, Payments & Order Lifecycle** · **Agent Orders & MCP** · **Text-to-CAD Studio** · **Marketplace: Listings, Purchases & Disputes** · **Creator Tools: Projects, Collections & Build Guides** · **Accounts, Profiles & Orgs** · **3D Viewer & Rendering** (product areas)
+- **Testing & E2E** · **Observability & Ops** · **Platform: Infra, DevX & Environment** (cross-cutting)
+- **📋 Overview & Ways of Working** holds no issues — it's the workspace map + the human copy of these rules.
+
+**Labels** = cross-cutting concerns that span projects: `Bug`, `Improvement`, `Feature`, `DX`, `Observability`, `Accessibility`, `Performance`, `Security`, and `Needs Decision` (maintainer must weigh in — pair it with a `🔵 OPEN QUESTION` comment listing options + a recommendation; don't block on it).
+
+**Legacy `CON-###`:** issue numbers in code comments and older descriptions (`CON-107`, `CON-153`, …) are from the pre-MTR `connorwhite`/`CON` team. They are historical context and do **not** resolve 1:1 to current `MTR-###` issues — don't chase them as live links.
+
 ## Critical flows (know these before touching anything)
 
 ### Print quote pipeline
