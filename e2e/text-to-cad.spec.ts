@@ -112,7 +112,10 @@ test.describe("text-to-cad studio (full pipeline)", () => {
 
     await page.goto("/text-to-cad");
 
-    const composer = page.getByPlaceholder(/Describe a part/i);
+    // There's exactly one <textarea> in the studio (the composer) — locating
+    // by tag rather than placeholder copy, since that copy is presentational
+    // and free to change independent of this test's contract.
+    const composer = page.locator("textarea");
     await expect(composer).toBeVisible({ timeout: 10_000 });
     await composer.fill("A rounded square plate with a hole through the center");
     await page.getByRole("button", { name: "Generate" }).click();
