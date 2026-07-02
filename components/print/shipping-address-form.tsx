@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useSignUp, useSignIn } from "@clerk/nextjs/legacy";
 import { setUsernameFromEmail } from "@/app/actions/onboarding";
+import { reportClientError } from "@/lib/observability/report-client-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -269,8 +270,10 @@ export function ShippingAddressForm({
         if (authFlow === "sign-up") {
           try {
             await setUsernameFromEmail(pendingSubmission.email);
-          } catch {
-            // Swallow — the user can rename from settings later.
+          } catch (err) {
+            // Non-fatal — the user can rename from settings later,
+            // but report so a broad failure isn't invisible.
+            reportClientError("checkout.set-username-failed", err);
           }
         }
 

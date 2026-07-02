@@ -785,8 +785,17 @@ export async function deleteFileListing(
     ];
 
     // R2 deletes are best-effort — a stale object is better than a
-    // failed delete leaving a half-gone file row.
-    await Promise.allSettled(keys.map((k) => deleteObject(k)));
+    // failed delete leaving a half-gone file row. Still log
+    // rejections (with the failing key) so a permission drift or R2
+    // outage leaves a record instead of a silent orphan.
+    const deleteResults = await Promise.allSettled(
+      keys.map((k) => deleteObject(k))
+    );
+    deleteResults.forEach((r, i) => {
+      if (r.status === "rejected") {
+        logError("deleteFileListing.r2", { key: keys[i], error: r.reason });
+      }
+    });
 
     // Cascade rules clean up file_assets, file_photos, collection_items,
     // project_files, and print_orders for us.
