@@ -4,6 +4,7 @@ import { projects, projectPhotos } from "@/lib/db/schema";
 import { eq, and, asc } from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
 import { logError } from "@/lib/logger";
+import { canWriteProject } from "@/lib/authorization";
 import { thumbnailPlaceholderResponse } from "../../placeholder";
 
 /** Same guard as in /api/thumbnails/[fileId]/route.ts — see that file for rationale. */
@@ -75,7 +76,7 @@ export async function GET(
       project.status === "published" && project.visibility === "public";
     if (!publicListing) {
       const { userId } = await auth();
-      if (!userId || userId !== project.userId) {
+      if (!userId || !(await canWriteProject(userId, project.id)).ok) {
         // Don't leak a draft/private cover to a stolen id — placeholder
         // (reveals nothing) rather than 404, consistent with the file route.
         return thumbnailPlaceholderResponse();

@@ -7,7 +7,11 @@ import { listMyCollections } from "@/app/actions/collections";
 import { listMyProjects } from "@/app/actions/projects";
 import { runCreateListing } from "./run-create-listing";
 import { MATERIALS } from "@/lib/materials";
-import { DESIGN_TAG_OPTIONS, DESIGN_TAG_LABELS } from "@/lib/validations/file";
+import {
+  DESIGN_TAG_OPTIONS,
+  DESIGN_TAG_LABELS,
+  MAX_PRICE_CENTS,
+} from "@/lib/validations/file";
 import { CategorySelect } from "@/components/categories/category-select";
 import {
   LICENSES,
@@ -415,6 +419,7 @@ export function FileMetadataForm({
                       name="price"
                       type="number"
                       min="0"
+                      max={MAX_PRICE_CENTS / 100}
                       step="0.01"
                       defaultValue="0"
                     />

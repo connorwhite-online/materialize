@@ -19,6 +19,32 @@ function abs(path: string): string {
   return `${APP_URL}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
+/**
+ * Serializes a JSON-LD object for safe embedding inside a
+ * `<script type="application/ld+json">` tag via `dangerouslySetInnerHTML`.
+ *
+ * `JSON.stringify` alone does not escape `<`, so a user-authored string
+ * field (file/project name or description, profile bio, …) containing
+ * `</script><script>…` breaks out of the JSON-LD block into executable
+ * HTML — stored XSS against every visitor of the page. We also escape
+ * U+2028/U+2029 (line/paragraph separators), which are valid in JSON
+ * strings but invalid in JS string literals and can otherwise break
+ * some parsers.
+ */
+// Built via String.fromCharCode rather than literal characters in a
+// RegExp source string -- a raw U+2028/U+2029 inside a `/.../ ` regex
+// literal is treated by some toolchains (esbuild included) as an actual
+// line terminator, which breaks the regex literal itself at parse time.
+const LINE_SEPARATOR_RE = new RegExp(String.fromCharCode(0x2028), "g");
+const PARAGRAPH_SEPARATOR_RE = new RegExp(String.fromCharCode(0x2029), "g");
+
+export function safeJsonLdScript(obj: unknown): string {
+  return JSON.stringify(obj)
+    .replace(/</g, "\\u003c")
+    .replace(LINE_SEPARATOR_RE, "\\u2028")
+    .replace(PARAGRAPH_SEPARATOR_RE, "\\u2029");
+}
+
 type PersonInput = {
   username: string | null;
   displayName: string | null;

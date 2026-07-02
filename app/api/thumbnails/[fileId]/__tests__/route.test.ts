@@ -36,8 +36,23 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("@/lib/db/schema", () => ({
-  files: { id: "id", thumbnailUrl: "thumbnailUrl", status: "status", userId: "userId", coverPhotoId: "coverPhotoId" },
+  files: {
+    id: "id",
+    thumbnailUrl: "thumbnailUrl",
+    status: "status",
+    userId: "userId",
+    organizationId: "organizationId",
+    coverPhotoId: "coverPhotoId",
+  },
   filePhotos: { id: "id", storageKey: "storageKey", fileId: "fileId" },
+}));
+
+// isOrgMember is exercised as its own unit in lib/__tests__/authorization.test.ts;
+// here we only need to pin that the route calls it and honors the result
+// for draft-owner gating (MTR-136).
+const mockIsOrgMember = vi.fn();
+vi.mock("@/lib/authorization", () => ({
+  isOrgMember: (...args: unknown[]) => mockIsOrgMember(...args),
 }));
 
 vi.mock("@/lib/storage", () => ({
@@ -62,10 +77,13 @@ function makeRequest(fileId: string, query?: string) {
 // Import AFTER mocks are registered so vi.mock hoisting takes effect.
 import { GET } from "../route";
 import { generateDownloadUrl } from "@/lib/storage";
+import { setMockUserId } from "@/vitest.setup";
 
 describe("GET /api/thumbnails/[fileId]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    setMockUserId("test-user-id");
+    mockIsOrgMember.mockResolvedValue({ member: false, role: null });
     // The main file query goes through leftJoin before where; reset both.
     mockDbLeftJoin.mockImplementation(() => ({ where: mockDbWhere }));
     // Default: simulate Postgres rejecting an invalid UUID.  Tests that
@@ -273,6 +291,70 @@ describe("GET /api/thumbnails/[fileId]", () => {
       // And the cover-photo lookup is skipped — only the files row
       // should have been queried.
       expect(mockDbWhere).toHaveBeenCalledTimes(1);
+
+      fetchSpy.mockRestore();
+    });
+  });
+
+  describe("draft visibility for org co-owners (MTR-136)", () => {
+    it("serves the placeholder for a draft when the viewer is neither the uploader nor an org member", async () => {
+      const fileId = "ba14f9ed-106b-46e3-8abc-123456789012";
+      setMockUserId("stranger");
+      mockIsOrgMember.mockResolvedValue({ member: false, role: null });
+
+      mockDbWhere.mockResolvedValueOnce([
+        {
+          id: fileId,
+          thumbnailUrl: `/api/thumbnails/${fileId}`,
+          status: "draft",
+          userId: "owner-1",
+          organizationId: "org-1",
+          coverPhotoId: null,
+          coverStorageKey: null,
+        },
+      ]);
+
+      const { req, context } = makeRequest(fileId);
+      const res = await GET(req, context);
+
+      // Placeholder, not the real bytes — a stranger must not see WIP art.
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Content-Type")).toBe("image/png");
+      expect(mockIsOrgMember).toHaveBeenCalledWith("stranger", "org-1");
+    });
+
+    it("streams the real bytes for a draft when the viewer is an org co-owner (not the uploader)", async () => {
+      const fileId = "ba14f9ed-106b-46e3-8abc-123456789012";
+      setMockUserId("org-teammate");
+      mockIsOrgMember.mockResolvedValue({ member: true, role: "member" });
+
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response("FAKE_WEBP_BYTES", {
+          status: 200,
+          headers: { "Content-Type": "image/webp" },
+        })
+      );
+
+      mockDbWhere
+        .mockResolvedValueOnce([
+          {
+            id: fileId,
+            thumbnailUrl: `/api/thumbnails/${fileId}`,
+            status: "draft",
+            userId: "owner-1",
+            organizationId: "org-1",
+            coverPhotoId: null,
+            coverStorageKey: null,
+          },
+        ])
+        .mockResolvedValue([]);
+
+      const { req, context } = makeRequest(fileId);
+      const res = await GET(req, context);
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Content-Type")).toBe("image/webp");
+      expect(mockIsOrgMember).toHaveBeenCalledWith("org-teammate", "org-1");
 
       fetchSpy.mockRestore();
     });

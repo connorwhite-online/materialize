@@ -28,6 +28,17 @@ export const ACCEPTED_MIME_TYPES: Record<string, string> = {
 
 export const MAX_FILE_SIZE = 200 * 1024 * 1024; // 200MB
 
+// Same ceiling and rationale as lib/validations/project.ts's
+// MAX_PRICE_CENTS: Stripe maxes line items at 999, well below this;
+// cents math caps at ~$21M for a 32-bit signed int, so $1M is a sane
+// upper bound. Defined locally rather than imported from project.ts —
+// project.ts already imports DESIGN_TAG_OPTIONS/categorySchema FROM
+// this file, so importing MAX_PRICE_CENTS back from project.ts would
+// create a file.ts <-> project.ts circular import (risky: whichever
+// module starts evaluating first would read the other's export before
+// it's initialized).
+export const MAX_PRICE_CENTS = 100_000_000;
+
 export const fileExtensionToFormat = (filename: string) => {
   const ext = filename.split(".").pop()?.toLowerCase();
   if (ext === "stp") return "step";
@@ -64,6 +75,7 @@ export const createListingSchema = z.object({
   price: z.coerce
     .number()
     .min(0, "Price must be 0 or more")
+    .max(MAX_PRICE_CENTS / 100, `Price must be under $${MAX_PRICE_CENTS / 100}`)
     .transform((val) => Math.round(val * 100)), // dollars to cents
   license: z.enum(LICENSE_ENUM_VALUES),
   visibility: z.enum(["public", "private"]).optional(),

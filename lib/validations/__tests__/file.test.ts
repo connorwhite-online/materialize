@@ -6,6 +6,7 @@ import {
   socialLinksSchema,
   ACCEPTED_FORMATS,
   MAX_FILE_SIZE,
+  MAX_PRICE_CENTS,
 } from "../file";
 
 describe("fileExtensionToFormat", () => {
@@ -96,6 +97,37 @@ describe("createListingSchema", () => {
 
   it("rejects negative price", () => {
     const result = createListingSchema.safeParse({ ...validData, price: "-1" });
+    expect(result.success).toBe(false);
+  });
+
+  // MTR-139: createListingSchema.price had .min(0) but no .max(), while
+  // the otherwise-identical project schema caps at MAX_PRICE_CENTS
+  // ($1M) — a typo (extra zero) or scripted caller could otherwise push
+  // a file price toward the int32 ceiling.
+  it("accepts a price right at the cap", () => {
+    const result = createListingSchema.safeParse({
+      ...validData,
+      price: String(MAX_PRICE_CENTS / 100),
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.price).toBe(MAX_PRICE_CENTS);
+    }
+  });
+
+  it("rejects a price above the cap", () => {
+    const result = createListingSchema.safeParse({
+      ...validData,
+      price: String(MAX_PRICE_CENTS / 100 + 1),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a price near the int32 cents ceiling (e.g. a typo'd extra zero)", () => {
+    const result = createListingSchema.safeParse({
+      ...validData,
+      price: "99999999", // ~$21M in cents once converted — the old unbounded ceiling
+    });
     expect(result.success).toBe(false);
   });
 

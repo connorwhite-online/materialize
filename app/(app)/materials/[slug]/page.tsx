@@ -11,6 +11,7 @@ import {
   findMaterialBySlug,
   type CatalogMaterial,
 } from "@/lib/craftcloud/catalog";
+import { safeJsonLdScript } from "@/lib/seo/json-ld";
 
 function truncate(s: string, n: number) {
   return s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s;
@@ -126,7 +127,7 @@ export default async function MaterialDetailPage(props: {
     <div className="mx-auto max-w-5xl px-4 py-8">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{ __html: safeJsonLdScript(jsonLd) }}
       />
       {/* Hero */}
       <div className="grid grid-cols-1 gap-8 md:grid-cols-2">

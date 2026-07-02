@@ -10,7 +10,7 @@ import { OrdersTab } from "@/components/profile/orders-tab";
 import { EarningsTab } from "@/components/profile/earnings-tab";
 import { NotificationsTab } from "@/components/profile/notifications-tab";
 import { getMyUnreadNotificationCount } from "@/lib/notifications/queries";
-import { profilePageJsonLd } from "@/lib/seo/json-ld";
+import { profilePageJsonLd, safeJsonLdScript } from "@/lib/seo/json-ld";
 
 const PLATFORM_LABELS: Record<string, string> = {
   twitter: "X / Twitter",
@@ -149,7 +149,7 @@ export async function UserProfileView({
       {jsonLd && (
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+          dangerouslySetInnerHTML={{ __html: safeJsonLdScript(jsonLd) }}
         />
       )}
       <div className="flex items-start gap-6">
