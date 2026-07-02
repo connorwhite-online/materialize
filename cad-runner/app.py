@@ -23,6 +23,7 @@ plan's "out of scope for v0" note.
 """
 
 import base64
+import hmac
 import multiprocessing as mp
 import os
 import queue as queue_mod
@@ -54,6 +55,18 @@ MEM_LIMIT_BYTES = int(
 # would otherwise hit SIGXCPU long before the wall-clock terminate fires.
 CPU_LIMIT_S = int(os.environ.get("CAD_RUN_CPU_S", "55"))
 RUNNER_SECRET = os.environ.get("CAD_RUNNER_SECRET", "")
+# Fail closed: an empty secret would otherwise skip the bearer check entirely
+# (see `run()` below), turning a misconfigured deploy into an unauthenticated
+# arbitrary-Python-execution endpoint. The container isolation (network-
+# disabled, read-only FS) is a separate, manually-applied defense — don't
+# rely on it alone. Set CAD_RUNNER_ALLOW_NO_AUTH=true only for local/dev runs
+# where there is no public URL.
+if not RUNNER_SECRET and os.environ.get("CAD_RUNNER_ALLOW_NO_AUTH", "") != "true":
+    raise RuntimeError(
+        "CAD_RUNNER_SECRET is required (unauthenticated code execution is not "
+        "safe to expose). Set CAD_RUNNER_SECRET, or set "
+        "CAD_RUNNER_ALLOW_NO_AUTH=true for local/dev runs only."
+    )
 
 
 class RunRequest(BaseModel):
@@ -373,7 +386,7 @@ def _render(mesh) -> Optional[str]:
 async def run(req: RunRequest, request: Request) -> dict:
     if RUNNER_SECRET:
         auth = request.headers.get("authorization", "")
-        if auth != f"Bearer {RUNNER_SECRET}":
+        if not hmac.compare_digest(auth, f"Bearer {RUNNER_SECRET}"):
             raise HTTPException(status_code=401, detail="unauthorized")
 
     ctx = mp.get_context("spawn")

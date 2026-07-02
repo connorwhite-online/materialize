@@ -22,8 +22,12 @@ response shape matches `CadRunResult` in `lib/cad/types.ts`.
 ```bash
 cd cad-runner
 pip install -r requirements.txt
-uvicorn app:app --port 8000
+CAD_RUNNER_ALLOW_NO_AUTH=true uvicorn app:app --port 8000
 ```
+
+(The runner now fails to boot without `CAD_RUNNER_SECRET`; the override above
+is fine for a local, non-public run. Set `CAD_RUNNER_SECRET` instead if you
+want to exercise the auth path locally.)
 
 Then point the app at it:
 
@@ -61,8 +65,12 @@ deploy network-disabled, non-root (already set), read-only FS, with
 memory/CPU caps. Per-run, `app.py` also forks a child with `RLIMIT_AS` /
 `RLIMIT_CPU` and a wall-clock timeout. Adequate for the owner-only v0;
 before public/multi-user exposure, move to a stronger sandbox (gVisor /
-seccomp / per-run microVM). Optionally set `CAD_RUNNER_SECRET` (and the
-matching env on the app) to require a bearer token.
+seccomp / per-run microVM).
+
+`CAD_RUNNER_SECRET` is **required** (and the matching env must be set on the
+app) to authenticate the bearer token — the service **fails to boot** without
+it. The only exception is `CAD_RUNNER_ALLOW_NO_AUTH=true`, an explicit dev
+override for local/no-public-URL runs; never set it on a deployed service.
 
 Env knobs: `CAD_RUN_TIMEOUT_S`, `CAD_RUN_MEM_BYTES`, `CAD_RUN_CPU_S`,
-`CAD_RUNNER_SECRET`.
+`CAD_RUNNER_SECRET`, `CAD_RUNNER_ALLOW_NO_AUTH`.

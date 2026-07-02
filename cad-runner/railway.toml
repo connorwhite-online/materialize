@@ -6,7 +6,11 @@
 # everything below is automatic — no manual port or healthcheck wiring.
 #
 # After it's up, set on the service:
-#   CAD_RUNNER_SECRET = <a long random token>   (also set the same on Vercel)
+#   CAD_RUNNER_SECRET = <a long random token>   (REQUIRED — also set the same
+#                                                 on Vercel; the service fails
+#                                                 to boot without it, absent
+#                                                 the explicit dev override
+#                                                 CAD_RUNNER_ALLOW_NO_AUTH=true)
 # and on the Vercel app:
 #   CAD_RUNNER_URL    = https://<this-service>.up.railway.app
 #   CAD_RUNNER_SECRET = <same token>
