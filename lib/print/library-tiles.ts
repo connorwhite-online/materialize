@@ -37,27 +37,31 @@ export async function loadLibraryTiles(userId: string): Promise<LibraryTile[]> {
 }
 
 async function loadLibraryTilesOnce(userId: string): Promise<LibraryTile[]> {
-  const ownedFiles = await db
-    .select({
-      id: files.id,
-      name: files.name,
-      thumbnailUrl: files.thumbnailUrl,
-    })
-    .from(files)
-    .where(eq(files.userId, userId))
-    .orderBy(desc(files.createdAt));
-
-  const purchasedRows = await db
-    .select({
-      id: files.id,
-      name: files.name,
-      thumbnailUrl: files.thumbnailUrl,
-    })
-    .from(purchases)
-    .innerJoin(files, eq(purchases.fileId, files.id))
-    .where(
-      and(eq(purchases.buyerId, userId), eq(purchases.status, "completed"))
-    );
+  // ownedFiles and purchasedRows are independent reads (different
+  // source tables, no shared dependency) — run them concurrently
+  // instead of paying two sequential round trips.
+  const [ownedFiles, purchasedRows] = await Promise.all([
+    db
+      .select({
+        id: files.id,
+        name: files.name,
+        thumbnailUrl: files.thumbnailUrl,
+      })
+      .from(files)
+      .where(eq(files.userId, userId))
+      .orderBy(desc(files.createdAt)),
+    db
+      .select({
+        id: files.id,
+        name: files.name,
+        thumbnailUrl: files.thumbnailUrl,
+      })
+      .from(purchases)
+      .innerJoin(files, eq(purchases.fileId, files.id))
+      .where(
+        and(eq(purchases.buyerId, userId), eq(purchases.status, "completed"))
+      ),
+  ]);
 
   const fileIds = [
     ...ownedFiles.map((f) => f.id),
@@ -87,39 +91,42 @@ async function loadLibraryTilesOnce(userId: string): Promise<LibraryTile[]> {
   if (primaryAssetIds.length > 0) {
     // Legacy single-item orders carry fileAssetId on printOrders
     // itself; multi-item orders leave it null and record per-item
-    // rows in printOrderItems. Union both and take the max.
-    const legacyPrints = await db
-      .select({
-        fileAssetId: printOrders.fileAssetId,
-        lastPrintedAt: sql<string>`max(${printOrders.createdAt})`,
-      })
-      .from(printOrders)
-      .where(
-        and(
-          eq(printOrders.userId, userId),
-          inArray(printOrders.fileAssetId, primaryAssetIds)
+    // rows in printOrderItems. Union both and take the max. The two
+    // queries are independent of each other, so run them concurrently.
+    const [legacyPrints, itemPrints] = await Promise.all([
+      db
+        .select({
+          fileAssetId: printOrders.fileAssetId,
+          lastPrintedAt: sql<string>`max(${printOrders.createdAt})`,
+        })
+        .from(printOrders)
+        .where(
+          and(
+            eq(printOrders.userId, userId),
+            inArray(printOrders.fileAssetId, primaryAssetIds)
+          )
         )
-      )
-      .groupBy(printOrders.fileAssetId);
+        .groupBy(printOrders.fileAssetId),
+      db
+        .select({
+          fileAssetId: printOrderItems.fileAssetId,
+          lastPrintedAt: sql<string>`max(${printOrders.createdAt})`,
+        })
+        .from(printOrderItems)
+        .innerJoin(printOrders, eq(printOrderItems.printOrderId, printOrders.id))
+        .where(
+          and(
+            eq(printOrders.userId, userId),
+            inArray(printOrderItems.fileAssetId, primaryAssetIds)
+          )
+        )
+        .groupBy(printOrderItems.fileAssetId),
+    ]);
     for (const row of legacyPrints) {
       if (row.fileAssetId) {
         lastPrintedByAssetId.set(row.fileAssetId, new Date(row.lastPrintedAt));
       }
     }
-    const itemPrints = await db
-      .select({
-        fileAssetId: printOrderItems.fileAssetId,
-        lastPrintedAt: sql<string>`max(${printOrders.createdAt})`,
-      })
-      .from(printOrderItems)
-      .innerJoin(printOrders, eq(printOrderItems.printOrderId, printOrders.id))
-      .where(
-        and(
-          eq(printOrders.userId, userId),
-          inArray(printOrderItems.fileAssetId, primaryAssetIds)
-        )
-      )
-      .groupBy(printOrderItems.fileAssetId);
     for (const row of itemPrints) {
       const d = new Date(row.lastPrintedAt);
       const prev = lastPrintedByAssetId.get(row.fileAssetId);

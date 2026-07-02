@@ -16,12 +16,17 @@ export default async function PrintPage(props: {
   // The "Print with X" link on /materials/[slug] passes CraftCloud's
   // real material id, so we resolve it against the cached catalog
   // for the headline and then forward the same id downstream for
-  // the material-step auto-skip.
+  // the material-step auto-skip. The catalog fetch (which can retry
+  // 3x with backoff on a CraftCloud 403/429) shares no data with
+  // auth(), so run them concurrently instead of paying the catalog
+  // latency before auth() even starts.
+  const [catalog, { userId }] = await Promise.all([
+    materialId ? getCraftCloudCatalog() : Promise.resolve(null),
+    auth(),
+  ]);
   const material = materialId
-    ? (await getCraftCloudCatalog()).materialById.get(materialId) ?? null
+    ? catalog?.materialById.get(materialId) ?? null
     : null;
-
-  const { userId } = await auth();
 
   // Project-scoped print hub — the "Print this project" button links
   // here with `?project=<slug>`. The tile grid is seeded with the
