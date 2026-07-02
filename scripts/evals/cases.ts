@@ -15,7 +15,8 @@ export type EvalTier =
   | "container"
   | "mechanical"
   | "assembly"
-  | "implicit";
+  | "implicit"
+  | "implicit-composite";
 
 export interface EvalCase {
   id: string;
@@ -75,5 +76,22 @@ export const EVAL_CASES: EvalCase[] = [
     prompt:
       "a 40mm cube gyroid TPMS lattice for a heat-exchanger core, ~3 unit cells per axis",
     expectedDims: { x: 40, y: 40, z: 40 },
+  },
+  // implicit-composite: exact features + implicit body in ONE part — the
+  // sdf_kit v2 composition capability (docs/text-to-cad/04). Watertightness
+  // is graded automatically; network isolation needs the sidecar's
+  // check_networks (run manually / agentically for now).
+  {
+    id: "heat-exchanger-core",
+    tier: "implicit-composite",
+    prompt:
+      "a two-fluid counterflow heat exchanger core, 50mm diameter x 60mm tall cylindrical jacket, gyroid sheet separator, 2mm walls — the two fluid networks must be fully isolated",
+    expectedDims: { x: 50, y: 50, z: 60 },
+  },
+  {
+    id: "lattice-bracket",
+    tier: "implicit-composite",
+    prompt:
+      "a lightweight L-bracket, 60x60mm legs, 12mm thick, with two exact M5 bolt bosses per leg and a gyroid lattice core inside a 2mm solid skin",
   },
 ];
