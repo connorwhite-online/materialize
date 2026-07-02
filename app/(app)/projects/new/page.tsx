@@ -2,7 +2,8 @@ import { redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { and, eq, desc } from "drizzle-orm";
+import { notUnsavedStudioDraft } from "@/lib/studio-drafts";
 import { ProjectCreateForm } from "@/components/projects/project-create-form";
 
 export default async function NewProjectPage() {
@@ -16,7 +17,9 @@ export default async function NewProjectPage() {
       thumbnailUrl: files.thumbnailUrl,
     })
     .from(files)
-    .where(eq(files.userId, userId))
+    // Library picker: unsaved text-to-CAD drafts stay studio-only
+    // (docs/text-to-cad/05 §B).
+    .where(and(eq(files.userId, userId), notUnsavedStudioDraft()))
     .orderBy(desc(files.createdAt));
 
   return (

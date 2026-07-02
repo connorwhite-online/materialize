@@ -854,6 +854,14 @@ export async function createDraftFileForPrint(params: {
    * instead of "model".
    */
   displayName?: string;
+  /**
+   * Provenance of the file (docs/text-to-cad/05 §B). 'upload' (default)
+   * for user uploads; 'studio' for text-to-CAD drafts, which stay
+   * invisible to library/profile/marketplace listings while
+   * status='draft' (see lib/studio-drafts.ts) until promoted by an
+   * explicit Save or a print order.
+   */
+  source?: "upload" | "studio";
 }): Promise<
   | { fileAssetId: string; fileSlug: string }
   | { error: string }
@@ -945,6 +953,7 @@ export async function createDraftFileForPrint(params: {
         // "private" → "draft", "public" → "published".
         status: visibility === "public" ? "published" : "draft",
         visibility,
+        source: params.source ?? "upload",
       })
       .returning();
 

@@ -17,10 +17,20 @@
 
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/lib/db";
-import { cadGenerations, fileAssets, files } from "@/lib/db/schema";
+import {
+  cadGenerations,
+  cadThreads,
+  cartItems,
+  fileAssets,
+  files,
+  printOrderItems,
+  printOrders,
+  projectFiles,
+} from "@/lib/db/schema";
+import { deleteObject } from "@/lib/storage";
 import { logError } from "@/lib/logger";
 import { canUseTextToCad } from "@/lib/features";
 import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
@@ -130,11 +140,67 @@ const MAX_NAME_LEN = 60;
 export type SaveCadResult = { ok: true } | { error: string };
 
 /**
- * "Save to profile" for a generated model: finalize the file the asset belongs
- * to (status published) so it leaves the studio's draft/editing space and
- * becomes a kept item in the owner's library — but keep it PRIVATE so it stays
- * off the public profile and the marketplace. Owner-only, idempotent. The user
- * can make it public / adjust pricing later from normal file management.
+ * True when any of the given assets is referenced by a print order, an
+ * order item, or a cart item. Assets with order/cart references must
+ * NEVER be re-pointed or mutated — printOrders.fileAssetId has to keep
+ * meaning "the geometry that was ordered" (docs/text-to-cad/05 §C).
+ */
+async function anyAssetOrderReferenced(assetIds: string[]): Promise<boolean> {
+  if (assetIds.length === 0) return false;
+  const [order] = await db
+    .select({ id: printOrders.id })
+    .from(printOrders)
+    .where(inArray(printOrders.fileAssetId, assetIds))
+    .limit(1);
+  if (order) return true;
+  const [item] = await db
+    .select({ id: printOrderItems.id })
+    .from(printOrderItems)
+    .where(inArray(printOrderItems.fileAssetId, assetIds))
+    .limit(1);
+  if (item) return true;
+  const [cartItem] = await db
+    .select({ id: cartItems.id })
+    .from(cartItems)
+    .where(inArray(cartItems.fileAssetId, assetIds))
+    .limit(1);
+  return !!cartItem;
+}
+
+/** True when any of the given files is bundled into a Project. */
+async function anyFileInProject(fileIds: string[]): Promise<boolean> {
+  if (fileIds.length === 0) return false;
+  const [row] = await db
+    .select({ fileId: projectFiles.fileId })
+    .from(projectFiles)
+    .where(inArray(projectFiles.fileId, fileIds))
+    .limit(1);
+  return !!row;
+}
+
+/**
+ * "Save to profile" for a generated model.
+ *
+ * First save of a design: finalize the file the asset belongs to (status
+ * published) so it leaves the studio's draft space and becomes a kept item in
+ * the owner's library — but keep it PRIVATE so it stays off the public profile
+ * and the marketplace. `source` stays 'studio' on purpose: source is
+ * provenance (where the file came from), status is the visibility stage.
+ * The design's thread records the file as its savedFileId.
+ *
+ * Re-save of an already-saved design (docs/text-to-cad/05 §C, one file per
+ * design): instead of publishing a second library file, the SAVED file is
+ * re-pointed at this generation's asset — the saved file's old asset rows move
+ * onto this generation's (invisible) draft file and this generation's asset
+ * moves under the saved file, so every reader that resolves "the file's asset"
+ * (they all take the file's first/only asset row) sees the new geometry while
+ * the saved file's id and slug stay stable. Assets referenced by print
+ * orders/cart items are never moved; in that case (and for assemblies /
+ * project-bundled files) we fall back to publishing this generation's file and
+ * demoting the previously saved studio file back to draft, so the library
+ * still shows exactly one entry per design.
+ *
+ * Owner-only, idempotent.
  */
 export async function saveCadFileToProfile(input: {
   fileAssetId: string;
@@ -156,10 +222,155 @@ export async function saveCadFileToProfile(input: {
       return { error: "Model not found." };
     }
 
-    await db
-      .update(files)
-      .set({ visibility: "private", status: "published", updatedAt: new Date() })
-      .where(and(eq(files.id, asset.fileId), eq(files.userId, userId)));
+    // The generation that produced this asset → its thread. Latest row wins
+    // when byte-hash dedup pointed several generations at one asset.
+    const [gen] = await db
+      .select({
+        id: cadGenerations.id,
+        threadId: cadGenerations.threadId,
+        projectId: cadGenerations.projectId,
+      })
+      .from(cadGenerations)
+      .where(
+        and(
+          eq(cadGenerations.fileAssetId, input.fileAssetId),
+          eq(cadGenerations.userId, userId)
+        )
+      )
+      .orderBy(desc(cadGenerations.createdAt))
+      .limit(1);
+
+    const [thread] = gen?.threadId
+      ? await db
+          .select({
+            id: cadThreads.id,
+            savedFileId: cadThreads.savedFileId,
+          })
+          .from(cadThreads)
+          .where(
+            and(eq(cadThreads.id, gen.threadId), eq(cadThreads.userId, userId))
+          )
+          .limit(1)
+      : [];
+
+    // The previously saved file for this design, when it's a DIFFERENT file
+    // that still exists and is ours (FK is SET NULL on delete, but re-check).
+    let priorSavedFileId: string | null = null;
+    if (thread?.savedFileId && thread.savedFileId !== asset.fileId) {
+      const [prior] = await db
+        .select({ id: files.id, source: files.source })
+        .from(files)
+        .where(
+          and(eq(files.id, thread.savedFileId), eq(files.userId, userId))
+        )
+        .limit(1);
+      priorSavedFileId = prior?.id ?? null;
+    }
+
+    if (!priorSavedFileId) {
+      // First save of this design (or re-save of the same file): publish in
+      // place. `source` stays 'studio' — provenance, not stage.
+      await db
+        .update(files)
+        .set({
+          visibility: "private",
+          status: "published",
+          updatedAt: new Date(),
+        })
+        .where(and(eq(files.id, asset.fileId), eq(files.userId, userId)));
+
+      if (thread && gen) {
+        await db
+          .update(cadThreads)
+          .set({
+            savedFileId: asset.fileId,
+            activeGenerationId: gen.id,
+            updatedAt: new Date(),
+          })
+          .where(eq(cadThreads.id, thread.id));
+      }
+
+      revalidatePath("/prometheus");
+      return { ok: true };
+    }
+
+    // One file per design: re-point the saved file at this generation's
+    // asset when it's safe (no order/cart references on either side, not an
+    // assembly, neither file bundled into a project).
+    const savedAssets = await db
+      .select({ id: fileAssets.id })
+      .from(fileAssets)
+      .where(eq(fileAssets.fileId, priorSavedFileId));
+
+    const canRepoint =
+      gen != null &&
+      thread != null &&
+      gen.projectId === null &&
+      !(await anyAssetOrderReferenced([
+        input.fileAssetId,
+        ...savedAssets.map((a) => a.id),
+      ])) &&
+      !(await anyFileInProject([asset.fileId, priorSavedFileId]));
+
+    if (canRepoint) {
+      // Swap so each file keeps exactly one asset (readers resolve "the
+      // file's asset" as the first/only fileAssets row — see
+      // lib/print/library-tiles.ts and files/[slug]/page.tsx): the saved
+      // file's old assets park on this generation's invisible draft file
+      // (preserving old geometry + its generation links), and this
+      // generation's asset becomes the saved file's asset. Slug stable.
+      await db
+        .update(fileAssets)
+        .set({ fileId: asset.fileId })
+        .where(eq(fileAssets.fileId, priorSavedFileId));
+      await db
+        .update(fileAssets)
+        .set({ fileId: priorSavedFileId })
+        .where(eq(fileAssets.id, input.fileAssetId));
+      await db
+        .update(files)
+        .set({ status: "published", updatedAt: new Date() })
+        .where(and(eq(files.id, priorSavedFileId), eq(files.userId, userId)));
+      await db
+        .update(cadThreads)
+        .set({ activeGenerationId: gen.id, updatedAt: new Date() })
+        .where(eq(cadThreads.id, thread.id));
+    } else {
+      // Conservative fallback: publish this generation's file as THE file
+      // for the design and demote the previously saved STUDIO file back to
+      // draft (library-invisible), so the library still shows one entry per
+      // design. The demoted file (and any ordered geometry) is untouched
+      // otherwise — orders keep referencing their original assets. Only
+      // studio-sourced files are ever demoted; a real upload never is.
+      await db
+        .update(files)
+        .set({
+          visibility: "private",
+          status: "published",
+          updatedAt: new Date(),
+        })
+        .where(and(eq(files.id, asset.fileId), eq(files.userId, userId)));
+      await db
+        .update(files)
+        .set({ status: "draft", updatedAt: new Date() })
+        .where(
+          and(
+            eq(files.id, priorSavedFileId),
+            eq(files.userId, userId),
+            eq(files.source, "studio")
+          )
+        );
+      if (thread && gen) {
+        await db
+          .update(cadThreads)
+          .set({
+            savedFileId: asset.fileId,
+            activeGenerationId: gen.id,
+            updatedAt: new Date(),
+          })
+          .where(eq(cadThreads.id, thread.id));
+      }
+    }
 
     revalidatePath("/prometheus");
     return { ok: true };
@@ -210,12 +421,14 @@ export async function renameCadGeneration(input: {
       .set({ name, updatedAt: new Date() })
       .where(and(eq(files.id, asset.fileId), eq(files.userId, userId)));
 
-    // Walk the generation that produced this asset up to its thread root and
-    // retitle it, so the sidebar label tracks the rename.
+    // Retitle the thread so the sidebar label tracks the rename. Threaded
+    // rows (docs/text-to-cad/05 §A) do it in one UPDATE on cadThreads;
+    // legacy pre-migration rows keep the old root-walk fallback.
     const [gen] = await db
       .select({
         id: cadGenerations.id,
         parentGenerationId: cadGenerations.parentGenerationId,
+        threadId: cadGenerations.threadId,
       })
       .from(cadGenerations)
       .where(
@@ -226,7 +439,14 @@ export async function renameCadGeneration(input: {
       )
       .limit(1);
 
-    if (gen) {
+    if (gen?.threadId) {
+      await db
+        .update(cadThreads)
+        .set({ title: name, updatedAt: new Date() })
+        .where(
+          and(eq(cadThreads.id, gen.threadId), eq(cadThreads.userId, userId))
+        );
+    } else if (gen) {
       let rootId = gen.id;
       let parentId = gen.parentGenerationId;
       const seen = new Set<string>([rootId]);
@@ -324,8 +544,10 @@ export async function recordCadFeedback(
 
 /**
  * Delete a build from the studio history — removes the generation rows for the
- * thread (root + revisions). The underlying library files/assets are left
- * intact (they may be saved/printed); this only clears the build from history.
+ * thread (root + revisions), best-effort deletes their render/topo R2 objects
+ * (docs/text-to-cad/05 §E), and drops the thread row itself once it has no
+ * generations left. The underlying library files/assets are left intact (they
+ * may be saved/printed); the studio-artifacts cron sweeps stale unsaved ones.
  */
 export async function deleteCadBuild(input: {
   generationIds: string[];
@@ -340,6 +562,19 @@ export async function deleteCadBuild(input: {
   if (ids.length === 0) return { error: "Nothing to delete" };
 
   try {
+    // Capture render/topo keys + thread ids before the rows disappear.
+    const rows = await db
+      .select({
+        id: cadGenerations.id,
+        renderStorageKey: cadGenerations.renderStorageKey,
+        topoStorageKey: cadGenerations.topoStorageKey,
+        threadId: cadGenerations.threadId,
+      })
+      .from(cadGenerations)
+      .where(
+        and(inArray(cadGenerations.id, ids), eq(cadGenerations.userId, userId))
+      );
+
     await db
       .delete(cadGenerations)
       .where(
@@ -348,6 +583,40 @@ export async function deleteCadBuild(input: {
           eq(cadGenerations.userId, userId)
         )
       );
+
+    // Best-effort R2 cleanup — a failed object delete must not fail the
+    // action (the studio-artifacts cron is the safety net).
+    const objectKeys = rows.flatMap((r) =>
+      [r.renderStorageKey, r.topoStorageKey].filter((k): k is string => !!k)
+    );
+    await Promise.allSettled(
+      objectKeys.map((key) =>
+        deleteObject(key).catch((err) =>
+          logError("deleteCadBuild.deleteObject", err)
+        )
+      )
+    );
+
+    // Drop thread rows that just lost their last generation (deleting a
+    // whole build deletes its thread; deleting a subset leaves it).
+    const threadIds = [
+      ...new Set(rows.map((r) => r.threadId).filter((t): t is string => !!t)),
+    ];
+    for (const threadId of threadIds) {
+      const [remaining] = await db
+        .select({ id: cadGenerations.id })
+        .from(cadGenerations)
+        .where(eq(cadGenerations.threadId, threadId))
+        .limit(1);
+      if (!remaining) {
+        await db
+          .delete(cadThreads)
+          .where(
+            and(eq(cadThreads.id, threadId), eq(cadThreads.userId, userId))
+          );
+      }
+    }
+
     revalidatePath("/prometheus");
     return { ok: true };
   } catch (error) {

@@ -17,6 +17,7 @@ import {
   purchases,
 } from "@/lib/db/schema";
 import { eq, and, asc, desc, inArray } from "drizzle-orm";
+import { notUnsavedStudioDraft } from "@/lib/studio-drafts";
 import { loadProjectBySlug } from "./loader";
 import { generateDownloadUrl } from "@/lib/storage";
 import { Card, CardContent } from "@/components/ui/card";
@@ -416,7 +417,9 @@ export default async function ProjectDetailPage(props: {
           thumbnailUrl: files.thumbnailUrl,
         })
         .from(files)
-        .where(eq(files.userId, userId))
+        // "Add file" picker: unsaved text-to-CAD drafts stay
+        // studio-only (docs/text-to-cad/05 §B).
+        .where(and(eq(files.userId, userId), notUnsavedStudioDraft()))
         .orderBy(desc(files.createdAt)),
     ]);
     ownerBuyerCount = buyerRows.length;
