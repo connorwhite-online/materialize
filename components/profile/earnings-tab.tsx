@@ -2,6 +2,7 @@ import Link from "next/link";
 import { db } from "@/lib/db";
 import {
   files,
+  fileAssets,
   fileComments,
   fileDownloads,
   filePhotos,
@@ -54,6 +55,24 @@ export async function EarningsTab({ userId }: { userId: string }) {
   ]);
   const fileIds = ownedFiles.map((r) => r.id);
   const projectIds = ownedProjects.map((r) => r.id);
+
+  // printOrders.fileAssetId / printOrderItems.fileAssetId are FKs to
+  // fileAssets.id, NOT files.id — an independent UUID space. Resolve
+  // the creator's fileAssets rows here so the print-count queries
+  // below can filter on the right id space (mirrors the pattern in
+  // app/(app)/files/[slug]/page.tsx:359,403). Joining printOrders
+  // directly to files.id (the old code) essentially never matches,
+  // which is why "Prints" always reported ~0.
+  const ownedFileAssets =
+    fileIds.length === 0
+      ? []
+      : await swallow(
+          db
+            .select({ id: fileAssets.id })
+            .from(fileAssets)
+            .where(inArray(fileAssets.fileId, fileIds))
+        );
+  const assetIds = ownedFileAssets.map((r) => r.id);
 
   const [
     fileEarnings,
@@ -170,21 +189,20 @@ export async function EarningsTab({ userId }: { userId: string }) {
             .from(fileDownloads)
             .where(inArray(fileDownloads.fileId, fileIds))
         ),
-    fileIds.length === 0
+    assetIds.length === 0
       ? Promise.resolve([{ value: 0 }])
       : swallow(
           db
             .select({ value: count() })
             .from(printOrders)
-            .innerJoin(files, eq(printOrders.fileAssetId, files.id))
             .where(
               and(
-                inArray(files.id, fileIds),
+                inArray(printOrders.fileAssetId, assetIds),
                 inArray(printOrders.status, [...PRINTED_STATUSES])
               )
             )
         ),
-    fileIds.length === 0
+    assetIds.length === 0
       ? Promise.resolve([{ value: 0 }])
       : swallow(
           db
@@ -194,10 +212,9 @@ export async function EarningsTab({ userId }: { userId: string }) {
               printOrders,
               eq(printOrderItems.printOrderId, printOrders.id)
             )
-            .innerJoin(files, eq(printOrderItems.fileAssetId, files.id))
             .where(
               and(
-                inArray(files.id, fileIds),
+                inArray(printOrderItems.fileAssetId, assetIds),
                 inArray(printOrders.status, [...PRINTED_STATUSES])
               )
             )
