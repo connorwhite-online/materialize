@@ -1485,6 +1485,8 @@ function describeEvent(ev: CadProgressEvent): {
   sub: string | null;
 } {
   switch (ev.type) {
+    case "queued":
+      return { text: "Queued", sub: null };
     case "phase":
       if (ev.phase === "generating") {
         return ev.attempt > 1

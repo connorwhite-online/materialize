@@ -32,6 +32,9 @@ export interface CadPart {
   error?: string;
 }
 
+/** Named render viewpoints the sidecar can produce (docs/text-to-cad/07 §A). */
+export type CadRenderView = "threeQuarter" | "top" | "front" | "side";
+
 /** Result of executing one CAD script in the sidecar. */
 export interface CadRunResult {
   ok: boolean;
@@ -39,6 +42,12 @@ export interface CadRunResult {
   files: Partial<Record<CadOutputFormat, string>>;
   /** Base64 PNG preview render (no `data:` prefix). */
   renderPng?: string;
+  /**
+   * Multi-view renders keyed by viewpoint — superset of renderPng (which
+   * stays the threeQuarter view for compatibility). Absent from older
+   * sidecars; consumers must tolerate it missing.
+   */
+  renders?: Partial<Record<CadRenderView, string>>;
   geometry?: CadGeometry;
   validation: CadValidation;
   /**
@@ -61,6 +70,10 @@ export interface CadRunResult {
  * and the client (renderer), so all three agree on one contract.
  */
 export type CadProgressEvent =
+  | {
+      /** Job accepted but not yet started (background-job mode, MTR-175). */
+      type: "queued";
+    }
   | {
       type: "phase";
       /** `generating` = model writing code; `executing` = sidecar running it. */
