@@ -11,6 +11,7 @@ import { NotificationsTabActions } from "./notifications-tab-actions";
 import type {
   CommentOnListingPayload,
   BuildOnFilePayload,
+  CollaboratorAddedToProjectPayload,
   NotificationType,
   PrintOnFilePayload,
   PurchaseOnListingPayload,
@@ -26,9 +27,11 @@ type Payload =
   | BuildOnFilePayload
   | PrintOnFilePayload
   | PurchaseOnListingPayload
-  | RefundOnListingPayload;
+  | RefundOnListingPayload
+  | CollaboratorAddedToProjectPayload;
 
-type Row = {
+// Exported for unit testing (see __tests__/notifications-tab.test.ts).
+export type Row = {
   id: string;
   type: NotificationType;
   payload: Payload;
@@ -151,7 +154,10 @@ function NotificationRow({ row }: { row: Row }) {
   );
 }
 
-function buildHref(n: Row): string {
+// Exported for unit testing the link-building decision in isolation
+// (see __tests__/notifications-tab.test.ts) — not used outside this
+// module otherwise.
+export function buildHref(n: Row): string {
   const { listing } = n.payload;
   const base =
     listing.kind === "file"
@@ -168,6 +174,13 @@ function buildHref(n: Row): string {
     // tab — point there rather than back at the listing page the
     // creator already knows.
     return `/dashboard/earnings`;
+  }
+  if (n.type === "collaborator_added_to_project") {
+    // No commentId on this payload (see CollaboratorAddedToProjectPayload)
+    // — link straight to the project rather than falling through to the
+    // comment-anchor branch below, which would read a nonexistent
+    // commentId and produce "#comment-undefined".
+    return base;
   }
   const commentId =
     n.type === "comment_on_listing"
