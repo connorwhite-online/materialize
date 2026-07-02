@@ -256,9 +256,15 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
   let lastCode = "";
   let lastRun: CadRunResult | undefined;
   let repairNote = "";
+  // Real count of attempts actually run, for the failure return below — NOT
+  // maxAttempts, which is only the cap. Set once we commit to running this
+  // attempt (past the abort check) so an aborted/never-started attempt isn't
+  // counted (MTR-158).
+  let lastAttempt = 0;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     if (input.signal?.aborted) break;
+    lastAttempt = attempt;
 
     emit({ type: "phase", phase: "generating", attempt, maxAttempts });
     if (useModel) {
@@ -368,7 +374,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
   return {
     ok: false,
     sourceCode: lastCode,
-    attempts: maxAttempts,
+    attempts: lastAttempt,
     run: lastRun,
     error: repairNote || "generation failed",
     telemetry,
