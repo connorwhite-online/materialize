@@ -7,11 +7,11 @@ import {
   collections,
   files,
   organizationMembers,
-  organizations,
   projects,
 } from "@/lib/db/schema";
 import { and, count, desc, eq } from "drizzle-orm";
 import { isOrgMember } from "@/lib/authorization";
+import { loadOrgByHandle } from "@/app/(app)/[handle]/loader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -31,10 +31,7 @@ const LIBRARY_LIMIT = 60;
 export async function OrgProfileView({ handle }: { handle: string }) {
   const { userId } = await auth();
 
-  const [org] = await db
-    .select()
-    .from(organizations)
-    .where(eq(organizations.slug, handle));
+  const org = await loadOrgByHandle(handle);
   if (!org) notFound();
 
   const membership = await isOrgMember(userId, org.id);

@@ -1,9 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { db } from "@/lib/db";
-import { organizations, users } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
 import { resolveHandle } from "@/lib/handles/resolve";
+import { loadUserByHandle, loadOrgByHandle } from "./loader";
 import { UserProfileView } from "@/components/profile/user-profile-view";
 import { OrgProfileView } from "@/components/orgs/org-profile-view";
 
@@ -31,15 +29,7 @@ export async function generateMetadata(props: {
   }
 
   if (resolution.kind === "user") {
-    const [user] = await db
-      .select({
-        username: users.username,
-        displayName: users.displayName,
-        bio: users.bio,
-        avatarUrl: users.avatarUrl,
-      })
-      .from(users)
-      .where(eq(users.id, resolution.userId));
+    const user = await loadUserByHandle(handle);
     if (!user) {
       return { title: "Not found", robots: { index: false, follow: false } };
     }
@@ -67,13 +57,7 @@ export async function generateMetadata(props: {
   }
 
   // resolution.kind === "org"
-  const [org] = await db
-    .select({
-      name: organizations.name,
-      bio: organizations.bio,
-    })
-    .from(organizations)
-    .where(eq(organizations.id, resolution.orgId));
+  const org = await loadOrgByHandle(handle);
   if (!org) {
     return { title: "Not found", robots: { index: false, follow: false } };
   }
