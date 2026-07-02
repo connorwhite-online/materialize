@@ -52,7 +52,7 @@ import { findMaterialConfig, getCraftCloudCatalog } from "@/lib/craftcloud/catal
 import { generateDownloadUrl } from "@/lib/storage";
 import { PRINTED_STATUSES } from "@/lib/print-statuses";
 import { swallow } from "@/lib/utils/swallow";
-import { fileJsonLd } from "@/lib/seo/json-ld";
+import { fileJsonLd, safeJsonLdScript } from "@/lib/seo/json-ld";
 import { PurchaseButton } from "@/components/purchase/purchase-button";
 import { PayoutSetupWarning } from "@/components/payouts/payout-setup-warning";
 
@@ -623,7 +623,7 @@ export default async function FileDetailPage(props: {
       {jsonLd && (
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+          dangerouslySetInnerHTML={{ __html: safeJsonLdScript(jsonLd) }}
         />
       )}
       {needsThumbnail && primaryAsset && (

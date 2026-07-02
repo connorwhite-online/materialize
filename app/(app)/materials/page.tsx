@@ -4,6 +4,7 @@ import {
 } from "@/lib/craftcloud/catalog";
 import { CatalogBrowser } from "@/components/materials/catalog-browser";
 import { logError } from "@/lib/logger";
+import { safeJsonLdScript } from "@/lib/seo/json-ld";
 
 export const metadata = {
   title: "Materials | Materialize",
@@ -56,7 +57,7 @@ export default async function MaterialsPage() {
     <div className="mx-auto max-w-7xl px-4 py-8">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{ __html: safeJsonLdScript(jsonLd) }}
       />
       <div className="mb-8">
         <h1 className="text-2xl font-bold">Materials</h1>

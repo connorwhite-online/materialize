@@ -42,7 +42,7 @@ import { LicenseBadge } from "@/components/licenses/license-badge";
 import { getCategoryLabel } from "@/lib/categories";
 import { SourceCodeCard } from "@/components/projects/source-code-card";
 import { CardImageCarousel } from "@/components/photos/card-image-carousel";
-import { projectJsonLd } from "@/lib/seo/json-ld";
+import { projectJsonLd, safeJsonLdScript } from "@/lib/seo/json-ld";
 import { PurchaseButton } from "@/components/purchase/purchase-button";
 import { PayoutSetupWarning } from "@/components/payouts/payout-setup-warning";
 import {
@@ -715,7 +715,7 @@ export default async function ProjectDetailPage(props: {
       {jsonLd && (
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+          dangerouslySetInnerHTML={{ __html: safeJsonLdScript(jsonLd) }}
         />
       )}
       <div className="flex flex-col gap-8">
