@@ -1,0 +1,126 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+// Route-shape tests: mock every engine so the router's dispatch — not the
+// engines — is what's under test.
+const runHarness = vi.fn();
+const runAgenticHarness = vi.fn();
+const runGenerative = vi.fn();
+const shouldUseGenerative = vi.fn();
+const generativeEnabled = vi.fn();
+const completeText = vi.fn();
+const hasModelCredentials = vi.fn();
+const sessionsAvailable = vi.fn();
+
+vi.mock("@/lib/cad/harness", () => ({
+  runHarness: (...a: unknown[]) => runHarness(...a),
+}));
+vi.mock("@/lib/cad/agentic", () => ({
+  runAgenticHarness: (...a: unknown[]) => runAgenticHarness(...a),
+}));
+vi.mock("@/lib/cad/generative", () => ({
+  runGenerative: (...a: unknown[]) => runGenerative(...a),
+  shouldUseGenerative: (...a: unknown[]) => shouldUseGenerative(...a),
+  generativeEnabled: () => generativeEnabled(),
+}));
+vi.mock("@/lib/cad/model-client", () => ({
+  completeText: (...a: unknown[]) => completeText(...a),
+  hasModelCredentials: () => hasModelCredentials(),
+}));
+vi.mock("@/lib/cad/session-client", () => ({
+  sessionsAvailable: () => sessionsAvailable(),
+}));
+vi.mock("@/lib/logger", () => ({ logError: vi.fn() }));
+
+import { runCadGeneration, classifyCadRequest } from "@/lib/cad/orchestrate";
+
+const RESULT = { ok: true, sourceCode: "x", attempts: 1 };
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  runHarness.mockResolvedValue({ ...RESULT, sourceCode: "harness" });
+  runAgenticHarness.mockResolvedValue({ ...RESULT, sourceCode: "agentic" });
+  runGenerative.mockResolvedValue({ ...RESULT, sourceCode: "generative" });
+  shouldUseGenerative.mockResolvedValue(false);
+  generativeEnabled.mockReturnValue(false);
+  hasModelCredentials.mockReturnValue(true);
+  sessionsAvailable.mockReturnValue(true);
+  delete process.env.CAD_AGENTIC;
+});
+
+afterEach(() => {
+  delete process.env.CAD_AGENTIC;
+});
+
+describe("classifyCadRequest", () => {
+  it.each([
+    ["SIMPLE", "simple"],
+    ["COMPLEX", "complex"],
+    ["ORGANIC", "organic"],
+    ["I think COMPLEX fits", "complex"],
+  ])("maps %s -> %s", async (reply, expected) => {
+    completeText.mockResolvedValue(reply);
+    expect(await classifyCadRequest("a part")).toBe(expected);
+  });
+
+  it("lands on simple on any classifier failure (safe landing)", async () => {
+    completeText.mockRejectedValue(new Error("down"));
+    expect(await classifyCadRequest("a part")).toBe("simple");
+  });
+});
+
+describe("runCadGeneration routing", () => {
+  it("CAD_AGENTIC=false reproduces the legacy path exactly", async () => {
+    process.env.CAD_AGENTIC = "false";
+    await runCadGeneration({ prompt: "a 20mm cube" });
+    expect(runHarness).toHaveBeenCalledTimes(1);
+    expect(runAgenticHarness).not.toHaveBeenCalled();
+    // The classifier must not even run on the legacy path.
+    expect(completeText).not.toHaveBeenCalled();
+  });
+
+  it("no sessions -> legacy path (agentic requires a real sidecar)", async () => {
+    sessionsAvailable.mockReturnValue(false);
+    await runCadGeneration({ prompt: "anything" });
+    expect(runHarness).toHaveBeenCalledTimes(1);
+    expect(runAgenticHarness).not.toHaveBeenCalled();
+  });
+
+  it("simple -> scripted loop", async () => {
+    completeText.mockResolvedValue("SIMPLE");
+    const r = await runCadGeneration({ prompt: "a cube" });
+    expect(r.sourceCode).toBe("harness");
+  });
+
+  it("complex -> agentic loop", async () => {
+    completeText.mockResolvedValue("COMPLEX");
+    const r = await runCadGeneration({ prompt: "a 6-port enclosure" });
+    expect(r.sourceCode).toBe("agentic");
+  });
+
+  it("complex falls back to the scripted loop on agentic failure", async () => {
+    completeText.mockResolvedValue("COMPLEX");
+    runAgenticHarness.mockRejectedValue(new Error("session died"));
+    const r = await runCadGeneration({ prompt: "a 6-port enclosure" });
+    expect(r.sourceCode).toBe("harness");
+  });
+
+  it("complex propagates aborts instead of falling back", async () => {
+    completeText.mockResolvedValue("COMPLEX");
+    const abort = new Error("aborted");
+    abort.name = "AbortError";
+    runAgenticHarness.mockRejectedValue(abort);
+    await expect(runCadGeneration({ prompt: "x" })).rejects.toThrow("aborted");
+    expect(runHarness).not.toHaveBeenCalled();
+  });
+
+  it("organic -> generative when enabled, scripted loop when not", async () => {
+    completeText.mockResolvedValue("ORGANIC");
+    generativeEnabled.mockReturnValue(true);
+    let r = await runCadGeneration({ prompt: "a dragon figurine" });
+    expect(r.sourceCode).toBe("generative");
+
+    generativeEnabled.mockReturnValue(false);
+    r = await runCadGeneration({ prompt: "a dragon figurine" });
+    expect(r.sourceCode).toBe("harness");
+  });
+});
