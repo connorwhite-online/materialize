@@ -134,7 +134,51 @@ type ResumeState = {
   rootId: string | null;
   viewTurnId: string | null;
   ts: number;
+  /** In-flight background generation job to reattach to (MTR-175). */
+  job?: StoredJob | null;
 };
+
+/**
+ * A background generation job persisted alongside the resume slot. Unlike
+ * the rootId/viewTurnId selection (grace-windowed), a stored job is
+ * reattached regardless of time away — the build keeps running server-side
+ * and the events stream replays whatever was missed.
+ */
+type StoredJob = {
+  jobId: string;
+  generationId: string;
+  /** The submitted prompt + thread context, needed to apply the `done`. */
+  prompt: string;
+  parentId: string | null;
+  rootId: string | null;
+};
+
+/** Read the persisted in-flight job, if any (no grace window — see above). */
+function readStoredJob(): StoredJob | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(RESUME_STORAGE_KEY);
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as Partial<ResumeState> | null;
+    const job = saved?.job;
+    if (
+      !job ||
+      typeof job.jobId !== "string" ||
+      typeof job.generationId !== "string"
+    ) {
+      return null;
+    }
+    return {
+      jobId: job.jobId,
+      generationId: job.generationId,
+      prompt: typeof job.prompt === "string" ? job.prompt : "",
+      parentId: job.parentId ?? null,
+      rootId: job.rootId ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Read the persisted selection iff it's recent enough to count as "came right
@@ -224,8 +268,13 @@ export function TextToCadStudio({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // The in-flight background job (persisted to the resume slot). Only
+  // cleared when the job reaches a terminal event or the user explicitly
+  // abandons it — NOT on unmount, so a reload/return can reattach.
+  const jobRef = useRef<StoredJob | null>(null);
 
-  // Abort an in-flight stream if the studio unmounts.
+  // Close an open events stream if the studio unmounts. The background job
+  // keeps running server-side; the resume slot reattaches on return.
   useEffect(() => () => abortRef.current?.abort(), []);
 
   // Persist the current selection for resume-on-return. Refs hold the latest
@@ -243,6 +292,7 @@ export function TextToCadStudio({
           rootId: activeRootIdRef.current,
           viewTurnId: viewTurnIdRef.current,
           ts: Date.now(),
+          job: jobRef.current,
         } satisfies ResumeState)
       );
     } catch {
@@ -265,6 +315,39 @@ export function TextToCadStudio({
       persistResume();
     };
   }, [activeRootId, viewTurnId, persistResume]);
+
+  // Reattach on return: if a background job from a previous visit is stored,
+  // tail its events stream — replay + live tail means an already-finished
+  // job resolves instantly and a running one keeps streaming (MTR-175).
+  useEffect(() => {
+    const saved = readStoredJob();
+    if (!saved) return;
+    const controller = new AbortController();
+    abortRef.current?.abort();
+    abortRef.current = controller;
+    jobRef.current = saved;
+    if (saved.rootId) setActiveRootId(saved.rootId);
+    setProgress([]);
+    setError(null);
+    setGenerating(true);
+    void streamJobEvents(
+      saved.jobId,
+      controller,
+      saved.prompt,
+      saved.parentId ?? undefined
+    )
+      .then((terminal) => {
+        // Keep the stored job on a non-terminal drop (unmount / lost
+        // connection) so the next visit can reattach again.
+        if (terminal) {
+          jobRef.current = null;
+          persistResume();
+        }
+      })
+      .finally(() => setGenerating(false));
+    // Mount-only by design: reattach exactly once per studio mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Close the build three-dot menu on any outside click.
   useEffect(() => {
@@ -329,6 +412,16 @@ export function TextToCadStudio({
   }, [activeAssetId]);
 
   function startNewBuild() {
+    // Abandoning an in-flight build is an explicit cancel: close the events
+    // stream AND ask the server to stop the job (fire-and-forget — the row
+    // flips to cancelled once the worker's poll notices).
+    const job = jobRef.current;
+    if (job) {
+      void fetch(`/api/cad/jobs/${job.jobId}/cancel`, { method: "POST" }).catch(
+        () => undefined
+      );
+      jobRef.current = null;
+    }
     abortRef.current?.abort();
     setGenerating(false);
     setTransition(null);
@@ -449,25 +542,33 @@ export function TextToCadStudio({
     const now = Date.now();
 
     if (parentId) {
-      // Revision: append to the active thread.
+      // Revision: append to the active thread. Read the root id from the
+      // ref (not the closure) so a stream resumed after a remount still
+      // lands on the right thread; skip if a replayed `done` already did.
+      const rootId = activeRootIdRef.current;
       setThreads((prev) =>
         prev
           .map((t) =>
-            t.rootId === activeRootId
+            t.rootId === rootId && !t.turns.some((x) => x.id === newTurn.id)
               ? { ...t, turns: [...t.turns, newTurn], lastActivity: now }
               : t
           )
           .sort((a, b) => b.lastActivity - a.lastActivity)
       );
     } else {
-      // New build: open a fresh thread.
+      // New build: open a fresh thread — unless a resumed job replayed a
+      // `done` the server page already rendered into initialThreads.
       const thread: StudioThread = {
         rootId: ev.generationId,
         title: ev.title,
         lastActivity: now,
         turns: [newTurn],
       };
-      setThreads((prev) => [thread, ...prev]);
+      setThreads((prev) =>
+        prev.some((t) => t.rootId === ev.generationId)
+          ? prev
+          : [thread, ...prev]
+      );
       setActiveRootId(ev.generationId);
     }
     setViewTurnId(ev.generationId);
@@ -577,41 +678,32 @@ export function TextToCadStudio({
         signal: controller.signal,
       });
 
-      if (!res.ok || !res.body) {
+      if (!res.ok) {
         setError((await res.text()) || "Generation failed.");
         return;
       }
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        let sep: number;
-        while ((sep = buf.indexOf("\n\n")) !== -1) {
-          const frame = buf.slice(0, sep);
-          buf = buf.slice(sep + 2);
-          const dataLine = frame
-            .split("\n")
-            .find((l) => l.startsWith("data:"));
-          if (!dataLine) continue;
-          let ev: CadStreamEvent;
-          try {
-            ev = JSON.parse(dataLine.slice(5).trim());
-          } catch {
-            continue;
-          }
-          if (ev.type === "done") {
-            applyDone(ev, text, parentId);
-          } else if (ev.type === "error") {
-            setError(ev.error);
-          } else {
-            setProgress((p) => [...p, ev]);
-          }
-        }
+      // The generate route now returns a background job (MTR-175); progress
+      // streams from the job's events endpoint, which survives reloads.
+      const { generationId, jobId } = (await res.json()) as {
+        generationId: string;
+        jobId: string;
+      };
+      jobRef.current = {
+        jobId,
+        generationId,
+        prompt: text,
+        parentId: parentId ?? null,
+        rootId: parentId ? activeRootId : generationId,
+      };
+      persistResume();
+
+      const terminal = await streamJobEvents(jobId, controller, text, parentId);
+      // Keep the stored job on a non-terminal drop (unmount / lost
+      // connection) so the next visit can reattach.
+      if (terminal) {
+        jobRef.current = null;
+        persistResume();
       }
     } catch (err) {
       if ((err as Error)?.name !== "AbortError") {
@@ -619,6 +711,75 @@ export function TextToCadStudio({
       }
     } finally {
       setGenerating(false);
+    }
+  }
+
+  /**
+   * Tail a background job's SSE stream (replay + live), applying events
+   * exactly as the old in-request stream did. Returns true once a terminal
+   * event (`done`/`error`) arrived. On a drop WITHOUT one (proxy timeout,
+   * flaky network, the route's own ceiling) the job keeps running server-
+   * side, so retry the events URL up to 3 times with a 2s backoff.
+   */
+  async function streamJobEvents(
+    jobId: string,
+    controller: AbortController,
+    submittedPrompt: string,
+    parentId: string | undefined
+  ): Promise<boolean> {
+    const MAX_RETRIES = 3;
+    for (let attempt = 0; ; attempt++) {
+      let sawTerminal = false;
+      try {
+        const res = await fetch(`/api/cad/jobs/${jobId}/events`, {
+          signal: controller.signal,
+        });
+        if (!res.ok || !res.body) throw new Error(`events ${res.status}`);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          let sep: number;
+          while ((sep = buf.indexOf("\n\n")) !== -1) {
+            const frame = buf.slice(0, sep);
+            buf = buf.slice(sep + 2);
+            const dataLine = frame
+              .split("\n")
+              .find((l) => l.startsWith("data:"));
+            if (!dataLine) continue;
+            let ev: CadStreamEvent;
+            try {
+              ev = JSON.parse(dataLine.slice(5).trim());
+            } catch {
+              continue;
+            }
+            if (ev.type === "done") {
+              sawTerminal = true;
+              applyDone(ev, submittedPrompt, parentId);
+            } else if (ev.type === "error") {
+              sawTerminal = true;
+              setError(ev.error);
+            } else {
+              setProgress((p) => [...p, ev]);
+            }
+          }
+        }
+      } catch (err) {
+        if ((err as Error)?.name === "AbortError") return sawTerminal;
+      }
+      if (sawTerminal || controller.signal.aborted) return sawTerminal;
+      if (attempt >= MAX_RETRIES) {
+        setError(
+          "Lost the connection to this build — it may still be running. Reload to check."
+        );
+        return false;
+      }
+      await new Promise((r) => setTimeout(r, 2000));
     }
   }
 

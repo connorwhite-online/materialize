@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 
@@ -6,40 +7,34 @@ import { cadGenerations } from "@/lib/db/schema";
 import { logError } from "@/lib/logger";
 import { canUseTextToCad } from "@/lib/features";
 import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
-import { runHarness, type PriorFeedback } from "@/lib/cad/harness";
-import {
-  generativeEnabled,
-  shouldUseGenerative,
-  runGenerative,
-} from "@/lib/cad/generative";
+import type { PriorFeedback } from "@/lib/cad/harness";
+import { createCadJob, executeCadJob } from "@/lib/cad/jobs";
 import type { PromptImage } from "@/lib/cad/model-client";
-import {
-  persistGenerationFailure,
-  persistGenerationSuccess,
-} from "@/lib/cad/persist";
-import type { CadStreamEvent } from "@/lib/cad/types";
 
 /**
- * Streaming generate endpoint for the text-to-CAD studio.
+ * Generate endpoint for the text-to-CAD studio (MTR-175: background jobs).
  *
- * The non-streaming server action (app/actions/cad-generation.ts) returns
- * only the final result; this route exists so the studio can show what the
- * harness is doing in real time (write code -> run kernel -> validate ->
- * repair). It runs the same gate + harness + persistence, but emits the
- * harness's progress events as Server-Sent Events and appends a terminal
- * `done`/`error` event. Per AGENTS.md, a long-lived loop the client consumes
- * directly belongs in a route, not behind a server action.
+ * Validates + gates, inserts the pending cadGenerations row and a queued
+ * cadJobs row, schedules executeCadJob in the background via after(), and
+ * returns { generationId, jobId } immediately (202). The studio then tails
+ * GET /api/cad/jobs/[jobId]/events for progress — the job row is the source
+ * of truth, so the client can disconnect and reattach freely, and closing
+ * the tab no longer kills the build (cancellation is the explicit
+ * POST /api/cad/jobs/[jobId]/cancel).
+ *
+ * The non-streaming server action (app/actions/cad-generation.ts) still
+ * runs the harness inline and returns only the final result.
  */
 
 export const dynamic = "force-dynamic";
-// The harness makes multiple model round-trips plus a sidecar call per repair
-// attempt — well past the default serverless budget. Prod must run on a plan
-// that allows this (and host the sidecar); see AGENTS.md production notes.
+// The background job (multiple model round-trips plus a sidecar call per
+// repair attempt) runs via after(), and on Vercel after() callbacks execute
+// within THIS function's lifetime — so maxDuration still bounds the total
+// effort a job can spend. Prod must run on a plan that allows this (and
+// host the sidecar). The unbounded upgrade path is moving executeCadJob to
+// the Railway worker (docs/text-to-cad/02 §B option 2) — the job/events/
+// cancel contract doesn't change.
 export const maxDuration = 300;
-
-function sse(event: CadStreamEvent): Uint8Array {
-  return new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`);
-}
 
 export async function POST(request: Request) {
   const { userId } = await auth();
@@ -88,7 +83,8 @@ export async function POST(request: Request) {
     .slice(0, 4);
 
   // When revising, load the parent's source to seed the harness — and verify
-  // it belongs to the caller.
+  // it belongs to the caller. This stays HERE, pre-job, so an unauthorized
+  // request fails before a generation or job row ever exists.
   let priorSourceCode: string | null = null;
   let priorFeedback: PriorFeedback | null = null;
   if (body.parentGenerationId) {
@@ -115,7 +111,6 @@ export async function POST(request: Request) {
     };
   }
 
-  const isRoot = !body.parentGenerationId;
   const [row] = await db
     .insert(cadGenerations)
     .values({
@@ -128,109 +123,23 @@ export async function POST(request: Request) {
     .returning({ id: cadGenerations.id });
   const generationId = row.id;
 
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const send = (event: CadStreamEvent) => {
-        try {
-          controller.enqueue(sse(event));
-        } catch {
-          /* controller already closed (client gone) */
-        }
-      };
+  const { jobId } = await createCadJob(generationId);
 
-      try {
-        // Route organic/sculptural forms to the generative backend (fal.ai)
-        // when it's enabled; everything else stays on build123d. The classifier
-        // only runs when FAL_KEY is set, so otherwise there's zero overhead.
-        const useGenerative =
-          generativeEnabled() &&
-          (await shouldUseGenerative(prompt, request.signal));
+  // Kick the job after the response is sent. Deliberately NOT tied to
+  // request.signal: a client disconnect must not abort the build anymore.
+  after(() =>
+    executeCadJob({
+      jobId,
+      generationId,
+      userId,
+      prompt,
+      parentGenerationId: body.parentGenerationId ?? null,
+      name: body.name,
+      images: images.length ? images : undefined,
+      priorSourceCode,
+      priorFeedback,
+    }).catch((error) => logError("api/cad/generate.job", error))
+  );
 
-        const result = useGenerative
-          ? await runGenerative({
-              prompt,
-              images: images.length ? images : undefined,
-              signal: request.signal,
-              onProgress: (event) => send(event),
-            })
-          : await runHarness({
-              prompt,
-              priorSourceCode,
-              priorFeedback,
-              images: images.length ? images : undefined,
-              signal: request.signal,
-              onProgress: (event) => send(event),
-            });
-
-        if (!result.ok || !result.run) {
-          const failed = await persistGenerationFailure(
-            generationId,
-            result.error ?? "Could not produce a valid model.",
-            result.sourceCode,
-            result.attempts
-          );
-          send({ type: "error", error: failed.error, generationId });
-          return;
-        }
-
-        const persisted = await persistGenerationSuccess({
-          userId,
-          generationId,
-          prompt,
-          isRoot,
-          // Revisions inherit the thread's current name from the client.
-          nameOverride: body.name,
-          result,
-        });
-
-        if ("error" in persisted) {
-          send({ type: "error", error: persisted.error, generationId });
-          return;
-        }
-
-        send({
-          type: "done",
-          generationId: persisted.generationId,
-          fileAssetId: persisted.fileAssetId,
-          fileSlug: persisted.fileSlug,
-          renderUrl: persisted.renderUrl,
-          sourceCode: persisted.sourceCode,
-          title: persisted.title,
-          parts: persisted.parts,
-          projectSlug: persisted.projectSlug,
-          remeshed: persisted.remeshed,
-        });
-      } catch (error) {
-        // A client disconnect aborts the request signal — not a real failure.
-        if ((error as Error)?.name !== "AbortError") {
-          logError("api/cad/generate", error);
-          await persistGenerationFailure(
-            generationId,
-            "Generation failed. Please try again."
-          ).catch(() => undefined);
-          send({
-            type: "error",
-            error: "Generation failed. Please try again.",
-            generationId,
-          });
-        }
-      } finally {
-        try {
-          controller.close();
-        } catch {
-          /* already closed */
-        }
-      }
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      // Disable proxy buffering so events flush as they happen.
-      "X-Accel-Buffering": "no",
-    },
-  });
+  return Response.json({ generationId, jobId }, { status: 202 });
 }

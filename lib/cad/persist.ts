@@ -21,6 +21,26 @@ function slugStem(name: string | undefined, fallback: string): string {
 }
 
 /**
+ * Optional result fields owned by in-flight harness work (design brief +
+ * per-dimension aesthetic scores; both jsonb passthroughs). Read
+ * structurally and defensively so persist compiles and no-ops whether or
+ * not HarnessResult has grown them yet — only set when present, so absent
+ * fields never overwrite a column with null.
+ */
+function resultExtras(
+  result: HarnessResult
+): { aestheticDims?: unknown; brief?: unknown } {
+  const r = result as HarnessResult & {
+    aestheticDims?: unknown;
+    brief?: unknown;
+  };
+  return {
+    ...(r.aestheticDims !== undefined ? { aestheticDims: r.aestheticDims } : {}),
+    ...(r.brief !== undefined ? { brief: r.brief } : {}),
+  };
+}
+
+/**
  * Post-harness persistence for a text-to-CAD generation, shared by the
  * non-streaming server action (app/actions/cad-generation.ts) and the
  * streaming route (app/api/cad/generate). Centralizing it keeps the two
@@ -186,6 +206,11 @@ export async function persistGenerationSuccess(opts: {
       fileAssetId: draft.fileAssetId,
       renderStorageKey,
       aestheticScore: result.aestheticScore ?? null,
+      // Remesh is a recorded decision (docs/text-to-cad/02 §C) — persist
+      // whether the printable mesh came from the lossy voxel fallback so
+      // the eval scorecard can report a remesh rate.
+      remeshed: result.run?.remeshed ?? false,
+      ...resultExtras(result),
       ...(isRoot ? { title } : {}),
       updatedAt: new Date(),
     })
@@ -336,6 +361,12 @@ async function persistAssembly(opts: {
       projectId,
       renderStorageKey,
       aestheticScore: result.aestheticScore ?? null,
+      // An assembly counts as remeshed when the run was, or ANY part's
+      // mesh came from the voxel fallback (docs/text-to-cad/02 §C).
+      remeshed:
+        (result.run?.remeshed ?? false) ||
+        parts.some((p) => p.remeshed === true),
+      ...resultExtras(result),
       ...(isRoot ? { title } : {}),
       updatedAt: new Date(),
     })

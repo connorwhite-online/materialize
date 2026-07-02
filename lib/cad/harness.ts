@@ -255,10 +255,16 @@ function buildUserPrompt(
   // The plan step's catalog pick wins when present (retrieval v2); keyword
   // scoring remains the fallback when the plan named nothing parseable.
   if (!input.priorSourceCode) {
-    const chosen =
-      extras.exemplarIds != null
-        ? selectExemplarsByIds(extras.exemplarIds)
-        : selectExemplars(input.prompt);
+    let chosen = selectExemplars(input.prompt);
+    if (extras.exemplarIds != null) {
+      if (extras.exemplarIds.length === 0) {
+        chosen = []; // explicit "none" — the model saw the catalog and declined
+      } else {
+        const byId = selectExemplarsByIds(extras.exemplarIds);
+        // All-invalid ids fall back to keyword scoring, never to nothing.
+        if (byId.length > 0) chosen = byId;
+      }
+    }
     const exemplars = formatExemplars(chosen);
     if (exemplars) out += `\n\n${exemplars}`;
   }
@@ -270,8 +276,14 @@ function buildUserPrompt(
  * Targeted repair guidance for known, recurring failure classes — a generic
  * "fix it" lets the model retry the same mistake. Returns "" for unknown errors.
  */
-function repairHintFor(note: string): string {
+export function repairHintFor(note: string): string {
   const n = note.toLowerCase();
+  // sdf_kit's to_mesh refuses over-budget grids with a message that already
+  // names a pitch that fits — pass it through verbatim, it IS the fix.
+  if (/cells exceeds/.test(n) && /use pitch >=/.test(n)) {
+    const verbatim = note.match(/grid .*use pitch >= [\d.]+/i)?.[0] ?? note;
+    return `The SDF grid was too large for the cell budget: ${verbatim}. Increase the pitch (and/or shrink the bounding box) exactly as instructed.`;
+  }
   if (/(fillet|chamfer)/.test(n) && /(smaller|max_fillet|radius|length|valid)/.test(n)) {
     return "That fillet/chamfer radius is too large for the geometry. REDUCE it substantially (at least halve it, and keep it well under the thinnest adjacent wall), apply it to fewer/specific edges, or wrap it in try/except and fall back to max_fillet() — do NOT retry the same radius.";
   }
@@ -286,6 +298,11 @@ function repairHintFor(note: string): string {
   }
   if (/no result|oom|crash|killed|memory|timed out/.test(n)) {
     return "The previous attempt CRASHED or hung the geometry kernel — it was too heavy. Drastically SIMPLIFY: far fewer boolean operations, no large loops or dense patterns, coarser detail, simple primitives. Build the simplest geometry that still reads as the requested object.";
+  }
+  // The harness runs the sidecar with allowRemesh: false (docs/text-to-cad/02
+  // §C) — a non-watertight result is the model's to fix, not the voxelizer's.
+  if (/not watertight/.test(n)) {
+    return "The result was NOT WATERTIGHT and the lossy voxel-remesh fallback is off — close the surface yourself. In mesh/SDF mode: pad the field with a void border (np.pad(..., constant_values=<void>)) so the isosurface closes at the box boundary, then mesh.merge_vertices() + mesh.fix_normals(). In build123d: simplify the boolean sequence — fewer overlapping/tangent booleans, ensure solids genuinely overlap (not merely touch) before fusing.";
   }
   return "";
 }
@@ -322,12 +339,37 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
     }
   };
 
+  // Design brief (fresh builds only, docs/text-to-cad/06 part 1): structured
+  // JSON between prompt and code. Best-effort like the plan step — null on any
+  // failure and the run proceeds as before. Revisions never rebuild it; they
+  // carry input.priorBrief through instead.
+  let brief: CadBrief | null = null;
+  if (useModel && !input.priorSourceCode && briefStepEnabled()) {
+    const briefModel = modelForRole("brief");
+    brief = await timed("brief", briefModel, () =>
+      buildBrief({
+        prompt: input.prompt,
+        images: input.images,
+        signal: input.signal,
+      })
+    );
+  }
+  // The brief (fresh) or the caller's priorBrief (revision) rides the result
+  // unchanged — persistence is the caller's job.
+  const resultBrief = input.priorSourceCode ? input.priorBrief : (brief ?? undefined);
+
   // Per-prompt concept image (fresh builds only): a beautiful product render the
   // generator builds TOWARD — taste injection that hand-authored code exemplars
   // can't provide. Best-effort + gated by FAL_KEY; null when disabled/failed.
+  // Built FROM the brief when one exists, so the taste target matches the
+  // functional reality (envelope, form language).
   const conceptImg =
     useModel && !input.priorSourceCode
-      ? await conceptImage(input.prompt, input.signal)
+      ? await conceptImage(
+          input.prompt,
+          input.signal,
+          brief ? formatBriefForConcept(brief) : undefined
+        )
       : null;
   const withConcept = (base?: PromptImage[] | null): PromptImage[] | undefined => {
     const imgs = [...(base ?? []), ...(conceptImg ? [conceptImg] : [])];
@@ -338,6 +380,9 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
   // already have the prior code as their plan). Best-effort: a planning failure
   // must not block generation. No-op without model credentials.
   let plan: string | undefined;
+  // Exemplar ids the plan chose from the catalog (null = no parseable choice,
+  // keyword fallback; [] = explicit none).
+  let exemplarIds: string[] | null = null;
   if (useModel && !input.priorSourceCode && planStepEnabled()) {
     const planModel = modelForRole("plan");
     try {
@@ -352,7 +397,11 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
           signal: input.signal,
         })
       );
-      plan = text.trim() || undefined;
+      // Strip the EXEMPLAR line before the plan reaches the generate prompt —
+      // the id choice routes exemplar injection, it isn't part of the plan.
+      const parsed = parsePlanExemplarLine(text);
+      plan = parsed.plan || undefined;
+      exemplarIds = parsed.ids;
     } catch {
       plan = undefined;
     }
@@ -384,7 +433,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
       const priorRender = repairNote ? lastRun?.renderPng : undefined;
       const userPrompt = repairNote
         ? [
-            buildUserPrompt(input, plan),
+            buildUserPrompt(input, plan, { brief, exemplarIds }),
             "",
             `The previous attempt failed because ${repairNote}. Here is that code:`,
             "```python",
@@ -398,7 +447,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
           ]
             .filter(Boolean)
             .join("\n")
-        : buildUserPrompt(input, plan);
+        : buildUserPrompt(input, plan, { brief, exemplarIds });
       const images: PromptImage[] = [
         ...(input.images ?? []),
         ...(conceptImg ? [conceptImg] : []),
@@ -434,15 +483,20 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
       validation: lastRun.validation,
     });
     if (grade.pass) {
-      // Geometrically valid — now (optionally) judge it aesthetically. The
-      // judge is gated off by default, so this is a no-op unless enabled.
+      // Geometrically valid — now judge it aesthetically. On by default with
+      // credentials (CAD_CRITIQUE=false disables); all available views go to
+      // the judge so one 3/4 view can't hide a defect.
       const judgement = await judgeAesthetics({
         renderPng: lastRun.renderPng,
+        renders: lastRun.renders,
         prompt: input.prompt,
         signal: input.signal,
       });
       const aestheticScore = judgement.available
         ? (judgement.score ?? null)
+        : null;
+      const aestheticDims = judgement.available
+        ? (judgement.perDimension ?? null)
         : null;
 
       // Spend a repair turn on a visually-weak (but printable) result when we
@@ -464,6 +518,8 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
         attempts: attempt,
         run: lastRun,
         aestheticScore,
+        aestheticDims,
+        brief: resultBrief,
         telemetry,
       };
     }
@@ -481,6 +537,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
     sourceCode: lastCode,
     attempts: lastAttempt,
     run: lastRun,
+    brief: resultBrief,
     error: repairNote || "generation failed",
     telemetry,
   };
