@@ -144,6 +144,38 @@ function threadLabel(t: StudioThread): string {
   return t.title?.trim() || truncate(t.turns[0]?.prompt ?? "Untitled build");
 }
 
+/** Most changed params shown inline; the rest fold into "+N more". */
+const MAX_DIFF_PARAMS = 3;
+
+/** Trim float noise from a parsed parameter literal ("2.4", not "2.4000…4"). */
+function fmtParam(n: number): string {
+  return String(Number(n.toFixed(4)));
+}
+
+/**
+ * One-line "what changed" between a revision and its parent: up to
+ * MAX_DIFF_PARAMS changed top-level parameters ("wall 2 → 2.4 ·
+ * corner_r 6 → 8"), the rest folded into "+N more". Null when either side
+ * parses to no parameters (mesh-mode scripts) or nothing changed.
+ */
+function paramDiffSummary(
+  prevSource: string,
+  nextSource: string
+): string | null {
+  const prev = extractParams(prevSource);
+  const next = extractParams(nextSource);
+  if (Object.keys(prev).length === 0 || Object.keys(next).length === 0) {
+    return null;
+  }
+  const { changed } = diffParams(prev, next);
+  if (changed.length === 0) return null;
+  const shown = changed
+    .slice(0, MAX_DIFF_PARAMS)
+    .map(([name, from, to]) => `${name} ${fmtParam(from)} → ${fmtParam(to)}`);
+  const extra = changed.length - shown.length;
+  return shown.join(" · ") + (extra > 0 ? ` · +${extra} more` : "");
+}
+
 // Resume-on-return: a cold visit to the studio starts a fresh build, but if
 // you were just here and bounced away, coming back within this window restores
 // the build you were on. The timestamp is refreshed on every selection change
@@ -410,7 +442,9 @@ export function TextToCadStudio({
   }, [prompt]);
 
   const activeThread = threads.find((t) => t.rootId === activeRootId) ?? null;
-  const turns = activeThread?.turns ?? [];
+  // Memoized (not just `?? []`) so the param-diff useMemo below only
+  // recomputes when the active thread's turns actually change.
+  const turns = useMemo(() => activeThread?.turns ?? [], [activeThread]);
   const latestTurn = turns[turns.length - 1] ?? null;
 
   // The most recent successful turn — the thread's "latest" model, used as
@@ -503,6 +537,16 @@ export function TextToCadStudio({
     viewedTurn.id !== latestGoodTurn.id
       ? latestGoodTurn.fileAssetId
       : null;
+  const compareAvailable =
+    !!viewedTurn &&
+    !!latestGoodTurn?.fileAssetId &&
+    viewedTurn.id !== latestGoodTurn.id &&
+    !!activeAssetId;
+
+  // A pin that points somewhere other than the latest turn is worth calling
+  // out on Save (the pinned version is what the design "is").
+  const pinnedDiffersFromLatest =
+    !!pinnedTurnId && !!latestGoodTurn && pinnedTurnId !== latestGoodTurn.id;
 
   function startNewBuild() {
     // Abandoning an in-flight build is an explicit cancel: close the events
@@ -1033,9 +1077,23 @@ export function TextToCadStudio({
                   remount/zoom; on a revision it's the shape being deformed. */}
               {showModel && activeAssetId && (
                 <Suspense fallback={<ViewerSkeleton label="Loading model…" />}>
+                  {/* Compare mode swaps the solid model for the thread's
+                      latest and ghosts the viewed (older) revision on top;
+                      both land in the same deterministic fixed frame. */}
                   <ModelViewer
-                    key={activeAssetId}
-                    modelUrl={`/api/files/preview/${activeAssetId}`}
+                    key={
+                      compareBaseAssetId
+                        ? `${compareBaseAssetId}::${activeAssetId}`
+                        : activeAssetId
+                    }
+                    modelUrl={`/api/files/preview/${
+                      compareBaseAssetId ?? activeAssetId
+                    }`}
+                    ghostUrl={
+                      compareBaseAssetId
+                        ? `/api/files/preview/${activeAssetId}`
+                        : undefined
+                    }
                     format="stl"
                     mode="detail"
                     showZoomControls
@@ -1138,6 +1196,31 @@ export function TextToCadStudio({
             </div>
           )}
 
+          {/* Compare with latest — only while viewing an older revision.
+              On: the latest model renders solid with this revision ghosted
+              over it at ~35% opacity (same fixed frame, so they align). */}
+          {!generating && compareAvailable && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                aria-pressed={compareOn}
+                onClick={() => setCompareOn((v) => !v)}
+                className={`cursor-pointer rounded-full border px-3 py-1 text-xs transition-colors ${
+                  compareOn
+                    ? "border-foreground/30 bg-foreground/5 text-foreground"
+                    : "border-foreground/10 text-muted-foreground hover:bg-foreground/5"
+                }`}
+              >
+                Compare with latest
+              </button>
+              {compareOn && (
+                <span className="text-xs text-muted-foreground">
+                  Latest solid · this revision ghosted
+                </span>
+              )}
+            </div>
+          )}
+
           {error && (
             <p className="mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {error}
@@ -1227,6 +1310,11 @@ export function TextToCadStudio({
                 type="button"
                 onClick={saveToProfile}
                 disabled={savingModel || savedAssets.has(activeAssetId)}
+                title={
+                  pinnedDiffersFromLatest
+                    ? "Saves the pinned (Active) version"
+                    : undefined
+                }
                 className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-foreground/15 px-4 py-2 text-sm hover:bg-foreground/5 disabled:opacity-60"
               >
                 {savedAssets.has(activeAssetId) ? (
@@ -1347,30 +1435,101 @@ export function TextToCadStudio({
                   {turns.map((t, i) => {
                     const isViewed = viewedTurn?.id === t.id;
                     const selectable = t.status === "succeeded" && !!t.fileAssetId;
+                    const isPinned = pinnedTurnId === t.id;
+                    const pinnable = canPinVersions && selectable;
+                    // A branch: this turn revised something other than the
+                    // immediately preceding turn — indent it as a fork.
+                    const isFork =
+                      i > 0 &&
+                      !!t.parentGenerationId &&
+                      t.parentGenerationId !== turns[i - 1].id;
+                    const diff = paramDiffSummaries.get(t.id);
                     return (
-                      <li key={t.id}>
+                      <li
+                        key={t.id}
+                        className={cn(
+                          "group relative",
+                          isFork && "ml-3 border-l-2 border-foreground/10 pl-2"
+                        )}
+                      >
                         <button
                           type="button"
                           disabled={!selectable}
                           onClick={() => setViewTurnId(t.id)}
-                          className={`flex w-full items-start gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                          className={cn(
+                            "flex w-full items-start gap-2.5 rounded-lg border py-2 pl-2.5 text-left text-sm transition-colors",
+                            pinnable ? "pr-8" : "pr-2.5",
                             isViewed
                               ? "border-foreground/30 bg-foreground/5"
-                              : "border-foreground/10 hover:bg-foreground/5"
-                          } ${selectable ? "" : "opacity-60"}`}
+                              : "border-foreground/10 hover:bg-foreground/5",
+                            selectable ? "" : "opacity-60"
+                          )}
                         >
-                          <span className="mt-0.5 shrink-0 text-xs text-muted-foreground">
-                            {i === 0 ? "Start" : `#${i}`}
-                          </span>
+                          {t.renderUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={t.renderUrl}
+                              alt=""
+                              className="size-10 shrink-0 rounded bg-muted/40 object-cover"
+                            />
+                          ) : (
+                            <div className="size-10 shrink-0 rounded bg-muted/40" />
+                          )}
                           <span className="min-w-0 flex-1">
+                            <span className="flex items-center gap-1.5">
+                              <span className="text-xs text-muted-foreground">
+                                {i === 0 ? "Start" : `#${i}`}
+                              </span>
+                              {isPinned && (
+                                <span className="rounded-full border border-foreground/15 bg-foreground/5 px-1.5 py-px text-[10px] font-medium text-muted-foreground">
+                                  Active
+                                </span>
+                              )}
+                            </span>
                             <span className="block truncate">{t.prompt}</span>
                             {t.status === "failed" && (
-                              <span className="text-xs text-destructive">
+                              <span className="block truncate text-xs text-destructive">
                                 {t.error ?? "failed"}
+                              </span>
+                            )}
+                            {diff && (
+                              <span className="block truncate text-xs text-muted-foreground">
+                                {diff}
                               </span>
                             )}
                           </span>
                         </button>
+                        {/* Pin as active — hover/focus reveal; always shown
+                            on the pinned row. Outside the row button (no
+                            nested buttons). */}
+                        {pinnable && (
+                          <button
+                            type="button"
+                            onClick={() => pinVersion(t)}
+                            disabled={pinning}
+                            aria-pressed={isPinned}
+                            aria-label={
+                              isPinned
+                                ? "Pinned as active version"
+                                : "Pin as active version"
+                            }
+                            title={
+                              isPinned
+                                ? "Active version"
+                                : "Pin as active version"
+                            }
+                            className={cn(
+                              "absolute right-1 top-1 flex size-6 cursor-pointer items-center justify-center rounded-md hover:bg-foreground/10 disabled:opacity-50",
+                              isPinned
+                                ? "text-foreground"
+                                : "text-muted-foreground/70 opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                            )}
+                          >
+                            <PinIcon
+                              className={cn("size-3.5", isPinned && "fill-current")}
+                            />
+                          </button>
+                        )}
                       </li>
                     );
                   })}

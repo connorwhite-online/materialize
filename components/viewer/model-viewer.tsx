@@ -393,6 +393,13 @@ interface ModelViewerProps {
    * reload/zoom pop. Inspect-only; default off (every other call site unchanged).
    */
   fixedFrame?: boolean;
+  /**
+   * Studio compare overlay: a second STL rendered translucent (~35%) in the
+   * same fixed frame as the primary model, so two versions of a design can
+   * be eyeballed in one view. Only honored with `fixedFrame` (the shared
+   * deterministic framing is what makes the overlay line up).
+   */
+  ghostUrl?: string;
 }
 
 /**
@@ -414,6 +421,29 @@ function FixedFrameModel({
   return (
     <group scale={frame.scale} position={frame.position}>
       {children}
+    </group>
+  );
+}
+
+/**
+ * Translucent overlay of a second model (the studio's compare toggle),
+ * normalized through the same fixed frame as the primary model so both land
+ * in an identical camera/scale. Non-interactive: no raycast hits, no depth
+ * writes, so it never intercepts annotate clicks or occludes the solid model.
+ */
+function GhostModel({ url }: { url: string }) {
+  const geometry = useLoader(STLLoader, url);
+  const frame = useMemo(() => frameTransformFor(geometry), [geometry]);
+  return (
+    <group scale={frame.scale} position={frame.position}>
+      <mesh geometry={geometry} raycast={() => null}>
+        <meshStandardMaterial
+          color="#9ca3af"
+          transparent
+          opacity={0.35}
+          depthWrite={false}
+        />
+      </mesh>
     </group>
   );
 }
@@ -608,6 +638,7 @@ export function ModelViewer({
   annotations,
   onAnnotate,
   fixedFrame = false,
+  ghostUrl,
 }: ModelViewerProps) {
   const isPreview = mode === "preview";
   // Wheel zoom defaults to true unless explicitly disabled. The
@@ -734,6 +765,9 @@ export function ModelViewer({
                     onPick={openPending}
                   />
                 </FixedFrameModel>
+                {/* Compare overlay — an older version ghosted in the same
+                    frame (GhostModel normalizes itself; see above). */}
+                {ghostUrl && <GhostModel url={ghostUrl} />}
               </>
             ) : (
               <Stage
