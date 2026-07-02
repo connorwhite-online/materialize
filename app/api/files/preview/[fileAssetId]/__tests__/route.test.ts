@@ -1,11 +1,13 @@
 /**
- * Tests for GET /api/files/preview/[fileAssetId] (CON-145).
+ * Tests for GET /api/files/preview/[fileAssetId] (CON-145, MTR-136).
  *
  * Behavior matrix (verified against route.ts):
  *   - published file → anyone including anon → 200 (streams bytes)
  *   - draft file + anon → 403
  *   - draft file + owner → 200
  *   - draft file + other user → 403
+ *   - draft file + org co-owner (isOrgMember) → 200 (MTR-136)
+ *   - draft file + non-member of the owning org → 403 (MTR-136)
  *   - missing row → 404
  */
 
@@ -25,7 +27,19 @@ vi.mock("@/lib/db/schema", () => ({
     storageKey: "storageKey",
     format: "format",
   },
-  files: { id: "id", userId: "userId", status: "status" },
+  files: {
+    id: "id",
+    userId: "userId",
+    organizationId: "organizationId",
+    status: "status",
+  },
+}));
+
+// isOrgMember is exercised as its own unit in lib/__tests__/authorization.test.ts;
+// here we only need to pin that the route calls it and honors the result.
+const mockIsOrgMember = vi.fn();
+vi.mock("@/lib/authorization", () => ({
+  isOrgMember: (...args: unknown[]) => mockIsOrgMember(...args),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -71,6 +85,7 @@ function asset(
     storageKey: string;
     format: string;
     fileUserId: string | null;
+    fileOrganizationId: string | null;
     fileStatus: string;
   }> = {}
 ) {
@@ -78,6 +93,7 @@ function asset(
     storageKey: "uploads/owner-1/abc/model.stl",
     format: "stl",
     fileUserId: "owner-1",
+    fileOrganizationId: null,
     fileStatus: "published",
     ...overrides,
   };
@@ -97,6 +113,8 @@ beforeEach(() => {
   mockUserId = null;
   assetRow = null;
   mockFetch.mockReset();
+  mockIsOrgMember.mockReset();
+  mockIsOrgMember.mockResolvedValue({ member: false, role: null });
 });
 
 describe("preview/[fileAssetId] GET", () => {
@@ -140,6 +158,35 @@ describe("preview/[fileAssetId] GET", () => {
   it("draft file: other authenticated user gets 403", async () => {
     mockUserId = "other-user";
     assetRow = asset({ fileStatus: "draft", fileUserId: "owner-1" });
+
+    const res = await GET(makeRequest(), makeProps("asset-1"));
+    expect(res.status).toBe(403);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("draft file: org co-owner (not the uploader) gets 200 via isOrgMember (MTR-136)", async () => {
+    mockUserId = "org-teammate";
+    assetRow = asset({
+      fileStatus: "draft",
+      fileUserId: "owner-1",
+      fileOrganizationId: "org-1",
+    });
+    mockIsOrgMember.mockResolvedValue({ member: true, role: "member" });
+    upstreamOk();
+
+    const res = await GET(makeRequest(), makeProps("asset-1"));
+    expect(res.status).toBe(200);
+    expect(mockIsOrgMember).toHaveBeenCalledWith("org-teammate", "org-1");
+  });
+
+  it("draft file: authenticated non-member of the owning org still gets 403 (MTR-136)", async () => {
+    mockUserId = "stranger";
+    assetRow = asset({
+      fileStatus: "draft",
+      fileUserId: "owner-1",
+      fileOrganizationId: "org-1",
+    });
+    mockIsOrgMember.mockResolvedValue({ member: false, role: null });
 
     const res = await GET(makeRequest(), makeProps("asset-1"));
     expect(res.status).toBe(403);

@@ -4,6 +4,7 @@ import { files, filePhotos } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
 import { logError } from "@/lib/logger";
+import { isOrgMember } from "@/lib/authorization";
 import { thumbnailPlaceholderResponse } from "../placeholder";
 
 /**
@@ -82,6 +83,7 @@ export async function GET(
         thumbnailUrl: files.thumbnailUrl,
         status: files.status,
         userId: files.userId,
+        organizationId: files.organizationId,
         coverPhotoId: files.coverPhotoId,
         coverStorageKey: filePhotos.storageKey,
       })
@@ -102,7 +104,12 @@ export async function GET(
     const isDraft = row.status !== "published";
     if (isDraft) {
       const { userId } = await auth();
-      if (!userId || userId !== row.userId) {
+      const canView =
+        !!userId &&
+        (userId === row.userId ||
+          (row.organizationId !== null &&
+            (await isOrgMember(userId, row.organizationId)).member));
+      if (!canView) {
         // Don't surface work-in-progress artwork to a leaked id — but
         // serve a placeholder rather than 404 (no artwork leaks, and
         // it stays consistent with the missing-row path above).

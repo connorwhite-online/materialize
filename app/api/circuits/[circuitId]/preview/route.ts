@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { projectCircuits, projects } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
+import { canWriteProject } from "@/lib/authorization";
 import { logError } from "@/lib/logger";
 
 /**
@@ -13,9 +14,11 @@ import { logError } from "@/lib/logger";
  * doesn't depend on long-lived S3 URLs.
  *
  * Visibility mirrors the project: the preview is public if the
- * project is `published` AND `visibility = 'public'`; otherwise only
- * the project owner can fetch it. Keeps draft / private circuit
- * diagrams from leaking via a stolen circuitId.
+ * project is `published` AND `visibility = 'public'`; otherwise the
+ * read set mirrors the write set — owner, org members, and
+ * per-project collaborators (see `canWriteProject`) — matching
+ * /api/circuits/[circuitId]/source/route.ts. Keeps draft / private
+ * circuit diagrams from leaking via a stolen circuitId.
  */
 export async function GET(
   _request: Request,
@@ -30,6 +33,7 @@ export async function GET(
     const [row] = await db
       .select({
         previewStorageKey: projectCircuits.previewStorageKey,
+        projectId: projects.id,
         projectStatus: projects.status,
         projectVisibility: projects.visibility,
         projectUserId: projects.userId,
@@ -47,7 +51,7 @@ export async function GET(
       row.projectVisibility === "public";
     if (!publicProject) {
       const { userId } = await auth();
-      if (!userId || userId !== row.projectUserId) {
+      if (!userId || !(await canWriteProject(userId, row.projectId)).ok) {
         return new Response("Not found", { status: 404 });
       }
     }

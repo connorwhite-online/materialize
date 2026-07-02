@@ -4,6 +4,7 @@ import { fileAssets, files } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
 import { logError } from "@/lib/logger";
+import { isOrgMember } from "@/lib/authorization";
 
 /**
  * Same-origin streaming proxy for the asset's bytes.
@@ -45,6 +46,7 @@ export async function GET(
         storageKey: fileAssets.storageKey,
         format: fileAssets.format,
         fileUserId: files.userId,
+        fileOrganizationId: files.organizationId,
         fileStatus: files.status,
       })
       .from(fileAssets)
@@ -55,9 +57,13 @@ export async function GET(
       return new Response("Not found", { status: 404 });
     }
 
-    const isOwner = userId && assetRow.fileUserId === userId;
+    const canView =
+      !!userId &&
+      (assetRow.fileUserId === userId ||
+        (assetRow.fileOrganizationId !== null &&
+          (await isOrgMember(userId, assetRow.fileOrganizationId)).member));
     const isPublished = assetRow.fileStatus === "published";
-    if (!isOwner && !isPublished) {
+    if (!canView && !isPublished) {
       return new Response("Forbidden", { status: 403 });
     }
 
