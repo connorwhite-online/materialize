@@ -5,12 +5,8 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { cadJobs } from "@/lib/db/schema";
 import { logError } from "@/lib/logger";
-import { runHarness, type PriorFeedback } from "@/lib/cad/harness";
-import {
-  generativeEnabled,
-  shouldUseGenerative,
-  runGenerative,
-} from "@/lib/cad/generative";
+import type { PriorFeedback } from "@/lib/cad/harness";
+import { runCadGeneration } from "@/lib/cad/orchestrate";
 import type { PromptImage } from "@/lib/cad/model-client";
 import {
   persistGenerationFailure,
@@ -110,6 +106,8 @@ export interface ExecuteCadJobInput {
    */
   priorSourceCode?: string | null;
   priorFeedback?: PriorFeedback | null;
+  /** Parent's persisted design brief (jsonb) — revisions inherit + patch it. */
+  priorBrief?: unknown;
 }
 
 /**
@@ -235,29 +233,19 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
   }, CANCEL_POLL_MS);
 
   try {
-    // Same routing as the old in-request stream: organic/sculptural forms
-    // go to the generative backend (fal.ai) when it's enabled; everything
-    // else stays on build123d. The classifier only runs when FAL_KEY is
-    // set, so otherwise there's zero overhead.
-    const useGenerative =
-      generativeEnabled() &&
-      (await shouldUseGenerative(prompt, controller.signal));
-
-    const result = useGenerative
-      ? await runGenerative({
-          prompt,
-          images,
-          signal: controller.signal,
-          onProgress,
-        })
-      : await runHarness({
-          prompt,
-          priorSourceCode: input.priorSourceCode ?? null,
-          priorFeedback: input.priorFeedback ?? null,
-          images,
-          signal: controller.signal,
-          onProgress,
-        });
+    // Complexity-routed entry (docs/text-to-cad/03 §C): simple prompts keep
+    // the scripted loop, complex ones get the agentic session loop, organic
+    // ones the generative backend. With CAD_AGENTIC=false / no sessions /
+    // no credentials this is byte-identical to the old inline routing.
+    const result = await runCadGeneration({
+      prompt,
+      priorSourceCode: input.priorSourceCode ?? null,
+      priorFeedback: input.priorFeedback ?? null,
+      priorBrief: input.priorBrief,
+      images,
+      signal: controller.signal,
+      onProgress,
+    });
 
     // runGenerative swallows AbortError into { ok: false }; catch the
     // cancel case here so it lands as `cancelled`, not `failed`.

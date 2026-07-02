@@ -87,6 +87,7 @@ export async function POST(request: Request) {
   // request fails before a generation or job row ever exists.
   let priorSourceCode: string | null = null;
   let priorFeedback: PriorFeedback | null = null;
+  let priorBrief: unknown;
   if (body.parentGenerationId) {
     const [parent] = await db
       .select({
@@ -95,6 +96,7 @@ export async function POST(request: Request) {
         rating: cadGenerations.rating,
         feedbackTags: cadGenerations.feedbackTags,
         feedbackNote: cadGenerations.feedbackNote,
+        brief: cadGenerations.brief,
       })
       .from(cadGenerations)
       .where(eq(cadGenerations.id, body.parentGenerationId))
@@ -109,6 +111,8 @@ export async function POST(request: Request) {
       tags: parent.feedbackTags,
       note: parent.feedbackNote,
     };
+    // Revisions inherit the parent's design brief (docs/text-to-cad/06).
+    priorBrief = parent.brief ?? undefined;
   }
 
   const [row] = await db
@@ -138,6 +142,7 @@ export async function POST(request: Request) {
       images: images.length ? images : undefined,
       priorSourceCode,
       priorFeedback,
+      priorBrief,
     }).catch((error) => logError("api/cad/generate.job", error))
   );
 
