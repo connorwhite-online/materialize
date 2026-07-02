@@ -57,11 +57,19 @@ const IN_PROGRESS_STATUSES = [
   "awaiting_production_payment",
 ] as const;
 
+// Cap the finished-orders history fetch at a user-friendly ceiling —
+// mirrors LIBRARY_MAX_FILES in library-tab.tsx. Without a limit, a
+// customer with a long print history (plus the multiItemOrderMeta
+// inArray fan-out below) loads their entire lifetime order list on
+// every visit; cost grows unboundedly with account age. A truncation
+// notice flags the cap so nothing silently disappears.
+const ORDERS_MAX = 100;
+
 export async function OrdersTab({ userId }: { userId: string }) {
   // In-progress rows surface separately as a "Carts" section with
   // Resume / Discard actions — they're not finished orders yet.
   // Same-user filter on both → fan them out in one roundtrip.
-  const [draftsRaw, ordersRaw] = await Promise.all([
+  const [draftsRaw, ordersRawUncapped] = await Promise.all([
     db
       .select({
         id: printOrders.id,
@@ -106,8 +114,14 @@ export async function OrdersTab({ userId }: { userId: string }) {
           notInArray(printOrders.status, [...IN_PROGRESS_STATUSES])
         )
       )
-      .orderBy(desc(printOrders.createdAt)),
+      .orderBy(desc(printOrders.createdAt))
+      .limit(ORDERS_MAX + 1),
   ]);
+
+  const ordersTruncated = ordersRawUncapped.length > ORDERS_MAX;
+  const ordersRaw = ordersTruncated
+    ? ordersRawUncapped.slice(0, ORDERS_MAX)
+    : ordersRawUncapped;
 
   // Multi-item drafts/orders have fileAssetId=null on the printOrders
   // row — the real files live in printOrderItems. Pull the first item
@@ -295,6 +309,13 @@ export async function OrdersTab({ userId }: { userId: string }) {
         <section className="space-y-3">
           {drafts.length > 0 && (
             <h3 className="text-sm font-medium">Orders</h3>
+          )}
+          {ordersTruncated && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+              Showing your most recent {ORDERS_MAX} orders. Older orders
+              aren&apos;t shown here yet — reach out if you need a full
+              export.
+            </div>
           )}
           <div className="space-y-2">
             {orders.map((order) => {
