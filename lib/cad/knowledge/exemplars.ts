@@ -508,6 +508,42 @@ export function selectExemplars(
     .map(({ e }) => e);
 }
 
+/**
+ * Resolve exemplar ids the plan/brief step chose from the catalog (retrieval
+ * v2, docs/text-to-cad/07 §C). Validated against the pool + verified-only +
+ * capped at 2, so a hallucinated or unverified id can never inject code.
+ * `pool` is injectable for tests.
+ */
+export function selectExemplarsByIds(
+  ids: string[],
+  opts: { pool?: CadExemplar[] } = {}
+): CadExemplar[] {
+  const pool = (opts.pool ?? CAD_EXEMPLARS).filter((e) => e.verified);
+  const out: CadExemplar[] = [];
+  for (const id of ids) {
+    const ex = pool.find((e) => e.id === id);
+    if (ex && !out.includes(ex)) out.push(ex);
+    if (out.length >= 2) break;
+  }
+  return out;
+}
+
+/**
+ * Catalog listing (id + title + keywords + lesson — NOT code) shown to the
+ * plan/brief steps so the model picks its own style reference instead of
+ * relying on brittle keyword overlap.
+ */
+export function formatExemplarCatalog(pool: CadExemplar[] = CAD_EXEMPLARS): string {
+  const rows = pool.filter((e) => e.verified);
+  if (rows.length === 0) return "";
+  const lines = rows.map(
+    (e) => `- ${e.id} — ${e.title} (${e.keywords.join(", ")}): ${e.lesson}`
+  );
+  return ["Exemplar catalog (style references available to the code generator):", ...lines].join(
+    "\n"
+  );
+}
+
 export function formatExemplars(rows: CadExemplar[]): string {
   if (rows.length === 0) return "";
   const blocks = rows.map(

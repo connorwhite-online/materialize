@@ -20,9 +20,9 @@ import {
  * reasoning, judge with a DIFFERENT model than the generator where possible
  * (self-preference bias), and judge form not lighting.
  *
- * Gated + fail-open: disabled unless CAD_AESTHETIC_JUDGE === "true" AND
- * credentials exist; ANY failure returns { available: false } so it can never
- * break a generation.
+ * Gated + fail-open: ON by default whenever model credentials exist
+ * (docs/text-to-cad/07 §B) — set CAD_CRITIQUE=false to disable. ANY failure
+ * returns { available: false } so it can never break a generation.
  */
 
 // Re-export the pure surface so existing importers (and tests) are unchanged.
@@ -36,9 +36,9 @@ export {
   type AestheticJudgement,
 } from "./critique-core";
 
-/** Disabled unless explicitly turned on AND credentials are present. */
+/** On whenever credentials are present; CAD_CRITIQUE=false disables. */
 export function aestheticJudgeEnabled(): boolean {
-  return process.env.CAD_AESTHETIC_JUDGE === "true" && hasModelCredentials();
+  return process.env.CAD_CRITIQUE !== "false" && hasModelCredentials();
 }
 
 /**
@@ -51,26 +51,38 @@ export function aestheticJudgeEnabled(): boolean {
  */
 async function runVisionJudge(
   prompt: string,
-  pngBase64: string,
+  pngs: string[],
   signal?: AbortSignal
 ): Promise<string> {
   return completeText({
     system: CRITIQUE_RUBRIC,
     prompt: `Requested object: ${prompt}`,
     model: process.env.CAD_AESTHETIC_JUDGE_MODEL || modelForRole("critique"),
-    images: [{ data: pngBase64, mediaType: "image/png" }],
+    images: pngs.map((data) => ({ data, mediaType: "image/png" as const })),
     signal,
   });
 }
 
 export async function judgeAesthetics(opts: {
   renderPng?: string | null;
+  /**
+   * Multi-view renders (docs/text-to-cad/07 §A) — when present, ALL views go
+   * to the judge in one call so a single 3/4 view can't hide a defect.
+   * `renderPng` remains the single-view fallback for older sidecars.
+   */
+  renders?: Partial<Record<string, string>> | null;
   prompt: string;
   signal?: AbortSignal;
 }): Promise<AestheticJudgement> {
-  if (!aestheticJudgeEnabled() || !opts.renderPng) return { available: false };
+  const views = Object.values(opts.renders ?? {}).filter(
+    (v): v is string => typeof v === "string" && v.length > 0
+  );
+  const images = views.length > 0 ? views : opts.renderPng ? [opts.renderPng] : [];
+  if (!aestheticJudgeEnabled() || images.length === 0) {
+    return { available: false };
+  }
   try {
-    const text = await runVisionJudge(opts.prompt, opts.renderPng, opts.signal);
+    const text = await runVisionJudge(opts.prompt, images, opts.signal);
     const parsed = parseJudgement(text);
     if (!parsed) return { available: false };
     return {

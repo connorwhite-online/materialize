@@ -29,6 +29,8 @@ export interface CadPart {
   renderPng?: string;
   geometry?: CadGeometry;
   validation: CadValidation;
+  /** True when this part's watertight mesh came from the voxel-remesh fallback. */
+  remeshed?: boolean;
   error?: string;
 }
 
@@ -120,3 +122,12 @@ export type CadStreamEvent =
   | CadProgressEvent
   | CadDoneEvent
   | { type: "error"; error: string; generationId?: string };
+
+/**
+ * One entry persisted in cadJobs.progress (MTR-175): every CadProgressEvent
+ * the harness emitted plus exactly one terminal record (`done` or `error`)
+ * appended when the job finishes. Same wire shapes as the SSE stream — the
+ * events route (/api/cad/jobs/[jobId]/events) replays these verbatim, so
+ * CadProgressEvent / CadDoneEvent stay backward compatible by construction.
+ */
+export type CadJobProgressEntry = CadStreamEvent;

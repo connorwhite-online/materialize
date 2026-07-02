@@ -13,10 +13,17 @@
  * Pure (no `server-only`) so the eval runner and tests can use it.
  */
 
-export type CadRole = "plan" | "implement" | "repair" | "critique" | "title";
+export type CadRole =
+  | "plan"
+  | "brief"
+  | "implement"
+  | "repair"
+  | "critique"
+  | "title";
 
 const ROLE_ENV: Record<CadRole, string> = {
   plan: "CAD_MODEL_PLAN",
+  brief: "CAD_MODEL_BRIEF",
   implement: "CAD_MODEL_IMPLEMENT",
   repair: "CAD_MODEL_REPAIR",
   critique: "CAD_MODEL_CRITIQUE",
@@ -42,4 +49,14 @@ export function modelForRole(role: CadRole): string | undefined {
  */
 export function planStepEnabled(): boolean {
   return process.env.CAD_PLAN_STEP !== "false";
+}
+
+/**
+ * Design-brief step (docs/text-to-cad/06 part 1): a structured JSON
+ * intermediate between prompt and code, built on fresh builds alongside the
+ * plan. On by default; set CAD_BRIEF_STEP=false to skip the extra model call.
+ * Best-effort regardless — a brief failure never blocks generation.
+ */
+export function briefStepEnabled(): boolean {
+  return process.env.CAD_BRIEF_STEP !== "false";
 }

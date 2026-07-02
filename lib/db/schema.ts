@@ -15,7 +15,7 @@ import {
   uniqueIndex,
   foreignKey,
 } from "drizzle-orm/pg-core";
-import type { CadProgressEvent } from "../cad/types";
+import type { CadJobProgressEntry } from "../cad/types";
 
 // Enums
 //
@@ -1552,11 +1552,12 @@ export const cadJobs = pgTable(
       .notNull()
       .references(() => cadGenerations.id, { onDelete: "cascade" }),
     status: cadJobStatusEnum("status").notNull().default("queued"),
-    // Append-only list of CadProgressEvent — the SSE replay log the
-    // events endpoint serves before tailing live ones. The size cap /
+    // Append-only list of CadJobProgressEntry (progress events plus the
+    // terminal done/error record) — the SSE replay log the events
+    // endpoint serves before tailing live ones. The size cap /
     // prune-on-completion is enforced at the app layer, not here.
     progress: jsonb("progress")
-      .$type<CadProgressEvent[]>()
+      .$type<CadJobProgressEntry[]>()
       .notNull()
       .default(sql`'[]'::jsonb`),
     // Failure message when status=failed (mirrors cadGenerations.error).

@@ -9,9 +9,28 @@ import { runCadCode } from "./runner-client";
 import { SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, extractCode, gradeRun } from "./prompt";
 import { buildKnowledgeBlock, type CadProcess } from "./knowledge";
 import { judgeAesthetics } from "./critique";
+import type { DimensionScore } from "./critique-core";
 import { conceptImage, CONCEPT_IMAGE_NOTE } from "./concept";
-import { selectExemplars, formatExemplars } from "./knowledge/exemplars";
-import { modelForRole, planStepEnabled, type CadRole } from "./models";
+import {
+  selectExemplars,
+  selectExemplarsByIds,
+  formatExemplars,
+  formatExemplarCatalog,
+} from "./knowledge/exemplars";
+import { formatComponentHints } from "./knowledge/components";
+import {
+  buildBrief,
+  cadBriefSchema,
+  formatBriefForPrompt,
+  formatBriefForConcept,
+  type CadBrief,
+} from "./brief";
+import {
+  modelForRole,
+  planStepEnabled,
+  briefStepEnabled,
+  type CadRole,
+} from "./models";
 import { CAD_FEEDBACK_TAG_LABELS, type CadFeedbackTag } from "./feedback";
 import type { CadProgressEvent, CadRunResult } from "./types";
 
@@ -60,6 +79,12 @@ export interface HarnessInput {
    */
   process?: CadProcess | null;
   /**
+   * The brief persisted with the version being revised — included in the
+   * revise prompt and passed through to the result unchanged (revisions never
+   * rebuild the brief; persistence is the caller's job). No-op on fresh builds.
+   */
+  priorBrief?: unknown;
+  /**
    * Called as the loop advances so the caller can stream status to the UI.
    * Best-effort and synchronous — the harness never awaits it and a throw
    * here must not derail a generation.
@@ -75,6 +100,17 @@ export interface HarnessResult {
   run?: CadRunResult;
   /** VLM aesthetic aggregate (0-100), null when the judge is off/unavailable. */
   aestheticScore?: number | null;
+  /**
+   * Per-dimension judge scores (docs/text-to-cad/07 §B) — shows WHICH
+   * dimension drags. Null whenever aestheticScore is null.
+   */
+  aestheticDims?: Record<string, DimensionScore> | null;
+  /**
+   * The design brief this generation was built against (docs/text-to-cad/06):
+   * freshly built on a fresh build, the caller's priorBrief passed through
+   * unchanged on a revision. Persistence is the caller's job.
+   */
+  brief?: unknown;
   /** Per-role model usage for routing/telemetry (which model, how long). */
   telemetry?: Array<{ role: CadRole; model?: string; ms: number }>;
   error?: string;
@@ -106,10 +142,56 @@ function buildPlanPrompt(input: HarnessInput): string {
     prompt: input.prompt,
     process: input.process,
   });
-  return `Plan a parametric 3D model for this request: ${input.prompt}\n\nDesign guidance to honor:\n\n${knowledge}`;
+  // Exemplar retrieval v2 (docs/text-to-cad/07 §C): the plan step sees the
+  // catalog (id/title/keywords/lesson — not code) and names its pick(s) on the
+  // last line; the generate step then injects the chosen exemplar code.
+  const catalog = formatExemplarCatalog();
+  const exemplarAsk = catalog
+    ? `\n\n${catalog}\n\nAfter the plan, your LAST line must be exactly \`EXEMPLAR: <id>\` (or \`EXEMPLAR: <id>|<id2>\` for two, or \`EXEMPLAR: none\` if none fits) naming the catalog exemplar(s) closest to this request.`
+    : "";
+  return `Plan a parametric 3D model for this request: ${input.prompt}\n\nDesign guidance to honor:\n\n${knowledge}${exemplarAsk}`;
 }
 
-function buildUserPrompt(input: HarnessInput, plan?: string): string {
+/**
+ * Split the plan step's trailing `EXEMPLAR: <id>|<id2>|none` line off the plan
+ * text. `ids: null` = no/unparseable line (fall back to keyword selection);
+ * `ids: []` = an explicit "none" (the model saw the catalog and declined).
+ * Pure + exported for tests.
+ */
+export function parsePlanExemplarLine(planText: string): {
+  ids: string[] | null;
+  plan: string;
+} {
+  const lines = planText.trimEnd().split("\n");
+  const last = lines[lines.length - 1]?.trim() ?? "";
+  const m = last.match(/^EXEMPLAR:\s*(.+)$/i);
+  if (!m) return { ids: null, plan: planText.trim() };
+  const plan = lines.slice(0, -1).join("\n").trim();
+  const tokens = m[1]
+    .split("|")
+    .map((t) => t.trim().toLowerCase())
+    .filter(Boolean);
+  if (tokens.length === 0) return { ids: null, plan };
+  if (tokens.length === 1 && tokens[0] === "none") return { ids: [], plan };
+  return { ids: tokens.filter((t) => t !== "none").slice(0, 2), plan };
+}
+
+/** Optional context threaded from the pre-generation steps (brief + plan). */
+interface PromptExtras {
+  /** Fresh-build design brief; folded in as a structured requirements block. */
+  brief?: CadBrief | null;
+  /**
+   * Exemplar ids the plan chose from the catalog. undefined/null = no plan
+   * choice, use keyword selection; [] = explicit "none", inject nothing.
+   */
+  exemplarIds?: string[] | null;
+}
+
+function buildUserPrompt(
+  input: HarnessInput,
+  plan?: string,
+  extras: PromptExtras = {}
+): string {
   const task = input.priorSourceCode
     ? [
         "Revise the following build123d model per this instruction:",
@@ -128,6 +210,25 @@ function buildUserPrompt(input: HarnessInput, plan?: string): string {
   });
 
   let out = `${task}\n\nDesign guidance to follow:\n\n${knowledge}`;
+
+  // Fresh-build brief: structured requirements + real cutout dims so the
+  // numbers stop being lost in prose (docs/text-to-cad/06 part 1).
+  if (extras.brief) {
+    out += `\n\n${formatBriefForPrompt(extras.brief)}`;
+    const hints = formatComponentHints(extras.brief);
+    if (hints) out += `\n\n${hints}`;
+  }
+
+  // Revision: replay the persisted brief so the revised code still honors the
+  // original structured requirements. Tolerate any shape — the column is
+  // untyped jsonb and older rows may predate the schema.
+  if (input.priorSourceCode && input.priorBrief != null) {
+    const parsed = cadBriefSchema.safeParse(input.priorBrief);
+    const block = parsed.success
+      ? formatBriefForPrompt(parsed.data)
+      : `Design brief (from the original build):\n${JSON.stringify(input.priorBrief)}`;
+    out += `\n\n${block}`;
+  }
 
   if (plan) {
     out += `\n\nFollow this plan:\n${plan}`;
@@ -149,12 +250,16 @@ function buildUserPrompt(input: HarnessInput, plan?: string): string {
     }
   }
 
-  // On a fresh build, show the best-matching verified exemplar as a style
+  // On a fresh build, show the best-matching verified exemplar(s) as a style
   // reference. (Revisions already have the prior code as their reference.)
-  // The exemplars are sidecar-verified (scripts/verify-exemplars.ts), so this
-  // now injects a matching example when one scores > 0 for the prompt.
+  // The plan step's catalog pick wins when present (retrieval v2); keyword
+  // scoring remains the fallback when the plan named nothing parseable.
   if (!input.priorSourceCode) {
-    const exemplars = formatExemplars(selectExemplars(input.prompt));
+    const chosen =
+      extras.exemplarIds != null
+        ? selectExemplarsByIds(extras.exemplarIds)
+        : selectExemplars(input.prompt);
+    const exemplars = formatExemplars(chosen);
     if (exemplars) out += `\n\n${exemplars}`;
   }
 
