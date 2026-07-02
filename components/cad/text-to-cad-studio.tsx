@@ -5,6 +5,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useTransition,
@@ -22,6 +23,7 @@ import {
   MessageSquareTextIcon,
   PaperclipIcon,
   PencilIcon,
+  PinIcon,
   PlusIcon,
   Trash2Icon,
   XIcon,
@@ -37,7 +39,9 @@ import {
   recordCadFeedback,
   renameCadGeneration,
   saveCadFileToProfile,
+  setActiveCadVersion,
 } from "@/app/actions/cad-generation";
+import { diffParams, extractParams } from "@/components/cad/param-diff";
 import type { CadStreamEvent, CadProgressEvent } from "@/lib/cad/types";
 import type { ViewerAnnotation } from "@/components/viewer/model-viewer";
 import {
@@ -85,6 +89,13 @@ export interface StudioTurn {
   projectSlug: string | null;
   /** True when the result was voxel-remeshed (an approximation). */
   remeshed: boolean;
+  /**
+   * The generation this one revised — encodes the branch structure within
+   * a thread (a fork when it isn't the immediately preceding turn).
+   * Optional: absent on turns minted before the column was threaded
+   * through.
+   */
+  parentGenerationId?: string | null;
 }
 
 export interface StudioThread {
@@ -92,6 +103,16 @@ export interface StudioThread {
   title: string | null;
   lastActivity: number;
   turns: StudioTurn[];
+  /**
+   * cadThreads.id when the thread is DB-backed (docs/text-to-cad/05 §A).
+   * Absent on legacy pre-migration groups and threads created in-session
+   * (the done event doesn't carry it) — those can't pin until reload.
+   */
+  threadId?: string;
+  /** Pinned version — which generation the thread currently "is". */
+  activeGenerationId?: string | null;
+  /** THE library file for this design once saved (one file per design). */
+  savedFileId?: string | null;
 }
 
 type ImageMediaType = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
@@ -263,6 +284,11 @@ export function TextToCadStudio({
   const [selectedPartId, setSelectedPartId] = useState<string | null>(null);
   const [savingModel, setSavingModel] = useState(false);
   const [savedAssets, setSavedAssets] = useState<Set<string>>(new Set());
+  // Pin-as-active in flight (optimistic; see pinVersion).
+  const [pinning, startPinning] = useTransition();
+  // Ghost-overlay compare: viewed (older) revision at ~35% opacity on top
+  // of the thread's latest model. Reset whenever the viewed asset changes.
+  const [compareOn, setCompareOn] = useState(false);
   const [annotateMode, setAnnotateMode] = useState(false);
   const [annotations, setAnnotations] = useState<StudioAnnotation[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -387,14 +413,19 @@ export function TextToCadStudio({
   const turns = activeThread?.turns ?? [];
   const latestTurn = turns[turns.length - 1] ?? null;
 
+  // The most recent successful turn — the thread's "latest" model, used as
+  // the viewer fallback and as the solid side of the compare overlay.
+  const latestGoodTurn =
+    [...turns]
+      .reverse()
+      .find((t) => t.status === "succeeded" && t.fileAssetId) ?? null;
+
   // Which turn's model fills the viewer: the explicitly selected one, else the
   // most recent successful turn in the active thread.
   const viewedTurn =
     (viewTurnId
       ? turns.find((t) => t.id === viewTurnId && t.fileAssetId)
-      : null) ??
-    [...turns].reverse().find((t) => t.status === "succeeded" && t.fileAssetId) ??
-    null;
+      : null) ?? latestGoodTurn;
 
   // For an assembly, the viewer/print/download act on the selected part; for a
   // single solid (or a stale selection) fall back to the turn's primary asset.
@@ -406,10 +437,72 @@ export function TextToCadStudio({
 
   // Annotations are tied to a specific model — drop them (and exit pin mode)
   // whenever the viewed asset changes (new turn, switched part, opened build).
+  // The compare overlay is likewise per-selection.
   useEffect(() => {
     setAnnotations([]);
     setAnnotateMode(false);
+    setCompareOn(false);
   }, [activeAssetId]);
+
+  // Pinned version (docs/text-to-cad/05 §D item 2): which generation the
+  // thread currently "is". Only DB-backed threads (threadId present) can
+  // pin; legacy groups and just-created in-session threads gain the
+  // affordance after a reload.
+  const pinnedTurnId = activeThread?.activeGenerationId ?? null;
+  const canPinVersions = !!activeThread?.threadId;
+
+  function pinVersion(turn: StudioTurn) {
+    if (!activeThread?.threadId || pinning || turn.id === pinnedTurnId) return;
+    const rootId = activeThread.rootId;
+    const prevPinned = pinnedTurnId;
+    // Optimistic: badge moves immediately, rolls back on error.
+    setThreads((prev) =>
+      prev.map((t) =>
+        t.rootId === rootId ? { ...t, activeGenerationId: turn.id } : t
+      )
+    );
+    startPinning(async () => {
+      const res = await setActiveCadVersion({ generationId: turn.id });
+      if ("error" in res) {
+        setError(res.error);
+        setThreads((prev) =>
+          prev.map((t) =>
+            t.rootId === rootId ? { ...t, activeGenerationId: prevPinned } : t
+          )
+        );
+      }
+    });
+  }
+
+  // Parametric diff per revision against its parent (docs/text-to-cad/05
+  // §D item 4): up to 3 changed top-level parameters as a one-line summary
+  // under the revision row. Parent = the turn parentGenerationId points at,
+  // falling back to the preceding turn for rows that predate the column.
+  const paramDiffSummaries = useMemo(() => {
+    const byId = new Map(turns.map((t) => [t.id, t]));
+    const out = new Map<string, string>();
+    turns.forEach((t, i) => {
+      if (!t.sourceCode) return;
+      const parent =
+        (t.parentGenerationId ? byId.get(t.parentGenerationId) : undefined) ??
+        (i > 0 ? turns[i - 1] : undefined);
+      if (!parent?.sourceCode) return;
+      const summary = paramDiffSummary(parent.sourceCode, t.sourceCode);
+      if (summary) out.set(t.id, summary);
+    });
+    return out;
+  }, [turns]);
+
+  // Ghost-overlay compare (docs/text-to-cad/05 §D item 3): while viewing an
+  // older revision, overlay it (translucent) on the thread's latest model.
+  // Both render through the same deterministic fixed frame, so they align.
+  const compareBaseAssetId =
+    compareOn &&
+    viewedTurn &&
+    latestGoodTurn?.fileAssetId &&
+    viewedTurn.id !== latestGoodTurn.id
+      ? latestGoodTurn.fileAssetId
+      : null;
 
   function startNewBuild() {
     // Abandoning an in-flight build is an explicit cancel: close the events
@@ -538,6 +631,7 @@ export function TextToCadStudio({
       parts: ev.parts ?? [],
       projectSlug: ev.projectSlug ?? null,
       remeshed: ev.remeshed ?? false,
+      parentGenerationId: parentId ?? null,
     };
     const now = Date.now();
 
@@ -545,12 +639,19 @@ export function TextToCadStudio({
       // Revision: append to the active thread. Read the root id from the
       // ref (not the closure) so a stream resumed after a remount still
       // lands on the right thread; skip if a replayed `done` already did.
+      // The server re-points activeGenerationId at every new success
+      // (persistGenerationSuccess), so mirror that for the pin badge.
       const rootId = activeRootIdRef.current;
       setThreads((prev) =>
         prev
           .map((t) =>
             t.rootId === rootId && !t.turns.some((x) => x.id === newTurn.id)
-              ? { ...t, turns: [...t.turns, newTurn], lastActivity: now }
+              ? {
+                  ...t,
+                  turns: [...t.turns, newTurn],
+                  lastActivity: now,
+                  activeGenerationId: newTurn.id,
+                }
               : t
           )
           .sort((a, b) => b.lastActivity - a.lastActivity)

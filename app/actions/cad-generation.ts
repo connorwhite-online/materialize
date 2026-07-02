@@ -380,6 +380,57 @@ export async function saveCadFileToProfile(input: {
   }
 }
 
+/**
+ * Pin a generation as its thread's active version (docs/text-to-cad/05 §D
+ * item 2). `activeGenerationId` is what the thread currently "is" — it
+ * defaults to the latest successful generation (persistGenerationSuccess
+ * re-points it on every new success), and this lets the user pin an older
+ * one instead. Owner-only, gated like every other text-to-CAD surface.
+ * Legacy pre-thread generations (threadId NULL) can't be pinned.
+ */
+export async function setActiveCadVersion(input: {
+  generationId: string;
+}): Promise<{ ok: true } | { error: string }> {
+  const { userId } = await auth();
+  if (!userId) return { error: "Unauthorized" };
+
+  const user = (await currentUser()) as ClerkUserLike;
+  if (!canUseTextToCad(primaryEmail(user))) return { error: "Not found" };
+
+  try {
+    const [gen] = await db
+      .select({
+        id: cadGenerations.id,
+        userId: cadGenerations.userId,
+        threadId: cadGenerations.threadId,
+        status: cadGenerations.status,
+      })
+      .from(cadGenerations)
+      .where(eq(cadGenerations.id, input.generationId))
+      .limit(1);
+    if (!gen || gen.userId !== userId) return { error: "Version not found." };
+    if (!gen.threadId) return { error: "This build doesn't support pinning." };
+    if (gen.status !== "succeeded") {
+      return { error: "Only a successful version can be pinned." };
+    }
+
+    const updated = await db
+      .update(cadThreads)
+      .set({ activeGenerationId: gen.id, updatedAt: new Date() })
+      .where(
+        and(eq(cadThreads.id, gen.threadId), eq(cadThreads.userId, userId))
+      )
+      .returning({ id: cadThreads.id });
+    if (updated.length === 0) return { error: "Version not found." };
+
+    revalidatePath("/prometheus");
+    return { ok: true };
+  } catch (error) {
+    logError("setActiveCadVersion", error);
+    return { error: "Could not pin this version." };
+  }
+}
+
 export type RenameCadResult = { name: string } | { error: string };
 
 /**

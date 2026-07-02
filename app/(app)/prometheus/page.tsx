@@ -243,6 +243,7 @@ export default async function TextToCadPage() {
     parts: m.parts,
     projectSlug: m.projectSlug,
     remeshed: m.remeshed,
+    parentGenerationId: m.parentGenerationId,
   });
 
   for (const thread of threadRows) {
