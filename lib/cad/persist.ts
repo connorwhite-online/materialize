@@ -230,7 +230,16 @@ async function persistAssembly(opts: {
     const bytes = new Uint8Array(Buffer.from(stl, "base64"));
     const stem = slugStem(`${baseName}-${p.name}`, `part-${i + 1}`);
     const storageKey = `uploads/${userId}/${nanoid()}/${stem}.stl`;
-    await putObject(storageKey, bytes, "model/stl");
+    try {
+      await putObject(storageKey, bytes, "model/stl");
+    } catch (err) {
+      // A mid-loop R2 failure must not propagate: that would discard the
+      // in-memory `created` array and orphan the parts already committed
+      // (files/fileAssets rows + R2 objects from 0..i-1, now unlinked to any
+      // generation/Project). Skip this part like a failed draft instead.
+      logError("persistAssembly.upload", err);
+      continue;
+    }
     const draft = await createDraftFileForPrint({
       storageKey,
       originalFilename: `${stem}.stl`,
