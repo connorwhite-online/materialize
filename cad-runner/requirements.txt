@@ -18,6 +18,10 @@ trimesh==4.5.3
 networkx==3.6.1
 # trimesh's voxel marching-cubes (organic remesh fallback) needs scikit-image.
 scikit-image==0.26.0
+# sdf_kit v2 (from_mesh voxel SDF), networks.py (void labeling), and fea.py
+# (sparse hex solve) use scipy directly. Was transitive via scikit-image;
+# now a first-class dependency, pinned like everything else.
+scipy==1.17.1
 # Headless clay-render of the result (no GL/pyglet) — feeds the VLM aesthetic
 # judge and the visual repair loop. Was transitive via scikit-image; now direct.
 matplotlib==3.11.0

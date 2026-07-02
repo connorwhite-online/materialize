@@ -19,7 +19,6 @@ Importable by sidecar-exec'd model code: `from sdf_kit import *`.
 """
 import numpy as np
 from scipy import ndimage
-from scipy.spatial import cKDTree
 from skimage import measure
 import trimesh
 
@@ -210,15 +209,43 @@ def rotate_z(P, degrees, center=(0, 0, 0)):
 
 
 # ---- B-rep bridge ------------------------------------------------------------
+def _crossing_parity(mesh, pts, rng):
+    """Point-in-solid by ray-crossing parity (odd crossings = inside), pure
+    numpy Möller–Trumbore over all triangles. Orientation-INDEPENDENT — it
+    survives inconsistent winding and `fix_normals`-flipped cavity shells,
+    which vertex/face-normal side tests do not. Random ray directions make
+    edge/vertex grazes measure-zero. O(len(pts) * faces): only for the handful
+    of classification samples below, never per-voxel."""
+    tri = mesh.triangles
+    v0 = tri[:, 0]
+    e1 = tri[:, 1] - v0
+    e2 = tri[:, 2] - v0
+    inside = np.zeros(len(pts), bool)
+    for i, o in enumerate(pts):
+        d = rng.normal(size=3)
+        d /= np.linalg.norm(d)
+        p = np.cross(d, e2)
+        det = np.einsum("ij,ij->i", e1, p)
+        ok = np.abs(det) > 1e-12
+        inv = np.where(ok, 1.0 / np.where(ok, det, 1.0), 0.0)
+        tvec = o - v0
+        u = np.einsum("ij,ij->i", tvec, p) * inv
+        q = np.cross(tvec, e1)
+        v = np.einsum("j,ij->i", d, q) * inv
+        t = np.einsum("ij,ij->i", e2, q) * inv
+        hits = ok & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 1e-9)
+        inside[i] = (int(hits.sum()) % 2) == 1
+    return inside
+
+
 def _solid_voxels(mesh, pitch, pad=2):
     """Voxel occupancy of a mesh's solid material at `pitch`, padded by `pad`
     void voxels per side. Returns (bool grid, world coords of voxel (0,0,0)
-    center). Surface voxels come from trimesh voxelization; enclosed pockets
-    are classified material-vs-cavity by a nearest-vertex-normal side test
-    (majority vote over samples), so internal channels stay VOID — a naive
+    center). Surface voxels come from trimesh voxelization; each enclosed
+    pocket is then classified material-vs-cavity by ray-parity majority vote
+    over a few sample voxels, so internal channels stay VOID — a naive
     `fill()` would pave over them and break both `from_mesh` and the network
-    verifier. Assumes outward-consistent normals (marching-cubes and build123d
-    tessellations both qualify)."""
+    verifier."""
     vg = mesh.voxelized(pitch)
     origin = np.asarray(vg.transform, float)[:3, 3] - pad * pitch
     surf = np.pad(np.asarray(vg.matrix, bool), pad)
@@ -230,18 +257,20 @@ def _solid_voxels(mesh, pitch, pad=2):
         open_air.update(np.unique(face))
     open_air.discard(0)
     solid = surf.copy()
-    tree = cKDTree(mesh.vertices)
-    vnorm = np.asarray(mesh.vertex_normals, float)
+    rng = np.random.default_rng(0)  # deterministic runs
+    enclosed, samples = [], []
     for lab in range(1, n + 1):
         if lab in open_air:
             continue
         vox = np.argwhere(lbl == lab)
-        sample = vox[:: max(1, len(vox) // 15)][:15]
-        pts = origin + sample * pitch
-        _, vi = tree.query(pts)
-        side = np.einsum("ij,ij->i", pts - mesh.vertices[vi], vnorm[vi])
-        if np.median(side) < 0:  # behind the surface → inside the material
-            solid[lbl == lab] = True
+        take = vox[:: max(1, len(vox) // 5)][:5]
+        enclosed.append((lab, len(samples), len(take)))
+        samples.extend(origin + take * pitch)
+    if enclosed:
+        inside = _crossing_parity(mesh, np.asarray(samples), rng)
+        for lab, start, count in enclosed:
+            if np.mean(inside[start:start + count]) >= 0.5:
+                solid[lbl == lab] = True
     return solid, origin
 
 
