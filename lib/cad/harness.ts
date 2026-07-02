@@ -473,6 +473,23 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
     emit({ type: "phase", phase: "executing", attempt, maxAttempts });
     lastRun = await runCadCode(lastCode, ["stl", "step"], input.signal);
 
+    // Last attempt, and the ONLY defect is an open/non-manifold surface:
+    // accept the lossy voxel remesh as an explicit, recorded decision
+    // (docs/text-to-cad/02 §C) rather than failing the generation. Earlier
+    // attempts keep allowRemesh off so the model fixes its own geometry.
+    if (
+      attempt === maxAttempts &&
+      !lastRun.ok &&
+      lastRun.validation.compiled &&
+      lastRun.validation.isSolid &&
+      !lastRun.validation.isWatertight
+    ) {
+      const remeshed = await runCadCode(lastCode, ["stl", "step"], input.signal, {
+        allowRemesh: true,
+      });
+      if (remeshed.ok) lastRun = remeshed;
+    }
+
     const grade = gradeRun(lastRun);
     emit({
       type: "validation",
