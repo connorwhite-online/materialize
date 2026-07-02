@@ -3,6 +3,7 @@ import { printOrders } from "@/lib/db/schema";
 import { eq, isNotNull } from "drizzle-orm";
 import { getStripe } from "@/lib/stripe";
 import { logError } from "@/lib/logger";
+import { constantTimeEqual } from "@/lib/auth/constant-time-equal";
 
 /**
  * Re-attempts refunds that failed during an auto-approved-order
@@ -37,7 +38,7 @@ export async function GET(request: Request) {
       { status: 500 }
     );
   }
-  if (auth !== `Bearer ${expected}`) {
+  if (!auth || !constantTimeEqual(auth, `Bearer ${expected}`)) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 

@@ -7,6 +7,7 @@ import {
 import { and, eq, like, lt } from "drizzle-orm";
 import { getStripe } from "@/lib/stripe";
 import { logError } from "@/lib/logger";
+import { constantTimeEqual } from "@/lib/auth/constant-time-equal";
 
 /**
  * Daily housekeeping sweeps. The path name predates the broader
@@ -55,7 +56,7 @@ export async function GET(request: Request) {
       { status: 500 }
     );
   }
-  if (auth !== `Bearer ${expected}`) {
+  if (!auth || !constantTimeEqual(auth, `Bearer ${expected}`)) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
