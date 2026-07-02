@@ -81,6 +81,11 @@ export default withIterate(withSentryConfig(nextConfig, {
   // Same-origin tunnel for client error reports. Keeps ad-blockers
   // from silently dropping events.
   tunnelRoute: "/api/monitoring/tunnel",
+  // Auto-instruments the routes wired in vercel.json's `crons` array as
+  // Sentry Cron Monitors, so a sweep that never runs (Vercel kills it
+  // mid-execution, the schedule silently stops firing, etc.) shows up
+  // as a missed check-in instead of going unnoticed (MTR-144).
+  automaticVercelMonitors: true,
   // Source maps go to Sentry but get deleted from the build
   // output afterwards — they're not served from the deployment,
   // only resolved server-side when Sentry renders a stack.

@@ -7,6 +7,7 @@ import {
 import { db } from "@/lib/db";
 import { fileAssets } from "@/lib/db/schema";
 import { logError } from "@/lib/logger";
+import { constantTimeEqual } from "@/lib/auth/constant-time-equal";
 
 /**
  * Daily cron that garbage-collects R2 objects under `uploads/` that no
@@ -76,7 +77,7 @@ export async function GET(request: Request) {
       { status: 500 }
     );
   }
-  if (auth !== `Bearer ${expected}`) {
+  if (!auth || !constantTimeEqual(auth, `Bearer ${expected}`)) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 

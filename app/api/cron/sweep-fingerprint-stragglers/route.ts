@@ -4,6 +4,7 @@ import { and, eq, inArray, isNull, lt, ne } from "drizzle-orm";
 import { logError } from "@/lib/logger";
 import { fingerprintAndPersistAsset } from "@/lib/hashing/fingerprint-asset";
 import type { MeshFormat } from "@/lib/hashing/mesh-fingerprint";
+import { constantTimeEqual } from "@/lib/auth/constant-time-equal";
 
 /**
  * Safety net for the deferred fingerprint pass scheduled in
@@ -48,7 +49,7 @@ export async function GET(request: Request) {
       { status: 500 }
     );
   }
-  if (auth !== `Bearer ${expected}`) {
+  if (!auth || !constantTimeEqual(auth, `Bearer ${expected}`)) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -132,6 +133,9 @@ export async function GET(request: Request) {
       cutoff: cutoff.toISOString(),
     };
     console.log("[cron/sweep-fingerprint-stragglers] swept", result);
+    if (failed > 0) {
+      return Response.json(result, { status: 500 });
+    }
     return Response.json(result);
   } catch (error) {
     logError("cron/sweep-fingerprint-stragglers", error);

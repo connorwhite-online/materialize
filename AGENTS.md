@@ -60,7 +60,7 @@ QuoteConfigurator:
 
 **Polling invariant** — `/api/craftcloud/quotes/poll` is polled by the client until CraftCloud reports `allComplete: true` AND the quote count has been stable for 4 consecutive polls (`STABLE_POLLS_REQUIRED = 4`, `POLL_INTERVAL_MS = 1500`, `HARD_CEILING_MS = 90_000`). We do NOT break on the first `allComplete: true` alone — CraftCloud will occasionally flip it true with an empty array on cached library modelIds, or while late vendors are still responding. Additional exit conditions: 3 consecutive 4xx responses = stale priceId bail (mobile tab backgrounded); 4 consecutive network errors = timeout; `"timeout"` exit reason → partial-results UI. Logic lives in `components/print/poll-quotes.ts` (shared by the quote configurator and cart re-pricing at `cart-context.tsx:234`).
 
-**Idempotency** — the anon checkout chain (R2 → draft → order → Stripe) uses a `checkoutInFlightRef` to prevent double-fire (`quote-configurator.tsx:357`, set/cleared `:868-962`). The Stripe webhook checks `order.craftCloudOrderId` in addition to `order.status` so a retry after a partial commit doesn't re-place the CraftCloud order.
+**Idempotency** — the anon checkout chain (R2 → draft → order → Stripe) uses a `checkoutInFlightRef` to prevent double-fire (`quote-configurator.tsx:364`, set/cleared `:875-969`). The Stripe webhook checks `order.craftCloudOrderId` in addition to `order.status` so a retry after a partial commit doesn't re-place the CraftCloud order.
 
 **Local Stripe webhook forwarding** — the order only advances from `cart_created` → `ordered` when `/api/webhooks/stripe` runs `handlePrintOrderPayment`. In local dev, Stripe can't reach `localhost:3000` on its own, so run `stripe listen --forward-to localhost:3000/api/webhooks/stripe` in a side terminal during checkout testing. Without it, the order sits in the profile's "Carts" section with a Resume button that just relinks to the same Stripe session — easy to mistake for "payment didn't go through." The `STRIPE_WEBHOOK_SECRET` for local dev is the value the `stripe listen` command prints on startup, not the one from the Stripe dashboard.
 
@@ -143,7 +143,7 @@ blocked|ordered         → refunded               (print.ts:1389)
 - **Three status-writing crons**: `place-auto-approved-orders` (minutely), `reconcile-production-payments` (hourly), `cleanup-stale-orders` (daily). `retry-failed-refunds` does NOT write status.
 
 **Consumer checklist** — every place that branches on `printOrderStatus` must be updated when states are added:
-- `app/(app)/dashboard/orders/[orderId]/page.tsx:23-33` — status label/variant map (note: duplicate map in orders-tab; both currently missing `awaiting_agent_approval`/`auto_approved` labels — CON-114)
+- `app/(app)/dashboard/orders/[orderId]/page.tsx:23-33` — status label/variant map (note: duplicate map in orders-tab; both now carry `awaiting_agent_approval`/`auto_approved` labels as of CON-114 — only the map *duplication* itself remains to consolidate)
 - `components/print/order-status-tracker.tsx` — STEPS array
 - `components/files/file-activity.tsx:38-40` — activity display
 - `lib/mcp/internal/orders.ts:423-427` — TERMINAL_STATUSES + raw passthrough
@@ -205,7 +205,7 @@ Never call the DB cart a "CraftCloud cart." They are distinct: the DB cart is a 
 
 **`withDbRetry` is read-only by contract** (`lib/db/retry.ts:15-17`) — it is intended only for idempotent SELECT loaders. Wrapping a write risks double-applying it on a retry. This contract is stated in the file's header comment and must not be relaxed without a careful audit.
 
-**Double-fire guards live in the callers** — `checkoutInFlightRef` at `components/print/quote-configurator.tsx:357` (set/cleared `:868-962`) guards the anon checkout chain; `materializingRef` at `components/print/cart-context.tsx:109` guards cart materialization. Moving or extracting the chained functions does NOT move the guards — they must travel with the call site.
+**Double-fire guards live in the callers** — `checkoutInFlightRef` at `components/print/quote-configurator.tsx:364` (set/cleared `:875-969`) guards the anon checkout chain; `materializingRef` at `components/print/cart-context.tsx:109` guards cart materialization. Moving or extracting the chained functions does NOT move the guards — they must travel with the call site.
 
 ## Fonts
 
@@ -219,6 +219,7 @@ Never call the DB cart a "CraftCloud cart." They are distinct: the DB cart is a 
 - Server actions are tested by mocking `@/lib/db`, `@/lib/storage`, and `@/lib/logger` — see `app/actions/__tests__/files.test.ts` for the pattern.
 - Before adding a runtime assertion or refactor, check whether the existing test suite already covers the contract. Run `npx vitest run` before committing.
 - **Pre-commit gate is `npm run build`, not filtered `tsc`**. `tsconfig.json` includes `**/*.ts` (scripts/, tests, everything), and Next's build pass is the only place the full program is type-checked for real. Never gate commits on `tsc --noEmit | grep <file>` — grep-filtered output hides errors in files you didn't touch this turn, and Vercel is then the first unfiltered pass. Seen once: `scripts/seed-resume-test.ts` shipped with a bad `users` column reference because the grep filter hid it from the local sanity check.
+- `npm run typecheck` (`tsc --noEmit`) is a fast, DB-free full-program type check — the same check CI runs as its own step. `npm run build` still requires `DATABASE_URL` (it runs `db:migrate` first), so `npm run typecheck` is the check to reach for locally when you don't have DB credentials handy.
 
 ## Common pitfalls
 

@@ -3,6 +3,7 @@ import { printOrders } from "@/lib/db/schema";
 import { and, eq, isNull, like, lte, or } from "drizzle-orm";
 import { handlePrintOrderPayment } from "@/lib/stripe/handle-print-order-payment";
 import { logError } from "@/lib/logger";
+import { constantTimeEqual } from "@/lib/auth/constant-time-equal";
 
 /**
  * Places CraftCloud orders for auto-approved agent orders whose
@@ -50,7 +51,7 @@ export async function GET(request: Request) {
       { status: 500 }
     );
   }
-  if (auth !== `Bearer ${expected}`) {
+  if (!auth || !constantTimeEqual(auth, `Bearer ${expected}`)) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 

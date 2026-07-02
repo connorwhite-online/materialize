@@ -184,7 +184,10 @@ describe("cron/sweep-fingerprint-stragglers", () => {
     });
 
     const res = await GET(makeRequest("Bearer test-secret"));
-    expect(res.status).toBe(200);
+    // MTR-144: failed>0 now surfaces as a 500 so Vercel cron monitoring
+    // flags it, matching cleanup-stale-orders / reconcile-production-payments
+    // / place-auto-approved-orders.
+    expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.scanned).toBe(2);
     expect(body.succeeded).toBe(1);
