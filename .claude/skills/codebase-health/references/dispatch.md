@@ -42,8 +42,14 @@ The executor prompt must contain:
    > moving on. Touch only the files listed as in scope. If any STOP condition
    > occurs, stop immediately and report — do not improvise around obstacles.
    > Fresh worktrees share git history but not `node_modules` — run `npm install`
-   > first. The real gate is `npm run build` (full type-check), tests are
-   > `npx vitest run`. Commit in the worktree following the issue's git workflow,
+   > first. Gates, in order: `npx tsc --noEmit`, `npx vitest run`, and — as the
+   > FINAL gate — `npx next build` (run it directly; `npm run build` also runs
+   > `db:migrate` which needs a DB, but bare `npx next build` works in a worktree
+   > and is the only gate that catches App-Router-only errors `tsc`/`vitest` miss:
+   > a `"use server"` file may export ONLY async functions, and an App Router
+   > page/layout file may export only `default` + reserved route config — so never
+   > add a plain `const`/object `export` to those files. If `next build` is blocked
+   > by env validation, say so in your report). Commit in the worktree following the issue's git workflow,
    > then open ONE pull request whose description contains `MTR-NNN` so it links
    > to the issue. Do NOT merge and do NOT push to a protected branch. Before
    > reporting, audit every claim against an actual tool result — only report
@@ -63,6 +69,18 @@ The executor prompt must contain:
    ```
 
 When an executor reports COMPLETE, move the Linear issue to **`In Progress`** (`save_issue`) and add a comment linking the PR. It stays `In Progress` until you review and the human merges.
+
+### Batch mode (few PRs — save build minutes, avoid merge conflicts)
+
+The default per-issue fan-out opens one PR per issue. When the maintainer wants **as few PRs as possible** (build-minute cost, merge-conflict risk), cluster instead:
+
+1. **Group ready issues into batches by file-locality.** A batch is a set of issues whose combined in-scope files are **disjoint from every other batch that runs in the same wave**. Two issues that touch the same file MUST land in the same batch (so one branch owns that file). Natural batches this repo has used: `platform-crons`, `observability`, `performance-loaders`, `money-checkout`, `marketplace-security`, `test-coverage`, `text-to-cad`.
+2. **Compute each batch's in-scope union and check for cross-batch file collisions** before dispatching. If two batches must touch the same file, put them in **different waves** (run one, let it open its PR, then the next) rather than concurrently — a shared file across two live branches is the merge conflict you're trying to avoid. Non-overlapping hunks in the same file across two PRs usually auto-merge, but don't rely on it for large edits.
+3. **One executor per batch**, `isolation: "worktree"`, `model: sonnet`. It branches from `origin/<default>` as `claude/mtr-batch-<name>`, implements **every issue in the batch** (each still followed step-by-step, each in-scope list respected), runs the gates once for the whole branch, commits per logical unit, and opens **ONE PR** whose body lists every `MTR-###` with a one-line summary. It moves each of its issues to `In Progress`.
+4. **Concurrency ≤4 batches in flight.** Give the executor the batch's issue ids and either inline every issue body or tell it to fetch each via `mcp__Linear__get_issue`.
+5. **Review is per-PR but covers all its issues**: re-run every done-criterion of every issue in the batch, and scope-check the diff against the **union** of the batch's in-scope lists (any file outside the union fails review).
+
+Batch mode trades a little review complexity (one PR, several issues) for a large drop in PR count and CI spend. Prefer it whenever the maintainer signals cost sensitivity; otherwise per-issue mode gives cleaner one-issue-one-PR traceability.
 
 ### Review each PR (the advisor's real job)
 
