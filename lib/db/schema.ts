@@ -1356,6 +1356,53 @@ export const webhookEventsProcessed = pgTable(
   ]
 );
 
+// Text-to-CAD threads — one row per studio design conversation. The
+// root generation plus every revision/fork hangs off it via
+// cadGenerations.threadId, replacing the read-time parentGenerationId
+// chain reconstruction (docs/text-to-cad/05 §A). `title` lives here
+// going forward; the root generation's title is a legacy-read fallback
+// during migration.
+export const cadThreads = pgTable(
+  "cad_threads",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // Thread title (agent-written or user-renamed). Null = untitled;
+    // readers fall back to the root generation's title, then prompt.
+    title: text("title"),
+    // The first generation in the thread. FK declared in the migration
+    // with ON DELETE SET NULL — cadGenerations.threadId points back at
+    // this table, and declaring both directions inline trips drizzle's
+    // circular type inference (same pattern as files.coverPhotoId).
+    rootGenerationId: uuid("root_generation_id"),
+    // Which version the thread currently "is" — defaults to the latest
+    // successful generation; the user can pin an older one. FK in the
+    // migration (ON DELETE SET NULL), same circularity note as above.
+    activeGenerationId: uuid("active_generation_id"),
+    // THE library file for this design once saved — one file per design,
+    // re-pointed on re-save rather than multiplied (docs/text-to-cad/05
+    // §C). Null until the first save; SET NULL if the file is later
+    // deleted so the thread history survives.
+    savedFileId: uuid("saved_file_id").references(() => files.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    // Composite covers the studio thread list (WHERE user_id ORDER BY
+    // updated_at) and the user_id-prefix lookup.
+    index("cad_threads_user_updated_idx").on(table.userId, table.updatedAt),
+  ]
+);
+
 // Text-to-CAD generations (experimental, owner-only — gated by
 // lib/features.ts). One row per generation attempt. This is both the
 // edit-history source ("edit existing" re-prompts against a prior row's
@@ -1389,6 +1436,14 @@ export const cadGenerations = pgTable(
     // Set on an "edit existing" generation — points at the generation
     // whose sourceCode seeded this one. Self-FK declared below.
     parentGenerationId: uuid("parent_generation_id"),
+    // The thread this generation belongs to (docs/text-to-cad/05 §A).
+    // Root generations create the thread; revisions carry it from the
+    // parent. parentGenerationId still encodes the branch structure
+    // WITHIN a thread. SET NULL so the generation history survives
+    // thread deletion.
+    threadId: uuid("thread_id").references(() => cadThreads.id, {
+      onDelete: "set null",
+    }),
     // The printable library asset produced on success. Null until the
     // R2 upload + createDraftFileForPrint step completes; SET NULL if the
     // asset is later deleted so the generation history survives.
@@ -1423,6 +1478,21 @@ export const cadGenerations = pgTable(
     // VLM aesthetic-judge aggregate (0-100), null when the judge is off or
     // unavailable. Surfaced as the average aesthetic score on the scorecard.
     aestheticScore: integer("aesthetic_score"),
+    // Whether the sidecar's lossy voxel-remesh fallback produced this
+    // generation's final mesh (docs/text-to-cad/02 §C). Remesh rate per
+    // tier is a quality KPI on the eval scorecard — today it's invisible.
+    remeshed: boolean("remeshed").notNull().default(false),
+    // Design-brief intermediate the harness derived from the prompt
+    // before writing code (docs/text-to-cad/06). Null when the brief
+    // stage is off or the row predates it.
+    brief: jsonb("brief"),
+    // Per-dimension VLM aesthetic-judge scores backing aestheticScore
+    // (docs/text-to-cad/07). Null when the judge is off or unavailable.
+    aestheticDims: jsonb("aesthetic_dims"),
+    // R2 storage key for the B-rep topology sidecar JSON (docs/
+    // text-to-cad/01 phase 2). Object storage like the render — never
+    // inline — so the history query stays small. Null until produced.
+    topoStorageKey: text("topo_storage_key"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -1439,6 +1509,7 @@ export const cadGenerations = pgTable(
     ),
     index("cad_generations_file_asset_id_idx").on(table.fileAssetId),
     index("cad_generations_parent_idx").on(table.parentGenerationId),
+    index("cad_generations_thread_id_idx").on(table.threadId),
     foreignKey({
       columns: [table.parentGenerationId],
       foreignColumns: [table.id],
