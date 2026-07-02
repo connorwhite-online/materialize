@@ -1,9 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
-import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { loadUserByHandle } from "@/app/(app)/[handle]/loader";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { ProfileTabs } from "@/components/profile/profile-tabs";
@@ -110,10 +108,7 @@ export async function UserProfileView({
   const showWelcome =
     searchParams.welcome === "1" && searchParams.payment === "success";
 
-  const [user] = await db
-    .select()
-    .from(users)
-    .where(eq(users.username, handle));
+  const user = await loadUserByHandle(handle);
 
   if (!user) notFound();
 
