@@ -14,7 +14,9 @@ import "server-only";
  */
 
 const CUSTOMER_API_BASE = "https://customer-api.craftcloud3d.com";
-const CATALOG_TTL_SECONDS = 24 * 60 * 60;
+// Exported so tests can assert TTL-based revalidation without
+// hardcoding a duplicate magic number.
+export const CATALOG_TTL_SECONDS = 24 * 60 * 60;
 
 // Top-level response shape. We type only the fields we use — the
 // upstream JSON has dozens more per material (physical properties,
@@ -148,7 +150,25 @@ export interface CraftCloudCatalog {
 }
 
 let cachedCatalog: CraftCloudCatalog | null = null;
+let cachedCatalogFetchedAt = 0;
 let cachedProviders: Map<string, Provider> | null = null;
+let cachedProvidersFetchedAt = 0;
+
+/**
+ * Whether a module-scope memo entry is still within the TTL window.
+ * Without this, `cachedCatalog`/`cachedProviders` short-circuit
+ * forever once populated — a warm server instance would never
+ * re-fetch for its whole process lifetime, even though the file's
+ * `next: { revalidate }` option implies a 24h refresh. Next's fetch
+ * cache alone doesn't help here because the module-level `if
+ * (cached...) return cached...` guard never lets execution reach the
+ * `fetch()` call a second time. Tracking our own fetchedAt timestamp
+ * keeps the "hit lands once a day across all requests" behavior
+ * truthful within a single warm instance too.
+ */
+function isFresh(fetchedAt: number): boolean {
+  return Date.now() - fetchedAt < CATALOG_TTL_SECONDS * 1000;
+}
 
 // CraftCloud's edge intermittently serves a 403/429 challenge to
 // datacenter IPs — most visibly during `next build`, where a single
@@ -207,7 +227,7 @@ async function fetchProvidersJson(): Promise<Provider[]> {
 const PRINTABLE_TECHNOLOGIES = new Set(["3d_printing"]);
 
 export async function getCraftCloudCatalog(): Promise<CraftCloudCatalog> {
-  if (cachedCatalog) return cachedCatalog;
+  if (cachedCatalog && isFresh(cachedCatalogFetchedAt)) return cachedCatalog;
 
   const json = await fetchCatalogJson();
   const rawGroups = json.materialStructure ?? [];
@@ -252,13 +272,15 @@ export async function getCraftCloudCatalog(): Promise<CraftCloudCatalog> {
   }
 
   cachedCatalog = { groups, materialById, configById, configCount };
+  cachedCatalogFetchedAt = Date.now();
   return cachedCatalog;
 }
 
 export async function getProviderIndex(): Promise<Map<string, Provider>> {
-  if (cachedProviders) return cachedProviders;
+  if (cachedProviders && isFresh(cachedProvidersFetchedAt)) return cachedProviders;
   const list = await fetchProvidersJson();
   cachedProviders = new Map(list.map((p) => [p.vendorId, p]));
+  cachedProvidersFetchedAt = Date.now();
   return cachedProviders;
 }
 

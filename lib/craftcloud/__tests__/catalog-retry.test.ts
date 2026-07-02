@@ -109,4 +109,54 @@ describe("catalog fetch retry", () => {
     expect(catalog.configById.get("c1")?.material.name).toBe("PLA");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("re-fetches the catalog once the TTL elapses within a warm instance", async () => {
+    vi.useFakeTimers();
+    try {
+      // A fresh Response per call — `Response.json()` can only be read
+      // once, and this memo test invokes the loader multiple times.
+      fetchMock.mockImplementation(() =>
+        Promise.resolve(jsonResponse({ materialStructure: [] }))
+      );
+
+      const { getCraftCloudCatalog, CATALOG_TTL_SECONDS } = await freshModule();
+
+      await getCraftCloudCatalog();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      // Still within the TTL — the memo should short-circuit.
+      await getCraftCloudCatalog();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      // Cross the TTL boundary — the memo must be considered stale.
+      vi.advanceTimersByTime(CATALOG_TTL_SECONDS * 1000 + 1000);
+      await getCraftCloudCatalog();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("re-fetches providers once the TTL elapses within a warm instance", async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock.mockImplementation(() =>
+        Promise.resolve(jsonResponse([{ vendorId: "v1", name: "Vendor One" }]))
+      );
+
+      const { getProviderIndex, CATALOG_TTL_SECONDS } = await freshModule();
+
+      await getProviderIndex();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      await getProviderIndex();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(CATALOG_TTL_SECONDS * 1000 + 1000);
+      await getProviderIndex();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
