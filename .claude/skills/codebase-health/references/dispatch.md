@@ -42,8 +42,14 @@ The executor prompt must contain:
    > moving on. Touch only the files listed as in scope. If any STOP condition
    > occurs, stop immediately and report — do not improvise around obstacles.
    > Fresh worktrees share git history but not `node_modules` — run `npm install`
-   > first. The real gate is `npm run build` (full type-check), tests are
-   > `npx vitest run`. Commit in the worktree following the issue's git workflow,
+   > first. Gates, in order: `npx tsc --noEmit`, `npx vitest run`, and — as the
+   > FINAL gate — `npx next build` (run it directly; `npm run build` also runs
+   > `db:migrate` which needs a DB, but bare `npx next build` works in a worktree
+   > and is the only gate that catches App-Router-only errors `tsc`/`vitest` miss:
+   > a `"use server"` file may export ONLY async functions, and an App Router
+   > page/layout file may export only `default` + reserved route config — so never
+   > add a plain `const`/object `export` to those files. If `next build` is blocked
+   > by env validation, say so in your report). Commit in the worktree following the issue's git workflow,
    > then open ONE pull request whose description contains `MTR-NNN` so it links
    > to the issue. Do NOT merge and do NOT push to a protected branch. Before
    > reporting, audit every claim against an actual tool result — only report
