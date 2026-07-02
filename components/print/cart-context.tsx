@@ -281,10 +281,14 @@ export function CartProvider({ children }: { children: ReactNode }) {
         }
         await updateCartItemQuantity(id, quantity);
       } finally {
+        // Only clear the repricing indicator if this call still owns
+        // the abort ref for `id` — a superseded (aborted) call must
+        // not turn off the skeleton for the live re-quote that
+        // replaced it (MTR-133).
         if (repriceAbortRef.current.get(id) === controller) {
           repriceAbortRef.current.delete(id);
+          setRepricing(id, false);
         }
-        setRepricing(id, false);
       }
     },
     [items, setRepricing]
