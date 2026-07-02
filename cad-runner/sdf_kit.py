@@ -302,6 +302,12 @@ def to_mesh(field, lo, hi, pitch=0.7):
     P = np.stack([X.ravel(), Y.ravel(), Z.ravel()], axis=1)
     F = np.asarray(field(P), float).reshape(*n)
     F = np.pad(F, 1, mode="constant", constant_values=float(pitch * 3 + 1.0))
+    # Exact zeros happen whenever a hard clip (mask/subtract) lands on a grid
+    # coordinate; marching cubes then emits coincident vertices there and the
+    # merge below welds them into non-manifold edges. Nudge them off the level
+    # by more than the vertex-merge tolerance (shifts the surface ~1e-4 voxels
+    # at those nodes — far below print resolution).
+    F[F == 0.0] = -1e-4 * pitch
     verts, faces, _, _ = measure.marching_cubes(F, level=0.0)
     for i in range(3):
         verts[:, i] = lo[i] + (verts[:, i] - 1.0) * (hi[i] - lo[i]) / (n[i] - 1)
