@@ -333,6 +333,35 @@ describe("reconcileProductionPayments", () => {
     expect(result.captured).toBe(1);
   });
 
+  it("MTR-144: bounded worker pool processes every row exactly once, no double-processing", async () => {
+    // More rows than CONCURRENCY (4) so multiple workers are definitely
+    // in flight at once. Each row must be retrieved from Stripe exactly
+    // once and captured exactly once — a double-claim would show up as
+    // a PI id appearing more than once in either call list.
+    const rowCount = 10;
+    selectRows = Array.from({ length: rowCount }, (_, i) =>
+      makeRow({ id: `order-${i}`, feePaymentIntentId: `pi_${i}` })
+    );
+    mockRetrieve.mockResolvedValue({ status: "requires_capture" });
+    mockGetOrderStatus.mockResolvedValue(PAID_STATUS);
+
+    const result = await reconcileProductionPayments();
+
+    expect(result.captured).toBe(rowCount);
+    expect(result.errors).toBe(0);
+
+    // Every row's PaymentIntent was retrieved exactly once — if a row
+    // were claimed by two workers, some pi_N would appear twice here.
+    const retrievedIds = mockRetrieve.mock.calls.map((c) => c[0]);
+    expect(retrievedIds).toHaveLength(rowCount);
+    expect(new Set(retrievedIds).size).toBe(rowCount);
+
+    // Same invariant for the Stripe capture call.
+    const capturedIds = mockCapture.mock.calls.map((c) => c[0]);
+    expect(capturedIds).toHaveLength(rowCount);
+    expect(new Set(capturedIds).size).toBe(rowCount);
+  });
+
   it("queries with ORDER BY feeAuthorizedAt ASC and LIMIT 500", async () => {
     // The mock db doesn't verify query shape directly, but this test
     // documents the intent and will fail if the orderBy/limit chain is

@@ -47,6 +47,23 @@ const STALE_ORDER_AGE_MS = 48 * 60 * 60 * 1000;
 const STALE_CART_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const WEBHOOK_DEDUP_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
+// The stale-order pass is serial (refund, then cancel, per row) and
+// previously had no cap — an unbounded backlog could run past the
+// function's wall-clock limit with zero signal (see MTR-144). 200 rows
+// at up to ~2s/row (a Stripe refund call plus the DB update) is ~400s
+// worst case, which is why maxDuration below is sized to match; any
+// remainder is picked up by tomorrow's run (`hasMoreStaleOrders` in the
+// response makes a growing backlog visible before it becomes a crisis).
+const STALE_ORDER_LIMIT = 200;
+
+// Worst case ~200 serial refund+cancel calls (see STALE_ORDER_LIMIT)
+// at up to ~2s each ≈ 400s; 300s (the platform's default Pro-plan
+// ceiling) covers the common case. A run that hits the ceiling still
+// leaves partial progress — every write is per-row and unconditional
+// only after its own refund attempt completes — so a mid-sweep kill
+// just means more rows for tomorrow, not a double-refund.
+export const maxDuration = 300;
+
 export async function GET(request: Request) {
   const auth = request.headers.get("authorization");
   const expected = process.env.CRON_SECRET;
@@ -70,6 +87,7 @@ export async function GET(request: Request) {
     let cancelledOrders: OpResult = "error";
     let deletedCartItems: OpResult = "error";
     let prunedWebhookEvents: OpResult = "error";
+    let hasMoreStaleOrders = false;
 
     try {
       // CON-159: Rows with a `pi_`-prefixed stripeSessionId are
@@ -80,7 +98,9 @@ export async function GET(request: Request) {
       // We split the operation into two passes:
       //   1. Charged rows (pi_ stripeSessionId): refund first, then cancel.
       //   2. Uncharged rows: cancel directly.
-      const staleRows = await db
+      // Fetch one row past the cap so we can tell whether there's a
+      // remainder without a separate COUNT query.
+      const fetchedRows = await db
         .select({
           id: printOrders.id,
           stripeSessionId: printOrders.stripeSessionId,
@@ -91,7 +111,13 @@ export async function GET(request: Request) {
             eq(printOrders.status, "cart_created"),
             lt(printOrders.createdAt, orderCutoff)
           )
-        );
+        )
+        .limit(STALE_ORDER_LIMIT + 1);
+
+      hasMoreStaleOrders = fetchedRows.length > STALE_ORDER_LIMIT;
+      const staleRows = hasMoreStaleOrders
+        ? fetchedRows.slice(0, STALE_ORDER_LIMIT)
+        : fetchedRows;
 
       const stripe = getStripe();
       let cancelled = 0;
@@ -170,6 +196,7 @@ export async function GET(request: Request) {
       cancelledOrders,
       deletedCartItems,
       prunedWebhookEvents: prunedWebhookEvents,
+      hasMoreStaleOrders,
       cutoffs: {
         orders: orderCutoff.toISOString(),
         cartItems: cartCutoff.toISOString(),

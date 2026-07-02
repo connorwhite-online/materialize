@@ -56,6 +56,16 @@ export interface ReconcileResult {
  * Each row is processed in its own try/catch — one bad order (Stripe
  * blip, CraftCloud 500, missing ids) must not stop the rest of the
  * sweep.
+ *
+ * Rows are drained through a bounded worker pool (CONCURRENCY workers,
+ * same pattern as app/api/cron/place-auto-approved-orders/route.ts)
+ * instead of a strictly serial loop. This is safe because every write
+ * below is already conditioned on the row still being in
+ * `awaiting_production_payment` — the same idempotency property that
+ * lets that cron run concurrent invocations safely applies here across
+ * concurrent workers within a single sweep. Each row is claimed by
+ * exactly one worker (the shared `idx` counter is only ever advanced
+ * synchronously between `await`s), so no row is ever double-processed.
  */
 export async function reconcileProductionPayments(): Promise<ReconcileResult> {
   const rows = await db
@@ -84,7 +94,7 @@ export async function reconcileProductionPayments(): Promise<ReconcileResult> {
 
   const stripe = getStripe();
 
-  for (const order of rows) {
+  async function processOrder(order: (typeof rows)[number]) {
     try {
       // An awaiting_production_payment row without both ids is a
       // bookkeeping bug — the webhook should have written the PI id
@@ -100,7 +110,7 @@ export async function reconcileProductionPayments(): Promise<ReconcileResult> {
           )
         );
         result.errors++;
-        continue;
+        return;
       }
 
       const intent = await stripe.paymentIntents.retrieve(
@@ -123,7 +133,7 @@ export async function reconcileProductionPayments(): Promise<ReconcileResult> {
             )
           );
         result.cancelled++;
-        continue;
+        return;
       }
 
       if (intent.status === "succeeded") {
@@ -139,7 +149,7 @@ export async function reconcileProductionPayments(): Promise<ReconcileResult> {
             )
           );
         result.captured++;
-        continue;
+        return;
       }
 
       if (intent.status !== "requires_capture") {
@@ -154,7 +164,7 @@ export async function reconcileProductionPayments(): Promise<ReconcileResult> {
           )
         );
         result.errors++;
-        continue;
+        return;
       }
 
       // The normal case: fee is held, waiting on CraftCloud payment.
@@ -187,7 +197,7 @@ export async function reconcileProductionPayments(): Promise<ReconcileResult> {
             logError("reconcileProductionPayments:notify", notifyError);
           }
         }
-        continue;
+        return;
       }
 
       const authorizedAt = order.feeAuthorizedAt?.getTime() ?? 0;
@@ -216,7 +226,7 @@ export async function reconcileProductionPayments(): Promise<ReconcileResult> {
             )
           );
         result.cancelled++;
-        continue;
+        return;
       }
 
       // Unconfirmed but within the TTL — leave it for a later sweep.
@@ -226,6 +236,23 @@ export async function reconcileProductionPayments(): Promise<ReconcileResult> {
       result.errors++;
     }
   }
+
+  // Bounded worker pool: each worker pulls the next unclaimed index off
+  // the shared counter. Advancing `idx` happens synchronously (no
+  // `await` between read and increment), so two workers can never claim
+  // the same row.
+  const CONCURRENCY = 4;
+  let idx = 0;
+  async function worker() {
+    while (true) {
+      const i = idx++;
+      if (i >= rows.length) return;
+      await processOrder(rows[i]);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, rows.length) }, () => worker())
+  );
 
   return result;
 }

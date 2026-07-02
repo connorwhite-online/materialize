@@ -133,6 +133,9 @@ export async function GET(request: Request) {
       cutoff: cutoff.toISOString(),
     };
     console.log("[cron/sweep-fingerprint-stragglers] swept", result);
+    if (failed > 0) {
+      return Response.json(result, { status: 500 });
+    }
     return Response.json(result);
   } catch (error) {
     logError("cron/sweep-fingerprint-stragglers", error);

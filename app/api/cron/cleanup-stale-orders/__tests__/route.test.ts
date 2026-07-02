@@ -22,10 +22,12 @@ vi.mock("@/lib/db", () => ({
   db: {
     select: () => ({
       from: () => ({
-        where: () => {
-          if (throwOnSelect) throw new Error("select error");
-          return Promise.resolve(staleOrderRows);
-        },
+        where: () => ({
+          limit: (n: number) => {
+            if (throwOnSelect) throw new Error("select error");
+            return Promise.resolve(staleOrderRows.slice(0, n));
+          },
+        }),
       }),
     }),
     update: () => ({
@@ -168,6 +170,22 @@ describe("cron/cleanup-stale-orders", () => {
     expect(body.cancelledOrders).toBe(0);
     expect(body.deletedCartItems).toBe(0);
     expect(body.prunedWebhookEvents).toBe(0);
+    expect(body.hasMoreStaleOrders).toBe(false);
+  });
+
+  it("MTR-144: caps stale-order processing at STALE_ORDER_LIMIT and reports hasMoreStaleOrders", async () => {
+    // 201 rows on the wire (the route fetches LIMIT+1 to detect a
+    // remainder); only the first 200 should be processed.
+    staleOrderRows = Array.from({ length: 201 }, (_, i) => ({
+      id: `order-${i}`,
+      stripeSessionId: null,
+    }));
+
+    const res = await GET(makeRequest("Bearer test-secret"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.cancelledOrders).toBe(200);
+    expect(body.hasMoreStaleOrders).toBe(true);
   });
 
   it("returns 500 with per-op results when cart delete fails (CON-137)", async () => {

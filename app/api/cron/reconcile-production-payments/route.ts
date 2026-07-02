@@ -31,6 +31,18 @@ import { constantTimeEqual } from "@/lib/auth/constant-time-equal";
  *   curl -H "Authorization: Bearer $CRON_SECRET" \\
  *     http://localhost:3000/api/cron/reconcile-production-payments
  */
+
+// Worst case: 500 rows (the SELECT's LIMIT) drained by a 4-worker pool
+// (see reconcileProductionPayments), ~2 external calls per row (Stripe
+// retrieve + CraftCloud getOrderStatus, sometimes + capture/cancel).
+// ceil(500/4) * ~2.5s ≈ 315s; 300s covers the typical case with margin
+// and matches the platform's default Pro-plan ceiling. Without this,
+// Vercel silently kills the function past its default timeout with no
+// log/Sentry event — see MTR-144. A backlog that still exceeds this is
+// safe to leave for the next hourly run: every write is conditioned on
+// the row's current status, so a mid-sweep kill never double-processes.
+export const maxDuration = 300;
+
 export async function GET(request: Request) {
   const auth = request.headers.get("authorization");
   const expected = process.env.CRON_SECRET;
