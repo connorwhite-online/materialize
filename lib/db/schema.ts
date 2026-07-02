@@ -15,6 +15,7 @@ import {
   uniqueIndex,
   foreignKey,
 } from "drizzle-orm/pg-core";
+import type { CadProgressEvent } from "../cad/types";
 
 // Enums
 //
@@ -274,6 +275,13 @@ export const files = pgTable("files", {
   currency: text("currency").notNull().default("USD"),
   license: licenseEnum("license").notNull().default("cc_by"),
   status: fileStatusEnum("status").notNull().default("draft"),
+  // Where the file came from: 'upload' (user upload, the default) or
+  // 'studio' (text-to-CAD draft). Plain text validated at the app
+  // layer like `category`, so new sources need no migration. Studio
+  // drafts stay invisible to library/profile/marketplace listings
+  // until promoted — explicit Save or print checkout — per
+  // docs/text-to-cad/05 §B.
+  source: text("source").notNull().default("upload"),
   tags: text("tags").array(),
   // Optional curated browse category — one slug from lib/categories.
   // Plain text (not a pg enum) so the taxonomy grows without a
@@ -1515,5 +1523,58 @@ export const cadGenerations = pgTable(
       foreignColumns: [table.id],
       name: "cad_generations_parent_fk",
     }).onDelete("set null"),
+  ]
+);
+
+// Background job rows for text-to-CAD generation (docs/text-to-cad/02
+// §A). Kept separate from cadGenerations so the generation row stays
+// immutable-ish and a generation can own multiple jobs later (e.g. a
+// topopt solve + verify pair as siblings). The worker polls on
+// (status, createdAt); clients tail `progress` over SSE and can
+// disconnect/reconnect freely — client disconnect no longer cancels.
+export const cadJobStatusEnum = pgEnum("cad_job_status", [
+  "queued",
+  "running",
+  "done",
+  "failed",
+  "cancelled",
+]);
+
+export const cadJobs = pgTable(
+  "cad_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    generationId: uuid("generation_id")
+      .notNull()
+      .references(() => cadGenerations.id, { onDelete: "cascade" }),
+    status: cadJobStatusEnum("status").notNull().default("queued"),
+    // Append-only list of CadProgressEvent — the SSE replay log the
+    // events endpoint serves before tailing live ones. The size cap /
+    // prune-on-completion is enforced at the app layer, not here.
+    progress: jsonb("progress")
+      .$type<CadProgressEvent[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    // Failure message when status=failed (mirrors cadGenerations.error).
+    error: text("error"),
+    // Cooperative cancellation — the cancel endpoint sets this; the
+    // worker checks it between attempts and flips status to cancelled.
+    cancelRequestedAt: timestamp("cancel_requested_at", {
+      withTimezone: true,
+    }),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    index("cad_jobs_generation_id_idx").on(table.generationId),
+    // Covers the worker poll (WHERE status = 'queued' ORDER BY created_at).
+    index("cad_jobs_status_created_idx").on(table.status, table.createdAt),
   ]
 );
