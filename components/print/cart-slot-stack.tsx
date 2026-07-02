@@ -13,8 +13,9 @@ import { useAuthModal } from "@/components/auth/auth-modal";
 import type { CartItemWithMeta } from "@/app/actions/cart";
 import { checkoutVendorGroup } from "@/app/actions/print";
 import { dedupeShippingByShipId } from "@/lib/pricing/shipping";
+import { calcServiceFee } from "@/lib/fees";
+import type { CheckoutModel } from "@/lib/env";
 
-const SERVICE_FEE_RATE = 0.03;
 const STALE_QUOTE_AGE_MS = 2 * 60 * 60 * 1000;
 
 type DisplayItem = {
@@ -132,6 +133,14 @@ interface CartSlotStackProps {
    * already showing the same info.
    */
   pendingItem?: PendingItem | null;
+  /**
+   * Which checkout architecture governs the fee-clamp math (see
+   * lib/fees.ts). Defaults to "single" (no clamp) — callers that
+   * know the real `getCheckoutModel()` value (server-derived, see
+   * AGENTS.md) should thread it down; until they do, this matches
+   * the pre-existing behavior of this component.
+   */
+  checkoutModel?: CheckoutModel;
 }
 
 /**
@@ -145,6 +154,7 @@ export function CartSlotStack({
   expandedVendorId,
   hideVendorId,
   pendingItem,
+  checkoutModel = "single",
 }: CartSlotStackProps) {
   const cart = useCart();
 
@@ -215,6 +225,7 @@ export function CartSlotStack({
               hasPending || group.vendorId === expandedVendorId
             }
             pendingItem={hasPending ? pendingItem : null}
+            checkoutModel={checkoutModel}
           />
         );
       })}
@@ -226,10 +237,12 @@ function CartSlot({
   group,
   defaultExpanded,
   pendingItem,
+  checkoutModel,
 }: {
   group: { vendorId: string; vendorName: string | null; items: DisplayItem[] };
   defaultExpanded: boolean;
   pendingItem: PendingItem | null;
+  checkoutModel: CheckoutModel;
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
 
@@ -259,8 +272,9 @@ function CartSlot({
   // Service fee is 3% of material (+ production fee, which we
   // don't track client-side for cart rows — server recomputes at
   // checkout-time with the real number). Keep shipping out of the
-  // base so freight doesn't scale our cut.
-  const serviceFee = Math.round(material * SERVICE_FEE_RATE);
+  // base so freight doesn't scale our cut. Single-sourced from
+  // lib/fees.ts so this can't drift from the server's clamp math.
+  const serviceFee = calcServiceFee(material, checkoutModel);
   const total = material + serviceFee + shipping;
   const itemCount = group.items.reduce((sum, i) => sum + i.quantity, 0);
 
