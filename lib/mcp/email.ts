@@ -38,9 +38,18 @@ import { logError } from "@/lib/logger";
  * Returns `{ ok: true }` even when Resend isn't configured — the
  * client wrapper falls back to a console-log stub so local dev
  * doesn't require a real Resend account.
+ *
+ * `appUrl` should be the caller's request-derived base URL (e.g.
+ * `await deriveAppUrl()` from `lib/utils/request-url.ts`) so the
+ * confirm/cancel links in this email don't bake in a dead
+ * `NEXT_PUBLIC_APP_URL` localhost fallback. Optional because this
+ * module can theoretically be invoked from a background/cron
+ * context with no live request to derive a host from — in that case
+ * only, we fall back to the env var / localhost below.
  */
 export async function sendOrderConfirmationEmail(params: {
   orderId: string;
+  appUrl?: string;
 }): Promise<{ ok: boolean; error?: string }> {
   try {
     const [row] = await db
@@ -96,7 +105,13 @@ export async function sendOrderConfirmationEmail(params: {
       row.vendorName ?? providerEntry?.name ?? "Vendor details unavailable";
 
     const totalDisplay = formatPrice(row.totalPrice + row.serviceFee);
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    // Prefer the request-derived URL passed by the caller (see the
+    // `appUrl` param doc above); only fall back to the build-time env
+    // var / localhost when no caller-derived URL is available.
+    const appUrl =
+      params.appUrl ??
+      process.env.NEXT_PUBLIC_APP_URL ??
+      "http://localhost:3000";
     const revokeAgentUrl = `${appUrl}/dashboard/settings/tokens`;
     const agentName = row.agentName ?? "An agent";
 
@@ -178,9 +193,18 @@ export async function sendOrderConfirmationEmail(params: {
  * Sent after the user clicks "Cancel" on an auto-approved order
  * during the cancellation window. Resolves order details from the
  * order id and dispatches the cancellation-confirmed template.
+ *
+ * `appUrl` is optional for the same reason as in
+ * `sendOrderConfirmationEmail` above: pass the caller's
+ * request-derived base URL when one is available. The current sole
+ * caller (`cancelAutoApprovedOrder` in `app/actions/agent-orders.ts`)
+ * is out of scope for MTR-131's file list, so it still doesn't pass
+ * one — this falls back to the env var / localhost below until that
+ * caller is updated in a follow-up.
  */
 export async function sendCancellationConfirmedEmail(params: {
   orderId: string;
+  appUrl?: string;
 }): Promise<{ ok: boolean; error?: string }> {
   try {
     const [row] = await db
@@ -212,7 +236,10 @@ export async function sendCancellationConfirmedEmail(params: {
       "Untitled model";
 
     const totalDisplay = formatPrice(row.totalPrice + row.serviceFee);
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    const appUrl =
+      params.appUrl ??
+      process.env.NEXT_PUBLIC_APP_URL ??
+      "http://localhost:3000";
 
     const props = {
       agentName: row.agentName ?? "An agent",

@@ -8,6 +8,7 @@ import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { getStripe } from "@/lib/stripe";
 import { logError } from "@/lib/logger";
+import { deriveAppUrl } from "@/lib/utils/request-url";
 
 /**
  * Server actions for the agent-billing setup flow:
@@ -29,10 +30,6 @@ import { logError } from "@/lib/logger";
  * for one extra surface. The redirect flow is fine for a settings
  * page that's rarely visited.
  */
-
-function appUrl(): string {
-  return process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-}
 
 export async function createBillingSetupSession(): Promise<
   { url: string } | { error: string }
@@ -71,8 +68,9 @@ export async function createBillingSetupSession(): Promise<
         .where(eq(users.id, userId));
     }
 
-    const successUrl = `${appUrl()}/dashboard/settings/billing?status=success&session_id={CHECKOUT_SESSION_ID}`;
-    const cancelUrl = `${appUrl()}/dashboard/settings/billing?status=cancelled`;
+    const baseUrl = await deriveAppUrl();
+    const successUrl = `${baseUrl}/dashboard/settings/billing?status=success&session_id={CHECKOUT_SESSION_ID}`;
+    const cancelUrl = `${baseUrl}/dashboard/settings/billing?status=cancelled`;
 
     const session = await stripe.checkout.sessions.create({
       mode: "setup",
