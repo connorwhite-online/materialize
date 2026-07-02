@@ -633,11 +633,7 @@ export async function archiveFileListing(fileId: string) {
  *   - auto_approved: off-session PI already charged; CraftCloud placement pending
  *   - awaiting_production_payment: two-step fee hold active; deleting
  *     the file would break resumption and refund context */
-// Exported (test-only need, MTR-155) so the print-order-status
-// exhaustiveness test can validate this set against
-// printOrderStatusEnum.enumValues without duplicating it. No logic
-// change.
-export const ACTIVE_ORDER_STATUSES = [
+const ACTIVE_ORDER_STATUSES = [
   "cart_created",
   "awaiting_agent_approval",
   "auto_approved",
