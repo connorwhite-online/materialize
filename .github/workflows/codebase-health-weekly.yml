@@ -1,0 +1,129 @@
+name: codebase-health-weekly
+
+# Weekly flagship codebase-health pass: a Claude Agent SDK session
+# (scripts/codebase-health-weekly.ts) runs the `codebase-health` skill
+# in `weekly` mode on the SMARTEST available model — deep audit across
+# every category (incl. Text-to-CAD, the surface-coverage map, and the
+# workflow meta-audit), files cold-executable Linear issues, then
+# batch-dispatches worktree executors that each open ONE PR. It never
+# merges. See .claude/skills/codebase-health/SKILL.md "Weekly deep run".
+#
+# Costs $$ on every run — Agent SDK calls bill against the repo's
+# CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY. The 3-hour cap inside
+# the script is one fence; `timeout-minutes` here is the outer one.
+#
+# GUARD: the script is a safe no-op (exit 0 with a notice) until
+# LINEAR_MCP_TOKEN is configured — an audit needs somewhere to file
+# issues, and a missing secret must never turn this job red. Mirrors
+# staging-smoke-tour's STAGING_URL guard.
+#
+# NOTE: GitHub only runs `schedule:` triggers from the DEFAULT branch,
+# so this workflow starts firing once it's merged to main.
+
+on:
+  schedule:
+    # 09:23 UTC every Monday — off-minute (not :00/:30) so the run
+    # doesn't pile onto the top-of-hour API rush; early in the week so
+    # the fresh backlog is ready for the human on Monday morning.
+    - cron: "23 9 * * 1"
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Override the driver model (defaults to the current flagship)
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      # Read-only DB access lets the audit subagents introspect schema /
+      # query patterns if needed. Point at a staging/replica branch, not
+      # prod. Harmless when unset.
+      DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL || secrets.DATABASE_URL }}
+    steps:
+      - name: Guard — skip if the Linear MCP credential is unset
+        id: guard
+        env:
+          LINEAR_MCP_TOKEN: ${{ secrets.LINEAR_MCP_TOKEN }}
+        run: |
+          if [ -z "$LINEAR_MCP_TOKEN" ]; then
+            echo "::notice::LINEAR_MCP_TOKEN is not configured — skipping the weekly codebase-health run. Set the LINEAR_MCP_TOKEN secret to enable it."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.guard.outputs.skip != 'true'
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v5
+        if: steps.guard.outputs.skip != 'true'
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Configure git for the agent
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          git config user.name "codebase-health[bot]"
+          git config user.email "codebase-health@users.noreply.github.com"
+
+      - name: Install deps
+        if: steps.guard.outputs.skip != 'true'
+        run: npm ci
+
+      - name: Run weekly audit
+        if: steps.guard.outputs.skip != 'true'
+        # Same auth pattern as sentry-fixer / staging-smoke-tour: prefer
+        # subscription OAuth, fall back to API key, strip whitespace from
+        # pasted tokens.
+        run: |
+          if [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            CLAUDE_CODE_OAUTH_TOKEN="$(printf '%s' "$CLAUDE_CODE_OAUTH_TOKEN" | tr -d '[:space:]')"
+            export CLAUDE_CODE_OAUTH_TOKEN
+            unset ANTHROPIC_API_KEY
+            echo "[auth] using CLAUDE_CODE_OAUTH_TOKEN (len=${#CLAUDE_CODE_OAUTH_TOKEN})"
+          elif [ -n "$ANTHROPIC_API_KEY" ]; then
+            ANTHROPIC_API_KEY="$(printf '%s' "$ANTHROPIC_API_KEY" | tr -d '[:space:]')"
+            export ANTHROPIC_API_KEY
+            echo "[auth] using ANTHROPIC_API_KEY (len=${#ANTHROPIC_API_KEY})"
+          else
+            echo "::error::Neither CLAUDE_CODE_OAUTH_TOKEN nor ANTHROPIC_API_KEY is set"
+            exit 1
+          fi
+          npx tsx scripts/codebase-health-weekly.ts
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Linear MCP credential the driver files/reconciles issues with.
+          LINEAR_MCP_TOKEN: ${{ secrets.LINEAR_MCP_TOKEN }}
+          LINEAR_MCP_URL: ${{ vars.LINEAR_MCP_URL }}
+          # Pin the driver model; the input override wins when dispatched
+          # manually, else the script's built-in flagship default is used.
+          CODEBASE_HEALTH_MODEL: ${{ inputs.model }}
+          # Executors open PRs via gh. GH_PAT (fine-grained, PRs:write)
+          # dodges the "Actions can't create PRs" org policy; fall back to
+          # GITHUB_TOKEN (can push branches; PR creation may fail — the
+          # log will say so).
+          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload run log
+        if: always() && steps.guard.outputs.skip != 'true'
+        uses: actions/upload-artifact@v5
+        with:
+          name: codebase-health-weekly-${{ github.run_id }}
+          path: .agent-out/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
