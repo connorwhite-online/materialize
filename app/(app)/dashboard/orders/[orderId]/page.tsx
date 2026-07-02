@@ -19,7 +19,10 @@ import { Separator } from "@/components/ui/separator";
 import { getMaterialById } from "@/lib/materials";
 import { formatOrderNumber } from "@/lib/utils/order-number";
 
-const STATUS_LABELS: Record<string, string> = {
+// Exported (test-only need, MTR-155) so the print-order-status
+// exhaustiveness test can assert every printOrderStatusEnum value has
+// a label without duplicating this map. No logic change.
+export const STATUS_LABELS: Record<string, string> = {
   quoting: "Quoting",
   awaiting_agent_approval: "Awaiting Approval",
   auto_approved: "Approved — Placing Soon",

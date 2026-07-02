@@ -420,7 +420,10 @@ export interface AgentOrderSummary {
   updatedAt: string;
 }
 
-const TERMINAL_STATUSES = new Set([
+// Exported (test-only need, MTR-155) so the print-order-status
+// exhaustiveness test can assert every printOrderStatusEnum value is
+// accounted for here without duplicating the set. No logic change.
+export const TERMINAL_STATUSES = new Set([
   "received",
   "refunded",
   "cancelled",
