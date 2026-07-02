@@ -2,7 +2,7 @@ import "server-only";
 
 import { db } from "@/lib/db";
 import { fileAssets, files } from "@/lib/db/schema";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, inArray, ne, or } from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
 import { logError } from "@/lib/logger";
 import { fingerprintFromStream, type MeshFormat } from "./mesh-fingerprint";
@@ -133,4 +133,119 @@ export async function fingerprintAndPersistAsset(params: {
   } catch (err) {
     logError("fingerprintAndPersistAsset", err);
   }
+}
+
+export interface SameUserAssetHit {
+  assetId: string;
+  fileId: string;
+  fileSlug: string;
+  fileName: string;
+}
+
+/**
+ * Batched cross-user byte-hash collision check for a multi-asset
+ * upload. Given every non-null byteHash from the batch, returns the
+ * subset that collide with an existing `fileAssets.contentHash`
+ * belonging to a *different* user — one query for the whole batch,
+ * mirroring `app/actions/files.ts`'s per-asset `checkByteHashCollision`
+ * but without the N separate round trips.
+ */
+export async function checkByteHashCollisionBatch(
+  byteHashes: string[],
+  userId: string
+): Promise<Set<string>> {
+  if (byteHashes.length === 0) return new Set();
+  const hits = await db
+    .select({ contentHash: fileAssets.contentHash })
+    .from(fileAssets)
+    .innerJoin(files, eq(fileAssets.fileId, files.id))
+    .where(
+      and(inArray(fileAssets.contentHash, byteHashes), ne(files.userId, userId))
+    );
+  return new Set(
+    hits
+      .map((h) => h.contentHash)
+      .filter((h): h is string => h !== null && h !== undefined)
+  );
+}
+
+/**
+ * Batched same-user dedup check for a multi-asset upload, mirroring
+ * `app/actions/files.ts`'s per-asset `findExistingSameUserAsset` two
+ * signals (byte-hash match, then filename+size fallback) in a single
+ * query for the whole batch instead of up to 2 queries per asset.
+ *
+ * Returns two lookup maps so the caller can replay the same
+ * hash-first-then-filename/size priority per asset in memory:
+ *   - `byHash` keyed by `contentHash`
+ *   - `byNameSize` keyed by `${originalFilename}::${fileSize}`
+ */
+export async function findExistingSameUserAssetsBatch(
+  userId: string,
+  items: Array<{
+    byteHash: string | null;
+    originalFilename: string;
+    fileSize: number;
+  }>
+): Promise<{
+  byHash: Map<string, SameUserAssetHit>;
+  byNameSize: Map<string, SameUserAssetHit>;
+}> {
+  const byHash = new Map<string, SameUserAssetHit>();
+  const byNameSize = new Map<string, SameUserAssetHit>();
+
+  const hashes = Array.from(
+    new Set(items.map((i) => i.byteHash).filter((h): h is string => !!h))
+  );
+  // Filename+size fallback only applies to non-empty filenames with a
+  // real size, same guard as the serial version.
+  const nameSizePairs = items.filter(
+    (i) => i.originalFilename && i.fileSize > 0
+  );
+
+  if (hashes.length === 0 && nameSizePairs.length === 0) {
+    return { byHash, byNameSize };
+  }
+
+  const matchConditions = [
+    ...(hashes.length > 0 ? [inArray(fileAssets.contentHash, hashes)] : []),
+    ...nameSizePairs.map(({ originalFilename, fileSize }) =>
+      and(
+        eq(fileAssets.originalFilename, originalFilename),
+        eq(fileAssets.fileSize, fileSize)
+      )
+    ),
+  ];
+
+  const rows = await db
+    .select({
+      assetId: fileAssets.id,
+      fileId: files.id,
+      fileSlug: files.slug,
+      fileName: files.name,
+      contentHash: fileAssets.contentHash,
+      originalFilename: fileAssets.originalFilename,
+      fileSize: fileAssets.fileSize,
+    })
+    .from(fileAssets)
+    .innerJoin(files, eq(fileAssets.fileId, files.id))
+    .where(and(eq(files.userId, userId), or(...matchConditions)));
+
+  for (const row of rows) {
+    const hit: SameUserAssetHit = {
+      assetId: row.assetId,
+      fileId: row.fileId,
+      fileSlug: row.fileSlug,
+      fileName: row.fileName,
+    };
+    if (row.contentHash && !byHash.has(row.contentHash)) {
+      byHash.set(row.contentHash, hit);
+    }
+    if (row.originalFilename && row.fileSize) {
+      const key = `${row.originalFilename}::${row.fileSize}`;
+      if (!byNameSize.has(key)) byNameSize.set(key, hit);
+    }
+  }
+
+  return { byHash, byNameSize };
 }

@@ -9,6 +9,31 @@ import { handleListingRefund } from "@/lib/stripe/handle-listing-refund";
 import { logError } from "@/lib/logger";
 import type Stripe from "stripe";
 
+/**
+ * Attach Stripe event identity (and any extra structured fields) to a
+ * caught error's `.cause` so lib/logger.ts's PROMOTE_TO_TAG machinery
+ * surfaces `stripeEventId` as a filterable Sentry tag. Without this, a
+ * thrown handler error can only be tied back to the Stripe Dashboard
+ * delivery by matching timestamps.
+ *
+ * Mutates `.cause` in place when `error` is already an Error instance
+ * (a writable, configurable own property per spec) so the original
+ * message/stack are preserved; wraps non-Error throws in a new Error
+ * otherwise.
+ */
+function withEventContext(
+  error: unknown,
+  event: Stripe.Event,
+  extra?: Record<string, unknown>
+): Error {
+  const cause = { stripeEventId: event.id, eventType: event.type, ...extra };
+  if (error instanceof Error) {
+    error.cause = cause;
+    return error;
+  }
+  return new Error(String(error), { cause });
+}
+
 export async function POST(request: Request) {
   const body = await request.text();
   const headersList = await headers();
@@ -136,7 +161,10 @@ export async function POST(request: Request) {
             : session.payment_intent?.id;
         await handlePrintOrderPayment(printOrderId, { paymentIntentId });
       } catch (error) {
-        logError("stripe-webhook-handler", error);
+        logError(
+          "stripe-webhook-handler",
+          withEventContext(error, event, { printOrderId })
+        );
         // Return 500 so Stripe retries — the user paid, we MUST place the order
         return Response.json(
           { error: "Failed to process order" },
@@ -149,7 +177,10 @@ export async function POST(request: Request) {
       try {
         await handleListingPurchase(session);
       } catch (error) {
-        logError("stripe-webhook-listing-purchase", error);
+        logError(
+          "stripe-webhook-listing-purchase",
+          withEventContext(error, event)
+        );
         // 500 so Stripe retries — the buyer paid, we MUST record the
         // purchases row so entitlement checks start returning true.
         return Response.json(
@@ -187,7 +218,10 @@ export async function POST(request: Request) {
             }
           }
         } catch (error) {
-          logError("stripe-webhook-billing-setup", error);
+          logError(
+            "stripe-webhook-billing-setup",
+            withEventContext(error, event, { userId })
+          );
           // Don't 500 — the user already paid nothing, this is just
           // saving a card. Returning 500 makes Stripe retry forever.
           // We log and let the user try again from the dashboard.
@@ -201,7 +235,10 @@ export async function POST(request: Request) {
     try {
       await handleListingRefund(charge);
     } catch (error) {
-      logError("stripe-webhook-listing-refund", error);
+      logError(
+        "stripe-webhook-listing-refund",
+        withEventContext(error, event)
+      );
       // 500 so Stripe retries — entitlement should drop promptly
       // once a refund clears. Note: refunds for non-listing charges
       // (print orders) silently no-op inside the handler; this
@@ -236,7 +273,10 @@ export async function POST(request: Request) {
         .set({ stripeOnboardingComplete: onboarded })
         .where(eq(users.stripeAccountId, account.id));
     } catch (error) {
-      logError("stripe-webhook-account-updated", error);
+      logError(
+        "stripe-webhook-account-updated",
+        withEventContext(error, event)
+      );
       // Don't 500 — Stripe will keep retrying account.updated as
       // long as the account state matters, so the worst case is
       // we miss one of many updates. We log and let the next
@@ -260,7 +300,7 @@ export async function POST(request: Request) {
       // succeeded, the user paid, the order is placed. A missed
       // dedup row at worst means we re-run on the next retry
       // (handler is itself idempotent).
-      logError("stripe-webhook-dedup-insert", err);
+      logError("stripe-webhook-dedup-insert", withEventContext(err, event));
     }
   }
 

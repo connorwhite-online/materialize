@@ -15,6 +15,7 @@ import type { Currency } from "@/lib/craftcloud/types";
 import { ShippingAddressForm } from "./shipping-address-form";
 import { pollQuotes } from "./poll-quotes";
 import { runAnonCheckout } from "./run-anon-checkout";
+import { reportClientError } from "@/lib/observability/report-client-error";
 import {
   createPrintOrder,
   completePrintOrder,
@@ -613,7 +614,12 @@ export function QuoteConfigurator({
       });
       if (!startRes.ok) {
         const data = await startRes.json().catch(() => ({}));
-        throw new Error(data.error || "Failed to start quote request");
+        const startError = new Error(data.error || "Failed to start quote request");
+        reportClientError("quote.start-failed", startError, {
+          fileAssetId,
+          draftModelId: draftMode?.modelId,
+        });
+        throw startError;
       }
       const { priceId } = (await startRes.json()) as { priceId: string };
 
@@ -621,10 +627,12 @@ export function QuoteConfigurator({
       // components/print/poll-quotes.ts for the termination
       // invariant (allComplete + stable count). Each snapshot
       // drops straight into React state.
+      let latestQuoteCount = 0;
       const reason = await pollQuotes({
         priceId,
         signal,
         onSnapshot: (snapshot) => {
+          latestQuoteCount = snapshot.quotes?.length ?? 0;
           setQuotes(snapshot.quotes ?? []);
           setShipping(snapshot.shipping ?? []);
         },
@@ -636,6 +644,12 @@ export function QuoteConfigurator({
         // arrive if the user retries. The picker uses this phase to
         // show a "showing partial results" hint with a Retry action
         // instead of the silent "Done" state.
+        if (reason === "timeout") {
+          reportClientError("quote.poll-timeout", new Error(reason), {
+            priceId,
+            quoteCount: latestQuoteCount,
+          });
+        }
         setLoadingPhase(reason === "timeout" ? "timeout" : "done");
       }
     } catch (err) {
