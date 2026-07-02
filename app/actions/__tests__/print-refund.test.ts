@@ -124,3 +124,43 @@ describe("requestOrderRefund — CON-160 two_step guard", () => {
     expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("requestOrderRefund — MTR-132 agent-order (pi_ prefixed stripeSessionId)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("refunds directly via the PaymentIntent id and skips the session lookup", async () => {
+    // Agent auto-approved orders store the off-session PaymentIntent id
+    // directly in stripeSessionId (lib/mcp/internal/orders.ts:353) —
+    // sessions.retrieve("pi_…") would throw, so this path must bypass
+    // it entirely and refund the PI id as-is.
+    selectedOrder = {
+      ...blockedOrder,
+      stripeSessionId: "pi_agent_456",
+    };
+
+    const res = await requestOrderRefund("order-id-1");
+
+    expect(res).toEqual({ success: true });
+    // Never looks up a Checkout session for a PaymentIntent id.
+    expect(mockSessionRetrieve).not.toHaveBeenCalled();
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+    const [params, opts] = mockRefundsCreate.mock.calls[0];
+    expect(params).toMatchObject({ payment_intent: "pi_agent_456" });
+    expect(opts).toEqual({ idempotencyKey: "print-refund:order-id-1" });
+  });
+
+  it("rejects a session_claim: sentinel instead of attempting a refund", async () => {
+    selectedOrder = {
+      ...blockedOrder,
+      stripeSessionId: "session_claim:abc123",
+    };
+
+    const res = await requestOrderRefund("order-id-1");
+
+    expect(res).not.toEqual({ success: true });
+    expect(mockSessionRetrieve).not.toHaveBeenCalled();
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+  });
+});
