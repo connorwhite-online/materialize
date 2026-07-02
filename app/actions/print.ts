@@ -1395,18 +1395,44 @@ export async function requestOrderRefund(
       return { error: "No payment found for this order" };
     }
 
-    // Get the payment intent from the Stripe session
-    const stripe = getStripe();
-    const session = await stripe.checkout.sessions.retrieve(order.stripeSessionId);
-
-    if (!session.payment_intent) {
-      return { error: "No payment intent found" };
+    // stripeSessionId is an overloaded column (AGENTS.md): agent
+    // auto-approved orders store the off-session PaymentIntent id
+    // (pi_…) here directly rather than a Checkout session id, and a
+    // session_claim:<nanoid> sentinel can be present mid-resume. Never
+    // call sessions.retrieve on either — sessions.retrieve("pi_…")
+    // throws (silently swallowed by the catch below, surfacing a
+    // generic "contact support" error despite the money and PI id
+    // being right there), and a claim sentinel isn't a real payment
+    // reference at all.
+    if (isSessionClaimSentinel(order.stripeSessionId)) {
+      return { error: "No payment found for this order" };
     }
 
-    const paymentIntentId =
-      typeof session.payment_intent === "string"
-        ? session.payment_intent
-        : session.payment_intent.id;
+    const stripe = getStripe();
+    let paymentIntentId: string;
+
+    if (order.stripeSessionId.startsWith("pi_")) {
+      // Auto-approved agent order — stripeSessionId IS the
+      // PaymentIntent id (lib/mcp/internal/orders.ts:353). Refund it
+      // directly, mirroring cancelAutoApprovedOrder in
+      // app/actions/agent-orders.ts.
+      paymentIntentId = order.stripeSessionId;
+    } else {
+      // Normal Checkout-session-backed order — resolve the payment
+      // intent from the session.
+      const session = await stripe.checkout.sessions.retrieve(
+        order.stripeSessionId
+      );
+
+      if (!session.payment_intent) {
+        return { error: "No payment intent found" };
+      }
+
+      paymentIntentId =
+        typeof session.payment_intent === "string"
+          ? session.payment_intent
+          : session.payment_intent.id;
+    }
 
     // Issue full refund. The deterministic idempotency key (one refund
     // per order) means a double-click or retry returns the existing

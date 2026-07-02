@@ -45,10 +45,7 @@ import {
 import { sendOrderConfirmationEmail } from "@/lib/mcp/email";
 import { LICENSE_ENUM_VALUES } from "@/lib/licenses";
 import { DESIGN_TAG_OPTIONS } from "@/lib/validations/file";
-
-function appUrl(): string {
-  return process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-}
+import { deriveAppUrl } from "@/lib/utils/request-url";
 
 /**
  * Convert any tool result into the MCP shape. We always return a
@@ -1173,9 +1170,11 @@ const handler = createMcpHandler(
               message: result.error,
             });
           }
-          const confirmationUrl = `${appUrl()}/orders/${result.orderId}/confirm?token=${result.confirmationToken}`;
+          const appUrl = await deriveAppUrl();
+          const confirmationUrl = `${appUrl}/orders/${result.orderId}/confirm?token=${result.confirmationToken}`;
           const emailResult = await sendOrderConfirmationEmail({
             orderId: result.orderId,
+            appUrl,
           });
 
           if (result.path === "auto_approved") {

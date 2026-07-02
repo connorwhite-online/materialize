@@ -20,9 +20,7 @@ import { getStripe } from "@/lib/stripe";
 import { logError } from "@/lib/logger";
 import { userOwnsFile, userOwnsProject } from "@/lib/entitlement";
 import { calcServiceFee } from "@/lib/fees";
-
-const APP_URL =
-  process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+import { deriveAppUrl } from "@/lib/utils/request-url";
 
 type CheckoutResult = { url: string } | { error: string };
 
@@ -156,6 +154,7 @@ export async function createListingCheckoutSession(params: {
 
     const serviceFee = calcServiceFee(listing.price);
     const stripe = getStripe();
+    const appUrl = await deriveAppUrl();
 
     const successPath =
       params.fileId
@@ -200,8 +199,8 @@ export async function createListingCheckoutSession(params: {
         amount: String(listing.price),
         serviceFee: String(serviceFee),
       },
-      success_url: `${APP_URL}${successPath}`,
-      cancel_url: `${APP_URL}${cancelPath}`,
+      success_url: `${appUrl}${successPath}`,
+      cancel_url: `${appUrl}${cancelPath}`,
     });
 
     if (!session.url) {

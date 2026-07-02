@@ -6,8 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-
-const SERVICE_FEE_RATE = 0.03;
+import { calcServiceFee } from "@/lib/fees";
 
 interface Quote {
   quoteId: string;
@@ -105,9 +104,14 @@ export function PriceDisplay({
   const shippingCost = selectedShipping?.price ?? 0;
   // Service fee is 3% of material + production fee, NOT shipping —
   // freight shouldn't inflate our platform cut. Shipping sits in
-  // its own line below and flows into total.
+  // its own line below and flows into total. calcServiceFee expects
+  // integer cents and applies the two_step $0.50 minimum clamp the
+  // server actually charges — single-sourced from lib/fees.ts rather
+  // than a locally hardcoded rate so this display can't drift from
+  // what Stripe authorizes.
   const preShipping = materialCost + minimumFee;
-  const serviceFee = preShipping * SERVICE_FEE_RATE;
+  const serviceFee =
+    calcServiceFee(Math.round(preShipping * 100), checkoutModel) / 100;
   const total = preShipping + serviceFee + shippingCost;
 
   return (

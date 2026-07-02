@@ -17,8 +17,8 @@ import { checkoutVendorGroup } from "@/app/actions/print";
 import { dedupeShippingByShipId } from "@/lib/pricing/shipping";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-
-const SERVICE_FEE_RATE = 0.03;
+import { calcServiceFee } from "@/lib/fees";
+import type { CheckoutModel } from "@/lib/env";
 
 type DisplayItem = {
   id: string;
@@ -107,13 +107,26 @@ function PriceCell({ cents, pending }: { cents: number; pending: boolean }) {
   return <span>${(cents / 100).toFixed(2)}</span>;
 }
 
-export function CartPanel() {
-  const cart = useCart();
-  if (!cart) return null;
-  return <CartPanelInner />;
+interface CartPanelProps {
+  /**
+   * Which checkout architecture governs the fee-clamp math (see
+   * lib/fees.ts). CartPanel is mounted globally from the app layout
+   * rather than a per-order server page, so there's currently no
+   * request-scoped `getCheckoutModel()` value threaded down to it —
+   * defaults to "single" (no clamp), matching the pre-existing
+   * behavior of this component. Pass the real value once a caller
+   * threads it through.
+   */
+  checkoutModel?: CheckoutModel;
 }
 
-function CartPanelInner() {
+export function CartPanel({ checkoutModel = "single" }: CartPanelProps = {}) {
+  const cart = useCart();
+  if (!cart) return null;
+  return <CartPanelInner checkoutModel={checkoutModel} />;
+}
+
+function CartPanelInner({ checkoutModel }: { checkoutModel: CheckoutModel }) {
   const cart = useCart()!;
   const {
     items,
@@ -213,6 +226,7 @@ function CartPanelInner() {
             materializeLocalItems={materializeLocalItems}
             materializing={materializing}
             close={close}
+            checkoutModel={checkoutModel}
           />
         )}
       </DialogContent>
@@ -230,6 +244,7 @@ function CartItemsList({
   materializeLocalItems,
   materializing,
   close,
+  checkoutModel,
 }: {
   allItems: DisplayItem[];
   hasLocalItems: boolean;
@@ -240,6 +255,7 @@ function CartItemsList({
   materializeLocalItems: () => Promise<{ ok: boolean; error?: string }>;
   materializing: boolean;
   close: () => void;
+  checkoutModel: CheckoutModel;
 }) {
   const router = useRouter();
   const { isSignedIn } = useUser();
@@ -296,6 +312,7 @@ function CartItemsList({
           close={close}
           router={router}
           showSeparator={groupIdx < vendorGroups.length - 1}
+          checkoutModel={checkoutModel}
         />
       ))}
     </div>
@@ -314,6 +331,7 @@ function VendorGroup({
   close,
   router,
   showSeparator,
+  checkoutModel,
 }: {
   group: { vendorId: string; vendorName: string | null; items: DisplayItem[] };
   onRemove: (item: DisplayItem) => void;
@@ -326,6 +344,7 @@ function VendorGroup({
   close: () => void;
   router: ReturnType<typeof useRouter>;
   showSeparator: boolean;
+  checkoutModel: CheckoutModel;
 }) {
   const cart = useCart();
   const [error, setError] = useState<string | null>(null);
@@ -344,7 +363,10 @@ function VendorGroup({
   const shipping = vendorGroupShipping(group.items);
   // Service fee is 3% of material (production fee gets folded in
   // server-side at checkout — we don't have that figure here).
-  const serviceFee = Math.round(material * SERVICE_FEE_RATE);
+  // Single-sourced from lib/fees.ts so this figure can't drift from
+  // what the server actually charges (including the two_step $0.50
+  // minimum clamp).
+  const serviceFee = calcServiceFee(material, checkoutModel);
   const total = material + serviceFee + shipping;
 
   const handleCheckout = async () => {

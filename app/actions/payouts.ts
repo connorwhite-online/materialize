@@ -27,9 +27,7 @@ import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { getStripe } from "@/lib/stripe";
 import { logError } from "@/lib/logger";
-
-const APP_URL =
-  process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+import { deriveAppUrl } from "@/lib/utils/request-url";
 
 type StatusResult = {
   connected: boolean;
@@ -153,13 +151,14 @@ export async function createStripePayoutOnboardingLink(): Promise<
         .where(eq(users.id, userId));
     }
 
+    const appUrl = await deriveAppUrl();
     const link = await stripe.accountLinks.create({
       account: accountId,
       // Refresh = user bailed mid-onboarding; bounce back to the same
       // page so they can re-start. Return = onboarding complete; we
       // read the latest status on the return.
-      refresh_url: `${APP_URL}/dashboard/settings/payouts?status=refresh`,
-      return_url: `${APP_URL}/dashboard/settings/payouts?status=return`,
+      refresh_url: `${appUrl}/dashboard/settings/payouts?status=refresh`,
+      return_url: `${appUrl}/dashboard/settings/payouts?status=return`,
       type: "account_onboarding",
     });
 
