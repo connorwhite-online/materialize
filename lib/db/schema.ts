@@ -325,6 +325,10 @@ export const files = pgTable("files", {
   index("files_slug_idx").on(table.slug),
   index("files_flagged_at_idx").on(table.flaggedAt),
   index("files_category_idx").on(table.category),
+  // (source, status) covers the listing-consumer exclusion of unsaved
+  // studio drafts (WHERE NOT (source = 'studio' AND status = 'draft'))
+  // and the GC sweep's direct lookup of them (docs/text-to-cad/05 §B/§E).
+  index("files_source_status_idx").on(table.source, table.status),
   // Trigram GIN index for the global search ILIKE on files.name
   // (app/api/search) — turns substring search from a seq scan into an
   // index scan. pg_trgm extension created in the same migration.
