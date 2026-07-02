@@ -10,6 +10,12 @@ const mockSet = vi.fn();
 const mockWhere = vi.fn();
 const mockFrom = vi.fn();
 
+// Queue of rows the mocked innerJoin().where() call resolves with, in
+// call order. Defaults to empty (no collisions) when unseeded, which
+// preserves the existing tests' assumptions; multi-asset collision
+// tests below seed it explicitly.
+let innerJoinResults: unknown[][] = [];
+
 vi.mock("@/lib/db", () => ({
   db: {
     insert: (...args: unknown[]) => {
@@ -66,14 +72,15 @@ vi.mock("@/lib/db", () => ({
           },
           innerJoin: () => ({
             where: () => {
-              // Dedup checks — no collisions. Both with and without
-              // a trailing .limit() are exercised by createFileListing
-              // (byte/geom/coarse) and createDraftFileForPrint.
-              const empty: never[] = [];
-              const result = Object.assign(empty, {
-                limit: () => [],
+              // Dedup checks. Both with and without a trailing
+              // .limit() are exercised by createFileListing
+              // (byte/geom/coarse) and createDraftFileForPrint. Rows
+              // come off the queue in call order; unseeded calls
+              // fall back to "no collisions" to match prior behavior.
+              const next = (innerJoinResults.shift() ?? []) as unknown[];
+              return Object.assign(next, {
+                limit: () => next,
               });
-              return result;
             },
           }),
         };
@@ -121,6 +128,7 @@ import {
 describe("createFileListing", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    innerJoinResults = [];
   });
 
   it("validates input and inserts file", async () => {
@@ -174,6 +182,86 @@ describe("createFileListing", () => {
 
     const result = await createFileListing(formData);
     expect(result).toHaveProperty("error");
+  });
+
+  // The generateDownloadUrl mock always resolves to the same fixed
+  // base64 payload ("AAEC" -> bytes 00 01 02), so computeByteHashOnly
+  // deterministically produces this SHA-256 for every asset in the
+  // batch regardless of storageKey.
+  const FIXED_BYTE_HASH =
+    "ae4b3280e56e2faf83f414a6e3dabe9d5fbe18976544c05fed121accb85b53fc";
+
+  it("blocks a multi-asset upload on a batched cross-user collision (2 assets, 1 upload)", async () => {
+    const formData = new FormData();
+    formData.set("name", "Multi Asset Model");
+    formData.set("description", "desc");
+    formData.set("price", "0");
+    formData.set("license", "cc_by");
+    formData.set("tags", "test, model");
+    formData.set(
+      "assetsJson",
+      JSON.stringify([
+        {
+          storageKey: "uploads/test-user-id/a/one.stl",
+          originalFilename: "one.stl",
+          format: "stl",
+          fileSize: 100,
+        },
+        {
+          storageKey: "uploads/test-user-id/b/two.stl",
+          originalFilename: "two.stl",
+          format: "stl",
+          fileSize: 200,
+        },
+      ])
+    );
+
+    // Two queued rows: the batched cross-user query (hit) then the
+    // batched same-user query (no hit) — one query each regardless
+    // of asset count, per the collision-batching change.
+    innerJoinResults = [[{ contentHash: FIXED_BYTE_HASH }], []];
+
+    const result = await createFileListing(formData);
+
+    expect(result).toEqual({
+      error: {
+        name: [
+          "This file has already been listed by another creator. Re-uploading others' files is not permitted.",
+        ],
+      },
+    });
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it("allows a multi-asset upload through when the batched queries find no collisions", async () => {
+    const formData = new FormData();
+    formData.set("name", "Multi Asset Model");
+    formData.set("description", "desc");
+    formData.set("price", "0");
+    formData.set("license", "cc_by");
+    formData.set("tags", "test, model");
+    formData.set(
+      "assetsJson",
+      JSON.stringify([
+        {
+          storageKey: "uploads/test-user-id/a/one.stl",
+          originalFilename: "one.stl",
+          format: "stl",
+          fileSize: 100,
+        },
+        {
+          storageKey: "uploads/test-user-id/b/two.stl",
+          originalFilename: "two.stl",
+          format: "stl",
+          fileSize: 200,
+        },
+      ])
+    );
+
+    innerJoinResults = [[], []];
+
+    await expect(createFileListing(formData)).rejects.toThrow("REDIRECT");
+    expect(mockInsert).toHaveBeenCalled();
   });
 });
 

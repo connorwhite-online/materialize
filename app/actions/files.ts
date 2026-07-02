@@ -72,7 +72,11 @@ import { deriveListingName, buildListingSlug } from "@/lib/filenames";
 import { logError, isRedirectError } from "@/lib/logger";
 import { generateDownloadUrl, deleteObject } from "@/lib/storage";
 import { type MeshFormat } from "@/lib/hashing/mesh-fingerprint";
-import { fingerprintAndPersistAsset } from "@/lib/hashing/fingerprint-asset";
+import {
+  fingerprintAndPersistAsset,
+  checkByteHashCollisionBatch,
+  findExistingSameUserAssetsBatch,
+} from "@/lib/hashing/fingerprint-asset";
 import { after } from "next/server";
 
 // Sync helper: stream R2 -> SHA-256 of raw bytes. This is the only
@@ -274,32 +278,46 @@ export async function createFileListing(formData: FormData) {
       incomingAssets.map((a) => computeByteHashOnly(a.storageKey))
     );
 
-    // Run the two collision lookups for every asset in parallel
-    // (within each asset they're independent; across assets they
-    // share no state). For single-asset uploads — ~90% of cases —
-    // this is the same shape as the prior serial loop. For multi-
-    // asset uploads it cuts wall-clock from 2N queries serial to 2
-    // batched roundtrips.
+    // Run the two collision lookups for the whole batch as two
+    // queries total (regardless of asset count) instead of up to 2N
+    // per-asset round trips: one inArray(contentHash, ...) query for
+    // cross-user collisions, one combined query for same-user dedup
+    // (byte-hash match unioned with filename+size fallback matches).
+    // See lib/hashing/fingerprint-asset.ts for the batched helpers.
     //
-    // To preserve the original serial-order error semantics
-    // (report the first listed asset's failure first), we collect
-    // each asset's result into a typed slot and then walk the
-    // array in order, returning the first non-null finding.
+    // To preserve the original serial-order error semantics (report
+    // the first listed asset's failure first), we replay each
+    // asset's per-asset priority (cross-user check, then same-user
+    // check) against the batched results in memory, then walk the
+    // array in order for the first non-null finding.
     type CollisionFinding =
       | { kind: "cross-user" }
       | { kind: "same-user"; fileName: string; fileSlug: string };
-    const findings: Array<CollisionFinding | null> = await Promise.all(
-      incomingAssets.map(async (asset, i): Promise<CollisionFinding | null> => {
-        const hash = byteHashes[i];
-        if (hash && (await checkByteHashCollision(hash, userId))) {
-          return { kind: "cross-user" };
-        }
-        const existing = await findExistingSameUserAsset({
-          userId,
-          byteHash: hash,
+    const nonNullHashes = byteHashes.filter((h): h is string => !!h);
+    const [crossUserHashes, sameUserMatches] = await Promise.all([
+      checkByteHashCollisionBatch(nonNullHashes, userId),
+      findExistingSameUserAssetsBatch(
+        userId,
+        incomingAssets.map((asset, i) => ({
+          byteHash: byteHashes[i],
           originalFilename: asset.originalFilename,
           fileSize: asset.fileSize,
-        });
+        }))
+      ),
+    ]);
+    const findings: Array<CollisionFinding | null> = incomingAssets.map(
+      (asset, i): CollisionFinding | null => {
+        const hash = byteHashes[i];
+        if (hash && crossUserHashes.has(hash)) {
+          return { kind: "cross-user" };
+        }
+        const existing =
+          (hash && sameUserMatches.byHash.get(hash)) ||
+          (asset.originalFilename && asset.fileSize > 0
+            ? sameUserMatches.byNameSize.get(
+                `${asset.originalFilename}::${asset.fileSize}`
+              )
+            : undefined);
         if (existing) {
           return {
             kind: "same-user",
@@ -308,7 +326,7 @@ export async function createFileListing(formData: FormData) {
           };
         }
         return null;
-      })
+      }
     );
     const firstFinding = findings.find((f) => f !== null);
     if (firstFinding?.kind === "cross-user") {
