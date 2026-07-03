@@ -55,6 +55,20 @@ function mockRun(): CadRunResult {
   };
 }
 
+/** Per-run options forwarded to the sidecar. */
+export interface RunCadCodeOptions {
+  /**
+   * Permit the sidecar's lossy voxel-remesh fallback for a non-watertight
+   * result. Default false: the harness gets the failure diagnosis and decides
+   * (repair turn, or an explicit last-attempt retry with allowRemesh: true) —
+   * the remesh must be a recorded decision, never a silent trade
+   * (docs/text-to-cad/02 §C). Older sidecars ignore the flag (always remesh).
+   */
+  allowRemesh?: boolean;
+  /** Code dialect for the sidecar ("build123d" default | "cadquery"). */
+  engine?: string;
+}
+
 /**
  * Execute a CAD script in the sidecar and return the result. Never throws
  * for an expected compile/validation failure — those come back as
@@ -64,7 +78,8 @@ function mockRun(): CadRunResult {
 export async function runCadCode(
   code: string,
   formats: CadOutputFormat[] = ["stl", "step"],
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  opts?: RunCadCodeOptions
 ): Promise<CadRunResult> {
   if (USE_MOCK) return mockRun();
 
@@ -76,7 +91,12 @@ export async function runCadCode(
         ? { Authorization: `Bearer ${process.env.CAD_RUNNER_SECRET}` }
         : {}),
     },
-    body: JSON.stringify({ code, formats }),
+    body: JSON.stringify({
+      code,
+      formats,
+      ...(opts?.engine ? { engine: opts.engine } : {}),
+      allowRemesh: opts?.allowRemesh ?? false,
+    }),
     signal,
   });
 

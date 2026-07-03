@@ -309,6 +309,27 @@
       "when": 1786000400000,
       "tag": "0043_greedy_zaladane",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1786000500000,
+      "tag": "0044_cad_workstreams",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1786000600000,
+      "tag": "0045_cad_config_fingerprint",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1786000700000,
+      "tag": "0046_cad_job_snapshot",
+      "breakpoints": true
     }
   ]
 }

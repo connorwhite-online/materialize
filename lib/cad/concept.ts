@@ -23,10 +23,16 @@ export function conceptImageEnabled(): boolean {
 export const CONCEPT_IMAGE_NOTE =
   "A concept render of the TARGET aesthetic is attached. Match its overall form language, proportions, stance, and finish — soft unified radii, clean restrained surfacing, a cohesive single body. It is a STYLE GUIDE, not a literal spec: keep the part functional, watertight, and printable, and ignore any unprintable or purely decorative flourishes.";
 
-/** Generate a concept render for the prompt, or null (disabled / any failure). */
+/**
+ * Generate a concept render for the prompt, or null (disabled / any failure).
+ * `briefDescription` (from formatBriefForConcept) folds the design brief's
+ * form language + envelope into the flux prompt so the taste target matches
+ * the functional reality (docs/text-to-cad/06 part 1).
+ */
 export async function conceptImage(
   prompt: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  briefDescription?: string | null
 ): Promise<PromptImage | null> {
   if (!conceptImageEnabled()) return null;
   try {
@@ -35,6 +41,7 @@ export async function conceptImage(
       input: {
         prompt:
           prompt +
+          (briefDescription ? ` -- ${briefDescription}` : "") +
           " -- the EMPTY product itself ALONE (no contents, no items inside, no extra objects, no people); industrial product design concept, a single clean minimalist object, refined proportions, soft unified fillets, premium matte finish, neutral studio lighting, plain seamless background, no text",
         image_size: "square_hd",
         num_inference_steps: 4,

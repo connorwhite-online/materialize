@@ -9,9 +9,28 @@ import { runCadCode } from "./runner-client";
 import { SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, extractCode, gradeRun } from "./prompt";
 import { buildKnowledgeBlock, type CadProcess } from "./knowledge";
 import { judgeAesthetics } from "./critique";
+import type { DimensionScore } from "./critique-core";
 import { conceptImage, CONCEPT_IMAGE_NOTE } from "./concept";
-import { selectExemplars, formatExemplars } from "./knowledge/exemplars";
-import { modelForRole, planStepEnabled, type CadRole } from "./models";
+import {
+  selectExemplars,
+  selectExemplarsByIds,
+  formatExemplars,
+  formatExemplarCatalog,
+} from "./knowledge/exemplars";
+import { formatComponentHints } from "./knowledge/components";
+import {
+  buildBrief,
+  cadBriefSchema,
+  formatBriefForPrompt,
+  formatBriefForConcept,
+  type CadBrief,
+} from "./brief";
+import {
+  modelForRole,
+  planStepEnabled,
+  briefStepEnabled,
+  type CadRole,
+} from "./models";
 import { CAD_FEEDBACK_TAG_LABELS, type CadFeedbackTag } from "./feedback";
 import type { CadProgressEvent, CadRunResult } from "./types";
 
@@ -60,6 +79,18 @@ export interface HarnessInput {
    */
   process?: CadProcess | null;
   /**
+   * The brief persisted with the version being revised — included in the
+   * revise prompt and passed through to the result unchanged (revisions never
+   * rebuild the brief; persistence is the caller's job). No-op on fresh builds.
+   */
+  priorBrief?: unknown;
+  /**
+   * A brief the user reviewed/edited BEFORE generating (the studio's brief
+   * card). When valid it replaces the brief step entirely — user-confirmed
+   * numbers beat a fresh model guess. Fresh builds only.
+   */
+  providedBrief?: unknown;
+  /**
    * Called as the loop advances so the caller can stream status to the UI.
    * Best-effort and synchronous — the harness never awaits it and a throw
    * here must not derail a generation.
@@ -75,8 +106,21 @@ export interface HarnessResult {
   run?: CadRunResult;
   /** VLM aesthetic aggregate (0-100), null when the judge is off/unavailable. */
   aestheticScore?: number | null;
+  /**
+   * Per-dimension judge scores (docs/text-to-cad/07 §B) — shows WHICH
+   * dimension drags. Null whenever aestheticScore is null.
+   */
+  aestheticDims?: Record<string, DimensionScore> | null;
+  /**
+   * The design brief this generation was built against (docs/text-to-cad/06):
+   * freshly built on a fresh build, the caller's priorBrief passed through
+   * unchanged on a revision. Persistence is the caller's job.
+   */
+  brief?: unknown;
   /** Per-role model usage for routing/telemetry (which model, how long). */
   telemetry?: Array<{ role: CadRole; model?: string; ms: number }>;
+  /** Router verdict that selected the engine (stamped by orchestrate). */
+  route?: string;
   error?: string;
 }
 
@@ -106,10 +150,56 @@ function buildPlanPrompt(input: HarnessInput): string {
     prompt: input.prompt,
     process: input.process,
   });
-  return `Plan a parametric 3D model for this request: ${input.prompt}\n\nDesign guidance to honor:\n\n${knowledge}`;
+  // Exemplar retrieval v2 (docs/text-to-cad/07 §C): the plan step sees the
+  // catalog (id/title/keywords/lesson — not code) and names its pick(s) on the
+  // last line; the generate step then injects the chosen exemplar code.
+  const catalog = formatExemplarCatalog();
+  const exemplarAsk = catalog
+    ? `\n\n${catalog}\n\nAfter the plan, your LAST line must be exactly \`EXEMPLAR: <id>\` (or \`EXEMPLAR: <id>|<id2>\` for two, or \`EXEMPLAR: none\` if none fits) naming the catalog exemplar(s) closest to this request.`
+    : "";
+  return `Plan a parametric 3D model for this request: ${input.prompt}\n\nDesign guidance to honor:\n\n${knowledge}${exemplarAsk}`;
 }
 
-function buildUserPrompt(input: HarnessInput, plan?: string): string {
+/**
+ * Split the plan step's trailing `EXEMPLAR: <id>|<id2>|none` line off the plan
+ * text. `ids: null` = no/unparseable line (fall back to keyword selection);
+ * `ids: []` = an explicit "none" (the model saw the catalog and declined).
+ * Pure + exported for tests.
+ */
+export function parsePlanExemplarLine(planText: string): {
+  ids: string[] | null;
+  plan: string;
+} {
+  const lines = planText.trimEnd().split("\n");
+  const last = lines[lines.length - 1]?.trim() ?? "";
+  const m = last.match(/^EXEMPLAR:\s*(.+)$/i);
+  if (!m) return { ids: null, plan: planText.trim() };
+  const plan = lines.slice(0, -1).join("\n").trim();
+  const tokens = m[1]
+    .split("|")
+    .map((t) => t.trim().toLowerCase())
+    .filter(Boolean);
+  if (tokens.length === 0) return { ids: null, plan };
+  if (tokens.length === 1 && tokens[0] === "none") return { ids: [], plan };
+  return { ids: tokens.filter((t) => t !== "none").slice(0, 2), plan };
+}
+
+/** Optional context threaded from the pre-generation steps (brief + plan). */
+interface PromptExtras {
+  /** Fresh-build design brief; folded in as a structured requirements block. */
+  brief?: CadBrief | null;
+  /**
+   * Exemplar ids the plan chose from the catalog. undefined/null = no plan
+   * choice, use keyword selection; [] = explicit "none", inject nothing.
+   */
+  exemplarIds?: string[] | null;
+}
+
+function buildUserPrompt(
+  input: HarnessInput,
+  plan?: string,
+  extras: PromptExtras = {}
+): string {
   const task = input.priorSourceCode
     ? [
         "Revise the following build123d model per this instruction:",
@@ -128,6 +218,25 @@ function buildUserPrompt(input: HarnessInput, plan?: string): string {
   });
 
   let out = `${task}\n\nDesign guidance to follow:\n\n${knowledge}`;
+
+  // Fresh-build brief: structured requirements + real cutout dims so the
+  // numbers stop being lost in prose (docs/text-to-cad/06 part 1).
+  if (extras.brief) {
+    out += `\n\n${formatBriefForPrompt(extras.brief)}`;
+    const hints = formatComponentHints(extras.brief);
+    if (hints) out += `\n\n${hints}`;
+  }
+
+  // Revision: replay the persisted brief so the revised code still honors the
+  // original structured requirements. Tolerate any shape — the column is
+  // untyped jsonb and older rows may predate the schema.
+  if (input.priorSourceCode && input.priorBrief != null) {
+    const parsed = cadBriefSchema.safeParse(input.priorBrief);
+    const block = parsed.success
+      ? formatBriefForPrompt(parsed.data)
+      : `Design brief (from the original build):\n${JSON.stringify(input.priorBrief)}`;
+    out += `\n\n${block}`;
+  }
 
   if (plan) {
     out += `\n\nFollow this plan:\n${plan}`;
@@ -149,12 +258,22 @@ function buildUserPrompt(input: HarnessInput, plan?: string): string {
     }
   }
 
-  // On a fresh build, show the best-matching verified exemplar as a style
+  // On a fresh build, show the best-matching verified exemplar(s) as a style
   // reference. (Revisions already have the prior code as their reference.)
-  // The exemplars are sidecar-verified (scripts/verify-exemplars.ts), so this
-  // now injects a matching example when one scores > 0 for the prompt.
+  // The plan step's catalog pick wins when present (retrieval v2); keyword
+  // scoring remains the fallback when the plan named nothing parseable.
   if (!input.priorSourceCode) {
-    const exemplars = formatExemplars(selectExemplars(input.prompt));
+    let chosen = selectExemplars(input.prompt);
+    if (extras.exemplarIds != null) {
+      if (extras.exemplarIds.length === 0) {
+        chosen = []; // explicit "none" — the model saw the catalog and declined
+      } else {
+        const byId = selectExemplarsByIds(extras.exemplarIds);
+        // All-invalid ids fall back to keyword scoring, never to nothing.
+        if (byId.length > 0) chosen = byId;
+      }
+    }
+    const exemplars = formatExemplars(chosen);
     if (exemplars) out += `\n\n${exemplars}`;
   }
 
@@ -165,8 +284,14 @@ function buildUserPrompt(input: HarnessInput, plan?: string): string {
  * Targeted repair guidance for known, recurring failure classes — a generic
  * "fix it" lets the model retry the same mistake. Returns "" for unknown errors.
  */
-function repairHintFor(note: string): string {
+export function repairHintFor(note: string): string {
   const n = note.toLowerCase();
+  // sdf_kit's to_mesh refuses over-budget grids with a message that already
+  // names a pitch that fits — pass it through verbatim, it IS the fix.
+  if (/cells exceeds/.test(n) && /use pitch >=/.test(n)) {
+    const verbatim = note.match(/grid .*use pitch >= [\d.]+/i)?.[0] ?? note;
+    return `The SDF grid was too large for the cell budget: ${verbatim}. Increase the pitch (and/or shrink the bounding box) exactly as instructed.`;
+  }
   if (/(fillet|chamfer)/.test(n) && /(smaller|max_fillet|radius|length|valid)/.test(n)) {
     return "That fillet/chamfer radius is too large for the geometry. REDUCE it substantially (at least halve it, and keep it well under the thinnest adjacent wall), apply it to fewer/specific edges, or wrap it in try/except and fall back to max_fillet() — do NOT retry the same radius.";
   }
@@ -181,6 +306,11 @@ function repairHintFor(note: string): string {
   }
   if (/no result|oom|crash|killed|memory|timed out/.test(n)) {
     return "The previous attempt CRASHED or hung the geometry kernel — it was too heavy. Drastically SIMPLIFY: far fewer boolean operations, no large loops or dense patterns, coarser detail, simple primitives. Build the simplest geometry that still reads as the requested object.";
+  }
+  // The harness runs the sidecar with allowRemesh: false (docs/text-to-cad/02
+  // §C) — a non-watertight result is the model's to fix, not the voxelizer's.
+  if (/not watertight/.test(n)) {
+    return "The result was NOT WATERTIGHT and the lossy voxel-remesh fallback is off — close the surface yourself. In mesh/SDF mode: pad the field with a void border (np.pad(..., constant_values=<void>)) so the isosurface closes at the box boundary, then mesh.merge_vertices() + mesh.fix_normals(). In build123d: simplify the boolean sequence — fewer overlapping/tangent booleans, ensure solids genuinely overlap (not merely touch) before fusing.";
   }
   return "";
 }
@@ -217,12 +347,41 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
     }
   };
 
+  // Design brief (fresh builds only, docs/text-to-cad/06 part 1): structured
+  // JSON between prompt and code. Best-effort like the plan step — null on any
+  // failure and the run proceeds as before. Revisions never rebuild it; they
+  // carry input.priorBrief through instead.
+  let brief: CadBrief | null = null;
+  if (!input.priorSourceCode && input.providedBrief != null) {
+    const parsed = cadBriefSchema.safeParse(input.providedBrief);
+    if (parsed.success) brief = parsed.data;
+  }
+  if (brief === null && useModel && !input.priorSourceCode && briefStepEnabled()) {
+    const briefModel = modelForRole("brief");
+    brief = await timed("brief", briefModel, () =>
+      buildBrief({
+        prompt: input.prompt,
+        images: input.images,
+        signal: input.signal,
+      })
+    );
+  }
+  // The brief (fresh) or the caller's priorBrief (revision) rides the result
+  // unchanged — persistence is the caller's job.
+  const resultBrief = input.priorSourceCode ? input.priorBrief : (brief ?? undefined);
+
   // Per-prompt concept image (fresh builds only): a beautiful product render the
   // generator builds TOWARD — taste injection that hand-authored code exemplars
   // can't provide. Best-effort + gated by FAL_KEY; null when disabled/failed.
+  // Built FROM the brief when one exists, so the taste target matches the
+  // functional reality (envelope, form language).
   const conceptImg =
     useModel && !input.priorSourceCode
-      ? await conceptImage(input.prompt, input.signal)
+      ? await conceptImage(
+          input.prompt,
+          input.signal,
+          brief ? formatBriefForConcept(brief) : undefined
+        )
       : null;
   const withConcept = (base?: PromptImage[] | null): PromptImage[] | undefined => {
     const imgs = [...(base ?? []), ...(conceptImg ? [conceptImg] : [])];
@@ -233,6 +392,9 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
   // already have the prior code as their plan). Best-effort: a planning failure
   // must not block generation. No-op without model credentials.
   let plan: string | undefined;
+  // Exemplar ids the plan chose from the catalog (null = no parseable choice,
+  // keyword fallback; [] = explicit none).
+  let exemplarIds: string[] | null = null;
   if (useModel && !input.priorSourceCode && planStepEnabled()) {
     const planModel = modelForRole("plan");
     try {
@@ -247,7 +409,11 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
           signal: input.signal,
         })
       );
-      plan = text.trim() || undefined;
+      // Strip the EXEMPLAR line before the plan reaches the generate prompt —
+      // the id choice routes exemplar injection, it isn't part of the plan.
+      const parsed = parsePlanExemplarLine(text);
+      plan = parsed.plan || undefined;
+      exemplarIds = parsed.ids;
     } catch {
       plan = undefined;
     }
@@ -279,7 +445,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
       const priorRender = repairNote ? lastRun?.renderPng : undefined;
       const userPrompt = repairNote
         ? [
-            buildUserPrompt(input, plan),
+            buildUserPrompt(input, plan, { brief, exemplarIds }),
             "",
             `The previous attempt failed because ${repairNote}. Here is that code:`,
             "```python",
@@ -293,7 +459,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
           ]
             .filter(Boolean)
             .join("\n")
-        : buildUserPrompt(input, plan);
+        : buildUserPrompt(input, plan, { brief, exemplarIds });
       const images: PromptImage[] = [
         ...(input.images ?? []),
         ...(conceptImg ? [conceptImg] : []),
@@ -319,6 +485,29 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
     emit({ type: "phase", phase: "executing", attempt, maxAttempts });
     lastRun = await runCadCode(lastCode, ["stl", "step"], input.signal);
 
+    // Last attempt, and the ONLY defect is an open/non-manifold surface:
+    // accept the lossy voxel remesh as an explicit, recorded decision
+    // (docs/text-to-cad/02 §C) rather than failing the generation. Earlier
+    // attempts keep allowRemesh off so the model fixes its own geometry.
+    if (
+      attempt === maxAttempts &&
+      !lastRun.ok &&
+      lastRun.validation.compiled &&
+      lastRun.validation.isSolid &&
+      !lastRun.validation.isWatertight
+    ) {
+      const remeshed = await runCadCode(lastCode, ["stl", "step"], input.signal, {
+        allowRemesh: true,
+      });
+      if (remeshed.ok) lastRun = remeshed;
+    }
+
+    // Live preview: stream the attempt's render so the studio shows the
+    // part taking shape instead of a spinner (kept out of the progress log).
+    if (lastRun.renderPng) {
+      emit({ type: "snapshot", render: lastRun.renderPng, step: attempt });
+    }
+
     const grade = gradeRun(lastRun);
     emit({
       type: "validation",
@@ -329,15 +518,20 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
       validation: lastRun.validation,
     });
     if (grade.pass) {
-      // Geometrically valid — now (optionally) judge it aesthetically. The
-      // judge is gated off by default, so this is a no-op unless enabled.
+      // Geometrically valid — now judge it aesthetically. On by default with
+      // credentials (CAD_CRITIQUE=false disables); all available views go to
+      // the judge so one 3/4 view can't hide a defect.
       const judgement = await judgeAesthetics({
         renderPng: lastRun.renderPng,
+        renders: lastRun.renders,
         prompt: input.prompt,
         signal: input.signal,
       });
       const aestheticScore = judgement.available
         ? (judgement.score ?? null)
+        : null;
+      const aestheticDims = judgement.available
+        ? (judgement.perDimension ?? null)
         : null;
 
       // Spend a repair turn on a visually-weak (but printable) result when we
@@ -359,6 +553,8 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
         attempts: attempt,
         run: lastRun,
         aestheticScore,
+        aestheticDims,
+        brief: resultBrief,
         telemetry,
       };
     }
@@ -376,6 +572,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
     sourceCode: lastCode,
     attempts: lastAttempt,
     run: lastRun,
+    brief: resultBrief,
     error: repairNote || "generation failed",
     telemetry,
   };

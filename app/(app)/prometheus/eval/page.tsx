@@ -44,6 +44,7 @@ export default async function TextToCadEvalPage() {
       feedbackTags: cadGenerations.feedbackTags,
       attempts: cadGenerations.attempts,
       aestheticScore: cadGenerations.aestheticScore,
+      remeshed: cadGenerations.remeshed,
       fileAssetId: cadGenerations.fileAssetId,
     })
     .from(cadGenerations)
@@ -59,6 +60,13 @@ export default async function TextToCadEvalPage() {
     total === 0
       ? 0
       : gens.reduce((s, g) => s + (g.attempts ?? 0), 0) / total;
+
+  // Remesh rate: how often a "valid" result actually came from the lossy
+  // voxel-remesh fallback (quality traded for watertightness — a KPI to
+  // drive DOWN; docs/text-to-cad/02 §C).
+  const remeshedCount = gens.filter(
+    (g) => g.status === "succeeded" && g.remeshed
+  ).length;
 
   // Aesthetic score (VLM judge), averaged over rows that have one.
   const scored = gens.filter(
@@ -123,6 +131,11 @@ export default async function TextToCadEvalPage() {
         scored.length === 0
           ? "VLM judge off / no scores yet"
           : `avg over ${scored.length} judged`,
+    },
+    {
+      label: "Remesh rate",
+      value: pct(remeshedCount, succeeded),
+      sub: `${remeshedCount} of ${succeeded} valid via voxel fallback`,
     },
     { label: "Avg attempts", value: avgAttempts.toFixed(2) },
   ];

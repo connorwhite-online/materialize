@@ -10,6 +10,7 @@ import {
   projects,
 } from "@/lib/db/schema";
 import { and, count, desc, eq } from "drizzle-orm";
+import { notUnsavedStudioDraft } from "@/lib/studio-drafts";
 import { isOrgMember } from "@/lib/authorization";
 import { loadOrgByHandle } from "@/app/(app)/[handle]/loader";
 import { Button } from "@/components/ui/button";
@@ -38,7 +39,12 @@ export async function OrgProfileView({ handle }: { handle: string }) {
   const isMember = membership.member;
   const isAdmin = membership.role === "admin";
 
-  const fileConditions = [eq(files.organizationId, org.id)];
+  // Unsaved text-to-CAD drafts stay out of the library view even for
+  // members (docs/text-to-cad/05 §B).
+  const fileConditions = [
+    eq(files.organizationId, org.id),
+    notUnsavedStudioDraft(),
+  ];
   const projectConditions = [eq(projects.organizationId, org.id)];
   const collectionConditions = [eq(collections.organizationId, org.id)];
   if (!isMember) {

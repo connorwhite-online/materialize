@@ -5,6 +5,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useTransition,
@@ -15,6 +16,7 @@ import {
   AlertTriangleIcon,
   ArrowUpIcon,
   CheckIcon,
+  ClipboardListIcon,
   DownloadIcon,
   EllipsisVerticalIcon,
   HistoryIcon,
@@ -22,6 +24,7 @@ import {
   MessageSquareTextIcon,
   PaperclipIcon,
   PencilIcon,
+  PinIcon,
   PlusIcon,
   Trash2Icon,
   XIcon,
@@ -37,8 +40,12 @@ import {
   recordCadFeedback,
   renameCadGeneration,
   saveCadFileToProfile,
+  setActiveCadVersion,
 } from "@/app/actions/cad-generation";
+import { diffParams, extractParams } from "@/components/cad/param-diff";
 import type { CadStreamEvent, CadProgressEvent } from "@/lib/cad/types";
+// Type-only: lib/cad/brief is server-only at runtime; the type is erased.
+import type { CadBrief } from "@/lib/cad/brief";
 import type { ViewerAnnotation } from "@/components/viewer/model-viewer";
 import {
   CAD_FEEDBACK_TAGS,
@@ -85,6 +92,13 @@ export interface StudioTurn {
   projectSlug: string | null;
   /** True when the result was voxel-remeshed (an approximation). */
   remeshed: boolean;
+  /**
+   * The generation this one revised — encodes the branch structure within
+   * a thread (a fork when it isn't the immediately preceding turn).
+   * Optional: absent on turns minted before the column was threaded
+   * through.
+   */
+  parentGenerationId?: string | null;
 }
 
 export interface StudioThread {
@@ -92,6 +106,16 @@ export interface StudioThread {
   title: string | null;
   lastActivity: number;
   turns: StudioTurn[];
+  /**
+   * cadThreads.id when the thread is DB-backed (docs/text-to-cad/05 §A).
+   * Absent on legacy pre-migration groups and threads created in-session
+   * (the done event doesn't carry it) — those can't pin until reload.
+   */
+  threadId?: string;
+  /** Pinned version — which generation the thread currently "is". */
+  activeGenerationId?: string | null;
+  /** THE library file for this design once saved (one file per design). */
+  savedFileId?: string | null;
 }
 
 type ImageMediaType = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
@@ -123,6 +147,38 @@ function threadLabel(t: StudioThread): string {
   return t.title?.trim() || truncate(t.turns[0]?.prompt ?? "Untitled build");
 }
 
+/** Most changed params shown inline; the rest fold into "+N more". */
+const MAX_DIFF_PARAMS = 3;
+
+/** Trim float noise from a parsed parameter literal ("2.4", not "2.4000…4"). */
+function fmtParam(n: number): string {
+  return String(Number(n.toFixed(4)));
+}
+
+/**
+ * One-line "what changed" between a revision and its parent: up to
+ * MAX_DIFF_PARAMS changed top-level parameters ("wall 2 → 2.4 ·
+ * corner_r 6 → 8"), the rest folded into "+N more". Null when either side
+ * parses to no parameters (mesh-mode scripts) or nothing changed.
+ */
+function paramDiffSummary(
+  prevSource: string,
+  nextSource: string
+): string | null {
+  const prev = extractParams(prevSource);
+  const next = extractParams(nextSource);
+  if (Object.keys(prev).length === 0 || Object.keys(next).length === 0) {
+    return null;
+  }
+  const { changed } = diffParams(prev, next);
+  if (changed.length === 0) return null;
+  const shown = changed
+    .slice(0, MAX_DIFF_PARAMS)
+    .map(([name, from, to]) => `${name} ${fmtParam(from)} → ${fmtParam(to)}`);
+  const extra = changed.length - shown.length;
+  return shown.join(" · ") + (extra > 0 ? ` · +${extra} more` : "");
+}
+
 // Resume-on-return: a cold visit to the studio starts a fresh build, but if
 // you were just here and bounced away, coming back within this window restores
 // the build you were on. The timestamp is refreshed on every selection change
@@ -134,7 +190,51 @@ type ResumeState = {
   rootId: string | null;
   viewTurnId: string | null;
   ts: number;
+  /** In-flight background generation job to reattach to (MTR-175). */
+  job?: StoredJob | null;
 };
+
+/**
+ * A background generation job persisted alongside the resume slot. Unlike
+ * the rootId/viewTurnId selection (grace-windowed), a stored job is
+ * reattached regardless of time away — the build keeps running server-side
+ * and the events stream replays whatever was missed.
+ */
+type StoredJob = {
+  jobId: string;
+  generationId: string;
+  /** The submitted prompt + thread context, needed to apply the `done`. */
+  prompt: string;
+  parentId: string | null;
+  rootId: string | null;
+};
+
+/** Read the persisted in-flight job, if any (no grace window — see above). */
+function readStoredJob(): StoredJob | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(RESUME_STORAGE_KEY);
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as Partial<ResumeState> | null;
+    const job = saved?.job;
+    if (
+      !job ||
+      typeof job.jobId !== "string" ||
+      typeof job.generationId !== "string"
+    ) {
+      return null;
+    }
+    return {
+      jobId: job.jobId,
+      generationId: job.generationId,
+      prompt: typeof job.prompt === "string" ? job.prompt : "",
+      parentId: job.parentId ?? null,
+      rootId: job.rootId ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Read the persisted selection iff it's recent enough to count as "came right
@@ -186,6 +286,20 @@ export function TextToCadStudio({
   );
   const [prompt, setPrompt] = useState("");
   const [progress, setProgress] = useState<CadProgressEvent[]>([]);
+  // Live build preview: the LATEST snapshot render only (replace, never
+  // accumulate — each frame is a whole base64 PNG). Kept out of `progress`
+  // so the status transcript stays tiny.
+  const [snapshot, setSnapshot] = useState<{
+    render: string;
+    step: number;
+  } | null>(null);
+  // Reviewable design brief (docs/text-to-cad/06): drafted from the composer
+  // prompt, edited in place, and sent with the generate request. Fresh
+  // builds only — revisions inherit the parent's brief server-side.
+  const [brief, setBrief] = useState<CadBrief | null>(null);
+  const [briefLoading, setBriefLoading] = useState(false);
+  // Soft "brief unavailable" note — not an error; generating still works.
+  const [briefNotice, setBriefNotice] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   // Loader→model handoff: on a fresh result the deforming blob morphs into the
   // generated shape ("morph"), then the crisp ModelViewer is mounted underneath
@@ -219,13 +333,26 @@ export function TextToCadStudio({
   const [selectedPartId, setSelectedPartId] = useState<string | null>(null);
   const [savingModel, setSavingModel] = useState(false);
   const [savedAssets, setSavedAssets] = useState<Set<string>>(new Set());
+  // Pin-as-active in flight (optimistic; see pinVersion).
+  const [pinning, startPinning] = useTransition();
+  // Ghost-overlay compare: viewed (older) revision at ~35% opacity on top
+  // of the thread's latest model. Reset whenever the viewed asset changes.
+  const [compareOn, setCompareOn] = useState(false);
   const [annotateMode, setAnnotateMode] = useState(false);
   const [annotations, setAnnotations] = useState<StudioAnnotation[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // In-flight "Draft brief" request — aborted on submit / thread switch /
+  // new-build so a slow draft can't pop a stale card into a new context.
+  const briefAbortRef = useRef<AbortController | null>(null);
+  // The in-flight background job (persisted to the resume slot). Only
+  // cleared when the job reaches a terminal event or the user explicitly
+  // abandons it — NOT on unmount, so a reload/return can reattach.
+  const jobRef = useRef<StoredJob | null>(null);
 
-  // Abort an in-flight stream if the studio unmounts.
+  // Close an open events stream if the studio unmounts. The background job
+  // keeps running server-side; the resume slot reattaches on return.
   useEffect(() => () => abortRef.current?.abort(), []);
 
   // Persist the current selection for resume-on-return. Refs hold the latest
@@ -243,6 +370,7 @@ export function TextToCadStudio({
           rootId: activeRootIdRef.current,
           viewTurnId: viewTurnIdRef.current,
           ts: Date.now(),
+          job: jobRef.current,
         } satisfies ResumeState)
       );
     } catch {
@@ -265,6 +393,40 @@ export function TextToCadStudio({
       persistResume();
     };
   }, [activeRootId, viewTurnId, persistResume]);
+
+  // Reattach on return: if a background job from a previous visit is stored,
+  // tail its events stream — replay + live tail means an already-finished
+  // job resolves instantly and a running one keeps streaming (MTR-175).
+  useEffect(() => {
+    const saved = readStoredJob();
+    if (!saved) return;
+    const controller = new AbortController();
+    abortRef.current?.abort();
+    abortRef.current = controller;
+    jobRef.current = saved;
+    if (saved.rootId) setActiveRootId(saved.rootId);
+    setProgress([]);
+    setSnapshot(null);
+    setError(null);
+    setGenerating(true);
+    void streamJobEvents(
+      saved.jobId,
+      controller,
+      saved.prompt,
+      saved.parentId ?? undefined
+    )
+      .then((terminal) => {
+        // Keep the stored job on a non-terminal drop (unmount / lost
+        // connection) so the next visit can reattach again.
+        if (terminal) {
+          jobRef.current = null;
+          persistResume();
+        }
+      })
+      .finally(() => setGenerating(false));
+    // Mount-only by design: reattach exactly once per studio mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Close the build three-dot menu on any outside click.
   useEffect(() => {
@@ -301,17 +463,24 @@ export function TextToCadStudio({
   }, [prompt]);
 
   const activeThread = threads.find((t) => t.rootId === activeRootId) ?? null;
-  const turns = activeThread?.turns ?? [];
+  // Memoized (not just `?? []`) so the param-diff useMemo below only
+  // recomputes when the active thread's turns actually change.
+  const turns = useMemo(() => activeThread?.turns ?? [], [activeThread]);
   const latestTurn = turns[turns.length - 1] ?? null;
+
+  // The most recent successful turn — the thread's "latest" model, used as
+  // the viewer fallback and as the solid side of the compare overlay.
+  const latestGoodTurn =
+    [...turns]
+      .reverse()
+      .find((t) => t.status === "succeeded" && t.fileAssetId) ?? null;
 
   // Which turn's model fills the viewer: the explicitly selected one, else the
   // most recent successful turn in the active thread.
   const viewedTurn =
     (viewTurnId
       ? turns.find((t) => t.id === viewTurnId && t.fileAssetId)
-      : null) ??
-    [...turns].reverse().find((t) => t.status === "succeeded" && t.fileAssetId) ??
-    null;
+      : null) ?? latestGoodTurn;
 
   // For an assembly, the viewer/print/download act on the selected part; for a
   // single solid (or a stale selection) fall back to the turn's primary asset.
@@ -323,19 +492,106 @@ export function TextToCadStudio({
 
   // Annotations are tied to a specific model — drop them (and exit pin mode)
   // whenever the viewed asset changes (new turn, switched part, opened build).
+  // The compare overlay is likewise per-selection.
   useEffect(() => {
     setAnnotations([]);
     setAnnotateMode(false);
+    setCompareOn(false);
   }, [activeAssetId]);
 
+  // Pinned version (docs/text-to-cad/05 §D item 2): which generation the
+  // thread currently "is". Only DB-backed threads (threadId present) can
+  // pin; legacy groups and just-created in-session threads gain the
+  // affordance after a reload.
+  const pinnedTurnId = activeThread?.activeGenerationId ?? null;
+  const canPinVersions = !!activeThread?.threadId;
+
+  function pinVersion(turn: StudioTurn) {
+    if (!activeThread?.threadId || pinning || turn.id === pinnedTurnId) return;
+    const rootId = activeThread.rootId;
+    const prevPinned = pinnedTurnId;
+    // Optimistic: badge moves immediately, rolls back on error.
+    setThreads((prev) =>
+      prev.map((t) =>
+        t.rootId === rootId ? { ...t, activeGenerationId: turn.id } : t
+      )
+    );
+    startPinning(async () => {
+      const res = await setActiveCadVersion({ generationId: turn.id });
+      if ("error" in res) {
+        setError(res.error);
+        setThreads((prev) =>
+          prev.map((t) =>
+            t.rootId === rootId ? { ...t, activeGenerationId: prevPinned } : t
+          )
+        );
+      }
+    });
+  }
+
+  // Parametric diff per revision against its parent (docs/text-to-cad/05
+  // §D item 4): up to 3 changed top-level parameters as a one-line summary
+  // under the revision row. Parent = the turn parentGenerationId points at,
+  // falling back to the preceding turn for rows that predate the column.
+  const paramDiffSummaries = useMemo(() => {
+    const byId = new Map(turns.map((t) => [t.id, t]));
+    const out = new Map<string, string>();
+    turns.forEach((t, i) => {
+      if (!t.sourceCode) return;
+      const parent =
+        (t.parentGenerationId ? byId.get(t.parentGenerationId) : undefined) ??
+        (i > 0 ? turns[i - 1] : undefined);
+      if (!parent?.sourceCode) return;
+      const summary = paramDiffSummary(parent.sourceCode, t.sourceCode);
+      if (summary) out.set(t.id, summary);
+    });
+    return out;
+  }, [turns]);
+
+  // Ghost-overlay compare (docs/text-to-cad/05 §D item 3): while viewing an
+  // older revision, overlay it (translucent) on the thread's latest model.
+  // Both render through the same deterministic fixed frame, so they align.
+  const compareBaseAssetId =
+    compareOn &&
+    viewedTurn &&
+    latestGoodTurn?.fileAssetId &&
+    viewedTurn.id !== latestGoodTurn.id
+      ? latestGoodTurn.fileAssetId
+      : null;
+  const compareAvailable =
+    !!viewedTurn &&
+    !!latestGoodTurn?.fileAssetId &&
+    viewedTurn.id !== latestGoodTurn.id &&
+    !!activeAssetId;
+
+  // A pin that points somewhere other than the latest turn is worth calling
+  // out on Save (the pinned version is what the design "is").
+  const pinnedDiffersFromLatest =
+    !!pinnedTurnId && !!latestGoodTurn && pinnedTurnId !== latestGoodTurn.id;
+
   function startNewBuild() {
+    // Abandoning an in-flight build is an explicit cancel: close the events
+    // stream AND ask the server to stop the job (fire-and-forget — the row
+    // flips to cancelled once the worker's poll notices).
+    const job = jobRef.current;
+    if (job) {
+      void fetch(`/api/cad/jobs/${job.jobId}/cancel`, { method: "POST" }).catch(
+        () => undefined
+      );
+      jobRef.current = null;
+    }
     abortRef.current?.abort();
+    briefAbortRef.current?.abort();
     setGenerating(false);
     setTransition(null);
     setSourceAssetId(null);
     setActiveRootId(null);
     setViewTurnId(null);
     setProgress([]);
+    setSnapshot(null);
+    setBrief(null);
+    setBriefLoading(false);
+    setBriefNotice(null);
     setError(null);
     setPrompt("");
     setImages([]);
@@ -347,6 +603,7 @@ export function TextToCadStudio({
 
   function openThread(t: StudioThread) {
     if (generating) return;
+    briefAbortRef.current?.abort();
     setTransition(null);
     setSourceAssetId(null);
     setActiveRootId(t.rootId);
@@ -355,6 +612,10 @@ export function TextToCadStudio({
       .find((x) => x.status === "succeeded" && x.fileAssetId);
     setViewTurnId(lastGood?.id ?? null);
     setProgress([]);
+    setSnapshot(null);
+    setBrief(null);
+    setBriefLoading(false);
+    setBriefNotice(null);
     setError(null);
     setSelectedPartId(null);
     setShowHistory(false);
@@ -445,29 +706,45 @@ export function TextToCadStudio({
       parts: ev.parts ?? [],
       projectSlug: ev.projectSlug ?? null,
       remeshed: ev.remeshed ?? false,
+      parentGenerationId: parentId ?? null,
     };
     const now = Date.now();
 
     if (parentId) {
-      // Revision: append to the active thread.
+      // Revision: append to the active thread. Read the root id from the
+      // ref (not the closure) so a stream resumed after a remount still
+      // lands on the right thread; skip if a replayed `done` already did.
+      // The server re-points activeGenerationId at every new success
+      // (persistGenerationSuccess), so mirror that for the pin badge.
+      const rootId = activeRootIdRef.current;
       setThreads((prev) =>
         prev
           .map((t) =>
-            t.rootId === activeRootId
-              ? { ...t, turns: [...t.turns, newTurn], lastActivity: now }
+            t.rootId === rootId && !t.turns.some((x) => x.id === newTurn.id)
+              ? {
+                  ...t,
+                  turns: [...t.turns, newTurn],
+                  lastActivity: now,
+                  activeGenerationId: newTurn.id,
+                }
               : t
           )
           .sort((a, b) => b.lastActivity - a.lastActivity)
       );
     } else {
-      // New build: open a fresh thread.
+      // New build: open a fresh thread — unless a resumed job replayed a
+      // `done` the server page already rendered into initialThreads.
       const thread: StudioThread = {
         rootId: ev.generationId,
         title: ev.title,
         lastActivity: now,
         turns: [newTurn],
       };
-      setThreads((prev) => [thread, ...prev]);
+      setThreads((prev) =>
+        prev.some((t) => t.rootId === ev.generationId)
+          ? prev
+          : [thread, ...prev]
+      );
       setActiveRootId(ev.generationId);
     }
     setViewTurnId(ev.generationId);
@@ -477,8 +754,10 @@ export function TextToCadStudio({
     setTransition(ev.fileAssetId ? { assetId: ev.fileAssetId, phase: "morph" } : null);
     // Clear the composer only now that the turn landed — on an error the
     // user's typed instruction (and any attached refs) stay put to retry.
+    // The brief card clears with it (same lifecycle: kept around to retry).
     setPrompt("");
     setImages([]);
+    setBrief(null);
   }
 
   async function addFiles(files: FileList | File[] | null | undefined) {
@@ -515,6 +794,57 @@ export function TextToCadStudio({
     setImages((prev) => prev.filter((i) => i.id !== id));
   }
 
+  /**
+   * Draft a reviewable design brief from the current prompt + reference
+   * images (fresh builds only). Renders as an editable card above the
+   * composer; a null brief from the route means the step couldn't produce
+   * one — soft-notice it and let the user generate directly.
+   */
+  async function draftBrief() {
+    const text = prompt.trim();
+    if (text.length < 3 || briefLoading || generating) return;
+
+    const controller = new AbortController();
+    briefAbortRef.current?.abort();
+    briefAbortRef.current = controller;
+    setBriefLoading(true);
+    setBriefNotice(null);
+    setError(null);
+    try {
+      const res = await fetch("/api/cad/brief", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: text,
+          images: images.length
+            ? images.map((i) => ({ data: i.data, mediaType: i.mediaType }))
+            : undefined,
+        }),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        setError((await res.text()) || "Couldn't draft a brief.");
+        return;
+      }
+      const { brief: drafted } = (await res.json()) as {
+        brief: CadBrief | null;
+      };
+      if (!drafted) {
+        setBriefNotice(
+          "Couldn't draft a brief right now — generating directly still works."
+        );
+        return;
+      }
+      setBrief(drafted);
+    } catch (err) {
+      if ((err as Error)?.name !== "AbortError") {
+        setError("Couldn't draft a brief. Please try again.");
+      }
+    } finally {
+      if (briefAbortRef.current === controller) setBriefLoading(false);
+    }
+  }
+
   async function submit() {
     const text = prompt.trim();
     if (text.length < 3 || generating) return;
@@ -547,8 +877,12 @@ export function TextToCadStudio({
       : "";
     const sentPrompt = text + annoBlock;
 
+    // A brief draft still in flight is superseded by the real generation.
+    briefAbortRef.current?.abort();
     setError(null);
+    setBriefNotice(null);
     setProgress([]);
+    setSnapshot(null);
     // A revision deforms the model currently on screen (edit-in-place); a fresh
     // build has none, so the wireframe blob deforms instead.
     setSourceAssetId(parentId ? activeAssetId : null);
@@ -573,45 +907,39 @@ export function TextToCadStudio({
           images: images.length
             ? images.map((i) => ({ data: i.data, mediaType: i.mediaType }))
             : undefined,
+          // The reviewed (possibly edited) brief card, when one is open.
+          // Fresh builds only — the server ignores it on revisions anyway.
+          brief: !parentId && brief ? brief : undefined,
         }),
         signal: controller.signal,
       });
 
-      if (!res.ok || !res.body) {
+      if (!res.ok) {
         setError((await res.text()) || "Generation failed.");
         return;
       }
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        let sep: number;
-        while ((sep = buf.indexOf("\n\n")) !== -1) {
-          const frame = buf.slice(0, sep);
-          buf = buf.slice(sep + 2);
-          const dataLine = frame
-            .split("\n")
-            .find((l) => l.startsWith("data:"));
-          if (!dataLine) continue;
-          let ev: CadStreamEvent;
-          try {
-            ev = JSON.parse(dataLine.slice(5).trim());
-          } catch {
-            continue;
-          }
-          if (ev.type === "done") {
-            applyDone(ev, text, parentId);
-          } else if (ev.type === "error") {
-            setError(ev.error);
-          } else {
-            setProgress((p) => [...p, ev]);
-          }
-        }
+      // The generate route now returns a background job (MTR-175); progress
+      // streams from the job's events endpoint, which survives reloads.
+      const { generationId, jobId } = (await res.json()) as {
+        generationId: string;
+        jobId: string;
+      };
+      jobRef.current = {
+        jobId,
+        generationId,
+        prompt: text,
+        parentId: parentId ?? null,
+        rootId: parentId ? activeRootId : generationId,
+      };
+      persistResume();
+
+      const terminal = await streamJobEvents(jobId, controller, text, parentId);
+      // Keep the stored job on a non-terminal drop (unmount / lost
+      // connection) so the next visit can reattach.
+      if (terminal) {
+        jobRef.current = null;
+        persistResume();
       }
     } catch (err) {
       if ((err as Error)?.name !== "AbortError") {
@@ -619,6 +947,84 @@ export function TextToCadStudio({
       }
     } finally {
       setGenerating(false);
+    }
+  }
+
+  /**
+   * Tail a background job's SSE stream (replay + live), applying events
+   * exactly as the old in-request stream did. Returns true once a terminal
+   * event (`done`/`error`) arrived. On a drop WITHOUT one (proxy timeout,
+   * flaky network, the route's own ceiling) the job keeps running server-
+   * side, so retry the events URL up to 3 times with a 2s backoff.
+   */
+  async function streamJobEvents(
+    jobId: string,
+    controller: AbortController,
+    submittedPrompt: string,
+    parentId: string | undefined
+  ): Promise<boolean> {
+    const MAX_RETRIES = 3;
+    for (let attempt = 0; ; attempt++) {
+      let sawTerminal = false;
+      try {
+        const res = await fetch(`/api/cad/jobs/${jobId}/events`, {
+          signal: controller.signal,
+        });
+        if (!res.ok || !res.body) throw new Error(`events ${res.status}`);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          let sep: number;
+          while ((sep = buf.indexOf("\n\n")) !== -1) {
+            const frame = buf.slice(0, sep);
+            buf = buf.slice(sep + 2);
+            const dataLine = frame
+              .split("\n")
+              .find((l) => l.startsWith("data:"));
+            if (!dataLine) continue;
+            let ev: CadStreamEvent;
+            try {
+              ev = JSON.parse(dataLine.slice(5).trim());
+            } catch {
+              continue;
+            }
+            if (ev.type === "done") {
+              sawTerminal = true;
+              // Clear the live preview BEFORE the transition state lands so
+              // the blob→model morph hand-off runs exactly as before.
+              setSnapshot(null);
+              applyDone(ev, submittedPrompt, parentId);
+            } else if (ev.type === "error") {
+              sawTerminal = true;
+              setSnapshot(null);
+              setError(ev.error);
+            } else if (ev.type === "snapshot") {
+              // Live build preview: latest frame only — REPLACE, never
+              // accumulate (each frame is a whole base64 PNG; the progress
+              // transcript must stay light).
+              setSnapshot({ render: ev.render, step: ev.step });
+            } else {
+              setProgress((p) => [...p, ev]);
+            }
+          }
+        }
+      } catch (err) {
+        if ((err as Error)?.name === "AbortError") return sawTerminal;
+      }
+      if (sawTerminal || controller.signal.aborted) return sawTerminal;
+      if (attempt >= MAX_RETRIES) {
+        setError(
+          "Lost the connection to this build — it may still be running. Reload to check."
+        );
+        return false;
+      }
+      await new Promise((r) => setTimeout(r, 2000));
     }
   }
 
@@ -771,9 +1177,23 @@ export function TextToCadStudio({
                   remount/zoom; on a revision it's the shape being deformed. */}
               {showModel && activeAssetId && (
                 <Suspense fallback={<ViewerSkeleton label="Loading model…" />}>
+                  {/* Compare mode swaps the solid model for the thread's
+                      latest and ghosts the viewed (older) revision on top;
+                      both land in the same deterministic fixed frame. */}
                   <ModelViewer
-                    key={activeAssetId}
-                    modelUrl={`/api/files/preview/${activeAssetId}`}
+                    key={
+                      compareBaseAssetId
+                        ? `${compareBaseAssetId}::${activeAssetId}`
+                        : activeAssetId
+                    }
+                    modelUrl={`/api/files/preview/${
+                      compareBaseAssetId ?? activeAssetId
+                    }`}
+                    ghostUrl={
+                      compareBaseAssetId
+                        ? `/api/files/preview/${activeAssetId}`
+                        : undefined
+                    }
                     format="stl"
                     mode="detail"
                     showZoomControls
@@ -824,7 +1244,17 @@ export function TextToCadStudio({
                     />
                   </Suspense>
                   {generating && !transition && (
-                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
+                    <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 p-6">
+                      {/* Live build preview — the latest snapshot render of
+                          the in-progress solid, cross-fading as frames land.
+                          Cleared on `done`, so the blob→model morph hand-off
+                          below runs untouched. */}
+                      {snapshot && (
+                        <SnapshotPreview
+                          render={snapshot.render}
+                          step={snapshot.step}
+                        />
+                      )}
                       <div className="glass rounded-2xl px-5 py-4 shadow-lg">
                         <ProgressPanel events={progress} />
                       </div>
@@ -873,6 +1303,31 @@ export function TextToCadStudio({
                   </button>
                 );
               })}
+            </div>
+          )}
+
+          {/* Compare with latest — only while viewing an older revision.
+              On: the latest model renders solid with this revision ghosted
+              over it at ~35% opacity (same fixed frame, so they align). */}
+          {!generating && compareAvailable && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                aria-pressed={compareOn}
+                onClick={() => setCompareOn((v) => !v)}
+                className={`cursor-pointer rounded-full border px-3 py-1 text-xs transition-colors ${
+                  compareOn
+                    ? "border-foreground/30 bg-foreground/5 text-foreground"
+                    : "border-foreground/10 text-muted-foreground hover:bg-foreground/5"
+                }`}
+              >
+                Compare with latest
+              </button>
+              {compareOn && (
+                <span className="text-xs text-muted-foreground">
+                  Latest solid · this revision ghosted
+                </span>
+              )}
             </div>
           )}
 
@@ -965,6 +1420,11 @@ export function TextToCadStudio({
                 type="button"
                 onClick={saveToProfile}
                 disabled={savingModel || savedAssets.has(activeAssetId)}
+                title={
+                  pinnedDiffersFromLatest
+                    ? "Saves the pinned (Active) version"
+                    : undefined
+                }
                 className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-foreground/15 px-4 py-2 text-sm hover:bg-foreground/5 disabled:opacity-60"
               >
                 {savedAssets.has(activeAssetId) ? (
@@ -1085,30 +1545,101 @@ export function TextToCadStudio({
                   {turns.map((t, i) => {
                     const isViewed = viewedTurn?.id === t.id;
                     const selectable = t.status === "succeeded" && !!t.fileAssetId;
+                    const isPinned = pinnedTurnId === t.id;
+                    const pinnable = canPinVersions && selectable;
+                    // A branch: this turn revised something other than the
+                    // immediately preceding turn — indent it as a fork.
+                    const isFork =
+                      i > 0 &&
+                      !!t.parentGenerationId &&
+                      t.parentGenerationId !== turns[i - 1].id;
+                    const diff = paramDiffSummaries.get(t.id);
                     return (
-                      <li key={t.id}>
+                      <li
+                        key={t.id}
+                        className={cn(
+                          "group relative",
+                          isFork && "ml-3 border-l-2 border-foreground/10 pl-2"
+                        )}
+                      >
                         <button
                           type="button"
                           disabled={!selectable}
                           onClick={() => setViewTurnId(t.id)}
-                          className={`flex w-full items-start gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                          className={cn(
+                            "flex w-full items-start gap-2.5 rounded-lg border py-2 pl-2.5 text-left text-sm transition-colors",
+                            pinnable ? "pr-8" : "pr-2.5",
                             isViewed
                               ? "border-foreground/30 bg-foreground/5"
-                              : "border-foreground/10 hover:bg-foreground/5"
-                          } ${selectable ? "" : "opacity-60"}`}
+                              : "border-foreground/10 hover:bg-foreground/5",
+                            selectable ? "" : "opacity-60"
+                          )}
                         >
-                          <span className="mt-0.5 shrink-0 text-xs text-muted-foreground">
-                            {i === 0 ? "Start" : `#${i}`}
-                          </span>
+                          {t.renderUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={t.renderUrl}
+                              alt=""
+                              className="size-10 shrink-0 rounded bg-muted/40 object-cover"
+                            />
+                          ) : (
+                            <div className="size-10 shrink-0 rounded bg-muted/40" />
+                          )}
                           <span className="min-w-0 flex-1">
+                            <span className="flex items-center gap-1.5">
+                              <span className="text-xs text-muted-foreground">
+                                {i === 0 ? "Start" : `#${i}`}
+                              </span>
+                              {isPinned && (
+                                <span className="rounded-full border border-foreground/15 bg-foreground/5 px-1.5 py-px text-[10px] font-medium text-muted-foreground">
+                                  Active
+                                </span>
+                              )}
+                            </span>
                             <span className="block truncate">{t.prompt}</span>
                             {t.status === "failed" && (
-                              <span className="text-xs text-destructive">
+                              <span className="block truncate text-xs text-destructive">
                                 {t.error ?? "failed"}
+                              </span>
+                            )}
+                            {diff && (
+                              <span className="block truncate text-xs text-muted-foreground">
+                                {diff}
                               </span>
                             )}
                           </span>
                         </button>
+                        {/* Pin as active — hover/focus reveal; always shown
+                            on the pinned row. Outside the row button (no
+                            nested buttons). */}
+                        {pinnable && (
+                          <button
+                            type="button"
+                            onClick={() => pinVersion(t)}
+                            disabled={pinning}
+                            aria-pressed={isPinned}
+                            aria-label={
+                              isPinned
+                                ? "Pinned as active version"
+                                : "Pin as active version"
+                            }
+                            title={
+                              isPinned
+                                ? "Active version"
+                                : "Pin as active version"
+                            }
+                            className={cn(
+                              "absolute right-1 top-1 flex size-6 cursor-pointer items-center justify-center rounded-md hover:bg-foreground/10 disabled:opacity-50",
+                              isPinned
+                                ? "text-foreground"
+                                : "text-muted-foreground/70 opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                            )}
+                          >
+                            <PinIcon
+                              className={cn("size-3.5", isPinned && "fill-current")}
+                            />
+                          </button>
+                        )}
                       </li>
                     );
                   })}
@@ -1196,6 +1727,22 @@ export function TextToCadStudio({
             At nav+ the pill is gone and the sidebar rail takes over. */}
         <div className="mx-auto grid max-w-6xl gap-8 px-4 pb-28 nav:pb-4 lg:grid-cols-[1fr_300px]">
           <div className="pointer-events-auto mx-auto w-full max-w-2xl">
+          {/* Brief card — the reviewable design brief for the pending build.
+              Hidden while generating; cleared when the turn lands. */}
+          {brief && !generating && (
+            <BriefCard
+              brief={brief}
+              onChange={setBrief}
+              onDismiss={() => setBrief(null)}
+              onGenerate={submit}
+              canGenerate={prompt.trim().length >= 3}
+            />
+          )}
+          {briefNotice && !generating && !brief && (
+            <p className="mb-2 rounded-xl border border-foreground/10 bg-card/95 px-3 py-2 text-xs text-muted-foreground shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80">
+              {briefNotice}
+            </p>
+          )}
           <div
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
@@ -1280,18 +1827,40 @@ export function TextToCadStudio({
               // zooming when the field is focused (it zooms any input < 16px).
               className="max-h-[200px] w-full resize-none border-0 bg-transparent px-2 py-1.5 text-base outline-none disabled:opacity-60 nav:text-sm"
             />
-            {/* Toolbar below the text: attach (left), send (right). */}
+            {/* Toolbar below the text: attach + draft-brief (left), send
+                (right). */}
             <div className="flex items-center justify-between px-1 pt-1">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={generating || images.length >= MAX_IMAGES}
-                aria-label="Attach reference image"
-                title="Attach reference image"
-                className="flex size-8 cursor-pointer items-center justify-center rounded-lg text-muted-foreground hover:bg-foreground/5 hover:text-foreground disabled:opacity-40"
-              >
-                <PaperclipIcon className="size-4" />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={generating || images.length >= MAX_IMAGES}
+                  aria-label="Attach reference image"
+                  title="Attach reference image"
+                  className="flex size-8 cursor-pointer items-center justify-center rounded-lg text-muted-foreground hover:bg-foreground/5 hover:text-foreground disabled:opacity-40"
+                >
+                  <PaperclipIcon className="size-4" />
+                </button>
+                {/* Draft brief — fresh builds only (revisions inherit the
+                    parent's brief server-side) and only once there's a
+                    prompt worth briefing. */}
+                {!latestTurn && !brief && prompt.trim().length >= 3 && (
+                  <button
+                    type="button"
+                    onClick={draftBrief}
+                    disabled={generating || briefLoading}
+                    title="Draft a design brief to review before generating"
+                    className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-muted-foreground hover:bg-foreground/5 hover:text-foreground disabled:opacity-40"
+                  >
+                    {briefLoading ? (
+                      <Loader2Icon className="size-3.5 animate-spin" />
+                    ) : (
+                      <ClipboardListIcon className="size-3.5" />
+                    )}
+                    {briefLoading ? "Drafting…" : "Draft brief"}
+                  </button>
+                )}
+              </div>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -1436,6 +2005,216 @@ function BuildsList({
   );
 }
 
+/**
+ * Live build preview — the latest snapshot render of the in-progress solid,
+ * shown over the generating blob. Cross-fades when a new frame replaces the
+ * old: the previous frame stays mounted underneath while the new one
+ * transitions in (opacity only; prefers-reduced-motion swaps instantly).
+ */
+function SnapshotPreview({ render, step }: { render: string; step: number }) {
+  const [prev, setPrev] = useState<{ render: string; step: number } | null>(
+    null
+  );
+  const [faded, setFaded] = useState(false);
+  const lastRef = useRef<{ render: string; step: number }>({ render, step });
+  useEffect(() => {
+    if (lastRef.current.step !== step) setPrev(lastRef.current);
+    lastRef.current = { render, step };
+    // Double-rAF: commit the new frame at opacity 0, then flip it visible so
+    // the CSS opacity transition actually runs.
+    setFaded(false);
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => setFaded(true));
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  }, [render, step]);
+  return (
+    <div className="glass relative w-40 max-w-[60%] overflow-hidden rounded-xl shadow-lg sm:w-52">
+      {prev && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={`data:image/png;base64,${prev.render}`}
+          alt=""
+          aria-hidden
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+      )}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={`data:image/png;base64,${render}`}
+        alt="Live preview of the model being built"
+        className={cn(
+          "relative block h-auto w-full transition-opacity duration-[250ms] motion-reduce:transition-none",
+          faded ? "opacity-100" : "opacity-0"
+        )}
+      />
+    </div>
+  );
+}
+
+/** Axis labels for a component's bounding-box inputs. */
+const BOX_AXES = ["width", "depth", "height"] as const;
+
+/**
+ * Reviewable design brief card (docs/text-to-cad/06): part restatement up
+ * top, component boxes + clearances as editable number inputs (the numbers
+ * users actually correct), interfaces and envelope read-only. Lives above
+ * the composer; the current (edited) value rides along with the generate
+ * request whether the user hits this card's button or just sends normally.
+ */
+function BriefCard({
+  brief,
+  onChange,
+  onDismiss,
+  onGenerate,
+  canGenerate,
+}: {
+  brief: CadBrief;
+  onChange: (b: CadBrief) => void;
+  onDismiss: () => void;
+  onGenerate: () => void;
+  canGenerate: boolean;
+}) {
+  function patchComponent(
+    idx: number,
+    patch: Partial<CadBrief["components"][number]>
+  ) {
+    onChange({
+      ...brief,
+      components: brief.components.map((c, i) =>
+        i === idx ? { ...c, ...patch } : c
+      ),
+    });
+  }
+
+  const numberInput =
+    "w-14 rounded-md border border-foreground/15 bg-card px-1.5 py-0.5 text-xs tabular-nums outline-none focus:border-foreground/30";
+
+  return (
+    <div className="mb-2 max-h-[45vh] overflow-y-auto rounded-2xl border border-foreground/15 bg-card/95 p-3 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80">
+      <div className="flex items-start gap-2">
+        <ClipboardListIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <span className="block text-sm font-medium">Design brief</span>
+          <p className="mt-0.5 text-sm text-muted-foreground">{brief.part}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label="Dismiss brief"
+          className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 hover:bg-foreground/10 hover:text-foreground"
+        >
+          <XIcon className="size-3.5" />
+        </button>
+      </div>
+
+      {brief.components.length > 0 && (
+        <div className="mt-2 space-y-1.5">
+          {brief.components.map((c, ci) => (
+            <div
+              key={`${c.name}-${ci}`}
+              className="rounded-lg border border-foreground/10 p-2"
+            >
+              <span className="block truncate text-xs font-medium">
+                {c.name}
+              </span>
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  Box
+                  {([0, 1, 2] as const).map((axis) => (
+                    <input
+                      key={axis}
+                      type="number"
+                      inputMode="decimal"
+                      min={0}
+                      step="any"
+                      value={c.box[axis]}
+                      aria-label={`${c.name} ${BOX_AXES[axis]} in millimeters`}
+                      onChange={(e) => {
+                        const v = e.target.valueAsNumber;
+                        if (!Number.isFinite(v)) return;
+                        const box = [...c.box] as [number, number, number];
+                        box[axis] = v;
+                        patchComponent(ci, { box });
+                      }}
+                      className={numberInput}
+                    />
+                  ))}
+                  mm
+                </span>
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  Clearance
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    step="any"
+                    value={c.clearance ?? ""}
+                    aria-label={`${c.name} clearance in millimeters`}
+                    onChange={(e) => {
+                      if (e.target.value === "") {
+                        patchComponent(ci, { clearance: undefined });
+                        return;
+                      }
+                      const v = e.target.valueAsNumber;
+                      if (Number.isFinite(v)) {
+                        patchComponent(ci, { clearance: v });
+                      }
+                    }}
+                    className={numberInput}
+                  />
+                  mm
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {brief.interfaces.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-muted-foreground">Interfaces:</span>
+          {brief.interfaces.map((it, i) => (
+            <span
+              key={i}
+              className="inline-flex items-center rounded-full border border-foreground/10 bg-foreground/5 px-2 py-0.5 text-xs"
+            >
+              {[it.type, it.std, it.face ? `${it.face} face` : null]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {brief.envelope && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Envelope: fits within{" "}
+          <span className="tabular-nums">
+            {brief.envelope.max.join(" × ")}
+          </span>{" "}
+          mm
+        </p>
+      )}
+
+      <div className="mt-3">
+        <button
+          type="button"
+          onClick={onGenerate}
+          disabled={!canGenerate}
+          className="cursor-pointer rounded-lg bg-foreground px-3 py-1.5 text-sm font-medium text-background disabled:opacity-40"
+        >
+          Generate with this brief
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ViewerSkeleton({ label }: { label: string }) {
   return (
     <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-muted-foreground">
@@ -1485,6 +2264,11 @@ function describeEvent(ev: CadProgressEvent): {
   sub: string | null;
 } {
   switch (ev.type) {
+    case "queued":
+      return { text: "Queued", sub: null };
+    case "snapshot":
+      // Rendered as the live preview image, not as status copy.
+      return { text: "Taking shape", sub: null };
     case "phase":
       if (ev.phase === "generating") {
         return ev.attempt > 1

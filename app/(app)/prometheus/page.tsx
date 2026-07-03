@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { notFound } from "next/navigation";
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { withDbRetry } from "@/lib/db/retry";
 import {
   cadGenerations,
+  cadThreads,
   fileAssets,
   files,
   projectFiles,
@@ -29,6 +30,16 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
+const THREAD_LIMIT = 60;
+const LEGACY_ROW_LIMIT = 100;
+
+/** StudioThread plus thread metadata the studio may adopt later. */
+type StudioThreadWithMeta = StudioThread & {
+  threadId?: string;
+  activeGenerationId?: string | null;
+  savedFileId?: string | null;
+};
+
 export default async function TextToCadPage() {
   const { userId } = await auth();
   const user = (await currentUser()) as ClerkUserLike;
@@ -36,29 +47,81 @@ export default async function TextToCadPage() {
     notFound();
   }
 
-  const rows = await withDbRetry(() =>
+  // Threads first-class (docs/text-to-cad/05 §A): load the user's threads
+  // by recency, then their generations by threadId — no chain-walk
+  // reconstruction, no 100-row fragmentation for threaded rows.
+  const threadRows = await withDbRetry(() =>
     db
       .select({
-        id: cadGenerations.id,
-        prompt: cadGenerations.prompt,
-        title: cadGenerations.title,
-        status: cadGenerations.status,
-        renderStorageKey: cadGenerations.renderStorageKey,
-        fileAssetId: cadGenerations.fileAssetId,
-        projectId: cadGenerations.projectId,
-        sourceCode: cadGenerations.sourceCode,
-        parentGenerationId: cadGenerations.parentGenerationId,
-        error: cadGenerations.error,
-        rating: cadGenerations.rating,
-        feedbackTags: cadGenerations.feedbackTags,
-        feedbackNote: cadGenerations.feedbackNote,
-        createdAt: cadGenerations.createdAt,
+        id: cadThreads.id,
+        title: cadThreads.title,
+        rootGenerationId: cadThreads.rootGenerationId,
+        activeGenerationId: cadThreads.activeGenerationId,
+        savedFileId: cadThreads.savedFileId,
+        updatedAt: cadThreads.updatedAt,
       })
-      .from(cadGenerations)
-      .where(eq(cadGenerations.userId, userId))
-      .orderBy(desc(cadGenerations.createdAt))
-      .limit(100)
+      .from(cadThreads)
+      .where(eq(cadThreads.userId, userId))
+      .orderBy(desc(cadThreads.updatedAt))
+      .limit(THREAD_LIMIT)
   );
+  const threadIds = threadRows.map((t) => t.id);
+
+  const generationColumns = {
+    id: cadGenerations.id,
+    prompt: cadGenerations.prompt,
+    title: cadGenerations.title,
+    status: cadGenerations.status,
+    renderStorageKey: cadGenerations.renderStorageKey,
+    fileAssetId: cadGenerations.fileAssetId,
+    projectId: cadGenerations.projectId,
+    sourceCode: cadGenerations.sourceCode,
+    parentGenerationId: cadGenerations.parentGenerationId,
+    threadId: cadGenerations.threadId,
+    error: cadGenerations.error,
+    rating: cadGenerations.rating,
+    feedbackTags: cadGenerations.feedbackTags,
+    feedbackNote: cadGenerations.feedbackNote,
+    createdAt: cadGenerations.createdAt,
+  };
+
+  const [threadGenRows, legacyRows] = await Promise.all([
+    threadIds.length > 0
+      ? withDbRetry(() =>
+          db
+            .select(generationColumns)
+            .from(cadGenerations)
+            .where(
+              and(
+                eq(cadGenerations.userId, userId),
+                inArray(cadGenerations.threadId, threadIds)
+              )
+            )
+            .orderBy(desc(cadGenerations.createdAt))
+        )
+      : Promise.resolve([]),
+    // Legacy fallback: rows with no threadId yet. Pre-migration builds land
+    // here whole; a threadId is also NULL on rows persisted mid-flight
+    // (pending) — those attach to their parent's thread below. Once
+    // scripts/backfill-cad-threads.ts has run in production, the
+    // pre-migration case is empty and this query + the rootIdOf walk can
+    // be retired.
+    withDbRetry(() =>
+      db
+        .select(generationColumns)
+        .from(cadGenerations)
+        .where(
+          and(
+            eq(cadGenerations.userId, userId),
+            isNull(cadGenerations.threadId)
+          )
+        )
+        .orderBy(desc(cadGenerations.createdAt))
+        .limit(LEGACY_ROW_LIMIT)
+    ),
+  ]);
+
+  const rows = [...threadGenRows, ...legacyRows];
 
   // Reconstruct multi-part assemblies: each assembly generation links to a
   // Project bundling its part files, so an assembly survives reload/navigation
@@ -102,6 +165,7 @@ export default async function TextToCadPage() {
   // Mint a short-lived URL per render (local signing, no network round-trip).
   const turns: (StudioTurn & {
     parentGenerationId: string | null;
+    threadId: string | null;
     title: string | null;
     createdAt: number;
   })[] = await Promise.all(
@@ -126,58 +190,92 @@ export default async function TextToCadPage() {
       // Not persisted (no column yet) — the badge shows in-session only.
       remeshed: false,
       parentGenerationId: r.parentGenerationId,
+      threadId: r.threadId,
       title: r.title,
       createdAt: r.createdAt.getTime(),
     }))
   );
 
-  // Group generations into threads: walk each turn's parent chain to its
-  // earliest fetched ancestor (the thread root). A linear chain of revisions
-  // collapses to one thread; the root row carries the agent-written title.
   const byId = new Map(turns.map((t) => [t.id, t]));
-  const rootIdOf = (t: (typeof turns)[number]): string => {
+
+  // Resolve a threadId for legacy/unlinked turns by walking the parent
+  // chain: a pending revision (threadId not yet stamped) attaches to its
+  // parent's thread. Falls back to the earliest fetched ancestor's id — the
+  // old chain-walk grouping — for genuinely pre-migration rows. Retire with
+  // the legacy query above after scripts/backfill-cad-threads.ts has run.
+  const resolveThread = (
+    t: (typeof turns)[number]
+  ): { threadId: string | null; rootId: string } => {
     let cur = t;
     const seen = new Set<string>();
-    while (cur.parentGenerationId && byId.has(cur.parentGenerationId)) {
+    while (!cur.threadId && cur.parentGenerationId && byId.has(cur.parentGenerationId)) {
       if (seen.has(cur.id)) break; // defensive: never loop on a cycle
       seen.add(cur.id);
       cur = byId.get(cur.parentGenerationId)!;
     }
-    return cur.id;
+    return { threadId: cur.threadId, rootId: cur.id };
   };
 
-  const groups = new Map<string, typeof turns>();
+  const byThreadId = new Map<string, typeof turns>();
+  const legacyGroups = new Map<string, typeof turns>();
   for (const t of turns) {
-    const root = rootIdOf(t);
-    (groups.get(root) ?? groups.set(root, []).get(root)!).push(t);
+    const { threadId, rootId } = resolveThread(t);
+    if (threadId) {
+      (byThreadId.get(threadId) ?? byThreadId.set(threadId, []).get(threadId)!).push(t);
+    } else {
+      (legacyGroups.get(rootId) ?? legacyGroups.set(rootId, []).get(rootId)!).push(t);
+    }
   }
 
-  const initialThreads: StudioThread[] = [...groups.entries()]
-    .map(([rootId, members]) => {
-      const ordered = [...members].sort((a, b) => a.createdAt - b.createdAt);
-      const lastActivity = Math.max(...ordered.map((m) => m.createdAt));
-      return {
-        rootId,
-        title: byId.get(rootId)?.title ?? null,
-        lastActivity,
-        turns: ordered.map<StudioTurn>((m) => ({
-          id: m.id,
-          prompt: m.prompt,
-          status: m.status,
-          renderUrl: m.renderUrl,
-          fileAssetId: m.fileAssetId,
-          sourceCode: m.sourceCode,
-          error: m.error,
-          rating: m.rating,
-          feedbackTags: m.feedbackTags,
-          feedbackNote: m.feedbackNote,
-          parts: m.parts,
-          projectSlug: m.projectSlug,
-          remeshed: m.remeshed,
-        })),
-      };
-    })
-    .sort((a, b) => b.lastActivity - a.lastActivity);
+  const initialThreads: StudioThreadWithMeta[] = [];
+
+  const toStudioTurn = (m: (typeof turns)[number]): StudioTurn => ({
+    id: m.id,
+    prompt: m.prompt,
+    status: m.status,
+    renderUrl: m.renderUrl,
+    fileAssetId: m.fileAssetId,
+    sourceCode: m.sourceCode,
+    error: m.error,
+    rating: m.rating,
+    feedbackTags: m.feedbackTags,
+    feedbackNote: m.feedbackNote,
+    parts: m.parts,
+    projectSlug: m.projectSlug,
+    remeshed: m.remeshed,
+    parentGenerationId: m.parentGenerationId,
+  });
+
+  for (const thread of threadRows) {
+    const members = byThreadId.get(thread.id);
+    if (!members || members.length === 0) continue;
+    const ordered = [...members].sort((a, b) => a.createdAt - b.createdAt);
+    const rootTurn =
+      (thread.rootGenerationId && byId.get(thread.rootGenerationId)) ||
+      ordered[0];
+    initialThreads.push({
+      rootId: rootTurn.id,
+      // Thread title first; root generation's title is the legacy fallback.
+      title: thread.title ?? rootTurn.title ?? null,
+      lastActivity: Math.max(...ordered.map((m) => m.createdAt)),
+      turns: ordered.map(toStudioTurn),
+      threadId: thread.id,
+      activeGenerationId: thread.activeGenerationId,
+      savedFileId: thread.savedFileId,
+    });
+  }
+
+  for (const [rootId, members] of legacyGroups) {
+    const ordered = [...members].sort((a, b) => a.createdAt - b.createdAt);
+    initialThreads.push({
+      rootId,
+      title: byId.get(rootId)?.title ?? null,
+      lastActivity: Math.max(...ordered.map((m) => m.createdAt)),
+      turns: ordered.map(toStudioTurn),
+    });
+  }
+
+  initialThreads.sort((a, b) => b.lastActivity - a.lastActivity);
 
   return <TextToCadStudio initialThreads={initialThreads} />;
 }

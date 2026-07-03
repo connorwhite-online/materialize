@@ -29,8 +29,13 @@ export interface CadPart {
   renderPng?: string;
   geometry?: CadGeometry;
   validation: CadValidation;
+  /** True when this part's watertight mesh came from the voxel-remesh fallback. */
+  remeshed?: boolean;
   error?: string;
 }
+
+/** Named render viewpoints the sidecar can produce (docs/text-to-cad/07 §A). */
+export type CadRenderView = "threeQuarter" | "top" | "front" | "side";
 
 /** Result of executing one CAD script in the sidecar. */
 export interface CadRunResult {
@@ -39,6 +44,12 @@ export interface CadRunResult {
   files: Partial<Record<CadOutputFormat, string>>;
   /** Base64 PNG preview render (no `data:` prefix). */
   renderPng?: string;
+  /**
+   * Multi-view renders keyed by viewpoint — superset of renderPng (which
+   * stays the threeQuarter view for compatibility). Absent from older
+   * sidecars; consumers must tolerate it missing.
+   */
+  renders?: Partial<Record<CadRenderView, string>>;
   geometry?: CadGeometry;
   validation: CadValidation;
   /**
@@ -61,6 +72,22 @@ export interface CadRunResult {
  * and the client (renderer), so all three agree on one contract.
  */
 export type CadProgressEvent =
+  | {
+      /** Job accepted but not yet started (background-job mode, MTR-175). */
+      type: "queued";
+    }
+  | {
+      /**
+       * Live build preview: the latest render of the in-progress solid.
+       * NOT persisted in cadJobs.progress (payload size) — carried in the
+       * cadJobs.lastSnapshot column and re-emitted by the events route.
+       */
+      type: "snapshot";
+      /** Base64 PNG (no data: prefix). */
+      render: string;
+      /** Monotonic step counter for cheap change detection. */
+      step: number;
+    }
   | {
       type: "phase";
       /** `generating` = model writing code; `executing` = sidecar running it. */
@@ -107,3 +134,12 @@ export type CadStreamEvent =
   | CadProgressEvent
   | CadDoneEvent
   | { type: "error"; error: string; generationId?: string };
+
+/**
+ * One entry persisted in cadJobs.progress (MTR-175): every CadProgressEvent
+ * the harness emitted plus exactly one terminal record (`done` or `error`)
+ * appended when the job finishes. Same wire shapes as the SSE stream — the
+ * events route (/api/cad/jobs/[jobId]/events) replays these verbatim, so
+ * CadProgressEvent / CadDoneEvent stay backward compatible by construction.
+ */
+export type CadJobProgressEntry = CadStreamEvent;

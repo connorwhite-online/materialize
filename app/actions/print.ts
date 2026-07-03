@@ -51,6 +51,7 @@ import { printOrderSchema } from "@/lib/validations/print";
 import { checkoutAddressSchema } from "@/lib/validations/address";
 import { logError } from "@/lib/logger";
 import { userCanPrintAsset } from "@/lib/entitlement";
+import { promoteStudioDraftsForAssets } from "@/lib/studio-drafts";
 import { dedupeShippingByShipId } from "@/lib/pricing/shipping";
 import type { Address, Currency } from "@/lib/craftcloud/types";
 import { calcServiceFee } from "@/lib/fees";
@@ -213,6 +214,14 @@ export async function createPrintOrder(params: {
         checkoutModel: getCheckoutModel(),
       })
       .returning();
+
+    // An order is a save (docs/text-to-cad/05 §B): if this asset backs an
+    // unsaved text-to-CAD draft, promote it to a real library entry
+    // (visibility unchanged). Best-effort — never fails the order.
+    await promoteStudioDraftsForAssets({
+      userId,
+      fileAssetIds: [data.fileAssetId],
+    });
 
     revalidatePath("/dashboard/orders");
     return { orderId: order.id, cartId: cart.cartId };
@@ -388,6 +397,13 @@ export async function checkoutVendorGroup(
           items.map((i) => i.id)
         )
       );
+
+    // An order is a save (docs/text-to-cad/05 §B) — promote any unsaved
+    // text-to-CAD drafts among the ordered assets. Best-effort.
+    await promoteStudioDraftsForAssets({
+      userId,
+      fileAssetIds: items.map((i) => i.fileAssetId),
+    });
 
     revalidatePath("/dashboard/orders");
     return { orderId: order.id, cartId: cart.cartId };

@@ -1,0 +1,328 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { HarnessResult } from "@/lib/cad/harness";
+import type { CadJobProgressEntry, CadProgressEvent } from "@/lib/cad/types";
+
+// --- @/lib/db/schema: minimal column-reference stubs (drizzle's eq()/and()
+// just wrap these; identity doesn't matter to the mocked db below). ---
+vi.mock("@/lib/db/schema", () => ({
+  cadJobs: {
+    id: "id",
+    generationId: "generation_id",
+    status: "status",
+    progress: "progress",
+    error: "error",
+    cancelRequestedAt: "cancel_requested_at",
+    startedAt: "started_at",
+    finishedAt: "finished_at",
+  },
+  cadGenerations: { id: "id", userId: "user_id" },
+}));
+
+// --- @/lib/db: a single simulated job row. select() always returns a copy
+// of it; update().set() records the patch and folds it back in, so the
+// read-modify-write in appendJobProgress and the cancel poll both behave
+// like the real table. ---
+type JobRow = {
+  progress: CadJobProgressEntry[];
+  cancelRequestedAt: Date | null;
+};
+let jobRow: JobRow;
+const updateCalls: Array<Record<string, unknown>> = [];
+const insertValues = vi.fn();
+
+vi.mock("@/lib/db", () => ({
+  db: {
+    insert: () => ({
+      values: (v: Record<string, unknown>) => {
+        insertValues(v);
+        return { returning: () => Promise.resolve([{ id: "job-1" }]) };
+      },
+    }),
+    update: () => ({
+      set: (v: Record<string, unknown>) => {
+        updateCalls.push(v);
+        if (Array.isArray(v.progress)) {
+          jobRow.progress = v.progress as CadJobProgressEntry[];
+        }
+        if (v.cancelRequestedAt instanceof Date) {
+          jobRow.cancelRequestedAt = v.cancelRequestedAt;
+        }
+        return { where: () => Promise.resolve() };
+      },
+    }),
+    select: () => ({
+      from: () => ({
+        where: () => {
+          const row = {
+            progress: [...jobRow.progress],
+            cancelRequestedAt: jobRow.cancelRequestedAt,
+          };
+          const arr = [row];
+          return Object.assign(arr, { limit: () => arr });
+        },
+      }),
+    }),
+  },
+}));
+
+vi.mock("@/lib/logger", () => ({ logError: vi.fn() }));
+
+// --- collaborators of executeCadJob ---
+const runHarness = vi.fn();
+vi.mock("@/lib/cad/harness", () => ({
+  runHarness: (...args: unknown[]) => runHarness(...args),
+}));
+
+vi.mock("@/lib/cad/generative", () => ({
+  generativeEnabled: () => false,
+  shouldUseGenerative: vi.fn(),
+  runGenerative: vi.fn(),
+}));
+
+const persistGenerationFailure = vi.fn(async (...args: unknown[]) => ({
+  error: args[1] as string,
+  generationId: args[0] as string,
+}));
+const persistGenerationSuccess = vi.fn();
+vi.mock("@/lib/cad/persist", () => ({
+  persistGenerationFailure: (...args: unknown[]) =>
+    persistGenerationFailure(...args),
+  persistGenerationSuccess: (...args: unknown[]) =>
+    persistGenerationSuccess(...args),
+}));
+
+import {
+  createCadJob,
+  appendJobProgress,
+  executeCadJob,
+  MAX_PROGRESS_EVENTS,
+} from "@/lib/cad/jobs";
+
+function phaseEvent(attempt: number): CadProgressEvent {
+  return { type: "phase", phase: "generating", attempt, maxAttempts: 4 };
+}
+
+function okHarnessResult(): HarnessResult {
+  return {
+    ok: true,
+    sourceCode: "result = 1",
+    attempts: 1,
+    run: {
+      ok: true,
+      files: { stl: "c3Rs" },
+      validation: {
+        compiled: true,
+        isSolid: true,
+        isWatertight: true,
+        isManifold: true,
+      },
+    },
+  };
+}
+
+const baseInput = {
+  jobId: "job-1",
+  generationId: "gen-1",
+  userId: "user-1",
+  prompt: "a 20mm cube",
+};
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  jobRow = { progress: [], cancelRequestedAt: null };
+  updateCalls.length = 0;
+  persistGenerationFailure.mockImplementation(async (...args: unknown[]) => ({
+    error: args[1] as string,
+    generationId: args[0] as string,
+  }));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe("createCadJob", () => {
+  it("inserts a queued row for the generation and returns the job id", async () => {
+    const res = await createCadJob("gen-1");
+    expect(res).toEqual({ jobId: "job-1" });
+    expect(insertValues).toHaveBeenCalledWith(
+      expect.objectContaining({ generationId: "gen-1", status: "queued" })
+    );
+  });
+});
+
+describe("appendJobProgress", () => {
+  it("appends to the existing progress array", async () => {
+    jobRow.progress = [phaseEvent(1)];
+    await appendJobProgress("job-1", [phaseEvent(2), phaseEvent(3)]);
+    expect(jobRow.progress).toHaveLength(3);
+    expect(jobRow.progress[2]).toEqual(phaseEvent(3));
+  });
+
+  it("caps the array at MAX_PROGRESS_EVENTS, keeping the first and last entries", async () => {
+    jobRow.progress = Array.from({ length: MAX_PROGRESS_EVENTS }, (_, i) =>
+      phaseEvent(i)
+    );
+    const appended: CadJobProgressEntry = {
+      type: "error",
+      error: "boom",
+      generationId: "gen-1",
+    };
+    await appendJobProgress("job-1", appended);
+
+    expect(jobRow.progress).toHaveLength(MAX_PROGRESS_EVENTS);
+    // First entry survives (the setup story)...
+    expect(jobRow.progress[0]).toEqual(phaseEvent(0));
+    // ...and the newest entry survives (the current state / terminal record).
+    expect(jobRow.progress[jobRow.progress.length - 1]).toEqual(appended);
+  });
+
+  it("no-ops on an empty batch", async () => {
+    await appendJobProgress("job-1", []);
+    expect(updateCalls).toHaveLength(0);
+  });
+});
+
+describe("executeCadJob", () => {
+  it("marks the job running then done, and appends a terminal `done` record", async () => {
+    runHarness.mockImplementation(
+      async (input: { onProgress?: (e: CadProgressEvent) => void }) => {
+        input.onProgress?.(phaseEvent(1));
+        input.onProgress?.({
+          type: "phase",
+          phase: "executing",
+          attempt: 1,
+          maxAttempts: 4,
+        });
+        return okHarnessResult();
+      }
+    );
+    persistGenerationSuccess.mockResolvedValue({
+      generationId: "gen-1",
+      fileAssetId: "asset-1",
+      fileSlug: "slug-1",
+      renderUrl: "https://example.test/r.png",
+      sourceCode: "result = 1",
+      title: "Cube",
+      remeshed: false,
+    });
+
+    await executeCadJob(baseInput);
+
+    // Status walked queued -> running -> done.
+    expect(updateCalls).toContainEqual(
+      expect.objectContaining({ status: "running", startedAt: expect.any(Date) })
+    );
+    expect(updateCalls).toContainEqual(
+      expect.objectContaining({ status: "done", finishedAt: expect.any(Date) })
+    );
+
+    // Progress captured the harness events AND ends with the terminal record.
+    const last = jobRow.progress[jobRow.progress.length - 1];
+    expect(last).toEqual(
+      expect.objectContaining({
+        type: "done",
+        generationId: "gen-1",
+        fileAssetId: "asset-1",
+        fileSlug: "slug-1",
+      })
+    );
+    expect(jobRow.progress).toContainEqual(phaseEvent(1));
+    expect(persistGenerationSuccess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        generationId: "gen-1",
+        isRoot: true,
+      })
+    );
+  });
+
+  it("marks the job failed (error column + terminal error record) on a bad result", async () => {
+    runHarness.mockResolvedValue({
+      ok: false,
+      sourceCode: "broken",
+      attempts: 4,
+      error: "not watertight",
+    } satisfies HarnessResult);
+
+    await executeCadJob(baseInput);
+
+    expect(persistGenerationFailure).toHaveBeenCalledWith(
+      "gen-1",
+      "not watertight",
+      "broken",
+      4
+    );
+    expect(updateCalls).toContainEqual(
+      expect.objectContaining({
+        status: "failed",
+        error: "not watertight",
+        finishedAt: expect.any(Date),
+      })
+    );
+    const last = jobRow.progress[jobRow.progress.length - 1];
+    expect(last).toEqual({
+      type: "error",
+      error: "not watertight",
+      generationId: "gen-1",
+    });
+    expect(persistGenerationSuccess).not.toHaveBeenCalled();
+  });
+
+  it("marks the job cancelled without running the harness when cancel raced the start", async () => {
+    jobRow.cancelRequestedAt = new Date();
+
+    await executeCadJob(baseInput);
+
+    expect(runHarness).not.toHaveBeenCalled();
+    expect(updateCalls).toContainEqual(
+      expect.objectContaining({
+        status: "cancelled",
+        finishedAt: expect.any(Date),
+      })
+    );
+    // The generation row doesn't hang at `pending`.
+    expect(persistGenerationFailure).toHaveBeenCalledWith(
+      "gen-1",
+      "Generation cancelled."
+    );
+    const last = jobRow.progress[jobRow.progress.length - 1];
+    expect(last).toEqual({
+      type: "error",
+      error: "Generation cancelled.",
+      generationId: "gen-1",
+    });
+  });
+
+  it("aborts a running harness and marks cancelled when cancelRequestedAt is set mid-run", async () => {
+    vi.useFakeTimers();
+    // A harness that only finishes when its signal aborts.
+    runHarness.mockImplementation(
+      ({ signal }: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener("abort", () =>
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" }))
+          );
+        })
+    );
+
+    const running = executeCadJob(baseInput);
+    // Let the pre-check + running-mark settle, then request cancellation.
+    await vi.advanceTimersByTimeAsync(0);
+    jobRow.cancelRequestedAt = new Date();
+    // Advance past the ~3s cancel poll so it notices and aborts.
+    await vi.advanceTimersByTimeAsync(3_100);
+    await running;
+
+    expect(updateCalls).toContainEqual(
+      expect.objectContaining({
+        status: "cancelled",
+        finishedAt: expect.any(Date),
+      })
+    );
+    expect(persistGenerationFailure).toHaveBeenCalledWith(
+      "gen-1",
+      "Generation cancelled."
+    );
+  });
+});

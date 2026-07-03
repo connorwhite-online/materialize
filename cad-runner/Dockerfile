@@ -25,7 +25,9 @@ ENV MALLOC_ARENA_MAX=2 \
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY app.py .
+# app.py plus the modules generated scripts / post-export checks import:
+# sdf_kit (mesh-mode implicit modeling), networks + fea (checks, MTR-179/180).
+COPY app.py sdf_kit.py networks.py fea.py ./
 
 # Run as a non-root user — defense in depth for executing generated code.
 RUN useradd --create-home --uid 10001 runner

@@ -180,7 +180,12 @@ export async function runGenerative(opts: {
       `_m.apply_scale(${DEFAULT_PRINT_SIZE_MM}.0 / _longest)`,
       "result = _m",
     ].join("\n");
-    const run = await runCadCode(code, ["stl"], opts.signal);
+    // Generative meshes are frequently non-watertight as downloaded and the
+    // model can't repair them (there's no code to fix) — the voxel remesh is
+    // the intended rescue here, so opt in explicitly (docs/text-to-cad/02 §C).
+    const run = await runCadCode(code, ["stl"], opts.signal, {
+      allowRemesh: true,
+    });
 
     emit({
       type: "validation",

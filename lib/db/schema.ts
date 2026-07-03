@@ -15,6 +15,7 @@ import {
   uniqueIndex,
   foreignKey,
 } from "drizzle-orm/pg-core";
+import type { CadJobProgressEntry } from "../cad/types";
 
 // Enums
 //
@@ -274,6 +275,13 @@ export const files = pgTable("files", {
   currency: text("currency").notNull().default("USD"),
   license: licenseEnum("license").notNull().default("cc_by"),
   status: fileStatusEnum("status").notNull().default("draft"),
+  // Where the file came from: 'upload' (user upload, the default) or
+  // 'studio' (text-to-CAD draft). Plain text validated at the app
+  // layer like `category`, so new sources need no migration. Studio
+  // drafts stay invisible to library/profile/marketplace listings
+  // until promoted — explicit Save or print checkout — per
+  // docs/text-to-cad/05 §B.
+  source: text("source").notNull().default("upload"),
   tags: text("tags").array(),
   // Optional curated browse category — one slug from lib/categories.
   // Plain text (not a pg enum) so the taxonomy grows without a
@@ -317,6 +325,10 @@ export const files = pgTable("files", {
   index("files_slug_idx").on(table.slug),
   index("files_flagged_at_idx").on(table.flaggedAt),
   index("files_category_idx").on(table.category),
+  // (source, status) covers the listing-consumer exclusion of unsaved
+  // studio drafts (WHERE NOT (source = 'studio' AND status = 'draft'))
+  // and the GC sweep's direct lookup of them (docs/text-to-cad/05 §B/§E).
+  index("files_source_status_idx").on(table.source, table.status),
   // Trigram GIN index for the global search ILIKE on files.name
   // (app/api/search) — turns substring search from a seq scan into an
   // index scan. pg_trgm extension created in the same migration.
@@ -1356,6 +1368,53 @@ export const webhookEventsProcessed = pgTable(
   ]
 );
 
+// Text-to-CAD threads — one row per studio design conversation. The
+// root generation plus every revision/fork hangs off it via
+// cadGenerations.threadId, replacing the read-time parentGenerationId
+// chain reconstruction (docs/text-to-cad/05 §A). `title` lives here
+// going forward; the root generation's title is a legacy-read fallback
+// during migration.
+export const cadThreads = pgTable(
+  "cad_threads",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // Thread title (agent-written or user-renamed). Null = untitled;
+    // readers fall back to the root generation's title, then prompt.
+    title: text("title"),
+    // The first generation in the thread. FK declared in the migration
+    // with ON DELETE SET NULL — cadGenerations.threadId points back at
+    // this table, and declaring both directions inline trips drizzle's
+    // circular type inference (same pattern as files.coverPhotoId).
+    rootGenerationId: uuid("root_generation_id"),
+    // Which version the thread currently "is" — defaults to the latest
+    // successful generation; the user can pin an older one. FK in the
+    // migration (ON DELETE SET NULL), same circularity note as above.
+    activeGenerationId: uuid("active_generation_id"),
+    // THE library file for this design once saved — one file per design,
+    // re-pointed on re-save rather than multiplied (docs/text-to-cad/05
+    // §C). Null until the first save; SET NULL if the file is later
+    // deleted so the thread history survives.
+    savedFileId: uuid("saved_file_id").references(() => files.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    // Composite covers the studio thread list (WHERE user_id ORDER BY
+    // updated_at) and the user_id-prefix lookup.
+    index("cad_threads_user_updated_idx").on(table.userId, table.updatedAt),
+  ]
+);
+
 // Text-to-CAD generations (experimental, owner-only — gated by
 // lib/features.ts). One row per generation attempt. This is both the
 // edit-history source ("edit existing" re-prompts against a prior row's
@@ -1389,6 +1448,14 @@ export const cadGenerations = pgTable(
     // Set on an "edit existing" generation — points at the generation
     // whose sourceCode seeded this one. Self-FK declared below.
     parentGenerationId: uuid("parent_generation_id"),
+    // The thread this generation belongs to (docs/text-to-cad/05 §A).
+    // Root generations create the thread; revisions carry it from the
+    // parent. parentGenerationId still encodes the branch structure
+    // WITHIN a thread. SET NULL so the generation history survives
+    // thread deletion.
+    threadId: uuid("thread_id").references(() => cadThreads.id, {
+      onDelete: "set null",
+    }),
     // The printable library asset produced on success. Null until the
     // R2 upload + createDraftFileForPrint step completes; SET NULL if the
     // asset is later deleted so the generation history survives.
@@ -1423,6 +1490,27 @@ export const cadGenerations = pgTable(
     // VLM aesthetic-judge aggregate (0-100), null when the judge is off or
     // unavailable. Surfaced as the average aesthetic score on the scorecard.
     aestheticScore: integer("aesthetic_score"),
+    // Whether the sidecar's lossy voxel-remesh fallback produced this
+    // generation's final mesh (docs/text-to-cad/02 §C). Remesh rate per
+    // tier is a quality KPI on the eval scorecard — today it's invisible.
+    remeshed: boolean("remeshed").notNull().default(false),
+    // Design-brief intermediate the harness derived from the prompt
+    // before writing code (docs/text-to-cad/06). Null when the brief
+    // stage is off or the row predates it.
+    brief: jsonb("brief"),
+    // Per-dimension VLM aesthetic-judge scores backing aestheticScore
+    // (docs/text-to-cad/07). Null when the judge is off or unavailable.
+    aestheticDims: jsonb("aesthetic_dims"),
+    // R2 storage key for the B-rep topology sidecar JSON (docs/
+    // text-to-cad/01 phase 2). Object storage like the render — never
+    // inline — so the history query stays small. Null until produced.
+    topoStorageKey: text("topo_storage_key"),
+    /**
+     * Config fingerprint: WHICH harness configuration produced this row
+     * (per-role models, flags, router verdict) — the treatment beside the
+     * outcome, so quality changes are attributable (lib/cad/fingerprint.ts).
+     */
+    configFingerprint: jsonb("config_fingerprint"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -1439,10 +1527,73 @@ export const cadGenerations = pgTable(
     ),
     index("cad_generations_file_asset_id_idx").on(table.fileAssetId),
     index("cad_generations_parent_idx").on(table.parentGenerationId),
+    index("cad_generations_thread_id_idx").on(table.threadId),
     foreignKey({
       columns: [table.parentGenerationId],
       foreignColumns: [table.id],
       name: "cad_generations_parent_fk",
     }).onDelete("set null"),
+  ]
+);
+
+// Background job rows for text-to-CAD generation (docs/text-to-cad/02
+// §A). Kept separate from cadGenerations so the generation row stays
+// immutable-ish and a generation can own multiple jobs later (e.g. a
+// topopt solve + verify pair as siblings). The worker polls on
+// (status, createdAt); clients tail `progress` over SSE and can
+// disconnect/reconnect freely — client disconnect no longer cancels.
+export const cadJobStatusEnum = pgEnum("cad_job_status", [
+  "queued",
+  "running",
+  "done",
+  "failed",
+  "cancelled",
+]);
+
+export const cadJobs = pgTable(
+  "cad_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    generationId: uuid("generation_id")
+      .notNull()
+      .references(() => cadGenerations.id, { onDelete: "cascade" }),
+    status: cadJobStatusEnum("status").notNull().default("queued"),
+    // Append-only list of CadJobProgressEntry (progress events plus the
+    // terminal done/error record) — the SSE replay log the events
+    // endpoint serves before tailing live ones. The size cap /
+    // prune-on-completion is enforced at the app layer, not here.
+    progress: jsonb("progress")
+      .$type<CadJobProgressEntry[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    // Failure message when status=failed (mirrors cadGenerations.error).
+    error: text("error"),
+    // Cooperative cancellation — the cancel endpoint sets this; the
+    // worker checks it between attempts and flips status to cancelled.
+    cancelRequestedAt: timestamp("cancel_requested_at", {
+      withTimezone: true,
+    }),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    /**
+     * Live build preview: latest in-progress render (base64 PNG) + a
+     * monotonic step counter for cheap change detection. Deliberately NOT in
+     * `progress` — the events route's cursor needs that array append-only,
+     * and a per-exec image would bloat every read-modify-write.
+     */
+    lastSnapshot: text("last_snapshot"),
+    snapshotStep: integer("snapshot_step").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    index("cad_jobs_generation_id_idx").on(table.generationId),
+    // Covers the worker poll (WHERE status = 'queued' ORDER BY created_at).
+    index("cad_jobs_status_created_idx").on(table.status, table.createdAt),
   ]
 );

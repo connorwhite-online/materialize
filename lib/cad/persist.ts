@@ -4,12 +4,19 @@ import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 
 import { db } from "@/lib/db";
-import { cadGenerations, files, projects, projectFiles } from "@/lib/db/schema";
+import {
+  cadGenerations,
+  cadThreads,
+  files,
+  projects,
+  projectFiles,
+} from "@/lib/db/schema";
 import { putObject, generateDownloadUrl } from "@/lib/storage";
 import { buildListingSlug } from "@/lib/filenames";
 import { logError } from "@/lib/logger";
 import { createDraftFileForPrint } from "@/app/actions/files";
 import { generateThreadTitle } from "./title";
+import { harnessConfigFingerprint } from "./fingerprint";
 import type { HarnessResult } from "./harness";
 import type { CadPart } from "./types";
 
@@ -18,6 +25,26 @@ function slugStem(name: string | undefined, fallback: string): string {
   return (
     name?.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "") || fallback
   );
+}
+
+/**
+ * Optional result fields owned by in-flight harness work (design brief +
+ * per-dimension aesthetic scores; both jsonb passthroughs). Read
+ * structurally and defensively so persist compiles and no-ops whether or
+ * not HarnessResult has grown them yet — only set when present, so absent
+ * fields never overwrite a column with null.
+ */
+function resultExtras(
+  result: HarnessResult
+): { aestheticDims?: unknown; brief?: unknown } {
+  const r = result as HarnessResult & {
+    aestheticDims?: unknown;
+    brief?: unknown;
+  };
+  return {
+    ...(r.aestheticDims !== undefined ? { aestheticDims: r.aestheticDims } : {}),
+    ...(r.brief !== undefined ? { brief: r.brief } : {}),
+  };
 }
 
 /**
@@ -54,6 +81,111 @@ export interface PersistedGeneration {
 export interface PersistError {
   error: string;
   generationId: string;
+}
+
+/**
+ * Thread linkage (docs/text-to-cad/05 §A), resolved entirely inside the
+ * persist layer so the action/route/jobs callers stay thread-unaware.
+ * Called only for SUCCESSFUL generations, right before the final row
+ * update:
+ *
+ *   - Root generations create the cadThreads row (title = the freshly
+ *     generated thread title; root/active generation = this one).
+ *   - Revisions inherit the parent's threadId and bump the thread's
+ *     activeGenerationId/updatedAt. For a legacy parent that predates
+ *     cad_threads (threadId NULL), a thread is created lazily adopting
+ *     the parent as root; scripts/backfill-cad-threads.ts covers deeper
+ *     pre-migration chains.
+ *
+ * Best-effort by contract: thread bookkeeping must never fail an
+ * otherwise-good generation — every error is logged and null returned
+ * (the generation simply stays on the legacy read path).
+ */
+async function ensureThreadForGeneration(opts: {
+  userId: string;
+  generationId: string;
+  isRoot: boolean;
+  /** Freshly generated thread title (root turns only; null elsewhere). */
+  title: string | null;
+}): Promise<string | null> {
+  const { userId, generationId, isRoot, title } = opts;
+  try {
+    if (isRoot) {
+      const [thread] = await db
+        .insert(cadThreads)
+        .values({
+          userId,
+          title,
+          rootGenerationId: generationId,
+          activeGenerationId: generationId,
+        })
+        .returning({ id: cadThreads.id });
+      return thread?.id ?? null;
+    }
+
+    // Revision: read this row's parent pointer, then the parent's thread.
+    const [row] = await db
+      .select({
+        threadId: cadGenerations.threadId,
+        parentGenerationId: cadGenerations.parentGenerationId,
+      })
+      .from(cadGenerations)
+      .where(eq(cadGenerations.id, generationId))
+      .limit(1);
+    if (!row) return null;
+
+    let threadId = row.threadId ?? null;
+    if (!threadId && row.parentGenerationId) {
+      const [parent] = await db
+        .select({
+          id: cadGenerations.id,
+          threadId: cadGenerations.threadId,
+          title: cadGenerations.title,
+        })
+        .from(cadGenerations)
+        .where(
+          and(
+            eq(cadGenerations.id, row.parentGenerationId),
+            eq(cadGenerations.userId, userId)
+          )
+        )
+        .limit(1);
+      if (!parent) return null;
+
+      if (parent.threadId) {
+        threadId = parent.threadId;
+      } else {
+        // Legacy parent with no thread: create one lazily, adopting the
+        // parent as root (its title, when it was a root row, comes along).
+        const [thread] = await db
+          .insert(cadThreads)
+          .values({
+            userId,
+            title: parent.title,
+            rootGenerationId: parent.id,
+            activeGenerationId: generationId,
+          })
+          .returning({ id: cadThreads.id });
+        if (!thread) return null;
+        await db
+          .update(cadGenerations)
+          .set({ threadId: thread.id, updatedAt: new Date() })
+          .where(eq(cadGenerations.id, parent.id));
+        return thread.id;
+      }
+    }
+    if (!threadId) return null;
+
+    // A successful revision becomes the thread's active version.
+    await db
+      .update(cadThreads)
+      .set({ activeGenerationId: generationId, updatedAt: new Date() })
+      .where(and(eq(cadThreads.id, threadId), eq(cadThreads.userId, userId)));
+    return threadId;
+  } catch (err) {
+    logError("persist.ensureThreadForGeneration", err);
+    return null;
+  }
 }
 
 /** Mark a generation row failed and return the error envelope. */
@@ -146,6 +278,9 @@ export async function persistGenerationSuccess(opts: {
     format: "stl",
     fileSize: bytes.byteLength,
     displayName,
+    // Studio provenance: invisible on library surfaces while draft
+    // (docs/text-to-cad/05 §B), promoted on Save or print order.
+    source: "studio",
   });
   if ("error" in draft) {
     return persistGenerationFailure(
@@ -177,6 +312,15 @@ export async function persistGenerationSuccess(opts: {
     }
   }
 
+  // Thread linkage last — only reached on success, so failed generations
+  // never mint (or bump) a thread.
+  const threadId = await ensureThreadForGeneration({
+    userId,
+    generationId,
+    isRoot,
+    title,
+  });
+
   await db
     .update(cadGenerations)
     .set({
@@ -186,7 +330,17 @@ export async function persistGenerationSuccess(opts: {
       fileAssetId: draft.fileAssetId,
       renderStorageKey,
       aestheticScore: result.aestheticScore ?? null,
+      // Remesh is a recorded decision (docs/text-to-cad/02 §C) — persist
+      // whether the printable mesh came from the lossy voxel fallback so
+      // the eval scorecard can report a remesh rate.
+      remeshed: result.run?.remeshed ?? false,
+      // Treatment beside the outcome: which harness config ran (attribution).
+      configFingerprint: harnessConfigFingerprint(result.route),
+      ...resultExtras(result),
+      // The thread owns the title going forward (root-row title is the
+      // legacy-read fallback) — set both while readers migrate.
       ...(isRoot ? { title } : {}),
+      ...(threadId ? { threadId } : {}),
       updatedAt: new Date(),
     })
     .where(eq(cadGenerations.id, generationId));
@@ -246,6 +400,9 @@ async function persistAssembly(opts: {
       format: "stl",
       fileSize: bytes.byteLength,
       displayName: `${baseName} — ${p.name}`,
+      // Studio provenance — same library invisibility as single-part
+      // drafts (docs/text-to-cad/05 §B).
+      source: "studio",
     });
     if ("error" in draft) {
       logError("persistAssembly.part", new Error(draft.error));
@@ -326,6 +483,15 @@ async function persistAssembly(opts: {
     }
   }
 
+  // Thread linkage last — only reached on success (zero-part assemblies
+  // bailed above), so failed generations never mint a thread.
+  const threadId = await ensureThreadForGeneration({
+    userId,
+    generationId,
+    isRoot,
+    title,
+  });
+
   await db
     .update(cadGenerations)
     .set({
@@ -336,7 +502,17 @@ async function persistAssembly(opts: {
       projectId,
       renderStorageKey,
       aestheticScore: result.aestheticScore ?? null,
+      // An assembly counts as remeshed when the run was, or ANY part's
+      // mesh came from the voxel fallback (docs/text-to-cad/02 §C).
+      remeshed:
+        (result.run?.remeshed ?? false) ||
+        parts.some((p) => p.remeshed === true),
+      configFingerprint: harnessConfigFingerprint(result.route),
+      ...resultExtras(result),
+      // Thread owns the title going forward; root-row title stays as the
+      // legacy-read fallback.
       ...(isRoot ? { title } : {}),
+      ...(threadId ? { threadId } : {}),
       updatedAt: new Date(),
     })
     .where(eq(cadGenerations.id, generationId));

@@ -48,6 +48,11 @@ import { StlModel } from "./loaders/stl-model";
 import { ObjModel } from "./loaders/obj-model";
 import { ThreeMfModel } from "./loaders/threemf-model";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
+import {
+  buildFaceAdjacency,
+  selectSmoothRegion,
+  type FaceAdjacency,
+} from "./mesh-selection";
 
 type Vec3 = [number, number, number];
 
@@ -80,134 +85,43 @@ interface FaceData {
   positions: number[];
 }
 
-interface FaceAdjacency {
-  normals: Float32Array; // per-triangle unit normal
-  adj: number[][]; // per-triangle edge-adjacent triangle indices
-}
-
 /**
- * Build (and cache on the geometry) per-triangle normals + edge adjacency.
- * STL is non-indexed with float-noisy duplicate verts, so we weld by a
- * quantized position key before deriving shared-edge neighbors.
+ * Adjacency for `geom`, cached on the geometry (built once per model, reused
+ * across picks). The build itself is pure — see mesh-selection.ts.
  */
-function buildFaceAdjacency(geom: BufferGeometry): FaceAdjacency {
+function getFaceAdjacency(geom: BufferGeometry): FaceAdjacency {
   const cached = geom.userData.__faceAdj as FaceAdjacency | undefined;
   if (cached) return cached;
-
-  const pos = geom.attributes.position;
-  const index = geom.index;
-  const triCount = (index ? index.count : pos.count) / 3;
-  const vi = (i: number) => (index ? index.getX(i) : i);
-
-  if (!geom.boundingBox) geom.computeBoundingBox();
-  const size = new Vector3();
-  geom.boundingBox!.getSize(size);
-  const q = (Math.max(size.x, size.y, size.z) || 1) * 1e-5;
-
-  const v = new Vector3();
-  const vid = new Map<string, number>();
-  const canon = new Int32Array(triCount * 3);
-  for (let t = 0; t < triCount; t++) {
-    for (let k = 0; k < 3; k++) {
-      v.fromBufferAttribute(pos, vi(t * 3 + k));
-      const key = `${Math.round(v.x / q)},${Math.round(v.y / q)},${Math.round(
-        v.z / q
-      )}`;
-      let id = vid.get(key);
-      if (id === undefined) {
-        id = vid.size;
-        vid.set(key, id);
-      }
-      canon[t * 3 + k] = id;
-    }
-  }
-
-  const edgeMap = new Map<string, number[]>();
-  const eKey = (x: number, y: number) => (x < y ? `${x}_${y}` : `${y}_${x}`);
-  for (let t = 0; t < triCount; t++) {
-    const c0 = canon[t * 3];
-    const c1 = canon[t * 3 + 1];
-    const c2 = canon[t * 3 + 2];
-    for (const [x, y] of [
-      [c0, c1],
-      [c1, c2],
-      [c2, c0],
-    ]) {
-      const k = eKey(x, y);
-      const arr = edgeMap.get(k);
-      if (arr) arr.push(t);
-      else edgeMap.set(k, [t]);
-    }
-  }
-
-  const adj: number[][] = Array.from({ length: triCount }, () => []);
-  for (const arr of edgeMap.values()) {
-    for (let i = 0; i < arr.length; i++) {
-      for (let j = i + 1; j < arr.length; j++) {
-        adj[arr[i]].push(arr[j]);
-        adj[arr[j]].push(arr[i]);
-      }
-    }
-  }
-
-  const normals = new Float32Array(triCount * 3);
-  const a = new Vector3();
-  const b = new Vector3();
-  const c = new Vector3();
-  const ab = new Vector3();
-  const ac = new Vector3();
-  const tn = new Vector3();
-  for (let t = 0; t < triCount; t++) {
-    a.fromBufferAttribute(pos, vi(t * 3));
-    b.fromBufferAttribute(pos, vi(t * 3 + 1));
-    c.fromBufferAttribute(pos, vi(t * 3 + 2));
-    tn.crossVectors(ab.subVectors(b, a), ac.subVectors(c, a)).normalize();
-    normals[t * 3] = tn.x;
-    normals[t * 3 + 1] = tn.y;
-    normals[t * 3 + 2] = tn.z;
-  }
-
-  const result: FaceAdjacency = { normals, adj };
+  const result = buildFaceAdjacency(
+    geom.attributes.position.array as ArrayLike<number>,
+    geom.index ? (geom.index.array as ArrayLike<number>) : null
+  );
   geom.userData.__faceAdj = result;
   return result;
 }
 
 /**
- * Select the single CONNECTED flat face containing the clicked triangle —
- * flood-fill through edge-adjacent neighbors whose normal stays within ~5° of
- * the seed. Unlike a global coplanar filter, this grabs only the face you
- * clicked (not other faces that happen to share its plane). Coordinates are
- * model-local (mm). Curved faces stop at their curvature; true face identity
- * needs STEP BRep topology (CON-182 v2).
+ * Select the CONNECTED optical face containing the clicked triangle —
+ * flood-fill through edge-adjacent neighbors bounded by feature edges and
+ * neighbor-to-neighbor smoothness (mesh-selection.ts). Curved surfaces are
+ * walked in full (a cylinder barrel is one face); flat faces still stop at
+ * chamfers/corners. Coordinates are model-local (mm). Exact face identity
+ * still needs STEP BRep topology (Phase 2, CON-182 v2). The reported normal
+ * is the clicked (seed) triangle's — a region-wide normal is meaningless on
+ * a curved face.
  */
 function selectConnectedFace(geom: BufferGeometry, faceIndex: number): FaceData {
-  const { normals, adj } = buildFaceAdjacency(geom);
+  const adjacency = getFaceAdjacency(geom);
   const pos = geom.attributes.position;
   const index = geom.index;
   const vi = (i: number) => (index ? index.getX(i) : i);
 
   const sn = new Vector3(
-    normals[faceIndex * 3],
-    normals[faceIndex * 3 + 1],
-    normals[faceIndex * 3 + 2]
+    adjacency.normals[faceIndex * 3],
+    adjacency.normals[faceIndex * 3 + 1],
+    adjacency.normals[faceIndex * 3 + 2]
   );
-  const COS = Math.cos((5 * Math.PI) / 180);
-  const seen = new Set<number>([faceIndex]);
-  const stack = [faceIndex];
-  const tris: number[] = [];
-  const tn = new Vector3();
-  while (stack.length) {
-    const t = stack.pop()!;
-    tris.push(t);
-    for (const nb of adj[t]) {
-      if (seen.has(nb)) continue;
-      tn.set(normals[nb * 3], normals[nb * 3 + 1], normals[nb * 3 + 2]);
-      if (tn.dot(sn) >= COS) {
-        seen.add(nb);
-        stack.push(nb);
-      }
-    }
-  }
+  const { triangles: tris } = selectSmoothRegion(adjacency, faceIndex);
 
   const out: number[] = [];
   const v = new Vector3();
@@ -479,6 +393,13 @@ interface ModelViewerProps {
    * reload/zoom pop. Inspect-only; default off (every other call site unchanged).
    */
   fixedFrame?: boolean;
+  /**
+   * Studio compare overlay: a second STL rendered translucent (~35%) in the
+   * same fixed frame as the primary model, so two versions of a design can
+   * be eyeballed in one view. Only honored with `fixedFrame` (the shared
+   * deterministic framing is what makes the overlay line up).
+   */
+  ghostUrl?: string;
 }
 
 /**
@@ -500,6 +421,29 @@ function FixedFrameModel({
   return (
     <group scale={frame.scale} position={frame.position}>
       {children}
+    </group>
+  );
+}
+
+/**
+ * Translucent overlay of a second model (the studio's compare toggle),
+ * normalized through the same fixed frame as the primary model so both land
+ * in an identical camera/scale. Non-interactive: no raycast hits, no depth
+ * writes, so it never intercepts annotate clicks or occludes the solid model.
+ */
+function GhostModel({ url }: { url: string }) {
+  const geometry = useLoader(STLLoader, url);
+  const frame = useMemo(() => frameTransformFor(geometry), [geometry]);
+  return (
+    <group scale={frame.scale} position={frame.position}>
+      <mesh geometry={geometry} raycast={() => null}>
+        <meshStandardMaterial
+          color="#9ca3af"
+          transparent
+          opacity={0.35}
+          depthWrite={false}
+        />
+      </mesh>
     </group>
   );
 }
@@ -694,6 +638,7 @@ export function ModelViewer({
   annotations,
   onAnnotate,
   fixedFrame = false,
+  ghostUrl,
 }: ModelViewerProps) {
   const isPreview = mode === "preview";
   // Wheel zoom defaults to true unless explicitly disabled. The
@@ -820,6 +765,9 @@ export function ModelViewer({
                     onPick={openPending}
                   />
                 </FixedFrameModel>
+                {/* Compare overlay — an older version ghosted in the same
+                    frame (GhostModel normalizes itself; see above). */}
+                {ghostUrl && <GhostModel url={ghostUrl} />}
               </>
             ) : (
               <Stage

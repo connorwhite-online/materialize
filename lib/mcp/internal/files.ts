@@ -13,6 +13,7 @@ import {
   users,
 } from "@/lib/db/schema";
 import { deleteObject, generateUploadUrl, objectExists } from "@/lib/storage";
+import { notUnsavedStudioDraft } from "@/lib/studio-drafts";
 import { uploadModel } from "@/lib/craftcloud/client";
 import { logError } from "@/lib/logger";
 import { LICENSE_ENUM_VALUES, type LicenseId } from "@/lib/licenses";
@@ -609,7 +610,10 @@ export async function listFilesForUser(
     })
     .from(fileAssets)
     .innerJoin(files, eq(fileAssets.fileId, files.id))
-    .where(eq(files.userId, userId))
+    // Library listing: unsaved text-to-CAD drafts stay studio-only
+    // (docs/text-to-cad/05 §B). By-id MCP lookups intentionally don't
+    // filter — drafts remain printable/orderable by their owner.
+    .where(and(eq(files.userId, userId), notUnsavedStudioDraft()))
     .orderBy(desc(fileAssets.createdAt));
 
   return rows.map((r) => ({

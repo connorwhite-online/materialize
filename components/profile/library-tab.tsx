@@ -12,6 +12,7 @@ import {
   projectPhotos,
 } from "@/lib/db/schema";
 import { eq, and, asc, desc, inArray, sql } from "drizzle-orm";
+import { notUnsavedStudioDraft } from "@/lib/studio-drafts";
 import { CollectionSection } from "./collection-section";
 import {
   LibraryFileCard,
@@ -39,7 +40,9 @@ type LibraryItem = LibraryFileCardItem;
 const LIBRARY_MAX_FILES = 500;
 
 export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
-  const fileConditions = [eq(files.userId, userId)];
+  // Unsaved text-to-CAD drafts live in the studio, not the library —
+  // even for the owner (docs/text-to-cad/05 §B).
+  const fileConditions = [eq(files.userId, userId), notUnsavedStudioDraft()];
   if (!isOwner) {
     fileConditions.push(eq(files.status, "published"));
     fileConditions.push(eq(files.visibility, "public"));
