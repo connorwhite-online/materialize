@@ -78,6 +78,20 @@ def capsule(P, a, b, r):
     return np.linalg.norm(P - (a + t * ab), axis=1) - r
 
 
+def sq_prism(P, a, b, n, z0, z1):
+    """Superellipse prism (|x/a|^n + |y/b|^n = 1 cross-section, z-extruded) —
+    the measured plan-form language of premium enclosures (see
+    docs/text-to-cad/design-studies/modem-works.md): n~4.5 reads as a
+    squircle desk device, n~1.7-2.2 as a handheld lens/pebble. Use this for
+    organic product shells INSTEAD of a box with corner fillets — a
+    superellipse has no straight-to-arc tangency breaks, which is what makes
+    the form read as designed. Pseudo-distance (monotone, ~mm near the
+    surface); pair with offset_field for uniform thin walls."""
+    r = (np.abs(P[:, 0] / a) ** n + np.abs(P[:, 1] / b) ** n) ** (1.0 / n)
+    d2 = (r - 1.0) * min(a, b)
+    return np.maximum(d2, np.maximum(P[:, 2] - z1, z0 - P[:, 2]))
+
+
 def cyl_z(P, x, y, r, z0, z1):
     """Flat-capped vertical cylinder (Z axis) — for exact bosses + bolt holes.
     Pass z0<z1 for a boss; extend past the body for a through-hole."""
