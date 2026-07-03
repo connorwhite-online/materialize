@@ -546,6 +546,31 @@ def _process_shape(
 
         entry["validation"]["isWatertight"] = bool(mesh.is_watertight)
         entry["validation"]["isManifold"] = bool(mesh.is_winding_consistent)
+        # Fragment gate: a mesh can be watertight and still contain floating
+        # debris — disconnected islands that print as loose chips (each island
+        # closed = whole mesh "watertight"). One exported part = ONE fused
+        # solid; separate pieces belong in the parts dict.
+        try:
+            bodies = mesh.split(only_watertight=False)
+            body_count = max(1, len(bodies))
+        except Exception:  # noqa: BLE001
+            bodies = []
+            body_count = 1
+        entry["validation"]["bodyCount"] = int(body_count)
+        if body_count > 1 and not entry["error"]:
+            try:
+                vols = sorted(
+                    (abs(float(b.volume)) for b in bodies), reverse=True
+                )[:5]
+                vol_s = ", ".join(f"{v:.0f}" for v in vols)
+            except Exception:  # noqa: BLE001
+                vol_s = "?"
+            entry["error"] = (
+                f"part contains {body_count} disconnected solids (volumes "
+                f"{vol_s} mm^3) — every exported part must be one fused "
+                "solid: union intentional geometry into the body, delete "
+                "stray debris, or export separate pieces via the parts dict"
+            )
         ext = mesh.extents
         entry["geometry"] = {
             "dimensions": {
@@ -689,6 +714,7 @@ def _build_run_payload(
             payload["ok"] = (
                 entry["validation"]["isSolid"]
                 and entry["validation"]["isWatertight"]
+                and entry["validation"].get("bodyCount", 1) == 1
             )
             if checks and mesh is not None:
                 payload["checks"] = _run_checks(mesh, checks)
@@ -711,6 +737,7 @@ def _build_run_payload(
                 all_ok = all_ok and (
                     entry["validation"]["isSolid"]
                     and entry["validation"]["isWatertight"]
+                    and entry["validation"].get("bodyCount", 1) == 1
                 )
             # Top-level mirrors the first part for single-part consumers.
             first = parts[0]

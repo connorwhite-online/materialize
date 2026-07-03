@@ -19,6 +19,12 @@ export interface CadValidation {
   isSolid: boolean;
   isWatertight: boolean;
   isManifold: boolean;
+  /**
+   * Connected-solid count for the exported mesh (sidecar fragment gate).
+   * 1 = one fused body; >1 means floating debris or un-unioned features —
+   * the sidecar fails the part with a diagnosis. Absent on old payloads.
+   */
+  bodyCount?: number;
 }
 
 /** One member of a multi-part assembly. */

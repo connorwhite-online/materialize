@@ -42,6 +42,32 @@ export function frameTransformFor(geometry: THREE.BufferGeometry): FrameTransfor
   };
 }
 
+/**
+ * Shared frame for a multi-part assembly: fit the UNION of all part bounding
+ * boxes (parts stay in their native assembly coordinates). Hiding a part must
+ * not recenter the rest — the frame is computed from all parts once, so
+ * isolation is pure visibility (MTR-174).
+ */
+export function frameTransformForAll(
+  geometries: THREE.BufferGeometry[]
+): FrameTransform {
+  const union = new THREE.Box3();
+  for (const g of geometries) {
+    if (!g.boundingBox) g.computeBoundingBox();
+    if (g.boundingBox) union.union(g.boundingBox);
+  }
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  union.getSize(size);
+  union.getCenter(center);
+  const longest = Math.max(size.x, size.y, size.z) || 1;
+  const scale = STUDIO_TARGET_SIZE / longest;
+  return {
+    scale,
+    position: [-center.x * scale, -center.y * scale, -center.z * scale],
+  };
+}
+
 /** Shared fit: centroid of the bbox + uniform scale to STUDIO_TARGET_SIZE. */
 function fitMetrics(geometry: THREE.BufferGeometry): {
   center: THREE.Vector3;

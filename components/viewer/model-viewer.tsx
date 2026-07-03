@@ -14,6 +14,7 @@ import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import {
   STUDIO_CAMERA,
   frameTransformFor,
+  frameTransformForAll,
 } from "@/components/cad/studio-frame";
 import { PointCloudScene } from "@/components/cad/materializing-blob";
 import {
@@ -400,6 +401,13 @@ interface ModelViewerProps {
    * deterministic framing is what makes the overlay line up).
    */
   ghostUrl?: string;
+  /**
+   * Multi-part assembly (MTR-174): render every part in its native assembly
+   * coordinates inside ONE shared frame (union bounding box). Isolation is
+   * pure visibility — hiding parts never recenters the rest. Honored only
+   * with `fixedFrame` + `inspect`; takes precedence over `modelUrl`.
+   */
+  assemblyParts?: { url: string; name: string; visible: boolean }[];
 }
 
 /**
@@ -624,6 +632,136 @@ function InspectModel({
   );
 }
 
+/** Subtle per-part shades so assembly parts read as distinct pieces. */
+const ASSEMBLY_SHADES = ["#a0a0a0", "#8f979f", "#b3afa7", "#9aa6ab"];
+
+/**
+ * Multi-part assembly in ONE shared frame (MTR-174): every part keeps its
+ * native assembly-position coordinates; the frame fits the UNION bounding box
+ * of all parts (visible or not), so isolating a part just hides the others —
+ * no recenter, no reframe. Cross-section clipping and face annotation work on
+ * every visible part; the stencil cap + edge guides are single-mesh tools and
+ * stay off here.
+ */
+function InspectAssembly({
+  parts,
+  planes,
+  onBounds,
+  annotateMode,
+  target,
+  annotations,
+  pending,
+  onPick,
+}: {
+  parts: { url: string; name: string; visible: boolean }[];
+  planes: Plane[] | undefined;
+  onBounds: (b: InspectBounds) => void;
+  annotateMode?: boolean;
+  target: "face" | "edge";
+  annotations?: ViewerAnnotation[];
+  pending?: PickResult | null;
+  onPick?: (pick: {
+    result: PickResult;
+    clientX: number;
+    clientY: number;
+  }) => void;
+}) {
+  const urls = parts.map((p) => p.url);
+  const geometries = useLoader(STLLoader, urls);
+  const frame = useMemo(() => frameTransformForAll(geometries), [geometries]);
+  const groupRef = useRef<THREE.Group>(null);
+  const done = useRef(false);
+
+  // Same click = select / drag = rotate gate as InspectModel; the picked
+  // mesh's own geometry is used, so selection works on any visible part.
+  const handleClick = (e: ThreeEvent<MouseEvent>) => {
+    if (!annotateMode || !onPick || e.delta > 4) return;
+    e.stopPropagation();
+    const mesh = e.object as THREE.Mesh;
+    const g = mesh.geometry as BufferGeometry;
+    const local = mesh.worldToLocal(e.point.clone());
+    let result: PickResult | null = null;
+    if (target === "edge") {
+      result = selectNearestEdge(g, local);
+    } else if (e.faceIndex != null) {
+      result = { kind: "face", ...selectConnectedFace(g, e.faceIndex) };
+    }
+    if (!result) return;
+    onPick({
+      result,
+      clientX: e.nativeEvent.clientX,
+      clientY: e.nativeEvent.clientY,
+    });
+  };
+
+  // Measure once from ALL parts (independent of visibility) so the section
+  // plane range, grid, and dimensions readout describe the whole assembly
+  // and stay put when parts are hidden.
+  useFrame(() => {
+    if (done.current || !groupRef.current) return;
+    const group = groupRef.current;
+    group.updateWorldMatrix(true, true);
+    const world = new Box3().setFromObject(group);
+    if (!isFinite(world.min.y) || world.isEmpty()) return;
+
+    const mmBox = new Box3();
+    for (const g of geometries) {
+      if (!g.boundingBox) g.computeBoundingBox();
+      if (g.boundingBox) mmBox.union(g.boundingBox);
+    }
+    const mm = new Vector3();
+    mmBox.getSize(mm);
+    const worldSize = new Vector3();
+    world.getSize(worldSize);
+    const scale = mm.x > 0 ? worldSize.x / mm.x : 1;
+
+    onBounds({
+      mm: { x: mm.x, y: mm.y, z: mm.z },
+      worldMinY: world.min.y,
+      worldMaxY: world.max.y,
+      center: [
+        (world.min.x + world.max.x) / 2,
+        world.min.y,
+        (world.min.z + world.max.z) / 2,
+      ],
+      footprint: { x: worldSize.x, z: worldSize.z },
+      scale,
+    });
+    done.current = true;
+  });
+
+  return (
+    <group scale={frame.scale} position={frame.position}>
+      <group ref={groupRef} onClick={annotateMode ? handleClick : undefined}>
+        {parts.map((p, i) => (
+          <group key={p.url} visible={p.visible}>
+            <StlModel
+              url={p.url}
+              color={ASSEMBLY_SHADES[i % ASSEMBLY_SHADES.length]}
+              clippingPlanes={planes}
+            />
+          </group>
+        ))}
+
+        {/* Committed annotation highlights (model-space mm = part space). */}
+        {(annotations ?? []).map((a) =>
+          a.kind === "edge" ? (
+            <EdgeHighlight key={a.id} a={a.edge.a} b={a.edge.b} />
+          ) : (
+            <FaceHighlight key={a.id} positions={a.positions} />
+          )
+        )}
+        {pending?.kind === "face" && pending.positions.length > 0 && (
+          <FaceHighlight positions={pending.positions} color="#f59e0b" />
+        )}
+        {pending?.kind === "edge" && (
+          <EdgeHighlight a={pending.edge.a} b={pending.edge.b} color="#f59e0b" />
+        )}
+      </group>
+    </group>
+  );
+}
+
 export function ModelViewer({
   modelUrl,
   format,
@@ -639,6 +777,7 @@ export function ModelViewer({
   onAnnotate,
   fixedFrame = false,
   ghostUrl,
+  assemblyParts,
 }: ModelViewerProps) {
   const isPreview = mode === "preview";
   // Wheel zoom defaults to true unless explicitly disabled. The
@@ -752,10 +891,9 @@ export function ModelViewer({
               // is self-lit, so a touch of ambient is all the rig needs.
               <>
                 <ambientLight intensity={0.7} />
-                <FixedFrameModel url={modelUrl}>
-                  <InspectModel
-                    modelUrl={modelUrl}
-                    color={materialColor}
+                {assemblyParts && assemblyParts.length > 1 ? (
+                  <InspectAssembly
+                    parts={assemblyParts}
                     planes={planes}
                     onBounds={setBounds}
                     annotateMode={annotateMode}
@@ -764,7 +902,21 @@ export function ModelViewer({
                     pending={pending?.result ?? null}
                     onPick={openPending}
                   />
-                </FixedFrameModel>
+                ) : (
+                  <FixedFrameModel url={modelUrl}>
+                    <InspectModel
+                      modelUrl={modelUrl}
+                      color={materialColor}
+                      planes={planes}
+                      onBounds={setBounds}
+                      annotateMode={annotateMode}
+                      target={target}
+                      annotations={annotations}
+                      pending={pending?.result ?? null}
+                      onPick={openPending}
+                    />
+                  </FixedFrameModel>
+                )}
                 {/* Compare overlay — an older version ghosted in the same
                     frame (GhostModel normalizes itself; see above). */}
                 {ghostUrl && <GhostModel url={ghostUrl} />}

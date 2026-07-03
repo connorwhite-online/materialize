@@ -46,6 +46,11 @@ import { diffParams, extractParams } from "@/components/cad/param-diff";
 import type { CadStreamEvent, CadProgressEvent } from "@/lib/cad/types";
 // Type-only: lib/cad/brief is server-only at runtime; the type is erased.
 import type { CadBrief } from "@/lib/cad/brief";
+// Plain data tables (no server-only marker) — safe in the client bundle.
+import {
+  componentCutoutFor,
+  devBoardFor,
+} from "@/lib/cad/knowledge/components";
 import type { ViewerAnnotation } from "@/components/viewer/model-viewer";
 import {
   CAD_FEEDBACK_TAGS,
@@ -1179,12 +1184,29 @@ export function TextToCadStudio({
                 <Suspense fallback={<ViewerSkeleton label="Loading model…" />}>
                   {/* Compare mode swaps the solid model for the thread's
                       latest and ghosts the viewed (older) revision on top;
-                      both land in the same deterministic fixed frame. */}
+                      both land in the same deterministic fixed frame.
+                      Assemblies (MTR-174) render every part in assembly
+                      position in ONE shared frame; part tabs below isolate
+                      by hiding the others — the key stays per-turn so
+                      switching tabs never remounts/reframes the canvas. */}
                   <ModelViewer
                     key={
                       compareBaseAssetId
                         ? `${compareBaseAssetId}::${activeAssetId}`
-                        : activeAssetId
+                        : viewedParts.length > 1
+                          ? `asm::${viewedTurn?.fileAssetId}`
+                          : activeAssetId
+                    }
+                    assemblyParts={
+                      viewedParts.length > 1 && !compareBaseAssetId
+                        ? viewedParts.map((p) => ({
+                            url: `/api/files/preview/${p.fileAssetId}`,
+                            name: p.name,
+                            visible:
+                              selectedPartId === null ||
+                              p.fileAssetId === selectedPartId,
+                          }))
+                        : undefined
                     }
                     modelUrl={`/api/files/preview/${
                       compareBaseAssetId ?? activeAssetId
@@ -1279,20 +1301,32 @@ export function TextToCadStudio({
             </div>
           </div>
 
-          {/* Assembly part selector — switch which part the viewer/actions
-              target. Shown only for multi-part builds. */}
+          {/* Assembly view tabs (MTR-174): default = every part in assembly
+              position; a part tab isolates it by hiding the others (same
+              frame — no recenter). Print/Download/Save follow the selection
+              (primary part while viewing All). */}
           {!generating && viewedParts.length > 1 && (
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="text-xs text-muted-foreground">
-                {viewedParts.length} parts:
-              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedPartId(null)}
+                aria-pressed={selectedPartId === null}
+                className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                  selectedPartId === null
+                    ? "border-foreground/30 bg-foreground/5 text-foreground"
+                    : "border-foreground/10 text-muted-foreground hover:bg-foreground/5"
+                }`}
+              >
+                All parts
+              </button>
               {viewedParts.map((p) => {
-                const isActive = p.fileAssetId === activeAssetId;
+                const isActive = p.fileAssetId === selectedPartId;
                 return (
                   <button
                     key={p.fileAssetId}
                     type="button"
                     onClick={() => setSelectedPartId(p.fileAssetId)}
+                    aria-pressed={isActive}
                     className={`rounded-full border px-3 py-1 text-xs transition-colors ${
                       isActive
                         ? "border-foreground/30 bg-foreground/5 text-foreground"
@@ -2066,6 +2100,46 @@ const BOX_AXES = ["width", "depth", "height"] as const;
  * the composer; the current (edited) value rides along with the generate
  * request whether the user hits this card's button or just sends normally.
  */
+/** Axis-code faces ("+Y") → words a person would use (MTR-194). */
+const FACE_WORDS: Record<string, string> = {
+  "+z": "the top",
+  "-z": "the underside",
+  "+y": "a long side",
+  "-y": "a long side",
+  "+x": "an end",
+  "-x": "an end",
+};
+
+function humanFace(face?: string): string | null {
+  if (!face) return null;
+  return FACE_WORDS[face.trim().toLowerCase()] ?? null;
+}
+
+const prettyName = (s: string) => s.replace(/_+/g, " ");
+
+/** "port · micro-usb · +Y face" → "micro-USB opening on a long side". */
+function interfaceSentence(it: CadBrief["interfaces"][number]): string {
+  const cut = it.std ? componentCutoutFor(it.std) : null;
+  const what = cut?.label ?? it.std;
+  let kind: string;
+  if (it.type === "vent") kind = "vents";
+  else if (it.type === "mount") kind = what ? `${what} mounting` : "mounting";
+  else kind = what ? `${what} opening` : `${it.type} opening`;
+  const loc = humanFace(it.face);
+  return loc ? `${kind} on ${loc}` : kind;
+}
+
+function componentSentence(c: CadBrief["components"][number]): string {
+  const board = devBoardFor(c.name);
+  const dims = `${c.box[0]} × ${c.box[1]} × ${c.box[2]} mm`;
+  const base = board
+    ? `Sized for a standard ${board.label} (${dims})`
+    : `Fits ${prettyName(c.name)} (${dims})`;
+  return c.clearance != null
+    ? `${base} with ${c.clearance} mm breathing room`
+    : base;
+}
+
 function BriefCard({
   brief,
   onChange,
@@ -2079,6 +2153,10 @@ function BriefCard({
   onGenerate: () => void;
   canGenerate: boolean;
 }) {
+  // The raw millimeter inputs still exist, but behind a disclosure — the
+  // default card speaks sentences, not bounding boxes (MTR-194).
+  const [adjustOpen, setAdjustOpen] = useState(false);
+
   function patchComponent(
     idx: number,
     patch: Partial<CadBrief["components"][number]>
@@ -2089,6 +2167,17 @@ function BriefCard({
         i === idx ? { ...c, ...patch } : c
       ),
     });
+  }
+
+  const chosenFor = (q: NonNullable<CadBrief["questions"]>[number]) =>
+    brief.decisions?.find((d) => d.q === q.question)?.a ?? q.default ?? null;
+
+  function choose(
+    q: NonNullable<CadBrief["questions"]>[number],
+    label: string
+  ) {
+    const rest = (brief.decisions ?? []).filter((d) => d.q !== q.question);
+    onChange({ ...brief, decisions: [...rest, { q: q.question, a: label }] });
   }
 
   const numberInput =
@@ -2112,7 +2201,84 @@ function BriefCard({
         </button>
       </div>
 
+      {/* Plain-language summary — what a person needs to know, in sentences. */}
+      {(brief.summary?.length || brief.components.length > 0) && (
+        <ul className="mt-2 space-y-1 text-sm">
+          {(brief.summary?.length
+            ? brief.summary
+            : brief.components.map(componentSentence)
+          ).map((line, i) => (
+            <li key={i} className="flex gap-2">
+              <span
+                aria-hidden
+                className="mt-[7px] size-1 shrink-0 rounded-full bg-foreground/40"
+              />
+              <span>{line}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* Open choices — tap to decide; the default is pre-selected. */}
+      {(brief.questions ?? []).map((q) => {
+        const chosen = chosenFor(q);
+        return (
+          <div key={q.id} className="mt-3">
+            <p className="text-sm">{q.question}</p>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {q.options.map((o) => {
+                const selected = chosen === o.label;
+                return (
+                  <button
+                    key={o.label}
+                    type="button"
+                    onClick={() => choose(q, o.label)}
+                    aria-pressed={selected}
+                    title={o.detail}
+                    className={`cursor-pointer rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                      selected
+                        ? "border-foreground bg-foreground text-background"
+                        : "border-foreground/15 bg-foreground/5 hover:border-foreground/30"
+                    }`}
+                  >
+                    {o.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Humanized facts line — openings + overall size, no axis codes. */}
+      {(brief.interfaces.length > 0 || brief.envelope) && (
+        <p className="mt-2.5 text-xs text-muted-foreground">
+          {[
+            brief.interfaces.length > 0
+              ? brief.interfaces.map(interfaceSentence).join(" · ")
+              : null,
+            brief.envelope
+              ? `fits within ${brief.envelope.max.join(" × ")} mm`
+              : null,
+          ]
+            .filter(Boolean)
+            .join(" — ")}
+        </p>
+      )}
+
+      {/* Millimeter details, demoted but never hidden from those who want them. */}
       {brief.components.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setAdjustOpen((v) => !v)}
+          aria-expanded={adjustOpen}
+          className="mt-2 cursor-pointer text-xs font-medium text-muted-foreground underline-offset-2 hover:underline"
+        >
+          {adjustOpen ? "Hide dimensions" : "Adjust dimensions"}
+        </button>
+      )}
+
+      {adjustOpen && brief.components.length > 0 && (
         <div className="mt-2 space-y-1.5">
           {brief.components.map((c, ci) => (
             <div
@@ -2120,7 +2286,7 @@ function BriefCard({
               className="rounded-lg border border-foreground/10 p-2"
             >
               <span className="block truncate text-xs font-medium">
-                {c.name}
+                {prettyName(c.name)}
               </span>
               <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5">
                 <span className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -2173,32 +2339,6 @@ function BriefCard({
             </div>
           ))}
         </div>
-      )}
-
-      {brief.interfaces.length > 0 && (
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <span className="text-xs text-muted-foreground">Interfaces:</span>
-          {brief.interfaces.map((it, i) => (
-            <span
-              key={i}
-              className="inline-flex items-center rounded-full border border-foreground/10 bg-foreground/5 px-2 py-0.5 text-xs"
-            >
-              {[it.type, it.std, it.face ? `${it.face} face` : null]
-                .filter(Boolean)
-                .join(" · ")}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {brief.envelope && (
-        <p className="mt-2 text-xs text-muted-foreground">
-          Envelope: fits within{" "}
-          <span className="tabular-nums">
-            {brief.envelope.max.join(" × ")}
-          </span>{" "}
-          mm
-        </p>
       )}
 
       <div className="mt-3">
