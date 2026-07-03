@@ -48,6 +48,8 @@ export async function POST(request: Request) {
     parentGenerationId?: string;
     name?: string;
     images?: PromptImage[];
+    /** User-reviewed design brief from the studio's brief card. */
+    brief?: unknown;
   };
   try {
     body = await request.json();
@@ -140,6 +142,11 @@ export async function POST(request: Request) {
       priorSourceCode,
       priorFeedback,
       priorBrief,
+      // Size-capped: the harness zod-validates; this only blocks abuse.
+      providedBrief:
+        body.brief != null && JSON.stringify(body.brief).length <= 20_000
+          ? body.brief
+          : undefined,
     }).catch((error) => logError("api/cad/generate.job", error))
   );
 

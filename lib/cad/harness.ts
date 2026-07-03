@@ -85,6 +85,12 @@ export interface HarnessInput {
    */
   priorBrief?: unknown;
   /**
+   * A brief the user reviewed/edited BEFORE generating (the studio's brief
+   * card). When valid it replaces the brief step entirely — user-confirmed
+   * numbers beat a fresh model guess. Fresh builds only.
+   */
+  providedBrief?: unknown;
+  /**
    * Called as the loop advances so the caller can stream status to the UI.
    * Best-effort and synchronous — the harness never awaits it and a throw
    * here must not derail a generation.
@@ -346,7 +352,11 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
   // failure and the run proceeds as before. Revisions never rebuild it; they
   // carry input.priorBrief through instead.
   let brief: CadBrief | null = null;
-  if (useModel && !input.priorSourceCode && briefStepEnabled()) {
+  if (!input.priorSourceCode && input.providedBrief != null) {
+    const parsed = cadBriefSchema.safeParse(input.providedBrief);
+    if (parsed.success) brief = parsed.data;
+  }
+  if (brief === null && useModel && !input.priorSourceCode && briefStepEnabled()) {
     const briefModel = modelForRole("brief");
     brief = await timed("brief", briefModel, () =>
       buildBrief({
@@ -490,6 +500,12 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
         allowRemesh: true,
       });
       if (remeshed.ok) lastRun = remeshed;
+    }
+
+    // Live preview: stream the attempt's render so the studio shows the
+    // part taking shape instead of a spinner (kept out of the progress log).
+    if (lastRun.renderPng) {
+      emit({ type: "snapshot", render: lastRun.renderPng, step: attempt });
     }
 
     const grade = gradeRun(lastRun);

@@ -1575,6 +1575,14 @@ export const cadJobs = pgTable(
     }),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
+    /**
+     * Live build preview: latest in-progress render (base64 PNG) + a
+     * monotonic step counter for cheap change detection. Deliberately NOT in
+     * `progress` — the events route's cursor needs that array append-only,
+     * and a per-exec image would bloat every read-modify-write.
+     */
+    lastSnapshot: text("last_snapshot"),
+    snapshotStep: integer("snapshot_step").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

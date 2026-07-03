@@ -60,6 +60,52 @@ export async function classifyCadRequest(
   }
 }
 
+/**
+ * Best-of-N (docs/text-to-cad/07): sample N independent scripted generations
+ * for a FRESH build and keep the judge's favorite — codegen variance is high,
+ * and selection converts it into quality at linear cost. Default 1 (off);
+ * CAD_BEST_OF=2|3 enables. Revisions are excluded (they converge on a prior,
+ * variance is the enemy there), as is the agentic path (already iterative).
+ */
+function bestOfN(): number {
+  const n = Number(process.env.CAD_BEST_OF);
+  return Number.isFinite(n) ? Math.max(1, Math.min(3, Math.floor(n))) : 1;
+}
+
+/** Judge-selected winner among candidates; first ok result as tiebreak. */
+async function runBestOf(
+  input: HarnessInput,
+  n: number
+): Promise<HarnessResult> {
+  // Only the first candidate streams progress — N interleaved event streams
+  // would render as UI noise; the others run silently.
+  const runs = await Promise.all(
+    Array.from({ length: n }, (_, i) =>
+      runHarness(i === 0 ? input : { ...input, onProgress: undefined }).catch(
+        () => null
+      )
+    )
+  );
+  const ok = runs.filter(
+    (r): r is HarnessResult => !!r && r.ok && !!r.run
+  );
+  if (ok.length === 0) {
+    // All failed — surface the streaming candidate's failure (or any).
+    return (
+      runs.find((r): r is HarnessResult => !!r) ?? {
+        ok: false,
+        sourceCode: "",
+        attempts: 0,
+        error: "generation failed",
+      }
+    );
+  }
+  const winner = ok.reduce((best, r) =>
+    (r.aestheticScore ?? -1) > (best.aestheticScore ?? -1) ? r : best
+  );
+  return winner;
+}
+
 function agenticEnabled(): boolean {
   return (
     hasModelCredentials() &&
@@ -88,8 +134,13 @@ export async function runCadGeneration(
     const useGenerative =
       generativeEnabled() &&
       (await shouldUseGenerative(input.prompt, input.signal));
-    const result = await (useGenerative ? generative() : runHarness(input));
-    return { ...result, route: "legacy" };
+    const n = !input.priorSourceCode && !useGenerative ? bestOfN() : 1;
+    const result = await (useGenerative
+      ? generative()
+      : n > 1
+        ? runBestOf(input, n)
+        : runHarness(input));
+    return { ...result, route: n > 1 ? `legacy-bestof${n}` : "legacy" };
   }
 
   const kind = await classifyCadRequest(input.prompt, input.signal);
@@ -105,6 +156,10 @@ export async function runCadGeneration(
       logError("runCadGeneration:agentic-fallback", err);
       return { ...(await runHarness(input)), route: "complex-fallback" };
     }
+  }
+  const n = !input.priorSourceCode ? bestOfN() : 1;
+  if (n > 1) {
+    return { ...(await runBestOf(input, n)), route: `simple-bestof${n}` };
   }
   return { ...(await runHarness(input)), route: "simple" };
 }

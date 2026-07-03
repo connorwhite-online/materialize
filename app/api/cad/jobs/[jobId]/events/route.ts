@@ -106,6 +106,7 @@ export async function GET(
 
       const startedAt = Date.now();
       let lastBeat = Date.now();
+      let sentSnapshotStep = 0;
       while (
         !TERMINAL_STATUSES.has(status) &&
         !closed &&
@@ -122,6 +123,7 @@ export async function GET(
                 error: cadJobs.error,
                 startedAt: cadJobs.startedAt,
                 createdAt: cadJobs.createdAt,
+                snapshotStep: cadJobs.snapshotStep,
               })
               .from(cadJobs)
               .where(eq(cadJobs.id, jobId))
@@ -131,6 +133,23 @@ export async function GET(
             status = row.status;
             entries = row.progress ?? [];
             jobError = row.error;
+            // Live preview: the render lives in its own column (not the
+            // append-only progress log); fetch it only when the step moved.
+            if (row.snapshotStep > sentSnapshotStep) {
+              sentSnapshotStep = row.snapshotStep;
+              const [snap] = await db
+                .select({ lastSnapshot: cadJobs.lastSnapshot })
+                .from(cadJobs)
+                .where(eq(cadJobs.id, jobId))
+                .limit(1);
+              if (snap?.lastSnapshot) {
+                sendEvent({
+                  type: "snapshot",
+                  render: snap.lastSnapshot,
+                  step: row.snapshotStep,
+                });
+              }
+            }
             // Reap-on-read: a non-terminal job whose execution window has
             // provably passed died without a terminal write — mark it failed
             // so this tail (and every future reattach) closes instead of

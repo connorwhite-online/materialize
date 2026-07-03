@@ -108,6 +108,8 @@ export interface ExecuteCadJobInput {
   priorFeedback?: PriorFeedback | null;
   /** Parent's persisted design brief (jsonb) — revisions inherit + patch it. */
   priorBrief?: unknown;
+  /** User-reviewed brief from the studio's brief card (fresh builds only). */
+  providedBrief?: unknown;
 }
 
 /**
@@ -146,7 +148,27 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
       .catch((err) => logError("executeCadJob.progress", err));
     return writeChain;
   };
+  // Live previews bypass the append-only progress log (SSE cursor + size):
+  // latest render only, in a dedicated column the events route polls.
+  let snapshotChain: Promise<void> = Promise.resolve();
+  const writeSnapshot = (render: string, step: number) => {
+    snapshotChain = snapshotChain.then(() =>
+      db
+        .update(cadJobs)
+        .set({ lastSnapshot: render, snapshotStep: step, updatedAt: new Date() })
+        .where(eq(cadJobs.id, jobId))
+        .then(
+          () => undefined,
+          () => undefined // best-effort — a lost preview is cosmetic
+        )
+    );
+  };
+
   const onProgress = (event: CadJobProgressEntry) => {
+    if (event.type === "snapshot") {
+      writeSnapshot(event.render, event.step);
+      return;
+    }
     buffer.push(event);
     const elapsed = Date.now() - lastFlush;
     if (elapsed >= FLUSH_INTERVAL_MS) {
@@ -242,6 +264,7 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
       priorSourceCode: input.priorSourceCode ?? null,
       priorFeedback: input.priorFeedback ?? null,
       priorBrief: input.priorBrief,
+      providedBrief: input.providedBrief,
       images,
       signal: controller.signal,
       onProgress,

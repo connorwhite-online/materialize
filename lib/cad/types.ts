@@ -77,6 +77,18 @@ export type CadProgressEvent =
       type: "queued";
     }
   | {
+      /**
+       * Live build preview: the latest render of the in-progress solid.
+       * NOT persisted in cadJobs.progress (payload size) — carried in the
+       * cadJobs.lastSnapshot column and re-emitted by the events route.
+       */
+      type: "snapshot";
+      /** Base64 PNG (no data: prefix). */
+      render: string;
+      /** Monotonic step counter for cheap change detection. */
+      step: number;
+    }
+  | {
       type: "phase";
       /** `generating` = model writing code; `executing` = sidecar running it. */
       phase: "generating" | "executing";

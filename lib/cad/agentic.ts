@@ -446,6 +446,10 @@ export async function runAgenticHarness(
             })
           ),
         ];
+        // Live preview for the studio: latest solid, per exec.
+        if (res.renderPng) {
+          emit({ type: "snapshot", render: res.renderPng, step: execCount });
+        }
         // Auto-attach the render whenever the exec changed the solid (doc 03
         // open question 4's default) so the agent can't build blind.
         if (res.renderPng) blocks.push(imageBlock(res.renderPng));

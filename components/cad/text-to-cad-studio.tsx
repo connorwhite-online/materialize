@@ -1908,6 +1908,9 @@ function describeEvent(ev: CadProgressEvent): {
   switch (ev.type) {
     case "queued":
       return { text: "Queued", sub: null };
+    case "snapshot":
+      // Rendered as the live preview image, not as status copy.
+      return { text: "Taking shape", sub: null };
     case "phase":
       if (ev.phase === "generating") {
         return ev.attempt > 1
