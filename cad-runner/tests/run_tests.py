@@ -237,6 +237,34 @@ def test_transforms_move_primitives():
     assert d[0] < 0, "rotate_z(90) did not carry (10,0,0) onto (0,10,0)"
 
 
+def test_split_shell_printed_fit():
+    from sdf_kit import box, smin, offset_field, subtract, split_shell, to_mesh
+    import numpy as np
+
+    def cavity(P):
+        return smin(box(P, (0, 0, 8.0), (31, 21, 6)),
+                    box(P, (0, 0, 20.5), (25, 15, 6.5)), 14.0)
+
+    def body(P):
+        return np.maximum(subtract(offset_field(cavity(P), 2.4), cavity(P)),
+                          -P[:, 2])
+
+    fit_gap = 0.25
+    bottom, top = split_shell(body, cavity, 16.0, fit_gap=fit_gap)
+    mb = to_mesh(bottom, (-40, -30, -3), (40, 30, 34), pitch=0.55)
+    mt = to_mesh(top, (-40, -30, -3), (40, 30, 34), pitch=0.55)
+    assert mb.is_watertight and mt.is_watertight
+    # printed-fit clearance on the lip faces + no interpenetration anywhere
+    rng = np.random.default_rng(3)
+    pts = rng.uniform([-38, -28, 16.4], [38, 28, 18.6], (40000, 3))
+    c = cavity(pts)
+    lip_pts = pts[np.abs(c - 1.1) < 0.08][:800]
+    gap = top(lip_pts)
+    assert np.median(gap) > fit_gap * 0.8, f"median lip clearance {np.median(gap):.2f}"
+    both = (bottom(pts) < 0) & (top(pts) < 0)
+    assert both.sum() == 0, "halves interpenetrate"
+
+
 TESTS = [
     test_gyroid_thickness_is_real_mm,
     test_gyroid_two_isolated_networks,
@@ -247,6 +275,7 @@ TESTS = [
     test_fea_cantilever,
     test_fea_refusals,
     test_transforms_move_primitives,
+    test_split_shell_printed_fit,
 ]
 
 

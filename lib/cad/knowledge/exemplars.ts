@@ -598,7 +598,48 @@ export function selectExemplarsByIds(
   opts: { pool?: CadExemplar[] } = {}
 ): CadExemplar[] {
   const pool = (opts.pool ?? CAD_EXEMPLARS).filter((e) => e.verified);
-  const out: CadExemplar[] = [];
+  const out: CadExemplar[] = [  {
+    id: "draped_two_piece_enclosure",
+    title: "Two-piece draped enclosure (drape-and-split recipe)",
+    keywords: ["enclosure", "two piece", "two-piece", "case", "housing", "lid", "snap", "split", "clamshell", "shell", "pcb", "battery", "components", "drape", "organic", "electronics"],
+    lesson:
+      "THE default enclosure archetype: component keep-outs -> smin cavity -> offset_field skin (uniform wall) -> split_shell into two watertight printed-fit halves on an inner lip (clearance is a real, numerically asserted tolerance). Function leads beauty — the organic form IS the softened component stack. Interior stays crisp per the edge budget.",
+    code: [
+      "# THE DRAPE-AND-SPLIT RECIPE (default enclosure archetype): exact component",
+      "# keep-outs smooth-unioned into ONE cavity, an organic skin draped over it",
+      "# (offset_field = uniform wall), then split_shell cuts it into two watertight",
+      "# printed-fit halves on an inner lip. Function leads beauty: the form IS the",
+      "# component stack, softened.",
+      "from sdf_kit import *",
+      "import numpy as np",
+      "",
+      "# Components (exact, mm): 62x42x12 PCB, 50x30x13 battery above it.",
+      "pcb_c, pcb_h = (0.0, 0.0, 8.0), (31.0, 21.0, 6.0)",
+      "batt_c, batt_h = (0.0, 0.0, 20.5), (25.0, 15.0, 6.5)",
+      "clearance = 1.0",
+      "wall = 2.4",
+      "k = 14.0            # drape blend",
+      "z_split = 16.0      # seam on the natural shadow line between the two bodies",
+      "fit_gap = 0.25      # printed lip clearance",
+      "",
+      "def cavity(P):",
+      "    return smin(box(P, pcb_c, tuple(h + clearance for h in pcb_h)),",
+      "                box(P, batt_c, tuple(h + clearance for h in batt_h)), k)",
+      "",
+      "def body(P):",
+      "    shell = subtract(offset_field(cavity(P), wall), cavity(P))",
+      "    return np.maximum(shell, -P[:, 2])   # flat printable base",
+      "",
+      "bottom, top = split_shell(body, cavity, z_split, fit_gap=fit_gap)",
+      "lo, hi = (-40, -30, -3), (40, 30, 34)",
+      "parts = {",
+      "    \"shell_bottom\": to_mesh(bottom, lo, hi, pitch=0.55),",
+      "    \"shell_top\": to_mesh(top, lo, hi, pitch=0.55),",
+      "}",
+    ].join("\n"),
+    verified: true,
+  },
+];
   for (const id of ids) {
     const ex = pool.find((e) => e.id === id);
     if (ex && !out.includes(ex)) out.push(ex);

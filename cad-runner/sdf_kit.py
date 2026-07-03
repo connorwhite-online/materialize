@@ -24,11 +24,11 @@ import trimesh
 
 __all__ = [
     "smin", "smax", "subtract", "union", "intersect",
-    "sphere", "box", "capsule", "cyl_z",
+    "sphere", "box", "capsule", "cyl_z", "sq_prism",
     "gyroid", "schwarz_p", "diamond",
     "mask", "shell_field", "offset_field",
     "translate", "rotate_z",
-    "from_mesh", "to_mesh",
+    "from_mesh", "to_mesh", "split_shell",
 ]
 
 
@@ -318,6 +318,38 @@ def from_mesh(mesh, pitch=1.0):
         return out
 
     return field
+
+
+def split_shell(body_field, cavity_field, z_split, lip_h=3.0, lip_t=1.1,
+                fit_gap=0.25):
+    """Split a draped shell into two watertight printed-fit halves — the
+    keystone of the drape-and-split enclosure recipe (docs/text-to-cad/
+    design-studies/modem-works.md): soft skin outside, component cavity
+    inside, two pieces joined on an inner lip. Returns (bottom, top) field
+    callables. The bottom keeps a lip ring (the innermost lip_t of the wall,
+    rising lip_h above the split, fused 1mm into its own wall); the top gets
+    the matching recess grown by fit_gap — a real printed clearance you can
+    assert numerically. Keep lip_t comfortably under the wall thickness."""
+    def bottom(P):
+        c = cavity_field(P)
+        below = np.maximum(body_field(P), P[:, 2] - z_split)
+        ring = np.maximum(
+            np.maximum(-c, c - lip_t),
+            np.maximum(P[:, 2] - (z_split + lip_h), (z_split - 1.0) - P[:, 2]),
+        )
+        return np.minimum(below, ring)
+
+    def top(P):
+        c = cavity_field(P)
+        above = np.maximum(body_field(P), z_split - P[:, 2])
+        recess = np.maximum(
+            np.maximum(-(c + fit_gap), c - (lip_t + fit_gap)),
+            np.maximum(P[:, 2] - (z_split + lip_h + fit_gap),
+                       (z_split - 0.5) - P[:, 2]),
+        )
+        return np.maximum(above, -recess)
+
+    return bottom, top
 
 
 # ---- meshing ---------------------------------------------------------------
