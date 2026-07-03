@@ -34,6 +34,10 @@ PROPORTION & LAYOUT:
 - Don't leave two principal bounding dimensions arbitrarily near-equal; make them equal, or clearly distinct (≥ ~1.3:1). Treat 1:√2, 1:1.5, 1:1.618 only as seeds to avoid arbitrariness — never as a quality target.
 - Default to bilateral symmetry about the primary axis unless an asymmetry is functional. Keep the center of mass low and over the footprint.
 
+SECTIONS & TRANSITIONS (functional parts earn beauty through honesty, not decoration):
+- Prefer a LOFT or taper over a constant-section extrusion whenever function allows — constant cross-section is a tooling habit, not a design decision. Let material follow load: thicker at roots, joints, and mounts; thinner toward free ends and unloaded spans.
+- Blend intersecting members with generous transition fillets (the load path made visible) instead of butt-joining prisms. A bracket web that tapers reads as designed; a uniform slab reads as a default.
+
 STANCE & RESTRAINT:
 - Give the part a deliberate base: a small recessed reveal (inset the bottom ~1–2 mm) or a distinct plinth, plus a ~45° base chamfer ≤ 1 mm tall (also avoids elephant-foot). Never end in a raw flush flat bottom with a sharp perimeter.
 - Emit nothing non-functional: no decorative grooves, fake fasteners, or ornamental panel lines unless the prompt asks. Less, but better.`;
