@@ -16,6 +16,7 @@ import {
   AlertTriangleIcon,
   ArrowUpIcon,
   CheckIcon,
+  ClipboardListIcon,
   DownloadIcon,
   EllipsisVerticalIcon,
   HistoryIcon,
@@ -43,6 +44,8 @@ import {
 } from "@/app/actions/cad-generation";
 import { diffParams, extractParams } from "@/components/cad/param-diff";
 import type { CadStreamEvent, CadProgressEvent } from "@/lib/cad/types";
+// Type-only: lib/cad/brief is server-only at runtime; the type is erased.
+import type { CadBrief } from "@/lib/cad/brief";
 import type { ViewerAnnotation } from "@/components/viewer/model-viewer";
 import {
   CAD_FEEDBACK_TAGS,
@@ -283,6 +286,20 @@ export function TextToCadStudio({
   );
   const [prompt, setPrompt] = useState("");
   const [progress, setProgress] = useState<CadProgressEvent[]>([]);
+  // Live build preview: the LATEST snapshot render only (replace, never
+  // accumulate — each frame is a whole base64 PNG). Kept out of `progress`
+  // so the status transcript stays tiny.
+  const [snapshot, setSnapshot] = useState<{
+    render: string;
+    step: number;
+  } | null>(null);
+  // Reviewable design brief (docs/text-to-cad/06): drafted from the composer
+  // prompt, edited in place, and sent with the generate request. Fresh
+  // builds only — revisions inherit the parent's brief server-side.
+  const [brief, setBrief] = useState<CadBrief | null>(null);
+  const [briefLoading, setBriefLoading] = useState(false);
+  // Soft "brief unavailable" note — not an error; generating still works.
+  const [briefNotice, setBriefNotice] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   // Loader→model handoff: on a fresh result the deforming blob morphs into the
   // generated shape ("morph"), then the crisp ModelViewer is mounted underneath
@@ -326,6 +343,9 @@ export function TextToCadStudio({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // In-flight "Draft brief" request — aborted on submit / thread switch /
+  // new-build so a slow draft can't pop a stale card into a new context.
+  const briefAbortRef = useRef<AbortController | null>(null);
   // The in-flight background job (persisted to the resume slot). Only
   // cleared when the job reaches a terminal event or the user explicitly
   // abandons it — NOT on unmount, so a reload/return can reattach.
@@ -386,6 +406,7 @@ export function TextToCadStudio({
     jobRef.current = saved;
     if (saved.rootId) setActiveRootId(saved.rootId);
     setProgress([]);
+    setSnapshot(null);
     setError(null);
     setGenerating(true);
     void streamJobEvents(
@@ -560,12 +581,17 @@ export function TextToCadStudio({
       jobRef.current = null;
     }
     abortRef.current?.abort();
+    briefAbortRef.current?.abort();
     setGenerating(false);
     setTransition(null);
     setSourceAssetId(null);
     setActiveRootId(null);
     setViewTurnId(null);
     setProgress([]);
+    setSnapshot(null);
+    setBrief(null);
+    setBriefLoading(false);
+    setBriefNotice(null);
     setError(null);
     setPrompt("");
     setImages([]);
@@ -577,6 +603,7 @@ export function TextToCadStudio({
 
   function openThread(t: StudioThread) {
     if (generating) return;
+    briefAbortRef.current?.abort();
     setTransition(null);
     setSourceAssetId(null);
     setActiveRootId(t.rootId);
@@ -585,6 +612,10 @@ export function TextToCadStudio({
       .find((x) => x.status === "succeeded" && x.fileAssetId);
     setViewTurnId(lastGood?.id ?? null);
     setProgress([]);
+    setSnapshot(null);
+    setBrief(null);
+    setBriefLoading(false);
+    setBriefNotice(null);
     setError(null);
     setSelectedPartId(null);
     setShowHistory(false);
@@ -723,8 +754,10 @@ export function TextToCadStudio({
     setTransition(ev.fileAssetId ? { assetId: ev.fileAssetId, phase: "morph" } : null);
     // Clear the composer only now that the turn landed — on an error the
     // user's typed instruction (and any attached refs) stay put to retry.
+    // The brief card clears with it (same lifecycle: kept around to retry).
     setPrompt("");
     setImages([]);
+    setBrief(null);
   }
 
   async function addFiles(files: FileList | File[] | null | undefined) {
@@ -761,6 +794,57 @@ export function TextToCadStudio({
     setImages((prev) => prev.filter((i) => i.id !== id));
   }
 
+  /**
+   * Draft a reviewable design brief from the current prompt + reference
+   * images (fresh builds only). Renders as an editable card above the
+   * composer; a null brief from the route means the step couldn't produce
+   * one — soft-notice it and let the user generate directly.
+   */
+  async function draftBrief() {
+    const text = prompt.trim();
+    if (text.length < 3 || briefLoading || generating) return;
+
+    const controller = new AbortController();
+    briefAbortRef.current?.abort();
+    briefAbortRef.current = controller;
+    setBriefLoading(true);
+    setBriefNotice(null);
+    setError(null);
+    try {
+      const res = await fetch("/api/cad/brief", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: text,
+          images: images.length
+            ? images.map((i) => ({ data: i.data, mediaType: i.mediaType }))
+            : undefined,
+        }),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        setError((await res.text()) || "Couldn't draft a brief.");
+        return;
+      }
+      const { brief: drafted } = (await res.json()) as {
+        brief: CadBrief | null;
+      };
+      if (!drafted) {
+        setBriefNotice(
+          "Couldn't draft a brief right now — generating directly still works."
+        );
+        return;
+      }
+      setBrief(drafted);
+    } catch (err) {
+      if ((err as Error)?.name !== "AbortError") {
+        setError("Couldn't draft a brief. Please try again.");
+      }
+    } finally {
+      if (briefAbortRef.current === controller) setBriefLoading(false);
+    }
+  }
+
   async function submit() {
     const text = prompt.trim();
     if (text.length < 3 || generating) return;
@@ -793,8 +877,12 @@ export function TextToCadStudio({
       : "";
     const sentPrompt = text + annoBlock;
 
+    // A brief draft still in flight is superseded by the real generation.
+    briefAbortRef.current?.abort();
     setError(null);
+    setBriefNotice(null);
     setProgress([]);
+    setSnapshot(null);
     // A revision deforms the model currently on screen (edit-in-place); a fresh
     // build has none, so the wireframe blob deforms instead.
     setSourceAssetId(parentId ? activeAssetId : null);
@@ -819,6 +907,9 @@ export function TextToCadStudio({
           images: images.length
             ? images.map((i) => ({ data: i.data, mediaType: i.mediaType }))
             : undefined,
+          // The reviewed (possibly edited) brief card, when one is open.
+          // Fresh builds only — the server ignores it on revisions anyway.
+          brief: !parentId && brief ? brief : undefined,
         }),
         signal: controller.signal,
       });
@@ -905,10 +996,19 @@ export function TextToCadStudio({
             }
             if (ev.type === "done") {
               sawTerminal = true;
+              // Clear the live preview BEFORE the transition state lands so
+              // the blob→model morph hand-off runs exactly as before.
+              setSnapshot(null);
               applyDone(ev, submittedPrompt, parentId);
             } else if (ev.type === "error") {
               sawTerminal = true;
+              setSnapshot(null);
               setError(ev.error);
+            } else if (ev.type === "snapshot") {
+              // Live build preview: latest frame only — REPLACE, never
+              // accumulate (each frame is a whole base64 PNG; the progress
+              // transcript must stay light).
+              setSnapshot({ render: ev.render, step: ev.step });
             } else {
               setProgress((p) => [...p, ev]);
             }
@@ -1144,7 +1244,17 @@ export function TextToCadStudio({
                     />
                   </Suspense>
                   {generating && !transition && (
-                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
+                    <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 p-6">
+                      {/* Live build preview — the latest snapshot render of
+                          the in-progress solid, cross-fading as frames land.
+                          Cleared on `done`, so the blob→model morph hand-off
+                          below runs untouched. */}
+                      {snapshot && (
+                        <SnapshotPreview
+                          render={snapshot.render}
+                          step={snapshot.step}
+                        />
+                      )}
                       <div className="glass rounded-2xl px-5 py-4 shadow-lg">
                         <ProgressPanel events={progress} />
                       </div>
@@ -1617,6 +1727,22 @@ export function TextToCadStudio({
             At nav+ the pill is gone and the sidebar rail takes over. */}
         <div className="mx-auto grid max-w-6xl gap-8 px-4 pb-28 nav:pb-4 lg:grid-cols-[1fr_300px]">
           <div className="pointer-events-auto mx-auto w-full max-w-2xl">
+          {/* Brief card — the reviewable design brief for the pending build.
+              Hidden while generating; cleared when the turn lands. */}
+          {brief && !generating && (
+            <BriefCard
+              brief={brief}
+              onChange={setBrief}
+              onDismiss={() => setBrief(null)}
+              onGenerate={submit}
+              canGenerate={prompt.trim().length >= 3}
+            />
+          )}
+          {briefNotice && !generating && !brief && (
+            <p className="mb-2 rounded-xl border border-foreground/10 bg-card/95 px-3 py-2 text-xs text-muted-foreground shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80">
+              {briefNotice}
+            </p>
+          )}
           <div
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
@@ -1701,18 +1827,40 @@ export function TextToCadStudio({
               // zooming when the field is focused (it zooms any input < 16px).
               className="max-h-[200px] w-full resize-none border-0 bg-transparent px-2 py-1.5 text-base outline-none disabled:opacity-60 nav:text-sm"
             />
-            {/* Toolbar below the text: attach (left), send (right). */}
+            {/* Toolbar below the text: attach + draft-brief (left), send
+                (right). */}
             <div className="flex items-center justify-between px-1 pt-1">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={generating || images.length >= MAX_IMAGES}
-                aria-label="Attach reference image"
-                title="Attach reference image"
-                className="flex size-8 cursor-pointer items-center justify-center rounded-lg text-muted-foreground hover:bg-foreground/5 hover:text-foreground disabled:opacity-40"
-              >
-                <PaperclipIcon className="size-4" />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={generating || images.length >= MAX_IMAGES}
+                  aria-label="Attach reference image"
+                  title="Attach reference image"
+                  className="flex size-8 cursor-pointer items-center justify-center rounded-lg text-muted-foreground hover:bg-foreground/5 hover:text-foreground disabled:opacity-40"
+                >
+                  <PaperclipIcon className="size-4" />
+                </button>
+                {/* Draft brief — fresh builds only (revisions inherit the
+                    parent's brief server-side) and only once there's a
+                    prompt worth briefing. */}
+                {!latestTurn && !brief && prompt.trim().length >= 3 && (
+                  <button
+                    type="button"
+                    onClick={draftBrief}
+                    disabled={generating || briefLoading}
+                    title="Draft a design brief to review before generating"
+                    className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-muted-foreground hover:bg-foreground/5 hover:text-foreground disabled:opacity-40"
+                  >
+                    {briefLoading ? (
+                      <Loader2Icon className="size-3.5 animate-spin" />
+                    ) : (
+                      <ClipboardListIcon className="size-3.5" />
+                    )}
+                    {briefLoading ? "Drafting…" : "Draft brief"}
+                  </button>
+                )}
+              </div>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -1854,6 +2002,216 @@ function BuildsList({
         );
       })}
     </>
+  );
+}
+
+/**
+ * Live build preview — the latest snapshot render of the in-progress solid,
+ * shown over the generating blob. Cross-fades when a new frame replaces the
+ * old: the previous frame stays mounted underneath while the new one
+ * transitions in (opacity only; prefers-reduced-motion swaps instantly).
+ */
+function SnapshotPreview({ render, step }: { render: string; step: number }) {
+  const [prev, setPrev] = useState<{ render: string; step: number } | null>(
+    null
+  );
+  const [faded, setFaded] = useState(false);
+  const lastRef = useRef<{ render: string; step: number }>({ render, step });
+  useEffect(() => {
+    if (lastRef.current.step !== step) setPrev(lastRef.current);
+    lastRef.current = { render, step };
+    // Double-rAF: commit the new frame at opacity 0, then flip it visible so
+    // the CSS opacity transition actually runs.
+    setFaded(false);
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => setFaded(true));
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  }, [render, step]);
+  return (
+    <div className="glass relative w-40 max-w-[60%] overflow-hidden rounded-xl shadow-lg sm:w-52">
+      {prev && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={`data:image/png;base64,${prev.render}`}
+          alt=""
+          aria-hidden
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+      )}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={`data:image/png;base64,${render}`}
+        alt="Live preview of the model being built"
+        className={cn(
+          "relative block h-auto w-full transition-opacity duration-[250ms] motion-reduce:transition-none",
+          faded ? "opacity-100" : "opacity-0"
+        )}
+      />
+    </div>
+  );
+}
+
+/** Axis labels for a component's bounding-box inputs. */
+const BOX_AXES = ["width", "depth", "height"] as const;
+
+/**
+ * Reviewable design brief card (docs/text-to-cad/06): part restatement up
+ * top, component boxes + clearances as editable number inputs (the numbers
+ * users actually correct), interfaces and envelope read-only. Lives above
+ * the composer; the current (edited) value rides along with the generate
+ * request whether the user hits this card's button or just sends normally.
+ */
+function BriefCard({
+  brief,
+  onChange,
+  onDismiss,
+  onGenerate,
+  canGenerate,
+}: {
+  brief: CadBrief;
+  onChange: (b: CadBrief) => void;
+  onDismiss: () => void;
+  onGenerate: () => void;
+  canGenerate: boolean;
+}) {
+  function patchComponent(
+    idx: number,
+    patch: Partial<CadBrief["components"][number]>
+  ) {
+    onChange({
+      ...brief,
+      components: brief.components.map((c, i) =>
+        i === idx ? { ...c, ...patch } : c
+      ),
+    });
+  }
+
+  const numberInput =
+    "w-14 rounded-md border border-foreground/15 bg-card px-1.5 py-0.5 text-xs tabular-nums outline-none focus:border-foreground/30";
+
+  return (
+    <div className="mb-2 max-h-[45vh] overflow-y-auto rounded-2xl border border-foreground/15 bg-card/95 p-3 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80">
+      <div className="flex items-start gap-2">
+        <ClipboardListIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <span className="block text-sm font-medium">Design brief</span>
+          <p className="mt-0.5 text-sm text-muted-foreground">{brief.part}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label="Dismiss brief"
+          className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 hover:bg-foreground/10 hover:text-foreground"
+        >
+          <XIcon className="size-3.5" />
+        </button>
+      </div>
+
+      {brief.components.length > 0 && (
+        <div className="mt-2 space-y-1.5">
+          {brief.components.map((c, ci) => (
+            <div
+              key={`${c.name}-${ci}`}
+              className="rounded-lg border border-foreground/10 p-2"
+            >
+              <span className="block truncate text-xs font-medium">
+                {c.name}
+              </span>
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  Box
+                  {([0, 1, 2] as const).map((axis) => (
+                    <input
+                      key={axis}
+                      type="number"
+                      inputMode="decimal"
+                      min={0}
+                      step="any"
+                      value={c.box[axis]}
+                      aria-label={`${c.name} ${BOX_AXES[axis]} in millimeters`}
+                      onChange={(e) => {
+                        const v = e.target.valueAsNumber;
+                        if (!Number.isFinite(v)) return;
+                        const box = [...c.box] as [number, number, number];
+                        box[axis] = v;
+                        patchComponent(ci, { box });
+                      }}
+                      className={numberInput}
+                    />
+                  ))}
+                  mm
+                </span>
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  Clearance
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    step="any"
+                    value={c.clearance ?? ""}
+                    aria-label={`${c.name} clearance in millimeters`}
+                    onChange={(e) => {
+                      if (e.target.value === "") {
+                        patchComponent(ci, { clearance: undefined });
+                        return;
+                      }
+                      const v = e.target.valueAsNumber;
+                      if (Number.isFinite(v)) {
+                        patchComponent(ci, { clearance: v });
+                      }
+                    }}
+                    className={numberInput}
+                  />
+                  mm
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {brief.interfaces.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-muted-foreground">Interfaces:</span>
+          {brief.interfaces.map((it, i) => (
+            <span
+              key={i}
+              className="inline-flex items-center rounded-full border border-foreground/10 bg-foreground/5 px-2 py-0.5 text-xs"
+            >
+              {[it.type, it.std, it.face ? `${it.face} face` : null]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {brief.envelope && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Envelope: fits within{" "}
+          <span className="tabular-nums">
+            {brief.envelope.max.join(" × ")}
+          </span>{" "}
+          mm
+        </p>
+      )}
+
+      <div className="mt-3">
+        <button
+          type="button"
+          onClick={onGenerate}
+          disabled={!canGenerate}
+          className="cursor-pointer rounded-lg bg-foreground px-3 py-1.5 text-sm font-medium text-background disabled:opacity-40"
+        >
+          Generate with this brief
+        </button>
+      </div>
+    </div>
   );
 }
 

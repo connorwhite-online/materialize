@@ -217,7 +217,6 @@ def _export_topology(shape, engine: str):
     from OCP.TopTools import (
         TopTools_IndexedDataMapOfShapeListOfShape,
         TopTools_IndexedMapOfShape,
-        TopTools_ListIteratorOfListOfShape,
     )
 
     def _enum_name(value) -> str:
@@ -306,12 +305,12 @@ def _export_topology(shape, engine: str):
                 for i in range(n_pts)
             ]
             face_ids = []
-            it = TopTools_ListIteratorOfListOfShape(edge_face_map.FindFromIndex(ei))
-            while it.More():
-                idx = face_map.FindIndex(it.Value())
+            # TopTools_ListOfShape is directly iterable under pybind OCP —
+            # the classic ListIterator class isn't exposed in current wheels.
+            for adjacent in edge_face_map.FindFromIndex(ei):
+                idx = face_map.FindIndex(adjacent)
                 if idx > 0:
                     face_ids.append(idx - 1)
-                it.Next()
             edges_meta.append(
                 {
                     "id": ei - 1,
@@ -332,6 +331,26 @@ def _export_topology(shape, engine: str):
     if len(tri_mesh.faces) == 0:
         raise ValueError("topology tessellation produced no triangles")
     return {"faces": faces_meta, "edges": edges_meta}, tri_mesh
+
+
+
+def _weld_vertices(mesh) -> None:
+    """Scale-relative tolerance weld: OCC tessellates B-rep faces
+    independently, so shared edges land as near-coincident (not identical)
+    vertices — hairline cracks that read as open boundaries and fail the
+    strict watertight gate on geometry that is actually perfect. Quantize
+    to ~1e-5 of the largest extent (microns at part scale) and merge.
+    Face order is preserved (only vertex indices remap), so this is safe
+    on topo exports where triRange indexes the triangle list."""
+    try:
+        import numpy as np
+
+        q = float(max(mesh.extents)) * 1e-5
+        if q > 0:
+            mesh.vertices = np.round(mesh.vertices / q) * q
+        mesh.merge_vertices()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _process_shape(
@@ -379,6 +398,8 @@ def _process_shape(
         if "topo" in formats and not is_mesh and engine in ("build123d", "cadquery"):
             try:
                 topo_dict, mesh = _export_topology(shape, engine)
+                if mesh is not None:
+                    _weld_vertices(mesh)
                 entry["topo"] = topo_dict
                 mesh.export(stl_path)
                 topo_exported = True
@@ -437,7 +458,7 @@ def _process_shape(
             not mesh.is_watertight or not mesh.is_winding_consistent
         ):
             for step in (
-                lambda: mesh.merge_vertices(),
+                lambda: _weld_vertices(mesh),
                 lambda: mesh.update_faces(mesh.nondegenerate_faces()),
                 lambda: mesh.update_faces(mesh.unique_faces()),
                 lambda: mesh.remove_unreferenced_vertices(),
