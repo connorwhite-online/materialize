@@ -59,10 +59,13 @@ def check_networks(mesh, ports, pitch=None):
                        components (voxels), None if single/too-far,
     }
 
-    Default pitch = bounding-box max extent / 96, floored at 0.3mm.
+    Default pitch = bounding-box max extent / 64, floored at 0.4mm — coarse
+    on purpose: at /96 a 50mm part costs ~2 minutes of CPU (measured), which
+    overruns the sidecar's per-exec CPU budget. Pass an explicit finer pitch
+    when you need a tighter leak bound and have the budget for it.
     """
     if pitch is None:
-        pitch = max(float(np.max(mesh.extents)) / 96.0, 0.3)
+        pitch = max(float(np.max(mesh.extents)) / 64.0, 0.4)
     pitch = float(pitch)
 
     solid, origin = _solid_voxels(mesh, pitch, pad=2)

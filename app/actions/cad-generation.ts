@@ -34,106 +34,17 @@ import { deleteObject } from "@/lib/storage";
 import { logError } from "@/lib/logger";
 import { canUseTextToCad } from "@/lib/features";
 import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
-import { runHarness } from "@/lib/cad/harness";
-import {
-  persistGenerationFailure,
-  persistGenerationSuccess,
-} from "@/lib/cad/persist";
 import {
   isCadFeedbackTag,
   isCadRating,
   type CadRating,
 } from "@/lib/cad/feedback";
 
-export type GenerateCadResult =
-  | { error: string; generationId?: string }
-  | {
-      generationId: string;
-      fileAssetId: string;
-      fileSlug: string;
-      renderUrl: string | null;
-      sourceCode: string;
-      title: string | null;
-    };
-
-export async function generateCadModel(input: {
-  prompt: string;
-  /** Set when revising an existing generation ("edit existing"). */
-  parentGenerationId?: string;
-}): Promise<GenerateCadResult> {
-  const { userId } = await auth();
-  if (!userId) return { error: "Unauthorized" };
-
-  const user = (await currentUser()) as ClerkUserLike;
-  if (!canUseTextToCad(primaryEmail(user))) {
-    // Mirror the page's notFound() — don't reveal the feature exists.
-    return { error: "Not found" };
-  }
-
-  const prompt = input.prompt?.trim() ?? "";
-  if (prompt.length < 3) return { error: "Describe what you want to make." };
-  if (prompt.length > 2000) return { error: "Prompt is too long." };
-
-  // When editing, load the parent's source to seed the harness — and
-  // verify it belongs to the caller.
-  let priorSourceCode: string | null = null;
-  if (input.parentGenerationId) {
-    const [parent] = await db
-      .select({
-        sourceCode: cadGenerations.sourceCode,
-        userId: cadGenerations.userId,
-      })
-      .from(cadGenerations)
-      .where(eq(cadGenerations.id, input.parentGenerationId))
-      .limit(1);
-    if (!parent || parent.userId !== userId) {
-      return { error: "Original model not found." };
-    }
-    priorSourceCode = parent.sourceCode;
-  }
-
-  const [row] = await db
-    .insert(cadGenerations)
-    .values({
-      userId,
-      prompt,
-      engine: "build123d",
-      parentGenerationId: input.parentGenerationId ?? null,
-      status: "pending",
-    })
-    .returning({ id: cadGenerations.id });
-  const generationId = row.id;
-
-  try {
-    const result = await runHarness({ prompt, priorSourceCode });
-
-    if (!result.ok || !result.run) {
-      return persistGenerationFailure(
-        generationId,
-        result.error ?? "Could not produce a valid model.",
-        result.sourceCode,
-        result.attempts
-      );
-    }
-
-    const persisted = await persistGenerationSuccess({
-      userId,
-      generationId,
-      prompt,
-      isRoot: !input.parentGenerationId,
-      result,
-    });
-
-    revalidatePath("/prometheus");
-    return persisted;
-  } catch (error) {
-    logError("generateCadModel", error);
-    return persistGenerationFailure(
-      generationId,
-      "Generation failed. Please try again."
-    );
-  }
-}
+// Generation itself lives in the jobs path (app/api/cad/generate ->
+// lib/cad/jobs.ts -> lib/cad/orchestrate.ts). The old inline generateCadModel
+// action was deleted (MTR-167): it had zero production callers and silently
+// diverged from the real path (no routing, no brief, no job row, no
+// cancellation) — a trap for the next caller.
 
 const MAX_NAME_LEN = 60;
 
@@ -319,14 +230,27 @@ export async function saveCadFileToProfile(input: {
       // file's old assets park on this generation's invisible draft file
       // (preserving old geometry + its generation links), and this
       // generation's asset becomes the saved file's asset. Slug stable.
-      await db
-        .update(fileAssets)
-        .set({ fileId: asset.fileId })
-        .where(eq(fileAssets.fileId, priorSavedFileId));
+      // ORDER MATTERS (no transaction on neon-http): attach the new asset
+      // FIRST — a crash between statements then leaves the saved file with
+      // two assets (readers resolve the older one: stale but working, and a
+      // re-save completes the swap) instead of zero (broken page + print).
+      // The park step targets the captured old-asset ids, not fileId, so it
+      // can't sweep up the freshly attached asset.
       await db
         .update(fileAssets)
         .set({ fileId: priorSavedFileId })
         .where(eq(fileAssets.id, input.fileAssetId));
+      if (savedAssets.length > 0) {
+        await db
+          .update(fileAssets)
+          .set({ fileId: asset.fileId })
+          .where(
+            inArray(
+              fileAssets.id,
+              savedAssets.map((a) => a.id)
+            )
+          );
+      }
       await db
         .update(files)
         .set({ status: "published", updatedAt: new Date() })

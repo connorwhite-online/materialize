@@ -180,11 +180,12 @@ describe("saveCadFileToProfile (one file per design, 05 §C)", () => {
     const res = await saveCadFileToProfile({ fileAssetId: "asset-B" });
     expect(res).toEqual({ ok: true });
 
-    // Swap: old assets park on the draft file, the new asset moves under
-    // the saved file — each file keeps exactly one asset.
+    // Swap, crash-safe order: the NEW asset attaches to the saved file
+    // first (a crash mid-swap leaves two assets — stale but working), then
+    // the old assets park on the draft file — each file ends with one asset.
     expect(updatesTo("file_assets")).toEqual([
-      expect.objectContaining({ fileId: "file-B" }),
       expect.objectContaining({ fileId: "file-A" }),
+      expect.objectContaining({ fileId: "file-B" }),
     ]);
     // The saved file stays published; NO second file is published.
     expect(updatesTo("files")).toEqual([

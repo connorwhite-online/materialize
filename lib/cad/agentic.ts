@@ -211,6 +211,29 @@ function imageBlock(pngBase64: string): ToolResultContent[number] {
   };
 }
 
+/**
+ * Strip image blocks from all tool_result turns except the last two user
+ * turns, replacing them with a re-fetch pointer. Mutates in place — the
+ * first user turn (the task, possibly with reference images) is never touched.
+ */
+function pruneStaleImages(messages: Anthropic.MessageParam[]): void {
+  const userTurnIdxs = messages
+    .map((m, i) => (i > 0 && m.role === "user" ? i : -1))
+    .filter((i) => i >= 0);
+  for (const idx of userTurnIdxs.slice(0, -2)) {
+    const content = messages[idx].content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      if (block.type !== "tool_result" || !Array.isArray(block.content)) continue;
+      block.content = block.content.map((c) =>
+        c.type === "image"
+          ? { type: "text" as const, text: "[render omitted — call render() to re-fetch]" }
+          : c
+      );
+    }
+  }
+}
+
 /** Compact, promptable summary of a run — files omitted (huge base64). */
 function runSummary(run: CadRunResult, extra?: Record<string, unknown>): string {
   return JSON.stringify({
@@ -292,6 +315,12 @@ export async function runAgenticHarness(
         attempt: toolTurns,
         maxAttempts: MAX_TOOL_TURNS,
       });
+      // Renders of superseded intermediate solids carry no signal but their
+      // base64 re-uploads on EVERY subsequent call — O(turns²) image cost
+      // left unpruned. Keep images only in the last two tool-result turns;
+      // the render tool re-fetches on demand.
+      pruneStaleImages(messages);
+
       const t = Date.now();
       let message: Anthropic.Message;
       try {

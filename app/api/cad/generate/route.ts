@@ -21,9 +21,6 @@ import type { PromptImage } from "@/lib/cad/model-client";
  * of truth, so the client can disconnect and reattach freely, and closing
  * the tab no longer kills the build (cancellation is the explicit
  * POST /api/cad/jobs/[jobId]/cancel).
- *
- * The non-streaming server action (app/actions/cad-generation.ts) still
- * runs the harness inline and returns only the final result.
  */
 
 export const dynamic = "force-dynamic";

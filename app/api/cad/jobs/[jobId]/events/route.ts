@@ -1,5 +1,5 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { withDbRetry } from "@/lib/db/retry";
@@ -29,6 +29,11 @@ const HEARTBEAT_MS = 15_000;
 // Close politely before the platform kills the function; the studio's
 // reconnect logic reattaches and the replay resumes where it left off.
 const HARD_CEILING_MS = 290_000;
+// A job whose executor died without writing a terminal status (platform kill
+// past maxDuration, process crash) would otherwise tail forever as "running".
+// Executions are bounded by the generate route's maxDuration=300s, so a
+// running job older than this is provably dead — reap it on read.
+const STALE_RUNNING_MS = 10 * 60_000;
 const TERMINAL_STATUSES = new Set(["done", "failed", "cancelled"]);
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -115,6 +120,8 @@ export async function GET(
                 status: cadJobs.status,
                 progress: cadJobs.progress,
                 error: cadJobs.error,
+                startedAt: cadJobs.startedAt,
+                createdAt: cadJobs.createdAt,
               })
               .from(cadJobs)
               .where(eq(cadJobs.id, jobId))
@@ -124,6 +131,34 @@ export async function GET(
             status = row.status;
             entries = row.progress ?? [];
             jobError = row.error;
+            // Reap-on-read: a non-terminal job whose execution window has
+            // provably passed died without a terminal write — mark it failed
+            // so this tail (and every future reattach) closes instead of
+            // polling a corpse. Plain write, not withDbRetry (write path).
+            const born = row.startedAt ?? row.createdAt;
+            if (
+              !TERMINAL_STATUSES.has(status) &&
+              born &&
+              Date.now() - born.getTime() > STALE_RUNNING_MS
+            ) {
+              jobError =
+                "Generation was interrupted before finishing. Please try again.";
+              await db
+                .update(cadJobs)
+                .set({
+                  status: "failed",
+                  error: jobError,
+                  finishedAt: new Date(),
+                  updatedAt: new Date(),
+                })
+                .where(
+                  and(
+                    eq(cadJobs.id, jobId),
+                    inArray(cadJobs.status, ["queued", "running"])
+                  )
+                );
+              status = "failed";
+            }
             emitNew();
           }
         } catch {
