@@ -329,7 +329,10 @@ def split_shell(body_field, cavity_field, z_split, lip_h=3.0, lip_t=1.1,
     callables. The bottom keeps a lip ring (the innermost lip_t of the wall,
     rising lip_h above the split, fused 1mm into its own wall); the top gets
     the matching recess grown by fit_gap — a real printed clearance you can
-    assert numerically. Keep lip_t comfortably under the wall thickness."""
+    assert numerically. Keep lip_t comfortably under the wall thickness. Cut port/connector
+    apertures AFTER splitting (subtract from both returned fields) so they
+    notch the lip like a real product seam — the ring is built from the
+    cavity and cannot know about ports."""
     def bottom(P):
         c = cavity_field(P)
         below = np.maximum(body_field(P), P[:, 2] - z_split)
