@@ -364,6 +364,12 @@ def to_mesh(field, lo, hi, pitch=0.7):
     refused before allocation with an error naming a pitch that fits — a
     self-explanatory failure the repair loop can act on."""
     lo = np.asarray(lo, float); hi = np.asarray(hi, float)
+    # Sub-resolution origin shift: a surface that runs EXACTLY along a grid
+    # plane with locally-flat field gradient (e.g. a superellipse's x=0
+    # tangent zone on a symmetric grid) makes marching cubes emit degenerate
+    # slivers that weld non-manifold. An irrational sub-pitch offset makes
+    # exact alignment impossible without measurably changing the bounds.
+    lo = lo - pitch * 0.013717
     n = [int(np.ceil((hi[i] - lo[i]) / pitch)) + 1 for i in range(3)]
     cells = n[0] * n[1] * n[2]
     if cells > _CELL_BUDGET:
