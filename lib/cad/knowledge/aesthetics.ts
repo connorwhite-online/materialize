@@ -36,7 +36,12 @@ PROPORTION & LAYOUT:
 
 SECTIONS & TRANSITIONS (functional parts earn beauty through honesty, not decoration):
 - Prefer a LOFT or taper over a constant-section extrusion whenever function allows — constant cross-section is a tooling habit, not a design decision. Let material follow load: thicker at roots, joints, and mounts; thinner toward free ends and unloaded spans.
-- Blend intersecting members with generous transition fillets (the load path made visible) instead of butt-joining prisms. A bracket web that tapers reads as designed; a uniform slab reads as a default.
+- Blend VISIBLE or LOAD-BEARING member intersections with transition fillets (the load path made visible). A bracket web that tapers reads as designed; a uniform slab reads as a default.
+
+EDGE BUDGET — allocate softness by visibility, touch, and load; do NOT fillet everything (measured from reference products: exteriors ~99% smooth, interior functional features overwhelmingly crisp):
+- KEEP CRISP: mating and registration faces (flat-on-flat needs sharp datums), pockets and bosses that seat sharp-cornered components (a filleted pocket corner interferes with a square PCB), snap/lip engagement edges, and any surface that locates another part.
+- Interior, unseen, unloaded features default to UNFILLETED — they earn no beauty budget, and every fillet is added failure risk in the kernel. Spend interior fillets only where load demands a root radius.
+- Exterior/touched surfaces get the softness (the existing EDGES rules); interior gets the precision.
 
 STANCE & RESTRAINT:
 - Give the part a deliberate base: a small recessed reveal (inset the bottom ~1–2 mm) or a distinct plinth, plus a ~45° base chamfer ≤ 1 mm tall (also avoids elephant-foot). Never end in a raw flush flat bottom with a sharp perimeter.
