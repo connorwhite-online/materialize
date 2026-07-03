@@ -16,6 +16,7 @@ import { buildListingSlug } from "@/lib/filenames";
 import { logError } from "@/lib/logger";
 import { createDraftFileForPrint } from "@/app/actions/files";
 import { generateThreadTitle } from "./title";
+import { harnessConfigFingerprint } from "./fingerprint";
 import type { HarnessResult } from "./harness";
 import type { CadPart } from "./types";
 
@@ -333,6 +334,8 @@ export async function persistGenerationSuccess(opts: {
       // whether the printable mesh came from the lossy voxel fallback so
       // the eval scorecard can report a remesh rate.
       remeshed: result.run?.remeshed ?? false,
+      // Treatment beside the outcome: which harness config ran (attribution).
+      configFingerprint: harnessConfigFingerprint(result.route),
       ...resultExtras(result),
       // The thread owns the title going forward (root-row title is the
       // legacy-read fallback) — set both while readers migrate.
@@ -504,6 +507,7 @@ async function persistAssembly(opts: {
       remeshed:
         (result.run?.remeshed ?? false) ||
         parts.some((p) => p.remeshed === true),
+      configFingerprint: harnessConfigFingerprint(result.route),
       ...resultExtras(result),
       // Thread owns the title going forward; root-row title stays as the
       // legacy-read fallback.

@@ -88,20 +88,23 @@ export async function runCadGeneration(
     const useGenerative =
       generativeEnabled() &&
       (await shouldUseGenerative(input.prompt, input.signal));
-    return useGenerative ? generative() : runHarness(input);
+    const result = await (useGenerative ? generative() : runHarness(input));
+    return { ...result, route: "legacy" };
   }
 
   const kind = await classifyCadRequest(input.prompt, input.signal);
-  if (kind === "organic" && generativeEnabled()) return generative();
+  if (kind === "organic" && generativeEnabled()) {
+    return { ...(await generative()), route: "organic" };
+  }
   if (kind === "complex") {
     try {
-      return await runAgenticHarness(input);
+      return { ...(await runAgenticHarness(input)), route: "complex" };
     } catch (err) {
       // Abort = the caller hung up, not an agentic failure — propagate.
       if ((err as Error)?.name === "AbortError") throw err;
       logError("runCadGeneration:agentic-fallback", err);
-      return runHarness(input);
+      return { ...(await runHarness(input)), route: "complex-fallback" };
     }
   }
-  return runHarness(input);
+  return { ...(await runHarness(input)), route: "simple" };
 }

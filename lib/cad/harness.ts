@@ -113,6 +113,8 @@ export interface HarnessResult {
   brief?: unknown;
   /** Per-role model usage for routing/telemetry (which model, how long). */
   telemetry?: Array<{ role: CadRole; model?: string; ms: number }>;
+  /** Router verdict that selected the engine (stamped by orchestrate). */
+  route?: string;
   error?: string;
 }
 

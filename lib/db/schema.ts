@@ -1505,6 +1505,12 @@ export const cadGenerations = pgTable(
     // text-to-cad/01 phase 2). Object storage like the render — never
     // inline — so the history query stays small. Null until produced.
     topoStorageKey: text("topo_storage_key"),
+    /**
+     * Config fingerprint: WHICH harness configuration produced this row
+     * (per-role models, flags, router verdict) — the treatment beside the
+     * outcome, so quality changes are attributable (lib/cad/fingerprint.ts).
+     */
+    configFingerprint: jsonb("config_fingerprint"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
