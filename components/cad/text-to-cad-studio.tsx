@@ -46,11 +46,6 @@ import { diffParams, extractParams } from "@/components/cad/param-diff";
 import type { CadStreamEvent, CadProgressEvent } from "@/lib/cad/types";
 // Type-only: lib/cad/brief is server-only at runtime; the type is erased.
 import type { CadBrief } from "@/lib/cad/brief";
-// Plain data tables (no server-only marker) — safe in the client bundle.
-import {
-  componentCutoutFor,
-  devBoardFor,
-} from "@/lib/cad/knowledge/components";
 import type { ViewerAnnotation } from "@/components/viewer/model-viewer";
 import {
   CAD_FEEDBACK_TAGS,
@@ -303,8 +298,6 @@ export function TextToCadStudio({
   // builds only — revisions inherit the parent's brief server-side.
   const [brief, setBrief] = useState<CadBrief | null>(null);
   const [briefLoading, setBriefLoading] = useState(false);
-  // Soft "brief unavailable" note — not an error; generating still works.
-  const [briefNotice, setBriefNotice] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   // Loader→model handoff: on a fresh result the deforming blob morphs into the
   // generated shape ("morph"), then the crisp ModelViewer is mounted underneath
@@ -348,8 +341,8 @@ export function TextToCadStudio({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
-  // In-flight "Draft brief" request — aborted on submit / thread switch /
-  // new-build so a slow draft can't pop a stale card into a new context.
+  // In-flight silent spec-check (fetchBrief) — aborted on thread switch /
+  // new-build so a slow check can't pop a stale quick-check card.
   const briefAbortRef = useRef<AbortController | null>(null);
   // The in-flight background job (persisted to the resume slot). Only
   // cleared when the job reaches a terminal event or the user explicitly
@@ -596,7 +589,6 @@ export function TextToCadStudio({
     setSnapshot(null);
     setBrief(null);
     setBriefLoading(false);
-    setBriefNotice(null);
     setError(null);
     setPrompt("");
     setImages([]);
@@ -620,7 +612,6 @@ export function TextToCadStudio({
     setSnapshot(null);
     setBrief(null);
     setBriefLoading(false);
-    setBriefNotice(null);
     setError(null);
     setSelectedPartId(null);
     setShowHistory(false);
@@ -800,21 +791,18 @@ export function TextToCadStudio({
   }
 
   /**
-   * Draft a reviewable design brief from the current prompt + reference
-   * images (fresh builds only). Renders as an editable card above the
-   * composer; a null brief from the route means the step couldn't produce
-   * one — soft-notice it and let the user generate directly.
+   * The brief is MACHINERY, not UI (MTR-194 pattern revision): it still
+   * grounds dimensions and feeds the generate prompt, but the user never
+   * reviews a form. This fetches it silently before a fresh build; the ONLY
+   * thing that ever surfaces is `questions` — a genuine fork the prompt
+   * didn't settle, asked as tappable choices. Null on any failure: a brief
+   * must never block or degrade a generation.
    */
-  async function draftBrief() {
-    const text = prompt.trim();
-    if (text.length < 3 || briefLoading || generating) return;
-
+  async function fetchBrief(text: string): Promise<CadBrief | null> {
     const controller = new AbortController();
     briefAbortRef.current?.abort();
     briefAbortRef.current = controller;
     setBriefLoading(true);
-    setBriefNotice(null);
-    setError(null);
     try {
       const res = await fetch("/api/cad/brief", {
         method: "POST",
@@ -827,24 +815,13 @@ export function TextToCadStudio({
         }),
         signal: controller.signal,
       });
-      if (!res.ok) {
-        setError((await res.text()) || "Couldn't draft a brief.");
-        return;
-      }
+      if (!res.ok) return null;
       const { brief: drafted } = (await res.json()) as {
         brief: CadBrief | null;
       };
-      if (!drafted) {
-        setBriefNotice(
-          "Couldn't draft a brief right now — generating directly still works."
-        );
-        return;
-      }
-      setBrief(drafted);
-    } catch (err) {
-      if ((err as Error)?.name !== "AbortError") {
-        setError("Couldn't draft a brief. Please try again.");
-      }
+      return drafted;
+    } catch {
+      return null;
     } finally {
       if (briefAbortRef.current === controller) setBriefLoading(false);
     }
@@ -852,9 +829,24 @@ export function TextToCadStudio({
 
   async function submit() {
     const text = prompt.trim();
-    if (text.length < 3 || generating) return;
+    if (text.length < 3 || generating || briefLoading) return;
 
     const parentId = latestTurn?.id; // revise the latest turn when in a thread
+
+    // Ask-before-build (MTR-191 ask-site a): fresh builds run the silent
+    // brief step first. Questions pause the flow ONCE with choice chips;
+    // no questions (or no brief) goes straight to generation. A brief
+    // already in state means the user answered/skipped — build with it.
+    let briefToSend = !parentId ? brief : null;
+    if (!parentId && !brief) {
+      const drafted = await fetchBrief(text);
+      if (drafted?.questions?.length) {
+        setBrief(drafted); // renders the quick-check card; user resumes
+        return;
+      }
+      briefToSend = drafted;
+      if (drafted) setBrief(drafted);
+    }
 
     // Fold pinned annotations into the instruction sent to the agent, as
     // structured spatial feedback (the displayed turn keeps the clean text).
@@ -882,10 +874,7 @@ export function TextToCadStudio({
       : "";
     const sentPrompt = text + annoBlock;
 
-    // A brief draft still in flight is superseded by the real generation.
-    briefAbortRef.current?.abort();
     setError(null);
-    setBriefNotice(null);
     setProgress([]);
     setSnapshot(null);
     // A revision deforms the model currently on screen (edit-in-place); a fresh
@@ -912,9 +901,10 @@ export function TextToCadStudio({
           images: images.length
             ? images.map((i) => ({ data: i.data, mediaType: i.mediaType }))
             : undefined,
-          // The reviewed (possibly edited) brief card, when one is open.
-          // Fresh builds only — the server ignores it on revisions anyway.
-          brief: !parentId && brief ? brief : undefined,
+          // The silently-drafted brief (with any answered questions folded
+          // into `decisions`). Fresh builds only — the server ignores it on
+          // revisions anyway.
+          brief: briefToSend ?? undefined,
         }),
         signal: controller.signal,
       });
@@ -1761,21 +1751,21 @@ export function TextToCadStudio({
             At nav+ the pill is gone and the sidebar rail takes over. */}
         <div className="mx-auto grid max-w-6xl gap-8 px-4 pb-28 nav:pb-4 lg:grid-cols-[1fr_300px]">
           <div className="pointer-events-auto mx-auto w-full max-w-2xl">
-          {/* Brief card — the reviewable design brief for the pending build.
-              Hidden while generating; cleared when the turn lands. */}
-          {brief && !generating && (
-            <BriefCard
+          {/* Quick check — shown ONLY when the silent brief step surfaced a
+              genuine choice. Answer (or skip) and it builds; the brief data
+              itself never renders as a form (MTR-194 pattern revision). */}
+          {brief && (brief.questions?.length ?? 0) > 0 && !generating && (
+            <QuickCheckCard
               brief={brief}
               onChange={setBrief}
-              onDismiss={() => setBrief(null)}
-              onGenerate={submit}
-              canGenerate={prompt.trim().length >= 3}
+              onClose={() =>
+                // Close = keep the brief (and the recommended defaults) but
+                // stop asking; the next send builds with it directly.
+                setBrief({ ...brief, questions: undefined })
+              }
+              onBuild={submit}
+              canBuild={prompt.trim().length >= 3}
             />
-          )}
-          {briefNotice && !generating && !brief && (
-            <p className="mb-2 rounded-xl border border-foreground/10 bg-card/95 px-3 py-2 text-xs text-muted-foreground shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80">
-              {briefNotice}
-            </p>
           )}
           <div
             onDragOver={(e) => e.preventDefault()}
@@ -1875,24 +1865,12 @@ export function TextToCadStudio({
                 >
                   <PaperclipIcon className="size-4" />
                 </button>
-                {/* Draft brief — fresh builds only (revisions inherit the
-                    parent's brief server-side) and only once there's a
-                    prompt worth briefing. */}
-                {!latestTurn && !brief && prompt.trim().length >= 3 && (
-                  <button
-                    type="button"
-                    onClick={draftBrief}
-                    disabled={generating || briefLoading}
-                    title="Draft a design brief to review before generating"
-                    className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-muted-foreground hover:bg-foreground/5 hover:text-foreground disabled:opacity-40"
-                  >
-                    {briefLoading ? (
-                      <Loader2Icon className="size-3.5 animate-spin" />
-                    ) : (
-                      <ClipboardListIcon className="size-3.5" />
-                    )}
-                    {briefLoading ? "Drafting…" : "Draft brief"}
-                  </button>
+                {/* Silent pre-build spec check in flight (fresh builds). */}
+                {briefLoading && (
+                  <span className="inline-flex h-8 items-center gap-1.5 px-2 text-xs font-medium text-muted-foreground">
+                    <Loader2Icon className="size-3.5 animate-spin" />
+                    Checking the spec…
+                  </span>
                 )}
               </div>
               <input
@@ -2091,8 +2069,6 @@ function SnapshotPreview({ render, step }: { render: string; step: number }) {
 }
 
 /** Axis labels for a component's bounding-box inputs. */
-const BOX_AXES = ["width", "depth", "height"] as const;
-
 /**
  * Reviewable design brief card (docs/text-to-cad/06): part restatement up
  * top, component boxes + clearances as editable number inputs (the numbers
@@ -2100,74 +2076,27 @@ const BOX_AXES = ["width", "depth", "height"] as const;
  * the composer; the current (edited) value rides along with the generate
  * request whether the user hits this card's button or just sends normally.
  */
-/** Axis-code faces ("+Y") → words a person would use (MTR-194). */
-const FACE_WORDS: Record<string, string> = {
-  "+z": "the top",
-  "-z": "the underside",
-  "+y": "a long side",
-  "-y": "a long side",
-  "+x": "an end",
-  "-x": "an end",
-};
-
-function humanFace(face?: string): string | null {
-  if (!face) return null;
-  return FACE_WORDS[face.trim().toLowerCase()] ?? null;
-}
-
-const prettyName = (s: string) => s.replace(/_+/g, " ");
-
-/** "port · micro-usb · +Y face" → "micro-USB opening on a long side". */
-function interfaceSentence(it: CadBrief["interfaces"][number]): string {
-  const cut = it.std ? componentCutoutFor(it.std) : null;
-  const what = cut?.label ?? it.std;
-  let kind: string;
-  if (it.type === "vent") kind = "vents";
-  else if (it.type === "mount") kind = what ? `${what} mounting` : "mounting";
-  else kind = what ? `${what} opening` : `${it.type} opening`;
-  const loc = humanFace(it.face);
-  return loc ? `${kind} on ${loc}` : kind;
-}
-
-function componentSentence(c: CadBrief["components"][number]): string {
-  const board = devBoardFor(c.name);
-  const dims = `${c.box[0]} × ${c.box[1]} × ${c.box[2]} mm`;
-  const base = board
-    ? `Sized for a standard ${board.label} (${dims})`
-    : `Fits ${prettyName(c.name)} (${dims})`;
-  return c.clearance != null
-    ? `${base} with ${c.clearance} mm breathing room`
-    : base;
-}
-
-function BriefCard({
+/**
+ * Quick check (MTR-191 ask-site a / MTR-194 pattern revision): the ONLY
+ * user-facing surface of the brief step. The brief itself is machinery —
+ * grounded dims ride along to the generate prompt invisibly; this card
+ * appears solely when the model surfaced a genuine choice the prompt didn't
+ * settle, as tappable options with the recommendation pre-selected.
+ */
+function QuickCheckCard({
   brief,
   onChange,
-  onDismiss,
-  onGenerate,
-  canGenerate,
+  onClose,
+  onBuild,
+  canBuild,
 }: {
   brief: CadBrief;
   onChange: (b: CadBrief) => void;
-  onDismiss: () => void;
-  onGenerate: () => void;
-  canGenerate: boolean;
+  onClose: () => void;
+  onBuild: () => void;
+  canBuild: boolean;
 }) {
-  // The raw millimeter inputs still exist, but behind a disclosure — the
-  // default card speaks sentences, not bounding boxes (MTR-194).
-  const [adjustOpen, setAdjustOpen] = useState(false);
-
-  function patchComponent(
-    idx: number,
-    patch: Partial<CadBrief["components"][number]>
-  ) {
-    onChange({
-      ...brief,
-      components: brief.components.map((c, i) =>
-        i === idx ? { ...c, ...patch } : c
-      ),
-    });
-  }
+  const questions = brief.questions ?? [];
 
   const chosenFor = (q: NonNullable<CadBrief["questions"]>[number]) =>
     brief.decisions?.find((d) => d.q === q.question)?.a ?? q.default ?? null;
@@ -2180,47 +2109,30 @@ function BriefCard({
     onChange({ ...brief, decisions: [...rest, { q: q.question, a: label }] });
   }
 
-  const numberInput =
-    "w-14 rounded-md border border-foreground/15 bg-card px-1.5 py-0.5 text-xs tabular-nums outline-none focus:border-foreground/30";
-
   return (
     <div className="mb-2 max-h-[45vh] overflow-y-auto rounded-2xl border border-foreground/15 bg-card/95 p-3 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80">
       <div className="flex items-start gap-2">
         <ClipboardListIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
-          <span className="block text-sm font-medium">Design brief</span>
-          <p className="mt-0.5 text-sm text-muted-foreground">{brief.part}</p>
+          <span className="block text-sm font-medium">Quick check</span>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {questions.length === 1
+              ? "One choice before building — the recommended option is selected."
+              : "A couple of choices before building — recommended options are selected."}
+          </p>
         </div>
         <button
           type="button"
-          onClick={onDismiss}
-          aria-label="Dismiss brief"
+          onClick={onClose}
+          aria-label="Skip questions"
+          title="Skip — the next send builds with the recommended options"
           className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 hover:bg-foreground/10 hover:text-foreground"
         >
           <XIcon className="size-3.5" />
         </button>
       </div>
 
-      {/* Plain-language summary — what a person needs to know, in sentences. */}
-      {(brief.summary?.length || brief.components.length > 0) && (
-        <ul className="mt-2 space-y-1 text-sm">
-          {(brief.summary?.length
-            ? brief.summary
-            : brief.components.map(componentSentence)
-          ).map((line, i) => (
-            <li key={i} className="flex gap-2">
-              <span
-                aria-hidden
-                className="mt-[7px] size-1 shrink-0 rounded-full bg-foreground/40"
-              />
-              <span>{line}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {/* Open choices — tap to decide; the default is pre-selected. */}
-      {(brief.questions ?? []).map((q) => {
+      {questions.map((q) => {
         const chosen = chosenFor(q);
         return (
           <div key={q.id} className="mt-3">
@@ -2250,105 +2162,14 @@ function BriefCard({
         );
       })}
 
-      {/* Humanized facts line — openings + overall size, no axis codes. */}
-      {(brief.interfaces.length > 0 || brief.envelope) && (
-        <p className="mt-2.5 text-xs text-muted-foreground">
-          {[
-            brief.interfaces.length > 0
-              ? brief.interfaces.map(interfaceSentence).join(" · ")
-              : null,
-            brief.envelope
-              ? `fits within ${brief.envelope.max.join(" × ")} mm`
-              : null,
-          ]
-            .filter(Boolean)
-            .join(" — ")}
-        </p>
-      )}
-
-      {/* Millimeter details, demoted but never hidden from those who want them. */}
-      {brief.components.length > 0 && (
-        <button
-          type="button"
-          onClick={() => setAdjustOpen((v) => !v)}
-          aria-expanded={adjustOpen}
-          className="mt-2 cursor-pointer text-xs font-medium text-muted-foreground underline-offset-2 hover:underline"
-        >
-          {adjustOpen ? "Hide dimensions" : "Adjust dimensions"}
-        </button>
-      )}
-
-      {adjustOpen && brief.components.length > 0 && (
-        <div className="mt-2 space-y-1.5">
-          {brief.components.map((c, ci) => (
-            <div
-              key={`${c.name}-${ci}`}
-              className="rounded-lg border border-foreground/10 p-2"
-            >
-              <span className="block truncate text-xs font-medium">
-                {prettyName(c.name)}
-              </span>
-              <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5">
-                <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                  Box
-                  {([0, 1, 2] as const).map((axis) => (
-                    <input
-                      key={axis}
-                      type="number"
-                      inputMode="decimal"
-                      min={0}
-                      step="any"
-                      value={c.box[axis]}
-                      aria-label={`${c.name} ${BOX_AXES[axis]} in millimeters`}
-                      onChange={(e) => {
-                        const v = e.target.valueAsNumber;
-                        if (!Number.isFinite(v)) return;
-                        const box = [...c.box] as [number, number, number];
-                        box[axis] = v;
-                        patchComponent(ci, { box });
-                      }}
-                      className={numberInput}
-                    />
-                  ))}
-                  mm
-                </span>
-                <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                  Clearance
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    min={0}
-                    step="any"
-                    value={c.clearance ?? ""}
-                    aria-label={`${c.name} clearance in millimeters`}
-                    onChange={(e) => {
-                      if (e.target.value === "") {
-                        patchComponent(ci, { clearance: undefined });
-                        return;
-                      }
-                      const v = e.target.valueAsNumber;
-                      if (Number.isFinite(v)) {
-                        patchComponent(ci, { clearance: v });
-                      }
-                    }}
-                    className={numberInput}
-                  />
-                  mm
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
       <div className="mt-3">
         <button
           type="button"
-          onClick={onGenerate}
-          disabled={!canGenerate}
+          onClick={onBuild}
+          disabled={!canBuild}
           className="cursor-pointer rounded-lg bg-foreground px-3 py-1.5 text-sm font-medium text-background disabled:opacity-40"
         >
-          Generate with this brief
+          Build
         </button>
       </div>
     </div>
