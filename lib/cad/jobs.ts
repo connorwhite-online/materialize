@@ -12,7 +12,11 @@ import {
   persistGenerationFailure,
   persistGenerationSuccess,
 } from "@/lib/cad/persist";
-import type { CadDoneEvent, CadJobProgressEntry } from "@/lib/cad/types";
+import type {
+  CadDoneEvent,
+  CadJobProgressEntry,
+  CadQuestion,
+} from "@/lib/cad/types";
 
 /**
  * Background-job execution for text-to-CAD generation (MTR-175,
@@ -42,6 +46,23 @@ export const MAX_PROGRESS_EVENTS = 200;
 const CANCEL_POLL_MS = 3_000;
 /** Progress writes are batched; flush at most this often (terminal always flushes). */
 const FLUSH_INTERVAL_MS = 750;
+/** How often the awaiting_input wait polls cadJobs.answers for a pick (MTR-191). */
+const ANSWER_POLL_MS = 1_500;
+/** Default seconds to wait on a question before proceeding with its default. */
+const DEFAULT_QUESTION_TIMEOUT_S = 120;
+/** Ceiling on a question's wait — an away user still gets a part (MTR-191). */
+const MAX_QUESTION_TIMEOUT_S = 600;
+
+/**
+ * How many mid-cycle questions a single generation may pause for (MTR-191).
+ * Default 1 — one focused question is the product intent; env-tunable. 0
+ * disables interactive questions entirely (the asker resolves to the default
+ * without ever suspending), a safe kill switch.
+ */
+export function maxQuestionsPerJob(): number {
+  const n = Number(process.env.CAD_MAX_QUESTIONS_PER_JOB);
+  return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 1;
+}
 
 /** Insert a queued job row for a generation and return its id. */
 export async function createCadJob(
@@ -195,6 +216,100 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
   const markJob = (patch: Partial<typeof cadJobs.$inferInsert>) =>
     db.update(cadJobs).set(patch).where(eq(cadJobs.id, jobId));
 
+  // --- Interactive questions (MTR-191) -----------------------------------
+  // The harness can SUSPEND a running build to ask one multiple-choice
+  // question and RESUME with the answer. Reuses the cancellation model
+  // exactly: emit the question, flip to `awaiting_input`, poll cadJobs.answers
+  // (the answer endpoint is the row's only answer-writer) until the pick lands
+  // — or the timeout elapses and we proceed with the default so an away user
+  // still gets a part. Never suspends past the per-job budget, and never once
+  // cancellation is in flight (a terminal state must not be blocked).
+  const questionBudget = maxQuestionsPerJob();
+  let questionsAsked = 0;
+  const onQuestion = async (q: CadQuestion): Promise<string> => {
+    const fallback = q.defaultOptionId ?? q.options[0]?.id ?? "";
+    if (
+      q.options.length === 0 ||
+      questionsAsked >= questionBudget ||
+      cancelRequested ||
+      controller.signal.aborted
+    ) {
+      return fallback;
+    }
+    questionsAsked++;
+
+    const timeoutS = Math.min(
+      Math.max(1, Math.round(q.timeoutS ?? DEFAULT_QUESTION_TIMEOUT_S)),
+      MAX_QUESTION_TIMEOUT_S
+    );
+    // Emit + suspend. Flush immediately (don't wait on the batch timer) so the
+    // studio shows the card fast, then flip the row to awaiting_input.
+    buffer.push({
+      type: "question",
+      questionId: q.id,
+      text: q.text,
+      options: q.options,
+      defaultOptionId: q.defaultOptionId,
+      timeoutS,
+    });
+    await flush();
+    await markJob({ status: "awaiting_input", updatedAt: new Date() }).catch(
+      (err) => logError("executeCadJob.ask", err)
+    );
+
+    const deadline = Date.now() + timeoutS * 1000;
+    let chosen: string | null = null;
+    let viaDefault = false;
+    while (Date.now() < deadline) {
+      if (cancelRequested || controller.signal.aborted) {
+        chosen = fallback;
+        viaDefault = true;
+        break;
+      }
+      try {
+        const [row] = await db
+          .select({ answers: cadJobs.answers })
+          .from(cadJobs)
+          .where(eq(cadJobs.id, jobId))
+          .limit(1);
+        const pick = row?.answers?.[q.id];
+        if (typeof pick === "string" && pick) {
+          // Only honor an option we actually offered — a stale/garbage answer
+          // (schema drift, replayed old question id) falls back to the default.
+          chosen = q.options.some((o) => o.id === pick) ? pick : fallback;
+          viaDefault = chosen !== pick;
+          break;
+        }
+      } catch {
+        // Transient read failure — retry next tick.
+      }
+      await new Promise((r) => setTimeout(r, ANSWER_POLL_MS));
+    }
+    if (chosen == null) {
+      chosen = fallback;
+      viaDefault = true;
+    }
+
+    const label = q.options.find((o) => o.id === chosen)?.label ?? chosen;
+    // Resume: record the resolution (visible in thread history + replay) and
+    // flip back to running BEFORE returning, so the harness continues under a
+    // running job.
+    buffer.push({
+      type: "answer",
+      questionId: q.id,
+      optionId: chosen,
+      label,
+      viaDefault,
+    });
+    await flush();
+    if (!cancelRequested && !controller.signal.aborted) {
+      await markJob({ status: "running", updatedAt: new Date() }).catch((err) =>
+        logError("executeCadJob.resume", err)
+      );
+    }
+    return chosen;
+  };
+
   // The terminal progress record is always written BEFORE the terminal
   // status flip — the events route relies on that ordering to close with
   // the terminal frame already replayed.
@@ -268,6 +383,7 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
       images,
       signal: controller.signal,
       onProgress,
+      onQuestion,
     });
 
     // runGenerative swallows AbortError into { ok: false }; catch the

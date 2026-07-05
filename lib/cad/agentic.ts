@@ -37,7 +37,22 @@ import {
 } from "./session-client";
 import { getObjectBytes } from "@/lib/storage";
 import type { HarnessInput, HarnessResult } from "./harness";
-import type { CadProgressEvent, CadRunResult } from "./types";
+import type {
+  CadProgressEvent,
+  CadQuestionOption,
+  CadRunResult,
+} from "./types";
+
+/**
+ * Interactive-question budget for the agentic loop (MTR-191). Mirrors the
+ * executor's per-job cap (CAD_MAX_QUESTIONS_PER_JOB, default 1) so the tool
+ * stops offering the model a pause once the budget is spent — the executor's
+ * asker is the authoritative guard, this just avoids emitting a dead prompt.
+ */
+function maxAgenticQuestions(): number {
+  const n = Number(process.env.CAD_MAX_QUESTIONS_PER_JOB);
+  return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 1;
+}
 
 /**
  * Agentic harness (docs/text-to-cad/03 §B): an Anthropic tool-use loop over a
@@ -178,6 +193,42 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "ask_user",
+    description:
+      "Pause the build and ask the USER ONE focused multiple-choice question when a genuine design choice materially changes the part and neither the prompt nor the brief settles it (board variant, lid style, mount vs. clip, overall silhouette). Use SPARINGLY — budget 1 per build. Returns the chosen option's label; honor it. If the user doesn't answer in time the build proceeds with the marked default, so always pick a sensible default. Do NOT ask about anything you can look up, measure, or reasonably decide yourself — a wrong guess you can revise beats stalling the build on a trivial question.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        question: {
+          type: "string",
+          description:
+            "The choice in one plain-language sentence for a non-engineer (no axis codes / snake_case).",
+        },
+        options: {
+          type: "array",
+          description: "2-4 concise, mutually-exclusive options.",
+          items: {
+            type: "object",
+            properties: {
+              label: { type: "string", description: "Short option label." },
+              detail: {
+                type: "string",
+                description: "Optional one-line elaboration.",
+              },
+            },
+            required: ["label"],
+          },
+        },
+        default: {
+          type: "string",
+          description:
+            "Label of the recommended option — taken if the user doesn't answer in time.",
+        },
+      },
+      required: ["question", "options"],
+    },
+  },
+  {
     name: "finish",
     description:
       "Declare the model done. The last exec'd `result` becomes the returned part — make sure the final exec assigned it and it graded clean.",
@@ -198,7 +249,9 @@ Review doctrine (MTR-199) — renders are DIAGNOSTIC, not authoritative:
 - Do NOT loop on snapshots/renders: rerender only after a source repair actually changed visible geometry. Re-viewing an unchanged solid burns budget for no signal.
 - HONESTY: report only checks that actually ran. Never claim structural safety, tolerance compliance, or manufacturability beyond geometric plausibility — you validate watertightness, body count, bounding box, and stated dimension targets, nothing more.
 
-Off-the-shelf parts (MTR-200): for any real named component the design must FIT or MATE with (a fastener, bearing, board, connector), call search_parts / fetch_part BEFORE modeling a placeholder box, and size the cavity/cutout/standoff from the returned envelope (or imported STEP). If sourcing misses or is unavailable, fall back to the documented envelope — a network failure is not proof the part doesn't exist.`;
+Off-the-shelf parts (MTR-200): for any real named component the design must FIT or MATE with (a fastener, bearing, board, connector), call search_parts / fetch_part BEFORE modeling a placeholder box, and size the cavity/cutout/standoff from the returned envelope (or imported STEP). If sourcing misses or is unavailable, fall back to the documented envelope — a network failure is not proof the part doesn't exist.
+
+Interactive specification (MTR-191): when a SINGLE genuine choice would materially change the part and neither the prompt nor the brief settles it (board variant, lid style, mount vs. clip, overall silhouette), call ask_user ONCE early — before you've built the geometry that choice governs — rather than guessing. Budget is 1 question per build; spend it on the highest-leverage fork only. Never ask about anything you can look up, measure, or safely default; a revisable guess beats stalling on a trivial question.`;
 
 function buildSystemPrompt(input: HarnessInput): string {
   const knowledge = buildKnowledgeBlock({
@@ -332,6 +385,9 @@ export async function runAgenticHarness(
   let toolTurns = 0;
   let execCount = 0;
   let finished = false;
+  // Interactive-question budget spent so far (MTR-191).
+  let questionsAsked = 0;
+  const questionBudget = maxAgenticQuestions();
   // Off-the-shelf part sourcing (MTR-200): what the loop sourced + the misses
   // it recorded (network-error distinguished from no-match), returned for the
   // flywheel / persistence follow-up.
@@ -682,6 +738,76 @@ export async function runAgenticHarness(
         await rollbackSession(sessionId!, input.signal);
         steps.push("# ---- rolled back to the last snapshot ----");
         return [textBlock("rolled back to the last snapshot")];
+      }
+      case "ask_user": {
+        // Interactive specification (MTR-191): suspend, ask the user one
+        // question, resume with the pick. When no asker is wired (inline /
+        // legacy caller) or the budget is spent, tell the model to decide.
+        if (!input.onQuestion || questionBudget === 0) {
+          return [
+            textBlock(
+              "Interactive questions aren't available in this run — proceed with your best judgment and note the assumption in the build."
+            ),
+          ];
+        }
+        if (questionsAsked >= questionBudget) {
+          return [
+            textBlock(
+              "You've used this build's question budget — decide the rest yourself and note the assumption."
+            ),
+          ];
+        }
+        const raw = use.input as {
+          question?: unknown;
+          options?: unknown;
+          default?: unknown;
+        };
+        const text = String(raw?.question ?? "").trim();
+        const rawOptions = Array.isArray(raw?.options) ? raw.options : [];
+        const options: CadQuestionOption[] = rawOptions
+          .map((o, i): CadQuestionOption | null => {
+            const label = String(
+              (o as { label?: unknown })?.label ?? ""
+            ).trim();
+            if (!label) return null;
+            const detail = (o as { detail?: unknown })?.detail;
+            return {
+              id: `opt-${i + 1}`,
+              label,
+              detail: typeof detail === "string" ? detail : undefined,
+            };
+          })
+          .filter((o): o is CadQuestionOption => o !== null)
+          .slice(0, 4);
+        if (!text || options.length < 2) {
+          return [
+            textBlock(
+              "ask_user needs a question and at least 2 options — decide yourself instead."
+            ),
+          ];
+        }
+        questionsAsked++;
+        const defLabel =
+          typeof raw?.default === "string" ? raw.default.trim() : "";
+        const defaultOptionId =
+          options.find((o) => o.label === defLabel)?.id ?? options[0].id;
+        const chosenId = await input.onQuestion({
+          id: `q-${questionsAsked}`,
+          text,
+          options,
+          defaultOptionId,
+        });
+        const chosen =
+          options.find((o) => o.id === chosenId) ??
+          options.find((o) => o.id === defaultOptionId) ??
+          options[0];
+        return [
+          textBlock(
+            `The user chose: ${chosen.label}${
+              chosen.detail ? ` — ${chosen.detail}` : ""
+            }. Honor this choice for the rest of the build.`
+          ),
+        ];
       }
       case "finish": {
         finished = true;

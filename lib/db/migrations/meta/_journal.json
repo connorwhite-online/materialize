@@ -337,6 +337,13 @@
       "when": 1786000800000,
       "tag": "0047_cad_step_artifact",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1786000900000,
+      "tag": "0048_cad_interactive_questions",
+      "breakpoints": true
     }
   ]
 }

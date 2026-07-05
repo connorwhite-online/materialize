@@ -128,7 +128,71 @@ export type CadProgressEvent =
       attempt: number;
       maxAttempts: number;
       reason: string;
+    }
+  | {
+      /**
+       * Mid-cycle clarifying question (MTR-191): the executor flipped the job
+       * to `awaiting_input`, emitted this, and is polling cadJobs.answers for
+       * the pick. Options may carry base64 thumbnails (visual draft-form
+       * variants). Answered via POST /api/cad/jobs/[jobId]/answer; ignored, the
+       * executor proceeds with `defaultOptionId` after `timeoutS`.
+       */
+      type: "question";
+      questionId: string;
+      text: string;
+      options: CadQuestionOption[];
+      defaultOptionId?: string;
+      timeoutS: number;
+    }
+  | {
+      /**
+       * Resolution of a `question` (MTR-191): the user's pick, or the default
+       * taken on timeout (`viaDefault`). Recorded in the progress log so the
+       * Q/A pair stays visible in thread history and survives replay.
+       */
+      type: "answer";
+      questionId: string;
+      optionId: string;
+      label: string;
+      viaDefault: boolean;
     };
+
+/**
+ * One selectable answer to a mid-cycle question (MTR-191). `thumbnail` carries
+ * a base64 PNG (no `data:` prefix) for the visual-variant case — cheap draft
+ * forms the user picks between as silhouettes rather than words.
+ */
+export interface CadQuestionOption {
+  id: string;
+  label: string;
+  detail?: string;
+  thumbnail?: string;
+}
+
+/**
+ * A focused multiple-choice question the harness pauses to ask mid-generation
+ * (MTR-191). The executor emits it as a `question` progress event, flips the
+ * job to `awaiting_input`, and polls `cadJobs.answers` for the pick.
+ */
+export interface CadQuestion {
+  id: string;
+  text: string;
+  options: CadQuestionOption[];
+  /** Option id taken when the user doesn't answer before the timeout. */
+  defaultOptionId?: string;
+  /** Seconds the executor waits before proceeding with the default. */
+  timeoutS?: number;
+}
+
+/**
+ * Callback the executor hands the harness so a running build can SUSPEND, ask
+ * the user one multiple-choice question, and RESUME with the chosen option id
+ * (MTR-191, riding MTR-175's resumable job). Resolves to the selected option
+ * id (or the default on timeout). Absent for legacy callers and secondary
+ * best-of candidates — the harness then proceeds with its own judgment instead
+ * of pausing, so asking is always optional.
+ */
+export type CadQuestionAsker = (question: CadQuestion) => Promise<string>;
 
 /** Terminal payload the streaming route appends after the harness finishes. */
 export interface CadDoneEvent {

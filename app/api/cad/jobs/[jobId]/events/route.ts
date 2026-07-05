@@ -150,13 +150,18 @@ export async function GET(
                 });
               }
             }
-            // Reap-on-read: a non-terminal job whose execution window has
+            // Reap-on-read: a running/queued job whose execution window has
             // provably passed died without a terminal write — mark it failed
             // so this tail (and every future reattach) closes instead of
             // polling a corpse. Plain write, not withDbRetry (write path).
+            // `awaiting_input` (MTR-191) is deliberately EXCLUDED: it's a live
+            // suspend on user input bounded by the question's own timeout, not
+            // a dead job — reaping it would kill a legitimately-waiting build
+            // (and the SQL guard below wouldn't match it anyway, desyncing the
+            // local `status`).
             const born = row.startedAt ?? row.createdAt;
             if (
-              !TERMINAL_STATUSES.has(status) &&
+              (status === "running" || status === "queued") &&
               born &&
               Date.now() - born.getTime() > STALE_RUNNING_MS
             ) {

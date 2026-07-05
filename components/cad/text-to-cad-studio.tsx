@@ -49,7 +49,11 @@ import {
 } from "@/app/actions/cad-generation";
 import { StepDownloadLink } from "@/components/files/step-download-button";
 import { diffParams, extractParams } from "@/components/cad/param-diff";
-import type { CadStreamEvent, CadProgressEvent } from "@/lib/cad/types";
+import type {
+  CadStreamEvent,
+  CadProgressEvent,
+  CadQuestionOption,
+} from "@/lib/cad/types";
 // Type-only: lib/cad/brief is server-only at runtime; the type is erased.
 import type { CadBrief } from "@/lib/cad/brief";
 import type { ViewerAnnotation } from "@/components/viewer/model-viewer";
@@ -357,6 +361,20 @@ export function TextToCadStudio({
   const [brief, setBrief] = useState<CadBrief | null>(null);
   const [briefLoading, setBriefLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
+  // Mid-cycle interactive question (MTR-191): set when the running job emits a
+  // `question` event and the job is suspended (awaiting_input); cleared when
+  // its `answer` resolution arrives (the user picked, or the server took the
+  // default on timeout) or the build ends. `answering` disables the chips
+  // during the POST so a double-tap can't fire twice.
+  const [pendingQuestion, setPendingQuestion] = useState<{
+    jobId: string;
+    questionId: string;
+    text: string;
+    options: CadQuestionOption[];
+    defaultOptionId?: string;
+    timeoutS: number;
+    answering: boolean;
+  } | null>(null);
   // Loader→model handoff: on a fresh result the deforming blob morphs into the
   // generated shape ("morph"), then the crisp ModelViewer is mounted underneath
   // and the blob is faded out ("reveal").
@@ -709,6 +727,7 @@ export function TextToCadStudio({
     setActiveRootId(null);
     setViewTurnId(null);
     setProgress([]);
+    setPendingQuestion(null);
     setSnapshot(null);
     setBrief(null);
     setBriefLoading(false);
@@ -1242,16 +1261,43 @@ export function TextToCadStudio({
               // Clear the live preview BEFORE the transition state lands so
               // the blob→model morph hand-off runs exactly as before.
               setSnapshot(null);
+              setPendingQuestion(null);
               applyDone(ev, submittedPrompt, parentId);
             } else if (ev.type === "error") {
               sawTerminal = true;
               setSnapshot(null);
+              setPendingQuestion(null);
               setError(ev.error);
             } else if (ev.type === "snapshot") {
               // Live build preview: latest frame only — REPLACE, never
               // accumulate (each frame is a whole base64 PNG; the progress
               // transcript must stay light).
               setSnapshot({ render: ev.render, step: ev.step });
+            } else if (ev.type === "question") {
+              // Mid-cycle question (MTR-191): the job suspended awaiting a pick.
+              // Replay-safe — reattaching mid-question re-emits this and we just
+              // re-open the same card (the answer merge on the server is
+              // idempotent). Never clobber an in-flight answer for the same id.
+              setPendingQuestion((cur) =>
+                cur && cur.questionId === ev.questionId && cur.answering
+                  ? cur
+                  : {
+                      jobId,
+                      questionId: ev.questionId,
+                      text: ev.text,
+                      options: ev.options,
+                      defaultOptionId: ev.defaultOptionId,
+                      timeoutS: ev.timeoutS,
+                      answering: false,
+                    }
+              );
+            } else if (ev.type === "answer") {
+              // Resolution arrived (user pick or server default on timeout) —
+              // close the card and note the decision in the transcript.
+              setPendingQuestion((cur) =>
+                cur && cur.questionId === ev.questionId ? null : cur
+              );
+              setProgress((p) => [...p, ev]);
             } else {
               setProgress((p) => [...p, ev]);
             }
@@ -1268,6 +1314,37 @@ export function TextToCadStudio({
         return false;
       }
       await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+
+  /**
+   * Answer a mid-cycle question (MTR-191): POST the pick to the job, then let
+   * the still-open events stream carry the resolving `answer` event that
+   * closes the card. We optimistically flip `answering` (not clear) so the
+   * chips lock but the card stays until the server confirms — a failed POST
+   * re-enables it to retry. The SSE tail is untouched; the executor's poll
+   * picks the answer up and resumes the build.
+   */
+  async function answerQuestion(optionId: string) {
+    const q = pendingQuestion;
+    if (!q || q.answering) return;
+    setPendingQuestion({ ...q, answering: true });
+    try {
+      const res = await fetch(`/api/cad/jobs/${q.jobId}/answer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ questionId: q.questionId, optionId }),
+      });
+      if (!res.ok) throw new Error(`answer ${res.status}`);
+      // Leave the card in place (answering=true) — the `answer` event clears
+      // it. If the stream already dropped, the reconnect replays that event.
+    } catch {
+      // Let the user retry; the question is still live server-side.
+      setPendingQuestion((cur) =>
+        cur && cur.questionId === q.questionId
+          ? { ...cur, answering: false }
+          : cur
+      );
     }
   }
 
@@ -1516,9 +1593,20 @@ export function TextToCadStudio({
                           step={snapshot.step}
                         />
                       )}
-                      <div className="glass rounded-2xl px-5 py-4 shadow-lg">
-                        <ProgressPanel events={progress} />
-                      </div>
+                      {/* Mid-cycle question (MTR-191): when the build suspends
+                          on a choice, the card takes over the overlay (the
+                          container is pointer-events-none, so the card opts
+                          itself back in). Otherwise the usual status panel. */}
+                      {pendingQuestion ? (
+                        <QuestionCard
+                          question={pendingQuestion}
+                          onAnswer={answerQuestion}
+                        />
+                      ) : (
+                        <div className="glass rounded-2xl px-5 py-4 shadow-lg">
+                          <ProgressPanel events={progress} />
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -2574,6 +2662,107 @@ function QuickCheckCard({
   );
 }
 
+/**
+ * Mid-cycle question card (MTR-191): shown over the generating overlay when the
+ * build suspends on a genuine choice the model couldn't settle. Tappable
+ * options (recommended default badged); if an option carries a thumbnail it's a
+ * visual draft-form variant and renders as an image tile. Picking posts the
+ * answer and the build resumes; ignoring it lets the server take the default
+ * after the timeout — so this never traps an away user.
+ */
+function QuestionCard({
+  question,
+  onAnswer,
+}: {
+  question: {
+    text: string;
+    options: CadQuestionOption[];
+    defaultOptionId?: string;
+    timeoutS: number;
+    answering: boolean;
+  };
+  onAnswer: (optionId: string) => void;
+}) {
+  const hasThumbnails = question.options.some((o) => o.thumbnail);
+  return (
+    <div className="glass pointer-events-auto w-full max-w-md rounded-2xl p-4 shadow-lg">
+      <div className="flex items-start gap-2">
+        <MessageSquareTextIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <span className="block text-sm font-medium">Quick question</span>
+          <p className="mt-0.5 text-sm text-foreground/90">{question.text}</p>
+        </div>
+      </div>
+
+      <div
+        className={
+          hasThumbnails
+            ? "mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3"
+            : "mt-3 flex flex-wrap gap-1.5"
+        }
+      >
+        {question.options.map((o) => {
+          const isDefault = o.id === question.defaultOptionId;
+          if (hasThumbnails) {
+            return (
+              <button
+                key={o.id}
+                type="button"
+                disabled={question.answering}
+                onClick={() => onAnswer(o.id)}
+                title={o.detail}
+                className="group flex cursor-pointer flex-col overflow-hidden rounded-xl border border-foreground/15 bg-foreground/5 text-left transition-colors hover:border-foreground/40 disabled:opacity-50"
+              >
+                {o.thumbnail ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={`data:image/png;base64,${o.thumbnail}`}
+                    alt={o.label}
+                    className="aspect-square w-full bg-background/40 object-contain"
+                  />
+                ) : (
+                  <div className="aspect-square w-full bg-background/40" />
+                )}
+                <span className="flex items-center gap-1 px-2 py-1.5 text-xs">
+                  {o.label}
+                  {isDefault && (
+                    <span className="text-[10px] text-muted-foreground">
+                      (recommended)
+                    </span>
+                  )}
+                </span>
+              </button>
+            );
+          }
+          return (
+            <button
+              key={o.id}
+              type="button"
+              disabled={question.answering}
+              onClick={() => onAnswer(o.id)}
+              title={o.detail}
+              className="cursor-pointer rounded-full border border-foreground/15 bg-foreground/5 px-2.5 py-1 text-xs transition-colors hover:border-foreground/40 disabled:opacity-50"
+            >
+              {o.label}
+              {isDefault && (
+                <span className="ml-1 text-[10px] text-muted-foreground">
+                  (recommended)
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      <p className="mt-2.5 text-[11px] text-muted-foreground">
+        {question.answering
+          ? "Applying your choice…"
+          : "Pick one, or the recommended option is used automatically to keep the build moving."}
+      </p>
+    </div>
+  );
+}
+
 function ViewerSkeleton({ label }: { label: string }) {
   return (
     <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-muted-foreground">
@@ -2643,6 +2832,15 @@ function describeEvent(ev: CadProgressEvent): {
       return {
         text: "Refining the design",
         sub: `Pass ${ev.attempt + 1} of ${ev.maxAttempts}`,
+      };
+    case "question":
+      // Rendered as the QuestionCard, not as status copy — but keep the switch
+      // exhaustive so a new event type can't silently fall through.
+      return { text: "Waiting on your answer", sub: null };
+    case "answer":
+      return {
+        text: "Continuing your build",
+        sub: ev.viaDefault ? `Using ${ev.label}` : `Building ${ev.label}`,
       };
   }
 }
