@@ -766,6 +766,23 @@ def _build_run_payload(
     return payload
 
 
+def _pre_exec_reason(code: str) -> Optional[str]:
+    """Cheap pre-exec source guard (MTR-187): return a reason to reject the
+    script (unparseable, or an obvious egress/process-spawn import) before we
+    fork+exec it, or None to proceed. Defense-in-depth, NOT a sandbox — the
+    container boundary is the real control. Fails OPEN: any problem importing
+    or running the guard proceeds to exec, so a broken guard can never wedge
+    generation. Enforcement is gated by CAD_AST_VALIDATE (default on)."""
+    try:
+        from validate import validate_source, validation_enabled
+
+        if not validation_enabled():
+            return None
+        return validate_source(code)
+    except Exception:  # noqa: BLE001 — guard unavailable → fail open
+        return None
+
+
 def _execute(
     code: str,
     formats: list[str],
@@ -782,6 +799,11 @@ def _execute(
     `parts`."""
     _apply_limits()
     payload = _base_payload()
+    reason = _pre_exec_reason(code)
+    if reason is not None:
+        payload["error"] = f"rejected before execution: {reason}"
+        out.put(payload)
+        return
     try:
         # Warm the kernel for the chosen engine (the script also imports what
         # it needs); no-op for "mesh".
@@ -881,6 +903,18 @@ def _session_exec_reply(
     {ok, stdout, namespace} triple. A code exception replies in the /run
     shape (compiled=false + error) so the agent repairs it like any failure.
     """
+    # Same pre-exec source guard as /run (MTR-187). Session children are
+    # long-lived, so an egress import here is exactly the extended-dwell risk
+    # the guard is cheapest against. Reply in the /run shape so the agent
+    # treats a rejection like any other failed exec.
+    reason = _pre_exec_reason(msg["code"])
+    if reason is not None:
+        reply = _base_payload()
+        reply["error"] = f"rejected before execution: {reason}"
+        reply["stdout"] = ""
+        reply["namespace"] = _session_namespace_summary(ns)
+        return reply
+
     buf = io.StringIO()
     try:
         with contextlib.redirect_stdout(buf):

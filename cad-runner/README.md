@@ -126,13 +126,42 @@ override for local/no-public-URL runs; never set it on a deployed service.
 Session mode extends child-process lifetime but not the threat model — the
 container boundary is still what contains generated code.
 
+### Pre-exec source guard (MTR-187, defense-in-depth)
+
+`validate.py` runs before every fork/exec (`/run` and `/session/*/exec`) and
+rejects a script that won't parse or that statically imports an obvious
+egress / process-spawn module (`socket`, `subprocess`, `requests`, `urllib`,
+`ctypes`, …). This is **not a sandbox** and is not the gate for non-owner
+access — builtins (`__import__`, `getattr`, `open`, `eval`) stay reachable, so
+a determined script bypasses it trivially. It just makes the lazy egress
+attempt fail loudly and cheaply, and moves syntax errors ahead of the fork.
+Enforcement is on by default; `CAD_AST_VALIDATE=false` disables it without a
+redeploy if a legitimate script ever trips the denylist. Tests:
+`python3 cad-runner/tests/test_validate.py`.
+
+**Output-path ownership (audited MTR-187):** generated code never chooses a
+filesystem destination. Every export/`open()` in `app.py` is rooted in a
+harness-owned `tempfile.TemporaryDirectory`; the single-`result` path uses the
+literal stem `"model"` and per-part stems are sanitized to `[A-Za-z0-9-]`
+(non-alnum → `-`, stripped, `part{i}` fallback), so a `parts` key cannot
+contain a path separator or `..` and cannot escape the temp dir.
+
+**Still open (the real gate):** the container is a single trust boundary, not
+a per-run/per-session sandbox. gVisor / seccomp+no-new-privileges+read-only-FS
++network-none-enforced / per-run microVM, per-session (not just per-exec)
+resource caps, runner-secret rotation, and a cross-session tmp-isolation proof
+remain **required before any non-owner exposure** — MTR-187 stays open for
+that decision. The guard above is a cheap complement, not a substitute.
+
 Env knobs: `CAD_RUN_TIMEOUT_S`, `CAD_RUN_MEM_BYTES`, `CAD_RUN_CPU_S`,
-`CAD_RUNNER_SECRET`, `CAD_RUNNER_ALLOW_NO_AUTH`, `CAD_VOXEL_FALLBACK`,
-`CAD_VOXEL_RES`, `CAD_SESSION_TTL_S`, `CAD_SESSION_MAX`.
+`CAD_RUNNER_SECRET`, `CAD_RUNNER_ALLOW_NO_AUTH`, `CAD_AST_VALIDATE`,
+`CAD_VOXEL_FALLBACK`, `CAD_VOXEL_RES`, `CAD_SESSION_TTL_S`, `CAD_SESSION_MAX`.
 
 ## Tests
 
-`python3 cad-runner/tests/run_tests.py` (sdf_kit/networks/fea contracts) and
+`python3 cad-runner/tests/run_tests.py` (sdf_kit/networks/fea contracts),
 `python3 cad-runner/tests/test_app.py` (HTTP layer: /run flags, renders,
 checks, sessions — engine `"mesh"` only, since the dev env has no CAD
-kernel; the B-rep/topo paths run only in the container image).
+kernel; the B-rep/topo paths run only in the container image), and
+`python3 cad-runner/tests/test_validate.py` (pre-exec source guard, stdlib
+only).
