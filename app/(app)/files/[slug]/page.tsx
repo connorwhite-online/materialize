@@ -30,6 +30,7 @@ import {
   type FeedPhoto,
 } from "@/components/photos/photos-feed";
 import { DeleteFileButton } from "@/components/files/delete-file-button";
+import { StepDownloadLink } from "@/components/files/step-download-button";
 import { EditFileButton } from "@/components/files/edit-file-button";
 import { FileThumbnailGeneratorLazy } from "@/components/files/file-thumbnail-generator-lazy";
 import { OrderModelPreviewLazy } from "@/components/print/order-model-preview-lazy";
@@ -799,6 +800,16 @@ export default async function FileDetailPage(props: {
                 >
                   Download
                 </Button>
+              )}
+              {/* Editable STEP source (MTR-196) — renders only when this asset
+                  actually has a persisted STEP (self-hiding for mesh-only /
+                  non-CAD files, so no dead button). Same entitlement as the
+                  STL download, enforced server-side in the action. */}
+              {canDownload && assets[0] && (
+                <StepDownloadLink
+                  fileAssetId={assets[0].id}
+                  className="w-full"
+                />
               )}
               {assets[0] && (
                 <Button

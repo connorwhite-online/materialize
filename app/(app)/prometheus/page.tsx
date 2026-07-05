@@ -16,12 +16,15 @@ import {
 import { generateDownloadUrl } from "@/lib/storage";
 import { canUseTextToCad } from "@/lib/features";
 import { isCadRating } from "@/lib/cad/feedback";
+import { CAD_EXEMPLARS } from "@/lib/cad/knowledge/exemplars";
 import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
 import {
   TextToCadStudio,
   type StudioTurn,
   type StudioThread,
+  type StudioTemplate,
 } from "@/components/cad/text-to-cad-studio";
+import { extractParams } from "@/components/cad/param-diff";
 
 // Experimental owner-only surface — keep it out of search indexes even if
 // the gate is ever misconfigured.
@@ -32,6 +35,58 @@ export const metadata: Metadata = {
 
 const THREAD_LIMIT = 60;
 const LEGACY_ROW_LIMIT = 100;
+
+/** A "nice" slider step for a parameter of the given magnitude. */
+function templateStep(value: number): number {
+  const m = Math.abs(value);
+  if (m >= 50) return 1;
+  if (m >= 10) return 0.5;
+  if (m >= 2) return 0.2;
+  return 0.1;
+}
+
+/** Snap to the slider's step grid so displayed values stay clean. */
+function roundToStep(v: number, step: number): number {
+  return Math.round(v / step) * step;
+}
+
+/**
+ * Verified exemplars → parametric template cards (MTR-190). Params are the
+ * top-level numeric assignments `extractParams` reads (the same contract the
+ * server-side substitution rewrites); ranges are ±50% of the authored value —
+ * the documented fallback when an exemplar carries no explicit param metadata.
+ * Zero-valued params are dropped (no meaningful ±50% range) and the list is
+ * capped so a slider panel stays scannable. Computed once at module load since
+ * the exemplar pool is a static import.
+ */
+const MAX_TEMPLATE_PARAMS = 8;
+const STUDIO_TEMPLATES: StudioTemplate[] = CAD_EXEMPLARS.filter(
+  (e) => e.verified
+).map((e) => {
+  const params = Object.entries(extractParams(e.code))
+    .filter(([, value]) => value !== 0 && Number.isFinite(value))
+    .slice(0, MAX_TEMPLATE_PARAMS)
+    .map(([name, value]) => {
+      const step = templateStep(value);
+      const lo = value > 0 ? Math.max(step, value * 0.5) : value * 1.5;
+      const hi = value > 0 ? value * 1.5 : value * 0.5;
+      return {
+        name,
+        label: name.replace(/_/g, " "),
+        value,
+        min: roundToStep(Math.min(lo, hi), step),
+        max: roundToStep(Math.max(lo, hi), step),
+        step,
+      };
+    });
+  return {
+    id: e.id,
+    title: e.title,
+    blurb: e.lesson,
+    keywords: e.keywords,
+    params,
+  };
+});
 
 /** StudioThread plus thread metadata the studio may adopt later. */
 type StudioThreadWithMeta = StudioThread & {
@@ -277,5 +332,10 @@ export default async function TextToCadPage() {
 
   initialThreads.sort((a, b) => b.lastActivity - a.lastActivity);
 
-  return <TextToCadStudio initialThreads={initialThreads} />;
+  return (
+    <TextToCadStudio
+      initialThreads={initialThreads}
+      templates={STUDIO_TEMPLATES}
+    />
+  );
 }

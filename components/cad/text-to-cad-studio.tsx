@@ -22,13 +22,16 @@ import {
   HistoryIcon,
   Loader2Icon,
   MessageSquareTextIcon,
+  PackageIcon,
   PaperclipIcon,
   PencilIcon,
   PinIcon,
   PlusIcon,
+  SparklesIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react";
+import { zipSync } from "fflate";
 import { Button } from "@/components/ui/button";
 import { ChevronDown } from "@/components/icons/chevron-down";
 import { ChevronRight } from "@/components/icons/chevron-right";
@@ -37,11 +40,14 @@ import { EditSparkle } from "@/components/icons/edit-sparkle";
 import { Layers } from "@/components/icons/layers";
 import {
   deleteCadBuild,
+  getCadTopoUrl,
   recordCadFeedback,
   renameCadGeneration,
+  runCadTemplate,
   saveCadFileToProfile,
   setActiveCadVersion,
 } from "@/app/actions/cad-generation";
+import { StepDownloadLink } from "@/components/files/step-download-button";
 import { diffParams, extractParams } from "@/components/cad/param-diff";
 import type { CadStreamEvent, CadProgressEvent } from "@/lib/cad/types";
 // Type-only: lib/cad/brief is server-only at runtime; the type is erased.
@@ -73,6 +79,33 @@ const MaterializingBlob = lazy(() =>
 export interface StudioPart {
   name: string;
   fileAssetId: string;
+}
+
+/** One adjustable parameter of a template (a top-level numeric assignment). */
+export interface StudioTemplateParam {
+  /** The Python identifier in the exemplar source (e.g. `corner_radius`). */
+  name: string;
+  /** Human label ("corner radius") for the slider. */
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+}
+
+/**
+ * A verified exemplar surfaced as an instant, no-LLM parametric starting point
+ * (MTR-190). Params are extracted server-side (extractParams + ±50% ranges);
+ * adjusting a slider re-runs the substituted source straight through the
+ * sidecar — deterministic, watertight-by-construction, zero model cost.
+ */
+export interface StudioTemplate {
+  id: string;
+  title: string;
+  /** One-line lesson/description shown on the card. */
+  blurb: string;
+  keywords: string[];
+  params: StudioTemplateParam[];
 }
 
 export interface StudioTurn {
@@ -141,6 +174,28 @@ type StudioAnnotation = ViewerAnnotation & { note: string };
 
 function truncate(s: string, n = 40): string {
   return s.length > n ? `${s.slice(0, n).trimEnd()}…` : s;
+}
+
+/** Filesystem-safe stem for a client-generated download filename. */
+function safeFileStem(s: string): string {
+  return s
+    .trim()
+    .replace(/[^\w.-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 60);
+}
+
+/** Trigger a browser download of an in-memory blob (same-origin object URL). */
+function triggerBlobDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoke on the next tick so the click has committed first.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function threadLabel(t: StudioThread): string {
@@ -272,8 +327,11 @@ function readRecentResume(threads: StudioThread[]): ResumeState | null {
  */
 export function TextToCadStudio({
   initialThreads,
+  templates = [],
 }: {
   initialThreads: StudioThread[];
+  /** Verified exemplars exposed as instant parametric starting points (MTR-190). */
+  templates?: StudioTemplate[];
 }) {
   const [threads, setThreads] = useState<StudioThread[]>(initialThreads);
   // Cold visit → start a fresh build (blank canvas). Only resume the last
@@ -338,6 +396,18 @@ export function TextToCadStudio({
   const [compareOn, setCompareOn] = useState(false);
   const [annotateMode, setAnnotateMode] = useState(false);
   const [annotations, setAnnotations] = useState<StudioAnnotation[]>([]);
+  // Per-generation B-rep topology URL for EXACT viewer picking (MTR-174):
+  // fetched lazily for the viewed single-solid turn. A stored `null` means
+  // "confirmed no topology" (mesh-mode / legacy) so we never refetch and the
+  // viewer stays on its flood-fill fallback.
+  const [topoUrls, setTopoUrls] = useState<Record<string, string | null>>({});
+  // Template gallery (MTR-190): the exemplar whose slider panel is open on the
+  // empty state, its live (edited) param values, and whether a build's running.
+  const [templatePickerId, setTemplatePickerId] = useState<string | null>(null);
+  const [templateParams, setTemplateParams] = useState<Record<string, number>>(
+    {}
+  );
+  const [templateBusy, setTemplateBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -510,6 +580,34 @@ export function TextToCadStudio({
     setCompareOn(false);
   }, [activeAssetId]);
 
+  // Lazily resolve the viewed build's B-rep topology sidecar so the viewer
+  // picks faces/edges by EXACT CAD identity (MTR-174: binary-search triRange →
+  // face; real smooth-tangent edge polylines) instead of mesh flood-fill.
+  // Single-solid path only — assemblies render via assemblyParts and keep the
+  // flood-fill fallback. Cached per generation; a null (mesh-mode / legacy) is
+  // remembered so we never refetch and never thread a dead URL.
+  useEffect(() => {
+    const turn = viewedTurn;
+    if (!turn || turn.status !== "succeeded") return;
+    if ((turn.parts?.length ?? 0) > 1) return;
+    if (turn.id in topoUrls) return;
+    let active = true;
+    void getCadTopoUrl({ generationId: turn.id })
+      .then((res) => {
+        if (!active) return;
+        setTopoUrls((prev) => ({
+          ...prev,
+          [turn.id]: "url" in res ? res.url : null,
+        }));
+      })
+      .catch(() => {
+        if (active) setTopoUrls((prev) => ({ ...prev, [turn.id]: null }));
+      });
+    return () => {
+      active = false;
+    };
+  }, [viewedTurn, topoUrls]);
+
   // Pinned version (docs/text-to-cad/05 §D item 2): which generation the
   // thread currently "is". Only DB-backed threads (threadId present) can
   // pin; legacy groups and just-created in-session threads gain the
@@ -579,6 +677,18 @@ export function TextToCadStudio({
   // out on Save (the pinned version is what the design "is").
   const pinnedDiffersFromLatest =
     !!pinnedTurnId && !!latestGoodTurn && pinnedTurnId !== latestGoodTurn.id;
+
+  // Exact-picking topology for the viewer (MTR-174): only for the viewed
+  // single-solid build and never in compare mode (the solid layer there is a
+  // DIFFERENT generation than the viewed one, so its topology wouldn't match).
+  const viewerTopoUrl =
+    !compareBaseAssetId && viewedParts.length <= 1 && viewedTurn
+      ? topoUrls[viewedTurn.id] ?? undefined
+      : undefined;
+
+  // The template whose slider panel is open on the empty-state gallery (MTR-190).
+  const selectedTemplate =
+    templates.find((t) => t.id === templatePickerId) ?? null;
 
   function startNewBuild() {
     // Abandoning an in-flight build is an explicit cancel: close the events
@@ -680,6 +790,122 @@ export function TextToCadStudio({
       return;
     }
     setSavedAssets((prev) => new Set(prev).add(assetId));
+  }
+
+  // Download every part of an assembly as a single .zip of STLs (MTR-44). The
+  // parts are individually printable files; a creator wants them all in one
+  // grab. Zipped client-side (fflate, store-only — STL is already large binary,
+  // so compression buys little and costs CPU) from the same-origin preview
+  // endpoint that backs the single-part download.
+  async function downloadAssemblyZip() {
+    if (viewedParts.length < 2) return;
+    try {
+      const entries: Record<string, Uint8Array> = {};
+      const used = new Set<string>();
+      await Promise.all(
+        viewedParts.map(async (p) => {
+          const res = await fetch(`/api/files/preview/${p.fileAssetId}`);
+          if (!res.ok) throw new Error(`part ${p.name} ${res.status}`);
+          const buf = new Uint8Array(await res.arrayBuffer());
+          const base = safeFileStem(p.name) || "part";
+          let name = `${base}.stl`;
+          let i = 2;
+          // Distinct filenames so two equally-named parts both land in the zip.
+          while (used.has(name)) name = `${base}-${i++}.stl`;
+          used.add(name);
+          entries[name] = buf;
+        })
+      );
+      const zipped = zipSync(entries, { level: 0 });
+      const label = activeThread ? threadLabel(activeThread) : "assembly";
+      // fflate returns a fresh Uint8Array over a fresh buffer; hand its buffer
+      // to Blob (the Uint8Array<ArrayBufferLike> generic doesn't satisfy the
+      // stricter BlobPart type directly).
+      triggerBlobDownload(
+        new Blob([zipped.buffer as ArrayBuffer], { type: "application/zip" }),
+        `${safeFileStem(label) || "assembly"}.zip`
+      );
+    } catch {
+      setError("Could not prepare the download. Please try again.");
+    }
+  }
+
+  // Open a template's slider panel on the empty state, seeding the sliders
+  // with the exemplar's own parameter values (MTR-190).
+  function openTemplate(template: StudioTemplate) {
+    if (generating || templateBusy) return;
+    setError(null);
+    setTemplatePickerId((cur) => (cur === template.id ? null : template.id));
+    setTemplateParams(
+      Object.fromEntries(template.params.map((p) => [p.name, p.value]))
+    );
+  }
+
+  // Instantiate a template as a fresh build (MTR-190) — NO LLM. The server
+  // substitutes the picked params into the verified exemplar and runs it
+  // straight through the sidecar (~2s, deterministic, watertight). On success
+  // we open it as a new thread exactly like a fresh generation's `done` event.
+  async function buildTemplate(template: StudioTemplate) {
+    if (templateBusy || generating) return;
+    setTemplateBusy(true);
+    setError(null);
+    setSnapshot(null);
+    setProgress([]);
+    setSourceAssetId(null);
+    setTransition(null);
+    setGenerating(true); // deforming loader while the sidecar runs
+    try {
+      const res = await runCadTemplate({
+        exemplarId: template.id,
+        params: templateParams,
+      });
+      if ("error" in res) {
+        setError(res.error);
+        return;
+      }
+      const newTurn: StudioTurn = {
+        id: res.generationId,
+        prompt: `Template: ${template.title}`,
+        status: "succeeded",
+        renderUrl: res.renderUrl,
+        fileAssetId: res.fileAssetId,
+        sourceCode: res.sourceCode,
+        error: null,
+        rating: null,
+        feedbackTags: [],
+        feedbackNote: null,
+        parts: res.parts,
+        projectSlug: res.projectSlug,
+        remeshed: res.remeshed,
+        parentGenerationId: null,
+      };
+      const now = Date.now();
+      setThreads((prev) =>
+        prev.some((t) => t.rootId === newTurn.id)
+          ? prev
+          : [
+              {
+                rootId: newTurn.id,
+                title: res.title,
+                lastActivity: now,
+                turns: [newTurn],
+              },
+              ...prev,
+            ]
+      );
+      setActiveRootId(newTurn.id);
+      setViewTurnId(newTurn.id);
+      setTransition(
+        res.fileAssetId ? { assetId: res.fileAssetId, phase: "morph" } : null
+      );
+      setTemplatePickerId(null);
+      setTemplateParams({});
+    } catch {
+      setError("Could not build this template. Please try again.");
+    } finally {
+      setGenerating(false);
+      setTemplateBusy(false);
+    }
   }
 
   // Reflect a saved feedback edit into the in-memory threads so the panel
@@ -1223,6 +1449,7 @@ export function TextToCadStudio({
                     modelUrl={`/api/files/preview/${
                       compareBaseAssetId ?? activeAssetId
                     }`}
+                    topoUrl={viewerTopoUrl}
                     ghostUrl={
                       compareBaseAssetId
                         ? `/api/files/preview/${activeAssetId}`
@@ -1312,6 +1539,134 @@ export function TextToCadStudio({
               )}
             </div>
           </div>
+
+          {/* Template gallery (MTR-190): verified exemplars as instant, no-LLM
+              parametric starting points. Empty state only — pick a part, nudge
+              its sliders, and build straight through the sidecar (~2s,
+              watertight-by-construction). Prompting stays the power tool for
+              refining, not the entry fee. */}
+          {!activeThread &&
+            !generating &&
+            !showTransition &&
+            templates.length > 0 && (
+              <div className="mt-5">
+                <div className="mb-3 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                  <span className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground">
+                    <SparklesIcon className="size-4" />
+                    Start from a template
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    Verified parts — adjust the dimensions and build instantly,
+                    no prompt needed.
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  {templates.map((tpl) => {
+                    const open = tpl.id === templatePickerId;
+                    return (
+                      <button
+                        key={tpl.id}
+                        type="button"
+                        onClick={() => openTemplate(tpl)}
+                        aria-expanded={open}
+                        className={cn(
+                          "flex flex-col rounded-xl border p-3 text-left transition-colors",
+                          open
+                            ? "border-foreground/30 bg-foreground/5"
+                            : "border-foreground/10 hover:bg-foreground/5"
+                        )}
+                      >
+                        <span className="truncate text-sm font-medium text-foreground">
+                          {tpl.title}
+                        </span>
+                        <span className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                          {tpl.blurb}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Slider panel for the selected template, full width below the
+                    grid so card heights stay uniform. */}
+                {selectedTemplate && (
+                  <div className="mt-3 rounded-xl border border-foreground/15 bg-card/60 p-4">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <span className="text-sm font-medium text-foreground">
+                        {selectedTemplate.title}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTemplatePickerId(null);
+                          setTemplateParams({});
+                        }}
+                        aria-label="Close template"
+                        className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                      >
+                        <XIcon className="size-3.5" />
+                      </button>
+                    </div>
+                    {selectedTemplate.params.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">
+                        No adjustable parameters — build it as-is.
+                      </p>
+                    ) : (
+                      <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+                        {selectedTemplate.params.map((p) => {
+                          const val = templateParams[p.name] ?? p.value;
+                          return (
+                            <label key={p.name} className="block">
+                              <span className="mb-1 flex items-center justify-between text-xs">
+                                <span className="text-muted-foreground">
+                                  {p.label}
+                                </span>
+                                <span className="font-mono text-foreground">
+                                  {fmtParam(val)}
+                                </span>
+                              </span>
+                              <input
+                                type="range"
+                                min={p.min}
+                                max={p.max}
+                                step={p.step}
+                                value={val}
+                                disabled={templateBusy}
+                                onChange={(e) =>
+                                  setTemplateParams((prev) => ({
+                                    ...prev,
+                                    [p.name]: Number(e.target.value),
+                                  }))
+                                }
+                                className="w-full accent-foreground"
+                              />
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <div className="mt-4 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => buildTemplate(selectedTemplate)}
+                        disabled={templateBusy}
+                        className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-60"
+                      >
+                        {templateBusy ? (
+                          <Loader2Icon className="size-4 animate-spin" />
+                        ) : (
+                          <SparklesIcon className="size-4" />
+                        )}
+                        Build this
+                      </button>
+                      <span className="text-xs text-muted-foreground">
+                        Refine it with a prompt after it lands.
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
           {/* Assembly view tabs (MTR-174): default = every part in assembly
               position; a part tab isolates it by hiding the others (same
@@ -1449,19 +1804,40 @@ export function TextToCadStudio({
               >
                 Print
               </Link>
-              <a
-                href={`/api/files/preview/${activeAssetId}`}
-                download={`${
-                  (viewedParts.length > 1
-                    ? viewedParts.find((p) => p.fileAssetId === activeAssetId)
-                        ?.name
-                    : activeThread && threadLabel(activeThread)) || "model"
-                }.stl`}
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-foreground/15 px-4 py-2 text-sm hover:bg-foreground/5"
-              >
-                <DownloadIcon className="size-4" />
-                Download
-              </a>
+              {/* Assembly + "All parts" selected → one .zip of every part's
+                  STL ("Download Files", MTR-44). A specific part (or a single
+                  solid) → that one STL. */}
+              {viewedParts.length > 1 && effectiveSelectedPartId === null ? (
+                <button
+                  type="button"
+                  onClick={downloadAssemblyZip}
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-foreground/15 px-4 py-2 text-sm hover:bg-foreground/5"
+                >
+                  <PackageIcon className="size-4" />
+                  Download Files ({viewedParts.length})
+                </button>
+              ) : (
+                <a
+                  href={`/api/files/preview/${activeAssetId}`}
+                  download={`${
+                    (viewedParts.length > 1
+                      ? viewedParts.find((p) => p.fileAssetId === activeAssetId)
+                          ?.name
+                      : activeThread && threadLabel(activeThread)) || "model"
+                  }.stl`}
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-foreground/15 px-4 py-2 text-sm hover:bg-foreground/5"
+                >
+                  <DownloadIcon className="size-4" />
+                  Download
+                </a>
+              )}
+              {/* Editable STEP source (MTR-196) — self-hides when the selected
+                  asset has no B-rep STEP (mesh-mode / remeshed parts). */}
+              <StepDownloadLink
+                key={activeAssetId}
+                fileAssetId={activeAssetId}
+                label="Download STEP"
+              />
               <button
                 type="button"
                 onClick={saveToProfile}
