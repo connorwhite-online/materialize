@@ -9,19 +9,14 @@ vi.mock("@/lib/features", () => ({
   canUseTextToCad: vi.fn(() => allowed),
 }));
 
-// recordCadFeedback shares a module with generateCadModel, which imports
-// these — mock them so importing the action doesn't drag in the harness /
-// storage / files chains.
-vi.mock("@/lib/cad/harness", () => ({ runHarness: vi.fn() }));
-vi.mock("@/lib/cad/persist", () => ({
-  persistGenerationSuccess: vi.fn(),
-  persistGenerationFailure: vi.fn(),
-}));
+// recordCadFeedback lives in the cad-generation actions module alongside
+// deleteCadBuild, which imports @/lib/storage (deleteObject) — mock it so
+// importing the action doesn't drag the storage chain into the test.
+// (The old generateCadModel action that also pulled in the harness/persist/
+// files chains was removed in MTR-167; those mocks went with it.)
 vi.mock("@/lib/storage", () => ({
-  putObject: vi.fn(),
-  generateDownloadUrl: vi.fn(),
+  deleteObject: vi.fn(),
 }));
-vi.mock("@/app/actions/files", () => ({ createDraftFileForPrint: vi.fn() }));
 
 vi.mock("@/lib/db/schema", () => ({
   cadGenerations: { __name: "cad_generations", id: "id", userId: "user_id" },

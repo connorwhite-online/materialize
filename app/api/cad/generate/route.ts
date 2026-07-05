@@ -10,6 +10,7 @@ import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
 import type { PriorFeedback } from "@/lib/cad/harness";
 import { createCadJob, executeCadJob } from "@/lib/cad/jobs";
 import type { PromptImage } from "@/lib/cad/model-client";
+import { checkCadGenerateRateLimit } from "./rate-limit";
 
 /**
  * Generate endpoint for the text-to-CAD studio (MTR-175: background jobs).
@@ -41,6 +42,21 @@ export async function POST(request: Request) {
   if (!canUseTextToCad(primaryEmail(user))) {
     // Mirror the page's notFound() — don't reveal the feature exists.
     return new Response("Not found", { status: 404 });
+  }
+
+  // Per-user frequency backstop (MTR-169): reject a runaway/retry loop before
+  // it can chain another round of model + fal.ai spend. Generous window so it
+  // never fires on legitimate iterative revise/repair use.
+  const rate = await checkCadGenerateRateLimit(userId);
+  if (!rate.ok) {
+    return new Response(
+      `You've started ${rate.count} generations in the last ` +
+        `${rate.windowMinutes} minutes. Give it a moment and try again.`,
+      {
+        status: 429,
+        headers: { "Retry-After": String(rate.retryAfterSeconds) },
+      }
+    );
   }
 
   let body: {
