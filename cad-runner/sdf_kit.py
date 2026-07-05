@@ -398,4 +398,19 @@ def to_mesh(field, lo, hi, pitch=0.7):
     m = trimesh.Trimesh(vertices=verts, faces=faces)
     m.merge_vertices()
     m.fix_normals()
+    # Drop sub-voxel debris: hard clips (mask/subtract/split_shell planes) can
+    # leave marching-cubes slivers — closed bodies a few cells across with
+    # ~zero volume. They are unprintable dust, and the sidecar's fragment gate
+    # rightly fails any part that ships disconnected bodies. Anything at least
+    # a few voxels big is kept — genuinely disjoint REAL geometry still reaches
+    # the gate and fails loudly there, as it should.
+    try:
+        bodies = m.split(only_watertight=False)
+        if len(bodies) > 1:
+            tol = (2.0 * pitch) ** 3
+            kept = [b for b in bodies if abs(float(b.volume)) > tol]
+            if kept and len(kept) < len(bodies):
+                m = trimesh.util.concatenate(kept) if len(kept) > 1 else kept[0]
+    except Exception:  # noqa: BLE001 — debris filtering is best-effort
+        pass
     return m

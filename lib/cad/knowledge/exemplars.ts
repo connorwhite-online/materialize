@@ -356,6 +356,13 @@ export const CAD_EXEMPLARS: CadExemplar[] = [
       "mesh = trimesh.Trimesh(vertices=verts, faces=faces)",
       "mesh.merge_vertices()",
       "mesh.fix_normals()",
+      "# Marching cubes can leave sub-voxel debris bodies (closed slivers with",
+      "# ~zero volume) where the field grazes the grid. Drop them — one printed",
+      "# part must be ONE fused body.",
+      "bodies = mesh.split(only_watertight=False)",
+      "if len(bodies) > 1:",
+      "    keep = [b for b in bodies if abs(float(b.volume)) > 1.0]",
+      "    mesh = trimesh.util.concatenate(keep) if len(keep) > 1 else keep[0]",
       "",
       "result = mesh",
     ].join("\n"),
@@ -396,19 +403,28 @@ export const CAD_EXEMPLARS: CadExemplar[] = [
     title: "Soft catch-all tray",
     keywords: ["catch-all", "catchall", "valet", "dish", "tray", "pebble", "bowl", "organizer", "desk"],
     lesson:
-      "Soft, cohesive product form: a very generous unified corner radius with a soft top rim and base, and a shallow shelled bowl — one pebble-like flowing body, nothing busy or disjointed.",
+      "Soft, cohesive product form: a very generous unified corner radius with a soft top rim and base, and a shallow bowl pocket — one pebble-like flowing body. The pocket is cut (not shelled): shelling through a big pre-filleted rim silently seals the opening into a closed hollow, so the bowl is an explicit rounded pocket inset by wall + rim radius.",
     code: [
       "from build123d import *",
       "length, width, height = 110, 80, 26",
       "corner_r = 26.0        # very soft, pebble-like corners",
       "wall = 2.2",
+      "rim_r = 6.0            # soft top rim",
       "with BuildPart() as part:",
-      "    Box(length, width, height)",
+      "    Box(length, width, height, align=(Align.CENTER, Align.CENTER, Align.MIN))",
       "    fillet(part.edges().filter_by(Axis.Z), corner_r)",
-      "    fillet(part.edges().group_by(Axis.Z)[-1], 6.0)   # soft top rim",
-      "    chamfer(part.edges().group_by(Axis.Z)[0], 3.0)   # soft base",
-      "    top = part.faces().sort_by(Axis.Z)[-1]",
-      "    offset(amount=-wall, openings=top)",
+      "    fillet(part.edges().group_by(Axis.Z)[-1], rim_r)   # soft top rim",
+      "    chamfer(part.edges().group_by(Axis.Z)[0], 3.0)     # soft base",
+      "    # Bowl as an explicit rounded pocket: shelling through the big rim",
+      "    # fillet silently produces a CLOSED hollow (the opening seals), so cut",
+      "    # the pocket instead — inset by wall + rim_r so the soft rim keeps a",
+      "    # full wall everywhere along its curve.",
+      "    with BuildSketch(Plane.XY.offset(height + 1)):",
+      "        RectangleRounded(length - 2 * wall - 2 * rim_r,",
+      "                         width - 2 * wall - 2 * rim_r,",
+      "                         corner_r - wall - rim_r)",
+      "    extrude(amount=-(height + 1 - wall), mode=Mode.SUBTRACT)",
+      "    fillet(part.edges().group_by(Axis.Z)[-1], 1.0)     # break the mouth",
       "result = part.part",
     ].join("\n"),
     verified: true,
@@ -488,12 +504,13 @@ export const CAD_EXEMPLARS: CadExemplar[] = [
     title: "Two-fluid gyroid heat-exchanger core (sdf_kit v2)",
     keywords: ["heat exchanger", "heat-exchanger", "exchanger", "two fluid", "two-fluid", "counterflow", "coolant", "manifold", "gyroid", "tpms", "radiator", "intercooler"],
     lesson:
-      "sdf_kit v2 composition for dual-network parts: a cylindrical jacket (exact cyl_z shell) whose interior is filled by a gyroid SHEET via mask() — the sheet splits the inner volume into two interpenetrating, fully isolated fluid labyrinths (verified with check_networks: 2 components, ports isolated). Real-mm sheet thickness, one field, watertight at pitch 0.6.",
+      "sdf_kit v2 composition for dual-network parts: an OPEN-ENDED cylindrical jacket tube whose interior is filled by a gyroid SHEET via mask() — the sheet splits the inner volume into two interpenetrating, fully isolated fluid labyrinths (verify with check_networks). Ends stay open: a capped core would seal both labyrinths into trapped, unprintable voids. The sheet region overlaps half a wall into the tube so the meshed sheet fuses into one body.",
     code: [
-      "# MESH MODE (sdf_kit): a two-fluid gyroid heat-exchanger CORE — a cylindrical",
-      "# jacket whose interior is split by a gyroid sheet into TWO isolated fluid",
-      "# labyrinths. The sheet is the heat-transfer surface; each network gets its",
-      "# own inlet/outlet when the manifolds are added.",
+      "# MESH MODE (sdf_kit): a two-fluid gyroid heat-exchanger CORE — an open-ended",
+      "# jacket tube whose interior is split by a gyroid sheet into TWO isolated",
+      "# fluid labyrinths. The sheet is the heat-transfer surface; manifolds attach",
+      "# at the open ends. The ends MUST stay open — capping the tube would seal",
+      "# both labyrinths into trapped voids no printer can evacuate.",
       "from sdf_kit import *",
       "",
       "core_d = 50.0        # jacket outer diameter",
@@ -505,15 +522,19 @@ export const CAD_EXEMPLARS: CadExemplar[] = [
       "R = core_d / 2",
       "",
       "def field(P):",
-      "    # Jacket: a solid-walled cylinder shell (closed top/bottom rims)...",
-      "    jacket_outer = cyl_z(P, 0, 0, R, 0.0, core_h)",
-      "    jacket_inner = cyl_z(P, 0, 0, R - wall, wall, core_h - wall)",
-      "    shell = subtract(jacket_outer, jacket_inner)",
-      "    # ...whose interior is filled by the gyroid separating SHEET. The sheet",
-      "    # (|g| <= t) splits the inner volume into two interpenetrating networks",
-      "    # that never touch — verify with check_networks before trusting it.",
-      "    sheet = mask(gyroid(P, cell, sheet_t), jacket_inner)",
-      "    return union(shell, sheet)",
+      "    # Jacket: an open-ended tube (inner cut overshoots both ends).",
+      "    tube = subtract(",
+      "        cyl_z(P, 0, 0, R, 0.0, core_h),",
+      "        cyl_z(P, 0, 0, R - wall, -1.0, core_h + 1.0),",
+      "    )",
+      "    # Gyroid separating SHEET (|g| <= t), clipped to a region that overlaps",
+      "    # half a wall INTO the tube — a hard clip exactly at the wall face can",
+      "    # leave the sheet a disconnected body at mesh resolution. The sheet",
+      "    # splits the interior into two networks that never touch — verify with",
+      "    # check_networks before trusting it.",
+      "    region = cyl_z(P, 0, 0, R - wall / 2, 0.0, core_h)",
+      "    sheet = mask(gyroid(P, cell, sheet_t), region)",
+      "    return union(tube, sheet)",
       "",
       "result = to_mesh(field, (-R - 2, -R - 2, -2), (R + 2, R + 2, core_h + 2), pitch=0.6)",
     ].join("\n"),
@@ -560,45 +581,7 @@ export const CAD_EXEMPLARS: CadExemplar[] = [
     ].join("\n"),
     verified: true,
   },
-];
-
-/** Score an exemplar against a prompt by keyword hits. */
-function score(prompt: string, ex: CadExemplar): number {
-  const p = prompt.toLowerCase();
-  return ex.keywords.reduce((s, k) => (p.includes(k) ? s + 1 : s), 0);
-}
-
-/**
- * Pick the best-matching VERIFIED exemplar(s) for a prompt. Unverified
- * exemplars are never returned, so an unproven part can't reach the model.
- * `pool` is injectable for tests.
- */
-export function selectExemplars(
-  prompt: string,
-  opts: { limit?: number; pool?: CadExemplar[] } = {}
-): CadExemplar[] {
-  const limit = opts.limit ?? 1;
-  const pool = (opts.pool ?? CAD_EXEMPLARS).filter((e) => e.verified);
-  return pool
-    .map((e) => ({ e, s: score(prompt, e) }))
-    .filter(({ s }) => s > 0)
-    .sort((a, b) => b.s - a.s)
-    .slice(0, limit)
-    .map(({ e }) => e);
-}
-
-/**
- * Resolve exemplar ids the plan/brief step chose from the catalog (retrieval
- * v2, docs/text-to-cad/07 §C). Validated against the pool + verified-only +
- * capped at 2, so a hallucinated or unverified id can never inject code.
- * `pool` is injectable for tests.
- */
-export function selectExemplarsByIds(
-  ids: string[],
-  opts: { pool?: CadExemplar[] } = {}
-): CadExemplar[] {
-  const pool = (opts.pool ?? CAD_EXEMPLARS).filter((e) => e.verified);
-  const out: CadExemplar[] = [  {
+  {
     id: "draped_two_piece_enclosure",
     title: "Two-piece draped enclosure (drape-and-split recipe)",
     keywords: ["enclosure", "two piece", "two-piece", "case", "housing", "lid", "snap", "split", "clamshell", "shell", "pcb", "battery", "components", "drape", "organic", "electronics"],
@@ -840,6 +823,44 @@ export function selectExemplarsByIds(
     verified: true,
   },
 ];
+
+/** Score an exemplar against a prompt by keyword hits. */
+function score(prompt: string, ex: CadExemplar): number {
+  const p = prompt.toLowerCase();
+  return ex.keywords.reduce((s, k) => (p.includes(k) ? s + 1 : s), 0);
+}
+
+/**
+ * Pick the best-matching VERIFIED exemplar(s) for a prompt. Unverified
+ * exemplars are never returned, so an unproven part can't reach the model.
+ * `pool` is injectable for tests.
+ */
+export function selectExemplars(
+  prompt: string,
+  opts: { limit?: number; pool?: CadExemplar[] } = {}
+): CadExemplar[] {
+  const limit = opts.limit ?? 1;
+  const pool = (opts.pool ?? CAD_EXEMPLARS).filter((e) => e.verified);
+  return pool
+    .map((e) => ({ e, s: score(prompt, e) }))
+    .filter(({ s }) => s > 0)
+    .sort((a, b) => b.s - a.s)
+    .slice(0, limit)
+    .map(({ e }) => e);
+}
+
+/**
+ * Resolve exemplar ids the plan/brief step chose from the catalog (retrieval
+ * v2, docs/text-to-cad/07 §C). Validated against the pool + verified-only +
+ * capped at 2, so a hallucinated or unverified id can never inject code.
+ * `pool` is injectable for tests.
+ */
+export function selectExemplarsByIds(
+  ids: string[],
+  opts: { pool?: CadExemplar[] } = {}
+): CadExemplar[] {
+  const pool = (opts.pool ?? CAD_EXEMPLARS).filter((e) => e.verified);
+  const out: CadExemplar[] = [];
   for (const id of ids) {
     const ex = pool.find((e) => e.id === id);
     if (ex && !out.includes(ex)) out.push(ex);
