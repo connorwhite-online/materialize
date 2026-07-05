@@ -90,6 +90,11 @@ cold-executable: current state with pointers, spec, acceptance criteria, open qu
 
 This review itself is tracked as MTR-182.
 
+Beyond the workstream specs, [09-cad-skills-research.md](./09-cad-skills-research.md)
+(MTR-195, 2026-07-05) is a competitive deep-dive of CAD Skills
+(earthtojake/text-to-cad): what it validates about this architecture, the gaps adopted
+from it (MTR-196–201), and the fulfillment-rails strategic play (MTR-202).
+
 Related pre-existing issues: MTR-35 (annotation v1, shipped — 01 is its v2), MTR-44
 (assemblies 2/2), MTR-46 (enhancement backlog), MTR-48 (studio cleanups — superseded in
 part by 05), MTR-50 (thumbnails), MTR-51 (production enablement — prerequisite for 02's
