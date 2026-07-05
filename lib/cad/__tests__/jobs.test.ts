@@ -12,6 +12,7 @@ vi.mock("@/lib/db/schema", () => ({
     progress: "progress",
     error: "error",
     cancelRequestedAt: "cancel_requested_at",
+    answers: "answers",
     startedAt: "started_at",
     finishedAt: "finished_at",
   },
@@ -25,6 +26,7 @@ vi.mock("@/lib/db/schema", () => ({
 type JobRow = {
   progress: CadJobProgressEntry[];
   cancelRequestedAt: Date | null;
+  answers: Record<string, string>;
 };
 let jobRow: JobRow;
 const updateCalls: Array<Record<string, unknown>> = [];
@@ -47,6 +49,9 @@ vi.mock("@/lib/db", () => ({
         if (v.cancelRequestedAt instanceof Date) {
           jobRow.cancelRequestedAt = v.cancelRequestedAt;
         }
+        if (v.answers && typeof v.answers === "object") {
+          jobRow.answers = v.answers as Record<string, string>;
+        }
         return { where: () => Promise.resolve() };
       },
     }),
@@ -56,6 +61,7 @@ vi.mock("@/lib/db", () => ({
           const row = {
             progress: [...jobRow.progress],
             cancelRequestedAt: jobRow.cancelRequestedAt,
+            answers: { ...jobRow.answers },
           };
           const arr = [row];
           return Object.assign(arr, { limit: () => arr });
@@ -129,8 +135,9 @@ const baseInput = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  jobRow = { progress: [], cancelRequestedAt: null };
+  jobRow = { progress: [], cancelRequestedAt: null, answers: {} };
   updateCalls.length = 0;
+  delete process.env.CAD_MAX_QUESTIONS_PER_JOB;
   persistGenerationFailure.mockImplementation(async (...args: unknown[]) => ({
     error: args[1] as string,
     generationId: args[0] as string,
@@ -323,6 +330,117 @@ describe("executeCadJob", () => {
     expect(persistGenerationFailure).toHaveBeenCalledWith(
       "gen-1",
       "Generation cancelled."
+    );
+  });
+
+  // --- Interactive specification (MTR-191) -------------------------------
+  const questionInput = {
+    id: "q1",
+    text: "Which board?",
+    options: [
+      { id: "esp32", label: "ESP32" },
+      { id: "pico", label: "Pico" },
+    ],
+    defaultOptionId: "esp32",
+  };
+
+  function doneSuccess() {
+    persistGenerationSuccess.mockResolvedValue({
+      generationId: "gen-1",
+      fileAssetId: "asset-1",
+      fileSlug: "slug-1",
+      renderUrl: null,
+      sourceCode: "result = 1",
+      title: "Part",
+      remeshed: false,
+    });
+  }
+
+  it("suspends on a question, resumes with the user's pick, and records the Q/A", async () => {
+    doneSuccess();
+    // The answer is already in the column when the harness asks — the first
+    // poll finds it, so no fake timers needed.
+    jobRow.answers = { q1: "pico" };
+    let chosen: string | undefined;
+    runHarness.mockImplementation(
+      async (input: {
+        onQuestion?: (q: typeof questionInput) => Promise<string>;
+      }) => {
+        chosen = await input.onQuestion?.(questionInput);
+        return okHarnessResult();
+      }
+    );
+
+    await executeCadJob(baseInput);
+
+    expect(chosen).toBe("pico");
+    // Status walked ... running -> awaiting_input -> running -> done.
+    expect(updateCalls).toContainEqual(
+      expect.objectContaining({ status: "awaiting_input" })
+    );
+    // The question + its resolution both land in the persisted progress log.
+    expect(jobRow.progress).toContainEqual(
+      expect.objectContaining({ type: "question", questionId: "q1" })
+    );
+    expect(jobRow.progress).toContainEqual(
+      expect.objectContaining({
+        type: "answer",
+        questionId: "q1",
+        optionId: "pico",
+        viaDefault: false,
+      })
+    );
+  });
+
+  it("proceeds with the default WITHOUT suspending when the budget is 0", async () => {
+    doneSuccess();
+    process.env.CAD_MAX_QUESTIONS_PER_JOB = "0";
+    let chosen: string | undefined;
+    runHarness.mockImplementation(
+      async (input: {
+        onQuestion?: (q: typeof questionInput) => Promise<string>;
+      }) => {
+        chosen = await input.onQuestion?.(questionInput);
+        return okHarnessResult();
+      }
+    );
+
+    await executeCadJob(baseInput);
+
+    // Default taken, and the job never entered awaiting_input nor emitted a
+    // question event — the kill switch is a clean no-op.
+    expect(chosen).toBe("esp32");
+    expect(updateCalls).not.toContainEqual(
+      expect.objectContaining({ status: "awaiting_input" })
+    );
+    expect(
+      jobRow.progress.some((e) => e.type === "question")
+    ).toBe(false);
+  });
+
+  it("falls back to the default when a stale answer names an option we never offered", async () => {
+    doneSuccess();
+    jobRow.answers = { q1: "not-an-option" };
+    let chosen: string | undefined;
+    runHarness.mockImplementation(
+      async (input: {
+        onQuestion?: (q: typeof questionInput) => Promise<string>;
+      }) => {
+        chosen = await input.onQuestion?.(questionInput);
+        return okHarnessResult();
+      }
+    );
+
+    await executeCadJob(baseInput);
+
+    expect(chosen).toBe("esp32");
+    expect(jobRow.progress).toContainEqual(
+      expect.objectContaining({
+        type: "answer",
+        questionId: "q1",
+        optionId: "esp32",
+        viaDefault: true,
+      })
     );
   });
 });
