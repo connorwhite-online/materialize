@@ -667,10 +667,11 @@ interface ModelViewerProps {
    * annotations carry a semantic handle. Absent/404 → mesh-flood-fill
    * fallback, so every current call site is unaffected.
    *
-   * TODO(MTR-174): the studio has no per-asset topology URL to pass yet — the
-   * cad-artifacts PR persists the sidecar (R2 `cad-topo/...` keyed on a new
-   * `cadGenerations.topoStorageKey`) and must expose a signed URL (mirroring
-   * `/api/files/preview/{id}` for renders). Thread it here once available.
+   * Live as of MTR-174: the studio threads a signed topology URL here from
+   * `getCadTopoUrl` (app/actions/cad-generation.ts), which mints it from
+   * `cadGenerations.topoStorageKey` (persisted by the cad-artifacts PR to R2
+   * `cad-topo/...`). Single-solid path only — assemblies keep the flood-fill
+   * fallback.
    */
   topoUrl?: string;
 }

@@ -40,6 +40,17 @@ import {
   isCadRating,
   type CadRating,
 } from "@/lib/cad/feedback";
+// Read-only imports of the backend building blocks so the no-LLM template
+// exec (MTR-190) composes them without reimplementing the persist/sidecar
+// path (owned by the backend PR — never edited here).
+import { runCadCode } from "@/lib/cad/runner-client";
+import {
+  persistGenerationSuccess,
+  persistGenerationFailure,
+} from "@/lib/cad/persist";
+import type { HarnessResult } from "@/lib/cad/harness";
+import { CAD_EXEMPLARS } from "@/lib/cad/knowledge/exemplars";
+import { substituteParams } from "@/components/cad/param-diff";
 
 // Generation itself lives in the jobs path (app/api/cad/generate ->
 // lib/cad/jobs.ts -> lib/cad/orchestrate.ts). The old inline generateCadModel
@@ -645,5 +656,185 @@ export async function getCadStepDownloadUrl(input: {
   } catch (error) {
     logError("getCadStepDownloadUrl", error);
     return { error: "Could not prepare download." };
+  }
+}
+
+/**
+ * Mint a short-lived download URL for a generation's B-rep topology sidecar
+ * (MTR-174) — the per-face/edge identity manifest the studio viewer consumes
+ * for EXACT picking (binary-search `triRange` → face; real edge polylines
+ * incl. smooth-tangent fillet boundaries) instead of the mesh flood-fill
+ * fallback. Keyed on the GENERATION (topology is a property of the build's
+ * B-rep, persisted on `cadGenerations.topoStorageKey`, not on the file asset).
+ *
+ * Returns `{ url: null }` (not an error) when the generation has no topology —
+ * mesh-mode / sdf_kit builds and legacy rows predating the column — so the
+ * viewer silently degrades to flood-fill picking with no dead affordance.
+ *
+ * Studio-only picking feature: gated behind `canUseTextToCad` and pinned to
+ * the caller's own rows (userId in the WHERE), mirroring every other studio
+ * action here.
+ */
+export async function getCadTopoUrl(input: {
+  generationId: string;
+}): Promise<{ url: string | null } | { error: string }> {
+  const { userId } = await auth();
+  if (!userId) return { error: "Unauthorized" };
+
+  const user = (await currentUser()) as ClerkUserLike;
+  if (!canUseTextToCad(primaryEmail(user))) return { error: "Not found" };
+
+  const generationId = input.generationId?.trim();
+  if (!generationId) return { error: "Not found" };
+
+  try {
+    const [gen] = await db
+      .select({ topoStorageKey: cadGenerations.topoStorageKey })
+      .from(cadGenerations)
+      .where(
+        and(
+          eq(cadGenerations.id, generationId),
+          eq(cadGenerations.userId, userId)
+        )
+      )
+      .limit(1);
+    // No row of ours, or no B-rep topology for this build — nothing to pick
+    // against, not an error.
+    if (!gen || !gen.topoStorageKey) return { url: null };
+
+    const url = await generateDownloadUrl(gen.topoStorageKey);
+    return { url };
+  } catch (error) {
+    logError("getCadTopoUrl", error);
+    return { url: null };
+  }
+}
+
+/** What the studio needs to render a template build as a first-class turn. */
+export interface RunCadTemplateResult {
+  generationId: string;
+  fileAssetId: string;
+  renderUrl: string | null;
+  sourceCode: string;
+  title: string | null;
+  parts: { name: string; fileAssetId: string }[];
+  projectSlug: string | null;
+  remeshed: boolean;
+  hasStep: boolean;
+}
+
+/**
+ * Instantiate a verified exemplar as a real generation with the user's picked
+ * parameters — the "Start from a template" path (MTR-190). NO LLM in the loop:
+ * we substitute the numbers into the proven source and run it straight through
+ * the sidecar, so every result is watertight-by-construction, deterministic,
+ * and carries zero marginal model cost (~2s round trip).
+ *
+ * The result is persisted exactly like any generation (`persistGenerationSuccess`),
+ * so threads/revisions/save/print/STEP/topology all work unchanged. We pass
+ * `isRoot: false` with a `nameOverride` of the exemplar title on purpose: that
+ * is the one persist branch that names the file WITHOUT a title-model call
+ * (the LLM the "no LLM / zero cost" invariant forbids on this hot slider path).
+ * The thread row is created lazily on the first revision (or reconstructed by
+ * the page's legacy grouping on reload) — same lifecycle as an in-session build.
+ *
+ * Owner-only; gated like every other studio surface.
+ */
+export async function runCadTemplate(input: {
+  exemplarId: string;
+  params: Record<string, number>;
+}): Promise<RunCadTemplateResult | { error: string }> {
+  const { userId } = await auth();
+  if (!userId) return { error: "Unauthorized" };
+
+  const user = (await currentUser()) as ClerkUserLike;
+  if (!canUseTextToCad(primaryEmail(user))) return { error: "Not found" };
+
+  const exemplar = CAD_EXEMPLARS.find(
+    (e) => e.id === input.exemplarId && e.verified
+  );
+  // Only VERIFIED exemplars are ever instantiable (the quality guard) — an
+  // unverified/unknown id is treated as not found, never run.
+  if (!exemplar) return { error: "Template not found." };
+
+  // Sanitize the picked params: finite numbers only, and only names that are
+  // actual parameters of this exemplar's source. Anything else is dropped, so
+  // a stale/hostile client can't smuggle values into non-parametric lines.
+  const params: Record<string, number> = {};
+  for (const [name, value] of Object.entries(input.params ?? {})) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      params[name] = value;
+    }
+  }
+  const source = substituteParams(exemplar.code, params);
+  const prompt = `Template: ${exemplar.title}`;
+
+  // Insert the pending row first (mirrors the generate route) so a failed
+  // sidecar run still leaves an auditable record rather than a silent drop.
+  const [row] = await db
+    .insert(cadGenerations)
+    .values({
+      userId,
+      prompt,
+      engine: "build123d",
+      status: "pending",
+    })
+    .returning({ id: cadGenerations.id });
+  const generationId = row.id;
+
+  try {
+    const run = await runCadCode(source, ["stl", "step"]);
+    if (!run.ok) {
+      await persistGenerationFailure(
+        generationId,
+        run.error || "Template build failed.",
+        source,
+        1
+      );
+      return { error: "This template couldn't be built. Please try again." };
+    }
+
+    const result: HarnessResult = {
+      ok: true,
+      sourceCode: source,
+      attempts: 1,
+      run,
+      route: `template:${exemplar.id}`,
+    };
+
+    const persisted = await persistGenerationSuccess({
+      userId,
+      generationId,
+      prompt,
+      isRoot: false,
+      nameOverride: exemplar.title,
+      result,
+    });
+    if ("error" in persisted) return { error: persisted.error };
+
+    revalidatePath("/prometheus");
+    return {
+      generationId: persisted.generationId,
+      fileAssetId: persisted.fileAssetId,
+      renderUrl: persisted.renderUrl,
+      sourceCode: persisted.sourceCode,
+      title: persisted.title ?? exemplar.title,
+      parts: (persisted.parts ?? []).map((p) => ({
+        name: p.name,
+        fileAssetId: p.fileAssetId,
+      })),
+      projectSlug: persisted.projectSlug ?? null,
+      remeshed: persisted.remeshed ?? false,
+      hasStep: persisted.hasStep ?? false,
+    };
+  } catch (error) {
+    logError("runCadTemplate", error);
+    await persistGenerationFailure(
+      generationId,
+      "Template build failed.",
+      source,
+      1
+    ).catch(() => undefined);
+    return { error: "Could not build this template. Please try again." };
   }
 }

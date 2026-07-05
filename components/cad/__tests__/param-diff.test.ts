@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { extractParams, diffParams } from "@/components/cad/param-diff";
+import {
+  extractParams,
+  diffParams,
+  substituteParams,
+} from "@/components/cad/param-diff";
 
 describe("extractParams", () => {
   it("parses plain top-level numeric assignments", () => {
@@ -124,5 +128,50 @@ describe("diffParams", () => {
       added: [],
       removed: [["wall", 2]],
     });
+  });
+});
+
+describe("substituteParams", () => {
+  it("rewrites a plain top-level assignment and leaves the rest untouched", () => {
+    const src = [
+      "from build123d import *",
+      "",
+      "wall = 2",
+      "corner_r = 6   # one radius family",
+      "with BuildPart() as part:",
+      "    Box(80, 60, 28)",
+      "result = part.part",
+    ].join("\n");
+    const out = substituteParams(src, { wall: 2.4, corner_r: 8 });
+    expect(out).toContain("wall = 2.4");
+    // Trailing comment + spacing preserved around the new value.
+    expect(out).toContain("corner_r = 8   # one radius family");
+    // Non-parametric lines (imports, indented body, result) are byte-identical.
+    expect(out).toContain("from build123d import *");
+    expect(out).toContain("    Box(80, 60, 28)");
+    expect(out).toContain("result = part.part");
+    // Round-trips through the extractor it is the inverse of.
+    expect(extractParams(out)).toMatchObject({ wall: 2.4, corner_r: 8 });
+  });
+
+  it("substitutes individual members of a tuple unpack", () => {
+    const src = "length, width, height = 80, 60, 28\nresult = 1";
+    const out = substituteParams(src, { length: 100, height: 30 });
+    expect(out.split("\n")[0]).toBe("length, width, height = 100, 60, 30");
+  });
+
+  it("ignores unknown, non-finite, and indented names (no injection)", () => {
+    const src = ["wall = 2", "    inner = 5"].join("\n");
+    const out = substituteParams(src, {
+      wall: NaN, // non-finite → keep original
+      inner: 9, // indented → not a top-level param
+      bogus: 3, // unknown name → no-op
+    });
+    expect(out).toBe(src);
+  });
+
+  it("trims float noise from substituted literals", () => {
+    const out = substituteParams("r = 1", { r: 2.7 / 1 + 0.0000000004 });
+    expect(out).toBe("r = 2.7");
   });
 });
