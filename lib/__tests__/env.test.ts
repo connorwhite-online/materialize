@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { REQUIRED_SERVER_ENV, requireEnv } from "../env";
+import {
+  REQUIRED_SERVER_ENV,
+  requireEnv,
+  isCadRunnerMock,
+  isSandboxMode,
+} from "../env";
 
 // A complete, valid set of all required server vars, layered over a clean
 // base (preserving NODE_ENV etc. that ProcessEnv requires).
@@ -92,5 +97,77 @@ describe("validateServerEnv", () => {
 
     const mod = await freshValidate();
     expect(() => mod.validateServerEnv()).toThrow(mod.EnvValidationError);
+  });
+});
+
+// MTR-166: the CAD-runner mock is a sandbox gate and must flip the badge.
+describe("isCadRunnerMock", () => {
+  const original = process.env;
+  beforeEach(() => {
+    process.env = { ...original };
+  });
+  afterEach(() => {
+    process.env = original;
+  });
+
+  it("is mocked when CAD_RUNNER_URL is unset/empty", () => {
+    delete process.env.CAD_RUNNER_URL;
+    expect(isCadRunnerMock()).toBe(true);
+    process.env.CAD_RUNNER_URL = "";
+    expect(isCadRunnerMock()).toBe(true);
+  });
+
+  it("is live when a runner URL is configured", () => {
+    process.env.CAD_RUNNER_URL = "https://runner.example.com";
+    delete process.env.CAD_RUNNER_USE_MOCK;
+    expect(isCadRunnerMock()).toBe(false);
+  });
+
+  it("CAD_RUNNER_USE_MOCK=true forces the mock even with a URL", () => {
+    process.env.CAD_RUNNER_URL = "https://runner.example.com";
+    process.env.CAD_RUNNER_USE_MOCK = "true";
+    expect(isCadRunnerMock()).toBe(true);
+  });
+});
+
+// MTR-166: isSandboxMode() must OR in every mock/test gate (AGENTS.md rule).
+describe("isSandboxMode", () => {
+  const original = process.env;
+  beforeEach(() => {
+    process.env = { ...original };
+  });
+  afterEach(() => {
+    process.env = original;
+  });
+
+  // A fully-live baseline: real Stripe key, CraftCloud live, runner live.
+  function liveEnv(): void {
+    process.env.STRIPE_SECRET_KEY = "sk_live_abc";
+    process.env.CRAFTCLOUD_USE_MOCK = "false";
+    process.env.CAD_RUNNER_URL = "https://runner.example.com";
+    delete process.env.CAD_RUNNER_USE_MOCK;
+  }
+
+  it("is false when nothing is mocked", () => {
+    liveEnv();
+    expect(isSandboxMode()).toBe(false);
+  });
+
+  it("is true on a Stripe test key", () => {
+    liveEnv();
+    process.env.STRIPE_SECRET_KEY = "sk_test_abc";
+    expect(isSandboxMode()).toBe(true);
+  });
+
+  it("is true when CraftCloud is mocked", () => {
+    liveEnv();
+    process.env.CRAFTCLOUD_USE_MOCK = "true";
+    expect(isSandboxMode()).toBe(true);
+  });
+
+  it("is true when only the CAD runner is mocked", () => {
+    liveEnv();
+    delete process.env.CAD_RUNNER_URL;
+    expect(isSandboxMode()).toBe(true);
   });
 });

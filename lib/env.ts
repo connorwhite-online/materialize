@@ -135,13 +135,34 @@ export function getCheckoutModel(): CheckoutModel {
 }
 
 /**
+ * True when the CAD execution sidecar is mocked — no real `CAD_RUNNER_URL`
+ * configured, or `CAD_RUNNER_USE_MOCK=true` forces the mock even with a URL.
+ * In mock mode the sidecar returns a hardcoded empty-mesh cube marked
+ * `ok: true` for ANY prompt, persisted as a real "succeeded" build, so a
+ * tester needs to know the geometry isn't real.
+ *
+ * Mirrors the `USE_MOCK` gate in lib/cad/runner-client.ts EXACTLY — kept
+ * inline (rather than importing `isRunnerLive()`) so lib/env stays free of
+ * a lib/cad dependency and the two stay in sync by construction. If you
+ * change the mock condition in runner-client.ts, change it here too.
+ */
+export function isCadRunnerMock(): boolean {
+  const runnerUrl = process.env.CAD_RUNNER_URL ?? "";
+  return runnerUrl === "" || process.env.CAD_RUNNER_USE_MOCK === "true";
+}
+
+/**
  * True when EITHER Stripe is on test keys (sk_test_*) OR the CraftCloud
- * client is in mock mode. Surfaced in the nav as a "Sandbox" badge so a
- * tester walking the checkout flow can tell at a glance that orders
- * won't be billed or fulfilled for real.
+ * client is in mock mode OR the CAD runner is mocked. Surfaced in the nav
+ * as a "Sandbox" badge so a tester walking the checkout or text-to-CAD
+ * flow can tell at a glance that orders won't be billed/fulfilled for real
+ * and generated geometry is a mock stand-in.
  *
  * Server-only: reads raw process.env, so don't call from a Client
  * Component. Pass the result down as a prop instead.
+ *
+ * House rule (AGENTS.md): every mock/test gate must be OR-ed in here so the
+ * badge keeps reflecting reality.
  */
 export function isSandboxMode(): boolean {
   const stripeKey = process.env.STRIPE_SECRET_KEY ?? "";
@@ -150,5 +171,5 @@ export function isSandboxMode(): boolean {
   // in lib/craftcloud/client.ts so the badge and the actual mock
   // path stay in sync.
   const craftCloudMock = process.env.CRAFTCLOUD_USE_MOCK !== "false";
-  return stripeIsTest || craftCloudMock;
+  return stripeIsTest || craftCloudMock || isCadRunnerMock();
 }
