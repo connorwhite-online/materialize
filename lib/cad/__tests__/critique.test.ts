@@ -4,6 +4,7 @@ import {
   judgeAesthetics,
   aestheticJudgeEnabled,
   PASS_THRESHOLD,
+  CRITIQUE_RUBRIC,
 } from "@/lib/cad/critique";
 
 function judgeJson(scores: Record<string, number>): string {
@@ -80,6 +81,26 @@ describe("parseJudgement", () => {
   it("returns null on malformed or incomplete responses", () => {
     expect(parseJudgement("no json here")).toBeNull();
     expect(parseJudgement('{"recognizability":{"score":5}}')).toBeNull(); // missing dims
+  });
+});
+
+describe("rubric honesty rails (MTR-199)", () => {
+  it("tells the judge review is diagnostic, not authoritative", () => {
+    expect(CRITIQUE_RUBRIC).toMatch(/DIAGNOSTIC, not authoritative/i);
+  });
+
+  it("forbids claiming safety / tolerance / manufacturability", () => {
+    // The judge must never assert checks it did not run.
+    expect(CRITIQUE_RUBRIC).toMatch(/structural safety/i);
+    expect(CRITIQUE_RUBRIC).toMatch(/tolerance/i);
+    expect(CRITIQUE_RUBRIC).toMatch(/manufacturability/i);
+    expect(CRITIQUE_RUBRIC).toMatch(/checked deterministically elsewhere/i);
+  });
+
+  it("names the opposed-iso + section packet it is scoring", () => {
+    // Keeps the rubric honest about the coverage it actually receives.
+    expect(CRITIQUE_RUBRIC).toMatch(/opposed isometric/i);
+    expect(CRITIQUE_RUBRIC).toMatch(/section/i);
   });
 });
 

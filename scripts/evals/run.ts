@@ -97,12 +97,18 @@ async function generate(prompt: string): Promise<string> {
   return extractCode(textOf(msg));
 }
 
-/** VLM design-quality score (0-100) for a render, or null if unavailable. */
+/**
+ * VLM design-quality score (0-100), or null if unavailable. Sends the FULL
+ * multi-view packet (opposed isos + top/front + section for hollow parts,
+ * MTR-199) in one call — identical to what the harness judge sees — so the
+ * scorecard's aesthetic number reflects the coverage guarantee, not a single
+ * 3/4 view that can hide a rear/bottom defect.
+ */
 async function judge(
   prompt: string,
-  renderPng?: string
+  renders: string[]
 ): Promise<number | null> {
-  if (!JUDGE_ON || !renderPng) return null;
+  if (!JUDGE_ON || renders.length === 0) return null;
   try {
     const msg = await client.messages.create({
       model: JUDGE_MODEL,
@@ -113,14 +119,17 @@ async function judge(
           role: "user",
           content: [
             { type: "text", text: `Requested object: ${prompt}` },
-            {
-              type: "image",
-              source: {
-                type: "base64",
-                media_type: "image/png",
-                data: renderPng,
-              },
-            },
+            ...renders.map(
+              (data) =>
+                ({
+                  type: "image" as const,
+                  source: {
+                    type: "base64" as const,
+                    media_type: "image/png" as const,
+                    data,
+                  },
+                })
+            ),
           ],
         },
       ],
@@ -254,7 +263,7 @@ async function main() {
       const grade = gradeRun(run, c.expectedDims);
       // Dimension contract (MTR-197 machinery — same code path as the harness).
       const dimResults = checkDimensionTargets(run, effectiveTargets(c));
-      const aesthetic = grade.pass ? await judge(c.prompt, run.renderPng) : null;
+      const aesthetic = grade.pass ? await judge(c.prompt, allRenders(run)) : null;
       // Negative checks only make sense once a real solid exists to look at.
       const negResults = grade.pass
         ? await judgeNegativeChecks(c.prompt, c.expectations?.negativeChecks ?? [], allRenders(run))

@@ -30,7 +30,26 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 client = TestClient(app_module.app)
 
-VIEWS = ("threeQuarter", "top", "front", "side")
+# The opposed-iso coverage guarantee (MTR-199): threeQuarterBack is the second,
+# opposed isometric — the pair guarantees every face lands in at least one view,
+# so rear / left / bottom features are covered by default. Section is added
+# ONLY for hollow parts (see test_run_hollow_part_gets_section), so it is not
+# in this always-present set.
+VIEWS = ("threeQuarter", "threeQuarterBack", "top", "front", "side")
+
+# A solid box fills its bounding box (fill ratio 1.0) -> no section view.
+SOLID_BOX_SCRIPT = """
+import trimesh
+result = trimesh.creation.box(extents=(20, 20, 20))
+"""
+
+# A torus is watertight but mostly empty bounding box (fill ratio ~0.44 < the
+# 0.75 hollow threshold) -> the packet must include a section cutaway so the
+# judge / self-review can see the interior (MTR-199).
+HOLLOW_TORUS_SCRIPT = """
+import trimesh
+result = trimesh.creation.torus(major_radius=10.0, minor_radius=3.0)
+"""
 
 SPHERE_SCRIPT = """
 import trimesh
@@ -117,6 +136,35 @@ def test_run_mesh_sphere_multiview():
     assert len(renders["top"]) < len(renders["threeQuarter"]), \
         "expected smaller secondary views"
     assert p["remeshed"] is False
+
+
+def test_run_opposed_iso_coverage_guarantee():
+    """MTR-199: the default packet carries BOTH isometric views (threeQuarter +
+    the opposed threeQuarterBack) so every face appears in at least one view.
+    The two iso angles must be genuinely opposed, not duplicates."""
+    p = run(SPHERE_SCRIPT)
+    assert p["ok"] is True, p.get("error")
+    renders = p.get("renders") or {}
+    assert renders.get("threeQuarter"), "missing front iso"
+    assert renders.get("threeQuarterBack"), "missing opposed iso"
+    # Opposed azimuths in _VIEW_ANGLES -> the two renders must differ.
+    assert renders["threeQuarter"] != renders["threeQuarterBack"], \
+        "opposed iso is a duplicate of the front iso"
+
+
+def test_run_hollow_part_gets_section():
+    """MTR-199: a hollow part (fill ratio below the threshold) gets a section
+    cutaway added to the packet; a solid part does NOT (a section of a solid is
+    misleading, not diagnostic)."""
+    hollow = run(HOLLOW_TORUS_SCRIPT)
+    assert hollow["ok"] is True, hollow.get("error")
+    assert (hollow.get("renders") or {}).get("section"), \
+        "hollow part is missing its section cutaway"
+
+    solid = run(SOLID_BOX_SCRIPT)
+    assert solid["ok"] is True, solid.get("error")
+    assert "section" not in (solid.get("renders") or {}), \
+        "a solid box should not get a section view"
 
 
 def test_run_open_mesh_remesh_is_a_decision():
@@ -290,6 +338,8 @@ def test_session_exec_timeout_kills_session():
 
 TESTS = [
     test_run_mesh_sphere_multiview,
+    test_run_opposed_iso_coverage_guarantee,
+    test_run_hollow_part_gets_section,
     test_run_open_mesh_remesh_is_a_decision,
     test_run_voxel_kill_switch_still_global,
     test_run_checks_networks_two_cavities,
