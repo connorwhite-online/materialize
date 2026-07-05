@@ -30,9 +30,10 @@ import {
   printOrders,
   projectFiles,
 } from "@/lib/db/schema";
-import { deleteObject } from "@/lib/storage";
+import { deleteObject, generateDownloadUrl } from "@/lib/storage";
 import { logError } from "@/lib/logger";
 import { canUseTextToCad } from "@/lib/features";
+import { userOwnsFile } from "@/lib/entitlement";
 import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
 import {
   isCadFeedbackTag,
@@ -597,5 +598,52 @@ export async function deleteCadBuild(input: {
   } catch (error) {
     logError("deleteCadBuild", error);
     return { error: "Could not delete build." };
+  }
+}
+
+/**
+ * Mint a short-lived download URL for a file's editable STEP source (MTR-196),
+ * the "Download STEP (editable CAD)" affordance the studio / file detail /
+ * marketplace surfaces call. Returns `{ url: null }` (not an error) when the
+ * asset has no STEP — mesh-mode / sdf_kit generations and every non-CAD
+ * upload — so the caller renders no dead button.
+ *
+ * Entitlement mirrors the STL download exactly: `userOwnsFile` grants the
+ * creator, org members, project collaborators, and buyers of the listing (or
+ * of a project bundling it) — a paying customer's editable source is part of
+ * what they bought. Free listings are public. Not gated behind
+ * canUseTextToCad: STEP download is a buyer/owner right, not a studio feature.
+ */
+export async function getCadStepDownloadUrl(input: {
+  fileAssetId: string;
+}): Promise<{ url: string | null } | { error: string }> {
+  const fileAssetId = input.fileAssetId?.trim();
+  if (!fileAssetId) return { error: "Not found" };
+
+  try {
+    const [asset] = await db
+      .select({
+        stepStorageKey: fileAssets.stepStorageKey,
+        fileId: fileAssets.fileId,
+      })
+      .from(fileAssets)
+      .where(eq(fileAssets.id, fileAssetId))
+      .limit(1);
+    // Unlinked asset or no B-rep source — nothing to download, not an error.
+    if (!asset || !asset.fileId || !asset.stepStorageKey) {
+      return { url: null };
+    }
+
+    // userId may be null (anon) — userOwnsFile still resolves free listings.
+    const { userId } = await auth();
+    if (!(await userOwnsFile(userId, asset.fileId))) {
+      return { error: "Not found" };
+    }
+
+    const url = await generateDownloadUrl(asset.stepStorageKey);
+    return { url };
+  } catch (error) {
+    logError("getCadStepDownloadUrl", error);
+    return { error: "Could not prepare download." };
   }
 }
