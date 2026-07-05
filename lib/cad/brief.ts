@@ -10,6 +10,7 @@ import {
 import { modelForRole } from "./models";
 import { formatExemplarCatalog } from "./knowledge/exemplars";
 import { formatBoardCatalog } from "./knowledge/components";
+import { dimensionTargetSchema } from "./dimension-check";
 
 /**
  * The design brief (docs/text-to-cad/06 part 1): a structured JSON
@@ -80,6 +81,11 @@ export const cadBriefSchema = z.looseObject({
   questions: z.array(questionSchema).optional(),
   /** Answered choices (written by the brief card, read by the prompt). */
   decisions: z.array(decisionSchema).optional(),
+  /**
+   * Machine-checkable dimension callouts (MTR-197): every explicit spec number
+   * becomes a named validation target, asserted against the built geometry.
+   */
+  dimensionTargets: z.array(dimensionTargetSchema).optional(),
   /** Things the part must contain / interface with. */
   components: z.array(componentSchema).default([]),
   /** Where the part meets the world. */
@@ -109,6 +115,7 @@ Output ONLY strict JSON (no markdown fence, no commentary) with this shape:
   "v": 1,
   "part": "one-line restatement of the part",
   "summary": ["2-4 short plain-language sentences for the person who asked"],
+  "dimensionTargets": [{ "label": "overall height", "kind": "bbox_span", "axis": "z", "value": 50, "tolerance": 0.5 }],
   "components": [{ "name": "...", "box": [x, y, z], "clearance": 1.0, "mounts": { "pattern": "corners", "inset": 3.5, "screw": "M2.5" } }],
   "interfaces": [{ "type": "port", "std": "usb-c", "face": "+X" }],
   "questions": [{ "id": "board-variant", "question": "...", "options": [{ "label": "...", "detail": "..." }], "default": "..." }],
@@ -120,6 +127,7 @@ Output ONLY strict JSON (no markdown fence, no commentary) with this shape:
 }
 
 Rules:
+- "dimensionTargets": convert EVERY explicit dimension the prompt/decisions state into a machine-checkable target. kind = "bbox_span" (overall extent along an axis; set "axis" to x/y/z), "count" (number of solids/parts; set "of" to "solid" or "part"), "diameter" or "distance" (feature-level). "value" in mm (a plain integer for count), "tolerance" the half-band in mm (tight, e.g. 0.5). Emit a target for each callout ("100 x 60 x 20 mm block, four 8 mm holes, two-piece" -> three bbox_span + a hole "count" + a hole "diameter"). Do NOT invent numbers the prompt never gave.
 - All dimensions in millimeters. "components" = things the part must contain or interface with (their real bounding boxes + clearances). "interfaces" = where the part meets the world (ports, vents, mounts); use standard ids for "std" where one applies (usb-c, usb-a, usb-b, micro-usb, mini-usb, barrel-jack-5.5, rj45, sd, M2/M2.5/M3/M4/M5/M6).
 - Known dev boards — when the prompt names one, use these TRUE dims and facts; never guess or re-ask:
 ${formatBoardCatalog()}
@@ -178,6 +186,17 @@ const fmtVec = (v: [number, number, number]) => v.map((n) => `${n}`).join(" x ")
 export function formatBriefForPrompt(brief: CadBrief): string {
   const lines = ["Design brief (structured requirements — honor these numbers exactly):"];
   lines.push(`- Part: ${brief.part}`);
+  if (brief.dimensionTargets?.length) {
+    lines.push(
+      "- Dimension contract (each becomes a named parameter and is machine-checked against the built geometry — hit every one):"
+    );
+    for (const t of brief.dimensionTargets) {
+      const unit = t.kind === "count" ? "" : " mm";
+      const axis = t.kind === "bbox_span" && t.axis ? ` along ${t.axis}` : "";
+      const tol = t.tolerance != null ? ` ±${t.tolerance}${unit}` : "";
+      lines.push(`  · ${t.label}${axis}: ${t.value}${unit}${tol} (${t.kind})`);
+    }
+  }
   for (const c of brief.components) {
     let line = `- Component "${c.name}": ${fmtVec(c.box)} mm`;
     if (c.clearance != null) line += `, clearance ${c.clearance} mm all around`;

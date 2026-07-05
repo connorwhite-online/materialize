@@ -32,6 +32,8 @@ const PER_DIMENSION_FLOOR = 1;
 
 export const CRITIQUE_RUBRIC = `You are an industrial/product designer judging a NEUTRAL GRAY CLAY render of a 3D-printable part. Judge the DESIGN — form, proportion, resolution, finish — NOT color, material, or lighting. Reward clean, intentional, restrained product design; do NOT reward busyness or added detail for its own sake.
 
+You are given one or more clay renders (typically two opposed isometric views plus top/front, and a section cutaway for hollow parts). Visual review is DIAGNOSTIC, not authoritative: judge only the DESIGN QUALITY you can actually SEE. Do NOT assert structural safety, tolerance compliance, dimensional accuracy, or manufacturability — those are checked deterministically elsewhere, not by you. If a face is not visible in any view, do not guess about it.
+
 Score each dimension 0-5 (0 worst, 5 best):
 - recognizability: is it unambiguously the requested object/part? (5 = instantly correct)
 - proportion: believable, balanced, intentional proportions and stance — it reads right and sits right (5 = beautifully proportioned)

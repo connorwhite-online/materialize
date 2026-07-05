@@ -8,6 +8,15 @@ import { buildKnowledgeBlock } from "./knowledge";
 import { selectExemplars, formatExemplars } from "./knowledge/exemplars";
 import { judgeAesthetics, type AestheticJudgement } from "./critique";
 import { CAD_FEEDBACK_TAG_LABELS, type CadFeedbackTag } from "./feedback";
+import {
+  checkDimensionTargets,
+  summarizeDimensionChecks,
+  formatDimensionRepairHints,
+  type DimensionCheckResult,
+  type DimensionTarget,
+} from "./dimension-check";
+import { cadBriefSchema } from "./brief";
+import { enrichRepairHint } from "./repair-taxonomy";
 import { modelForRole } from "./models";
 import {
   createSession,
@@ -149,7 +158,12 @@ const LOOP_GUIDANCE = `You are working in a PERSISTENT Python session via tools 
 - When a step fails, fix THAT step — the previous steps are still in the namespace; do not restart from scratch.
 - snapshot() before risky operations (large fillets, shells, big booleans); rollback() if the step wrecks the solid.
 - Keep each exec small and per-step; assign the running solid to \`result\` whenever a printable state exists so progress is never lost.
-- You have a bounded budget (tool turns + wall clock). Get to a valid \`result\` early, then refine; call grade() and then finish() when it grades clean.`;
+- You have a bounded budget (tool turns + wall clock). Get to a valid \`result\` early, then refine; call grade() and then finish() when it grades clean.
+
+Review doctrine (MTR-199) — renders are DIAGNOSTIC, not authoritative:
+- Convert every VISUAL concern into a follow-up GEOMETRY check before acting on it. If a hole looks off-centre or a wall looks thin, the next tool call is measure() (or an exec that prints the coordinate/bbox), NOT a blind regenerate. Only treat a concern as real once a measurement confirms it.
+- Do NOT loop on snapshots/renders: rerender only after a source repair actually changed visible geometry. Re-viewing an unchanged solid burns budget for no signal.
+- HONESTY: report only checks that actually ran. Never claim structural safety, tolerance compliance, or manufacturability beyond geometric plausibility — you validate watertightness, body count, bounding box, and stated dimension targets, nothing more.`;
 
 function buildSystemPrompt(input: HarnessInput): string {
   const knowledge = buildKnowledgeBlock({
@@ -252,6 +266,12 @@ export async function runAgenticHarness(
   const maxMs = Number(process.env.CAD_AGENTIC_MAX_MS) || DEFAULT_MAX_MS;
   const model = modelForRole("implement");
   const startedAt = Date.now();
+
+  // Dimension contract (MTR-197): targets from the provided/prior brief, if any.
+  // The agentic loop has no brief step of its own, so this is a no-op unless the
+  // caller threaded a brief through.
+  const dimensionTargets = extractAgenticDimensionTargets(input);
+  let dimensionChecks: DimensionCheckResult[] = [];
 
   const emit = (event: CadProgressEvent) => {
     try {
@@ -390,6 +410,7 @@ export async function runAgenticHarness(
     aestheticScore: judgement?.available ? (judgement.score ?? null) : null,
     aestheticDims: judgement?.available ? (judgement.perDimension ?? null) : null,
     brief: input.priorBrief,
+    dimensionChecks,
     telemetry,
     error: ok
       ? undefined
@@ -436,11 +457,18 @@ export async function runAgenticHarness(
           bestCode = assembled();
           judgedBest = false;
         }
+        // Deterministic stderr->class->fixes enrichment (MTR-198): when the exec
+        // failed, name the failure class + standard fixes so the model's next
+        // step is targeted, not a blind rewrite.
+        const enriched = grade.pass
+          ? ""
+          : enrichRepairHint(res.error || grade.failures.join("; "));
         const blocks: ToolResultContent = [
           textBlock(
             runSummary(res, {
               gradePass: grade.pass,
               gradeFailures: grade.failures,
+              repairGuidance: enriched || undefined,
               stdout,
               namespace: res.namespace,
             })
@@ -492,6 +520,12 @@ export async function runAgenticHarness(
             validation: lastRun.validation,
           });
         }
+        // Dimension contract (MTR-197): assert the brief's callouts against the
+        // current solid and hand the model the specific out-of-spec targets to
+        // fix — a tool result it must address, not a vibe.
+        dimensionChecks = checkDimensionTargets(lastRun, dimensionTargets);
+        const dimSummary = summarizeDimensionChecks(dimensionChecks);
+        const dimHints = formatDimensionRepairHints(dimensionChecks);
         judgement = await judgeAesthetics({
           renderPng: lastRun.renderPng,
           renders: lastRun.renders,
@@ -504,6 +538,11 @@ export async function runAgenticHarness(
             JSON.stringify({
               pass: grade.pass,
               failures: grade.failures,
+              // Honesty rail: only checks that ran are counted (label null when
+              // no target could be evaluated).
+              dimensions: dimSummary.ran > 0
+                ? { verified: dimSummary.label, failures: dimHints || undefined }
+                : null,
               aesthetic: judgement.available
                 ? {
                     score: judgement.score,
@@ -532,4 +571,17 @@ export async function runAgenticHarness(
         return [textBlock(`unknown tool: ${use.name}`)];
     }
   }
+}
+
+/**
+ * Dimension targets from the caller-threaded brief (provided or prior). The
+ * agentic loop builds no brief of its own, so this is empty unless the
+ * orchestrator passed one. Best-effort: malformed briefs yield no targets.
+ */
+function extractAgenticDimensionTargets(input: HarnessInput): DimensionTarget[] {
+  const source = input.providedBrief ?? input.priorBrief;
+  if (source == null) return [];
+  const parsed = cadBriefSchema.safeParse(source);
+  if (!parsed.success) return [];
+  return (parsed.data.dimensionTargets as DimensionTarget[] | undefined) ?? [];
 }

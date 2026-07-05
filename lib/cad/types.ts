@@ -40,8 +40,21 @@ export interface CadPart {
   error?: string;
 }
 
-/** Named render viewpoints the sidecar can produce (docs/text-to-cad/07 §A). */
-export type CadRenderView = "threeQuarter" | "top" | "front" | "side";
+/**
+ * Named render viewpoints the sidecar can produce (docs/text-to-cad/07 §A).
+ * `threeQuarterBack` is the OPPOSED isometric (MTR-199): the two opposed isos
+ * guarantee every face appears in at least one image — rear/left/bottom
+ * features are covered by default, not by suspicion. `section` is a mid-plane
+ * cutaway, emitted only for parts with internal cavities so the judge /
+ * self-review can see bores, channels, and shell interiors.
+ */
+export type CadRenderView =
+  | "threeQuarter"
+  | "threeQuarterBack"
+  | "top"
+  | "front"
+  | "side"
+  | "section";
 
 /** Result of executing one CAD script in the sidecar. */
 export interface CadRunResult {
