@@ -145,6 +145,14 @@ class SessionExecRequest(BaseModel):
     checks: Optional[dict] = None
 
 
+class SessionImportStepRequest(BaseModel):
+    # Off-the-shelf part sourcing (MTR-200): a base64 STEP fetched from the
+    # step.parts catalog (sha256-verified + R2-cached upstream) to bind into the
+    # session namespace under `name` for boolean/cavity/mate operations.
+    stepB64: str
+    name: str = "part"
+
+
 def _check_auth(request: Request) -> None:
     """Bearer auth shared by /run and every /session endpoint."""
     if RUNNER_SECRET:
@@ -949,6 +957,74 @@ def _session_namespace_summary(ns: dict) -> list:
     )
 
 
+def _session_import_step_reply(ns: dict, msg: dict, engine: str) -> dict:
+    """Bind an imported STEP part into the session namespace (MTR-200).
+
+    Writes the base64 STEP to a temp file and imports it with build123d
+    `import_step` (or cadquery's importers), binding it to `name` so generated
+    code can boolean/cavity/mate against it. Returns the imported part's
+    bounding box (mm) so the caller can DERIVE MATING FRAMES from inspected
+    geometry — imported origins are arbitrary (step.parts' explicit warning),
+    so callers must never assume the STEP sits at the world origin.
+
+    OCP/build123d only exist in the container image, so this path is
+    DOCKER-VERIFIED; any failure is returned as an error reply, never a crash."""
+    name = str(msg.get("name") or "part")
+    if not name.isidentifier():
+        return {"ok": False, "error": f"invalid namespace name {name!r}"}
+    step_b64 = msg.get("stepB64")
+    if not step_b64:
+        return {"ok": False, "error": "no stepB64 provided"}
+    tmp_path = None
+    try:
+        raw = base64.b64decode(step_b64)
+        fd, tmp_path = tempfile.mkstemp(suffix=".step")
+        with os.fdopen(fd, "wb") as f:
+            f.write(raw)
+
+        if engine == "cadquery":
+            import cadquery as cq  # noqa: F401
+
+            solid = cq.importers.importStep(tmp_path)
+        else:
+            from build123d import import_step  # type: ignore
+
+            solid = import_step(tmp_path)
+        ns[name] = solid
+
+        bbox = None
+        try:
+            bb = solid.bounding_box()  # build123d BoundBox
+            lo, hi = bb.min, bb.max
+            bbox = {
+                "min": [float(lo.X), float(lo.Y), float(lo.Z)],
+                "max": [float(hi.X), float(hi.Y), float(hi.Z)],
+                "size": [
+                    float(hi.X - lo.X),
+                    float(hi.Y - lo.Y),
+                    float(hi.Z - lo.Z),
+                ],
+            }
+        except Exception:  # noqa: BLE001 — bbox is advisory
+            bbox = None
+
+        return {
+            "ok": True,
+            "name": name,
+            "byteSize": len(raw),
+            "boundingBox": bbox,
+            "namespace": _session_namespace_summary(ns),
+        }
+    except Exception as err:  # noqa: BLE001 — keep the session alive
+        return {"ok": False, "error": f"import_step: {err}"}
+    finally:
+        if tmp_path is not None:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+
 def _session_exec_reply(
     ns: dict, msg: dict, engine: str
 ) -> dict:
@@ -1035,6 +1111,13 @@ def _session_worker(inq: "mp.Queue", outq: "mp.Queue", engine: str) -> None:
                 reply["stdout"] = ""
                 reply["namespace"] = _session_namespace_summary(ns)
             outq.put(reply)
+        elif op == "import_step":
+            # Off-the-shelf part sourcing (MTR-200): load a fetched STEP into the
+            # session namespace so generated code can reference the component
+            # solid for boolean/cavity/mate operations. Exercised only in the
+            # container image (needs OCP/build123d import_step) — DOCKER-VERIFIED;
+            # failure-isolated so a missing kernel never kills the session.
+            outq.put(_session_import_step_reply(ns, msg, engine))
         elif op == "snapshot":
             # Checkpoint the current `result` in-namespace (docs 03 §A v1).
             # Copy so later in-place mutation of `result` (trimesh methods
@@ -1205,6 +1288,31 @@ def session_exec(
     payload["stdout"] = ""
     payload["namespace"] = []
     return payload
+
+
+@app.post("/session/{session_id}/import_step")
+def session_import_step(
+    session_id: str, req: SessionImportStepRequest, request: Request
+) -> dict:
+    """Bind a fetched STEP into the session namespace (MTR-200). DOCKER-VERIFIED
+    (needs OCP/build123d import_step); returns the imported part's bounding box
+    so the caller derives mating frames from geometry, not the arbitrary STEP
+    origin."""
+    _check_auth(request)
+    session = _get_session(session_id)
+    with session.lock:
+        if session.dead:
+            raise HTTPException(status_code=410, detail="session terminated")
+        reply, failure = session.request(
+            {"op": "import_step", "stepB64": req.stepB64, "name": req.name},
+            RUN_TIMEOUT_S,
+        )
+    if reply is None:
+        raise HTTPException(
+            status_code=410,
+            detail=f"session terminated ({failure or 'crash'})",
+        )
+    return reply
 
 
 @app.post("/session/{session_id}/snapshot")

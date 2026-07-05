@@ -19,6 +19,11 @@ import {
 } from "./knowledge/exemplars";
 import { formatComponentHints } from "./knowledge/components";
 import {
+  sourcePartsForBrief,
+  formatSourcedPartsForPrompt,
+  type BriefSourcing,
+} from "./step-parts";
+import {
   buildBrief,
   cadBriefSchema,
   formatBriefForPrompt,
@@ -136,6 +141,15 @@ export interface HarnessResult {
   telemetry?: Array<{ role: CadRole; model?: string; ms: number }>;
   /** Router verdict that selected the engine (stamped by orchestrate). */
   route?: string;
+  /**
+   * Off-the-shelf parts sourced + misses recorded (MTR-200), from either the
+   * scripted brief enrichment or the agentic search_parts/fetch_part tools.
+   * Present only when part sourcing ran. Misses (with network-error
+   * distinguished from no-match) are the signal the generation fell back to a
+   * documented envelope; persisting them onto the generation row is a follow-up
+   * (no column yet).
+   */
+  partSourcing?: import("./step-parts").BriefSourcing;
   error?: string;
 }
 
@@ -208,6 +222,12 @@ interface PromptExtras {
    * choice, use keyword selection; [] = explicit "none", inject nothing.
    */
   exemplarIds?: string[] | null;
+  /**
+   * Off-the-shelf part sourcing block (MTR-200): sourced-part envelopes +
+   * honest miss notes, appended so the model sizes cavities/cutouts from real
+   * dims. "" / undefined = nothing sourced.
+   */
+  partSourcing?: string | null;
 }
 
 function buildUserPrompt(
@@ -241,6 +261,10 @@ function buildUserPrompt(
     const hints = formatComponentHints(extras.brief);
     if (hints) out += `\n\n${hints}`;
   }
+
+  // Off-the-shelf part sourcing (MTR-200): real vendor / local-fastener
+  // envelopes so cavities and cutouts FIT, plus honest miss notes.
+  if (extras.partSourcing) out += `\n\n${extras.partSourcing}`;
 
   // Revision: replay the persisted brief so the revised code still honors the
   // original structured requirements. Tolerate any shape — the column is
@@ -385,6 +409,21 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
   // unchanged — persistence is the caller's job.
   const resultBrief = input.priorSourceCode ? input.priorBrief : (brief ?? undefined);
 
+  // Off-the-shelf part sourcing (MTR-200): resolve the brief's named components
+  // to real envelopes ONCE, up front, and thread the block into every generate
+  // prompt (fresh + repair). With the catalog gated off (default) this only
+  // resolves local fasteners — offline, cheap; never blocks a generation.
+  let partSourcing: BriefSourcing = { sourced: [], misses: [] };
+  let partSourcingBlock = "";
+  if (brief) {
+    try {
+      partSourcing = await sourcePartsForBrief(brief, { signal: input.signal });
+      partSourcingBlock = formatSourcedPartsForPrompt(partSourcing);
+    } catch {
+      /* best-effort — a sourcing failure never derails a generation */
+    }
+  }
+
   // Dimension contract (MTR-197): the machine-checkable targets to assert after
   // a valid run. From the fresh brief, or re-parsed from the revision's brief so
   // a revision still honors the original callouts.
@@ -470,7 +509,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
       const priorRender = repairNote ? lastRun?.renderPng : undefined;
       const userPrompt = repairNote
         ? [
-            buildUserPrompt(input, plan, { brief, exemplarIds }),
+            buildUserPrompt(input, plan, { brief, exemplarIds, partSourcing: partSourcingBlock }),
             "",
             `The previous attempt failed because ${repairNote}. Here is that code:`,
             "```python",
@@ -488,7 +527,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
           ]
             .filter(Boolean)
             .join("\n")
-        : buildUserPrompt(input, plan, { brief, exemplarIds });
+        : buildUserPrompt(input, plan, { brief, exemplarIds, partSourcing: partSourcingBlock });
       const images: PromptImage[] = [
         ...(input.images ?? []),
         ...(conceptImg ? [conceptImg] : []),
@@ -604,6 +643,9 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
         // the in-memory result for the studio chip + eval reuse only.
         dimensionChecks,
         telemetry,
+        ...(partSourcing.sourced.length > 0 || partSourcing.misses.length > 0
+          ? { partSourcing }
+          : {}),
       };
     }
 
@@ -624,6 +666,9 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
     dimensionChecks,
     error: repairNote || "generation failed",
     telemetry,
+    ...(partSourcing.sourced.length > 0 || partSourcing.misses.length > 0
+      ? { partSourcing }
+      : {}),
   };
 }
 

@@ -154,6 +154,26 @@ export const EVAL_CASES: EvalCase[] = [
     },
   },
 
+  // Off-the-shelf part sourcing (MTR-200): the headline example. A Pico
+  // enclosure with M3 heat-set bosses must fit REAL component geometry —
+  // fasteners resolve from the local library (envelope) by default, the Pico
+  // from the catalog when it's enabled + license-confirmed. The sourced-part
+  // CLIENT is unit-tested with a mocked API (lib/cad/__tests__/step-parts*.ts);
+  // this case exercises the end-to-end prompt path.
+  {
+    id: "pico-enclosure-m3-bosses",
+    tier: "assembly",
+    prompt:
+      "an enclosure for a Raspberry Pi Pico with two M3 heat-set insert bosses, USB cutout on the short end, two-piece",
+    expectations: {
+      dims: [{ label: "two printed parts", kind: "count", of: "part", value: 2 }],
+      negativeChecks: [
+        "the M3 boss bores are the wrong size for a heat-set insert (should be ~4.0 mm)",
+        "the USB cutout is missing or on the wrong face",
+      ],
+    },
+  },
+
   // ── CAD Skills benchmark seed set (MTR-201) ──────────────────────────────
   {
     id: "bench-calibration-block",
