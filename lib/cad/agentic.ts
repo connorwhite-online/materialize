@@ -19,14 +19,23 @@ import { cadBriefSchema } from "./brief";
 import { enrichRepairHint } from "./repair-taxonomy";
 import { modelForRole } from "./models";
 import {
+  sourcePart,
+  catalogEnabled,
+  type BriefSourcing,
+  type SourcedPart,
+  type PartSourceMiss,
+} from "./step-parts";
+import {
   createSession,
   deleteSession,
   execInSession,
   execProducedRun,
+  importStepIntoSession,
   rollbackSession,
   snapshotSession,
   CadSessionError,
 } from "./session-client";
+import { getObjectBytes } from "@/lib/storage";
 import type { HarnessInput, HarnessResult } from "./harness";
 import type { CadProgressEvent, CadRunResult } from "./types";
 
@@ -145,6 +154,30 @@ const TOOLS: Anthropic.Tool[] = [
     input_schema: NO_INPUT,
   },
   {
+    name: "search_parts",
+    description:
+      "Search off-the-shelf part sources (MTR-200) for a named component BEFORE modeling placeholder geometry — fasteners (e.g. 'iso4762 socket head cap screw M3x12'), and, when the hosted catalog is enabled, bearings/boards/connectors. Returns the best match's label + documented envelope (mm), or a recorded miss. A network failure is NOT a no-match.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        query: { type: "string", description: "Component description, e.g. 'M3x12 cap screw' or 'raspberry pi pico'." },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "fetch_part",
+    description:
+      "Fetch a sourced part (MTR-200): for a hosted-catalog hit, download + sha256-verify + R2-cache its STEP and return the cache key so it can be imported into the session; for a local fastener, return its documented envelope to build a keep-out. Use the returned dimensions to size cavities/cutouts; NEVER trust an imported STEP's origin (derive mating frames from inspected geometry).",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        query: { type: "string", description: "Component description to source and fetch." },
+      },
+      required: ["query"],
+    },
+  },
+  {
     name: "finish",
     description:
       "Declare the model done. The last exec'd `result` becomes the returned part — make sure the final exec assigned it and it graded clean.",
@@ -163,7 +196,9 @@ const LOOP_GUIDANCE = `You are working in a PERSISTENT Python session via tools 
 Review doctrine (MTR-199) — renders are DIAGNOSTIC, not authoritative:
 - Convert every VISUAL concern into a follow-up GEOMETRY check before acting on it. If a hole looks off-centre or a wall looks thin, the next tool call is measure() (or an exec that prints the coordinate/bbox), NOT a blind regenerate. Only treat a concern as real once a measurement confirms it.
 - Do NOT loop on snapshots/renders: rerender only after a source repair actually changed visible geometry. Re-viewing an unchanged solid burns budget for no signal.
-- HONESTY: report only checks that actually ran. Never claim structural safety, tolerance compliance, or manufacturability beyond geometric plausibility — you validate watertightness, body count, bounding box, and stated dimension targets, nothing more.`;
+- HONESTY: report only checks that actually ran. Never claim structural safety, tolerance compliance, or manufacturability beyond geometric plausibility — you validate watertightness, body count, bounding box, and stated dimension targets, nothing more.
+
+Off-the-shelf parts (MTR-200): for any real named component the design must FIT or MATE with (a fastener, bearing, board, connector), call search_parts / fetch_part BEFORE modeling a placeholder box, and size the cavity/cutout/standoff from the returned envelope (or imported STEP). If sourcing misses or is unavailable, fall back to the documented envelope — a network failure is not proof the part doesn't exist.`;
 
 function buildSystemPrompt(input: HarnessInput): string {
   const knowledge = buildKnowledgeBlock({
@@ -297,9 +332,26 @@ export async function runAgenticHarness(
   let toolTurns = 0;
   let execCount = 0;
   let finished = false;
+  // Off-the-shelf part sourcing (MTR-200): what the loop sourced + the misses
+  // it recorded (network-error distinguished from no-match), returned for the
+  // flywheel / persistence follow-up.
+  const partSourcing: BriefSourcing = { sourced: [], misses: [] };
 
   const assembled = () =>
     steps.length > 0 ? steps.join("\n\n") : `# agentic session for: ${input.prompt}`;
+
+  // Dedupe sourcing records by query so a model that re-fetches the same part
+  // doesn't inflate the provenance.
+  const recordSourced = (p: SourcedPart) => {
+    if (!partSourcing.sourced.some((x) => x.query === p.query)) {
+      partSourcing.sourced.push(p);
+    }
+  };
+  const recordMiss = (m: PartSourceMiss) => {
+    if (!partSourcing.misses.some((x) => x.query === m.query && x.reason === m.reason)) {
+      partSourcing.misses.push(m);
+    }
+  };
 
   try {
     sessionId = await createSession({ signal: input.signal });
@@ -412,6 +464,9 @@ export async function runAgenticHarness(
     brief: input.priorBrief,
     dimensionChecks,
     telemetry,
+    ...(partSourcing.sourced.length > 0 || partSourcing.misses.length > 0
+      ? { partSourcing }
+      : {}),
     error: ok
       ? undefined
       : lastRun
@@ -550,6 +605,71 @@ export async function runAgenticHarness(
                     feedback: judgement.feedback,
                   }
                 : null,
+            })
+          ),
+        ];
+      }
+      case "search_parts":
+      case "fetch_part": {
+        const query = String((use.input as { query?: unknown })?.query ?? "").trim();
+        if (!query) return [textBlock(`${use.name} called with empty query`)];
+        const res = await sourcePart(query, { signal: input.signal });
+        if (!res.ok) {
+          recordMiss(res.miss);
+          return [
+            textBlock(
+              JSON.stringify({
+                query,
+                match: null,
+                miss: res.miss.reason,
+                // Honesty rail: a network failure is NOT "no such part".
+                guidance:
+                  res.miss.reason === "network-error"
+                    ? "Sourcing is temporarily unavailable — model this component from its documented envelope for now; do not conclude the part does not exist."
+                    : "No off-the-shelf match — model this component from its documented envelope (knowledge/components.ts dims).",
+                catalogEnabled: catalogEnabled(),
+              })
+            ),
+          ];
+        }
+        const part = res.part;
+        recordSourced(part);
+        // fetch_part with a real cached STEP: load it into the session namespace
+        // so generated code can boolean/mate against it. DOCKER-VERIFIED — the
+        // import_step kernel path only exists in the container image; any
+        // failure here is reported, never fatal (envelopeMm still lets the model
+        // proceed). search_parts never imports (it's a lookup).
+        let imported:
+          | { name: string; boundingBox: unknown }
+          | { error: string }
+          | undefined;
+        if (use.name === "fetch_part" && part.cacheKey) {
+          const varName = `part_${part.partId?.replace(/[^a-zA-Z0-9]+/g, "_") ?? "src"}`.slice(0, 40);
+          try {
+            const bytes = await getObjectBytes(part.cacheKey);
+            const b64 = Buffer.from(bytes).toString("base64");
+            const r = await importStepIntoSession(sessionId!, b64, varName, input.signal);
+            imported = r.ok
+              ? { name: r.name ?? varName, boundingBox: r.boundingBox ?? null }
+              : { error: r.error ?? "import failed" };
+          } catch (err) {
+            if ((err as Error)?.name === "AbortError") throw err;
+            imported = { error: (err as Error)?.message ?? "import failed" };
+          }
+        }
+        return [
+          textBlock(
+            JSON.stringify({
+              query,
+              label: part.label,
+              source: part.kind,
+              envelopeMm: part.envelopeMm ?? null,
+              cacheKey: part.cacheKey ?? null,
+              note: part.note,
+              // When imported, `imported.name` is bound in the session; use its
+              // boundingBox to derive mating frames (the STEP origin is
+              // arbitrary). When not, size features from envelopeMm.
+              imported: imported ?? undefined,
             })
           ),
         ];

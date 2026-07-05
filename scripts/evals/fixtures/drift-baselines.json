@@ -1,0 +1,41 @@
+{
+  "_comment": "Judge drift fixtures (MTR-184, doc 07 §B). Each entry is a frozen clay render (renders/<id>.png) with HAND-ASSIGNED scores that encode the intended rubric calibration. scripts/evals/drift.ts re-judges the live model against these and fails when it drifts past tolerance — insurance for a model upgrade on the critique role. dims use the real AESTHETIC_DIMENSIONS (0-5); aggregate is the intended 0-100. Add the render PNGs (produced by the sidecar) alongside this file to activate a fixture; entries without a render are reported as pending, not failed.",
+  "fixtures": [
+    {
+      "id": "clean-desk-enclosure",
+      "note": "A restrained squircle desk enclosure with one uniform wall, crisp port cutout, cohesive single form — the taste target.",
+      "aggregate": 88,
+      "dims": {
+        "recognizability": 5,
+        "proportion": 5,
+        "cohesion": 5,
+        "surfacing": 4,
+        "refinement": 5
+      }
+    },
+    {
+      "id": "blobby-fragment",
+      "note": "A generative-accident blob with a stray unmerged boss floating beside the body — disjointed, should score at/below the cohesion floor.",
+      "aggregate": 34,
+      "dims": {
+        "recognizability": 3,
+        "proportion": 2,
+        "cohesion": 1,
+        "surfacing": 2,
+        "refinement": 2
+      }
+    },
+    {
+      "id": "over-filleted-bracket",
+      "note": "A functional L-bracket that is valid and recognizable but visually soft/mushy from over-large fillets and inconsistent edge treatment — a middling score.",
+      "aggregate": 62,
+      "dims": {
+        "recognizability": 5,
+        "proportion": 4,
+        "cohesion": 4,
+        "surfacing": 2,
+        "refinement": 3
+      }
+    }
+  ]
+}

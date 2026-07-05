@@ -75,6 +75,21 @@ export async function putObject(
   await getS3().send(command);
 }
 
+/**
+ * Server-side read of an object's bytes straight from R2 — for pipelines that
+ * need the content in-process (e.g. the text-to-CAD harness re-importing a
+ * cached step.parts STEP into the sidecar session, MTR-200) rather than a
+ * browser download URL.
+ */
+export async function getObjectBytes(key: string): Promise<Uint8Array> {
+  const result = await getS3().send(
+    new GetObjectCommand({ Bucket: getBucket(), Key: key })
+  );
+  const bytes = await result.Body?.transformToByteArray();
+  if (!bytes) throw new Error(`R2 object ${key} had no body`);
+  return bytes;
+}
+
 export async function generateDownloadUrl(
   key: string,
   expiresIn = 3600

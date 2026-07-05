@@ -129,6 +129,40 @@ export async function execInSession(
   });
 }
 
+/** Bounding box the sidecar reports for an imported STEP (mm). */
+export interface ImportStepResult {
+  ok: boolean;
+  name?: string;
+  byteSize?: number;
+  boundingBox?: {
+    min: [number, number, number];
+    max: [number, number, number];
+    size: [number, number, number];
+  } | null;
+  namespace?: string[];
+  error?: string;
+}
+
+/**
+ * Import a fetched STEP (base64) into the session namespace under `name`
+ * (MTR-200). The sidecar returns the imported part's bounding box so the
+ * caller derives mating frames from geometry, never from the arbitrary STEP
+ * origin. DOCKER-VERIFIED: needs OCP/build123d import_step, which the dev/test
+ * env lacks — callers must failure-isolate.
+ */
+export async function importStepIntoSession(
+  sessionId: string,
+  stepB64: string,
+  name = "part",
+  signal?: AbortSignal
+): Promise<ImportStepResult> {
+  return sessionFetch<ImportStepResult>(`/session/${sessionId}/import_step`, {
+    method: "POST",
+    body: { stepB64, name },
+    signal,
+  });
+}
+
 export async function snapshotSession(
   sessionId: string,
   signal?: AbortSignal

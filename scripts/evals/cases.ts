@@ -1,5 +1,6 @@
 import type { ExpectedDims } from "../../lib/cad/prompt";
 import type { DimensionTarget } from "../../lib/cad/dimension-check";
+import type { EvalTurn } from "./turns";
 
 /**
  * Frozen text-to-CAD eval set. Tiered by difficulty so a scorecard shows
@@ -30,7 +31,8 @@ export type EvalTier =
   | "assembly"
   | "implicit"
   | "implicit-composite"
-  | "benchmark";
+  | "benchmark"
+  | "revision";
 
 /**
  * Structured, machine-checkable expectations for a case (MTR-201).
@@ -54,6 +56,14 @@ export interface EvalCase {
   expectedDims?: ExpectedDims;
   /** MTR-201 structured expectations. */
   expectations?: EvalExpectations;
+  /**
+   * MTR-183 multi-turn revision chain. After the initial generation (turn 0),
+   * the runner applies each turn's `instruction` as a revision (threading
+   * priorSourceCode / priorFeedback exactly as app/api/cad/generate does) and
+   * grades the requested delta + non-regression per turn. Absent on
+   * single-shot cases.
+   */
+  turns?: EvalTurn[];
 }
 
 export const EVAL_CASES: EvalCase[] = [
@@ -140,6 +150,26 @@ export const EVAL_CASES: EvalCase[] = [
       negativeChecks: [
         "the two shells are translated apart / exploded rather than sitting in their assembled position",
         "a boxy extruded-rectangle shell with corner fillets instead of a continuous soft plan-form",
+      ],
+    },
+  },
+
+  // Off-the-shelf part sourcing (MTR-200): the headline example. A Pico
+  // enclosure with M3 heat-set bosses must fit REAL component geometry —
+  // fasteners resolve from the local library (envelope) by default, the Pico
+  // from the catalog when it's enabled + license-confirmed. The sourced-part
+  // CLIENT is unit-tested with a mocked API (lib/cad/__tests__/step-parts*.ts);
+  // this case exercises the end-to-end prompt path.
+  {
+    id: "pico-enclosure-m3-bosses",
+    tier: "assembly",
+    prompt:
+      "an enclosure for a Raspberry Pi Pico with two M3 heat-set insert bosses, USB cutout on the short end, two-piece",
+    expectations: {
+      dims: [{ label: "two printed parts", kind: "count", of: "part", value: 2 }],
+      negativeChecks: [
+        "the M3 boss bores are the wrong size for a heat-set insert (should be ~4.0 mm)",
+        "the USB cutout is missing or on the wrong face",
       ],
     },
   },
@@ -318,5 +348,97 @@ export const EVAL_CASES: EvalCase[] = [
         "fewer than three planet gears",
       ],
     },
+  },
+
+  // ── Multi-turn revision chains (MTR-183) ─────────────────────────────────
+  // The product is a revision loop; these score the CONVERSATION. Each turn is
+  // graded on (a) the requested delta landing and (b) no regression elsewhere,
+  // via the deterministic gradeTurn oracle (scripts/evals/turns.ts). They cover
+  // the four edit shapes the studio serializes: a dimension tweak, a named-param
+  // tweak, a feature add, a feedback-tag correction, and an annotation (mm
+  // coordinates in prompt text).
+  {
+    id: "revise-resize-box",
+    tier: "revision",
+    prompt: "a rectangular box 60 x 40 x 30 mm with 2mm walls and an open top",
+    expectedDims: { x: 60, y: 40, z: 30 },
+    turns: [
+      {
+        instruction: "make it 80 mm long along the X axis; leave width and height as they are",
+        assert: {
+          expectDims: { x: 80 },
+          holdDims: { axes: ["y", "z"] },
+        },
+      },
+    ],
+  },
+  {
+    id: "revise-wall-param",
+    tier: "revision",
+    prompt:
+      "a rectangular box 60 x 40 x 30 mm, open top, with the wall thickness declared as a top-level parameter named `wall` (start at 2.0 mm)",
+    expectedDims: { x: 60, y: 40, z: 30 },
+    turns: [
+      {
+        instruction: "increase the wall thickness to 2.4 mm (update the `wall` parameter)",
+        assert: {
+          paramChanged: { name: "wall", to: 2.4 },
+          // Outer envelope must not change when only the wall thickens.
+          holdDims: { axes: ["x", "y", "z"] },
+        },
+      },
+    ],
+  },
+  {
+    id: "revise-add-bore",
+    tier: "revision",
+    prompt: "a solid cylinder 60 mm tall and 20 mm in diameter",
+    expectedDims: { x: 20, y: 20, z: 60 },
+    turns: [
+      {
+        instruction:
+          "add a coaxial through-hole down the center; expose its diameter as a top-level parameter named `bore` set to 6 mm",
+        assert: {
+          paramAdded: "bore",
+          // A central bore does not change the outer envelope.
+          holdDims: { axes: ["x", "y", "z"] },
+        },
+      },
+    ],
+  },
+  {
+    id: "revise-feedback-dims",
+    tier: "revision",
+    prompt: "a 25 mm cube",
+    expectedDims: { x: 25, y: 25, z: 25 },
+    turns: [
+      {
+        // The corrective TARGET lives in the feedback, not the instruction —
+        // a runner that drops priorFeedback threading loses it and this fails.
+        instruction: "apply the reviewer feedback below",
+        feedbackTags: ["dimensions_off"],
+        feedbackNote: "The cube came out the wrong size — it must be exactly 30 mm on every side.",
+        assert: {
+          expectDims: { x: 30, y: 30, z: 30 },
+        },
+      },
+    ],
+  },
+  {
+    id: "revise-annotation-hole",
+    tier: "revision",
+    prompt: "a flat plate 40 x 40 mm and 4 mm thick",
+    expectedDims: { x: 40, y: 40, z: 4 },
+    turns: [
+      {
+        // Annotation-shaped: mm coordinates in the prompt text, as the studio
+        // serializes a spatial edit.
+        instruction:
+          "add a 6 mm diameter through-hole centered at (10 mm, 10 mm) from the plate's corner origin; keep the plate outline and thickness unchanged",
+        assert: {
+          holdDims: { axes: ["x", "y", "z"] },
+        },
+      },
+    ],
   },
 ];
