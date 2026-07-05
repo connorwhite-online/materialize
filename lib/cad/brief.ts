@@ -9,6 +9,7 @@ import {
 } from "./model-client";
 import { modelForRole } from "./models";
 import { formatExemplarCatalog } from "./knowledge/exemplars";
+import { formatBoardCatalog } from "./knowledge/components";
 
 /**
  * The design brief (docs/text-to-cad/06 part 1): a structured JSON
@@ -51,10 +52,34 @@ const interfaceSchema = z.looseObject({
   face: z.string().optional(),
 });
 
+/**
+ * A genuine design choice the prompt doesn't answer, surfaced as a
+ * multiple-choice question on the brief card (MTR-191 ask-site (a) /
+ * MTR-194). Never for things a standard or the board table already implies.
+ */
+const questionSchema = z.looseObject({
+  id: z.string(),
+  question: z.string(),
+  options: z.array(
+    z.looseObject({ label: z.string(), detail: z.string().optional() })
+  ),
+  /** Label of the recommended option — taken when the user doesn't answer. */
+  default: z.string().optional(),
+});
+
+/** A resolved question: the user's (or default) pick, folded into the prompt. */
+const decisionSchema = z.looseObject({ q: z.string(), a: z.string() });
+
 export const cadBriefSchema = z.looseObject({
   v: z.literal(1).default(1),
   /** One-line restatement of what the part is. */
   part: z.string(),
+  /** 2-4 plain-language bullets for a non-engineer (MTR-194). */
+  summary: z.array(z.string()).optional(),
+  /** Open choices for the user; unanswered = default (MTR-191/194). */
+  questions: z.array(questionSchema).optional(),
+  /** Answered choices (written by the brief card, read by the prompt). */
+  decisions: z.array(decisionSchema).optional(),
   /** Things the part must contain / interface with. */
   components: z.array(componentSchema).default([]),
   /** Where the part meets the world. */
@@ -83,8 +108,10 @@ Output ONLY strict JSON (no markdown fence, no commentary) with this shape:
 {
   "v": 1,
   "part": "one-line restatement of the part",
+  "summary": ["2-4 short plain-language sentences for the person who asked"],
   "components": [{ "name": "...", "box": [x, y, z], "clearance": 1.0, "mounts": { "pattern": "corners", "inset": 3.5, "screw": "M2.5" } }],
   "interfaces": [{ "type": "port", "std": "usb-c", "face": "+X" }],
+  "questions": [{ "id": "board-variant", "question": "...", "options": [{ "label": "...", "detail": "..." }], "default": "..." }],
   "keepOut": [],
   "loads": [{ "at": "mount:*", "kind": "static", "n": 20 }],
   "form": { "language": "soft-premium", "constraints": ["desk-stable"] },
@@ -93,7 +120,11 @@ Output ONLY strict JSON (no markdown fence, no commentary) with this shape:
 }
 
 Rules:
-- All dimensions in millimeters. "components" = things the part must contain or interface with (their real bounding boxes + clearances). "interfaces" = where the part meets the world (ports, vents, mounts); use standard ids for "std" where one applies (usb-c, usb-a, micro-usb, barrel-jack-5.5, rj45, sd, M2/M2.5/M3/M4/M5/M6).
+- All dimensions in millimeters. "components" = things the part must contain or interface with (their real bounding boxes + clearances). "interfaces" = where the part meets the world (ports, vents, mounts); use standard ids for "std" where one applies (usb-c, usb-a, usb-b, micro-usb, mini-usb, barrel-jack-5.5, rj45, sd, M2/M2.5/M3/M4/M5/M6).
+- Known dev boards — when the prompt names one, use these TRUE dims and facts; never guess or re-ask:
+${formatBoardCatalog()}
+- "summary" is written for a non-engineer: what it is, what it fits, where the openings go. No axis names (+X), no snake_case ids, no coordinate dumps. Spell things like "USB-C". Only include a number when the number itself matters to the user.
+- "questions" (0-3): ONLY genuine choices that materially change the part and that neither the prompt nor the tables above answer — board variant when ambiguous (e.g. ESP32 micro-USB vs USB-C clones), lid style, mounting, venting. 2-4 options each; "default" = the label of the recommended option. Never ask about anything you can look up or that the prompt already settled.
 - Only state what the prompt implies or standard components require — omit optional fields you cannot ground ("loads", "envelope", "form" may be omitted). Do NOT invent components the prompt doesn't call for.
 - "form.language" is a 1-3 word aesthetic direction; "form.constraints" are physical form constraints (e.g. "desk-stable", "one-hand-liftable").
 
@@ -121,7 +152,18 @@ export async function buildBrief(opts: {
     const match = text.match(/\{[\s\S]*\}/);
     if (!match) return null;
     const parsed = cadBriefSchema.safeParse(JSON.parse(match[0]));
-    return parsed.success ? parsed.data : null;
+    if (!parsed.success) return null;
+    const brief = parsed.data;
+    // Post-validate questions instead of hard schema bounds (a malformed
+    // question must not void the whole brief): keep real choices only.
+    if (brief.questions) {
+      brief.questions = brief.questions
+        .filter((q) => q.options.length >= 2)
+        .slice(0, 3)
+        .map((q) => ({ ...q, options: q.options.slice(0, 4) }));
+      if (brief.questions.length === 0) brief.questions = undefined;
+    }
+    return brief;
   } catch {
     return null;
   }
@@ -176,6 +218,17 @@ export function formatBriefForPrompt(brief: CadBrief): string {
     lines.push(`- Envelope: fits within ${fmtVec(brief.envelope.max)} mm`);
   }
   if (brief.process) lines.push(`- Process: ${brief.process}`);
+  // Resolved choices: explicit user decisions first, then defaults for any
+  // question left unanswered — the model must honor both as requirements.
+  const decided = new Set((brief.decisions ?? []).map((d) => d.q));
+  for (const d of brief.decisions ?? []) {
+    lines.push(`- Decision: ${d.q} -> ${d.a}`);
+  }
+  for (const q of brief.questions ?? []) {
+    if (!decided.has(q.question) && q.default) {
+      lines.push(`- Decision (default taken): ${q.question} -> ${q.default}`);
+    }
+  }
   return lines.join("\n");
 }
 
