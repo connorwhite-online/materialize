@@ -1554,6 +1554,11 @@ export const cadGenerations = pgTable(
 export const cadJobStatusEnum = pgEnum("cad_job_status", [
   "queued",
   "running",
+  // Mid-cycle interactive question (MTR-191): the executor emitted a `question`
+  // progress event and is polling `answers` for the pick. NON-terminal — the
+  // events route keeps tailing and the executor flips back to `running` once
+  // the answer lands or the question times out.
+  "awaiting_input",
   "done",
   "failed",
   "cancelled",
@@ -1582,6 +1587,14 @@ export const cadJobs = pgTable(
     cancelRequestedAt: timestamp("cancel_requested_at", {
       withTimezone: true,
     }),
+    // Interactive-question answers (MTR-191): questionId -> chosen optionId,
+    // written by POST /api/cad/jobs/[jobId]/answer and read by the executor's
+    // awaiting_input poll (mirrors the cancelRequestedAt single-writer model —
+    // the answer endpoint is the only writer, the executor the only reader).
+    answers: jsonb("answers")
+      .$type<Record<string, string>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
     /**
