@@ -5,11 +5,13 @@
  * no-match, and every miss is recorded so the caller falls back to the
  * documented envelope (knowledge/components.ts) — never a silent guess.
  *
- * Default source is the LOCAL fasteners library (the hosted catalog's STEP
- * files have no documented redistribution license, so the catalog is gated
- * OFF; see ./types.ts). When `CAD_STEP_PARTS_ENABLED=true`, the catalog is
- * consulted first for real vendor geometry, with the local library as the
- * offline/empty fallback.
+ * Default source is the bd_warehouse standard-parts resolver (trusted
+ * ISO/DIN geometry via constructor snippets — see ./bd-warehouse.ts; the
+ * hosted catalog's STEP files have no documented redistribution license, so
+ * the catalog is gated OFF; see ./types.ts). When `CAD_STEP_PARTS_ENABLED=
+ * true`, the catalog is consulted first for real vendor geometry (boards,
+ * connectors — parts bd_warehouse has no notion of), with the standard-parts
+ * resolver as the offline/empty fallback.
  */
 import {
   catalogEnabled,
@@ -17,7 +19,7 @@ import {
   downloadAndCacheStep,
   StepPartsNetworkError,
 } from "./client";
-import { resolveLocalFastener } from "./local-fasteners";
+import { resolveStandardPart } from "./bd-warehouse";
 import type {
   PartSourceMiss,
   PartSourceResult,
@@ -26,7 +28,7 @@ import type {
 
 export * from "./types";
 export { catalogEnabled } from "./client";
-export { resolveLocalFastener } from "./local-fasteners";
+export { resolveStandardPart } from "./bd-warehouse";
 
 function miss(query: string, reason: PartSourceMiss["reason"], detail?: string): PartSourceResult {
   return { ok: false, miss: { query, reason, detail } };
@@ -34,9 +36,10 @@ function miss(query: string, reason: PartSourceMiss["reason"], detail?: string):
 
 /**
  * Source one named component. Catalog-first when enabled (real STEP, cached +
- * sha256-verified), else the local fasteners library, else a recorded miss.
- * Never throws — transport failures become a `network-error` miss (distinct
- * from `no-match`) so a transient outage is retried, not memorialized.
+ * sha256-verified), else the bd_warehouse standard-parts resolver, else a
+ * recorded miss. Never throws — transport failures become a `network-error`
+ * miss (distinct from `no-match`) so a transient outage is retried, not
+ * memorialized.
  */
 export async function sourcePart(
   query: string,
@@ -85,15 +88,15 @@ export async function sourcePart(
     }
   }
 
-  // Catalog disabled (the default): local library only.
+  // Catalog disabled (the default): standard-parts resolver only.
   return (
     maybeLocal(q) ??
-    miss(q, "no-match", "catalog disabled; no match in the local fasteners library")
+    miss(q, "no-match", "catalog disabled; no match in the bd_warehouse standard-parts resolver")
   );
 }
 
 function maybeLocal(query: string): PartSourceResult | null {
-  const local = resolveLocalFastener(query);
+  const local = resolveStandardPart(query);
   return local ? { ok: true, part: local } : null;
 }
 
@@ -147,9 +150,11 @@ export function formatSourcedPartsForPrompt(s: BriefSourcing): string {
     const geom =
       p.kind === "catalog"
         ? " (real vendor STEP cached; size cavities/cutouts from the imported geometry, not a box)"
-        : p.kind === "local-fastener"
-          ? " (local fasteners library envelope)"
-          : "";
+        : p.kind === "bd_warehouse" && p.bdWarehouse
+          ? ` — construct it, never hand-model it: \`${p.bdWarehouse.importLine}\` then \`${p.bdWarehouse.constructor}\``
+          : p.kind === "local-fastener"
+            ? " (documented envelope only — no bd_warehouse coverage for this one)"
+            : "";
     lines.push(`- "${p.query}" → ${p.label}${env}${geom}`);
   }
   for (const m of s.misses) {
