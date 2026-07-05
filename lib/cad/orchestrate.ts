@@ -78,12 +78,17 @@ async function runBestOf(
   n: number
 ): Promise<HarnessResult> {
   // Only the first candidate streams progress — N interleaved event streams
-  // would render as UI noise; the others run silently.
+  // would render as UI noise; the others run silently. Interactive questions
+  // (MTR-191) are stripped from the silent candidates too: a background
+  // candidate must never suspend on user input (nothing surfaces its card, and
+  // it would block the whole Promise.all).
   const runs = await Promise.all(
     Array.from({ length: n }, (_, i) =>
-      runHarness(i === 0 ? input : { ...input, onProgress: undefined }).catch(
-        () => null
-      )
+      runHarness(
+        i === 0
+          ? input
+          : { ...input, onProgress: undefined, onQuestion: undefined }
+      ).catch(() => null)
     )
   );
   const ok = runs.filter(

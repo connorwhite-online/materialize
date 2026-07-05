@@ -45,7 +45,11 @@ import {
   type DimensionTarget,
 } from "./dimension-check";
 import { enrichRepairHint } from "./repair-taxonomy";
-import type { CadProgressEvent, CadRunResult } from "./types";
+import type {
+  CadProgressEvent,
+  CadQuestionAsker,
+  CadRunResult,
+} from "./types";
 
 /** Owner feedback on the version being revised (CON-181). */
 export interface PriorFeedback {
@@ -109,6 +113,16 @@ export interface HarnessInput {
    * here must not derail a generation.
    */
   onProgress?: (event: CadProgressEvent) => void;
+  /**
+   * Interactive-question hook (MTR-191): lets a mid-cycle ask site SUSPEND the
+   * build to ask the user one multiple-choice question and RESUME with the
+   * chosen option id. Provided by the background-job executor (executeCadJob);
+   * absent on legacy/inline callers and secondary best-of candidates, in which
+   * case the harness never pauses and decides for itself. Awaited by design —
+   * unlike onProgress, this one blocks the loop until the user answers or the
+   * question times out.
+   */
+  onQuestion?: CadQuestionAsker;
 }
 
 export interface HarnessResult {
