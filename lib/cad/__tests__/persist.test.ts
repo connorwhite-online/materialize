@@ -15,6 +15,7 @@ vi.mock("@/lib/db/schema", () => ({
   },
   cadThreads: { id: "id", userId: "user_id" },
   files: { id: "id", slug: "slug", userId: "user_id" },
+  fileAssets: { id: "id", stepStorageKey: "step_storage_key" },
   projects: { id: "id", slug: "slug" },
   projectFiles: { projectId: "project_id", fileId: "file_id", position: "position" },
 }));
@@ -377,5 +378,231 @@ describe("thread linkage (MTR-178, docs/text-to-cad/05 §A)", () => {
     expect(mockUpdateSet).not.toHaveBeenCalledWith(
       expect.objectContaining({ threadId: expect.anything() })
     );
+  });
+});
+
+describe("STEP + topology + thumbnail persistence (MTR-196 / MTR-50)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    insertCallCount = 0;
+    selectCallCount = 0;
+    selectQueue = [];
+    putObject.mockReset().mockImplementation(async () => undefined);
+    generateDownloadUrl
+      .mockReset()
+      .mockImplementation(async () => "https://example.test/render.png");
+    createDraftFileForPrint.mockReset().mockImplementation(
+      async (params: { originalFilename: string }) => ({
+        fileAssetId: `asset-${params.originalFilename}`,
+        fileSlug: `slug-${params.originalFilename}`,
+      })
+    );
+  });
+
+  const b64 = (s: string) => Buffer.from(s).toString("base64");
+
+  /** Single-part run with optional STEP / render / topology attached. */
+  function singleRun(opts: {
+    step?: boolean;
+    render?: boolean;
+    topo?: boolean;
+  }): HarnessResult {
+    const run: Record<string, unknown> = {
+      ok: true,
+      files: {
+        stl: b64("stl-bytes"),
+        ...(opts.step ? { step: b64("step-bytes") } : {}),
+      },
+      validation: {
+        compiled: true,
+        isSolid: true,
+        isWatertight: true,
+        isManifold: true,
+      },
+      ...(opts.render ? { renderPng: b64("png-bytes") } : {}),
+    };
+    // `topo` is an excess field the harness passes through verbatim (not on
+    // the shared CadRunResult type) — attach it structurally, as the sidecar
+    // does on the wire.
+    if (opts.topo) run.topo = { faces: [{ id: 0, surface: "plane" }] };
+    return {
+      ok: true,
+      sourceCode: "result = 1",
+      attempts: 1,
+      run: run as unknown as HarnessResult["run"],
+    };
+  }
+
+  it("persists STEP beside the STL, stamps stepStorageKey, and reports hasStep", async () => {
+    const result = await persistGenerationSuccess({
+      userId: "user-1",
+      generationId: "gen-1",
+      prompt: "a bracket",
+      isRoot: true,
+      result: singleRun({ step: true }),
+    });
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) throw new Error("unexpected failure");
+    expect(result.hasStep).toBe(true);
+
+    // STEP written to a sibling `.step` key with the B-rep content type.
+    expect(putObject).toHaveBeenCalledWith(
+      expect.stringMatching(/\/model\.step$/),
+      expect.any(Uint8Array),
+      "model/step"
+    );
+    // ...and stamped onto the asset row.
+    expect(mockUpdateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stepStorageKey: expect.stringMatching(/\/model\.step$/),
+      })
+    );
+  });
+
+  it("persists the topology manifest under cad-topo/ and records topoStorageKey", async () => {
+    const result = await persistGenerationSuccess({
+      userId: "user-1",
+      generationId: "gen-1",
+      prompt: "a bracket",
+      isRoot: true,
+      result: singleRun({ step: true, topo: true }),
+    });
+
+    expect("error" in result).toBe(false);
+    expect(putObject).toHaveBeenCalledWith(
+      expect.stringMatching(/^cad-topo\/user-1\/.+\.json$/),
+      expect.any(Uint8Array),
+      "application/json"
+    );
+    expect(mockUpdateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        topoStorageKey: expect.stringMatching(/^cad-topo\//),
+      })
+    );
+  });
+
+  it("wires the render to the library thumbnail (thumbnails/{fileId}.webp + thumbnailUrl)", async () => {
+    const result = await persistGenerationSuccess({
+      userId: "user-1",
+      generationId: "gen-1",
+      prompt: "a bracket",
+      isRoot: true,
+      result: singleRun({ render: true }),
+    });
+
+    expect("error" in result).toBe(false);
+    expect(putObject).toHaveBeenCalledWith(
+      expect.stringMatching(/^thumbnails\/.+\.webp$/),
+      expect.any(Uint8Array),
+      "image/png"
+    );
+    expect(mockUpdateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        thumbnailUrl: expect.stringMatching(/^\/api\/thumbnails\//),
+      })
+    );
+  });
+
+  it("degrades gracefully with no STEP/topology/render (mesh-mode): STL only, hasStep false", async () => {
+    const result = await persistGenerationSuccess({
+      userId: "user-1",
+      generationId: "gen-1",
+      prompt: "a bracket",
+      isRoot: true,
+      result: singleRun({}),
+    });
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) throw new Error("unexpected failure");
+    expect(result.hasStep).toBe(false);
+
+    // No STEP object, no topology object, no thumbnail — no dead artifacts.
+    expect(putObject).not.toHaveBeenCalledWith(
+      expect.stringMatching(/\.step$/),
+      expect.anything(),
+      expect.anything()
+    );
+    expect(putObject).not.toHaveBeenCalledWith(
+      expect.stringMatching(/^cad-topo\//),
+      expect.anything(),
+      expect.anything()
+    );
+    expect(mockUpdateSet).not.toHaveBeenCalledWith(
+      expect.objectContaining({ stepStorageKey: expect.anything() })
+    );
+    // topoStorageKey is still written on the generation row, but null.
+    expect(mockUpdateSet).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "succeeded", topoStorageKey: null })
+    );
+  });
+
+  it("a STEP upload failure is swallowed — the generation still succeeds without STEP", async () => {
+    putObject.mockImplementation(async (...args: unknown[]) => {
+      if (String(args[0]).endsWith(".step")) throw new Error("R2 write failed");
+      return undefined;
+    });
+
+    const result = await persistGenerationSuccess({
+      userId: "user-1",
+      generationId: "gen-1",
+      prompt: "a bracket",
+      isRoot: true,
+      result: singleRun({ step: true }),
+    });
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) throw new Error("unexpected failure");
+    expect(result.hasStep).toBe(false);
+    expect(logError).toHaveBeenCalledWith("persist.step", expect.any(Error));
+    expect(mockUpdateSet).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "succeeded" })
+    );
+  });
+
+  it("persists a STEP per assembly part and reports per-part hasStep", async () => {
+    const partWithStep = (name: string): CadPart => ({
+      name,
+      files: { stl: b64("stl"), step: b64("step") },
+      validation: {
+        compiled: true,
+        isSolid: true,
+        isWatertight: true,
+        isManifold: true,
+      },
+    });
+
+    const result = await persistGenerationSuccess({
+      userId: "user-1",
+      generationId: "gen-1",
+      prompt: "a two-part enclosure",
+      isRoot: false,
+      nameOverride: "Enclosure",
+      result: {
+        ok: true,
+        sourceCode: "parts = {}",
+        attempts: 1,
+        run: {
+          ok: true,
+          files: { stl: b64("stl"), step: b64("step") },
+          validation: {
+            compiled: true,
+            isSolid: true,
+            isWatertight: true,
+            isManifold: true,
+          },
+          parts: [partWithStep("lid"), partWithStep("base")],
+        } as HarnessResult["run"],
+      },
+    });
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) throw new Error("unexpected failure");
+    // Two parts, each with a STEP sibling written.
+    expect(result.parts).toHaveLength(2);
+    expect(result.parts?.every((p) => p.hasStep)).toBe(true);
+    expect(
+      putObject.mock.calls.filter((c) => String(c[0]).endsWith(".step"))
+    ).toHaveLength(2);
   });
 });

@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import {
   cadGenerations,
   cadThreads,
+  fileAssets,
   files,
   projects,
   projectFiles,
@@ -47,6 +48,138 @@ function resultExtras(
   };
 }
 
+/** IANA type for a STEP (ISO 10303-21) B-rep exchange file. */
+const STEP_CONTENT_TYPE = "model/step";
+
+/**
+ * Persist the editable B-rep STEP source (MTR-196) beside the printable STL:
+ * `uploads/{userId}/{id}/model.step` in the SAME folder as the mesh, then
+ * stamp its key onto the fileAsset (fileAssets.stepStorageKey) so the file
+ * detail / studio / marketplace surfaces can offer "Download STEP (editable
+ * CAD)". Best-effort: STEP is a bonus artifact, so a failure here must never
+ * fail an otherwise-good generation — the printable STL already committed.
+ * No-ops (returns false) when the run carried no STEP bytes (mesh-mode /
+ * sdf_kit), which keeps the download affordance graceful (no dead button).
+ */
+async function persistStepForAsset(opts: {
+  fileAssetId: string;
+  /** The STL's storage key — STEP lands in the same folder, `.stl`→`.step`. */
+  stlStorageKey: string;
+  /** Base64 STEP bytes from the run/part payload (undefined = no B-rep). */
+  stepB64: string | undefined;
+}): Promise<boolean> {
+  const { fileAssetId, stlStorageKey, stepB64 } = opts;
+  if (!stepB64) return false;
+  try {
+    const stepStorageKey = stlStorageKey.replace(/\.stl$/i, ".step");
+    await putObject(
+      stepStorageKey,
+      new Uint8Array(Buffer.from(stepB64, "base64")),
+      STEP_CONTENT_TYPE
+    );
+    await db
+      .update(fileAssets)
+      .set({ stepStorageKey })
+      .where(eq(fileAssets.id, fileAssetId));
+    return true;
+  } catch (err) {
+    logError("persist.step", err);
+    return false;
+  }
+}
+
+/**
+ * The sidecar attaches a B-rep topology manifest (per-face tessellation with
+ * face/edge identity — MTR-174 Phase 2, `cad-runner/app.py` `_export_topology`)
+ * on the run payload at `run.topo` when "topo" is among the requested formats.
+ * It's an excess field the harness passes through verbatim (not on the shared
+ * CadRunResult type), so read it structurally/defensively like resultExtras:
+ * absent today (the harness requests ["stl","step"]), and picked up the moment
+ * topo is wired — no change here needed.
+ *
+ * Addressing scheme (spec item 3): the manifest is stored verbatim, and
+ * face/edge selector refs are the manifest's own per-face / per-edge identity
+ * indices, which by the sidecar's shipped-STL-matches-triRange invariant index
+ * exactly the triangles of the STL we persist. Consumers (MTR-174 viewer
+ * picking, MTR-40 measure) resolve a picked triangle → face via triRange and
+ * address it stably across a session from this cached manifest without
+ * reopening the kernel.
+ */
+function runTopology(result: HarnessResult): unknown {
+  const run = result.run as { topo?: unknown } | undefined;
+  return run?.topo ?? null;
+}
+
+/**
+ * Store the topology manifest under the GC-swept `cad-topo/` prefix and return
+ * its key for the generation row (cadGenerations.topoStorageKey). Best-effort:
+ * a failure leaves topoStorageKey null (the manifest is re-derivable from the
+ * STEP), and the cleanup-studio-artifacts cron already sweeps orphaned
+ * `cad-topo/` objects.
+ */
+async function persistTopology(
+  userId: string,
+  topo: unknown
+): Promise<string | null> {
+  if (topo === null || topo === undefined) return null;
+  try {
+    const key = `cad-topo/${userId}/${nanoid()}.json`;
+    await putObject(
+      key,
+      new Uint8Array(Buffer.from(JSON.stringify(topo), "utf-8")),
+      "application/json"
+    );
+    return key;
+  } catch (err) {
+    logError("persist.topology", err);
+    return null;
+  }
+}
+
+/**
+ * Wire the sidecar preview render (PNG) to the file's library thumbnail
+ * (MTR-50). The render is already stored under `cad-renders/` for the studio
+ * history; this ALSO writes it to the file-scoped `thumbnails/{fileId}.webp`
+ * key the thumbnails route serves and records `/api/thumbnails/{fileId}` on
+ * files.thumbnailUrl, so a promoted studio file shows real geometry on library
+ * / profile cards instead of a blank tile. Best-effort and graceful: no render
+ * (bare-macOS sidecar has no headless GL) → thumbnailUrl stays null → the
+ * route serves a placeholder. deleteFileListing already scrubs
+ * `thumbnails/{fileId}.webp` on hard-delete, so this adds no new orphan.
+ */
+async function wireThumbnail(
+  fileId: string | null,
+  renderPngB64: string | undefined
+): Promise<void> {
+  if (!fileId || !renderPngB64) return;
+  try {
+    await putObject(
+      `thumbnails/${fileId}.webp`,
+      new Uint8Array(Buffer.from(renderPngB64, "base64")),
+      "image/png"
+    );
+    await db
+      .update(files)
+      .set({ thumbnailUrl: `/api/thumbnails/${fileId}` })
+      .where(eq(files.id, fileId));
+  } catch (err) {
+    logError("persist.thumbnail", err);
+  }
+}
+
+/** Resolve a file's id from its (unique) slug, scoped to the owner. */
+async function fileIdForSlug(
+  slug: string,
+  userId: string
+): Promise<string | null> {
+  const [f] = await db
+    .select({ id: files.id })
+    .from(files)
+    .where(and(eq(files.slug, slug), eq(files.userId, userId)))
+    .limit(1);
+  return f?.id ?? null;
+}
+
 /**
  * Post-harness persistence for a text-to-CAD generation, shared by the
  * non-streaming server action (app/actions/cad-generation.ts) and the
@@ -59,6 +192,8 @@ export interface GeneratedPart {
   name: string;
   fileAssetId: string;
   fileSlug: string;
+  /** True when this part carried an editable STEP source (MTR-196). */
+  hasStep?: boolean;
 }
 
 export interface PersistedGeneration {
@@ -76,6 +211,12 @@ export interface PersistedGeneration {
   projectSlug?: string | null;
   /** True when the result was voxel-remeshed (an approximation). */
   remeshed?: boolean;
+  /**
+   * True when an editable STEP source was persisted for the primary asset
+   * (MTR-196) — lets the studio show "Download STEP (editable CAD)" without a
+   * round-trip. Absent/false for mesh-mode / sdf_kit (no B-rep).
+   */
+  hasStep?: boolean;
 }
 
 export interface PersistError {
@@ -291,26 +432,39 @@ export async function persistGenerationSuccess(opts: {
     );
   }
 
-  // Store the preview render in R2 (not inline in the DB) and mint a
-  // short-lived URL for immediate display. Best-effort: a render failure
-  // must not fail an otherwise-good generation.
+  // Editable STEP source (MTR-196), topology manifest (MTR-174 substrate), and
+  // preview render are independent best-effort side artifacts — run them
+  // together so they don't stack latency on the hot path. Each helper swallows
+  // + logs its own failure so none can fail an otherwise-good generation.
   let renderStorageKey: string | null = null;
   let renderUrl: string | null = null;
-  if (result.run?.renderPng) {
-    try {
-      renderStorageKey = `cad-renders/${userId}/${nanoid()}.png`;
-      await putObject(
-        renderStorageKey,
-        new Uint8Array(Buffer.from(result.run.renderPng, "base64")),
-        "image/png"
-      );
-      renderUrl = await generateDownloadUrl(renderStorageKey);
-    } catch (err) {
-      logError("persistGenerationSuccess.render", err);
-      renderStorageKey = null;
-      renderUrl = null;
-    }
-  }
+  const [hasStep, topoStorageKey] = await Promise.all([
+    persistStepForAsset({
+      fileAssetId: draft.fileAssetId,
+      stlStorageKey: storageKey,
+      stepB64: result.run?.files.step,
+    }),
+    persistTopology(userId, runTopology(result)),
+    // Store the preview render in R2 (not inline in the DB) for the studio
+    // history and mint a short-lived URL for immediate display.
+    (async () => {
+      if (!result.run?.renderPng) return;
+      try {
+        const key = `cad-renders/${userId}/${nanoid()}.png`;
+        await putObject(
+          key,
+          new Uint8Array(Buffer.from(result.run.renderPng, "base64")),
+          "image/png"
+        );
+        renderStorageKey = key;
+        renderUrl = await generateDownloadUrl(key);
+      } catch (err) {
+        logError("persistGenerationSuccess.render", err);
+        renderStorageKey = null;
+        renderUrl = null;
+      }
+    })(),
+  ]);
 
   // Thread linkage last — only reached on success, so failed generations
   // never mint (or bump) a thread.
@@ -329,6 +483,9 @@ export async function persistGenerationSuccess(opts: {
       attempts: result.attempts,
       fileAssetId: draft.fileAssetId,
       renderStorageKey,
+      // B-rep topology sidecar key (MTR-174) when the run carried a manifest;
+      // null otherwise (re-derivable from the STEP). GC-swept via cad-topo/.
+      topoStorageKey,
       aestheticScore: result.aestheticScore ?? null,
       // Remesh is a recorded decision (docs/text-to-cad/02 §C) — persist
       // whether the printable mesh came from the lossy voxel fallback so
@@ -345,11 +502,23 @@ export async function persistGenerationSuccess(opts: {
     })
     .where(eq(cadGenerations.id, generationId));
 
+  // Wire the render to the library card thumbnail (MTR-50). Done after the
+  // generation row is safely committed and only when there's a render to wire,
+  // so a thumbnail hiccup never delays the printable result and the file-id
+  // lookup is skipped entirely on renderless (bare-macOS) runs.
+  if (result.run?.renderPng) {
+    await wireThumbnail(
+      await fileIdForSlug(draft.fileSlug, userId),
+      result.run.renderPng
+    );
+  }
+
   return {
     generationId,
     fileAssetId: draft.fileAssetId,
     fileSlug: draft.fileSlug,
     renderUrl,
+    hasStep,
     sourceCode: result.sourceCode,
     title,
     remeshed: result.run?.remeshed ?? false,
@@ -410,16 +579,20 @@ async function persistAssembly(opts: {
     }
     // createDraftFileForPrint returns the asset + slug; resolve the file id
     // (slug is unique) so we can link it into the Project.
-    const [f] = await db
-      .select({ id: files.id })
-      .from(files)
-      .where(and(eq(files.slug, draft.fileSlug), eq(files.userId, userId)))
-      .limit(1);
+    const fileId = await fileIdForSlug(draft.fileSlug, userId);
+    // Editable STEP source per part (MTR-196) — each part is a real
+    // individual file, so each gets its own downloadable B-rep.
+    const hasStep = await persistStepForAsset({
+      fileAssetId: draft.fileAssetId,
+      stlStorageKey: storageKey,
+      stepB64: p.files.step,
+    });
     created.push({
       name: p.name,
       fileAssetId: draft.fileAssetId,
       fileSlug: draft.fileSlug,
-      fileId: f?.id ?? null,
+      fileId,
+      hasStep,
     });
   }
 
@@ -464,24 +637,34 @@ async function persistAssembly(opts: {
     }
   }
 
-  // Preview render (best-effort) mirrors the first part / top-level render.
+  // Preview render (mirrors the first part / top-level render), library
+  // thumbnail on the PRIMARY part's card (MTR-50), and the assembly-level
+  // topology manifest (MTR-174) — independent best-effort side artifacts, run
+  // together. Per-part topology isn't emitted by the sidecar (payload size), so
+  // the manifest is the top-level/primary one.
   let renderStorageKey: string | null = null;
   let renderUrl: string | null = null;
-  if (result.run?.renderPng) {
-    try {
-      renderStorageKey = `cad-renders/${userId}/${nanoid()}.png`;
-      await putObject(
-        renderStorageKey,
-        new Uint8Array(Buffer.from(result.run.renderPng, "base64")),
-        "image/png"
-      );
-      renderUrl = await generateDownloadUrl(renderStorageKey);
-    } catch (err) {
-      logError("persistAssembly.render", err);
-      renderStorageKey = null;
-      renderUrl = null;
-    }
-  }
+  const [topoStorageKey] = await Promise.all([
+    persistTopology(userId, runTopology(result)),
+    wireThumbnail(created[0].fileId, result.run?.renderPng),
+    (async () => {
+      if (!result.run?.renderPng) return;
+      try {
+        const key = `cad-renders/${userId}/${nanoid()}.png`;
+        await putObject(
+          key,
+          new Uint8Array(Buffer.from(result.run.renderPng, "base64")),
+          "image/png"
+        );
+        renderStorageKey = key;
+        renderUrl = await generateDownloadUrl(key);
+      } catch (err) {
+        logError("persistAssembly.render", err);
+        renderStorageKey = null;
+        renderUrl = null;
+      }
+    })(),
+  ]);
 
   // Thread linkage last — only reached on success (zero-part assemblies
   // bailed above), so failed generations never mint a thread.
@@ -501,6 +684,7 @@ async function persistAssembly(opts: {
       fileAssetId: created[0].fileAssetId,
       projectId,
       renderStorageKey,
+      topoStorageKey,
       aestheticScore: result.aestheticScore ?? null,
       // An assembly counts as remeshed when the run was, or ANY part's
       // mesh came from the voxel fallback (docs/text-to-cad/02 §C).
@@ -522,12 +706,15 @@ async function persistAssembly(opts: {
     fileAssetId: created[0].fileAssetId,
     fileSlug: created[0].fileSlug,
     renderUrl,
+    // Primary part's STEP availability drives the top-level download affordance.
+    hasStep: created[0].hasStep ?? false,
     sourceCode: result.sourceCode,
     title,
     parts: created.map((c) => ({
       name: c.name,
       fileAssetId: c.fileAssetId,
       fileSlug: c.fileSlug,
+      hasStep: c.hasStep ?? false,
     })),
     projectSlug,
     remeshed: result.run?.remeshed ?? false,
