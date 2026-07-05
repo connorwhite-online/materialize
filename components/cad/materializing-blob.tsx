@@ -159,7 +159,8 @@ function PointCloud({
   const morphProgress = useRef(0);
   const morphing = useRef(false);
   const completed = useRef(false);
-  const pixelRatio = useThree((s) => s.gl.getPixelRatio());
+  const gl = useThree((s) => s.gl);
+  const pixelRatio = gl.getPixelRatio();
 
   const uniforms = useMemo(
     () => ({
@@ -187,17 +188,38 @@ function PointCloud({
     loader.load(
       morphUrl,
       (modelGeom) => {
-        if (cancelled) return;
+        if (cancelled) {
+          // Loader resolved after unmount/cancel — free the transient geometry
+          // (STLLoader mints a fresh BufferGeometry per load) and bail.
+          modelGeom.dispose();
+          return;
+        }
         try {
           const targets = computePointTargets(
             baseGeom.attributes.position,
             modelGeom
           );
+          // Free the GPU buffer backing the superseded aTarget before swapping
+          // in the morph target — replacing an attribute otherwise strands the
+          // old buffer in WebGLAttributes until the whole geometry is disposed.
+          // `renderer.attributes` is an internal (untyped) three surface; the
+          // narrow cast keeps this a no-op-safe best effort.
+          const prevTarget = baseGeom.attributes.aTarget as
+            | THREE.BufferAttribute
+            | undefined;
+          const attrCache = (gl as unknown as {
+            attributes?: { remove?: (a: THREE.BufferAttribute) => void };
+          }).attributes;
+          if (prevTarget) attrCache?.remove?.(prevTarget);
           baseGeom.setAttribute("aTarget", new THREE.BufferAttribute(targets, 3));
           morphProgress.current = 0;
           morphing.current = true;
         } catch {
           onMorphComplete?.();
+        } finally {
+          // The morph-target mesh is only read for correspondence — never added
+          // to the scene — so dispose it immediately either way.
+          modelGeom.dispose();
         }
       },
       undefined,
@@ -272,11 +294,28 @@ export function PointCloudScene({
     () => pointGeometry(fibonacciSphere(POINT_COUNT, BLOB_RADIUS)),
     []
   );
+  // The sphere blob is created once for this scene's lifetime — dispose its GPU
+  // buffers when the scene unmounts (MTR-168). Every studio revision remounts
+  // this component via a key swap, so without this each turn strands a
+  // 20k-point × 2-attribute geometry.
+  useEffect(() => () => blob.dispose(), [blob]);
+
   const [loaded, setLoaded] = useState<{
     url: string;
     geom: THREE.BufferGeometry;
   } | null>(null);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
+
+  // Dispose the previous source point-cloud geometry whenever it's superseded
+  // (a new sourceUrl loads) and on unmount — it's owned here, not by r3f (the
+  // <points geometry={...}> prop attaches an existing object, which r3f never
+  // auto-disposes).
+  useEffect(() => {
+    const current = loaded?.geom;
+    return () => {
+      current?.dispose();
+    };
+  }, [loaded]);
 
   // Build a point cloud from the previous model's framed surface (revision).
   useEffect(() => {
@@ -285,7 +324,10 @@ export function PointCloudScene({
     new STLLoader().load(
       sourceUrl,
       (g) => {
-        if (cancelled) return;
+        if (cancelled) {
+          g.dispose();
+          return;
+        }
         const samples = frameSamples(g, POINT_COUNT);
         const pos = new Float32Array(POINT_COUNT * 3);
         for (let i = 0; i < POINT_COUNT; i++) {
@@ -293,6 +335,9 @@ export function PointCloudScene({
           pos[i * 3 + 1] = samples[i].y;
           pos[i * 3 + 2] = samples[i].z;
         }
+        // The loaded STL is only sampled for surface points — never rendered —
+        // so free it now; `pointGeometry` copies what it needs.
+        g.dispose();
         setLoaded({ url: sourceUrl, geom: pointGeometry(pos) });
       },
       undefined,
