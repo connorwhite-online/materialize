@@ -61,7 +61,7 @@ export const KERNEL_FAILURE_TAXONOMY: Record<KernelFailureClass, FailureClassSpe
       /unexpected (eof|indent)/i,
     ],
     fixes: [
-      "The script did not run as Python. Fix the syntax/import: use only `from build123d import *` (and `from sdf_kit import *` for implicit mode); do not import packages the sidecar lacks.",
+      "The script did not run as Python. Fix the syntax/import: use only `from build123d import *` (plus `from bd_warehouse.fastener import ...` / `from bd_warehouse.bearing import ...` for standard parts, and `from sdf_kit import *` for implicit mode); do not import packages the sidecar lacks.",
       "Define every name before use; a NameError usually means a typo or a missing intermediate variable.",
     ],
   },
