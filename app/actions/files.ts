@@ -786,7 +786,12 @@ export async function deleteFileListing(
     // No buyers — safe to hard-delete. Collect every storage key first
     // so we can scrub R2 even after the DB rows are gone.
     const assets = await db
-      .select({ storageKey: fileAssets.storageKey })
+      .select({
+        storageKey: fileAssets.storageKey,
+        // Editable STEP source (MTR-196) rides beside the mesh — scrub it
+        // with the STL so a deleted CAD file leaves no orphaned .step in R2.
+        stepStorageKey: fileAssets.stepStorageKey,
+      })
       .from(fileAssets)
       .where(eq(fileAssets.fileId, fileId));
     const photos = await db
@@ -796,6 +801,9 @@ export async function deleteFileListing(
 
     const keys = [
       ...assets.map((a) => a.storageKey),
+      ...assets
+        .map((a) => a.stepStorageKey)
+        .filter((k): k is string => !!k),
       ...photos.map((p) => p.storageKey),
       // Thumbnail key is derived from the file id at upload time, see
       // app/api/thumbnails/route.ts.

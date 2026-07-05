@@ -203,6 +203,9 @@ async function sweepStaleDrafts(
       id: fileAssets.id,
       fileId: fileAssets.fileId,
       storageKey: fileAssets.storageKey,
+      // Editable STEP source (MTR-196) rides the asset's lifecycle — it must
+      // be swept with the STL, not orphaned in R2 when the draft is deleted.
+      stepStorageKey: fileAssets.stepStorageKey,
     })
     .from(fileAssets)
     .where(inArray(fileAssets.fileId, candidateIds));
@@ -297,7 +300,9 @@ async function sweepStaleDrafts(
   const deletableFileIdSet = new Set(deletableFileIds);
   const keys = assets
     .filter((a) => a.fileId && deletableFileIdSet.has(a.fileId))
-    .map((a) => a.storageKey);
+    .flatMap((a) =>
+      [a.storageKey, a.stepStorageKey].filter((k): k is string => !!k)
+    );
   const deletedObjects = await deleteKeys(
     s3,
     bucket,

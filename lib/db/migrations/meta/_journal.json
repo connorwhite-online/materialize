@@ -330,6 +330,13 @@
       "when": 1786000700000,
       "tag": "0046_cad_job_snapshot",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1786000800000,
+      "tag": "0047_cad_step_artifact",
+      "breakpoints": true
     }
   ]
 }

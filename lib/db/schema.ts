@@ -517,6 +517,15 @@ export const fileAssets = pgTable("file_assets", {
     triangleCount?: number;
   }>(),
   craftCloudModelId: text("craft_cloud_model_id"),
+  // R2 key for the editable B-rep STEP source alongside the printable
+  // mesh (MTR-196). The sidecar exports STEP on every build123d/cadquery
+  // run; this is the "Download STEP (editable CAD)" artifact — a real
+  // marketplace value-add vs a trinket mesh. Null for mesh-mode / sdf_kit
+  // generations (no B-rep) and every non-CAD upload, so consumers must
+  // treat it as optional and degrade gracefully (no dead download button).
+  // Sits beside `storageKey` (the STL) and shares its lifecycle: the
+  // file-delete + stale-draft GC paths delete it with the STL.
+  stepStorageKey: text("step_storage_key"),
   contentHash: text("content_hash"), // SHA-256 of raw file bytes
   // Normalized geometry hash — SHA-256 over a canonical (sorted, rounded)
   // triangle list. Survives format conversion, vertex reordering, and
