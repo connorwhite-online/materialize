@@ -41,6 +41,7 @@ import {
   Grid3x3Icon,
   MinusIcon,
   MousePointer2Icon,
+  MoveHorizontalIcon,
   PlusIcon,
   RulerIcon,
   ScissorsIcon,
@@ -54,8 +55,34 @@ import {
   selectSmoothRegion,
   type FaceAdjacency,
 } from "./mesh-selection";
+import {
+  describeEdge,
+  describeFace,
+  edgeLength,
+  faceForTriangle,
+  parseTopology,
+  type CadTopology,
+  type TopoEdge,
+} from "./topology";
 
 type Vec3 = [number, number, number];
+
+/**
+ * Exact CAD-face identity resolved from the B-rep topology sidecar (MTR-174).
+ * Present only when the part shipped a topology manifest; `description` is the
+ * semantic handle folded into the revision prompt (`cylinder r=2.7, axis Z`).
+ */
+export interface FaceTopoHandle {
+  faceId: number;
+  surface: string;
+  description: string;
+}
+
+export interface EdgeTopoHandle {
+  edgeId: number;
+  curve: string;
+  description: string;
+}
 
 /** A selected face or edge, in the model's own (mm) coordinate frame. */
 export type PickResult =
@@ -68,6 +95,10 @@ export type PickResult =
       extent: Vec3;
       /** Flat triangle coords (mm) for the highlight overlay. */
       positions: number[];
+      /** Which assembly part was hit (multi-part only, MTR-188). */
+      partName?: string;
+      /** Exact CAD face identity when topology is available (MTR-174). */
+      topo?: FaceTopoHandle;
     }
   | {
       kind: "edge";
@@ -75,6 +106,10 @@ export type PickResult =
       point: Vec3;
       /** Edge endpoints (mm) + length. */
       edge: { a: Vec3; b: Vec3; length: number };
+      /** Which assembly part was hit (multi-part only, MTR-188). */
+      partName?: string;
+      /** Exact CAD edge identity when topology is available (MTR-174). */
+      topo?: EdgeTopoHandle;
     };
 
 export type ViewerAnnotation = { id: string } & PickResult;
@@ -164,6 +199,9 @@ function FaceHighlight({
     g.setAttribute("position", new Float32BufferAttribute(positions, 3));
     return g;
   }, [positions]);
+  // Owned geometry (attached via prop, not created declaratively) — dispose it
+  // when the highlight changes/unmounts so re-picks don't leak (MTR-168).
+  useEffect(() => () => geom.dispose(), [geom]);
   return (
     <mesh geometry={geom} renderOrder={999}>
       <meshBasicMaterial
@@ -261,6 +299,188 @@ function FeatureEdges({ geom }: { geom: BufferGeometry }) {
 }
 
 /**
+ * Fetch + parse the B-rep topology sidecar for a part (MTR-174). Fails open:
+ * a missing file (the common case until cad-artifacts persists topology), a
+ * non-OK response, or malformed JSON all resolve to `null`, and the viewer
+ * falls back to the mesh flood-fill / feature-edge path.
+ */
+function useTopology(url?: string): CadTopology | null {
+  const [topo, setTopo] = useState<CadTopology | null>(null);
+  useEffect(() => {
+    if (!url) {
+      setTopo(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(url)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!cancelled) setTopo(parseTopology(j));
+      })
+      .catch(() => {
+        if (!cancelled) setTopo(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [url]);
+  return topo;
+}
+
+/**
+ * Exact face selection from B-rep topology (MTR-174): the clicked triangle's
+ * CAD face is found by binary search over `triRange`, and the highlight/extent
+ * are built from that face's whole triangle range — no flood-fill, no
+ * threshold tuning, and it works identically on flat and curved faces
+ * (clicking a fillet selects the whole fillet). The seed triangle's normal is
+ * reported (a region-wide normal is meaningless on a curved face).
+ */
+function selectTopoFace(
+  geom: BufferGeometry,
+  topo: CadTopology,
+  seedTriIndex: number
+): (FaceData & { topo: FaceTopoHandle }) | null {
+  const face = faceForTriangle(topo.faces, seedTriIndex);
+  if (!face) return null;
+  const pos = geom.attributes.position;
+  const index = geom.index;
+  const vi = (i: number) => (index ? index.getX(i) : i);
+  const triCount = (index ? index.count : pos.count) / 3;
+  const lo = Math.max(0, face.triRange[0]);
+  const hi = Math.min(triCount, face.triRange[1]);
+
+  const out: number[] = [];
+  const v = new Vector3();
+  const box = new Box3();
+  let cx = 0;
+  let cy = 0;
+  let cz = 0;
+  for (let t = lo; t < hi; t++) {
+    for (let k = 0; k < 3; k++) {
+      v.fromBufferAttribute(pos, vi(t * 3 + k));
+      out.push(v.x, v.y, v.z);
+      box.expandByPoint(v);
+      cx += v.x;
+      cy += v.y;
+      cz += v.z;
+    }
+  }
+  if (out.length === 0) return null;
+
+  const a = new Vector3().fromBufferAttribute(pos, vi(seedTriIndex * 3));
+  const b = new Vector3().fromBufferAttribute(pos, vi(seedTriIndex * 3 + 1));
+  const c = new Vector3().fromBufferAttribute(pos, vi(seedTriIndex * 3 + 2));
+  const sn = new Vector3()
+    .subVectors(b, a)
+    .cross(new Vector3().subVectors(c, a))
+    .normalize();
+  const n = out.length / 3;
+  const ext = new Vector3();
+  box.getSize(ext);
+  return {
+    point: [cx / n, cy / n, cz / n],
+    normal: [sn.x, sn.y, sn.z],
+    extent: [ext.x, ext.y, ext.z],
+    positions: out,
+    topo: {
+      faceId: face.id,
+      surface: face.surface,
+      description: describeFace(face),
+    },
+  };
+}
+
+/**
+ * Nearest B-rep edge to a model-space point (MTR-174). Unlike
+ * `selectNearestEdge` (which searches `EdgesGeometry`'s dihedral-thresholded
+ * segments), this walks the real edge polylines — so smooth-tangent edges
+ * (fillet boundaries, loft seams) are selectable. Returns the nearest local
+ * segment for the highlight plus the WHOLE edge's true polyline length.
+ */
+function selectTopoEdge(
+  geom: BufferGeometry,
+  topo: CadTopology,
+  point: Vector3
+): Extract<PickResult, { kind: "edge" }> | null {
+  if (topo.edges.length === 0) return null;
+  if (!geom.boundingBox) geom.computeBoundingBox();
+  const size = new Vector3();
+  geom.boundingBox!.getSize(size);
+  const thr = (Math.max(size.x, size.y, size.z) || 1) * 0.06;
+
+  const A = new Vector3();
+  const B = new Vector3();
+  const line = new Line3();
+  const closest = new Vector3();
+  let best = Infinity;
+  let bestEdge: TopoEdge | null = null;
+  let bestA: Vec3 | null = null;
+  let bestB: Vec3 | null = null;
+  for (const edge of topo.edges) {
+    for (let i = 1; i < edge.polyline.length; i++) {
+      A.set(edge.polyline[i - 1][0], edge.polyline[i - 1][1], edge.polyline[i - 1][2]);
+      B.set(edge.polyline[i][0], edge.polyline[i][1], edge.polyline[i][2]);
+      line.set(A, B);
+      line.closestPointToPoint(point, true, closest);
+      const d = closest.distanceTo(point);
+      if (d < best) {
+        best = d;
+        bestEdge = edge;
+        bestA = [A.x, A.y, A.z];
+        bestB = [B.x, B.y, B.z];
+      }
+    }
+  }
+  if (!bestEdge || !bestA || !bestB || best > thr) return null;
+  return {
+    kind: "edge",
+    point: [
+      (bestA[0] + bestB[0]) / 2,
+      (bestA[1] + bestB[1]) / 2,
+      (bestA[2] + bestB[2]) / 2,
+    ],
+    edge: { a: bestA, b: bestB, length: edgeLength(bestEdge) },
+    topo: {
+      edgeId: bestEdge.id,
+      curve: bestEdge.curve,
+      description: describeEdge(bestEdge),
+    },
+  };
+}
+
+/**
+ * Faint guide of every real B-rep edge (topology edge mode). One merged
+ * LineSegments so hundreds of polylines stay a single draw call; disposed on
+ * change/unmount (MTR-168 discipline).
+ */
+function TopoFeatureEdges({ topo }: { topo: CadTopology }) {
+  const geom = useMemo(() => {
+    const pts: number[] = [];
+    for (const e of topo.edges) {
+      for (let i = 1; i < e.polyline.length; i++) {
+        pts.push(
+          e.polyline[i - 1][0],
+          e.polyline[i - 1][1],
+          e.polyline[i - 1][2],
+          e.polyline[i][0],
+          e.polyline[i][1],
+          e.polyline[i][2]
+        );
+      }
+    }
+    const g = new BufferGeometry();
+    g.setAttribute("position", new Float32BufferAttribute(pts, 3));
+    return g;
+  }, [topo]);
+  useEffect(() => () => geom.dispose(), [geom]);
+  return (
+    <lineSegments geometry={geom}>
+      <lineBasicMaterial color="#64748b" transparent opacity={0.55} />
+    </lineSegments>
+  );
+}
+
+/**
  * Writes the model's cross-section footprint into the stencil buffer (back
  * faces increment, front faces decrement → non-zero exactly where the cut
  * passes through solid material). Renders no color/depth; a cap quad drawn
@@ -345,6 +565,38 @@ function SectionCap({
   );
 }
 
+/**
+ * Measure-tool overlay (MTR-40): a marker at each picked world point and a
+ * segment between the pair, drawn on top (depthTest off) so it reads through
+ * the model. Markers scale with the model (≈1.5 mm) via world-units-per-mm.
+ * Sphere/line geometry is declarative, so r3f disposes it on unmount.
+ */
+function MeasureOverlay({ points, scale }: { points: Vec3[]; scale: number }) {
+  const r = Math.max(0.02, 1.5 * (scale || 1));
+  return (
+    <group renderOrder={1000}>
+      {points.map((p, i) => (
+        <mesh key={i} position={p}>
+          <sphereGeometry args={[r, 16, 16]} />
+          <meshBasicMaterial
+            color="#f97316"
+            depthTest={false}
+            toneMapped={false}
+          />
+        </mesh>
+      ))}
+      {points.length === 2 && (
+        <Line
+          points={[points[0], points[1]]}
+          color="#f97316"
+          lineWidth={2}
+          depthTest={false}
+        />
+      )}
+    </group>
+  );
+}
+
 function PreviewUnavailable() {
   return (
     <div className="flex h-full w-full items-center justify-center bg-muted/20">
@@ -408,6 +660,19 @@ interface ModelViewerProps {
    * with `fixedFrame` + `inspect`; takes precedence over `modelUrl`.
    */
   assemblyParts?: { url: string; name: string; visible: boolean }[];
+  /**
+   * B-rep topology sidecar URL for the single-model path (MTR-174). When
+   * present + valid, face/edge picking uses exact CAD identity (binary-search
+   * `triRange` → face; real edge polylines incl. smooth-tangent edges) and
+   * annotations carry a semantic handle. Absent/404 → mesh-flood-fill
+   * fallback, so every current call site is unaffected.
+   *
+   * TODO(MTR-174): the studio has no per-asset topology URL to pass yet — the
+   * cad-artifacts PR persists the sidecar (R2 `cad-topo/...` keyed on a new
+   * `cadGenerations.topoStorageKey`) and must expose a signed URL (mirroring
+   * `/api/files/preview/{id}` for renders). Thread it here once available.
+   */
+  topoUrl?: string;
 }
 
 /**
@@ -512,20 +777,27 @@ interface InspectBounds {
  */
 function InspectModel({
   modelUrl,
+  topoUrl,
   color,
   planes,
   onBounds,
   annotateMode,
+  measureMode,
+  onMeasurePick,
   target,
   annotations,
   pending,
   onPick,
 }: {
   modelUrl: string;
+  /** B-rep topology sidecar URL (MTR-174); enables exact face/edge picking. */
+  topoUrl?: string;
   color?: string;
   planes: Plane[] | undefined;
   onBounds: (b: InspectBounds) => void;
   annotateMode?: boolean;
+  measureMode?: boolean;
+  onMeasurePick?: (worldPoint: Vec3) => void;
   target: "face" | "edge";
   annotations?: ViewerAnnotation[];
   pending?: PickResult | null;
@@ -539,20 +811,36 @@ function InspectModel({
   const geomRef = useRef<THREE.BufferGeometry | null>(null);
   const [geom, setGeom] = useState<BufferGeometry | null>(null);
   const done = useRef(false);
+  // Exact CAD identity when the part shipped a topology sidecar (MTR-174);
+  // null → fall back to the mesh flood-fill / feature-edge path.
+  const topo = useTopology(topoUrl);
 
   // Click = select; drag = rotate. r3f fires onClick even after a drag, so gate
-  // on pointer travel (e.delta) to keep orbit-rotate usable in annotate mode.
+  // on pointer travel (e.delta) to keep orbit-rotate usable. Measure picks a
+  // raw world point (MTR-40); annotate picks a face/edge.
   const handleClick = (e: ThreeEvent<MouseEvent>) => {
-    if (!annotateMode || !onPick || e.delta > 4) return;
+    if (e.delta > 4) return;
+    if (measureMode && onMeasurePick) {
+      e.stopPropagation();
+      onMeasurePick([e.point.x, e.point.y, e.point.z]);
+      return;
+    }
+    if (!annotateMode || !onPick) return;
     e.stopPropagation();
     const mesh = e.object as THREE.Mesh;
     const g = mesh.geometry as BufferGeometry;
     const local = mesh.worldToLocal(e.point.clone());
     let result: PickResult | null = null;
     if (target === "edge") {
-      result = selectNearestEdge(g, local);
+      // Prefer real B-rep edges (selectable smooth-tangent edges); fall back
+      // to the dihedral-thresholded mesh edges when there's no topology.
+      result =
+        (topo && selectTopoEdge(g, topo, local)) || selectNearestEdge(g, local);
     } else if (e.faceIndex != null) {
-      result = { kind: "face", ...selectConnectedFace(g, e.faceIndex) };
+      const topoFace = topo ? selectTopoFace(g, topo, e.faceIndex) : null;
+      result = topoFace
+        ? { kind: "face", ...topoFace }
+        : { kind: "face", ...selectConnectedFace(g, e.faceIndex) };
     }
     if (!result) return;
     onPick({
@@ -594,7 +882,10 @@ function InspectModel({
   });
 
   return (
-    <group ref={groupRef} onClick={annotateMode ? handleClick : undefined}>
+    <group
+      ref={groupRef}
+      onClick={annotateMode || measureMode ? handleClick : undefined}
+    >
       <StlModel
         url={modelUrl}
         color={color}
@@ -609,8 +900,16 @@ function InspectModel({
       {planes && planes.length > 0 && geom && (
         <SectionStencil geom={geom} planes={planes} />
       )}
-      {/* Faint guide of all selectable edges while in edge mode. */}
-      {annotateMode && target === "edge" && geom && <FeatureEdges geom={geom} />}
+      {/* Faint guide of all selectable edges while in edge mode. With topology
+          we render the real B-rep edges (incl. smooth-tangent ones); otherwise
+          the dihedral-thresholded mesh feature edges. */}
+      {annotateMode &&
+        target === "edge" &&
+        (topo ? (
+          <TopoFeatureEdges topo={topo} />
+        ) : (
+          geom && <FeatureEdges geom={geom} />
+        ))}
 
       {/* Committed annotation highlights (face overlay or edge line). */}
       {(annotations ?? []).map((a) =>
@@ -643,11 +942,18 @@ const ASSEMBLY_SHADES = ["#a0a0a0", "#8f979f", "#b3afa7", "#9aa6ab"];
  * every visible part; the stencil cap + edge guides are single-mesh tools and
  * stay off here.
  */
+/** Separation magnitude at explode = 1, as a multiple of each part's
+ *  centroid-offset from the assembly centroid. */
+const EXPLODE_GAIN = 1.2;
+
 function InspectAssembly({
   parts,
   planes,
+  explode = 0,
   onBounds,
   annotateMode,
+  measureMode,
+  onMeasurePick,
   target,
   annotations,
   pending,
@@ -655,8 +961,12 @@ function InspectAssembly({
 }: {
   parts: { url: string; name: string; visible: boolean }[];
   planes: Plane[] | undefined;
+  /** 0 = assembled, 1 = fully separated (MTR-188). */
+  explode?: number;
   onBounds: (b: InspectBounds) => void;
   annotateMode?: boolean;
+  measureMode?: boolean;
+  onMeasurePick?: (worldPoint: Vec3) => void;
   target: "face" | "edge";
   annotations?: ViewerAnnotation[];
   pending?: PickResult | null;
@@ -672,14 +982,41 @@ function InspectAssembly({
   const groupRef = useRef<THREE.Group>(null);
   const done = useRef(false);
 
-  // Same click = select / drag = rotate gate as InspectModel; the picked
-  // mesh's own geometry is used, so selection works on any visible part.
+  // Per-part explode vectors (native mm): assembly-centroid → part-centroid.
+  // Concentric parts (a lid over a base) have a near-zero vector and barely
+  // separate — that's the honest centroid-outward behavior (MTR-188).
+  const explodeVectors = useMemo(() => {
+    const union = new Box3();
+    const centers = geometries.map((g) => {
+      if (!g.boundingBox) g.computeBoundingBox();
+      const c = new Vector3();
+      const bb = g.boundingBox ?? new Box3();
+      bb.getCenter(c);
+      union.union(bb);
+      return c;
+    });
+    const asmCenter = new Vector3();
+    union.getCenter(asmCenter);
+    return centers.map((c) => c.clone().sub(asmCenter));
+  }, [geometries]);
+
+  // Same click = select / drag = rotate gate as InspectModel. Measure picks a
+  // raw world point; annotate picks a face/edge and tags the part that was hit
+  // (MTR-188) so serialized feedback reads "on part 'lid': …".
   const handleClick = (e: ThreeEvent<MouseEvent>) => {
-    if (!annotateMode || !onPick || e.delta > 4) return;
+    if (e.delta > 4) return;
+    if (measureMode && onMeasurePick) {
+      e.stopPropagation();
+      onMeasurePick([e.point.x, e.point.y, e.point.z]);
+      return;
+    }
+    if (!annotateMode || !onPick) return;
     e.stopPropagation();
     const mesh = e.object as THREE.Mesh;
     const g = mesh.geometry as BufferGeometry;
     const local = mesh.worldToLocal(e.point.clone());
+    const partIdx = geometries.findIndex((geo) => geo === g);
+    const partName = partIdx >= 0 ? parts[partIdx].name : undefined;
     let result: PickResult | null = null;
     if (target === "edge") {
       result = selectNearestEdge(g, local);
@@ -688,7 +1025,7 @@ function InspectAssembly({
     }
     if (!result) return;
     onPick({
-      result,
+      result: { ...result, partName },
       clientX: e.nativeEvent.clientX,
       clientY: e.nativeEvent.clientY,
     });
@@ -732,16 +1069,29 @@ function InspectAssembly({
 
   return (
     <group scale={frame.scale} position={frame.position}>
-      <group ref={groupRef} onClick={annotateMode ? handleClick : undefined}>
-        {parts.map((p, i) => (
-          <group key={p.url} visible={p.visible}>
-            <StlModel
-              url={p.url}
-              color={ASSEMBLY_SHADES[i % ASSEMBLY_SHADES.length]}
-              clippingPlanes={planes}
-            />
-          </group>
-        ))}
+      <group
+        ref={groupRef}
+        onClick={annotateMode || measureMode ? handleClick : undefined}
+      >
+        {parts.map((p, i) => {
+          const v = explodeVectors[i];
+          const off: Vec3 = v
+            ? [
+                v.x * explode * EXPLODE_GAIN,
+                v.y * explode * EXPLODE_GAIN,
+                v.z * explode * EXPLODE_GAIN,
+              ]
+            : [0, 0, 0];
+          return (
+            <group key={p.url} visible={p.visible} position={off}>
+              <StlModel
+                url={p.url}
+                color={ASSEMBLY_SHADES[i % ASSEMBLY_SHADES.length]}
+                clippingPlanes={planes}
+              />
+            </group>
+          );
+        })}
 
         {/* Committed annotation highlights (model-space mm = part space). */}
         {(annotations ?? []).map((a) =>
@@ -778,6 +1128,7 @@ export function ModelViewer({
   fixedFrame = false,
   ghostUrl,
   assemblyParts,
+  topoUrl,
 }: ModelViewerProps) {
   const isPreview = mode === "preview";
   // Wheel zoom defaults to true unless explicitly disabled. The
@@ -828,10 +1179,40 @@ export function ModelViewer({
 
   // Inspection state (only meaningful when `inspect`). STL only.
   const inspectable = inspect && format === "stl";
+  const isAssembly = !!assemblyParts && assemblyParts.length > 1;
   const [showGrid, setShowGrid] = useState(false);
   const [sectionOn, setSectionOn] = useState(false);
   const [sectionT, setSectionT] = useState(0); // 0 = nothing cut, 1 = all cut
   const [bounds, setBounds] = useState<InspectBounds | null>(null);
+
+  // Measure tool (MTR-40): click two points on the model → straight-line
+  // distance. Points are world coords; distance is converted to mm via
+  // `bounds.scale` (world units per mm). Mutually exclusive with annotate.
+  const [measureMode, setMeasureMode] = useState(false);
+  const [measurePts, setMeasurePts] = useState<Vec3[]>([]);
+  const addMeasurePoint = (p: Vec3) =>
+    setMeasurePts((prev) => (prev.length >= 2 ? [p] : [...prev, p]));
+  const measureMm =
+    measurePts.length === 2 && bounds
+      ? Math.hypot(
+          measurePts[0][0] - measurePts[1][0],
+          measurePts[0][1] - measurePts[1][1],
+          measurePts[0][2] - measurePts[1][2]
+        ) / (bounds.scale || 1)
+      : null;
+
+  // Explode control (MTR-188): 0 = assembled, 1 = fully separated along each
+  // part's centroid-outward vector. Assembly-only.
+  const [explode, setExplode] = useState(0);
+
+  // Annotate and measure both consume model clicks — turning one on turns the
+  // other off so a click never does two things.
+  useEffect(() => {
+    if (annotateMode) setMeasureMode(false);
+  }, [annotateMode]);
+  useEffect(() => {
+    if (!measureMode) setMeasurePts([]);
+  }, [measureMode]);
 
   // A single horizontal cross-section plane. normal (0,-1,0) keeps geometry
   // below the cut height (constant), so raising `t` lowers the cut and exposes
@@ -869,7 +1250,7 @@ export function ModelViewer({
     <div
       ref={wrapperRef}
       className={`relative ${className || "h-full w-full"} ${
-        inspectable && annotateMode ? "cursor-crosshair" : ""
+        inspectable && (annotateMode || measureMode) ? "cursor-crosshair" : ""
       }`}
     >
       <ErrorBoundary fallback={<PreviewUnavailable />}>
@@ -891,12 +1272,15 @@ export function ModelViewer({
               // is self-lit, so a touch of ambient is all the rig needs.
               <>
                 <ambientLight intensity={0.7} />
-                {assemblyParts && assemblyParts.length > 1 ? (
+                {isAssembly && assemblyParts ? (
                   <InspectAssembly
                     parts={assemblyParts}
                     planes={planes}
+                    explode={explode}
                     onBounds={setBounds}
                     annotateMode={annotateMode}
+                    measureMode={measureMode}
+                    onMeasurePick={addMeasurePoint}
                     target={target}
                     annotations={annotations}
                     pending={pending?.result ?? null}
@@ -906,10 +1290,13 @@ export function ModelViewer({
                   <FixedFrameModel url={modelUrl}>
                     <InspectModel
                       modelUrl={modelUrl}
+                      topoUrl={topoUrl}
                       color={materialColor}
                       planes={planes}
                       onBounds={setBounds}
                       annotateMode={annotateMode}
+                      measureMode={measureMode}
+                      onMeasurePick={addMeasurePoint}
                       target={target}
                       annotations={annotations}
                       pending={pending?.result ?? null}
@@ -936,10 +1323,13 @@ export function ModelViewer({
                   {inspectable ? (
                     <InspectModel
                       modelUrl={modelUrl}
+                      topoUrl={topoUrl}
                       color={materialColor}
                       planes={planes}
                       onBounds={setBounds}
                       annotateMode={annotateMode}
+                      measureMode={measureMode}
+                      onMeasurePick={addMeasurePoint}
                       target={target}
                       annotations={annotations}
                       pending={pending?.result ?? null}
@@ -987,6 +1377,10 @@ export function ModelViewer({
                 }
                 size={Math.max(bounds.footprint.x, bounds.footprint.z) * 1.5}
               />
+            )}
+            {/* Measure markers + segment (world space, MTR-40). */}
+            {inspectable && measureMode && bounds && (
+              <MeasureOverlay points={measurePts} scale={bounds.scale} />
             )}
           </Suspense>
           <OrbitControls
@@ -1049,6 +1443,23 @@ export function ModelViewer({
               }`}
             >
               <ScissorsIcon className="size-4" />
+            </button>
+            <div className="h-4 w-px bg-border/60" />
+            <button
+              type="button"
+              onClick={() => {
+                // Measure and annotate are mutually exclusive click consumers.
+                if (!measureMode && annotateMode) onToggleAnnotate?.();
+                setMeasureMode((v) => !v);
+              }}
+              aria-label="Measure"
+              aria-pressed={measureMode}
+              title="Measure — click two points for a distance"
+              className={`flex h-8 w-8 items-center justify-center transition-colors hover:bg-foreground/5 ${
+                measureMode ? "text-foreground" : "text-muted-foreground"
+              }`}
+            >
+              <RulerIcon className="size-4" />
             </button>
             {onToggleAnnotate && (
               <>
@@ -1120,6 +1531,38 @@ export function ModelViewer({
               <RulerIcon className="size-3.5" />
               {bounds.mm.x.toFixed(1)} × {bounds.mm.y.toFixed(1)} ×{" "}
               {bounds.mm.z.toFixed(1)} mm
+            </div>
+          )}
+
+          {/* Measure readout — distance between the two picked points, or a
+              hint while collecting them (MTR-40). */}
+          {measureMode && (
+            <div className="absolute left-1/2 top-3 -translate-x-1/2 rounded-full border border-orange-500/40 bg-background/40 px-2.5 py-1 text-[11px] tabular-nums text-orange-600 backdrop-blur-md dark:text-orange-400">
+              {measureMm != null
+                ? `distance: ${measureMm.toFixed(2)} mm`
+                : measurePts.length === 1
+                  ? "click a second point"
+                  : "click two points to measure"}
+            </div>
+          )}
+
+          {/* Explode control — assembly only (MTR-188). Horizontal slider,
+              0 = assembled, 1 = fully separated along each part's outward
+              vector. Isolation/cross-section stay independent. */}
+          {isAssembly && (
+            <div className="absolute left-3 top-3 flex items-center gap-2 rounded-full border border-border/60 bg-background/40 px-3 py-1.5 backdrop-blur-md">
+              <MoveHorizontalIcon className="size-3.5 text-muted-foreground" />
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={explode}
+                onChange={(e) => setExplode(Number(e.target.value))}
+                aria-label="Explode assembly"
+                title="Explode"
+                className="w-24 cursor-pointer accent-foreground"
+              />
             </div>
           )}
 

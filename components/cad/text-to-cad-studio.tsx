@@ -483,10 +483,23 @@ export function TextToCadStudio({
   // For an assembly, the viewer/print/download act on the selected part; for a
   // single solid (or a stale selection) fall back to the turn's primary asset.
   const viewedParts = viewedTurn?.parts ?? [];
-  const activeAssetId =
+  // A revision mints parts with NEW fileAssetIds, so a `selectedPartId` held
+  // over from the previous turn no longer matches any part. Left unguarded that
+  // made the assembly viewer render every part with `visible=false` → a blank
+  // canvas (MTR-188 item 3: "a revision leaves the viewer blank / pointing at a
+  // stale part"). Resolve the selection against the CURRENT parts and treat a
+  // non-match as "All parts".
+  const effectiveSelectedPartId =
     viewedParts.find((p) => p.fileAssetId === selectedPartId)?.fileAssetId ??
-    viewedTurn?.fileAssetId ??
     null;
+  const activeAssetId = effectiveSelectedPartId ?? viewedTurn?.fileAssetId ?? null;
+
+  // Clear a stale isolation when the viewed turn changes (revision or history
+  // navigation) so the part tabs highlight "All parts", matching the guard
+  // above. Switching parts within a turn keeps the same turn id → no reset.
+  useEffect(() => {
+    setSelectedPartId(null);
+  }, [viewedTurn?.id]);
 
   // Annotations are tied to a specific model — drop them (and exit pin mode)
   // whenever the viewed asset changes (new turn, switched part, opened build).
@@ -856,17 +869,26 @@ export function TextToCadStudio({
         annotations
           .map((a, i) => {
             const note = a.note.trim();
+            // Part name (assemblies, MTR-188) + semantic CAD handle when B-rep
+            // topology is present (MTR-174): "cylinder r=2.7, axis Z". The mm
+            // coordinates stay as a fallback channel so a code model without a
+            // clean topology signal still has something to reason from.
+            const partPrefix = a.partName ? `on part '${a.partName}', ` : "";
             if (a.kind === "edge") {
-              return `#${i + 1} — edge from (${fmt(a.edge.a)}) to (${fmt(
-                a.edge.b
-              )}), length ${a.edge.length.toFixed(1)} mm: ${
-                note || "(address this edge)"
-              }`;
+              const semantic = a.topo ? `${a.topo.description} — ` : "";
+              return `#${i + 1} — ${partPrefix}${semantic}edge from (${fmt(
+                a.edge.a
+              )}) to (${fmt(a.edge.b)}), length ${a.edge.length.toFixed(
+                1
+              )} mm: ${note || "(address this edge)"}`;
             }
             const sz = a.extent.some((n) => n > 0)
               ? `, ~${a.extent.map((n) => n.toFixed(0)).join("×")} mm`
               : "";
-            return `#${i + 1} — face centered at (${fmt(a.point)})${sz}, normal (${a.normal
+            const semantic = a.topo ? `${a.topo.description} — ` : "";
+            return `#${i + 1} — ${partPrefix}${semantic}face centered at (${fmt(
+              a.point
+            )})${sz}, normal (${a.normal
               .map((n) => n.toFixed(2))
               .join(", ")}): ${note || "(address this face)"}`;
           })
