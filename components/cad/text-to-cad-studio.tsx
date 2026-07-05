@@ -856,17 +856,26 @@ export function TextToCadStudio({
         annotations
           .map((a, i) => {
             const note = a.note.trim();
+            // Part name (assemblies, MTR-188) + semantic CAD handle when B-rep
+            // topology is present (MTR-174): "cylinder r=2.7, axis Z". The mm
+            // coordinates stay as a fallback channel so a code model without a
+            // clean topology signal still has something to reason from.
+            const partPrefix = a.partName ? `on part '${a.partName}', ` : "";
             if (a.kind === "edge") {
-              return `#${i + 1} — edge from (${fmt(a.edge.a)}) to (${fmt(
-                a.edge.b
-              )}), length ${a.edge.length.toFixed(1)} mm: ${
-                note || "(address this edge)"
-              }`;
+              const semantic = a.topo ? `${a.topo.description} — ` : "";
+              return `#${i + 1} — ${partPrefix}${semantic}edge from (${fmt(
+                a.edge.a
+              )}) to (${fmt(a.edge.b)}), length ${a.edge.length.toFixed(
+                1
+              )} mm: ${note || "(address this edge)"}`;
             }
             const sz = a.extent.some((n) => n > 0)
               ? `, ~${a.extent.map((n) => n.toFixed(0)).join("×")} mm`
               : "";
-            return `#${i + 1} — face centered at (${fmt(a.point)})${sz}, normal (${a.normal
+            const semantic = a.topo ? `${a.topo.description} — ` : "";
+            return `#${i + 1} — ${partPrefix}${semantic}face centered at (${fmt(
+              a.point
+            )})${sz}, normal (${a.normal
               .map((n) => n.toFixed(2))
               .join(", ")}): ${note || "(address this face)"}`;
           })
