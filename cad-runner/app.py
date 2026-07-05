@@ -92,14 +92,22 @@ if not RUNNER_SECRET and os.environ.get("CAD_RUNNER_ALLOW_NO_AUTH", "") != "true
 # Named preview viewpoints (docs/text-to-cad/07 §A). threeQuarter is the
 # legacy single render and keeps the full figure size; the extra views are
 # smaller — they exist for the VLM judge and repair prompts, not for display.
+# threeQuarterBack is the OPPOSED isometric (MTR-199): the two opposed isos
+# together guarantee every face appears in at least one view, so rear / left /
+# bottom features are covered by default rather than by suspicion.
 _VIEW_ANGLES = {
     "threeQuarter": (22, -55),
+    "threeQuarterBack": (22, 125),
     "top": (80, -90),
     "front": (0, -90),
     "side": (0, 0),
 }
 _FULL_FIGSIZE = (6.4, 4.8)
 _SMALL_FIGSIZE = (4.0, 3.0)
+# Below this (mesh volume / bounding-box volume) a part is treated as hollow
+# (shell, bores, channels) and gets a section cutaway added to the packet so
+# the judge / self-review can see the internal geometry (MTR-199).
+_SECTION_FILL_RATIO = 0.75
 
 
 class RunRequest(BaseModel):
@@ -591,6 +599,20 @@ def _process_shape(
                 png = _render(mesh, elev=elev, azim=azim, figsize=figsize)
                 if png:
                     renders[view] = png
+            # Section cutaway for hollow parts (MTR-199): a mid-plane slice
+            # reveals bores / channels / shell interiors that no exterior view
+            # can show. Gated on a cheap fill-ratio heuristic so solid parts
+            # don't get a pointless (and misleading) empty section.
+            try:
+                ex = mesh.extents
+                bbox_vol = float(ex[0]) * float(ex[1]) * float(ex[2])
+                fill = float(mesh.volume) / bbox_vol if bbox_vol > 0 else 1.0
+                if fill < _SECTION_FILL_RATIO:
+                    section = _render_section(mesh)
+                    if section:
+                        renders["section"] = section
+            except Exception:  # noqa: BLE001
+                pass
             entry["renders"] = renders
             entry["renderPng"] = renders.get("threeQuarter")
         else:
@@ -851,6 +873,42 @@ def _render(mesh, elev: float = 22, azim: float = -55, figsize=(6.4, 4.8)) -> Op
         )
         plt.close(fig)
         return base64.b64encode(buf.getvalue()).decode()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _render_section(mesh) -> Optional[str]:
+    """Mid-plane section cutaway PNG (base64) for a hollow part (MTR-199).
+
+    Slices the mesh in half along its LONGEST horizontal axis at the centroid,
+    caps the cut so interior walls read as solid faces, and renders the
+    remaining half from a viewpoint facing the cut plane. This is the cheap
+    half of the cross-section tooling (MTR-40 owns the interactive viewer
+    version): it exists so the VLM judge and the agentic self-review can see
+    bores / channels / shell interiors that no exterior view exposes.
+
+    Returns None on any failure — callers treat the section view as optional."""
+    try:
+        import numpy as np
+        import trimesh
+
+        center = mesh.bounds.mean(axis=0)
+        # Cut across the longer of X/Y so the reveal shows the most interior.
+        ext = mesh.extents
+        axis = 0 if float(ext[0]) >= float(ext[1]) else 1
+        normal = [0.0, 0.0, 0.0]
+        normal[axis] = 1.0
+        half = trimesh.intersections.slice_mesh_plane(
+            mesh,
+            plane_normal=np.array(normal),
+            plane_origin=np.array(center),
+            cap=True,
+        )
+        if half is None or len(half.faces) == 0:
+            return None
+        # Look along the cut normal so the exposed section faces the camera.
+        azim = -90.0 if axis == 0 else 0.0
+        return _render(half, elev=12, azim=azim, figsize=_SMALL_FIGSIZE)
     except Exception:  # noqa: BLE001
         return None
 

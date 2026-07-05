@@ -32,6 +32,14 @@ import {
   type CadRole,
 } from "./models";
 import { CAD_FEEDBACK_TAG_LABELS, type CadFeedbackTag } from "./feedback";
+import {
+  checkDimensionTargets,
+  hasDimensionFailures,
+  formatDimensionRepairHints,
+  type DimensionCheckResult,
+  type DimensionTarget,
+} from "./dimension-check";
+import { enrichRepairHint } from "./repair-taxonomy";
 import type { CadProgressEvent, CadRunResult } from "./types";
 
 /** Owner feedback on the version being revised (CON-181). */
@@ -117,6 +125,13 @@ export interface HarnessResult {
    * unchanged on a revision. Persistence is the caller's job.
    */
   brief?: unknown;
+  /**
+   * Deterministic dimension-contract results (MTR-197): each brief dimension
+   * target checked against the final geometry. Only checks that RAN are ever
+   * counted as verified (honesty rail). Empty when the brief carried no
+   * targets. Persistence is the caller's job (see the TODO below on the column).
+   */
+  dimensionChecks?: DimensionCheckResult[];
   /** Per-role model usage for routing/telemetry (which model, how long). */
   telemetry?: Array<{ role: CadRole; model?: string; ms: number }>;
   /** Router verdict that selected the engine (stamped by orchestrate). */
@@ -370,6 +385,16 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
   // unchanged — persistence is the caller's job.
   const resultBrief = input.priorSourceCode ? input.priorBrief : (brief ?? undefined);
 
+  // Dimension contract (MTR-197): the machine-checkable targets to assert after
+  // a valid run. From the fresh brief, or re-parsed from the revision's brief so
+  // a revision still honors the original callouts.
+  const dimensionTargets: DimensionTarget[] = extractDimensionTargets(
+    input.priorSourceCode ? input.priorBrief : brief
+  );
+  // The last run's dimension-check results, surfaced on the return + used to
+  // drive a dimension-specific repair turn.
+  let dimensionChecks: DimensionCheckResult[] = [];
+
   // Per-prompt concept image (fresh builds only): a beautiful product render the
   // generator builds TOWARD — taste injection that hand-authored code exemplars
   // can't provide. Best-effort + gated by FAL_KEY; null when disabled/failed.
@@ -452,6 +477,10 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
             lastCode,
             "```",
             repairHintFor(repairNote),
+            // Deterministic stderr->class->fixes enrichment (MTR-198). Additive
+            // to the tailored hint above; names the failure class + standard
+            // fixes even when repairHintFor had no specific match.
+            enrichRepairHint(repairNote),
             priorRender
               ? "A render of that previous attempt is attached — use it to see what is actually wrong with the form, then fix it."
               : "",
@@ -518,6 +547,21 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
       validation: lastRun.validation,
     });
     if (grade.pass) {
+      // Dimension contract (MTR-197): assert the brief's callouts against the
+      // built geometry. Deterministic, no model call. A failed target that we
+      // have budget to fix earns a dimension-specific repair turn BEFORE the
+      // (paid) aesthetic judge — function before beauty.
+      dimensionChecks = checkDimensionTargets(lastRun, dimensionTargets);
+      if (
+        hasDimensionFailures(dimensionChecks) &&
+        useModel &&
+        attempt < maxAttempts
+      ) {
+        repairNote = `dimensions are out of spec — ${formatDimensionRepairHints(dimensionChecks)}`;
+        emit({ type: "repairing", attempt, maxAttempts, reason: repairNote });
+        continue;
+      }
+
       // Geometrically valid — now judge it aesthetically. On by default with
       // credentials (CAD_CRITIQUE=false disables); all available views go to
       // the judge so one 3/4 view can't hide a defect.
@@ -555,6 +599,10 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
         aestheticScore,
         aestheticDims,
         brief: resultBrief,
+        // TODO(MTR-197): persist on a cad_generations.dimension_checks jsonb
+        // column (the cad-artifacts PR owns migrations); until then this rides
+        // the in-memory result for the studio chip + eval reuse only.
+        dimensionChecks,
         telemetry,
       };
     }
@@ -573,7 +621,20 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
     attempts: lastAttempt,
     run: lastRun,
     brief: resultBrief,
+    dimensionChecks,
     error: repairNote || "generation failed",
     telemetry,
   };
+}
+
+/**
+ * Pull the machine-checkable dimension targets off a brief (fresh CadBrief or
+ * an untyped persisted priorBrief). Best-effort — a malformed/absent brief just
+ * yields no targets, so the dimension pass is a no-op rather than a failure.
+ */
+function extractDimensionTargets(brief: unknown): DimensionTarget[] {
+  if (brief == null) return [];
+  const parsed = cadBriefSchema.safeParse(brief);
+  if (!parsed.success) return [];
+  return (parsed.data.dimensionTargets as DimensionTarget[] | undefined) ?? [];
 }

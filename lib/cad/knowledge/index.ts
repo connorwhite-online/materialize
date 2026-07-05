@@ -4,6 +4,7 @@
  * design-knowledge block per request:
  *
  *   - Aesthetics directives — always (universal).
+ *   - Repair playbook — always (universal build-order/overshoot discipline).
  *   - Process DFM — the target process if known, else the conservative
  *     multi-process envelope (generation can precede material choice).
  *   - Fastener tables — only when the prompt references metric screw sizes.
@@ -21,6 +22,7 @@ import {
 } from "./dfm";
 import { fastenersInPrompt, formatFasteners } from "./fasteners";
 import { ERGONOMIC_RULES, needsErgonomics } from "./ergonomics";
+import { REPAIR_PLAYBOOK_RULES } from "./repair-playbook";
 
 export interface KnowledgeContext {
   prompt: string;
@@ -32,7 +34,7 @@ export function buildKnowledgeBlock({
   prompt,
   process,
 }: KnowledgeContext): string {
-  const sections: string[] = [AESTHETICS_RULES];
+  const sections: string[] = [AESTHETICS_RULES, REPAIR_PLAYBOOK_RULES];
 
   sections.push(
     formatProcessDfm(process ? PROCESS_DFM[process] : MULTI_PROCESS_SAFE)

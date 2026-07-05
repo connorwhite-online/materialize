@@ -32,6 +32,13 @@ import {
   formatExemplars,
 } from "../../lib/cad/knowledge/exemplars";
 import { CRITIQUE_RUBRIC, parseJudgement } from "../../lib/cad/critique-core";
+import {
+  checkDimensionTargets,
+  summarizeDimensionChecks,
+  dimensionTargetsFromExpectedDims,
+  type DimensionCheckResult,
+  type DimensionTarget,
+} from "../../lib/cad/dimension-check";
 import type { CadRunResult } from "../../lib/cad/types";
 import { EVAL_CASES, type EvalCase, type EvalTier } from "./cases";
 
@@ -124,6 +131,80 @@ async function judge(
   }
 }
 
+/**
+ * Negative checks (MTR-201): LLM-judged from the render packet — the "must NOT
+ * be present" row of the benchmark rubric, for properties geometry can't
+ * express (decorative geometry, wrong tooth direction, exploded parts). Returns
+ * a per-check verdict; null on any failure so a judge hiccup never fails a case
+ * silently. All available render views go in one call.
+ */
+interface NegativeCheckResult {
+  check: string;
+  /** True = the forbidden property IS present (a violation). */
+  violated: boolean;
+}
+
+async function judgeNegativeChecks(
+  prompt: string,
+  checks: string[],
+  renders: string[]
+): Promise<NegativeCheckResult[] | null> {
+  if (!JUDGE_ON || checks.length === 0 || renders.length === 0) return null;
+  const system = `You are inspecting neutral clay renders of a 3D-printable part for FORBIDDEN properties. For each listed property, answer whether it IS present in the renders. Judge only what you can SEE; if a property cannot be determined from the views, answer false (absent). Output ONLY strict JSON: {"results":[{"i":0,"present":true|false}, ...]} with one entry per property index.`;
+  try {
+    const msg = await client.messages.create({
+      model: JUDGE_MODEL,
+      max_tokens: 1024,
+      system,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `Requested object: ${prompt}\n\nForbidden properties (report each as present/absent):\n${checks
+                .map((c, i) => `${i}. ${c}`)
+                .join("\n")}`,
+            },
+            ...renders.map(
+              (data) =>
+                ({
+                  type: "image" as const,
+                  source: { type: "base64" as const, media_type: "image/png" as const, data },
+                })
+            ),
+          ],
+        },
+      ],
+    });
+    const match = textOf(msg).match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    const raw = JSON.parse(match[0]) as { results?: { i: number; present: boolean }[] };
+    if (!Array.isArray(raw.results)) return null;
+    return checks.map((check, i) => ({
+      check,
+      violated: raw.results!.find((r) => r.i === i)?.present === true,
+    }));
+  } catch {
+    return null;
+  }
+}
+
+/** The dimension targets to check for a case: structured expectations win, else the legacy bbox. */
+function effectiveTargets(c: EvalCase): DimensionTarget[] {
+  if (c.expectations?.dims?.length) return c.expectations.dims;
+  return dimensionTargetsFromExpectedDims(c.expectedDims);
+}
+
+/** Every render view the sidecar returned, for the multi-view judges. */
+function allRenders(run: CadRunResult): string[] {
+  const views = Object.values(run.renders ?? {}).filter(
+    (v): v is string => typeof v === "string" && v.length > 0
+  );
+  if (views.length > 0) return views;
+  return run.renderPng ? [run.renderPng] : [];
+}
+
 async function runCode(code: string): Promise<CadRunResult> {
   if (!RUNNER_URL) throw new Error("Set CAD_RUNNER_URL to a running sidecar");
   const res = await fetch(`${RUNNER_URL}/run`, {
@@ -140,12 +221,27 @@ interface CaseResult {
   grade: RunGrade;
   /** VLM design-quality score (0-100), null when not scored. */
   aesthetic: number | null;
+  /** MTR-197 dimension-contract results (only checks that ran are counted). */
+  dimResults: DimensionCheckResult[];
+  /** MTR-201 negative-check verdicts; null when not judged. */
+  negResults: NegativeCheckResult[] | null;
 }
 
 function avg(nums: number[]): number | null {
   return nums.length
     ? Math.round(nums.reduce((a, b) => a + b, 0) / nums.length)
     : null;
+}
+
+/** Per-case: ran dimension checks + negative-check violations, compactly. */
+function dimTag(r: CaseResult): string {
+  const s = summarizeDimensionChecks(r.dimResults);
+  return s.label ? `  dims ${s.label}` : "";
+}
+function negTag(r: CaseResult): string {
+  if (!r.negResults) return "";
+  const violated = r.negResults.filter((n) => n.violated).length;
+  return violated > 0 ? `  ⚠ ${violated} neg-violation(s)` : "  neg ✓";
 }
 
 async function main() {
@@ -156,23 +252,37 @@ async function main() {
       const code = await generate(c.prompt);
       const run = await runCode(code);
       const grade = gradeRun(run, c.expectedDims);
+      // Dimension contract (MTR-197 machinery — same code path as the harness).
+      const dimResults = checkDimensionTargets(run, effectiveTargets(c));
       const aesthetic = grade.pass ? await judge(c.prompt, run.renderPng) : null;
-      results.push({ c, grade, aesthetic });
+      // Negative checks only make sense once a real solid exists to look at.
+      const negResults = grade.pass
+        ? await judgeNegativeChecks(c.prompt, c.expectations?.negativeChecks ?? [], allRenders(run))
+        : null;
+      const cr: CaseResult = { c, grade, aesthetic, dimResults, negResults };
+      results.push(cr);
       const tag = aesthetic == null ? "" : `  aesthetic ${aesthetic}/100`;
       console.log(
-        (grade.pass ? "PASS" : `FAIL (${grade.failures.join(", ")})`) + tag
+        (grade.pass ? "PASS" : `FAIL (${grade.failures.join(", ")})`) +
+          tag +
+          dimTag(cr) +
+          negTag(cr)
       );
     } catch (err) {
       results.push({
         c,
         grade: { pass: false, failures: [String(err)], dimsOk: null },
         aesthetic: null,
+        dimResults: [],
+        negResults: null,
       });
       console.log(`ERROR (${err})`);
     }
   }
 
-  // Scorecard by tier: validity pass-rate + mean design-quality score.
+  // Scorecard by tier: validity pass-rate + mean design-quality score +
+  // dimension accuracy (passed/ran across the tier, honesty-railed) + negative
+  // checks clean (cases with all forbidden properties absent).
   const tiers: EvalTier[] = [
     "primitive",
     "bracket",
@@ -180,9 +290,27 @@ async function main() {
     "mechanical",
     "assembly",
     "implicit",
+    "implicit-composite",
+    "benchmark",
   ];
+  const dimAccuracy = (rs: CaseResult[]): string => {
+    let ran = 0;
+    let passed = 0;
+    for (const r of rs) {
+      const s = summarizeDimensionChecks(r.dimResults);
+      ran += s.ran;
+      passed += s.passed;
+    }
+    return ran > 0 ? `${passed}/${ran}` : "—";
+  };
+  const negClean = (rs: CaseResult[]): string => {
+    const judged = rs.filter((r) => r.negResults != null);
+    if (judged.length === 0) return "—";
+    const clean = judged.filter((r) => r.negResults!.every((n) => !n.violated)).length;
+    return `${clean}/${judged.length}`;
+  };
   console.log(
-    `\n=== Scorecard [engine: ${ENGINE}, model: ${GEN_MODEL}] (validity | mean aesthetic) ===`
+    `\n=== Scorecard [engine: ${ENGINE}, model: ${GEN_MODEL}] (validity | aesthetic | dim-acc | neg-clean) ===`
   );
   for (const tier of tiers) {
     const inTier = results.filter((r) => r.c.tier === tier);
@@ -192,7 +320,7 @@ async function main() {
       inTier.map((r) => r.aesthetic).filter((x): x is number => x != null)
     );
     console.log(
-      `${tier.padEnd(11)} ${pass}/${inTier.length}    ${a == null ? "—" : `${a}/100`}`
+      `${tier.padEnd(18)} ${pass}/${inTier.length}    ${(a == null ? "—" : `${a}/100`).padEnd(8)} ${dimAccuracy(inTier).padEnd(8)} ${negClean(inTier)}`
     );
   }
   const passed = results.filter((r) => r.grade.pass).length;
@@ -200,7 +328,7 @@ async function main() {
     results.map((r) => r.aesthetic).filter((x): x is number => x != null)
   );
   console.log(
-    `${"TOTAL".padEnd(11)} ${passed}/${results.length}    ${meanA == null ? "—" : `${meanA}/100`}`
+    `${"TOTAL".padEnd(18)} ${passed}/${results.length}    ${(meanA == null ? "—" : `${meanA}/100`).padEnd(8)} ${dimAccuracy(results).padEnd(8)} ${negClean(results)}`
   );
 
   // Non-zero exit when nothing passed, so CI can gate on it later.
