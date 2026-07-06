@@ -5,7 +5,11 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { cadJobs } from "@/lib/db/schema";
 import { logError } from "@/lib/logger";
+import { computeCostCents } from "@/lib/billing/cad-pricing";
+import { recordGenerationDebit } from "@/lib/billing/cad-credits";
+import { resolveModelCredentials } from "@/lib/cad/credentials";
 import type { PriorFeedback } from "@/lib/cad/harness";
+import { CadMeter, runWithCadContext } from "@/lib/cad/metering";
 import { runCadGeneration } from "@/lib/cad/orchestrate";
 import type { PromptImage } from "@/lib/cad/model-client";
 import {
@@ -310,6 +314,20 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
     return chosen;
   };
 
+  // --- Cost metering (MTR-181) -------------------------------------------
+  // One meter per job, active for everything runCadGeneration does (model
+  // calls, sidecar runs, fal invocations record into it via the async
+  // context). The RAW summary + a cents rollup at current CAD_PRICE_* unit
+  // prices land on the job row with EVERY terminal status — failures and
+  // cancellations cost real money too, only the (flag-gated) credit debit
+  // is success-only. `route` is stamped once the router verdict is known.
+  const meter = new CadMeter();
+  let meteredRoute: string | undefined;
+  const usagePatch = () => {
+    const usage = meter.summarize(meteredRoute);
+    return { usage, costCents: computeCostCents(usage) };
+  };
+
   // The terminal progress record is always written BEFORE the terminal
   // status flip — the events route relies on that ordering to close with
   // the terminal frame already replayed.
@@ -322,11 +340,20 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
       error: "Generation cancelled.",
       generationId,
     });
-    await markJob({ status: "cancelled", finishedAt: new Date() });
+    await markJob({
+      status: "cancelled",
+      finishedAt: new Date(),
+      ...usagePatch(),
+    });
   };
   const finishFailed = async (message: string) => {
     await flushTerminal({ type: "error", error: message, generationId });
-    await markJob({ status: "failed", error: message, finishedAt: new Date() });
+    await markJob({
+      status: "failed",
+      error: message,
+      finishedAt: new Date(),
+      ...usagePatch(),
+    });
   };
 
   try {
@@ -370,21 +397,33 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
   }, CANCEL_POLL_MS);
 
   try {
+    // BYOK seam (MTR-181): resolve which credentials this generation's
+    // model calls run under. With CAD_BYOK_ENABLED off (default) this is
+    // the platform env credentials and completeText keeps its singleton —
+    // byte-identical. Best-effort: a resolution hiccup means platform.
+    const credentials = await resolveModelCredentials(userId).catch(
+      () => undefined
+    );
+
     // Complexity-routed entry (docs/text-to-cad/03 §C): simple prompts keep
     // the scripted loop, complex ones get the agentic session loop, organic
     // ones the generative backend. With CAD_AGENTIC=false / no sessions /
     // no credentials this is byte-identical to the old inline routing.
-    const result = await runCadGeneration({
-      prompt,
-      priorSourceCode: input.priorSourceCode ?? null,
-      priorFeedback: input.priorFeedback ?? null,
-      priorBrief: input.priorBrief,
-      providedBrief: input.providedBrief,
-      images,
-      signal: controller.signal,
-      onProgress,
-      onQuestion,
-    });
+    // runWithCadContext scopes the cost meter + credentials to this run.
+    const result = await runWithCadContext({ meter, credentials }, () =>
+      runCadGeneration({
+        prompt,
+        priorSourceCode: input.priorSourceCode ?? null,
+        priorFeedback: input.priorFeedback ?? null,
+        priorBrief: input.priorBrief,
+        providedBrief: input.providedBrief,
+        images,
+        signal: controller.signal,
+        onProgress,
+        onQuestion,
+      })
+    );
+    meteredRoute = result.route;
 
     // runGenerative swallows AbortError into { ok: false }; catch the
     // cancel case here so it lands as `cancelled`, not `failed`.
@@ -434,7 +473,18 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
       remeshed: persisted.remeshed,
     };
     await flushTerminal(done);
-    await markJob({ status: "done", finishedAt: new Date() });
+    await markJob({ status: "done", finishedAt: new Date(), ...usagePatch() });
+
+    // Credit debit (MTR-181): success-only, flag-gated (CAD_CREDITS_ENABLED,
+    // default off → hard no-op), priced per route tier (CAD_CREDIT_COST_*,
+    // default 0 → still a no-op), idempotent per job, and never throws —
+    // bookkeeping must not fail a finished generation.
+    await recordGenerationDebit({
+      userId,
+      jobId,
+      generationId,
+      route: result.route,
+    });
   } catch (error) {
     if (cancelRequested || (error as Error)?.name === "AbortError") {
       await finishCancelled().catch((err) =>

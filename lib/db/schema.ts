@@ -15,7 +15,7 @@ import {
   uniqueIndex,
   foreignKey,
 } from "drizzle-orm/pg-core";
-import type { CadJobProgressEntry } from "../cad/types";
+import type { CadJobProgressEntry, CadUsageSummary } from "../cad/types";
 
 // Enums
 //
@@ -1605,6 +1605,21 @@ export const cadJobs = pgTable(
      */
     lastSnapshot: text("last_snapshot"),
     snapshotStep: integer("snapshot_step").notNull().default(0),
+    /**
+     * Cost metering (MTR-181, docs/text-to-cad/08): RAW per-job usage —
+     * model tokens per (role, model), sidecar wall time, fal invocations,
+     * router verdict — written once at job termination. Raw on purpose:
+     * unit prices (CAD_PRICE_*) re-compute cost from this at read time, so
+     * price changes never orphan history.
+     */
+    usage: jsonb("usage").$type<CadUsageSummary>(),
+    /**
+     * Cents rollup of `usage` at the unit prices in force when the job
+     * finished (lib/billing/cad-pricing.ts). A point-in-time snapshot for
+     * cheap aggregation — recompute from `usage` for anything price-
+     * sensitive. 0 while all CAD_PRICE_* default to 0 (metering-only).
+     */
+    costCents: integer("cost_cents"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -1617,5 +1632,64 @@ export const cadJobs = pgTable(
     index("cad_jobs_generation_id_idx").on(table.generationId),
     // Covers the worker poll (WHERE status = 'queued' ORDER BY created_at).
     index("cad_jobs_status_created_idx").on(table.status, table.createdAt),
+  ]
+);
+
+// Studio credit ledger (MTR-181, docs/text-to-cad/08): one signed row per
+// credit movement; a user's balance is SUM(delta) — no denormalized balance
+// column to drift. Append-only by convention (corrections are new `admin`
+// rows, never updates). Entirely inert unless CAD_CREDITS_ENABLED=true
+// (default off): no writer runs without the flag, and credits are an
+// internal unit — nothing here touches Stripe or real money.
+//
+// `reason` is free-form text like notifications.type (new reasons need no
+// migration); known values live in lib/billing/cad-credits.ts:
+//   generation           — debit for a finished generation job (delta < 0)
+//   grant                — signup/monthly/plan credit grant (delta > 0)
+//   print_through_refund — credit-back when a studio design reaches a paid
+//                          print order (docs/text-to-cad/08 strategic
+//                          alignment; delta > 0)
+//   admin                — manual correction, either sign
+export const cadCreditLedger = pgTable(
+  "cad_credit_ledger",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // Signed credit amount: negative = debit, positive = grant/refund.
+    delta: integer("delta").notNull(),
+    reason: text("reason").notNull(),
+    // Provenance refs — SET NULL so the ledger (money-adjacent history)
+    // survives deletion of what it points at.
+    generationId: uuid("generation_id").references(() => cadGenerations.id, {
+      onDelete: "set null",
+    }),
+    jobId: uuid("job_id").references(() => cadJobs.id, {
+      onDelete: "set null",
+    }),
+    printOrderId: uuid("print_order_id").references(() => printOrders.id, {
+      onDelete: "set null",
+    }),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    // Covers balance (WHERE user_id) and per-user statement listing.
+    index("cad_credit_ledger_user_created_idx").on(
+      table.userId,
+      table.createdAt
+    ),
+    // Idempotency rails: at most ONE debit per job, and at most ONE
+    // print-through refund per print order — writers use
+    // onConflictDoNothing against these, so retries/crons can't double-write.
+    uniqueIndex("cad_credit_ledger_generation_debit_uq")
+      .on(table.jobId)
+      .where(sql`reason = 'generation'`),
+    uniqueIndex("cad_credit_ledger_print_refund_uq")
+      .on(table.printOrderId)
+      .where(sql`reason = 'print_through_refund'`),
   ]
 );
