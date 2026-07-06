@@ -56,6 +56,7 @@ import type {
 } from "@/lib/cad/types";
 // Type-only: lib/cad/brief is server-only at runtime; the type is erased.
 import type { CadBrief } from "@/lib/cad/brief";
+import type { CadProcess } from "@/lib/cad/knowledge/dfm";
 import type { ViewerAnnotation } from "@/components/viewer/model-viewer";
 import {
   CAD_FEEDBACK_TAGS,
@@ -64,6 +65,20 @@ import {
   type CadRating,
 } from "@/lib/cad/feedback";
 import { cn } from "@/lib/utils";
+
+// Optional target-process picker (MTR-171): "" = Any (the conservative
+// multi-process DFM envelope, unchanged default); a specific pick threads that
+// process's DFM guidance into generation. Ids MUST stay in sync with
+// PROCESS_DFM's keys — the server rejects anything else and falls back to Any.
+const PROCESS_OPTIONS: ReadonlyArray<{ id: CadProcess | ""; label: string }> = [
+  { id: "", label: "Any process" },
+  { id: "fdm", label: "FDM / FFF" },
+  { id: "sla", label: "Resin (SLA/DLP)" },
+  { id: "sls", label: "SLS nylon" },
+  { id: "mjf", label: "MJF nylon" },
+  { id: "dmls", label: "Metal (DMLS)" },
+  { id: "binder_jet", label: "Binder jet metal" },
+];
 
 // The 3D viewer pulls in three.js / react-three-fiber — lazy-load it so the
 // studio shell (and its bundle) stays light until a model is on screen.
@@ -404,6 +419,8 @@ export function TextToCadStudio({
   const [nameDraft, setNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
   const [images, setImages] = useState<AttachedImage[]>([]);
+  // Optional target process for DFM guidance (MTR-171). "" = Any (default).
+  const [targetProcess, setTargetProcess] = useState<CadProcess | "">("");
   const [selectedPartId, setSelectedPartId] = useState<string | null>(null);
   const [savingModel, setSavingModel] = useState(false);
   const [savedAssets, setSavedAssets] = useState<Set<string>>(new Set());
@@ -1172,6 +1189,9 @@ export function TextToCadStudio({
           // into `decisions`). Fresh builds only — the server ignores it on
           // revisions anyway.
           brief: briefToSend ?? undefined,
+          // Optional target process (MTR-171). Omitted when "Any" so a revision
+          // still inherits its parent's process; a specific pick overrides it.
+          process: targetProcess || undefined,
         }),
         signal: controller.signal,
       });
@@ -2351,6 +2371,27 @@ export function TextToCadStudio({
                 >
                   <PaperclipIcon className="size-4" />
                 </button>
+                {/* Optional target-process picker (MTR-171): steers DFM
+                    guidance. "Any" keeps the conservative envelope. */}
+                <label className="sr-only" htmlFor="cad-target-process">
+                  Target print process
+                </label>
+                <select
+                  id="cad-target-process"
+                  value={targetProcess}
+                  onChange={(e) =>
+                    setTargetProcess(e.target.value as CadProcess | "")
+                  }
+                  disabled={generating}
+                  title="Target print process — steers manufacturability guidance"
+                  className="h-8 cursor-pointer rounded-lg bg-transparent px-2 text-xs font-medium text-muted-foreground outline-none hover:bg-foreground/5 hover:text-foreground disabled:opacity-40"
+                >
+                  {PROCESS_OPTIONS.map((o) => (
+                    <option key={o.id || "any"} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
                 {/* Silent pre-build spec check in flight (fresh builds). */}
                 {briefLoading && (
                   <span className="inline-flex h-8 items-center gap-1.5 px-2 text-xs font-medium text-muted-foreground">

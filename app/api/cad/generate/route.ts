@@ -10,7 +10,45 @@ import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
 import type { PriorFeedback } from "@/lib/cad/harness";
 import { createCadJob, executeCadJob } from "@/lib/cad/jobs";
 import type { PromptImage } from "@/lib/cad/model-client";
+import { PROCESS_DFM, type CadProcess } from "@/lib/cad/knowledge/dfm";
 import { checkCadGenerateRateLimit } from "./rate-limit";
+
+/**
+ * Target-process threading (MTR-171). The harness already branches DFM
+ * guidance on `HarnessInput.process` (process-specific envelope vs the
+ * conservative multi-process one) — the seam just never received a value.
+ * These two pure helpers turn the request (+ a revision's parent) into that
+ * value, and are exported for unit testing.
+ */
+
+/**
+ * A request value is a real process only if it is one of PROCESS_DFM's OWN
+ * keys. Uses hasOwnProperty, not `in` — the latter walks the prototype chain,
+ * so `"toString"`/`"constructor"` would otherwise pass and then index onto a
+ * function instead of a ProcessDfm.
+ */
+export function parseTargetProcess(value: unknown): CadProcess | null {
+  return typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(PROCESS_DFM, value)
+    ? (value as CadProcess)
+    : null;
+}
+
+/**
+ * Resolve the process a generation should build for: an explicit, valid pick
+ * wins; otherwise a revision inherits the process stamped on its parent's
+ * config fingerprint. Fresh builds with no pick stay unset (null) → the
+ * conservative envelope, exactly as before.
+ */
+export function resolveGenerationProcess(
+  requested: unknown,
+  parentFingerprint: unknown
+): CadProcess | null {
+  const explicit = parseTargetProcess(requested);
+  if (explicit) return explicit;
+  const fp = parentFingerprint as { process?: unknown } | null | undefined;
+  return fp ? parseTargetProcess(fp.process) : null;
+}
 
 /**
  * Generate endpoint for the text-to-CAD studio (MTR-175: background jobs).
@@ -66,6 +104,13 @@ export async function POST(request: Request) {
     images?: PromptImage[];
     /** User-reviewed design brief from the studio's brief card. */
     brief?: unknown;
+    /**
+     * Optional target CraftCloud process (MTR-171). When one of PROCESS_DFM's
+     * keys, the harness injects that process's DFM envelope instead of the
+     * conservative multi-process one; anything else (incl. "any"/omitted) keeps
+     * today's behavior. Revisions inherit the parent's process when unset.
+     */
+    process?: unknown;
   };
   try {
     body = await request.json();
@@ -103,6 +148,7 @@ export async function POST(request: Request) {
   let priorSourceCode: string | null = null;
   let priorFeedback: PriorFeedback | null = null;
   let priorBrief: unknown;
+  let parentFingerprint: unknown = null;
   if (body.parentGenerationId) {
     const [parent] = await db
       .select({
@@ -112,6 +158,7 @@ export async function POST(request: Request) {
         feedbackTags: cadGenerations.feedbackTags,
         feedbackNote: cadGenerations.feedbackNote,
         brief: cadGenerations.brief,
+        configFingerprint: cadGenerations.configFingerprint,
       })
       .from(cadGenerations)
       .where(eq(cadGenerations.id, body.parentGenerationId))
@@ -128,7 +175,14 @@ export async function POST(request: Request) {
     };
     // Revisions inherit the parent's design brief (docs/text-to-cad/06).
     priorBrief = parent.brief ?? undefined;
+    // …and the parent's target process (MTR-171), unless this request overrides.
+    parentFingerprint = parent.configFingerprint ?? null;
   }
+
+  // Target process for DFM guidance (MTR-171): an explicit valid pick wins;
+  // otherwise a revision inherits its parent's process; else unset → the
+  // conservative envelope (unchanged behavior for existing flows).
+  const process = resolveGenerationProcess(body.process, parentFingerprint);
 
   const [row] = await db
     .insert(cadGenerations)
@@ -155,6 +209,7 @@ export async function POST(request: Request) {
       parentGenerationId: body.parentGenerationId ?? null,
       name: body.name,
       images: images.length ? images : undefined,
+      process,
       priorSourceCode,
       priorFeedback,
       priorBrief,

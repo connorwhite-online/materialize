@@ -4,6 +4,7 @@ import { conceptImageEnabled } from "./concept";
 import { generativeEnabled } from "./generative";
 import { sessionsAvailable } from "./session-client";
 import { isRunnerLive } from "./runner-client";
+import type { CadProcess } from "./knowledge/dfm";
 
 /**
  * Config fingerprint stamped onto every cadGenerations row: WHICH harness
@@ -29,10 +30,18 @@ export interface CadConfigFingerprint {
   };
   /** Router verdict for this request ("legacy" = kill-switch/no-sessions path). */
   route?: string;
+  /**
+   * Target CraftCloud process this generation built for (MTR-171), when the
+   * request supplied one or a revision inherited it. Absent = the conservative
+   * multi-process envelope ran. Part of the treatment beside the outcome, so
+   * the eval rollup can slice save/print-through by process.
+   */
+  process?: CadProcess;
 }
 
 export function harnessConfigFingerprint(
-  route?: string
+  route?: string,
+  targetProcess?: CadProcess | null
 ): CadConfigFingerprint {
   return {
     v: 1,
@@ -55,5 +64,6 @@ export function harnessConfigFingerprint(
       runnerLive: isRunnerLive(),
     },
     ...(route ? { route } : {}),
+    ...(targetProcess ? { process: targetProcess } : {}),
   };
 }
