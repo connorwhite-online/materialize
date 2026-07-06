@@ -35,8 +35,15 @@ Spec shape (built by lib/cad/dimension-check.ts buildFitChecksFromTargets):
       "boardMm": [L, W, T], "clearanceMm": c, "aboveMm": a, "belowMm": b,
       "holes": {"positions": [[x, y], ...], "diaMm": d} | null,
       "ports": [{"id": "micro-usb", "edge": "-x", "offsetMm": o,
-                 "heightMm": h, "wMm": w, "hMm": hh}, ...]
+                 "heightMm": h, "wMm": w, "hMm": hh},
+                {"id": "screen-window", "face": "+z", "xMm": x, "yMm": y,
+                 "wMm": w, "hMm": hh}, ...]
   }]}
+
+Port kinds: lateral ports carry edge/offset/height and are checked with
+outward rays through the wall; `face: "+z"` ports (screen windows, lenses,
+shafts, MTR-203) carry a center in the component frame and are checked with
+upward rays from the component top through the lid.
 
 Component frame: origin at board center, +x along length, +y along width,
 z up; port heights above the PCB TOP. Result ids: "fit:<id>:cavity",
@@ -225,10 +232,34 @@ def _walls_blocked(grid, center, box_mm):
 
 def _port_open(grid, comp, center, rot, env_z, port):
     """Is there a through-opening for `port` at the solved placement?
-    Five outward rays (center, ±width, ±height inside the cutout) must all
-    exit the grid without touching solid."""
+    Five rays (center, ±width, ±height inside the cutout) must all exit the
+    grid without touching solid. Lateral ports shoot outward through the
+    wall; `face: "+z"` ports (screen windows) shoot upward through the lid."""
     L, W, T = [float(v) for v in comp["boardMm"]]
     zb = center[2] - env_z / 2.0
+    if port.get("face") == "+z":
+        # Top-face windows are usually cut at exactly the recommended size,
+        # and window-bearing components often have no bosses to pin the solved
+        # seat — allow 1 mm of seat slack on top of the voxel margin so a
+        # correct window over a slightly-slid seat still verifies.
+        margin = max(grid.pitch, 0.8) + 1.0
+        half_w = max(float(port["wMm"]) / 2.0 - margin, 0.0)
+        half_h = max(float(port["hMm"]) / 2.0 - margin, 0.0)
+        p_b = np.array([float(port.get("xMm") or 0.0), float(port.get("yMm") or 0.0)])
+        u_w = _rot_xy(np.array([1.0, 0.0]), rot)[0]
+        u_h = _rot_xy(np.array([0.0, 1.0]), rot)[0]
+        c_w = center[:2] + _rot_xy(p_b, rot)[0]
+        z0 = zb + T + grid.pitch
+        direction = np.array([0.0, 0.0, 1.0])
+        for dw, dh in ((0, 0), (half_w, 0), (-half_w, 0), (0, half_h), (0, -half_h)):
+            start = np.array([
+                c_w[0] + u_w[0] * dw + u_h[0] * dh,
+                c_w[1] + u_w[1] * dw + u_h[1] * dh,
+                z0,
+            ])
+            if not grid.ray_clear(start, direction):
+                return False
+        return True
     edge = port["edge"]
     off = float(port.get("offsetMm") or 0.0)
     if edge in ("+x", "-x"):
@@ -381,22 +412,29 @@ def _check_component(grid, comp):
     # ---- Ports -----------------------------------------------------------
     for p in ports:
         ok = _port_open(grid, comp, center, rot, env[2], p)
+        if p.get("face") == "+z":
+            where_ok = f"{p['id']} opening verified through the top face"
+            where_bad = (
+                f"no through-opening for {p['id']} ({p['wMm']} x {p['hMm']} mm) "
+                f"above the component: window center at ({p.get('xMm', 0)}, "
+                f"{p.get('yMm', 0)}) in the board frame. The lid there is "
+                f"solid, or the window is misplaced / too small."
+            )
+        else:
+            where_ok = f"{p['id']} opening verified through the {p['edge']} wall"
+            where_bad = (
+                f"no through-opening for {p['id']} ({p['wMm']} x {p['hMm']} mm) "
+                f"where the connector sits: board edge {p['edge']}, "
+                f"{p['offsetMm']} mm along the edge, center "
+                f"{p['heightMm']} mm above the board top. The wall there is "
+                f"solid, or the cutout is on the wrong face / misplaced / too small."
+            )
         results.append({
             "id": f"fit:{cid}:port:{p['id']}",
             "kind": "fit_cutout",
             "ok": bool(ok),
             "got": 1.0 if ok else 0.0,
-            "note": (
-                f"{p['id']} opening verified through the {p['edge']} wall"
-                if ok
-                else (
-                    f"no through-opening for {p['id']} ({p['wMm']} x {p['hMm']} mm) "
-                    f"where the connector sits: board edge {p['edge']}, "
-                    f"{p['offsetMm']} mm along the edge, center "
-                    f"{p['heightMm']} mm above the board top. The wall there is "
-                    f"solid, or the cutout is on the wrong face / misplaced / too small."
-                )
-            ),
+            "note": where_ok if ok else where_bad,
         })
 
     return results
