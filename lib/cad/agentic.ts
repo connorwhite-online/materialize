@@ -171,7 +171,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: "search_parts",
     description:
-      "Search off-the-shelf part sources (MTR-200) for a named component BEFORE modeling placeholder geometry — fasteners (e.g. 'iso4762 socket head cap screw M3x12'), and, when the hosted catalog is enabled, bearings/boards/connectors. Returns the best match's label + documented envelope (mm), or a recorded miss. A network failure is NOT a no-match.",
+      "Search off-the-shelf part sources (MTR-200) for a named component BEFORE modeling placeholder geometry — fasteners/nuts/washers/heat-set inserts/bearings resolve to bd_warehouse constructor snippets (e.g. 'm3x12 shcs', '608zz'); the hosted catalog, when enabled, adds boards/connectors. Returns the best match's label + documented envelope (mm) + any bd_warehouse constructor, or a recorded miss. A network failure is NOT a no-match.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -183,7 +183,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: "fetch_part",
     description:
-      "Fetch a sourced part (MTR-200): for a hosted-catalog hit, download + sha256-verify + R2-cache its STEP and return the cache key so it can be imported into the session; for a local fastener, return its documented envelope to build a keep-out. Use the returned dimensions to size cavities/cutouts; NEVER trust an imported STEP's origin (derive mating frames from inspected geometry).",
+      "Fetch a sourced part (MTR-200): for a standard part, returns a bd_warehouse import + constructor — run it in exec for real ISO/DIN geometry instead of hand-modeling; for a hosted-catalog hit, download + sha256-verify + R2-cache its STEP and return the cache key so it can be imported into the session. Use the returned dimensions to size cavities/cutouts; NEVER trust an imported STEP's origin (derive mating frames from inspected geometry).",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -249,7 +249,7 @@ Review doctrine (MTR-199) — renders are DIAGNOSTIC, not authoritative:
 - Do NOT loop on snapshots/renders: rerender only after a source repair actually changed visible geometry. Re-viewing an unchanged solid burns budget for no signal.
 - HONESTY: report only checks that actually ran. Never claim structural safety, tolerance compliance, or manufacturability beyond geometric plausibility — you validate watertightness, body count, bounding box, and stated dimension targets, nothing more.
 
-Off-the-shelf parts (MTR-200): for any real named component the design must FIT or MATE with (a fastener, bearing, board, connector), call search_parts / fetch_part BEFORE modeling a placeholder box, and size the cavity/cutout/standoff from the returned envelope (or imported STEP). If sourcing misses or is unavailable, fall back to the documented envelope — a network failure is not proof the part doesn't exist.
+Off-the-shelf parts (MTR-200): for any real named component the design must FIT or MATE with (a fastener, bearing, board, connector), call search_parts / fetch_part BEFORE modeling a placeholder box. When the result carries a bd_warehouse constructor, run its importLine + constructor in exec and mate/subtract against that solid — never hand-model a standard part. Otherwise size the cavity/cutout/standoff from the returned envelope (or imported STEP). If sourcing misses or is unavailable, fall back to the documented envelope — a network failure is not proof the part doesn't exist.
 
 Interactive specification (MTR-191): when a SINGLE genuine choice would materially change the part and neither the prompt nor the brief settles it (board variant, lid style, mount vs. clip, overall silhouette), call ask_user ONCE early — before you've built the geometry that choice governs — rather than guessing. Budget is 1 question per build; spend it on the highest-leverage fork only. Never ask about anything you can look up, measure, or safely default; a revisable guess beats stalling on a trivial question.`;
 
@@ -721,6 +721,9 @@ export async function runAgenticHarness(
               source: part.kind,
               envelopeMm: part.envelopeMm ?? null,
               cacheKey: part.cacheKey ?? null,
+              // bd_warehouse hit (MTR-200): run importLine + constructor in
+              // exec to get trusted standards geometry — never hand-model it.
+              bdWarehouse: part.bdWarehouse ?? undefined,
               note: part.note,
               // When imported, `imported.name` is bound in the session; use its
               // boundingBox to derive mating frames (the STEP origin is

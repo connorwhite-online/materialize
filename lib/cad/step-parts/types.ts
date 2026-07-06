@@ -4,13 +4,21 @@
  * PROVENANCE / LICENSE POSTURE (the check the issue said to do FIRST): the
  * step.parts catalog is MIT-tooled but the STEP *files* it serves carry NO
  * documented redistribution license, the API was unreachable for verification,
- * and it is a single-maintainer service. So the DEFAULT source is a LOCAL
- * fasteners library (dimensions are uncopyrightable facts, re-tabled in our own
- * values — same posture as knowledge/fasteners.ts). The hosted catalog client
- * exists and is R2-cached + sha256-verified, but is gated OFF
- * (`CAD_STEP_PARTS_ENABLED`) until a human confirms the license permits
- * redistribution in user-downloadable artifacts. Our R2 cache is the
- * availability mitigation for when it is turned on.
+ * and it is a single-maintainer service. The hosted catalog client exists and
+ * is R2-cached + sha256-verified, but is gated OFF (`CAD_STEP_PARTS_ENABLED`)
+ * until a human confirms the license permits redistribution in
+ * user-downloadable artifacts. Our R2 cache is the availability mitigation for
+ * when it is turned on.
+ *
+ * The DEFAULT source for standard parts is bd_warehouse (Apache-2.0,
+ * maintained by the build123d author, installed in the sidecar): fasteners,
+ * nuts, washers, heat-set inserts, and bearings built parametrically from
+ * published ISO/DIN/vendor tables. We resolve aliases ("m3x12 shcs", "608zz")
+ * to CONSTRUCTOR SNIPPETS the generated code executes in the sidecar — no
+ * geometry files are redistributed, so there is nothing to license-check. See
+ * ./bd-warehouse.ts. Dimensions are trusted upstream; the constructors
+ * themselves are verified by cad-runner/tests/test_bd_warehouse_smoke.py
+ * inside the Docker image (this env cannot execute OCP).
  */
 
 /** A raw record from the step.parts catalog (api.step.parts/v1/parts). */
@@ -31,14 +39,29 @@ export interface StepPartRecord {
 /** Where a resolved part came from. */
 export type PartSourceKind =
   | "catalog" // real vendor STEP from step.parts (gated on license confirmation)
-  | "local-fastener" // our local fasteners library (the scoped-down default)
+  | "bd_warehouse" // trusted standards geometry via a bd_warehouse constructor (the default)
+  | "local-fastener" // documented-envelope-only local resolution (no bd_warehouse coverage)
   | "envelope-fallback"; // documented box envelope (components.ts) — no real geometry
+
+/**
+ * How generated/session code constructs a bd_warehouse standard part. The
+ * snippet executes in the sidecar (which pins bd_warehouse); dimensions come
+ * from its published ISO/DIN/vendor tables, so nothing is hand-modeled.
+ */
+export interface BdWarehouseRef {
+  /** e.g. `from bd_warehouse.fastener import SocketHeadCapScrew` */
+  importLine: string;
+  /** e.g. `SocketHeadCapScrew(size="M3-0.5", length=12, fastener_type="iso4762")` */
+  constructor: string;
+}
 
 /** A successfully sourced part. */
 export interface SourcedPart {
   /** The query that resolved to this part. */
   query: string;
   kind: PartSourceKind;
+  /** Constructor snippet — present exactly when kind === "bd_warehouse". */
+  bdWarehouse?: BdWarehouseRef;
   /** Catalog id or local part id, when there is one. */
   partId?: string;
   label: string;

@@ -8,6 +8,8 @@
  *   - Process DFM — the target process if known, else the conservative
  *     multi-process envelope (generation can precede material choice).
  *   - Fastener tables — only when the prompt references metric screw sizes.
+ *   - bd_warehouse standard-parts rules — only when the prompt references
+ *     fasteners/bearings/inserts (never hand-model a standard part; MTR-200).
  *   - Ergonomic defaults — only when the prompt implies a human-held part.
  *
  * Keeping it conditional keeps each prompt focused (the more you cram in, the
@@ -21,6 +23,7 @@ import {
   type CadProcess,
 } from "./dfm";
 import { fastenersInPrompt, formatFasteners } from "./fasteners";
+import { BD_WAREHOUSE_RULES, needsStandardParts } from "./bd-warehouse";
 import { ERGONOMIC_RULES, needsErgonomics } from "./ergonomics";
 import { REPAIR_PLAYBOOK_RULES } from "./repair-playbook";
 
@@ -42,6 +45,12 @@ export function buildKnowledgeBlock({
 
   const fasteners = fastenersInPrompt(prompt);
   if (fasteners.length > 0) sections.push(formatFasteners(fasteners));
+
+  // Standard parts (MTR-200): whenever fasteners/bearings/inserts are in play,
+  // teach the bd_warehouse constructors so none of them get hand-modeled.
+  if (fasteners.length > 0 || needsStandardParts(prompt)) {
+    sections.push(BD_WAREHOUSE_RULES);
+  }
 
   if (needsErgonomics(prompt)) sections.push(ERGONOMIC_RULES);
 

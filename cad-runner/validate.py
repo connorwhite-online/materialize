@@ -18,9 +18,13 @@ CAD-Skills research (docs/text-to-cad/09) uses at their exec boundary:
      `import socket` / `import subprocess` / `import requests` in generated
      code fails loudly and cheaply instead of reaching the interpreter. Real
      CAD scripts never import these; the CAD stack's legit import tail is long
-     and evolving (build123d, cadquery, trimesh, numpy, scipy, sdf_kit, OCP,
-     matplotlib, math, random, ...), so this is a tight DENYLIST, never an
-     allowlist that would false-positive on every new dependency.
+     and evolving (build123d, bd_warehouse, cadquery, trimesh, numpy, scipy,
+     sdf_kit, OCP, matplotlib, math, random, ...), so this is a tight DENYLIST,
+     never an allowlist that would false-positive on every new dependency.
+     bd_warehouse (MTR-200 standard parts) passes by construction: it is
+     geometry-only (build123d/OCP/stdlib at runtime — verified against the
+     0.2.0 wheel; its ocp_vscode import is __main__-guarded), so nothing in the
+     denylist fires on it or on code that imports it.
 
 Source hashing (`source_hash`) is exposed for the same research's
 source-hash caching idea — skip re-execution when the generator source is
