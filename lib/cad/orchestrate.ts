@@ -49,6 +49,7 @@ export async function classifyCadRequest(
         "Reply with only the single word.",
       prompt,
       model: modelForRole("plan"),
+      role: "route",
       signal,
     });
     if (/\bORGANIC\b/i.test(verdict)) return "organic";

@@ -2,7 +2,8 @@ import "server-only";
 
 import Anthropic from "@anthropic-ai/sdk";
 
-import { hasModelCredentials } from "./model-client";
+import { clientForCredentials, hasModelCredentials } from "./model-client";
+import { activeCadContext, meterModelUsage } from "./metering";
 import { SYSTEM_PROMPT, gradeRun } from "./prompt";
 import { buildKnowledgeBlock } from "./knowledge";
 import { selectExemplars, formatExemplars } from "./knowledge/exemplars";
@@ -86,18 +87,9 @@ export class CadAgenticError extends Error {
 
 // Deliberately NOT model-client's completeText: the loop needs tools + full
 // message history, which the one-shot wrapper intentionally doesn't expose.
-// Same credential resolution + SDK patterns (see model-client.ts / CON-174).
-let _client: Anthropic | null = null;
-function getClient(): Anthropic {
-  if (!_client) {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    _client = apiKey
-      ? new Anthropic({ apiKey })
-      : new Anthropic({ authToken: process.env.CLAUDE_CODE_OAUTH_TOKEN });
-  }
-  return _client;
-}
-
+// Credential resolution IS shared (clientForCredentials) so the BYOK seam
+// and the platform singleton behave identically here (see model-client.ts /
+// CON-174 / MTR-181).
 async function completeWithTools(opts: {
   system: string;
   messages: Anthropic.MessageParam[];
@@ -110,7 +102,9 @@ async function completeWithTools(opts: {
       "No model credentials (set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN)"
     );
   }
-  return getClient().messages.create(
+  const client = clientForCredentials(activeCadContext()?.credentials);
+  const started = Date.now();
+  const message = await client.messages.create(
     {
       model: opts.model || DEFAULT_MODEL,
       max_tokens: MAX_TOKENS,
@@ -120,6 +114,18 @@ async function completeWithTools(opts: {
     },
     { signal: opts.signal }
   );
+  // Cost metering (MTR-181): agentic turns are usually the job's biggest
+  // token line item — attribute them to their own role.
+  meterModelUsage({
+    role: "agentic",
+    model: message.model || opts.model || DEFAULT_MODEL,
+    inputTokens: message.usage?.input_tokens ?? 0,
+    outputTokens: message.usage?.output_tokens ?? 0,
+    cacheReadTokens: message.usage?.cache_read_input_tokens ?? 0,
+    cacheWriteTokens: message.usage?.cache_creation_input_tokens ?? 0,
+    ms: Date.now() - started,
+  });
+  return message;
 }
 
 const NO_INPUT = {

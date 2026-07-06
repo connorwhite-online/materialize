@@ -2,6 +2,7 @@ import "server-only";
 
 import { fal } from "@fal-ai/client";
 import { completeText, type PromptImage } from "./model-client";
+import { meterFalCall } from "./metering";
 import { modelForRole } from "./models";
 import { runCadCode } from "./runner-client";
 import type { HarnessResult } from "./harness";
@@ -85,6 +86,7 @@ export async function shouldUseGenerative(
         "Reply with only the single word.",
       prompt,
       model: modelForRole("plan"),
+      role: "route",
       signal,
     });
     return /\bORGANIC\b/i.test(verdict);
@@ -132,6 +134,7 @@ export async function runGenerative(opts: {
       });
       imageUrl = await fal.storage.upload(blob);
     } else if (!DIRECT_TEXT_TO_3D) {
+      const t2iStarted = Date.now();
       const t2i = await fal.subscribe(TEXT_TO_IMAGE_MODEL, {
         input: {
           prompt: `${opts.prompt}, the EMPTY product itself ALONE — no contents, no items inside it, no extra objects, no people; a single 3D object, centered, full body, plain neutral background, soft studio lighting, product render`,
@@ -140,13 +143,17 @@ export async function runGenerative(opts: {
         },
         abortSignal: opts.signal,
       });
+      // Cost metering (MTR-181): raw fal invocations, priced later.
+      meterFalCall(TEXT_TO_IMAGE_MODEL, Date.now() - t2iStarted);
       const data = res2Images(t2i.data as Record<string, unknown>);
       if (!data) throw new Error("text-to-image returned no image");
       imageUrl = data;
     }
 
+    const to3dModel = imageUrl ? IMAGE_MODEL : (DIRECT_TEXT_TO_3D as string);
+    const to3dStarted = Date.now();
     const res = await fal.subscribe(
-      imageUrl ? IMAGE_MODEL : (DIRECT_TEXT_TO_3D as string),
+      to3dModel,
       {
         // Hunyuan3D-2 input shape (white mesh = geometry only, cheaper/smaller).
         // A different FAL_IMAGE_TO_3D_MODEL may need different param names.
@@ -156,6 +163,7 @@ export async function runGenerative(opts: {
         abortSignal: opts.signal,
       }
     );
+    meterFalCall(to3dModel, Date.now() - to3dStarted);
     const url = meshUrlOf(res.data as Record<string, unknown>);
     if (!url) throw new Error("fal returned no mesh url");
 

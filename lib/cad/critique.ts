@@ -58,6 +58,7 @@ async function runVisionJudge(
     system: CRITIQUE_RUBRIC,
     prompt: `Requested object: ${prompt}`,
     model: process.env.CAD_AESTHETIC_JUDGE_MODEL || modelForRole("critique"),
+    role: "critique",
     images: pngs.map((data) => ({ data, mediaType: "image/png" as const })),
     signal,
   });

@@ -30,6 +30,7 @@ export async function generateThreadTitle(
       system: TITLE_SYSTEM,
       prompt: `Design request: ${prompt}`,
       model: TITLE_MODEL,
+      role: "title",
     });
     // Defend against a chatty model: first line, stripped of wrapping quotes.
     const title = text

@@ -154,6 +154,7 @@ export async function buildBrief(opts: {
       system: briefSystemPrompt(),
       prompt: `Write the design brief for: ${opts.prompt}`,
       model: modelForRole("brief"),
+      role: "brief",
       images: opts.images?.length ? opts.images : undefined,
       signal: opts.signal,
     });
