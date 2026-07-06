@@ -56,6 +56,22 @@ export type CadRenderView =
   | "side"
   | "section";
 
+/**
+ * One sidecar fit-check verdict (MTR-204): cavity containment, boss↔hole
+ * pattern match, or cutout↔port alignment, evaluated against the built mesh
+ * in cad-runner/fit.py. `id` matches the requesting DimensionTarget's id.
+ */
+export interface CadFitCheckResult {
+  id: string;
+  kind?: string;
+  /** Pass/fail; null when this check could not be evaluated. */
+  ok: boolean | null;
+  /** Measured value (air fraction, matched holes, opening found 1/0). */
+  got?: number;
+  /** Geometric diagnosis — becomes the repair hint on failure. */
+  note?: string;
+}
+
 /** Result of executing one CAD script in the sidecar. */
 export interface CadRunResult {
   ok: boolean;
@@ -80,6 +96,21 @@ export interface CadRunResult {
   parts?: CadPart[];
   /** True when the watertight result came from the voxel-remesh fallback. */
   remeshed?: boolean;
+  /**
+   * Post-export checks the caller requested (sidecar `checks` request):
+   * `fit` carries the MTR-204 component-fit verdicts; `networks`/`fea`
+   * (MTR-179/180) pass through untyped. Absent when no checks were requested
+   * or the sidecar predates them — consumers must tolerate it missing.
+   */
+  checks?: {
+    fit?: {
+      results?: CadFitCheckResult[];
+      /** Voxel pitch used — the honesty bound on interference detection. */
+      pitchMm?: number;
+      error?: string;
+    };
+    [key: string]: unknown;
+  };
   /** stderr / exception message when compile or export failed. */
   error?: string;
 }

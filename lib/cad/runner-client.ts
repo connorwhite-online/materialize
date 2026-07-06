@@ -67,6 +67,13 @@ export interface RunCadCodeOptions {
   allowRemesh?: boolean;
   /** Code dialect for the sidecar ("build123d" default | "cadquery"). */
   engine?: string;
+  /**
+   * Post-export checks to run on the produced mesh (sidecar `checks` field):
+   * `{ fit }` for the MTR-204 component-fit verifier, `{ networks, fea }` for
+   * MTR-179/180 probes. Failure-isolated sidecar-side; older sidecars ignore
+   * it. Omitted (not sent) when absent.
+   */
+  checks?: Record<string, unknown> | null;
 }
 
 /**
@@ -95,6 +102,7 @@ export async function runCadCode(
       code,
       formats,
       ...(opts?.engine ? { engine: opts.engine } : {}),
+      ...(opts?.checks ? { checks: opts.checks } : {}),
       allowRemesh: opts?.allowRemesh ?? false,
     }),
     signal,

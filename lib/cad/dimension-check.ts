@@ -31,9 +31,34 @@ import type { CadRunResult } from "./types";
  * - `diameter` / `distance` — feature-level measures that need per-face
  *                  topology (MTR-196); accepted here but reported as not-run
  *                  until that data lands, so the model still declares them.
+ * - `fit_cavity` / `fit_bosses` / `fit_cutout` — component-fit checks
+ *                  (MTR-204), evaluated SIDECAR-side against the built mesh
+ *                  (cad-runner/fit.py, requested via `checks.fit`). Auto-
+ *                  emitted by `fitTargetsForBrief` for known components; each
+ *                  carries an `id` matched against `run.checks.fit.results`.
+ *                  When the sidecar returned no fit data (mock runner, old
+ *                  sidecar, fit error) they report `ran: false` — honesty rail.
  */
-export type DimensionTargetKind = "bbox_span" | "diameter" | "distance" | "count";
+export type DimensionTargetKind =
+  | "bbox_span"
+  | "diameter"
+  | "distance"
+  | "count"
+  | "fit_cavity"
+  | "fit_bosses"
+  | "fit_cutout";
 export type DimensionAxis = "x" | "y" | "z";
+
+/** The fit target kinds — evaluated from sidecar `checks.fit` results. */
+export const FIT_TARGET_KINDS = [
+  "fit_cavity",
+  "fit_bosses",
+  "fit_cutout",
+] as const;
+
+export function isFitTargetKind(kind: DimensionTargetKind): boolean {
+  return (FIT_TARGET_KINDS as readonly string[]).includes(kind);
+}
 
 export interface DimensionTarget {
   /** Human label, e.g. "overall height" or "through-hole diameter". */
@@ -47,16 +72,38 @@ export interface DimensionTarget {
   value: number;
   /** Half-width of the acceptance band. Absent → a computed default. */
   tolerance?: number;
+  /**
+   * Stable id for sidecar-evaluated targets (fit_*): matched against
+   * `run.checks.fit.results[].id`. Absent on locally-evaluated kinds.
+   */
+  id?: string;
+  /**
+   * Fit payload (MTR-204): the ComponentFitSpec on a `fit_cavity` target
+   * (see lib/cad/knowledge/components.ts), or a `{ component }` reference on
+   * its sibling boss/cutout targets. Opaque here on purpose — this module
+   * ships it to the sidecar and matches results by id, nothing more.
+   */
+  fit?: unknown;
 }
 
 /** Zod schema for a brief-emitted target — permissive, best-effort like the brief. */
 export const dimensionTargetSchema = z.looseObject({
   label: z.string(),
-  kind: z.enum(["bbox_span", "diameter", "distance", "count"]),
+  kind: z.enum([
+    "bbox_span",
+    "diameter",
+    "distance",
+    "count",
+    "fit_cavity",
+    "fit_bosses",
+    "fit_cutout",
+  ]),
   axis: z.enum(["x", "y", "z"]).optional(),
   of: z.enum(["solid", "part"]).optional(),
   value: z.number(),
   tolerance: z.number().nonnegative().optional(),
+  id: z.string().optional(),
+  fit: z.unknown().optional(),
 });
 
 export interface DimensionCheckResult {
@@ -82,7 +129,8 @@ export interface DimensionCheckResult {
  */
 export function defaultTolerance(target: DimensionTarget): number {
   if (target.tolerance != null) return target.tolerance;
-  if (target.kind === "count") return 0;
+  // Counts and fit verdicts are exact — a boss pattern either matches or not.
+  if (target.kind === "count" || isFitTargetKind(target.kind)) return 0;
   return Math.max(0.5, Math.abs(target.value) * 0.02);
 }
 
@@ -106,6 +154,37 @@ export function checkDimensionTargets(
 
   return targets.map((target): DimensionCheckResult => {
     const tolerance = defaultTolerance(target);
+
+    if (isFitTargetKind(target.kind)) {
+      // Component-fit targets (MTR-204): evaluated by the sidecar against the
+      // real built mesh; here we only map its verdicts back onto the targets.
+      const fit = run.checks?.fit;
+      const res = target.id
+        ? fit?.results?.find((r) => r.id === target.id)
+        : undefined;
+      if (!res || res.ok == null) {
+        return {
+          target,
+          ran: false,
+          ok: null,
+          tolerance,
+          note:
+            res?.note ??
+            fit?.error ??
+            "fit check did not run on the sidecar (no fit data on the run)",
+        };
+      }
+      const got = res.got;
+      return {
+        target,
+        ran: true,
+        ok: res.ok,
+        got,
+        delta: got != null ? Math.abs(got - target.value) : undefined,
+        tolerance,
+        note: res.note,
+      };
+    }
 
     if (target.kind === "bbox_span") {
       const axis = target.axis;
@@ -193,6 +272,11 @@ export function formatDimensionRepairHints(
   const lines = results
     .filter((r) => r.ran && r.ok === false)
     .map((r) => {
+      // Fit failures (MTR-204) carry the sidecar's geometric diagnosis — the
+      // note IS the actionable hint (which wall, which holes, which opening).
+      if (isFitTargetKind(r.target.kind)) {
+        return `- ${r.target.label}: FAILED — ${r.note ?? "component does not fit the built geometry"}`;
+      }
       const unit = r.target.kind === "count" ? "" : "mm";
       const tol = r.tolerance ?? defaultTolerance(r.target);
       const axis = r.target.axis ? ` (${r.target.axis})` : "";
@@ -203,6 +287,22 @@ export function formatDimensionRepairHints(
     "DIMENSION CONTRACT VIOLATIONS — these machine-checked callouts are out of spec; fix each by editing the named parameter (do NOT rescale the whole part):",
     ...lines,
   ].join("\n");
+}
+
+/**
+ * Build the sidecar `checks.fit` request from the fit targets (MTR-204): the
+ * ComponentFitSpec payloads ride the `fit_cavity` targets (one per component,
+ * see fitTargetsForBrief). Null when the target list carries no fit specs —
+ * the caller then omits `checks` entirely and the run behaves exactly as
+ * before this feature existed.
+ */
+export function buildFitChecksFromTargets(
+  targets: DimensionTarget[] | null | undefined
+): { components: unknown[] } | null {
+  const components = (targets ?? [])
+    .filter((t) => t.kind === "fit_cavity" && t.fit != null)
+    .map((t) => t.fit as unknown);
+  return components.length > 0 ? { components } : null;
 }
 
 /**

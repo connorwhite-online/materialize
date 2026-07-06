@@ -165,3 +165,8 @@ checks, sessions — engine `"mesh"` only, since the dev env has no CAD
 kernel; the B-rep/topo paths run only in the container image), and
 `python3 cad-runner/tests/test_validate.py` (pre-exec source guard, stdlib
 only).
+
+`python3 cad-runner/tests/test_bd_warehouse_smoke.py` (MTR-200) verifies the
+canonical bd_warehouse standard-part constructors the TS resolver emits —
+Docker-only (needs OCP; SKIPs cleanly elsewhere). Run it once inside the image
+after any bd_warehouse or build123d version bump.

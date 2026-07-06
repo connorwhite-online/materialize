@@ -204,6 +204,16 @@ def _warm_engine(engine: str) -> None:
         import cadquery as _cq  # noqa: F401
     else:
         import build123d as _b3d  # noqa: F401
+        # Standard-parts library (MTR-200): warming the fastener/bearing
+        # modules here keeps exec-time `from bd_warehouse.fastener import ...`
+        # cheap (they parse their CSV standards tables at import). Guarded so
+        # an image built before bd_warehouse landed still boots — generated
+        # code then just pays the import cost itself.
+        try:
+            import bd_warehouse.fastener as _bdw_f  # noqa: F401
+            import bd_warehouse.bearing as _bdw_b  # noqa: F401
+        except ImportError:
+            pass
 
 
 def _export_topology(shape, engine: str):
@@ -685,6 +695,16 @@ def _run_checks(mesh, checks: dict) -> dict:
             )
         except Exception as err:  # noqa: BLE001
             out["fea"] = {"error": str(err)}
+    fit_spec = checks.get("fit")
+    if fit_spec is not None:
+        # Component-fit verifier (MTR-204): cavity containment, boss↔hole
+        # pattern match, cutout↔port alignment against the produced mesh.
+        try:
+            from fit import check_fit
+
+            out["fit"] = _plain(check_fit(mesh, fit_spec))
+        except Exception as err:  # noqa: BLE001
+            out["fit"] = {"error": str(err)}
     return out
 
 
