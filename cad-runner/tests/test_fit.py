@@ -186,6 +186,65 @@ def test_open_mesh_reports_error_not_verdicts():
     assert report["results"] == []
 
 
+# ---- "+z" face ports: screen windows through the lid (MTR-203) --------------
+# A 1602-style display spec: body block, no bosses, one top-face window.
+DISPLAY_SPEC = {
+    "components": [
+        {
+            "id": "lcd1602",
+            "label": "1602 LCD",
+            "boardMm": [80.0, 36.0, 1.6],
+            "clearanceMm": 1.0,
+            "aboveMm": 7.0,
+            "belowMm": 0.0,
+            "holes": None,
+            "ports": [
+                {
+                    "id": "screen-window",
+                    "face": "+z",
+                    "xMm": 0.0,
+                    "yMm": 0.0,
+                    "wMm": 64.5,
+                    "hMm": 15.0,
+                }
+            ],
+        }
+    ]
+}
+
+
+def build_display_box(window=True):
+    """Closed box with an interior cavity for the 1602 block; the lid gets a
+    64.5 x 15 window over the display when `window` is True."""
+    from build123d import Align, Box, BuildPart, Locations, Mode
+
+    inner_x, inner_y, inner_z = 84.0, 40.0, 10.6
+    lid = 2.5
+    align = (Align.CENTER, Align.CENTER, Align.MIN)
+    with BuildPart() as p:
+        Box(inner_x + 2 * WALL, inner_y + 2 * WALL, FLOOR + inner_z + lid, align=align)
+        with Locations((0, 0, FLOOR)):
+            Box(inner_x, inner_y, inner_z, align=align, mode=Mode.SUBTRACT)
+        if window:
+            with Locations((0, 0, FLOOR + inner_z - 0.5)):
+                Box(64.5, 15.0, lid + 1.5, align=align, mode=Mode.SUBTRACT)
+    return p.part
+
+
+def test_screen_window_passes_when_lid_is_open():
+    report = check_fit(to_mesh(build_display_box(window=True)), DISPLAY_SPEC)
+    assert by_id(report, "fit:lcd1602:cavity")["ok"] is True
+    assert by_id(report, "fit:lcd1602:port:screen-window")["ok"] is True, report
+
+
+def test_screen_window_fails_under_solid_lid():
+    report = check_fit(to_mesh(build_display_box(window=False)), DISPLAY_SPEC)
+    assert by_id(report, "fit:lcd1602:cavity")["ok"] is True
+    res = by_id(report, "fit:lcd1602:port:screen-window")
+    assert res["ok"] is False, res
+    assert "lid" in res["note"] or "window" in res["note"]
+
+
 # ---- full HTTP seam: /run with checks.fit on the build123d engine ------------
 def test_run_endpoint_fit_checks_round_trip():
     import app as app_module
@@ -240,6 +299,8 @@ TESTS = [
     test_undersized_cavity_fails_cavity_check,
     test_misplaced_bosses_fail_boss_check,
     test_cutout_on_wrong_edge_fails_port_check,
+    test_screen_window_passes_when_lid_is_open,
+    test_screen_window_fails_under_solid_lid,
     test_open_mesh_reports_error_not_verdicts,
     test_run_endpoint_fit_checks_round_trip,
 ]
