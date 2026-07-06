@@ -31,6 +31,7 @@ Materialize exposes an MCP (Model Context Protocol) server. Connect with a Perso
 - Available tool prefix: \`materialize_*\` (catalog, files, quotes, orders)
 - Auth: Bearer token; tokens are scoped (catalog:read, files:write, quotes:read, orders:create, orders:read)
 - Spending policies: per-token caps (per-order, period budget, vendor/material allowlist) configurable at ${APP_URL}/dashboard/settings/tokens
+- Skill for coding agents (Claude Code, Codex, and compatible): \`npx skills install connorwhite-online/materialize\` — installs the print-ordering workflow (upload -> quote -> order, human approval built in) from skills/materialize in the GitHub repo
 
 ## Catalog
 
