@@ -2,6 +2,9 @@ import "server-only";
 
 import Anthropic from "@anthropic-ai/sdk";
 
+import { activeCadContext, meterModelUsage } from "./metering";
+import type { ResolvedModelCredentials } from "./credentials";
+
 /**
  * Thin wrapper over the Anthropic Messages API for one-shot text completions
  * (the harness drives its own plan/repair loop, so each call is a single
@@ -18,6 +21,15 @@ import Anthropic from "@anthropic-ai/sdk";
  *   - CLAUDE_CODE_OAUTH_TOKEN — sent as a bearer `authToken` fallback so a
  *     subscription-only setup still resolves credentials; prefer the API key.
  * With neither, the harness uses its deterministic local stub (offline demo).
+ *
+ * BYOK seam (MTR-181): when the active generation context carries USER
+ * credentials (lib/cad/credentials.ts — CAD_BYOK_ENABLED, off by default),
+ * the call runs on a per-request client built from them instead of the
+ * platform singleton. Platform credentials keep the singleton, so the
+ * default path is byte-identical.
+ *
+ * Metering (MTR-181): every completion records its token usage (per role +
+ * model) into the active CadMeter — a no-op outside a metered run.
  */
 
 // Default when a role doesn't pin a model (modelForRole -> CAD_MODEL_* ->
@@ -27,7 +39,13 @@ const DEFAULT_MODEL = "claude-sonnet-4-6";
 // build123d for a non-trivial part can run long; headroom avoids truncation.
 const MAX_TOKENS = 8192;
 
-/** True when a usable credential is present in the environment. */
+/**
+ * True when a usable credential is present in the environment.
+ *
+ * Deliberately env-only even under BYOK: the user-key path has no storage yet
+ * (MTR-187 gate), so a user key can never be the ONLY credential. Revisit
+ * when real BYOK lands.
+ */
 export function hasModelCredentials(): boolean {
   return !!(
     process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_OAUTH_TOKEN
@@ -45,6 +63,21 @@ function getClient(): Anthropic {
   return _client;
 }
 
+/**
+ * The client for this call: a per-request instance for USER credentials
+ * (BYOK — never cached, never shared across users), the platform singleton
+ * otherwise. Exported for the agentic loop, which owns its own tool-use
+ * calls but must follow the same credential resolution.
+ */
+export function clientForCredentials(
+  creds: ResolvedModelCredentials | undefined
+): Anthropic {
+  if (creds?.source === "user" && creds.apiKey) {
+    return new Anthropic({ apiKey: creds.apiKey });
+  }
+  return getClient();
+}
+
 /** A reference image (base64, no data: prefix) passed alongside the prompt. */
 export interface PromptImage {
   data: string;
@@ -56,6 +89,11 @@ export interface CompleteTextOptions {
   prompt: string;
   /** Model id; falls back to DEFAULT_MODEL when omitted. */
   model?: string;
+  /**
+   * Harness role making the call ("plan", "brief", "critique", …) — used
+   * only to attribute token usage in the metering summary (MTR-181).
+   */
+  role?: string;
   /** Reference images to include in the user turn (multimodal). */
   images?: PromptImage[];
   signal?: AbortSignal;
@@ -83,7 +121,9 @@ export async function completeText(opts: CompleteTextOptions): Promise<string> {
     });
   }
 
-  const message = await getClient().messages.create(
+  const client = clientForCredentials(activeCadContext()?.credentials);
+  const started = Date.now();
+  const message = await client.messages.create(
     {
       model: opts.model || DEFAULT_MODEL,
       max_tokens: MAX_TOKENS,
@@ -92,6 +132,15 @@ export async function completeText(opts: CompleteTextOptions): Promise<string> {
     },
     { signal: opts.signal }
   );
+  meterModelUsage({
+    role: opts.role ?? "other",
+    model: message.model || opts.model || DEFAULT_MODEL,
+    inputTokens: message.usage?.input_tokens ?? 0,
+    outputTokens: message.usage?.output_tokens ?? 0,
+    cacheReadTokens: message.usage?.cache_read_input_tokens ?? 0,
+    cacheWriteTokens: message.usage?.cache_creation_input_tokens ?? 0,
+    ms: Date.now() - started,
+  });
 
   return message.content
     .filter((b): b is Anthropic.TextBlock => b.type === "text")

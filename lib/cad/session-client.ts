@@ -1,5 +1,6 @@
 import "server-only";
 
+import { meterSidecarCall } from "./metering";
 import type { CadOutputFormat, CadRunResult } from "./types";
 
 /**
@@ -51,6 +52,9 @@ async function sessionFetch<T>(
   if (!sessionsAvailable() || !base) {
     throw new CadSessionError("CAD sessions unavailable (no CAD_RUNNER_URL)");
   }
+  // Cost metering (MTR-181): session calls are sidecar wall time too —
+  // recorded however the request ends (no-op outside a metered generation).
+  const started = Date.now();
   let res: Response;
   try {
     res = await fetch(`${base}${path}`, {
@@ -65,6 +69,8 @@ async function sessionFetch<T>(
     throw new CadSessionError(`CAD session request failed: ${path}`, {
       cause: err,
     });
+  } finally {
+    meterSidecarCall(Date.now() - started);
   }
   if (!res.ok) {
     throw new CadSessionError(

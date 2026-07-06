@@ -491,6 +491,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
             ? `${buildPlanPrompt(input)}\n\n${CONCEPT_IMAGE_NOTE}`
             : buildPlanPrompt(input),
           model: planModel,
+          role: "plan",
           images: withConcept(input.images),
           signal: input.signal,
         })
@@ -562,6 +563,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
           system: SYSTEM_PROMPT,
           prompt: conceptImg ? `${userPrompt}\n\n${CONCEPT_IMAGE_NOTE}` : userPrompt,
           model,
+          role,
           images: images.length ? images : undefined,
           signal: input.signal,
         })

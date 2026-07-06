@@ -1,6 +1,7 @@
 import "server-only";
 
 import { fal } from "@fal-ai/client";
+import { meterFalCall } from "./metering";
 import type { PromptImage } from "./model-client";
 import { logError } from "@/lib/logger";
 
@@ -37,6 +38,7 @@ export async function conceptImage(
   if (!conceptImageEnabled()) return null;
   try {
     fal.config({ credentials: process.env.FAL_KEY });
+    const started = Date.now();
     const res = await fal.subscribe(FLUX_MODEL, {
       input: {
         prompt:
@@ -49,6 +51,8 @@ export async function conceptImage(
       },
       abortSignal: signal,
     });
+    // Cost metering (MTR-181): raw fal invocations, priced later.
+    meterFalCall(FLUX_MODEL, Date.now() - started);
     const url = (res.data as { images?: Array<{ url?: unknown }> })?.images?.[0]
       ?.url;
     if (typeof url !== "string") return null;

@@ -1,5 +1,6 @@
 import "server-only";
 
+import { meterSidecarCall } from "./metering";
 import type { CadOutputFormat, CadRunResult } from "./types";
 
 /**
@@ -90,6 +91,22 @@ export async function runCadCode(
 ): Promise<CadRunResult> {
   if (USE_MOCK) return mockRun();
 
+  // Cost metering (MTR-181): sidecar wall time is a real marginal cost —
+  // record it into the active meter (no-op outside a metered generation).
+  const started = Date.now();
+  try {
+    return await runCadCodeLive(code, formats, signal, opts);
+  } finally {
+    meterSidecarCall(Date.now() - started);
+  }
+}
+
+async function runCadCodeLive(
+  code: string,
+  formats: CadOutputFormat[],
+  signal?: AbortSignal,
+  opts?: RunCadCodeOptions
+): Promise<CadRunResult> {
   const res = await fetch(`${RUNNER_URL}/run`, {
     method: "POST",
     headers: {
