@@ -15,8 +15,22 @@ vi.mock("@/lib/db/schema", () => ({
     answers: "answers",
     startedAt: "started_at",
     finishedAt: "finished_at",
+    usage: "usage",
+    costCents: "cost_cents",
   },
   cadGenerations: { id: "id", userId: "user_id" },
+  cadCreditLedger: {
+    id: "id",
+    userId: "user_id",
+    delta: "delta",
+    reason: "reason",
+    generationId: "generation_id",
+    jobId: "job_id",
+    printOrderId: "print_order_id",
+    note: "note",
+    createdAt: "created_at",
+  },
+  printOrders: { id: "id", userId: "user_id" },
 }));
 
 // --- @/lib/db: a single simulated job row. select() always returns a copy
@@ -37,7 +51,12 @@ vi.mock("@/lib/db", () => ({
     insert: () => ({
       values: (v: Record<string, unknown>) => {
         insertValues(v);
-        return { returning: () => Promise.resolve([{ id: "job-1" }]) };
+        return {
+          returning: () => Promise.resolve([{ id: "job-1" }]),
+          // Ledger writes (lib/billing/cad-credits.ts) chain
+          // .onConflictDoNothing() and await it directly.
+          onConflictDoNothing: () => Promise.resolve(),
+        };
       },
     }),
     update: () => ({
@@ -138,6 +157,8 @@ beforeEach(() => {
   jobRow = { progress: [], cancelRequestedAt: null, answers: {} };
   updateCalls.length = 0;
   delete process.env.CAD_MAX_QUESTIONS_PER_JOB;
+  delete process.env.CAD_CREDITS_ENABLED;
+  delete process.env.CAD_CREDIT_COST_SIMPLE;
   persistGenerationFailure.mockImplementation(async (...args: unknown[]) => ({
     error: args[1] as string,
     generationId: args[0] as string,
@@ -442,5 +463,103 @@ describe("executeCadJob", () => {
         viaDefault: true,
       })
     );
+  });
+});
+
+// --- Metering + credits substrate (MTR-181) --------------------------------
+describe("executeCadJob metering + credit debits", () => {
+  function successRun() {
+    runHarness.mockResolvedValue(okHarnessResult());
+    persistGenerationSuccess.mockResolvedValue({
+      generationId: "gen-1",
+      fileAssetId: "asset-1",
+      fileSlug: "slug-1",
+      renderUrl: null,
+      sourceCode: "result = 1",
+      title: "Part",
+      remeshed: false,
+    });
+  }
+
+  it("PROOF OF INERTNESS: with flags at defaults, a successful job stamps raw usage + costCents 0 and writes NOTHING else", async () => {
+    successRun();
+    await executeCadJob(baseInput);
+
+    // The terminal patch carries the usage summary and a 0-cent rollup
+    // (every CAD_PRICE_* defaults to 0 = metering-only).
+    const done = updateCalls.find((c) => c.status === "done");
+    expect(done).toBeDefined();
+    expect(done!.costCents).toBe(0);
+    expect(done!.usage).toEqual(
+      expect.objectContaining({
+        v: 1,
+        model: [],
+        sidecar: { calls: 0, ms: 0 },
+        fal: [],
+        route: "legacy", // no credentials/sessions in tests → legacy path
+      })
+    );
+
+    // And the credit ledger saw nothing: CAD_CREDITS_ENABLED defaults off,
+    // so the ONLY inserts ever made are job-row inserts (none in this run).
+    expect(insertValues).not.toHaveBeenCalled();
+  });
+
+  it("stamps usage on FAILED jobs too (failures cost real money; they are just never debited)", async () => {
+    runHarness.mockResolvedValue({
+      ok: false,
+      sourceCode: "broken",
+      attempts: 4,
+      error: "not watertight",
+    } satisfies HarnessResult);
+
+    await executeCadJob(baseInput);
+
+    const failed = updateCalls.find((c) => c.status === "failed");
+    expect(failed).toBeDefined();
+    expect(failed!.usage).toEqual(expect.objectContaining({ v: 1 }));
+    expect(failed!.costCents).toBe(0);
+    expect(insertValues).not.toHaveBeenCalled();
+  });
+
+  it("flag ON + priced tier: a successful job writes exactly one negative ledger row", async () => {
+    process.env.CAD_CREDITS_ENABLED = "true";
+    process.env.CAD_CREDIT_COST_SIMPLE = "2";
+    successRun();
+
+    await executeCadJob(baseInput);
+
+    expect(insertValues).toHaveBeenCalledTimes(1);
+    expect(insertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        delta: -2,
+        reason: "generation",
+        jobId: "job-1",
+        generationId: "gen-1",
+      })
+    );
+  });
+
+  it("flag ON but price 0 (the flag-on default): still no ledger writes", async () => {
+    process.env.CAD_CREDITS_ENABLED = "true";
+    successRun();
+    await executeCadJob(baseInput);
+    expect(insertValues).not.toHaveBeenCalled();
+  });
+
+  it("failed jobs are never debited even with the flag on and a price set", async () => {
+    process.env.CAD_CREDITS_ENABLED = "true";
+    process.env.CAD_CREDIT_COST_SIMPLE = "2";
+    runHarness.mockResolvedValue({
+      ok: false,
+      sourceCode: "broken",
+      attempts: 4,
+      error: "boom",
+    } satisfies HarnessResult);
+
+    await executeCadJob(baseInput);
+
+    expect(insertValues).not.toHaveBeenCalled();
   });
 });

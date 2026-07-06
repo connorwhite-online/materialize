@@ -58,12 +58,12 @@ export interface CadUnitPrices {
   falCentsByModel: Record<string, number>;
 }
 
-function num(name: string, env: NodeJS.ProcessEnv): number {
+function num(name: string, env: Record<string, string | undefined>): number {
   const n = Number(env[name]);
   return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
-function jsonMap<T>(name: string, env: NodeJS.ProcessEnv): Record<string, T> {
+function jsonMap<T>(name: string, env: Record<string, string | undefined>): Record<string, T> {
   const raw = env[name];
   if (!raw) return {};
   try {
@@ -79,7 +79,7 @@ function jsonMap<T>(name: string, env: NodeJS.ProcessEnv): Record<string, T> {
 
 /** Read the unit prices currently in force. All defaults are 0. */
 export function unitPricesFromEnv(
-  env: NodeJS.ProcessEnv = process.env
+  env: Record<string, string | undefined> = process.env
 ): CadUnitPrices {
   return {
     inputCentsPerMTok: num("CAD_PRICE_MTOK_INPUT_CENTS", env),
