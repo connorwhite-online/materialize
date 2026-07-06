@@ -42,6 +42,12 @@ jobs:
       - name: Install sidecar deps (pinned)
         run: pip install -r requirements.txt
 
+      # Test-only: FastAPI's TestClient (test_fit / test_app round-trips) pulls
+      # in httpx, which is deliberately NOT a runtime dep — the shipped image
+      # never runs a test client. Keep it out of requirements.txt.
+      - name: Install test-only deps
+        run: pip install httpx
+
       # Keep the same lean-footprint env the image bakes (Dockerfile), so a
       # RLIMIT_AS-sensitive run behaves the same in CI as in the container.
       - name: Pre-exec source guard (stdlib only)
