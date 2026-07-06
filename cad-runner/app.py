@@ -33,6 +33,7 @@ import multiprocessing as mp
 import os
 import queue as queue_mod
 import resource
+import shutil
 import sys
 import tempfile
 import threading
@@ -75,7 +76,43 @@ CPU_LIMIT_S = int(os.environ.get("CAD_RUN_CPU_S", "55"))
 # thread would be complexity without benefit.
 SESSION_TTL_S = int(os.environ.get("CAD_SESSION_TTL_S", "600"))
 SESSION_MAX = int(os.environ.get("CAD_SESSION_MAX", "4"))
+# Per-SESSION cumulative caps (MTR-187). The one-shot /run path is bounded per
+# request, but a session child is long-lived (up to SESSION_TTL_S), so per-exec
+# limits alone let an attacker accumulate unbounded CPU / output / exec count
+# across many execs inside one session. These bound the whole session:
+#   - CPU seconds: the child's HARD RLIMIT_CPU (kernel SIGKILLs on breach) —
+#     set in _apply_limits(session=True), re-armed (soft only) per exec.
+#   - exec count + cumulative output bytes: tracked in _session_worker, which
+#     ends the session on breach (the child exits; the parent then 410s later
+#     calls). Memory is already bounded per child by RLIMIT_AS, and a session
+#     child is one persistent process, so that cap is inherently cumulative.
+SESSION_CPU_BUDGET_S = int(os.environ.get("CAD_SESSION_CPU_S", "300"))
+SESSION_MAX_EXECS = int(os.environ.get("CAD_SESSION_MAX_EXECS", "250"))
+SESSION_MAX_OUTPUT_BYTES = int(
+    os.environ.get("CAD_SESSION_MAX_OUTPUT_BYTES", str(512 * 1024 * 1024))
+)
+# Cap a single exported artifact (STL/STEP base64) so one script can't flood the
+# caller with a multi-GB payload — the "output flood" resource bomb. RLIMIT_AS
+# already bounds memory *inside* the child; this bounds what crosses the process
+# boundary onto the queue and back to the app.
+MAX_OUTPUT_BYTES = int(
+    os.environ.get("CAD_MAX_OUTPUT_BYTES", str(96 * 1024 * 1024))
+)
 RUNNER_SECRET = os.environ.get("CAD_RUNNER_SECRET", "")
+# Prefer a secret read from a FILE (CAD_RUNNER_SECRET_FILE) over the env var
+# (MTR-187). A secret in the environment is inherited by every spawned child and
+# stays visible in that child's /proc/self/environ (the kernel keeps the initial
+# stack copy even after `del os.environ[...]`), so generated code could read and
+# return it via stdout. A file-mounted secret never enters the environment, so
+# it never lands in /proc/*/environ. Env var stays supported for Railway-style
+# deploys; the file is the hardened option.
+_SECRET_FILE = os.environ.get("CAD_RUNNER_SECRET_FILE", "")
+if _SECRET_FILE and not RUNNER_SECRET:
+    try:
+        with open(_SECRET_FILE) as _sf:
+            RUNNER_SECRET = _sf.read().strip()
+    except OSError:
+        pass
 # Fail closed: an empty secret would otherwise skip the bearer check entirely
 # (see `_check_auth` below), turning a misconfigured deploy into an
 # unauthenticated arbitrary-Python-execution endpoint. The container isolation
@@ -164,16 +201,23 @@ def _check_auth(request: Request) -> None:
 def _apply_limits(session: bool = False) -> None:
     """Cap address space + CPU in the child so runaway scripts die fast.
 
-    One-shot children get a hard CPU cap. Session children keep the hard
-    limit unbounded and start with a soft cap: the budget is per *exec*, not
-    per process lifetime, so `_extend_cpu_budget` re-arms the soft limit
-    before each exec (a hard cap would kill a healthy session after enough
-    accumulated work)."""
+    One-shot children get a hard CPU cap == the per-run budget. Session
+    children get a soft per-*exec* cap (`_extend_cpu_budget` re-arms it before
+    each exec so accumulated work across healthy execs doesn't kill the session)
+    UNDER a hard cap == SESSION_CPU_BUDGET_S: the kernel SIGKILLs the child once
+    the session's cumulative CPU crosses that ceiling, which the parent sees as
+    a crash and turns into a 410 (MTR-187 per-session cap). RLIMIT_AS bounds the
+    child's address space either way."""
     try:
         resource.setrlimit(resource.RLIMIT_AS, (MEM_LIMIT_BYTES, MEM_LIMIT_BYTES))
         if session:
-            _, hard = resource.getrlimit(resource.RLIMIT_CPU)
-            resource.setrlimit(resource.RLIMIT_CPU, (CPU_LIMIT_S, hard))
+            # Hard cap = whole-session CPU budget (an absolute ceiling); soft
+            # cap = one exec's budget, clamped under the ceiling so the session
+            # cap still bites even when it is set below the per-exec cap.
+            hard = SESSION_CPU_BUDGET_S
+            resource.setrlimit(
+                resource.RLIMIT_CPU, (min(CPU_LIMIT_S, hard), hard)
+            )
         else:
             resource.setrlimit(resource.RLIMIT_CPU, (CPU_LIMIT_S, CPU_LIMIT_S))
     except (ValueError, OSError):
@@ -182,15 +226,123 @@ def _apply_limits(session: bool = False) -> None:
 
 
 def _extend_cpu_budget() -> None:
-    """Re-arm the session child's soft CPU limit to `now + CPU_LIMIT_S` so
-    each exec gets a fresh CPU budget (see `_apply_limits(session=True)`)."""
+    """Re-arm the session child's soft CPU limit to `now + CPU_LIMIT_S` so each
+    exec gets a fresh per-exec budget — but never above the hard cap
+    (SESSION_CPU_BUDGET_S), so the cumulative session ceiling still bites."""
     try:
         used = resource.getrusage(resource.RUSAGE_SELF)
         budget = int(used.ru_utime + used.ru_stime) + CPU_LIMIT_S
         _, hard = resource.getrlimit(resource.RLIMIT_CPU)
+        if hard != resource.RLIM_INFINITY:
+            budget = min(budget, hard)
         resource.setrlimit(resource.RLIMIT_CPU, (budget, hard))
     except (ValueError, OSError):
         pass
+
+
+# PEP-578 audit events (https://docs.python.org/3/library/audit_events.html)
+# that model-generated CAD code has no legitimate reason to raise. Blocking them
+# at the interpreter level is strictly stronger than the pre-exec AST denylist
+# (validate.py): the hook fires no matter HOW the primitive is reached —
+# `__import__("socket")`, `importlib.import_module("subprocess")`, a re-exported
+# alias, `getattr(os, "sys"+"tem")` — because it sees the *operation*, not the
+# import statement, so it closes the trivial "bypass the denylist in one line"
+# gap that validate.py openly concedes. It is still NOT a sandbox: code that
+# calls libc directly through a raw ctypes function pointer can bypass
+# Python-level auditing, which is exactly why the container boundary (and, before
+# non-owner exposure, gVisor/seccomp) remains the real control. The whole CAD
+# stack (build123d, cadquery, trimesh, numpy, scipy, matplotlib-Agg,
+# bd_warehouse) does none of these at runtime, so the hook is transparent to
+# legitimate work — proven by the exemplar sweep + bd_warehouse smoke.
+_BLOCKED_AUDIT_EVENTS = frozenset(
+    {
+        "socket.connect",
+        "socket.bind",
+        "socket.getaddrinfo",
+        "socket.sethostname",
+        "subprocess.Popen",
+        "os.system",
+        "os.exec",
+        "os.spawn",
+        "os.posix_spawn",
+        "os.startfile",
+    }
+)
+
+
+def _scrub_child_env() -> None:
+    """Drop the runner secret and obviously-sensitive vars from the child's
+    os.environ before untrusted code runs, so a script can't read them via
+    `os.environ` and return them through stdout (MTR-187). The child never needs
+    the runner secret — only the parent authenticates.
+
+    LIMIT (documented in README residual risks): this scrubs the live os.environ
+    mapping but NOT /proc/self/environ, which Linux keeps as the process's
+    initial-stack copy that `unsetenv` does not rewrite. To keep a secret out of
+    /proc entirely, provide it via CAD_RUNNER_SECRET_FILE (it then never enters
+    the environment). The operational env vars (CAD_*) were already read into
+    module globals at import, so removing them here changes no behavior."""
+    for key in list(os.environ.keys()):
+        upper = key.upper()
+        if (
+            key == "CAD_RUNNER_SECRET"
+            or "SECRET" in upper
+            or "TOKEN" in upper
+            or "PASSWORD" in upper
+            or "API_KEY" in upper
+            or upper.endswith("_KEY")
+        ):
+            os.environ.pop(key, None)
+
+
+def _install_exec_guard() -> None:
+    """Install a PEP-578 audit hook that blocks network egress + process
+    spawning from generated code (see `_BLOCKED_AUDIT_EVENTS`). Defense in
+    depth, not a sandbox. Installed in the child AFTER the trusted kernel warm
+    (so kernel imports are never second-guessed) and before any untrusted code
+    runs; audit hooks cannot be removed once added (by design), and this one
+    lives only in the child. Fails open — hardening must never wedge a run."""
+
+    def _hook(event: str, args) -> None:  # noqa: ANN001
+        if event in _BLOCKED_AUDIT_EVENTS:
+            raise PermissionError(
+                f"blocked operation '{event}': network and process access are "
+                "not permitted in generated CAD code"
+            )
+
+    try:
+        sys.addaudithook(_hook)
+    except Exception:  # noqa: BLE001 — never let hardening break execution
+        pass
+
+
+def _encode_output(raw: bytes, kind: str, entry: dict) -> Optional[str]:
+    """Base64-encode an exported artifact, refusing anything over
+    MAX_OUTPUT_BYTES (the output-flood bomb guard, MTR-187). On refusal the
+    file is dropped and the reason is appended to the part's error so the caller
+    sees why, rather than silently shipping a truncated blob."""
+    if len(raw) > MAX_OUTPUT_BYTES:
+        note = (
+            f"{kind} export is {len(raw) // (1024 * 1024)}MB, over the "
+            f"{MAX_OUTPUT_BYTES // (1024 * 1024)}MB output cap — dropped"
+        )
+        entry["error"] = f"{entry['error']}; {note}" if entry.get("error") else note
+        return None
+    return base64.b64encode(raw).decode()
+
+
+def _reply_output_bytes(reply: dict) -> int:
+    """Approximate serialized output size of a session reply (base64 file blobs
+    + renders), for the per-session cumulative output cap."""
+    total = 0
+    for container in (reply.get("files"), *(
+        p.get("files") for p in (reply.get("parts") or [])
+    ), reply.get("renders")):
+        if isinstance(container, dict):
+            for v in container.values():
+                if isinstance(v, str):
+                    total += len(v)
+    return total
 
 
 def _warm_engine(engine: str) -> None:
@@ -452,7 +604,9 @@ def _process_shape(
                 step_path = os.path.join(tmp, f"{stem}.step")
                 cq.exporters.export(shape, step_path)
                 with open(step_path, "rb") as f:
-                    entry["files"]["step"] = base64.b64encode(f.read()).decode()
+                    encoded = _encode_output(f.read(), "step", entry)
+                if encoded is not None:
+                    entry["files"]["step"] = encoded
             if not topo_exported:
                 mesh = trimesh.load(stl_path, force="mesh")
             # isSolid from the loaded mesh (uniform across engines).
@@ -470,7 +624,9 @@ def _process_shape(
                 step_path = os.path.join(tmp, f"{stem}.step")
                 export_step(shape, step_path)
                 with open(step_path, "rb") as f:
-                    entry["files"]["step"] = base64.b64encode(f.read()).decode()
+                    encoded = _encode_output(f.read(), "step", entry)
+                if encoded is not None:
+                    entry["files"]["step"] = encoded
             if not topo_exported:
                 mesh = trimesh.load(stl_path, force="mesh")
 
@@ -639,10 +795,12 @@ def _process_shape(
         entry["error"] = f"analysis: {mesh_err}"
         mesh = None
 
-    # Encode the (possibly repaired) STL.
+    # Encode the (possibly repaired) STL, under the output-flood cap.
     if "stl" in formats and os.path.exists(stl_path):
         with open(stl_path, "rb") as f:
-            entry["files"]["stl"] = base64.b64encode(f.read()).decode()
+            encoded = _encode_output(f.read(), "stl", entry)
+        if encoded is not None:
+            entry["files"]["stl"] = encoded
 
     return entry, mesh
 
@@ -858,6 +1016,10 @@ def _execute(
         # Warm the kernel for the chosen engine (the script also imports what
         # it needs); no-op for "mesh".
         _warm_engine(engine)
+        # Lock down AFTER the trusted warm, BEFORE the untrusted script runs
+        # (MTR-187): scrub secrets from the child env, then block egress/spawn.
+        _scrub_child_env()
+        _install_exec_guard()
 
         ns: dict = {}
         exec(compile(code, "<generated>", "exec"), ns, ns)  # noqa: S102
@@ -1102,17 +1264,34 @@ def _session_exec_reply(
     }
 
 
-def _session_worker(inq: "mp.Queue", outq: "mp.Queue", engine: str) -> None:
+def _session_worker(
+    inq: "mp.Queue", outq: "mp.Queue", engine: str, tmpdir: Optional[str] = None
+) -> None:
     """Session child: REPL loop over the input/output queues, one persistent
     namespace for the session's lifetime. The parent enforces the per-exec
     wall clock and kills us on breach — no self-timeouts here."""
+    # Point this session's temp allocations at its own private 0700 directory
+    # (MTR-187): the harness export TemporaryDirectory AND any `tempfile.*` the
+    # generated code calls now land under here, and the parent rmtree's the tree
+    # on session close, so a later session cannot read this one's temp files.
+    # (Same-uid concurrent peers are NOT isolated by this — see README residual
+    # risks; that needs distinct uids / a namespace, the gVisor gate.)
+    if tmpdir:
+        os.environ["TMPDIR"] = tmpdir
+        tempfile.tempdir = tmpdir
     _apply_limits(session=True)
     try:
         _warm_engine(engine)
     except Exception:  # noqa: BLE001 — surfaces on first exec's own imports
         pass
+    # Lock down once, AFTER the trusted warm — every exec in this session runs
+    # under it (MTR-187): scrub secrets, then block egress/spawn.
+    _scrub_child_env()
+    _install_exec_guard()
 
     ns: dict = {}
+    exec_count = 0
+    output_bytes = 0
     while True:
         try:
             msg = inq.get()
@@ -1122,6 +1301,19 @@ def _session_worker(inq: "mp.Queue", outq: "mp.Queue", engine: str) -> None:
         if op == "shutdown":
             break
         if op == "exec":
+            # Per-session exec-count cap (MTR-187): refuse past the budget and
+            # end the session, so a long-lived child can't run unbounded execs.
+            exec_count += 1
+            if exec_count > SESSION_MAX_EXECS:
+                reply = _base_payload()
+                reply["error"] = (
+                    f"session exec budget exhausted (>{SESSION_MAX_EXECS} "
+                    "execs); start a new session"
+                )
+                reply["stdout"] = ""
+                reply["namespace"] = _session_namespace_summary(ns)
+                outq.put(reply)
+                break
             _extend_cpu_budget()
             try:
                 reply = _session_exec_reply(ns, msg, engine)
@@ -1131,6 +1323,16 @@ def _session_worker(inq: "mp.Queue", outq: "mp.Queue", engine: str) -> None:
                 reply["stdout"] = ""
                 reply["namespace"] = _session_namespace_summary(ns)
             outq.put(reply)
+            # Per-session cumulative output cap (MTR-187): reply is already sent
+            # (this exec's result is honored), but if the session has now shipped
+            # more than its total output budget, end it — the parent 410s the
+            # next call.
+            try:
+                output_bytes += _reply_output_bytes(reply)
+            except Exception:  # noqa: BLE001
+                pass
+            if output_bytes > SESSION_MAX_OUTPUT_BYTES:
+                break
         elif op == "import_step":
             # Off-the-shelf part sourcing (MTR-200): load a fetched STEP into the
             # session namespace so generated code can reference the component
@@ -1174,9 +1376,15 @@ class _Session:
         ctx = mp.get_context("spawn")
         self.inq: "mp.Queue" = ctx.Queue()
         self.outq: "mp.Queue" = ctx.Queue()
+        # Private per-session temp root (0700), removed on close so a later
+        # session can't read this one's temp files (MTR-187 cross-session
+        # cleanup). The child points TMPDIR + tempfile.tempdir at it.
+        self.tmpdir = tempfile.mkdtemp(prefix="cadsess-")
         # daemon: a dying uvicorn must not be held open by idle sessions.
         self.proc = ctx.Process(
-            target=_session_worker, args=(self.inq, self.outq, engine), daemon=True
+            target=_session_worker,
+            args=(self.inq, self.outq, engine, self.tmpdir),
+            daemon=True,
         )
         self.proc.start()
         self.lock = threading.Lock()
@@ -1218,6 +1426,13 @@ class _Session:
                 if self.proc.is_alive():
                     self.proc.kill()
             self.proc.join(1)
+        except Exception:  # noqa: BLE001
+            pass
+        # Remove this session's private temp tree (MTR-187): its export dirs and
+        # any files the generated code wrote under TMPDIR go with it, so a later
+        # session cannot read them.
+        try:
+            shutil.rmtree(self.tmpdir, ignore_errors=True)
         except Exception:  # noqa: BLE001
             pass
 

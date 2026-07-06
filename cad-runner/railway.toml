@@ -18,7 +18,14 @@
 #
 # Security: this container runs model-generated Python. It needs NO outbound
 # network (LLM/fal.ai calls happen from the Next app), so restrict egress on
-# the service. Give it generous memory — CAD runs are RAM-hungry.
+# the service. Give it generous memory — CAD runs are RAM-hungry. Where Railway
+# exposes them, add a read-only root FS + tmpfs /tmp, cap-drop=ALL, and
+# no-new-privileges (the Dockerfile keeps all writable paths under /tmp so a
+# read-only root works). The container is the trust boundary — see README
+# "Security" for the in-process hardening (MTR-187) and what it does/doesn't
+# enforce. Optional resource-cap env knobs (all safe defaults): CAD_RUN_*,
+# CAD_SESSION_*, CAD_MAX_OUTPUT_BYTES. Prefer CAD_RUNNER_SECRET_FILE over the
+# env var so the secret stays out of /proc/*/environ.
 
 [build]
 builder = "dockerfile"

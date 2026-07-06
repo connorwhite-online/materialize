@@ -22,24 +22,55 @@ ENV MALLOC_ARENA_MAX=2 \
     MKL_NUM_THREADS=1 \
     NUMEXPR_NUM_THREADS=1
 
+# Keep every runtime-writable path under /tmp so the root filesystem can be
+# mounted READ-ONLY in the deployment (--read-only + a tmpfs /tmp). Without
+# this, matplotlib's Agg backend (headless render, app.py `_render`) and
+# fontconfig try to write caches under $HOME and crash on a read-only FS.
+# app.py's export TemporaryDirectory + per-session tmpdirs already live in /tmp.
+ENV MPLCONFIGDIR=/tmp/mpl \
+    XDG_CACHE_HOME=/tmp/cache \
+    HOME=/tmp/home \
+    PYTHONDONTWRITEBYTECODE=1
+
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 # app.py plus the modules generated scripts / post-export checks import:
-# sdf_kit (mesh-mode implicit modeling), networks + fea (checks, MTR-179/180).
-COPY app.py sdf_kit.py networks.py fea.py ./
+# sdf_kit (mesh-mode implicit modeling), networks + fea + fit (checks,
+# MTR-179/180/204). fit.py is imported by app.py's `checks.fit` path — it MUST
+# be copied or that check errors at runtime in the image.
+COPY app.py sdf_kit.py networks.py fea.py fit.py ./
 
-# Run as a non-root user — defense in depth for executing generated code.
-RUN useradd --create-home --uid 10001 runner
+# Run as a non-root, no-login user — defense in depth for executing generated
+# code (it can never be root inside the container). The base image ships no
+# compilers or shells beyond /bin/sh; we add nothing that widens the surface.
+RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin runner \
+    && mkdir -p /tmp/mpl /tmp/cache /tmp/home \
+    && chown -R runner /tmp/mpl /tmp/cache /tmp/home
 USER runner
 
 EXPOSE 8000
 
-# NOTE (deployment hardening — see plan): run this container with NO
-# outbound network, a read-only root filesystem, and memory/CPU caps.
-# Those container-level controls are the real trust boundary; the
-# per-run rlimits + timeout in app.py are a second layer.
-# Shell form so ${PORT} expands at runtime: Railway (and most PaaS) inject
-# the listening port via $PORT and probe the healthcheck on it. Falls back to
-# 8000 for local `docker run`.
+# Liveness probe for `docker run` / any orchestrator that honors HEALTHCHECK
+# (Railway also probes railway.toml's healthcheckPath). Uses stdlib urllib —
+# no curl in the slim image. Hits 8000 (the EXPOSE default); on Railway the
+# platform probes the injected $PORT via railway.toml instead.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
+    CMD python3 -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=4).status==200 else 1)"
+
+# DEPLOYMENT HARDENING (MTR-187) — the container is the trust boundary; these
+# runtime controls are the REAL isolation and MUST be set on the platform (they
+# cannot be baked into the image). On Railway/any Docker host, run with:
+#   --read-only                 (root FS immutable; writable /tmp is tmpfs)
+#   --tmpfs /tmp:rw,noexec,nosuid,size=2g
+#   --cap-drop=ALL              (no Linux capabilities)
+#   --security-opt=no-new-privileges
+#   --network=none OR egress-restricted   (the sidecar needs NO outbound net;
+#                                          the app makes all LLM/fal calls)
+#   memory + CPU limits         (physical-RAM bound; app.py rlimits are layer 2)
+# See cad-runner/README.md "Security" for what IS vs ISN'T enforced in-process
+# and the residual risks that gate non-owner access (gVisor/microVM — MTR-187).
+#
+# Shell form so ${PORT} expands at runtime: Railway (and most PaaS) inject the
+# listening port via $PORT. Falls back to 8000 for local `docker run`.
 CMD uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000}
