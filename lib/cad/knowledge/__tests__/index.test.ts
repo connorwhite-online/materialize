@@ -3,6 +3,7 @@ import { buildKnowledgeBlock } from "@/lib/cad/knowledge";
 import { fastenersInPrompt } from "@/lib/cad/knowledge/fasteners";
 import { needsStandardParts } from "@/lib/cad/knowledge/bd-warehouse";
 import { needsErgonomics } from "@/lib/cad/knowledge/ergonomics";
+import { needsEnclosureRecipe } from "@/lib/cad/knowledge/enclosure-recipe";
 
 describe("buildKnowledgeBlock", () => {
   it("always includes the aesthetic directives", () => {
@@ -57,6 +58,31 @@ describe("buildKnowledgeBlock", () => {
 
     const plain = buildKnowledgeBlock({ prompt: "a wall mounting plate" });
     expect(plain).not.toMatch(/Power-grip/);
+  });
+});
+
+describe("needsEnclosureRecipe / enclosure recipe block", () => {
+  it("injects the drape-and-split recipe for enclosure-shaped prompts", () => {
+    const block = buildKnowledgeBlock({
+      prompt: "an enclosure for a 60x40 PCB and a battery",
+    });
+    expect(block).toMatch(/DEFAULT ENCLOSURE RECIPE/);
+    expect(block).toMatch(/split_shell/);
+    expect(block).toMatch(/heat-set boss = 4\.0 mm bore/);
+  });
+
+  it("triggers on case/box + component hints, but not on a bare box", () => {
+    expect(needsEnclosureRecipe("a case for a raspberry pi pico")).toBe(true);
+    expect(needsEnclosureRecipe("a box for an ESP32 sensor module")).toBe(true);
+    expect(needsEnclosureRecipe("a housing for electronics")).toBe(true);
+    expect(needsEnclosureRecipe("a rectangular box 60x40x30mm")).toBe(false);
+    expect(needsEnclosureRecipe("a spiral staircase")).toBe(false);
+    expect(needsEnclosureRecipe("a bookcase shelf")).toBe(false);
+  });
+
+  it("stays out of non-enclosure prompts", () => {
+    const block = buildKnowledgeBlock({ prompt: "a decorative coaster" });
+    expect(block).not.toMatch(/DEFAULT ENCLOSURE RECIPE/);
   });
 });
 
