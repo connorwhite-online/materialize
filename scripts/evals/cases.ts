@@ -137,7 +137,10 @@ export const EVAL_CASES: EvalCase[] = [
   },
   // Drape recipe regression gate (MTR-192): a bare "enclose these components"
   // prompt with no style must yield a two-piece, cavity-fitting assembly by
-  // default. Asserts the two-part contract + honesty on the plan-form.
+  // default. Asserts the two-part contract, a body at least big enough to
+  // hold the stated components plus walls, + recipe adherence via negative
+  // checks (assembled position, continuous plan-form, a real seam joint).
+  // Per-part watertightness is graded by the runner's validity gate.
   {
     id: "drape-enclosure-two-piece",
     tier: "assembly",
@@ -146,10 +149,35 @@ export const EVAL_CASES: EvalCase[] = [
     expectations: {
       dims: [
         { label: "two printed parts", kind: "count", of: "part", value: 2 },
+        // 60x40 PCB + clearance + two walls, with headroom for the drape
+        // blend: the body cannot be SMALLER than the stack it encloses.
+        { label: "length fits PCB + walls", kind: "bbox_span", axis: "x", value: 74, tolerance: 10 },
+        { label: "width fits PCB + walls", kind: "bbox_span", axis: "y", value: 54, tolerance: 10 },
       ],
       negativeChecks: [
         "the two shells are translated apart / exploded rather than sitting in their assembled position",
         "a boxy extruded-rectangle shell with corner fillets instead of a continuous soft plan-form",
+        "the halves meet at a plain butt joint with no lip, ridge, or registration feature at the seam",
+      ],
+    },
+  },
+
+  // Closure-menu regression gate (MTR-189/192): a snap-lid ask with heat-set
+  // inserts and vents must produce the real mechanisms (snap engagement at
+  // the seam, 4.0mm insert bores, a vent field), not a plain friction lid.
+  {
+    id: "vented-snap-sensor-case",
+    tier: "assembly",
+    prompt:
+      "a vented snap-fit case for a 58x42 mm sensor board with two M3 heat-set inserts, two-piece",
+    expectations: {
+      dims: [
+        { label: "two printed parts", kind: "count", of: "part", value: 2 },
+      ],
+      negativeChecks: [
+        "no snap feature at the seam (no ridge, nub, or window engagement — just a plain lip or butt joint)",
+        "the heat-set boss bores are the wrong size for an M3 insert (should be ~4.0 mm)",
+        "no vent openings anywhere on the case",
       ],
     },
   },

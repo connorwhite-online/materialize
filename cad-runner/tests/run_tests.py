@@ -263,6 +263,24 @@ def test_split_shell_printed_fit():
     assert np.median(gap) > fit_gap * 0.8, f"median lip clearance {np.median(gap):.2f}"
     both = (bottom(pts) < 0) & (top(pts) < 0)
     assert both.sum() == 0, "halves interpenetrate"
+    # union coverage: every solidly-interior body point belongs to one half,
+    # EXCEPT inside the designed lip-clearance band (the fit_gap ring between
+    # lip and recess is in neither half — that gap IS the printed fit).
+    z_split, lip_h, lip_t = 16.0, 3.0, 1.1
+    vol = rng.uniform([-38, -28, -1], [38, 28, 33], (60000, 3))
+    interior = body(vol) < -0.2
+    p_in = vol[interior]
+    covered = (bottom(p_in) < 0) | (top(p_in) < 0)
+    missed = p_in[~covered]
+    assert len(missed) < 0.05 * len(p_in), f"{len(missed)}/{len(p_in)} interior points uncovered"
+    if len(missed):
+        cz = missed[:, 2]
+        cc = cavity(missed)
+        in_band = (
+            (cz > z_split - 1.2) & (cz < z_split + lip_h + fit_gap + 0.2)
+            & (cc > -0.1) & (cc < lip_t + fit_gap + 0.1)
+        )
+        assert in_band.all(), "uncovered material outside the lip-clearance band"
 
 
 TESTS = [

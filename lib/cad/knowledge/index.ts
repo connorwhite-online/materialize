@@ -9,6 +9,8 @@
  *     multi-process envelope (generation can precede material choice).
  *   - Fastener tables — only when the prompt references metric screw sizes.
  *   - Ergonomic defaults — only when the prompt implies a human-held part.
+ *   - Enclosure recipe — only when the prompt is enclosure-shaped (the
+ *     drape-and-split default + closure patterns, MTR-192).
  *
  * Keeping it conditional keeps each prompt focused (the more you cram in, the
  * less weight any one rule carries).
@@ -23,6 +25,7 @@ import {
 import { fastenersInPrompt, formatFasteners } from "./fasteners";
 import { ERGONOMIC_RULES, needsErgonomics } from "./ergonomics";
 import { REPAIR_PLAYBOOK_RULES } from "./repair-playbook";
+import { ENCLOSURE_RECIPE_RULES, needsEnclosureRecipe } from "./enclosure-recipe";
 
 export interface KnowledgeContext {
   prompt: string;
@@ -44,6 +47,8 @@ export function buildKnowledgeBlock({
   if (fasteners.length > 0) sections.push(formatFasteners(fasteners));
 
   if (needsErgonomics(prompt)) sections.push(ERGONOMIC_RULES);
+
+  if (needsEnclosureRecipe(prompt)) sections.push(ENCLOSURE_RECIPE_RULES);
 
   return sections.join("\n\n");
 }

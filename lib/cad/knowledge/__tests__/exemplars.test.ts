@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   CAD_EXEMPLARS,
   selectExemplars,
+  selectExemplarsByIds,
   formatExemplars,
+  formatExemplarCatalog,
   type CadExemplar,
 } from "@/lib/cad/knowledge/exemplars";
 
@@ -40,6 +42,50 @@ describe("selectExemplars", () => {
     const picked = selectExemplars("an enclosure box");
     expect(picked.length).toBeGreaterThan(0);
     expect(picked.every((e) => e.verified)).toBe(true);
+  });
+});
+
+describe("selectExemplarsByIds", () => {
+  it("returns ONLY the requested ids (regression: entries once leaked into the initializer)", () => {
+    expect(selectExemplarsByIds([])).toEqual([]);
+    const one = selectExemplarsByIds(["rounded_enclosure"]);
+    expect(one.map((e) => e.id)).toEqual(["rounded_enclosure"]);
+    // hallucinated ids resolve to nothing, and the cap is 2
+    expect(selectExemplarsByIds(["not_a_real_id"])).toEqual([]);
+    const capped = selectExemplarsByIds([
+      "rounded_enclosure",
+      "snap_fit_lid",
+      "ergonomic_knob",
+    ]);
+    expect(capped).toHaveLength(2);
+  });
+});
+
+describe("assembly exemplar retrieval (MTR-189)", () => {
+  it.each([
+    ["a hinged box for small parts", "hinged_case_pin_bores"],
+    ["a snap-fit case for my sensor", "snap_lid_sensor_node"],
+    ["a strain relief for a power cord", "strain_relief_clamshell"],
+    ["a wall mount holder for the tv remote", "wall_mount_keyhole_bin"],
+    ["a box with an ssd1306 oled display window", "oled_window_front_plate_box"],
+  ])("%s -> retrieves %s", (prompt, id) => {
+    const picked = selectExemplars(prompt, { limit: 2 });
+    expect(picked.map((e) => e.id)).toContain(id);
+  });
+
+  it("lists the new entries in the plan-step catalog", () => {
+    const catalog = formatExemplarCatalog();
+    for (const id of [
+      "snap_lid_sensor_node",
+      "hinged_case_pin_bores",
+      "strain_relief_clamshell",
+      "oled_window_front_plate_box",
+      "wall_mount_keyhole_bin",
+      "draped_two_piece_enclosure",
+      "pico_dev_board_enclosure",
+    ]) {
+      expect(catalog).toContain(id);
+    }
   });
 });
 
