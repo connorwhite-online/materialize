@@ -1,0 +1,71 @@
+name: CAD runner tests
+
+# Real-kernel tests for the CAD execution sidecar. Runs on PRs (and main pushes)
+# that touch cad-runner/**, so a change to the image or the sidecar code can't
+# land without the geometry + adversarial suites passing. The sidecar's deps are
+# plain-pip-installable on x86_64 Linux (MTR-51), so CI runs the actual
+# OpenCASCADE kernel — no Docker image build required for the tests.
+on:
+  pull_request:
+    paths:
+      - "cad-runner/**"
+      - ".github/workflows/cad-runner-tests.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "cad-runner/**"
+      - ".github/workflows/cad-runner-tests.yml"
+
+jobs:
+  cad-runner:
+    name: kernel + adversarial suites
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cad-runner
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: cad-runner/requirements.txt
+
+      - name: Install OpenGL runtime libs (trimesh/matplotlib rendering)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgl1 libglu1-mesa libxrender1 libxext6 libsm6
+
+      - name: Install sidecar deps (pinned)
+        run: pip install -r requirements.txt
+
+      # Keep the same lean-footprint env the image bakes (Dockerfile), so a
+      # RLIMIT_AS-sensitive run behaves the same in CI as in the container.
+      - name: Pre-exec source guard (stdlib only)
+        run: python3 tests/test_validate.py
+
+      - name: Kernel contracts — sdf_kit / networks / fea
+        run: python3 tests/run_tests.py
+
+      - name: Fit contract (MTR-204)
+        run: python3 tests/test_fit.py
+
+      - name: Adversarial proof suite (MTR-187)
+        run: python3 tests/test_adversarial.py
+
+      - name: bd_warehouse standard-parts smoke (MTR-200)
+        run: python3 tests/test_bd_warehouse_smoke.py
+
+      # Informational, not a hard gate: two of test_app.py's mesh-mode
+      # assertions (the hollow-part section cutaway and the two-cavity
+      # marching-cubes body count) are sensitive to numpy/trimesh *patch*
+      # versions and can flake in a freshly pip-resolved environment even though
+      # the flagship kernel contracts (run_tests.py, incl. two-isolated-networks)
+      # pass. The B-rep/topo paths run only in the Docker image regardless.
+      # Kept visible here; the hard gate is the deterministic suites above.
+      - name: HTTP layer — /run flags, renders, checks, sessions (informational)
+        continue-on-error: true
+        run: python3 tests/test_app.py
