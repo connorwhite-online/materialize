@@ -9,7 +9,7 @@ import {
 } from "./model-client";
 import { modelForRole } from "./models";
 import { formatExemplarCatalog } from "./knowledge/exemplars";
-import { formatBoardCatalog } from "./knowledge/components";
+import { formatComponentCatalog } from "./knowledge/components";
 import { dimensionTargetSchema } from "./dimension-check";
 
 /**
@@ -129,8 +129,8 @@ Output ONLY strict JSON (no markdown fence, no commentary) with this shape:
 Rules:
 - "dimensionTargets": convert EVERY explicit dimension the prompt/decisions state into a machine-checkable target. kind = "bbox_span" (overall extent along an axis; set "axis" to x/y/z), "count" (number of solids/parts; set "of" to "solid" or "part"), "diameter" or "distance" (feature-level). "value" in mm (a plain integer for count), "tolerance" the half-band in mm (tight, e.g. 0.5). Emit a target for each callout ("100 x 60 x 20 mm block, four 8 mm holes, two-piece" -> three bbox_span + a hole "count" + a hole "diameter"). Do NOT invent numbers the prompt never gave.
 - All dimensions in millimeters. "components" = things the part must contain or interface with (their real bounding boxes + clearances). "interfaces" = where the part meets the world (ports, vents, mounts); use standard ids for "std" where one applies (usb-c, usb-a, usb-b, micro-usb, mini-usb, barrel-jack-5.5, rj45, sd, M2/M2.5/M3/M4/M5/M6).
-- Known dev boards — when the prompt names one, use these TRUE dims and facts; never guess or re-ask:
-${formatBoardCatalog()}
+- Known components (dev boards, sensors, actuators, displays, power, cameras) — when the prompt names one, use these TRUE dims and facts; never guess or re-ask:
+${formatComponentCatalog()}
 - "summary" is written for a non-engineer: what it is, what it fits, where the openings go. No axis names (+X), no snake_case ids, no coordinate dumps. Spell things like "USB-C". Only include a number when the number itself matters to the user.
 - "questions" (0-3): ONLY genuine choices that materially change the part and that neither the prompt nor the tables above answer — board variant when ambiguous (e.g. ESP32 micro-USB vs USB-C clones), lid style, mounting, venting. 2-4 options each; "default" = the label of the recommended option. Never ask about anything you can look up or that the prompt already settled.
 - Only state what the prompt implies or standard components require — omit optional fields you cannot ground ("loads", "envelope", "form" may be omitted). Do NOT invent components the prompt doesn't call for.
