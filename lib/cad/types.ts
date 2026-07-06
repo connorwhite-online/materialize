@@ -257,3 +257,45 @@ export type CadStreamEvent =
  * CadProgressEvent / CadDoneEvent stay backward compatible by construction.
  */
 export type CadJobProgressEntry = CadStreamEvent;
+
+// --- Generation cost metering (MTR-181) ------------------------------------
+//
+// RAW usage signals captured per generation job and persisted on
+// cadJobs.usage. Deliberately raw (token counts per role+model, sidecar wall
+// time, fal invocations) rather than a single number, so unit-price changes
+// re-compute cost from history instead of freezing yesterday's prices into
+// the data. The cents rollup lives beside it in cadJobs.costCents as a
+// point-in-time snapshot; lib/billing/cad-pricing.ts recomputes from this.
+
+/** Aggregated Messages-API usage for one (role, model) pair within a job. */
+export interface CadModelUsage {
+  /** Harness role that made the calls ("plan", "implement", "agentic", …). */
+  role: string;
+  /** Resolved model id the API reported (or the requested id as fallback). */
+  model: string;
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  /** Total wall time spent in these calls (ms). */
+  ms: number;
+}
+
+/** Aggregated fal.ai invocations for one fal model within a job. */
+export interface CadFalUsage {
+  model: string;
+  calls: number;
+  ms: number;
+}
+
+/** The persisted per-job usage record (cadJobs.usage). */
+export interface CadUsageSummary {
+  v: 1;
+  model: CadModelUsage[];
+  /** Sidecar wall time: every /run + session call the job made. */
+  sidecar: { calls: number; ms: number };
+  fal: CadFalUsage[];
+  /** Router verdict for the job (mirrors HarnessResult.route), when known. */
+  route?: string;
+}
