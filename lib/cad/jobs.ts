@@ -9,6 +9,7 @@ import { computeCostCents } from "@/lib/billing/cad-pricing";
 import { recordGenerationDebit } from "@/lib/billing/cad-credits";
 import { resolveModelCredentials } from "@/lib/cad/credentials";
 import type { PriorFeedback } from "@/lib/cad/harness";
+import type { CadProcess } from "@/lib/cad/knowledge/dfm";
 import { CadMeter, runWithCadContext } from "@/lib/cad/metering";
 import { runCadGeneration } from "@/lib/cad/orchestrate";
 import type { PromptImage } from "@/lib/cad/model-client";
@@ -124,6 +125,12 @@ export interface ExecuteCadJobInput {
   /** Thread name a revision inherits (client-supplied, as before). */
   name?: string;
   images?: PromptImage[];
+  /**
+   * Target CraftCloud process (MTR-171). Threads into the harness so DFM
+   * guidance is process-specific instead of the conservative envelope, and is
+   * stamped onto the generation's config fingerprint. Null/absent = unset.
+   */
+  process?: CadProcess | null;
   /**
    * Parent source/feedback for a revision. Loaded — with the ownership
    * check — in the generate route BEFORE the job row exists, so an
@@ -417,6 +424,7 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
         priorFeedback: input.priorFeedback ?? null,
         priorBrief: input.priorBrief,
         providedBrief: input.providedBrief,
+        process: input.process ?? null,
         images,
         signal: controller.signal,
         onProgress,
@@ -450,6 +458,8 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
       isRoot,
       // Revisions inherit the thread's current name from the client.
       nameOverride: input.name,
+      // Stamped onto the config fingerprint for outcome slicing (MTR-171).
+      process: input.process ?? null,
       result,
     });
 

@@ -19,6 +19,7 @@ import { createDraftFileForPrint } from "@/app/actions/files";
 import { generateThreadTitle } from "./title";
 import { harnessConfigFingerprint } from "./fingerprint";
 import type { HarnessResult } from "./harness";
+import type { CadProcess } from "./knowledge/dfm";
 import type { CadPart } from "./types";
 
 /** A filename-safe stem from a display name (download names + dedup safety). */
@@ -367,6 +368,8 @@ export async function persistGenerationSuccess(opts: {
    * generated title.
    */
   nameOverride?: string;
+  /** Target process this generation built for (MTR-171), stamped on the fingerprint. */
+  process?: CadProcess | null;
   result: HarnessResult;
 }): Promise<PersistedGeneration | PersistError> {
   const { userId, generationId, prompt, isRoot, result } = opts;
@@ -380,6 +383,7 @@ export async function persistGenerationSuccess(opts: {
       prompt,
       isRoot,
       nameOverride: opts.nameOverride,
+      process: opts.process,
       result,
       parts,
     });
@@ -491,8 +495,9 @@ export async function persistGenerationSuccess(opts: {
       // whether the printable mesh came from the lossy voxel fallback so
       // the eval scorecard can report a remesh rate.
       remeshed: result.run?.remeshed ?? false,
-      // Treatment beside the outcome: which harness config ran (attribution).
-      configFingerprint: harnessConfigFingerprint(result.route),
+      // Treatment beside the outcome: which harness config ran (attribution),
+      // including the target process this build was guided for (MTR-171).
+      configFingerprint: harnessConfigFingerprint(result.route, opts.process),
       ...resultExtras(result),
       // The thread owns the title going forward (root-row title is the
       // legacy-read fallback) — set both while readers migrate.
@@ -537,6 +542,7 @@ async function persistAssembly(opts: {
   prompt: string;
   isRoot: boolean;
   nameOverride?: string;
+  process?: CadProcess | null;
   result: HarnessResult;
   parts: CadPart[];
 }): Promise<PersistedGeneration | PersistError> {
@@ -691,7 +697,7 @@ async function persistAssembly(opts: {
       remeshed:
         (result.run?.remeshed ?? false) ||
         parts.some((p) => p.remeshed === true),
-      configFingerprint: harnessConfigFingerprint(result.route),
+      configFingerprint: harnessConfigFingerprint(result.route, opts.process),
       ...resultExtras(result),
       // Thread owns the title going forward; root-row title stays as the
       // legacy-read fallback.
