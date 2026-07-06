@@ -685,6 +685,16 @@ def _run_checks(mesh, checks: dict) -> dict:
             )
         except Exception as err:  # noqa: BLE001
             out["fea"] = {"error": str(err)}
+    fit_spec = checks.get("fit")
+    if fit_spec is not None:
+        # Component-fit verifier (MTR-204): cavity containment, boss↔hole
+        # pattern match, cutout↔port alignment against the produced mesh.
+        try:
+            from fit import check_fit
+
+            out["fit"] = _plain(check_fit(mesh, fit_spec))
+        except Exception as err:  # noqa: BLE001
+            out["fit"] = {"error": str(err)}
     return out
 
 

@@ -17,7 +17,7 @@ import {
   formatExemplars,
   formatExemplarCatalog,
 } from "./knowledge/exemplars";
-import { formatComponentHints } from "./knowledge/components";
+import { formatComponentHints, fitTargetsForBrief } from "./knowledge/components";
 import {
   sourcePartsForBrief,
   formatSourcedPartsForPrompt,
@@ -41,6 +41,7 @@ import {
   checkDimensionTargets,
   hasDimensionFailures,
   formatDimensionRepairHints,
+  buildFitChecksFromTargets,
   type DimensionCheckResult,
   type DimensionTarget,
 } from "./dimension-check";
@@ -440,10 +441,17 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
 
   // Dimension contract (MTR-197): the machine-checkable targets to assert after
   // a valid run. From the fresh brief, or re-parsed from the revision's brief so
-  // a revision still honors the original callouts.
+  // a revision still honors the original callouts. Fit targets (MTR-204) for
+  // known components are auto-appended inside extractDimensionTargets.
   const dimensionTargets: DimensionTarget[] = extractDimensionTargets(
     input.priorSourceCode ? input.priorBrief : brief
   );
+  // Component-fit checks (MTR-204): the sidecar request derived from the fit
+  // targets, passed on every run so the verdicts land on run.checks.fit and
+  // flow through the SAME dimension-check → repair-hint machinery. Null (no
+  // `checks` sent at all) when the brief names no known component.
+  const fitChecks = buildFitChecksFromTargets(dimensionTargets);
+  const runChecks = fitChecks ? { fit: fitChecks } : undefined;
   // The last run's dimension-check results, surfaced on the return + used to
   // drive a dimension-specific repair turn.
   let dimensionChecks: DimensionCheckResult[] = [];
@@ -565,7 +573,9 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
     }
 
     emit({ type: "phase", phase: "executing", attempt, maxAttempts });
-    lastRun = await runCadCode(lastCode, ["stl", "step"], input.signal);
+    lastRun = await runCadCode(lastCode, ["stl", "step"], input.signal, {
+      checks: runChecks,
+    });
 
     // Last attempt, and the ONLY defect is an open/non-manifold surface:
     // accept the lossy voxel remesh as an explicit, recorded decision
@@ -580,6 +590,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
     ) {
       const remeshed = await runCadCode(lastCode, ["stl", "step"], input.signal, {
         allowRemesh: true,
+        checks: runChecks,
       });
       if (remeshed.ok) lastRun = remeshed;
     }
@@ -688,12 +699,16 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
 
 /**
  * Pull the machine-checkable dimension targets off a brief (fresh CadBrief or
- * an untyped persisted priorBrief). Best-effort — a malformed/absent brief just
- * yields no targets, so the dimension pass is a no-op rather than a failure.
+ * an untyped persisted priorBrief), plus the auto-emitted component-fit
+ * targets (MTR-204) for any known dev board the brief names. Best-effort — a
+ * malformed/absent brief just yields no targets, so the dimension pass is a
+ * no-op rather than a failure.
  */
 function extractDimensionTargets(brief: unknown): DimensionTarget[] {
   if (brief == null) return [];
   const parsed = cadBriefSchema.safeParse(brief);
   if (!parsed.success) return [];
-  return (parsed.data.dimensionTargets as DimensionTarget[] | undefined) ?? [];
+  const declared =
+    (parsed.data.dimensionTargets as DimensionTarget[] | undefined) ?? [];
+  return [...declared, ...fitTargetsForBrief(parsed.data)];
 }
