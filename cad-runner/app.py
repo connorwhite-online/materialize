@@ -883,6 +883,111 @@ def _base_payload(compiled: bool = False) -> dict:
     }
 
 
+# Fragment-gate assembly rescue (MTR-213). A single `result` that splits into a
+# few large, comparable-volume, individually-watertight bodies is almost always
+# a base+lid enclosure the script returned as one compound instead of a `parts`
+# dict. Rather than hard-failing the fragment gate (which pushes the repair loop
+# toward fusing the shells into one shallow shell and losing a piece), promote it
+# into a real assembly. Conservative by construction: only comparable large
+# watertight bodies with negligible debris promote — a solid trailing stray chips
+# stays an error so the genuine debris case is still caught.
+_PROMOTE_MIN_PARTS = 2
+_PROMOTE_MAX_PARTS = 4
+_PROMOTE_SLIVER_VOLUME = 1.0  # mm^3 — a body below this is a tessellation sliver
+_PROMOTE_LARGE_FRAC = 0.15    # a body is a "real part" if >= 15% of the biggest
+
+
+def _promote_disconnected_bodies(mesh):
+    """Decide whether a multi-body `result` mesh is a clean assembly worth
+    rescuing (MTR-213). Returns a list of (name, submesh) ordered low->high z
+    (base/lid for the two-body case) when the split is a clean assembly, else
+    None so the fragment-gate debris error stands.
+
+    Pure + side-effect-free so run_tests.py can unit-test it without the kernel."""
+    try:
+        bodies = list(mesh.split(only_watertight=False))
+    except Exception:  # noqa: BLE001
+        return None
+    if len(bodies) < _PROMOTE_MIN_PARTS:
+        return None
+    vols = [abs(float(b.volume)) for b in bodies]
+    v_max = max(vols) if vols else 0.0
+    if v_max < _PROMOTE_SLIVER_VOLUME:
+        return None
+    # "Real parts" are the large, comparable-volume bodies; requiring each >= 15%
+    # of the biggest is what separates a genuine base+lid (comparable) from a
+    # solid trailing a stray chip.
+    large, other = [], []
+    for b, v in zip(bodies, vols):
+        (large if v >= _PROMOTE_LARGE_FRAC * v_max else other).append((b, v))
+    if not (_PROMOTE_MIN_PARTS <= len(large) <= _PROMOTE_MAX_PARTS):
+        return None
+    # Only sub-mm^3 tessellation slivers are tolerated alongside the parts. Any
+    # non-comparable body ABOVE that is genuine debris (a loose nub / un-unioned
+    # feature) — keep the fragment error so the model fixes it, don't silently
+    # drop it.
+    if any(v >= _PROMOTE_SLIVER_VOLUME for _, v in other):
+        return None
+    # Each real part must be individually watertight — a printable piece, not an
+    # open shell that only reads closed as part of the compound.
+    if not all(bool(b.is_watertight) for b, _ in large):
+        return None
+    ordered = sorted(large, key=lambda bv: float(bv[0].centroid[2]))
+    names = (
+        ["base", "lid"]
+        if len(ordered) == 2
+        else [f"part{i + 1}" for i in range(len(ordered))]
+    )
+    return [(names[i], ordered[i][0]) for i in range(len(ordered))]
+
+
+def _assemble_parts_payload(
+    payload: dict,
+    items: list,
+    formats: list[str],
+    tmp: str,
+    engine: str,
+    allow_remesh: bool,
+) -> None:
+    """Fill `payload` from a list of (name, shape) assembly members — shared by
+    the explicit `parts` dict branch and the MTR-213 promotion path.
+
+    Per-part: single render only, and no per-part topo — 4 PNGs plus a topology
+    sidecar per part would balloon the payload (all base64 over one queue/pipe).
+    The multi-view/topo consumers work on the top-level single result."""
+    part_formats = [f for f in formats if f != "topo"]
+    parts: list[dict] = []
+    all_ok = True
+    for i, (name, shape) in enumerate(items):
+        stem = "".join(
+            c if c.isalnum() else "-" for c in str(name)
+        ).strip("-") or f"part{i}"
+        entry, _mesh = _process_shape(
+            shape, part_formats, tmp, stem, engine, allow_remesh
+        )
+        parts.append({"name": str(name), **entry})
+        all_ok = all_ok and (
+            entry["validation"]["isSolid"]
+            and entry["validation"]["isWatertight"]
+            and entry["validation"].get("bodyCount", 1) == 1
+        )
+    # Top-level mirrors the first part for single-part consumers.
+    first = parts[0]
+    payload["files"] = first["files"]
+    payload["renderPng"] = first["renderPng"]
+    payload["geometry"] = first["geometry"]
+    # Aggregate validity = AND across parts.
+    payload["validation"] = {
+        "compiled": True,
+        "isSolid": all(p["validation"]["isSolid"] for p in parts),
+        "isWatertight": all(p["validation"]["isWatertight"] for p in parts),
+        "isManifold": all(p["validation"]["isManifold"] for p in parts),
+    }
+    payload["parts"] = parts
+    payload["remeshed"] = any(p.get("remeshed") for p in parts)
+    payload["ok"] = all_ok
+
+
 def _build_run_payload(
     ns: dict,
     formats: list[str],
@@ -908,64 +1013,51 @@ def _build_run_payload(
                 single, formats, tmp, "model", engine, allow_remesh,
                 include_views=True,
             )
-            payload["files"] = entry["files"]
-            payload["renderPng"] = entry["renderPng"]
-            if entry.get("renders") is not None:
-                payload["renders"] = entry["renders"]
-            payload["geometry"] = entry["geometry"]
-            payload["validation"] = entry["validation"]
-            payload["remeshed"] = bool(entry.get("remeshed"))
-            if entry.get("topo") is not None:
-                payload["topo"] = entry["topo"]
-            if entry["error"]:
-                payload["error"] = entry["error"]
-            payload["ok"] = (
-                entry["validation"]["isSolid"]
-                and entry["validation"]["isWatertight"]
-                and entry["validation"].get("bodyCount", 1) == 1
-            )
-            if checks and mesh is not None:
-                payload["checks"] = _run_checks(mesh, checks)
-        elif isinstance(parts_ns, dict) and parts_ns:
-            # Per-part: single render only, and no per-part topo — 4 PNGs plus
-            # a topology sidecar per part would balloon the payload (all
-            # base64 over one queue/pipe). The multi-view/topo consumers work
-            # on the top-level single result.
-            part_formats = [f for f in formats if f != "topo"]
-            parts: list[dict] = []
-            all_ok = True
-            for i, (name, shape) in enumerate(parts_ns.items()):
-                stem = "".join(
-                    c if c.isalnum() else "-" for c in str(name)
-                ).strip("-") or f"part{i}"
-                entry, _mesh = _process_shape(
-                    shape, part_formats, tmp, stem, engine, allow_remesh
+            # Assembly rescue (MTR-213): a watertight `result` that the fragment
+            # gate flagged as multiple bodies is promoted to a real base/lid
+            # assembly when it's a clean split (comparable large watertight
+            # bodies, negligible debris) rather than hard-failed into a repair
+            # loop that collapses the enclosure to one shell.
+            promoted = None
+            if (
+                mesh is not None
+                and entry["validation"].get("bodyCount", 1) > 1
+                and entry["validation"].get("isWatertight")
+            ):
+                promoted = _promote_disconnected_bodies(mesh)
+            if promoted is not None:
+                _assemble_parts_payload(
+                    payload, promoted, formats, tmp, engine, allow_remesh
                 )
-                parts.append({"name": str(name), **entry})
-                all_ok = all_ok and (
+                payload["promotedFromSingle"] = True
+                # Fit/network checks reference the whole enclosure, so run them
+                # against the original compound mesh (the parts share it).
+                if checks and mesh is not None:
+                    payload["checks"] = _run_checks(mesh, checks)
+            else:
+                payload["files"] = entry["files"]
+                payload["renderPng"] = entry["renderPng"]
+                if entry.get("renders") is not None:
+                    payload["renders"] = entry["renders"]
+                payload["geometry"] = entry["geometry"]
+                payload["validation"] = entry["validation"]
+                payload["remeshed"] = bool(entry.get("remeshed"))
+                if entry.get("topo") is not None:
+                    payload["topo"] = entry["topo"]
+                if entry["error"]:
+                    payload["error"] = entry["error"]
+                payload["ok"] = (
                     entry["validation"]["isSolid"]
                     and entry["validation"]["isWatertight"]
                     and entry["validation"].get("bodyCount", 1) == 1
                 )
-            # Top-level mirrors the first part for single-part consumers.
-            first = parts[0]
-            payload["files"] = first["files"]
-            payload["renderPng"] = first["renderPng"]
-            payload["geometry"] = first["geometry"]
-            # Aggregate validity = AND across parts.
-            payload["validation"] = {
-                "compiled": True,
-                "isSolid": all(p["validation"]["isSolid"] for p in parts),
-                "isWatertight": all(
-                    p["validation"]["isWatertight"] for p in parts
-                ),
-                "isManifold": all(
-                    p["validation"]["isManifold"] for p in parts
-                ),
-            }
-            payload["parts"] = parts
-            payload["remeshed"] = any(p.get("remeshed") for p in parts)
-            payload["ok"] = all_ok
+                if checks and mesh is not None:
+                    payload["checks"] = _run_checks(mesh, checks)
+        elif isinstance(parts_ns, dict) and parts_ns:
+            _assemble_parts_payload(
+                payload, list(parts_ns.items()), formats, tmp, engine,
+                allow_remesh,
+            )
         else:
             payload["error"] = (
                 "script did not assign `result` or a non-empty `parts` dict"

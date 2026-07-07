@@ -38,3 +38,17 @@ export function needsEnclosureRecipe(prompt: string): boolean {
   if (CASE_NOUN.test(prompt) && COMPONENT_HINTS.test(prompt)) return true;
   return /\bbox\b/i.test(prompt) && COMPONENT_HINTS.test(prompt);
 }
+
+/**
+ * Targeted repair note for the enclosure-split enforcement (MTR-213): the
+ * request is enclosure-shaped but the run produced a SINGLE part instead of the
+ * two-piece assembly the recipe mandates. This steers the model to the `parts`
+ * dict — the OPPOSITE of the generic "merge into one solid" fragment-gate hint,
+ * which is exactly what collapsed the enclosure to one shallow shell. Kept as a
+ * shared, deterministic string (like the recipe rules) so evals stay stable.
+ * Deliberately avoids the kernel-failure trigger words (fuse / watertight /
+ * boolean / export) so `enrichRepairHint` does not misclassify it as a kernel
+ * crash and append contradictory "reduce the boolean count" fixes.
+ */
+export const ENCLOSURE_SPLIT_REPAIR_NOTE =
+  "this is a TWO-PIECE enclosure but the script produced a SINGLE part. Assign the two shells to a `parts` dict — `parts = {\"base\": <base solid>, \"lid\": <lid solid>}`, each a separate closed solid — instead of one `result`. Do NOT merge the base and lid into one body, and do NOT stuff both shells into a single `result` compound (the fragment gate rejects that). Shell the base with an open top; give the lid an inner lip with a printed-fit clearance (~0.25 mm), seam on a natural shadow line. Make the internal cavity tall enough to actually enclose the component stack (respect each component's keep-out height), not a shallow tray.";
