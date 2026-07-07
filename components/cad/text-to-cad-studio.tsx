@@ -27,7 +27,6 @@ import {
   PencilIcon,
   PinIcon,
   PlusIcon,
-  SparklesIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react";
@@ -43,7 +42,6 @@ import {
   getCadTopoUrl,
   recordCadFeedback,
   renameCadGeneration,
-  runCadTemplate,
   saveCadFileToProfile,
   setActiveCadVersion,
 } from "@/app/actions/cad-generation";
@@ -56,7 +54,6 @@ import type {
 } from "@/lib/cad/types";
 // Type-only: lib/cad/brief is server-only at runtime; the type is erased.
 import type { CadBrief } from "@/lib/cad/brief";
-import type { CadProcess } from "@/lib/cad/knowledge/dfm";
 import type { ViewerAnnotation } from "@/components/viewer/model-viewer";
 import {
   CAD_FEEDBACK_TAGS,
@@ -66,18 +63,14 @@ import {
 } from "@/lib/cad/feedback";
 import { cn } from "@/lib/utils";
 
-// Optional target-process picker (MTR-171): "" = Any (the conservative
-// multi-process DFM envelope, unchanged default); a specific pick threads that
-// process's DFM guidance into generation. Ids MUST stay in sync with
-// PROCESS_DFM's keys — the server rejects anything else and falls back to Any.
-const PROCESS_OPTIONS: ReadonlyArray<{ id: CadProcess | ""; label: string }> = [
-  { id: "", label: "Any process" },
-  { id: "fdm", label: "FDM / FFF" },
-  { id: "sla", label: "Resin (SLA/DLP)" },
-  { id: "sls", label: "SLS nylon" },
-  { id: "mjf", label: "MJF nylon" },
-  { id: "dmls", label: "Metal (DMLS)" },
-  { id: "binder_jet", label: "Binder jet metal" },
+// A few human-written example prompts for the empty state — plain strings that
+// prefill the composer (NOT exemplar template cards; MTR-208). Kept short and
+// evocative so a first-time visitor sees the kind of thing to ask for.
+const EXAMPLE_PROMPTS: readonly string[] = [
+  "A parametric enclosure for a Raspberry Pi with vents",
+  "An ergonomic knurled knob, 30mm",
+  "A desk organizer with three compartments",
+  "A wall bracket for a 22mm dowel",
 ];
 
 // The 3D viewer pulls in three.js / react-three-fiber — lazy-load it so the
@@ -98,33 +91,6 @@ const MaterializingBlob = lazy(() =>
 export interface StudioPart {
   name: string;
   fileAssetId: string;
-}
-
-/** One adjustable parameter of a template (a top-level numeric assignment). */
-export interface StudioTemplateParam {
-  /** The Python identifier in the exemplar source (e.g. `corner_radius`). */
-  name: string;
-  /** Human label ("corner radius") for the slider. */
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-}
-
-/**
- * A verified exemplar surfaced as an instant, no-LLM parametric starting point
- * (MTR-190). Params are extracted server-side (extractParams + ±50% ranges);
- * adjusting a slider re-runs the substituted source straight through the
- * sidecar — deterministic, watertight-by-construction, zero model cost.
- */
-export interface StudioTemplate {
-  id: string;
-  title: string;
-  /** One-line lesson/description shown on the card. */
-  blurb: string;
-  keywords: string[];
-  params: StudioTemplateParam[];
 }
 
 export interface StudioTurn {
@@ -346,11 +312,8 @@ function readRecentResume(threads: StudioThread[]): ResumeState | null {
  */
 export function TextToCadStudio({
   initialThreads,
-  templates = [],
 }: {
   initialThreads: StudioThread[];
-  /** Verified exemplars exposed as instant parametric starting points (MTR-190). */
-  templates?: StudioTemplate[];
 }) {
   const [threads, setThreads] = useState<StudioThread[]>(initialThreads);
   // Cold visit → start a fresh build (blank canvas). Only resume the last
@@ -419,8 +382,6 @@ export function TextToCadStudio({
   const [nameDraft, setNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
   const [images, setImages] = useState<AttachedImage[]>([]);
-  // Optional target process for DFM guidance (MTR-171). "" = Any (default).
-  const [targetProcess, setTargetProcess] = useState<CadProcess | "">("");
   const [selectedPartId, setSelectedPartId] = useState<string | null>(null);
   const [savingModel, setSavingModel] = useState(false);
   const [savedAssets, setSavedAssets] = useState<Set<string>>(new Set());
@@ -436,13 +397,6 @@ export function TextToCadStudio({
   // "confirmed no topology" (mesh-mode / legacy) so we never refetch and the
   // viewer stays on its flood-fill fallback.
   const [topoUrls, setTopoUrls] = useState<Record<string, string | null>>({});
-  // Template gallery (MTR-190): the exemplar whose slider panel is open on the
-  // empty state, its live (edited) param values, and whether a build's running.
-  const [templatePickerId, setTemplatePickerId] = useState<string | null>(null);
-  const [templateParams, setTemplateParams] = useState<Record<string, number>>(
-    {}
-  );
-  const [templateBusy, setTemplateBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -721,10 +675,6 @@ export function TextToCadStudio({
       ? topoUrls[viewedTurn.id] ?? undefined
       : undefined;
 
-  // The template whose slider panel is open on the empty-state gallery (MTR-190).
-  const selectedTemplate =
-    templates.find((t) => t.id === templatePickerId) ?? null;
-
   function startNewBuild() {
     // Abandoning an in-flight build is an explicit cancel: close the events
     // stream AND ask the server to stop the job (fire-and-forget — the row
@@ -863,84 +813,6 @@ export function TextToCadStudio({
       );
     } catch {
       setError("Could not prepare the download. Please try again.");
-    }
-  }
-
-  // Open a template's slider panel on the empty state, seeding the sliders
-  // with the exemplar's own parameter values (MTR-190).
-  function openTemplate(template: StudioTemplate) {
-    if (generating || templateBusy) return;
-    setError(null);
-    setTemplatePickerId((cur) => (cur === template.id ? null : template.id));
-    setTemplateParams(
-      Object.fromEntries(template.params.map((p) => [p.name, p.value]))
-    );
-  }
-
-  // Instantiate a template as a fresh build (MTR-190) — NO LLM. The server
-  // substitutes the picked params into the verified exemplar and runs it
-  // straight through the sidecar (~2s, deterministic, watertight). On success
-  // we open it as a new thread exactly like a fresh generation's `done` event.
-  async function buildTemplate(template: StudioTemplate) {
-    if (templateBusy || generating) return;
-    setTemplateBusy(true);
-    setError(null);
-    setSnapshot(null);
-    setProgress([]);
-    setSourceAssetId(null);
-    setTransition(null);
-    setGenerating(true); // deforming loader while the sidecar runs
-    try {
-      const res = await runCadTemplate({
-        exemplarId: template.id,
-        params: templateParams,
-      });
-      if ("error" in res) {
-        setError(res.error);
-        return;
-      }
-      const newTurn: StudioTurn = {
-        id: res.generationId,
-        prompt: `Template: ${template.title}`,
-        status: "succeeded",
-        renderUrl: res.renderUrl,
-        fileAssetId: res.fileAssetId,
-        sourceCode: res.sourceCode,
-        error: null,
-        rating: null,
-        feedbackTags: [],
-        feedbackNote: null,
-        parts: res.parts,
-        projectSlug: res.projectSlug,
-        remeshed: res.remeshed,
-        parentGenerationId: null,
-      };
-      const now = Date.now();
-      setThreads((prev) =>
-        prev.some((t) => t.rootId === newTurn.id)
-          ? prev
-          : [
-              {
-                rootId: newTurn.id,
-                title: res.title,
-                lastActivity: now,
-                turns: [newTurn],
-              },
-              ...prev,
-            ]
-      );
-      setActiveRootId(newTurn.id);
-      setViewTurnId(newTurn.id);
-      setTransition(
-        res.fileAssetId ? { assetId: res.fileAssetId, phase: "morph" } : null
-      );
-      setTemplatePickerId(null);
-      setTemplateParams({});
-    } catch {
-      setError("Could not build this template. Please try again.");
-    } finally {
-      setGenerating(false);
-      setTemplateBusy(false);
     }
   }
 
@@ -1189,9 +1061,9 @@ export function TextToCadStudio({
           // into `decisions`). Fresh builds only — the server ignores it on
           // revisions anyway.
           brief: briefToSend ?? undefined,
-          // Optional target process (MTR-171). Omitted when "Any" so a revision
-          // still inherits its parent's process; a specific pick overrides it.
-          process: targetProcess || undefined,
+          // Target-process threading (MTR-171) stays supported by the route but
+          // is no longer asked up-front in the composer (MTR-208): the signal
+          // will later be auto-derived from a material/print selection.
         }),
         signal: controller.signal,
       });
@@ -1448,6 +1320,25 @@ export function TextToCadStudio({
               )}
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              {/* Owner-only debug affordances (MTR-208): the whole studio is
+                  owner-gated, so these links are inherently owner-only. The
+                  eval scorecard had NO link from anywhere before this. */}
+              <Link
+                href="/prometheus/eval"
+                title="Harness scorecard"
+                className="hidden items-center gap-1.5 rounded-lg border border-foreground/15 px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground sm:inline-flex"
+              >
+                <ClipboardListIcon className="size-3.5" />
+                <span className="hidden lg:inline">Scorecard</span>
+              </Link>
+              <Link
+                href="/prometheus/exemplars"
+                title="Verified exemplars (debug)"
+                className="hidden items-center gap-1.5 rounded-lg border border-foreground/15 px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground sm:inline-flex"
+              >
+                <Layers className="size-3.5" />
+                <span className="hidden lg:inline">Exemplars</span>
+              </Link>
               {/* Builds history — mobile only; pops a scrollable dropdown down
                   from this icon. At lg+ the Builds sidebar block takes over. */}
               <div className="relative lg:hidden">
@@ -1648,133 +1539,37 @@ export function TextToCadStudio({
             </div>
           </div>
 
-          {/* Template gallery (MTR-190): verified exemplars as instant, no-LLM
-              parametric starting points. Empty state only — pick a part, nudge
-              its sliders, and build straight through the sidecar (~2s,
-              watertight-by-construction). Prompting stays the power tool for
-              refining, not the entry fee. */}
-          {!activeThread &&
-            !generating &&
-            !showTransition &&
-            templates.length > 0 && (
-              <div className="mt-5">
-                <div className="mb-3 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                  <span className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground">
-                    <SparklesIcon className="size-4" />
-                    Start from a template
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    Verified parts — adjust the dimensions and build instantly,
-                    no prompt needed.
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                  {templates.map((tpl) => {
-                    const open = tpl.id === templatePickerId;
-                    return (
-                      <button
-                        key={tpl.id}
-                        type="button"
-                        onClick={() => openTemplate(tpl)}
-                        aria-expanded={open}
-                        className={cn(
-                          "flex flex-col rounded-xl border p-3 text-left transition-colors",
-                          open
-                            ? "border-foreground/30 bg-foreground/5"
-                            : "border-foreground/10 hover:bg-foreground/5"
-                        )}
-                      >
-                        <span className="truncate text-sm font-medium text-foreground">
-                          {tpl.title}
-                        </span>
-                        <span className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                          {tpl.blurb}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Slider panel for the selected template, full width below the
-                    grid so card heights stay uniform. */}
-                {selectedTemplate && (
-                  <div className="mt-3 rounded-xl border border-foreground/15 bg-card/60 p-4">
-                    <div className="mb-3 flex items-center justify-between gap-3">
-                      <span className="text-sm font-medium text-foreground">
-                        {selectedTemplate.title}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setTemplatePickerId(null);
-                          setTemplateParams({});
-                        }}
-                        aria-label="Close template"
-                        className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
-                      >
-                        <XIcon className="size-3.5" />
-                      </button>
-                    </div>
-                    {selectedTemplate.params.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">
-                        No adjustable parameters — build it as-is.
-                      </p>
-                    ) : (
-                      <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-                        {selectedTemplate.params.map((p) => {
-                          const val = templateParams[p.name] ?? p.value;
-                          return (
-                            <label key={p.name} className="block">
-                              <span className="mb-1 flex items-center justify-between text-xs">
-                                <span className="text-muted-foreground">
-                                  {p.label}
-                                </span>
-                                <span className="font-mono text-foreground">
-                                  {fmtParam(val)}
-                                </span>
-                              </span>
-                              <input
-                                type="range"
-                                min={p.min}
-                                max={p.max}
-                                step={p.step}
-                                value={val}
-                                disabled={templateBusy}
-                                onChange={(e) =>
-                                  setTemplateParams((prev) => ({
-                                    ...prev,
-                                    [p.name]: Number(e.target.value),
-                                  }))
-                                }
-                                className="w-full accent-foreground"
-                              />
-                            </label>
-                          );
-                        })}
-                      </div>
-                    )}
-                    <div className="mt-4 flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => buildTemplate(selectedTemplate)}
-                        disabled={templateBusy}
-                        className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-60"
-                      >
-                        {templateBusy ? (
-                          <Loader2Icon className="size-4 animate-spin" />
-                        ) : (
-                          <SparklesIcon className="size-4" />
-                        )}
-                        Build this
-                      </button>
-                      <span className="text-xs text-muted-foreground">
-                        Refine it with a prompt after it lands.
-                      </span>
-                    </div>
-                  </div>
-                )}
+          {/* Prompt-first empty state (MTR-208): a few human-written example
+              prompts as plain chips. Tapping one prefills the composer and
+              focuses it — a starting point to edit, not an exemplar to build. */}
+          {!activeThread && !generating && !showTransition && (
+            <div className="mt-5">
+              <p className="mb-2 text-xs text-muted-foreground">
+                Not sure where to start? Try one of these:
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {EXAMPLE_PROMPTS.map((ex) => (
+                  <button
+                    key={ex}
+                    type="button"
+                    onClick={() => {
+                      setPrompt(ex);
+                      requestAnimationFrame(() => {
+                        const el = textareaRef.current;
+                        if (el) {
+                          el.focus();
+                          el.setSelectionRange(el.value.length, el.value.length);
+                        }
+                      });
+                    }}
+                    className="cursor-pointer rounded-full border border-foreground/15 bg-foreground/5 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+                  >
+                    {ex}
+                  </button>
+                ))}
               </div>
-            )}
+            </div>
+          )}
 
           {/* Assembly view tabs (MTR-174): default = every part in assembly
               position; a part tab isolates it by hiding the others (same
@@ -2371,27 +2166,6 @@ export function TextToCadStudio({
                 >
                   <PaperclipIcon className="size-4" />
                 </button>
-                {/* Optional target-process picker (MTR-171): steers DFM
-                    guidance. "Any" keeps the conservative envelope. */}
-                <label className="sr-only" htmlFor="cad-target-process">
-                  Target print process
-                </label>
-                <select
-                  id="cad-target-process"
-                  value={targetProcess}
-                  onChange={(e) =>
-                    setTargetProcess(e.target.value as CadProcess | "")
-                  }
-                  disabled={generating}
-                  title="Target print process — steers manufacturability guidance"
-                  className="h-8 cursor-pointer rounded-lg bg-transparent px-2 text-xs font-medium text-muted-foreground outline-none hover:bg-foreground/5 hover:text-foreground disabled:opacity-40"
-                >
-                  {PROCESS_OPTIONS.map((o) => (
-                    <option key={o.id || "any"} value={o.id}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
                 {/* Silent pre-build spec check in flight (fresh builds). */}
                 {briefLoading && (
                   <span className="inline-flex h-8 items-center gap-1.5 px-2 text-xs font-medium text-muted-foreground">
