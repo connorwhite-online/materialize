@@ -56,6 +56,7 @@ import type {
 // Type-only: lib/cad/brief is server-only at runtime; the type is erased.
 import type { CadBrief } from "@/lib/cad/brief";
 import type { ViewerAnnotation } from "@/components/viewer/model-viewer";
+import { planComposerSubmit } from "@/components/cad/composer-submit";
 import { useKeyboardStickyBottom } from "@/lib/hooks/use-keyboard-sticky-bottom";
 import {
   CAD_FEEDBACK_TAGS,
@@ -727,6 +728,13 @@ export function TextToCadStudio({
     !compareBaseAssetId && viewedParts.length <= 1 && viewedTurn
       ? topoUrls[viewedTurn.id] ?? undefined
       : undefined;
+  // Mesh-mode / legacy models expose no B-rep topology (resolved to null in
+  // topoUrls): a pin then references approximate coordinates only, not an exact
+  // CAD face, so the reference is weaker — worth flagging (MTR-217).
+  const viewedModelHasNoTopo =
+    !!viewedTurn &&
+    viewedTurn.id in topoUrls &&
+    topoUrls[viewedTurn.id] == null;
 
   function startNewBuild() {
     // Abandoning an in-flight build is an explicit cancel: close the events
@@ -1038,9 +1046,17 @@ export function TextToCadStudio({
 
   async function submit() {
     const text = prompt.trim();
-    if (text.length < 3 || generating || briefLoading) return;
+    // A pin with no typed text is a valid revision on its own (MTR-217) — the
+    // annotations carry the instruction. Otherwise require a few characters.
+    const { canSubmit, annotationOnly, instruction } = planComposerSubmit(
+      prompt,
+      annotations.length
+    );
+    if (!canSubmit || generating || briefLoading) return;
 
     const parentId = latestTurn?.id; // revise the latest turn when in a thread
+    // Annotation-only sends need a model to annotate (always a revision).
+    if (annotationOnly && !parentId) return;
 
     // Morph the composer into the right-aligned "sent" bubble immediately, on
     // BOTH entry paths (chip or typed), BEFORE the spec check runs (MTR-209
@@ -1048,7 +1064,7 @@ export function TextToCadStudio({
     // rather than parking the text with an inline "Checking the spec…". The
     // typed value stays in `prompt` for the quick-check re-submit / error retry;
     // it's just no longer shown (the composer is unmounted while in flight).
-    setSubmittedPrompt(text);
+    setSubmittedPrompt(instruction);
 
     // Ask-before-build (MTR-191 ask-site a): fresh builds run the silent
     // brief step first. Questions pause the flow ONCE with choice cards;
@@ -1098,7 +1114,7 @@ export function TextToCadStudio({
           })
           .join("\n")
       : "";
-    const sentPrompt = text + annoBlock;
+    const sentPrompt = instruction + annoBlock;
 
     setError(null);
     setProgress([]);
@@ -1112,6 +1128,12 @@ export function TextToCadStudio({
     // backing value; it's restored on any error path below so a failed build
     // doesn't swallow what the user typed.
     setPrompt("");
+    // The pins have "sent" — clear them at send time (MTR-217) so they don't
+    // linger through the build or silently re-send on the next revision. The
+    // snapshot restores them if the request fails below.
+    const sentAnnotations = annotations;
+    setAnnotations([]);
+    setAnnotateMode(false);
     setGenerating(true);
     setShowHistory(false);
 
@@ -1145,9 +1167,11 @@ export function TextToCadStudio({
 
       if (!res.ok) {
         setError((await res.text()) || "Generation failed.");
-        // Restore the composer so the user can retry (the thread unwinds).
+        // Restore the composer so the user can retry (the thread unwinds); bring
+        // the pins back too so an annotation revision isn't silently lost.
         setPrompt(text);
         setSubmittedPrompt(null);
+        setAnnotations(sentAnnotations);
         return;
       }
 
@@ -1160,13 +1184,20 @@ export function TextToCadStudio({
       jobRef.current = {
         jobId,
         generationId,
-        prompt: text,
+        // The turn's history label — the synthesized instruction for an
+        // annotation-only revision so it isn't blank (MTR-217).
+        prompt: instruction,
         parentId: parentId ?? null,
         rootId: parentId ? activeRootId : generationId,
       };
       persistResume();
 
-      const terminal = await streamJobEvents(jobId, controller, text, parentId);
+      const terminal = await streamJobEvents(
+        jobId,
+        controller,
+        instruction,
+        parentId
+      );
       // Keep the stored job on a non-terminal drop (unmount / lost
       // connection) so the next visit can reattach.
       if (terminal) {
@@ -1178,6 +1209,7 @@ export function TextToCadStudio({
         setError("Generation failed. Please try again.");
         setPrompt(text);
         setSubmittedPrompt(null);
+        setAnnotations(sentAnnotations);
       }
     } finally {
       setGenerating(false);
@@ -1976,6 +2008,12 @@ export function TextToCadStudio({
                   ))}
                 </ol>
               )}
+              {annotations.length > 0 && viewedModelHasNoTopo && (
+                <p className="mt-2 text-[11px] text-muted-foreground">
+                  This model has no exact CAD faces, so pins reference
+                  approximate coordinates — the change may be less precise.
+                </p>
+              )}
             </div>
           )}
 
@@ -2334,7 +2372,10 @@ export function TextToCadStudio({
               <button
                 type="button"
                 onClick={submit}
-                disabled={generating || prompt.trim().length < 3}
+                disabled={
+                  generating ||
+                  !planComposerSubmit(prompt, annotations.length).canSubmit
+                }
                 aria-label={composerLabel}
                 title={composerLabel}
                 className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-foreground text-background disabled:opacity-40"
