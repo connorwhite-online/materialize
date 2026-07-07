@@ -9,8 +9,9 @@ import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
 /**
  * Answer a mid-cycle interactive question on a background CAD job (MTR-191).
  *
- * Records the user's pick for a `question` progress event into cadJobs.answers
- * (questionId -> chosen optionId). The executor's awaiting_input poll notices
+ * Records the user's answer for a `question` progress event into
+ * cadJobs.answers (questionId -> chosen optionId, OR a free-text answer from
+ * the always-present custom field, MTR-209). The executor's awaiting_input poll notices
  * it, appends the resolving `answer` event, and flips the job back to
  * `running` — the SAME single-writer model as POST .../cancel: this endpoint
  * is the only answer-writer, the executor the only reader/status-transitioner.
@@ -19,6 +20,43 @@ import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Max length of a free-text custom answer (matches the composer cap). */
+const MAX_TEXT_LEN = 2000;
+/** Max length of a preset option id. */
+const MAX_OPTION_LEN = 200;
+
+/**
+ * Validate + normalize an answer body. The client sends EITHER a preset
+ * `optionId` (a card pick) OR a free-text `text` (the always-present custom
+ * field, MTR-209). Both collapse to a single `answer` string stored in
+ * `cadJobs.answers[questionId]` — the same column the executor already reads.
+ * Pure + exported so the branch table is unit-tested without the route's
+ * auth/DB shell.
+ */
+export function parseAnswerBody(
+  body: unknown
+): { questionId: string; answer: string } | null {
+  const questionId = (body as { questionId?: unknown })?.questionId;
+  if (typeof questionId !== "string" || !questionId || questionId.length > 200) {
+    return null;
+  }
+  const optionId = (body as { optionId?: unknown })?.optionId;
+  const text = (body as { text?: unknown })?.text;
+
+  // Preset pick takes precedence when present and valid.
+  if (typeof optionId === "string" && optionId && optionId.length <= MAX_OPTION_LEN) {
+    return { questionId, answer: optionId };
+  }
+  // Otherwise accept a non-empty, length-bounded free-text answer.
+  if (typeof text === "string") {
+    const trimmed = text.trim();
+    if (trimmed && trimmed.length <= MAX_TEXT_LEN) {
+      return { questionId, answer: trimmed };
+    }
+  }
+  return null;
+}
 
 export async function POST(
   request: Request,
@@ -44,18 +82,11 @@ export async function POST(
   } catch {
     return new Response("Bad request", { status: 400 });
   }
-  const questionId = (body as { questionId?: unknown })?.questionId;
-  const optionId = (body as { optionId?: unknown })?.optionId;
-  if (
-    typeof questionId !== "string" ||
-    !questionId ||
-    typeof optionId !== "string" ||
-    !optionId ||
-    questionId.length > 200 ||
-    optionId.length > 200
-  ) {
+  const parsed = parseAnswerBody(body);
+  if (!parsed) {
     return new Response("Bad request", { status: 400 });
   }
+  const { questionId, answer } = parsed;
 
   // Ownership: the job belongs to whoever owns its generation. Load the current
   // answers so we can merge (the executor never writes this column, so there's
@@ -84,7 +115,7 @@ export async function POST(
   await db
     .update(cadJobs)
     .set({
-      answers: { ...(job.answers ?? {}), [questionId]: optionId },
+      answers: { ...(job.answers ?? {}), [questionId]: answer },
       updatedAt: new Date(),
     })
     .where(eq(cadJobs.id, jobId));

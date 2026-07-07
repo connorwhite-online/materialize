@@ -27,11 +27,11 @@ import {
   PencilIcon,
   PinIcon,
   PlusIcon,
-  SparklesIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react";
 import { zipSync } from "fflate";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { ChevronDown } from "@/components/icons/chevron-down";
 import { ChevronRight } from "@/components/icons/chevron-right";
@@ -43,7 +43,6 @@ import {
   getCadTopoUrl,
   recordCadFeedback,
   renameCadGeneration,
-  runCadTemplate,
   saveCadFileToProfile,
   setActiveCadVersion,
 } from "@/app/actions/cad-generation";
@@ -56,8 +55,8 @@ import type {
 } from "@/lib/cad/types";
 // Type-only: lib/cad/brief is server-only at runtime; the type is erased.
 import type { CadBrief } from "@/lib/cad/brief";
-import type { CadProcess } from "@/lib/cad/knowledge/dfm";
 import type { ViewerAnnotation } from "@/components/viewer/model-viewer";
+import { useKeyboardStickyBottom } from "@/lib/hooks/use-keyboard-sticky-bottom";
 import {
   CAD_FEEDBACK_TAGS,
   CAD_FEEDBACK_TAG_LABELS,
@@ -66,18 +65,14 @@ import {
 } from "@/lib/cad/feedback";
 import { cn } from "@/lib/utils";
 
-// Optional target-process picker (MTR-171): "" = Any (the conservative
-// multi-process DFM envelope, unchanged default); a specific pick threads that
-// process's DFM guidance into generation. Ids MUST stay in sync with
-// PROCESS_DFM's keys — the server rejects anything else and falls back to Any.
-const PROCESS_OPTIONS: ReadonlyArray<{ id: CadProcess | ""; label: string }> = [
-  { id: "", label: "Any process" },
-  { id: "fdm", label: "FDM / FFF" },
-  { id: "sla", label: "Resin (SLA/DLP)" },
-  { id: "sls", label: "SLS nylon" },
-  { id: "mjf", label: "MJF nylon" },
-  { id: "dmls", label: "Metal (DMLS)" },
-  { id: "binder_jet", label: "Binder jet metal" },
+// A few human-written example prompts for the empty state — plain strings that
+// prefill the composer (NOT exemplar template cards; MTR-208). Kept short and
+// evocative so a first-time visitor sees the kind of thing to ask for.
+const EXAMPLE_PROMPTS: readonly string[] = [
+  "A parametric enclosure for a Raspberry Pi with vents",
+  "An ergonomic knurled knob, 30mm",
+  "A desk organizer with three compartments",
+  "A wall bracket for a 22mm dowel",
 ];
 
 // The 3D viewer pulls in three.js / react-three-fiber — lazy-load it so the
@@ -98,33 +93,6 @@ const MaterializingBlob = lazy(() =>
 export interface StudioPart {
   name: string;
   fileAssetId: string;
-}
-
-/** One adjustable parameter of a template (a top-level numeric assignment). */
-export interface StudioTemplateParam {
-  /** The Python identifier in the exemplar source (e.g. `corner_radius`). */
-  name: string;
-  /** Human label ("corner radius") for the slider. */
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-}
-
-/**
- * A verified exemplar surfaced as an instant, no-LLM parametric starting point
- * (MTR-190). Params are extracted server-side (extractParams + ±50% ranges);
- * adjusting a slider re-runs the substituted source straight through the
- * sidecar — deterministic, watertight-by-construction, zero model cost.
- */
-export interface StudioTemplate {
-  id: string;
-  title: string;
-  /** One-line lesson/description shown on the card. */
-  blurb: string;
-  keywords: string[];
-  params: StudioTemplateParam[];
 }
 
 export interface StudioTurn {
@@ -346,11 +314,8 @@ function readRecentResume(threads: StudioThread[]): ResumeState | null {
  */
 export function TextToCadStudio({
   initialThreads,
-  templates = [],
 }: {
   initialThreads: StudioThread[];
-  /** Verified exemplars exposed as instant parametric starting points (MTR-190). */
-  templates?: StudioTemplate[];
 }) {
   const [threads, setThreads] = useState<StudioThread[]>(initialThreads);
   // Cold visit → start a fresh build (blank canvas). Only resume the last
@@ -419,8 +384,6 @@ export function TextToCadStudio({
   const [nameDraft, setNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
   const [images, setImages] = useState<AttachedImage[]>([]);
-  // Optional target process for DFM guidance (MTR-171). "" = Any (default).
-  const [targetProcess, setTargetProcess] = useState<CadProcess | "">("");
   const [selectedPartId, setSelectedPartId] = useState<string | null>(null);
   const [savingModel, setSavingModel] = useState(false);
   const [savedAssets, setSavedAssets] = useState<Set<string>>(new Set());
@@ -436,15 +399,21 @@ export function TextToCadStudio({
   // "confirmed no topology" (mesh-mode / legacy) so we never refetch and the
   // viewer stays on its flood-fill fallback.
   const [topoUrls, setTopoUrls] = useState<Record<string, string | null>>({});
-  // Template gallery (MTR-190): the exemplar whose slider panel is open on the
-  // empty state, its live (edited) param values, and whether a build's running.
-  const [templatePickerId, setTemplatePickerId] = useState<string | null>(null);
-  const [templateParams, setTemplateParams] = useState<Record<string, number>>(
-    {}
-  );
-  const [templateBusy, setTemplateBusy] = useState(false);
+  // The submitted prompt, held for the life of a generation so it can ride in
+  // the RIGHT-aligned "sent" bubble of the morphing generation thread (MTR-209)
+  // while the composer empties. Restored into the composer on error so a failed
+  // build never loses the user's typed instruction.
+  const [submittedPrompt, setSubmittedPrompt] = useState<string | null>(null);
+  // Respect the OS "reduce motion" setting: the morph sequence collapses to
+  // instant opacity swaps instead of layout/spring animation (Accessibility).
+  const reduceMotion = useReducedMotion();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Outer fixed wrapper of the floating composer — its `bottom` is rewritten
+  // from the VisualViewport API so the composer stays pinned above the iOS
+  // keyboard instead of hiding behind it (MTR-211).
+  const composerFixedRef = useRef<HTMLDivElement>(null);
+  useKeyboardStickyBottom(composerFixedRef, 0);
   const abortRef = useRef<AbortController | null>(null);
   // In-flight silent spec-check (fetchBrief) — aborted on thread switch /
   // new-build so a slow check can't pop a stale quick-check card.
@@ -511,6 +480,9 @@ export function TextToCadStudio({
     setProgress([]);
     setSnapshot(null);
     setError(null);
+    // Repopulate the "sent" bubble so a reattached build shows its prompt in
+    // the morphing thread (the composer text itself was never persisted).
+    setSubmittedPrompt(saved.prompt || null);
     setGenerating(true);
     void streamJobEvents(
       saved.jobId,
@@ -721,10 +693,6 @@ export function TextToCadStudio({
       ? topoUrls[viewedTurn.id] ?? undefined
       : undefined;
 
-  // The template whose slider panel is open on the empty-state gallery (MTR-190).
-  const selectedTemplate =
-    templates.find((t) => t.id === templatePickerId) ?? null;
-
   function startNewBuild() {
     // Abandoning an in-flight build is an explicit cancel: close the events
     // stream AND ask the server to stop the job (fire-and-forget — the row
@@ -750,6 +718,7 @@ export function TextToCadStudio({
     setBriefLoading(false);
     setError(null);
     setPrompt("");
+    setSubmittedPrompt(null);
     setImages([]);
     setSelectedPartId(null);
     setShowHistory(false);
@@ -863,84 +832,6 @@ export function TextToCadStudio({
       );
     } catch {
       setError("Could not prepare the download. Please try again.");
-    }
-  }
-
-  // Open a template's slider panel on the empty state, seeding the sliders
-  // with the exemplar's own parameter values (MTR-190).
-  function openTemplate(template: StudioTemplate) {
-    if (generating || templateBusy) return;
-    setError(null);
-    setTemplatePickerId((cur) => (cur === template.id ? null : template.id));
-    setTemplateParams(
-      Object.fromEntries(template.params.map((p) => [p.name, p.value]))
-    );
-  }
-
-  // Instantiate a template as a fresh build (MTR-190) — NO LLM. The server
-  // substitutes the picked params into the verified exemplar and runs it
-  // straight through the sidecar (~2s, deterministic, watertight). On success
-  // we open it as a new thread exactly like a fresh generation's `done` event.
-  async function buildTemplate(template: StudioTemplate) {
-    if (templateBusy || generating) return;
-    setTemplateBusy(true);
-    setError(null);
-    setSnapshot(null);
-    setProgress([]);
-    setSourceAssetId(null);
-    setTransition(null);
-    setGenerating(true); // deforming loader while the sidecar runs
-    try {
-      const res = await runCadTemplate({
-        exemplarId: template.id,
-        params: templateParams,
-      });
-      if ("error" in res) {
-        setError(res.error);
-        return;
-      }
-      const newTurn: StudioTurn = {
-        id: res.generationId,
-        prompt: `Template: ${template.title}`,
-        status: "succeeded",
-        renderUrl: res.renderUrl,
-        fileAssetId: res.fileAssetId,
-        sourceCode: res.sourceCode,
-        error: null,
-        rating: null,
-        feedbackTags: [],
-        feedbackNote: null,
-        parts: res.parts,
-        projectSlug: res.projectSlug,
-        remeshed: res.remeshed,
-        parentGenerationId: null,
-      };
-      const now = Date.now();
-      setThreads((prev) =>
-        prev.some((t) => t.rootId === newTurn.id)
-          ? prev
-          : [
-              {
-                rootId: newTurn.id,
-                title: res.title,
-                lastActivity: now,
-                turns: [newTurn],
-              },
-              ...prev,
-            ]
-      );
-      setActiveRootId(newTurn.id);
-      setViewTurnId(newTurn.id);
-      setTransition(
-        res.fileAssetId ? { assetId: res.fileAssetId, phase: "morph" } : null
-      );
-      setTemplatePickerId(null);
-      setTemplateParams({});
-    } catch {
-      setError("Could not build this template. Please try again.");
-    } finally {
-      setGenerating(false);
-      setTemplateBusy(false);
     }
   }
 
@@ -1165,6 +1056,11 @@ export function TextToCadStudio({
     // build has none, so the wireframe blob deforms instead.
     setSourceAssetId(parentId ? activeAssetId : null);
     setTransition(null);
+    // Morph the composer into the "sent" bubble: stash the prompt for the
+    // thread and empty the composer (MTR-209). Restored on any error path below
+    // so a failed build doesn't swallow what the user typed.
+    setSubmittedPrompt(text);
+    setPrompt("");
     setGenerating(true);
     setShowHistory(false);
 
@@ -1189,15 +1085,18 @@ export function TextToCadStudio({
           // into `decisions`). Fresh builds only — the server ignores it on
           // revisions anyway.
           brief: briefToSend ?? undefined,
-          // Optional target process (MTR-171). Omitted when "Any" so a revision
-          // still inherits its parent's process; a specific pick overrides it.
-          process: targetProcess || undefined,
+          // Target-process threading (MTR-171) stays supported by the route but
+          // is no longer asked up-front in the composer (MTR-208): the signal
+          // will later be auto-derived from a material/print selection.
         }),
         signal: controller.signal,
       });
 
       if (!res.ok) {
         setError((await res.text()) || "Generation failed.");
+        // Restore the composer so the user can retry (the thread unwinds).
+        setPrompt(text);
+        setSubmittedPrompt(null);
         return;
       }
 
@@ -1226,6 +1125,8 @@ export function TextToCadStudio({
     } catch (err) {
       if ((err as Error)?.name !== "AbortError") {
         setError("Generation failed. Please try again.");
+        setPrompt(text);
+        setSubmittedPrompt(null);
       }
     } finally {
       setGenerating(false);
@@ -1288,6 +1189,10 @@ export function TextToCadStudio({
               setSnapshot(null);
               setPendingQuestion(null);
               setError(ev.error);
+              // Return the typed instruction to the composer so a failed build
+              // can be retried; the morphing thread unwinds to rest.
+              setPrompt(submittedPrompt);
+              setSubmittedPrompt(null);
             } else if (ev.type === "snapshot") {
               // Live build preview: latest frame only — REPLACE, never
               // accumulate (each frame is a whole base64 PNG; the progress
@@ -1345,15 +1250,23 @@ export function TextToCadStudio({
    * re-enables it to retry. The SSE tail is untouched; the executor's poll
    * picks the answer up and resumes the build.
    */
-  async function answerQuestion(optionId: string) {
+  async function answerQuestion(pick: { optionId?: string; text?: string }) {
     const q = pendingQuestion;
     if (!q || q.answering) return;
+    // A preset card sends `optionId`; the always-present custom field sends
+    // `text` (MTR-209). Guard against an empty custom submit.
+    const customText = pick.text?.trim();
+    if (!pick.optionId && !customText) return;
     setPendingQuestion({ ...q, answering: true });
     try {
       const res = await fetch(`/api/cad/jobs/${q.jobId}/answer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ questionId: q.questionId, optionId }),
+        body: JSON.stringify(
+          pick.optionId
+            ? { questionId: q.questionId, optionId: pick.optionId }
+            : { questionId: q.questionId, text: customText }
+        ),
       });
       if (!res.ok) throw new Error(`answer ${res.status}`);
       // Leave the card in place (answering=true) — the `answer` event clears
@@ -1448,6 +1361,25 @@ export function TextToCadStudio({
               )}
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              {/* Owner-only debug affordances (MTR-208): the whole studio is
+                  owner-gated, so these links are inherently owner-only. The
+                  eval scorecard had NO link from anywhere before this. */}
+              <Link
+                href="/prometheus/eval"
+                title="Harness scorecard"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-foreground/15 px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+              >
+                <ClipboardListIcon className="size-3.5" />
+                <span className="hidden lg:inline">Scorecard</span>
+              </Link>
+              <Link
+                href="/prometheus/exemplars"
+                title="Verified exemplars (debug)"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-foreground/15 px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+              >
+                <Layers className="size-3.5" />
+                <span className="hidden lg:inline">Exemplars</span>
+              </Link>
               {/* Builds history — mobile only; pops a scrollable dropdown down
                   from this icon. At lg+ the Builds sidebar block takes over. */}
               <div className="relative lg:hidden">
@@ -1601,32 +1533,17 @@ export function TextToCadStudio({
                       }
                     />
                   </Suspense>
-                  {generating && !transition && (
+                  {generating && !transition && snapshot && (
                     <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 p-6">
-                      {/* Live build preview — the latest snapshot render of
-                          the in-progress solid, cross-fading as frames land.
-                          Cleared on `done`, so the blob→model morph hand-off
-                          below runs untouched. */}
-                      {snapshot && (
-                        <SnapshotPreview
-                          render={snapshot.render}
-                          step={snapshot.step}
-                        />
-                      )}
-                      {/* Mid-cycle question (MTR-191): when the build suspends
-                          on a choice, the card takes over the overlay (the
-                          container is pointer-events-none, so the card opts
-                          itself back in). Otherwise the usual status panel. */}
-                      {pendingQuestion ? (
-                        <QuestionCard
-                          question={pendingQuestion}
-                          onAnswer={answerQuestion}
-                        />
-                      ) : (
-                        <div className="glass rounded-2xl px-5 py-4 shadow-lg">
-                          <ProgressPanel events={progress} />
-                        </div>
-                      )}
+                      {/* Live build preview — the latest snapshot render of the
+                          in-progress solid, cross-fading as frames land. Status
+                          + the interactive question now live in the morphing
+                          generation thread above the composer (MTR-209); the
+                          particle cloud is the visual backdrop here (MTR-210). */}
+                      <SnapshotPreview
+                        render={snapshot.render}
+                        step={snapshot.step}
+                      />
                     </div>
                   )}
                 </div>
@@ -1648,133 +1565,37 @@ export function TextToCadStudio({
             </div>
           </div>
 
-          {/* Template gallery (MTR-190): verified exemplars as instant, no-LLM
-              parametric starting points. Empty state only — pick a part, nudge
-              its sliders, and build straight through the sidecar (~2s,
-              watertight-by-construction). Prompting stays the power tool for
-              refining, not the entry fee. */}
-          {!activeThread &&
-            !generating &&
-            !showTransition &&
-            templates.length > 0 && (
-              <div className="mt-5">
-                <div className="mb-3 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                  <span className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground">
-                    <SparklesIcon className="size-4" />
-                    Start from a template
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    Verified parts — adjust the dimensions and build instantly,
-                    no prompt needed.
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                  {templates.map((tpl) => {
-                    const open = tpl.id === templatePickerId;
-                    return (
-                      <button
-                        key={tpl.id}
-                        type="button"
-                        onClick={() => openTemplate(tpl)}
-                        aria-expanded={open}
-                        className={cn(
-                          "flex flex-col rounded-xl border p-3 text-left transition-colors",
-                          open
-                            ? "border-foreground/30 bg-foreground/5"
-                            : "border-foreground/10 hover:bg-foreground/5"
-                        )}
-                      >
-                        <span className="truncate text-sm font-medium text-foreground">
-                          {tpl.title}
-                        </span>
-                        <span className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                          {tpl.blurb}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Slider panel for the selected template, full width below the
-                    grid so card heights stay uniform. */}
-                {selectedTemplate && (
-                  <div className="mt-3 rounded-xl border border-foreground/15 bg-card/60 p-4">
-                    <div className="mb-3 flex items-center justify-between gap-3">
-                      <span className="text-sm font-medium text-foreground">
-                        {selectedTemplate.title}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setTemplatePickerId(null);
-                          setTemplateParams({});
-                        }}
-                        aria-label="Close template"
-                        className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
-                      >
-                        <XIcon className="size-3.5" />
-                      </button>
-                    </div>
-                    {selectedTemplate.params.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">
-                        No adjustable parameters — build it as-is.
-                      </p>
-                    ) : (
-                      <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-                        {selectedTemplate.params.map((p) => {
-                          const val = templateParams[p.name] ?? p.value;
-                          return (
-                            <label key={p.name} className="block">
-                              <span className="mb-1 flex items-center justify-between text-xs">
-                                <span className="text-muted-foreground">
-                                  {p.label}
-                                </span>
-                                <span className="font-mono text-foreground">
-                                  {fmtParam(val)}
-                                </span>
-                              </span>
-                              <input
-                                type="range"
-                                min={p.min}
-                                max={p.max}
-                                step={p.step}
-                                value={val}
-                                disabled={templateBusy}
-                                onChange={(e) =>
-                                  setTemplateParams((prev) => ({
-                                    ...prev,
-                                    [p.name]: Number(e.target.value),
-                                  }))
-                                }
-                                className="w-full accent-foreground"
-                              />
-                            </label>
-                          );
-                        })}
-                      </div>
-                    )}
-                    <div className="mt-4 flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => buildTemplate(selectedTemplate)}
-                        disabled={templateBusy}
-                        className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-60"
-                      >
-                        {templateBusy ? (
-                          <Loader2Icon className="size-4 animate-spin" />
-                        ) : (
-                          <SparklesIcon className="size-4" />
-                        )}
-                        Build this
-                      </button>
-                      <span className="text-xs text-muted-foreground">
-                        Refine it with a prompt after it lands.
-                      </span>
-                    </div>
-                  </div>
-                )}
+          {/* Prompt-first empty state (MTR-208): a few human-written example
+              prompts as plain chips. Tapping one prefills the composer and
+              focuses it — a starting point to edit, not an exemplar to build. */}
+          {!activeThread && !generating && !showTransition && (
+            <div className="mt-5">
+              <p className="mb-2 text-xs text-muted-foreground">
+                Not sure where to start? Try one of these:
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {EXAMPLE_PROMPTS.map((ex) => (
+                  <button
+                    key={ex}
+                    type="button"
+                    onClick={() => {
+                      setPrompt(ex);
+                      requestAnimationFrame(() => {
+                        const el = textareaRef.current;
+                        if (el) {
+                          el.focus();
+                          el.setSelectionRange(el.value.length, el.value.length);
+                        }
+                      });
+                    }}
+                    className="cursor-pointer rounded-full border border-foreground/15 bg-foreground/5 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+                  >
+                    {ex}
+                  </button>
+                ))}
               </div>
-            )}
+            </div>
+          )}
 
           {/* Assembly view tabs (MTR-174): default = every part in assembly
               position; a part tab isolates it by hiding the others (same
@@ -2251,7 +2072,10 @@ export function TextToCadStudio({
           viewport-fixed bar lines up with the page's content area; the inner
           grid then mirrors the page grid so the composer centers under the
           viewer column and ignores the Builds sidebar (empty 300px track). */}
-      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 nav:pl-56">
+      <div
+        ref={composerFixedRef}
+        className="pointer-events-none fixed inset-x-0 bottom-0 z-30 nav:pl-56"
+      >
         {/* Sub-nav viewports show the floating MobileTabBar pill (bottom-6,
             z-40); lift the composer above it so its controls stay tappable.
             At nav+ the pill is gone and the sidebar rail takes over. */}
@@ -2273,6 +2097,28 @@ export function TextToCadStudio({
               canBuild={prompt.trim().length >= 3}
             />
           )}
+          {/* Morphing generation thread (MTR-209): the composer "sends" the
+              prompt as a RIGHT-aligned bubble, a one-line status loader sits
+              LEFT-aligned below it, and when a question fires the status
+              container physically morphs into the questionnaire — then back.
+              Unmounts (exits down) on completion, returning to the rest
+              composer. */}
+          <AnimatePresence>
+            {generating && submittedPrompt !== null && (
+              <GenerationThread
+                key="gen-thread"
+                promptText={submittedPrompt}
+                statusText={
+                  progress.length
+                    ? describeEvent(progress[progress.length - 1]).text
+                    : "Getting started"
+                }
+                pendingQuestion={pendingQuestion}
+                onAnswer={answerQuestion}
+                reduce={!!reduceMotion}
+              />
+            )}
+          </AnimatePresence>
           <div
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
@@ -2371,27 +2217,6 @@ export function TextToCadStudio({
                 >
                   <PaperclipIcon className="size-4" />
                 </button>
-                {/* Optional target-process picker (MTR-171): steers DFM
-                    guidance. "Any" keeps the conservative envelope. */}
-                <label className="sr-only" htmlFor="cad-target-process">
-                  Target print process
-                </label>
-                <select
-                  id="cad-target-process"
-                  value={targetProcess}
-                  onChange={(e) =>
-                    setTargetProcess(e.target.value as CadProcess | "")
-                  }
-                  disabled={generating}
-                  title="Target print process — steers manufacturability guidance"
-                  className="h-8 cursor-pointer rounded-lg bg-transparent px-2 text-xs font-medium text-muted-foreground outline-none hover:bg-foreground/5 hover:text-foreground disabled:opacity-40"
-                >
-                  {PROCESS_OPTIONS.map((o) => (
-                    <option key={o.id || "any"} value={o.id}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
                 {/* Silent pre-build spec check in flight (fresh builds). */}
                 {briefLoading && (
                   <span className="inline-flex h-8 items-center gap-1.5 px-2 text-xs font-medium text-muted-foreground">
@@ -2704,14 +2529,110 @@ function QuickCheckCard({
 }
 
 /**
- * Mid-cycle question card (MTR-191): shown over the generating overlay when the
- * build suspends on a genuine choice the model couldn't settle. Tappable
- * options (recommended default badged); if an option carries a thumbnail it's a
- * visual draft-form variant and renders as an image tile. Picking posts the
- * answer and the build resumes; ignoring it lets the server take the default
- * after the timeout — so this never traps an away user.
+ * The morphing generation thread (MTR-209). One surface that carries the whole
+ * generation lifecycle in an iMessage sent/received metaphor:
+ *   • the submitted prompt as a RIGHT-aligned "sent" bubble (truncated, 1 line),
+ *   • a LEFT-aligned "received" system bubble that shows a one-line status
+ *     loader and *physically morphs* (shared-layout resize) into the
+ *     questionnaire when a mid-cycle question fires, then morphs back.
+ * All motion is transform/opacity + layout (no per-frame CPU); `reduce`
+ * collapses everything to instant opacity swaps for prefers-reduced-motion.
+ * Mounted while a build runs; exits (down) on completion → back to rest.
  */
-function QuestionCard({
+function GenerationThread({
+  promptText,
+  statusText,
+  pendingQuestion,
+  onAnswer,
+  reduce,
+}: {
+  promptText: string;
+  statusText: string;
+  pendingQuestion: {
+    questionId: string;
+    text: string;
+    options: CadQuestionOption[];
+    defaultOptionId?: string;
+    answering: boolean;
+  } | null;
+  onAnswer: (pick: { optionId?: string; text?: string }) => void;
+  reduce: boolean;
+}) {
+  const spring = reduce
+    ? { duration: 0 }
+    : ({ type: "spring", stiffness: 480, damping: 42, mass: 0.9 } as const);
+  const fade = reduce
+    ? { duration: 0 }
+    : ({ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] } as const);
+
+  return (
+    <motion.div
+      initial={reduce ? { opacity: 0 } : { opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={reduce ? { opacity: 0 } : { opacity: 0, y: 14 }}
+      transition={fade}
+      className="mb-2 flex flex-col gap-2"
+    >
+      {/* Sent — the user's prompt, right-aligned, truncated to one line. */}
+      <motion.div layout={!reduce} className="flex justify-end">
+        <div className="max-w-[85%] truncate rounded-2xl rounded-br-md bg-foreground px-3.5 py-2 text-sm text-background shadow-sm">
+          {promptText}
+        </div>
+      </motion.div>
+
+      {/* Received — the system bubble. `layout` on THIS element is what makes
+          the container physically morph between the short status line and the
+          taller questionnaire (a real resize, not a cross-fade swap). */}
+      <motion.div layout={!reduce} className="flex justify-start">
+        <motion.div
+          layout={!reduce}
+          transition={spring}
+          className="max-w-[92%] overflow-hidden rounded-2xl rounded-bl-md border border-foreground/10 bg-card/95 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/80"
+        >
+          <AnimatePresence mode="wait" initial={false}>
+            {pendingQuestion ? (
+              <motion.div
+                key={`q:${pendingQuestion.questionId}`}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={fade}
+                className="p-3"
+              >
+                <Questionnaire question={pendingQuestion} onAnswer={onAnswer} />
+              </motion.div>
+            ) : (
+              <motion.div
+                key="status"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={fade}
+                className="flex items-center gap-2.5 px-3.5 py-2.5"
+              >
+                <Loader2Icon className="size-4 shrink-0 animate-spin text-muted-foreground" />
+                <span className="text-sm font-medium text-foreground">
+                  {statusText}
+                </span>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+/**
+ * The mid-cycle question (MTR-191), restyled for the morphing thread (MTR-209):
+ * question text on top, each answer a full-width contained card (an inline
+ * thumbnail when the option carries a visual draft variant), and — ALWAYS — a
+ * custom free-text field as the last option so the user can bypass the presets
+ * and answer in their own words. Picking a card sends `optionId`; the custom
+ * field sends `text`. Ignoring it still lets the server take the default after
+ * the timeout, so it never traps an away user.
+ */
+function Questionnaire({
   question,
   onAnswer,
 }: {
@@ -2719,80 +2640,80 @@ function QuestionCard({
     text: string;
     options: CadQuestionOption[];
     defaultOptionId?: string;
-    timeoutS: number;
     answering: boolean;
   };
-  onAnswer: (optionId: string) => void;
+  onAnswer: (pick: { optionId?: string; text?: string }) => void;
 }) {
-  const hasThumbnails = question.options.some((o) => o.thumbnail);
+  const [custom, setCustom] = useState("");
+  const canCustom = custom.trim().length > 0 && !question.answering;
   return (
-    <div className="glass pointer-events-auto w-full max-w-md rounded-2xl p-4 shadow-lg">
+    <div>
       <div className="flex items-start gap-2">
         <MessageSquareTextIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-        <div className="min-w-0 flex-1">
-          <span className="block text-sm font-medium">Quick question</span>
-          <p className="mt-0.5 text-sm text-foreground/90">{question.text}</p>
-        </div>
+        <p className="min-w-0 flex-1 text-sm font-medium text-foreground">
+          {question.text}
+        </p>
       </div>
 
-      <div
-        className={
-          hasThumbnails
-            ? "mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3"
-            : "mt-3 flex flex-wrap gap-1.5"
-        }
-      >
+      <div className="mt-3 flex flex-col gap-2">
         {question.options.map((o) => {
           const isDefault = o.id === question.defaultOptionId;
-          if (hasThumbnails) {
-            return (
-              <button
-                key={o.id}
-                type="button"
-                disabled={question.answering}
-                onClick={() => onAnswer(o.id)}
-                title={o.detail}
-                className="group flex cursor-pointer flex-col overflow-hidden rounded-xl border border-foreground/15 bg-foreground/5 text-left transition-colors hover:border-foreground/40 disabled:opacity-50"
-              >
-                {o.thumbnail ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={`data:image/png;base64,${o.thumbnail}`}
-                    alt={o.label}
-                    className="aspect-square w-full bg-background/40 object-contain"
-                  />
-                ) : (
-                  <div className="aspect-square w-full bg-background/40" />
-                )}
-                <span className="flex items-center gap-1 px-2 py-1.5 text-xs">
-                  {o.label}
-                  {isDefault && (
-                    <span className="text-[10px] text-muted-foreground">
-                      (recommended)
-                    </span>
-                  )}
-                </span>
-              </button>
-            );
-          }
           return (
             <button
               key={o.id}
               type="button"
               disabled={question.answering}
-              onClick={() => onAnswer(o.id)}
+              onClick={() => onAnswer({ optionId: o.id })}
               title={o.detail}
-              className="cursor-pointer rounded-full border border-foreground/15 bg-foreground/5 px-2.5 py-1 text-xs transition-colors hover:border-foreground/40 disabled:opacity-50"
+              className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-foreground/15 bg-foreground/[0.03] p-2.5 text-left transition-colors hover:border-foreground/40 hover:bg-foreground/[0.06] disabled:opacity-50"
             >
-              {o.label}
+              {o.thumbnail && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={`data:image/png;base64,${o.thumbnail}`}
+                  alt=""
+                  className="size-12 shrink-0 rounded-lg bg-background/40 object-contain"
+                />
+              )}
+              <span className="min-w-0 flex-1 text-sm text-foreground">
+                {o.label}
+              </span>
               {isDefault && (
-                <span className="ml-1 text-[10px] text-muted-foreground">
-                  (recommended)
+                <span className="shrink-0 rounded-full border border-foreground/15 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  recommended
                 </span>
               )}
             </button>
           );
         })}
+
+        {/* Always-present custom free-text escape hatch (MTR-209). */}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (canCustom) onAnswer({ text: custom });
+          }}
+          className="flex items-center gap-2 rounded-xl border border-dashed border-foreground/25 p-1.5 pl-3"
+        >
+          <input
+            value={custom}
+            onChange={(e) => setCustom(e.target.value)}
+            disabled={question.answering}
+            maxLength={2000}
+            placeholder="Or answer in your own words…"
+            aria-label="Custom answer"
+            // text-base on mobile keeps iOS Safari from auto-zooming the field.
+            className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground/60 disabled:opacity-50 sm:text-sm"
+          />
+          <button
+            type="submit"
+            disabled={!canCustom}
+            aria-label="Send custom answer"
+            className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground text-background disabled:opacity-30"
+          >
+            <ArrowUpIcon className="size-3.5" strokeWidth={2.5} />
+          </button>
+        </form>
       </div>
 
       <p className="mt-2.5 text-[11px] text-muted-foreground">
@@ -2824,26 +2745,6 @@ function ViewerSkeleton({ label }: { label: string }) {
         />
       </svg>
       <p className="px-6 text-center text-sm">{label}</p>
-    </div>
-  );
-}
-
-/** Renders the streamed harness transcript as a live checklist. */
-function ProgressPanel({ events }: { events: CadProgressEvent[] }) {
-  // Only ever show the current step — the live status, not a transcript.
-  const current = events[events.length - 1];
-  const d = current
-    ? describeEvent(current)
-    : { text: "Getting started", sub: null as string | null };
-  return (
-    <div className="flex items-center gap-3 text-sm">
-      <Loader2Icon className="size-4 shrink-0 animate-spin text-muted-foreground" />
-      <div className="flex flex-col">
-        <span className="font-medium text-foreground">{d.text}</span>
-        {d.sub && (
-          <span className="text-xs text-muted-foreground">{d.sub}</span>
-        )}
-      </div>
     </div>
   );
 }

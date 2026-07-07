@@ -162,6 +162,17 @@ function PointCloud({
   const gl = useThree((s) => s.gl);
   const pixelRatio = gl.getPixelRatio();
 
+  // Hold the completion callback in a ref so the morph effect below does NOT
+  // depend on its identity (MTR-210). The studio passes an inline arrow that
+  // is recreated on every parent render; if that identity were in the deps,
+  // any re-render during the morph (a status event, setGenerating(false), the
+  // reveal timer) would re-run the effect — resetting uMorph to 0 and reloading
+  // the STL, i.e. the shape visibly "disappears/reloads right before the
+  // transition." Keyed only on [morphUrl, baseGeom], the morph loads once and
+  // runs uninterrupted.
+  const onMorphCompleteRef = useRef(onMorphComplete);
+  onMorphCompleteRef.current = onMorphComplete;
+
   const uniforms = useMemo(
     () => ({
       uTime: { value: 0 },
@@ -176,7 +187,9 @@ function PointCloud({
   );
 
   // Load the morph target, compute correspondence, run the morph. Fail-open:
-  // any error completes immediately so the caller still proceeds.
+  // any error completes immediately so the caller still proceeds. Deps are
+  // ONLY [morphUrl, baseGeom] (see onMorphCompleteRef above) so a parent
+  // re-render can't restart an in-flight morph.
   useEffect(() => {
     if (!morphUrl) return;
     let cancelled = false;
@@ -199,23 +212,25 @@ function PointCloud({
             baseGeom.attributes.position,
             modelGeom
           );
-          // Free the GPU buffer backing the superseded aTarget before swapping
-          // in the morph target — replacing an attribute otherwise strands the
-          // old buffer in WebGLAttributes until the whole geometry is disposed.
-          // `renderer.attributes` is an internal (untyped) three surface; the
-          // narrow cast keeps this a no-op-safe best effort.
+          // Install the NEW morph target first, then free the GPU buffer of the
+          // superseded one — dispose only AFTER the replacement is live (MTR-210
+          // ordering; still no leaked buffer, MTR-168). The point cloud keeps
+          // rendering from `position` (uMorph starts at 0), so this swap never
+          // produces a blank/partial frame. `renderer.attributes` is an
+          // internal (untyped) three surface; the narrow cast keeps the free a
+          // no-op-safe best effort.
           const prevTarget = baseGeom.attributes.aTarget as
             | THREE.BufferAttribute
             | undefined;
+          baseGeom.setAttribute("aTarget", new THREE.BufferAttribute(targets, 3));
           const attrCache = (gl as unknown as {
             attributes?: { remove?: (a: THREE.BufferAttribute) => void };
           }).attributes;
           if (prevTarget) attrCache?.remove?.(prevTarget);
-          baseGeom.setAttribute("aTarget", new THREE.BufferAttribute(targets, 3));
           morphProgress.current = 0;
           morphing.current = true;
         } catch {
-          onMorphComplete?.();
+          onMorphCompleteRef.current?.();
         } finally {
           // The morph-target mesh is only read for correspondence — never added
           // to the scene — so dispose it immediately either way.
@@ -223,14 +238,17 @@ function PointCloud({
         }
       },
       undefined,
-      () => onMorphComplete?.()
+      () => onMorphCompleteRef.current?.()
     );
-    const safety = setTimeout(() => onMorphComplete?.(), 8000);
+    const safety = setTimeout(() => onMorphCompleteRef.current?.(), 8000);
     return () => {
       cancelled = true;
       clearTimeout(safety);
     };
-  }, [morphUrl, baseGeom, onMorphComplete]);
+    // onMorphComplete is intentionally excluded — it's read via a ref so a
+    // changing callback identity never restarts the morph. `gl` is the
+    // canvas-stable renderer, so including it never re-runs this.
+  }, [morphUrl, baseGeom, gl]);
 
   useFrame((_, delta) => {
     const k = Math.min(1, delta * 2.5);
@@ -249,7 +267,7 @@ function PointCloud({
         m.uniforms.uMorph.value = smoothstep(morphProgress.current);
         if (morphProgress.current >= 1 && !completed.current) {
           completed.current = true;
-          onMorphComplete?.();
+          onMorphCompleteRef.current?.();
         }
       }
     }
