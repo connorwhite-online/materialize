@@ -56,6 +56,7 @@ import type {
 // Type-only: lib/cad/brief is server-only at runtime; the type is erased.
 import type { CadBrief } from "@/lib/cad/brief";
 import type { ViewerAnnotation } from "@/components/viewer/model-viewer";
+import { useKeyboardStickyBottom } from "@/lib/hooks/use-keyboard-sticky-bottom";
 import {
   CAD_FEEDBACK_TAGS,
   CAD_FEEDBACK_TAG_LABELS,
@@ -408,6 +409,11 @@ export function TextToCadStudio({
   const reduceMotion = useReducedMotion();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Outer fixed wrapper of the floating composer — its `bottom` is rewritten
+  // from the VisualViewport API so the composer stays pinned above the iOS
+  // keyboard instead of hiding behind it (MTR-211).
+  const composerFixedRef = useRef<HTMLDivElement>(null);
+  useKeyboardStickyBottom(composerFixedRef, 0);
   const abortRef = useRef<AbortController | null>(null);
   // In-flight silent spec-check (fetchBrief) — aborted on thread switch /
   // new-build so a slow check can't pop a stale quick-check card.
@@ -2066,7 +2072,10 @@ export function TextToCadStudio({
           viewport-fixed bar lines up with the page's content area; the inner
           grid then mirrors the page grid so the composer centers under the
           viewer column and ignores the Builds sidebar (empty 300px track). */}
-      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 nav:pl-56">
+      <div
+        ref={composerFixedRef}
+        className="pointer-events-none fixed inset-x-0 bottom-0 z-30 nav:pl-56"
+      >
         {/* Sub-nav viewports show the floating MobileTabBar pill (bottom-6,
             z-40); lift the composer above it so its controls stay tappable.
             At nav+ the pill is gone and the sidebar rail takes over. */}

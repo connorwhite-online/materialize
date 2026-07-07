@@ -16,6 +16,7 @@ import {
   DialogContent,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useKeyboardStickyBottom } from "@/lib/hooks/use-keyboard-sticky-bottom";
 import { cn } from "@/lib/utils";
 
 type Mode = "idle" | "searching" | "uploading";
@@ -46,34 +47,12 @@ export function HomeBottomBar() {
 
   const isExpanded = mode === "searching" || mode === "uploading";
 
-  // Pin the bottom bar above the soft keyboard. Without this the
-  // fixed bar stays at bottom-4 of the layout viewport — which on
-  // iOS sits behind the keyboard once it opens, and triggers an
-  // auto-scroll of the document trying to bring the focused input
-  // into view (pushing the rest of the hero up off the screen).
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const vv = window.visualViewport;
-    if (!vv) return;
-
-    const updateOffset = () => {
-      const el = fixedWrapperRef.current;
-      if (!el) return;
-      // Distance between the bottom of the layout viewport and the
-      // bottom of the visual viewport — i.e. the keyboard height
-      // (plus any iOS chrome that's overlapping). 16 = bottom-4.
-      const overlap = window.innerHeight - vv.height - vv.offsetTop;
-      el.style.bottom = `${Math.max(16, overlap + 16)}px`;
-    };
-
-    updateOffset();
-    vv.addEventListener("resize", updateOffset);
-    vv.addEventListener("scroll", updateOffset);
-    return () => {
-      vv.removeEventListener("resize", updateOffset);
-      vv.removeEventListener("scroll", updateOffset);
-    };
-  }, []);
+  // Pin the bottom bar above the soft keyboard (MTR-211): the shared hook
+  // rewrites this fixed wrapper's `bottom` from the VisualViewport API. Without
+  // it the bar sits at bottom-4 of the layout viewport, hides behind the iOS
+  // keyboard, and triggers a document auto-scroll pushing the hero off-screen.
+  // 16 = the resting bottom-4 offset.
+  useKeyboardStickyBottom(fixedWrapperRef, 16);
 
   // Debounced search fetch. Clears results when the query empties
   // so the panel collapses back to the upload-or-idle layout.
