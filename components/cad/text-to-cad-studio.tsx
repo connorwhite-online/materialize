@@ -31,6 +31,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { zipSync } from "fflate";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { ChevronDown } from "@/components/icons/chevron-down";
 import { ChevronRight } from "@/components/icons/chevron-right";
@@ -397,6 +398,14 @@ export function TextToCadStudio({
   // "confirmed no topology" (mesh-mode / legacy) so we never refetch and the
   // viewer stays on its flood-fill fallback.
   const [topoUrls, setTopoUrls] = useState<Record<string, string | null>>({});
+  // The submitted prompt, held for the life of a generation so it can ride in
+  // the RIGHT-aligned "sent" bubble of the morphing generation thread (MTR-209)
+  // while the composer empties. Restored into the composer on error so a failed
+  // build never loses the user's typed instruction.
+  const [submittedPrompt, setSubmittedPrompt] = useState<string | null>(null);
+  // Respect the OS "reduce motion" setting: the morph sequence collapses to
+  // instant opacity swaps instead of layout/spring animation (Accessibility).
+  const reduceMotion = useReducedMotion();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -465,6 +474,9 @@ export function TextToCadStudio({
     setProgress([]);
     setSnapshot(null);
     setError(null);
+    // Repopulate the "sent" bubble so a reattached build shows its prompt in
+    // the morphing thread (the composer text itself was never persisted).
+    setSubmittedPrompt(saved.prompt || null);
     setGenerating(true);
     void streamJobEvents(
       saved.jobId,
@@ -700,6 +712,7 @@ export function TextToCadStudio({
     setBriefLoading(false);
     setError(null);
     setPrompt("");
+    setSubmittedPrompt(null);
     setImages([]);
     setSelectedPartId(null);
     setShowHistory(false);
@@ -1037,6 +1050,11 @@ export function TextToCadStudio({
     // build has none, so the wireframe blob deforms instead.
     setSourceAssetId(parentId ? activeAssetId : null);
     setTransition(null);
+    // Morph the composer into the "sent" bubble: stash the prompt for the
+    // thread and empty the composer (MTR-209). Restored on any error path below
+    // so a failed build doesn't swallow what the user typed.
+    setSubmittedPrompt(text);
+    setPrompt("");
     setGenerating(true);
     setShowHistory(false);
 
@@ -1070,6 +1088,9 @@ export function TextToCadStudio({
 
       if (!res.ok) {
         setError((await res.text()) || "Generation failed.");
+        // Restore the composer so the user can retry (the thread unwinds).
+        setPrompt(text);
+        setSubmittedPrompt(null);
         return;
       }
 
@@ -1098,6 +1119,8 @@ export function TextToCadStudio({
     } catch (err) {
       if ((err as Error)?.name !== "AbortError") {
         setError("Generation failed. Please try again.");
+        setPrompt(text);
+        setSubmittedPrompt(null);
       }
     } finally {
       setGenerating(false);
@@ -1160,6 +1183,10 @@ export function TextToCadStudio({
               setSnapshot(null);
               setPendingQuestion(null);
               setError(ev.error);
+              // Return the typed instruction to the composer so a failed build
+              // can be retried; the morphing thread unwinds to rest.
+              setPrompt(submittedPrompt);
+              setSubmittedPrompt(null);
             } else if (ev.type === "snapshot") {
               // Live build preview: latest frame only — REPLACE, never
               // accumulate (each frame is a whole base64 PNG; the progress
@@ -1217,15 +1244,23 @@ export function TextToCadStudio({
    * re-enables it to retry. The SSE tail is untouched; the executor's poll
    * picks the answer up and resumes the build.
    */
-  async function answerQuestion(optionId: string) {
+  async function answerQuestion(pick: { optionId?: string; text?: string }) {
     const q = pendingQuestion;
     if (!q || q.answering) return;
+    // A preset card sends `optionId`; the always-present custom field sends
+    // `text` (MTR-209). Guard against an empty custom submit.
+    const customText = pick.text?.trim();
+    if (!pick.optionId && !customText) return;
     setPendingQuestion({ ...q, answering: true });
     try {
       const res = await fetch(`/api/cad/jobs/${q.jobId}/answer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ questionId: q.questionId, optionId }),
+        body: JSON.stringify(
+          pick.optionId
+            ? { questionId: q.questionId, optionId: pick.optionId }
+            : { questionId: q.questionId, text: customText }
+        ),
       });
       if (!res.ok) throw new Error(`answer ${res.status}`);
       // Leave the card in place (answering=true) — the `answer` event clears
@@ -1492,32 +1527,17 @@ export function TextToCadStudio({
                       }
                     />
                   </Suspense>
-                  {generating && !transition && (
+                  {generating && !transition && snapshot && (
                     <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 p-6">
-                      {/* Live build preview — the latest snapshot render of
-                          the in-progress solid, cross-fading as frames land.
-                          Cleared on `done`, so the blob→model morph hand-off
-                          below runs untouched. */}
-                      {snapshot && (
-                        <SnapshotPreview
-                          render={snapshot.render}
-                          step={snapshot.step}
-                        />
-                      )}
-                      {/* Mid-cycle question (MTR-191): when the build suspends
-                          on a choice, the card takes over the overlay (the
-                          container is pointer-events-none, so the card opts
-                          itself back in). Otherwise the usual status panel. */}
-                      {pendingQuestion ? (
-                        <QuestionCard
-                          question={pendingQuestion}
-                          onAnswer={answerQuestion}
-                        />
-                      ) : (
-                        <div className="glass rounded-2xl px-5 py-4 shadow-lg">
-                          <ProgressPanel events={progress} />
-                        </div>
-                      )}
+                      {/* Live build preview — the latest snapshot render of the
+                          in-progress solid, cross-fading as frames land. Status
+                          + the interactive question now live in the morphing
+                          generation thread above the composer (MTR-209); the
+                          particle cloud is the visual backdrop here (MTR-210). */}
+                      <SnapshotPreview
+                        render={snapshot.render}
+                        step={snapshot.step}
+                      />
                     </div>
                   )}
                 </div>
@@ -2068,6 +2088,28 @@ export function TextToCadStudio({
               canBuild={prompt.trim().length >= 3}
             />
           )}
+          {/* Morphing generation thread (MTR-209): the composer "sends" the
+              prompt as a RIGHT-aligned bubble, a one-line status loader sits
+              LEFT-aligned below it, and when a question fires the status
+              container physically morphs into the questionnaire — then back.
+              Unmounts (exits down) on completion, returning to the rest
+              composer. */}
+          <AnimatePresence>
+            {generating && submittedPrompt !== null && (
+              <GenerationThread
+                key="gen-thread"
+                promptText={submittedPrompt}
+                statusText={
+                  progress.length
+                    ? describeEvent(progress[progress.length - 1]).text
+                    : "Getting started"
+                }
+                pendingQuestion={pendingQuestion}
+                onAnswer={answerQuestion}
+                reduce={!!reduceMotion}
+              />
+            )}
+          </AnimatePresence>
           <div
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
@@ -2478,14 +2520,110 @@ function QuickCheckCard({
 }
 
 /**
- * Mid-cycle question card (MTR-191): shown over the generating overlay when the
- * build suspends on a genuine choice the model couldn't settle. Tappable
- * options (recommended default badged); if an option carries a thumbnail it's a
- * visual draft-form variant and renders as an image tile. Picking posts the
- * answer and the build resumes; ignoring it lets the server take the default
- * after the timeout — so this never traps an away user.
+ * The morphing generation thread (MTR-209). One surface that carries the whole
+ * generation lifecycle in an iMessage sent/received metaphor:
+ *   • the submitted prompt as a RIGHT-aligned "sent" bubble (truncated, 1 line),
+ *   • a LEFT-aligned "received" system bubble that shows a one-line status
+ *     loader and *physically morphs* (shared-layout resize) into the
+ *     questionnaire when a mid-cycle question fires, then morphs back.
+ * All motion is transform/opacity + layout (no per-frame CPU); `reduce`
+ * collapses everything to instant opacity swaps for prefers-reduced-motion.
+ * Mounted while a build runs; exits (down) on completion → back to rest.
  */
-function QuestionCard({
+function GenerationThread({
+  promptText,
+  statusText,
+  pendingQuestion,
+  onAnswer,
+  reduce,
+}: {
+  promptText: string;
+  statusText: string;
+  pendingQuestion: {
+    questionId: string;
+    text: string;
+    options: CadQuestionOption[];
+    defaultOptionId?: string;
+    answering: boolean;
+  } | null;
+  onAnswer: (pick: { optionId?: string; text?: string }) => void;
+  reduce: boolean;
+}) {
+  const spring = reduce
+    ? { duration: 0 }
+    : ({ type: "spring", stiffness: 480, damping: 42, mass: 0.9 } as const);
+  const fade = reduce
+    ? { duration: 0 }
+    : ({ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] } as const);
+
+  return (
+    <motion.div
+      initial={reduce ? { opacity: 0 } : { opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={reduce ? { opacity: 0 } : { opacity: 0, y: 14 }}
+      transition={fade}
+      className="mb-2 flex flex-col gap-2"
+    >
+      {/* Sent — the user's prompt, right-aligned, truncated to one line. */}
+      <motion.div layout={!reduce} className="flex justify-end">
+        <div className="max-w-[85%] truncate rounded-2xl rounded-br-md bg-foreground px-3.5 py-2 text-sm text-background shadow-sm">
+          {promptText}
+        </div>
+      </motion.div>
+
+      {/* Received — the system bubble. `layout` on THIS element is what makes
+          the container physically morph between the short status line and the
+          taller questionnaire (a real resize, not a cross-fade swap). */}
+      <motion.div layout={!reduce} className="flex justify-start">
+        <motion.div
+          layout={!reduce}
+          transition={spring}
+          className="max-w-[92%] overflow-hidden rounded-2xl rounded-bl-md border border-foreground/10 bg-card/95 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/80"
+        >
+          <AnimatePresence mode="wait" initial={false}>
+            {pendingQuestion ? (
+              <motion.div
+                key={`q:${pendingQuestion.questionId}`}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={fade}
+                className="p-3"
+              >
+                <Questionnaire question={pendingQuestion} onAnswer={onAnswer} />
+              </motion.div>
+            ) : (
+              <motion.div
+                key="status"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={fade}
+                className="flex items-center gap-2.5 px-3.5 py-2.5"
+              >
+                <Loader2Icon className="size-4 shrink-0 animate-spin text-muted-foreground" />
+                <span className="text-sm font-medium text-foreground">
+                  {statusText}
+                </span>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+/**
+ * The mid-cycle question (MTR-191), restyled for the morphing thread (MTR-209):
+ * question text on top, each answer a full-width contained card (an inline
+ * thumbnail when the option carries a visual draft variant), and — ALWAYS — a
+ * custom free-text field as the last option so the user can bypass the presets
+ * and answer in their own words. Picking a card sends `optionId`; the custom
+ * field sends `text`. Ignoring it still lets the server take the default after
+ * the timeout, so it never traps an away user.
+ */
+function Questionnaire({
   question,
   onAnswer,
 }: {
@@ -2493,80 +2631,80 @@ function QuestionCard({
     text: string;
     options: CadQuestionOption[];
     defaultOptionId?: string;
-    timeoutS: number;
     answering: boolean;
   };
-  onAnswer: (optionId: string) => void;
+  onAnswer: (pick: { optionId?: string; text?: string }) => void;
 }) {
-  const hasThumbnails = question.options.some((o) => o.thumbnail);
+  const [custom, setCustom] = useState("");
+  const canCustom = custom.trim().length > 0 && !question.answering;
   return (
-    <div className="glass pointer-events-auto w-full max-w-md rounded-2xl p-4 shadow-lg">
+    <div>
       <div className="flex items-start gap-2">
         <MessageSquareTextIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-        <div className="min-w-0 flex-1">
-          <span className="block text-sm font-medium">Quick question</span>
-          <p className="mt-0.5 text-sm text-foreground/90">{question.text}</p>
-        </div>
+        <p className="min-w-0 flex-1 text-sm font-medium text-foreground">
+          {question.text}
+        </p>
       </div>
 
-      <div
-        className={
-          hasThumbnails
-            ? "mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3"
-            : "mt-3 flex flex-wrap gap-1.5"
-        }
-      >
+      <div className="mt-3 flex flex-col gap-2">
         {question.options.map((o) => {
           const isDefault = o.id === question.defaultOptionId;
-          if (hasThumbnails) {
-            return (
-              <button
-                key={o.id}
-                type="button"
-                disabled={question.answering}
-                onClick={() => onAnswer(o.id)}
-                title={o.detail}
-                className="group flex cursor-pointer flex-col overflow-hidden rounded-xl border border-foreground/15 bg-foreground/5 text-left transition-colors hover:border-foreground/40 disabled:opacity-50"
-              >
-                {o.thumbnail ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={`data:image/png;base64,${o.thumbnail}`}
-                    alt={o.label}
-                    className="aspect-square w-full bg-background/40 object-contain"
-                  />
-                ) : (
-                  <div className="aspect-square w-full bg-background/40" />
-                )}
-                <span className="flex items-center gap-1 px-2 py-1.5 text-xs">
-                  {o.label}
-                  {isDefault && (
-                    <span className="text-[10px] text-muted-foreground">
-                      (recommended)
-                    </span>
-                  )}
-                </span>
-              </button>
-            );
-          }
           return (
             <button
               key={o.id}
               type="button"
               disabled={question.answering}
-              onClick={() => onAnswer(o.id)}
+              onClick={() => onAnswer({ optionId: o.id })}
               title={o.detail}
-              className="cursor-pointer rounded-full border border-foreground/15 bg-foreground/5 px-2.5 py-1 text-xs transition-colors hover:border-foreground/40 disabled:opacity-50"
+              className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-foreground/15 bg-foreground/[0.03] p-2.5 text-left transition-colors hover:border-foreground/40 hover:bg-foreground/[0.06] disabled:opacity-50"
             >
-              {o.label}
+              {o.thumbnail && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={`data:image/png;base64,${o.thumbnail}`}
+                  alt=""
+                  className="size-12 shrink-0 rounded-lg bg-background/40 object-contain"
+                />
+              )}
+              <span className="min-w-0 flex-1 text-sm text-foreground">
+                {o.label}
+              </span>
               {isDefault && (
-                <span className="ml-1 text-[10px] text-muted-foreground">
-                  (recommended)
+                <span className="shrink-0 rounded-full border border-foreground/15 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  recommended
                 </span>
               )}
             </button>
           );
         })}
+
+        {/* Always-present custom free-text escape hatch (MTR-209). */}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (canCustom) onAnswer({ text: custom });
+          }}
+          className="flex items-center gap-2 rounded-xl border border-dashed border-foreground/25 p-1.5 pl-3"
+        >
+          <input
+            value={custom}
+            onChange={(e) => setCustom(e.target.value)}
+            disabled={question.answering}
+            maxLength={2000}
+            placeholder="Or answer in your own words…"
+            aria-label="Custom answer"
+            // text-base on mobile keeps iOS Safari from auto-zooming the field.
+            className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground/60 disabled:opacity-50 sm:text-sm"
+          />
+          <button
+            type="submit"
+            disabled={!canCustom}
+            aria-label="Send custom answer"
+            className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground text-background disabled:opacity-30"
+          >
+            <ArrowUpIcon className="size-3.5" strokeWidth={2.5} />
+          </button>
+        </form>
       </div>
 
       <p className="mt-2.5 text-[11px] text-muted-foreground">
@@ -2598,26 +2736,6 @@ function ViewerSkeleton({ label }: { label: string }) {
         />
       </svg>
       <p className="px-6 text-center text-sm">{label}</p>
-    </div>
-  );
-}
-
-/** Renders the streamed harness transcript as a live checklist. */
-function ProgressPanel({ events }: { events: CadProgressEvent[] }) {
-  // Only ever show the current step — the live status, not a transcript.
-  const current = events[events.length - 1];
-  const d = current
-    ? describeEvent(current)
-    : { text: "Getting started", sub: null as string | null };
-  return (
-    <div className="flex items-center gap-3 text-sm">
-      <Loader2Icon className="size-4 shrink-0 animate-spin text-muted-foreground" />
-      <div className="flex flex-col">
-        <span className="font-medium text-foreground">{d.text}</span>
-        {d.sub && (
-          <span className="text-xs text-muted-foreground">{d.sub}</span>
-        )}
-      </div>
     </div>
   );
 }
