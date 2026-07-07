@@ -12,6 +12,7 @@ import { AvatarWithUnreadDot } from "@/components/auth/avatar-with-unread-dot";
 import { SandboxBadge } from "@/components/nav/sandbox-badge";
 import { useCart } from "@/components/print/cart-context";
 import { useAuthModal } from "@/components/auth/auth-modal";
+import { useKeyboardOpen } from "@/lib/hooks/use-keyboard-sticky-bottom";
 import { cn } from "@/lib/utils";
 
 import type { ComponentType, SVGProps } from "react";
@@ -86,6 +87,12 @@ export function MobileTabBar({
   const { openAuth } = useAuthModal();
   const cart = useCart();
   const items = tabItems(textToCad);
+  // Fade the pill out while the soft keyboard is up so it doesn't float over a
+  // raised text field (e.g. the studio composer, MTR-212). Global: any focused
+  // input that opens the keyboard on a sub-nav viewport gets the clean hide.
+  // The transition is CSS opacity/translate; `motion-reduce` drops it to an
+  // instant toggle for prefers-reduced-motion (Accessibility).
+  const keyboardOpen = useKeyboardOpen();
 
   const ownProfilePath =
     isLoaded && user?.username ? `/${user.username}` : null;
@@ -96,11 +103,21 @@ export function MobileTabBar({
   return (
     // pointer-events-none on the wrapper so the area beside the nav
     // stays click-through to page content; the nav re-enables it.
-    <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex items-center justify-center px-4 nav:hidden">
+    <div
+      aria-hidden={keyboardOpen || undefined}
+      className={cn(
+        "pointer-events-none fixed inset-x-0 bottom-6 z-40 flex items-center justify-center px-4 nav:hidden",
+        "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
+        keyboardOpen && "translate-y-6 opacity-0"
+      )}
+    >
       <nav
         aria-label="Primary"
         className={cn(
-          "pointer-events-auto flex shrink-0 items-center gap-1 rounded-full p-1.5",
+          "flex shrink-0 items-center gap-1 rounded-full p-1.5",
+          // Un-tappable while faded out so it can't intercept taps meant for
+          // the raised input under it.
+          keyboardOpen ? "pointer-events-none" : "pointer-events-auto",
           "bg-muted/70 backdrop-blur-xl dark:bg-input/40",
           "shadow-lg shadow-foreground/10 ring-1 ring-foreground/10"
         )}

@@ -1,6 +1,18 @@
 "use client";
 
-import { useEffect, type RefObject } from "react";
+import { useEffect, useState, type RefObject } from "react";
+
+/**
+ * Overlap (px) between the layout viewport and the (shrunken) visual viewport
+ * — i.e. the height of whatever is covering the bottom of the screen, almost
+ * always the on-screen keyboard. Shared by the sticky-bottom pin and the
+ * `useKeyboardOpen` signal so both read the keyboard from one place (MTR-212).
+ */
+function keyboardOverlapPx(): number {
+  const vv = window.visualViewport;
+  if (!vv) return 0;
+  return Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+}
 
 /**
  * Pin a `position: fixed` element above the on-screen (soft) keyboard on iOS
@@ -32,10 +44,9 @@ export function useKeyboardStickyBottom(
     const updateOffset = () => {
       const el = ref.current;
       if (!el) return;
-      // Distance between the bottom of the layout viewport and the bottom of
-      // the visual viewport — i.e. the keyboard height (plus any iOS chrome
-      // overlapping it). Clamped so the element never drops below its rest.
-      const overlap = window.innerHeight - vv.height - vv.offsetTop;
+      // The keyboard height (plus any iOS chrome overlapping it), clamped so
+      // the element never drops below its rest offset.
+      const overlap = keyboardOverlapPx();
       el.style.bottom = `${Math.max(baseOffsetPx, overlap + baseOffsetPx)}px`;
     };
 
@@ -47,4 +58,37 @@ export function useKeyboardStickyBottom(
       vv.removeEventListener("scroll", updateOffset);
     };
   }, [ref, baseOffsetPx]);
+}
+
+/**
+ * `true` while the on-screen (soft) keyboard is open, detected from the same
+ * VisualViewport overlap the sticky-bottom pin uses. Global surfaces (the
+ * mobile bottom nav, MTR-212) read this to fade themselves out while a text
+ * input has the keyboard up, rather than floating over the raised composer.
+ *
+ * A generous threshold (default 120px) keeps benign visual-viewport changes —
+ * the iOS URL bar collapsing, a rubber-band scroll — from reading as a
+ * keyboard. Returns `false` during SSR and where VisualViewport is absent.
+ *
+ * @param thresholdPx minimum bottom overlap (px) that counts as "keyboard open"
+ */
+export function useKeyboardOpen(thresholdPx = 120): boolean {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    const update = () => setOpen(keyboardOverlapPx() > thresholdPx);
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  }, [thresholdPx]);
+
+  return open;
 }

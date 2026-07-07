@@ -93,6 +93,8 @@ const MaterializingBlob = lazy(() =>
 export interface StudioPart {
   name: string;
   fileAssetId: string;
+  /** True when this part carried an editable STEP source (MTR-196/215). */
+  hasStep?: boolean;
 }
 
 export interface StudioTurn {
@@ -112,6 +114,13 @@ export interface StudioTurn {
   projectSlug: string | null;
   /** True when the result was voxel-remeshed (an approximation). */
   remeshed: boolean;
+  /**
+   * True when the primary asset carried an editable STEP source (MTR-196).
+   * Threaded from the server / done event so the "Download STEP" action is
+   * present at first paint — no probe-driven late pop-in (MTR-215). Optional:
+   * absent on turns minted before the signal was threaded.
+   */
+  hasStep?: boolean;
   /**
    * The generation this one revised — encodes the branch structure within
    * a thread (a fork when it isn't the immediately preceding turn).
@@ -868,6 +877,9 @@ export function TextToCadStudio({
       parts: ev.parts ?? [],
       projectSlug: ev.projectSlug ?? null,
       remeshed: ev.remeshed ?? false,
+      // STEP presence rides the done event so the action row is stable at first
+      // paint (MTR-215).
+      hasStep: ev.hasStep ?? false,
       parentGenerationId: parentId ?? null,
     };
     const now = Date.now();
@@ -1760,12 +1772,20 @@ export function TextToCadStudio({
                   Download
                 </a>
               )}
-              {/* Editable STEP source (MTR-196) — self-hides when the selected
-                  asset has no B-rep STEP (mesh-mode / remeshed parts). */}
+              {/* Editable STEP source (MTR-196). `available` is threaded from
+                  the turn/part (MTR-215) so the button is present or absent from
+                  first paint — no async probe that inserts late and reflows the
+                  row. Undefined (legacy turns) falls back to the self-probe. */}
               <StepDownloadLink
                 key={activeAssetId}
                 fileAssetId={activeAssetId}
                 label="Download STEP"
+                available={
+                  viewedParts.length > 1
+                    ? viewedParts.find((p) => p.fileAssetId === activeAssetId)
+                        ?.hasStep
+                    : viewedTurn?.hasStep
+                }
               />
               <button
                 type="button"

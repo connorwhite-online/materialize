@@ -131,7 +131,10 @@ export default async function TextToCadPage() {
   ];
   const partsByProject = new Map<
     string,
-    { slug: string; parts: { name: string; fileAssetId: string }[] }
+    {
+      slug: string;
+      parts: { name: string; fileAssetId: string; hasStep: boolean }[];
+    }
   >();
   if (projectIds.length > 0) {
     const partRows = await withDbRetry(() =>
@@ -141,6 +144,9 @@ export default async function TextToCadPage() {
           slug: projects.slug,
           name: files.name,
           fileAssetId: fileAssets.id,
+          // STEP presence per part so the studio's action row is stable at
+          // first paint for assemblies too (MTR-215).
+          stepStorageKey: fileAssets.stepStorageKey,
         })
         .from(projectFiles)
         .innerJoin(projects, eq(projects.id, projectFiles.projectId))
@@ -157,9 +163,33 @@ export default async function TextToCadPage() {
         pr.name && pr.name.includes(" — ")
           ? pr.name.split(" — ").slice(1).join(" — ")
           : pr.name ?? "part";
-      entry.parts.push({ name, fileAssetId: pr.fileAssetId });
+      entry.parts.push({
+        name,
+        fileAssetId: pr.fileAssetId,
+        hasStep: !!pr.stepStorageKey,
+      });
       partsByProject.set(pr.projectId, entry);
     }
+  }
+
+  // STEP presence for each turn's primary asset — batched so the studio can
+  // render the "Download STEP" action at first paint without a per-button probe
+  // (MTR-215). A stamped `stepStorageKey` is the same signal the download action
+  // gates on server-side.
+  const primaryAssetIds = [
+    ...new Set(
+      rows.map((r) => r.fileAssetId).filter((id): id is string => !!id)
+    ),
+  ];
+  const assetsWithStep = new Set<string>();
+  if (primaryAssetIds.length > 0) {
+    const stepRows = await withDbRetry(() =>
+      db
+        .select({ id: fileAssets.id, stepStorageKey: fileAssets.stepStorageKey })
+        .from(fileAssets)
+        .where(inArray(fileAssets.id, primaryAssetIds))
+    );
+    for (const s of stepRows) if (s.stepStorageKey) assetsWithStep.add(s.id);
   }
 
   // Mint a short-lived URL per render (local signing, no network round-trip).
@@ -189,6 +219,9 @@ export default async function TextToCadPage() {
         : null,
       // Not persisted (no column yet) — the badge shows in-session only.
       remeshed: false,
+      // STEP availability threaded so "Download STEP" renders at first paint
+      // (no post-mount pop-in / row reflow, MTR-215).
+      hasStep: r.fileAssetId ? assetsWithStep.has(r.fileAssetId) : false,
       parentGenerationId: r.parentGenerationId,
       threadId: r.threadId,
       title: r.title,
@@ -243,6 +276,7 @@ export default async function TextToCadPage() {
     parts: m.parts,
     projectSlug: m.projectSlug,
     remeshed: m.remeshed,
+    hasStep: m.hasStep,
     parentGenerationId: m.parentGenerationId,
   });
 

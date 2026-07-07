@@ -236,11 +236,23 @@ export interface CadDoneEvent {
   /** Thread title — non-null only for a thread's first (root) generation. */
   title: string | null;
   /** Present (length > 1) when the result was a multi-part assembly. */
-  parts?: { name: string; fileAssetId: string; fileSlug: string }[];
+  parts?: {
+    name: string;
+    fileAssetId: string;
+    fileSlug: string;
+    /** True when this part carried an editable STEP source (MTR-196). */
+    hasStep?: boolean;
+  }[];
   /** Slug of the Project bundling an assembly's parts, when created. */
   projectSlug?: string | null;
   /** True when the result was voxel-remeshed (an approximation). */
   remeshed?: boolean;
+  /**
+   * True when the primary asset carried an editable STEP source (MTR-196).
+   * Threaded so the studio can render the "Download STEP" action at first paint
+   * instead of probing after mount — no late pop-in / row reflow (MTR-215).
+   */
+  hasStep?: boolean;
 }
 
 /** Full event union carried over the SSE stream from /api/cad/generate. */
