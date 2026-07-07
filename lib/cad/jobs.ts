@@ -481,6 +481,9 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
       parts: persisted.parts,
       projectSlug: persisted.projectSlug,
       remeshed: persisted.remeshed,
+      // STEP availability rides along so the studio's action row is stable at
+      // first paint (no post-mount "Download STEP" pop-in, MTR-215).
+      hasStep: persisted.hasStep,
     };
     await flushTerminal(done);
     await markJob({ status: "done", finishedAt: new Date(), ...usagePatch() });

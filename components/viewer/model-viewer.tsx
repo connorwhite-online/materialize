@@ -674,6 +674,35 @@ interface ModelViewerProps {
    * fallback.
    */
   topoUrl?: string;
+  /**
+   * Fired once the model's geometry has loaded and committed (the Suspense
+   * boundary resolved). The studio uses this to gate the particle→solid
+   * crossfade on the mesh actually being ready, instead of a fixed timer
+   * (MTR-214) — so the reveal never flashes a loading stand-in.
+   */
+  onReady?: () => void;
+  /**
+   * Suppress the inner "3D is loading" deforming point-cloud fallback, rendering
+   * a transparent placeholder instead. The studio sets this during the
+   * particle→solid handoff so the morphed cloud stays the ONLY loader — no
+   * second, competing point cloud snapping in beneath it (MTR-214).
+   */
+  hideLoadingFallback?: boolean;
+}
+
+/**
+ * Fires `onReady` exactly once on mount. Rendered inside the model's Suspense
+ * boundary, so it commits only after `useLoader` has resolved the geometry —
+ * i.e. it's a real "mesh is loaded" signal (MTR-214). Kept in a ref so an
+ * inline parent callback identity doesn't re-fire it.
+ */
+function ReadySignal({ onReady }: { onReady?: () => void }) {
+  const ref = useRef(onReady);
+  ref.current = onReady;
+  useEffect(() => {
+    ref.current?.();
+  }, []);
+  return null;
 }
 
 /**
@@ -1130,6 +1159,8 @@ export function ModelViewer({
   ghostUrl,
   assemblyParts,
   topoUrl,
+  onReady,
+  hideLoadingFallback = false,
 }: ModelViewerProps) {
   const isPreview = mode === "preview";
   // Wheel zoom defaults to true unless explicitly disabled. The
@@ -1266,7 +1297,12 @@ export function ModelViewer({
           // (no-op) everywhere else since no material sets clippingPlanes.
           gl={{ localClippingEnabled: true, stencil: true }}
         >
-          <Suspense fallback={<LoadingFallback />}>
+          <Suspense
+            fallback={hideLoadingFallback ? null : <LoadingFallback />}
+          >
+            {/* Real "geometry loaded" signal — commits with the mesh, after
+                Suspense resolves (MTR-214). */}
+            {onReady && <ReadySignal onReady={onReady} />}
             {fixedFrame && inspectable ? (
               // Studio: fixed camera + deterministic fit (no Stage), so this
               // viewer registers with the deforming-loader canvas. MaterializeMaterial

@@ -93,6 +93,8 @@ const MaterializingBlob = lazy(() =>
 export interface StudioPart {
   name: string;
   fileAssetId: string;
+  /** True when this part carried an editable STEP source (MTR-196/215). */
+  hasStep?: boolean;
 }
 
 export interface StudioTurn {
@@ -112,6 +114,13 @@ export interface StudioTurn {
   projectSlug: string | null;
   /** True when the result was voxel-remeshed (an approximation). */
   remeshed: boolean;
+  /**
+   * True when the primary asset carried an editable STEP source (MTR-196).
+   * Threaded from the server / done event so the "Download STEP" action is
+   * present at first paint — no probe-driven late pop-in (MTR-215). Optional:
+   * absent on turns minted before the signal was threaded.
+   */
+  hasStep?: boolean;
   /**
    * The generation this one revised — encodes the branch structure within
    * a thread (a fork when it isn't the immediately preceding turn).
@@ -355,13 +364,20 @@ export function TextToCadStudio({
     timeoutS: number;
     answering: boolean;
   } | null>(null);
-  // Loader→model handoff: on a fresh result the deforming blob morphs into the
-  // generated shape ("morph"), then the crisp ModelViewer is mounted underneath
-  // and the blob is faded out ("reveal").
+  // Loader→model handoff (MTR-210/214). On a fresh result the deforming blob
+  // morphs into the generated shape ("morph"), then FREEZES at the final shape
+  // ("hold") while the crisp ModelViewer — mounted transparently underneath the
+  // whole time — finishes loading; once it reports ready we crossfade the
+  // particles out and the solid in ("reveal"). Gating reveal on the real load
+  // (not a fixed timer) is what kills the "Loading model…" flash + cloud
+  // regression + abrupt pop.
   const [transition, setTransition] = useState<{
     assetId: string;
-    phase: "morph" | "reveal";
+    phase: "morph" | "hold" | "reveal";
   } | null>(null);
+  // The solid ModelViewer has reported its geometry loaded for the current
+  // handoff (MTR-214). Reset when a new transition begins; drives morph→reveal.
+  const [modelReady, setModelReady] = useState(false);
   // The model to deform in place while generating a REVISION (the shape being
   // edited). Null on a fresh build → the wireframe blob deforms instead.
   const [sourceAssetId, setSourceAssetId] = useState<string | null>(null);
@@ -520,8 +536,27 @@ export function TextToCadStudio({
     return () => document.removeEventListener("click", close);
   }, [showBuildsMenu]);
 
-  // Once the morph finishes and the model is mounted underneath, give it a
-  // beat to load, then clear the transition (unmounts the faded-out blob).
+  // Loader→model reveal, gated on the solid actually loading (MTR-214). The
+  // morphed particle cloud holds frozen at its final shape ("hold") until the
+  // ModelViewer (preloaded transparently underneath) reports `onReady`; only
+  // then do we flip to "reveal" and crossfade. A backstop timer forces the
+  // reveal if the load never lands, so the handoff can't get stuck.
+  useEffect(() => {
+    if (!transition || transition.phase === "reveal") return;
+    // Morph done + model loaded → reveal now.
+    if (transition.phase === "hold" && modelReady) {
+      setTransition((t) => (t ? { ...t, phase: "reveal" } : null));
+      return;
+    }
+    // Backstop: don't hold the frozen cloud forever if the mesh never loads.
+    const backstop = setTimeout(() => {
+      setTransition((t) => (t ? { ...t, phase: "reveal" } : null));
+    }, 8000);
+    return () => clearTimeout(backstop);
+  }, [transition, modelReady]);
+
+  // Once revealed, let the crossfade run, then clear the transition (unmounts
+  // the faded-out blob). The particles fade over 500ms; give it a small beat.
   useEffect(() => {
     if (transition?.phase !== "reveal") return;
     const t = setTimeout(() => setTransition(null), 550);
@@ -740,6 +775,9 @@ export function TextToCadStudio({
     setSnapshot(null);
     setBrief(null);
     setBriefLoading(false);
+    // Switching builds at the quick-check stage (in flight but not yet
+    // generating) must drop the sent bubble so the resting composer returns.
+    setSubmittedPrompt(null);
     setError(null);
     setSelectedPartId(null);
     setShowHistory(false);
@@ -868,6 +906,9 @@ export function TextToCadStudio({
       parts: ev.parts ?? [],
       projectSlug: ev.projectSlug ?? null,
       remeshed: ev.remeshed ?? false,
+      // STEP presence rides the done event so the action row is stable at first
+      // paint (MTR-215).
+      hasStep: ev.hasStep ?? false,
       parentGenerationId: parentId ?? null,
     };
     const now = Date.now();
@@ -913,6 +954,8 @@ export function TextToCadStudio({
     // Kick off the loader→model morph (the blob is still on screen here; it
     // morphs into this asset, then we crossfade to the real viewer). No asset
     // means nothing to morph into — fall straight through to the empty state.
+    // Reset the ready flag first so the reveal waits for THIS asset to load.
+    setModelReady(false);
     setTransition(ev.fileAssetId ? { assetId: ev.fileAssetId, phase: "morph" } : null);
     // Clear the composer only now that the turn landed — on an error the
     // user's typed instruction (and any attached refs) stay put to retry.
@@ -999,8 +1042,16 @@ export function TextToCadStudio({
 
     const parentId = latestTurn?.id; // revise the latest turn when in a thread
 
+    // Morph the composer into the right-aligned "sent" bubble immediately, on
+    // BOTH entry paths (chip or typed), BEFORE the spec check runs (MTR-209
+    // round 2 #1) — so the prompt visibly "sends" and the composer unmounts
+    // rather than parking the text with an inline "Checking the spec…". The
+    // typed value stays in `prompt` for the quick-check re-submit / error retry;
+    // it's just no longer shown (the composer is unmounted while in flight).
+    setSubmittedPrompt(text);
+
     // Ask-before-build (MTR-191 ask-site a): fresh builds run the silent
-    // brief step first. Questions pause the flow ONCE with choice chips;
+    // brief step first. Questions pause the flow ONCE with choice cards;
     // no questions (or no brief) goes straight to generation. A brief
     // already in state means the user answered/skipped — build with it.
     let briefToSend = !parentId ? brief : null;
@@ -1056,10 +1107,10 @@ export function TextToCadStudio({
     // build has none, so the wireframe blob deforms instead.
     setSourceAssetId(parentId ? activeAssetId : null);
     setTransition(null);
-    // Morph the composer into the "sent" bubble: stash the prompt for the
-    // thread and empty the composer (MTR-209). Restored on any error path below
-    // so a failed build doesn't swallow what the user typed.
-    setSubmittedPrompt(text);
+    // `submittedPrompt` was already stashed at the top (the composer sent on
+    // submit). Now that the build is actually starting, empty the composer's
+    // backing value; it's restored on any error path below so a failed build
+    // doesn't swallow what the user typed.
     setPrompt("");
     setGenerating(true);
     setShowHistory(false);
@@ -1184,6 +1235,10 @@ export function TextToCadStudio({
               setSnapshot(null);
               setPendingQuestion(null);
               applyDone(ev, submittedPrompt, parentId);
+              // Return to rest: the sent bubble morphs back into the empty
+              // composer (MTR-209). Clearing this unmounts the thread and
+              // re-mounts the resting composer.
+              setSubmittedPrompt(null);
             } else if (ev.type === "error") {
               sawTerminal = true;
               setSnapshot(null);
@@ -1281,15 +1336,42 @@ export function TextToCadStudio({
     }
   }
 
-  // Viewer layering. Exactly ONE of the two renders while work is in flight:
-  // the transition canvas (deforming loader / morph) OWNS the frame during
-  // generating + morph, then fades out on reveal as the crisp model takes over.
-  // Showing the crisp model underneath a deforming overlay made the wobbling
-  // silhouette reveal the static model at its edges — a ghost "second copy".
-  const showTransition = generating || transition !== null;
-  const showModel =
-    !!activeAssetId &&
-    (!showTransition || transition?.phase === "reveal");
+  // The morphing generation thread owns the whole in-flight window (submit →
+  // done), across both the chip and typed paths. While it's up, the resting
+  // composer is UNMOUNTED (round 2 note #3). `submittedPrompt` is the single
+  // "conversation active" signal — set on submit, cleared on done/error.
+  const inFlight = submittedPrompt !== null;
+  // The pre-build quick-check is live (a genuine choice surfaced) but the build
+  // hasn't started — the system bubble shows the questionnaire, not status.
+  const briefActive =
+    !!brief && (brief.questions?.length ?? 0) > 0 && !generating;
+  // One-line status for the system bubble: "Checking the spec" during the
+  // silent brief step, then the harness's current phase (round 1 dropped the
+  // second line).
+  const statusText = briefLoading
+    ? "Checking the spec"
+    : progress.length
+      ? describeEvent(progress[progress.length - 1]).text
+      : "Getting started";
+  // Cancel the quick-check → back to the resting composer with the prompt kept
+  // so it can be edited (round 2 note #4 escape hatch).
+  const cancelBrief = () => {
+    setBrief(null);
+    setSubmittedPrompt(null);
+  };
+
+  // Viewer layering (MTR-214). The transition canvas (deforming loader / morph)
+  // OWNS the frame during generating + morph + hold; the crisp ModelViewer is
+  // mounted TRANSPARENTLY underneath from the start of the handoff so it's
+  // loaded by the time the morph freezes, then crossfades in on reveal.
+  const inTransition = transition !== null;
+  const showTransition = generating || inTransition;
+  // Mount the solid whenever there's an asset AND we're either settled or in the
+  // loader→model handoff (so it preloads under the frozen particles).
+  const mountModel = !!activeAssetId && (inTransition || !generating);
+  // Opaque only when settled or once the morph revealed it; during morph/hold
+  // it's mounted-but-transparent (loading) so there's no ghost-edge second copy.
+  const modelVisible = !inTransition || transition?.phase === "reveal";
 
   const composerLabel = generating
     ? "Generating…"
@@ -1444,11 +1526,30 @@ export function TextToCadStudio({
           {/* Viewer / progress / empty state */}
           <div className="mt-5 overflow-hidden rounded-xl border border-foreground/10">
             <div className="relative aspect-[4/3] w-full bg-muted/30 lg:aspect-auto lg:h-[clamp(260px,46vh,520px)]">
-              {/* Crisp model — the BASE layer (fixed frame). Stays mounted
-                  under the transition so the morph fades to reveal it with no
-                  remount/zoom; on a revision it's the shape being deformed. */}
-              {showModel && activeAssetId && (
-                <Suspense fallback={<ViewerSkeleton label="Loading model…" />}>
+              {/* Crisp model — the BASE layer (fixed frame). Mounted (and
+                  loading) UNDER the transition from the start of the handoff,
+                  transparent until reveal, so the morph crossfades into a
+                  ready mesh with no "Loading model…" flash or cloud regression
+                  (MTR-214). On a revision it's the shape being deformed. */}
+              {mountModel && activeAssetId && (
+                <div
+                  className={cn(
+                    "absolute inset-0 transition-opacity duration-500 motion-reduce:transition-none",
+                    modelVisible ? "opacity-100" : "opacity-0"
+                  )}
+                >
+                <Suspense
+                  fallback={
+                    // During the handoff the morphed particles are the loader —
+                    // a transparent fallback keeps a second skeleton from
+                    // showing through (MTR-214).
+                    inTransition ? (
+                      <div className="h-full w-full" />
+                    ) : (
+                      <ViewerSkeleton label="Loading model…" />
+                    )
+                  }
+                >
                   {/* Compare mode swaps the solid model for the thread's
                       latest and ghosts the viewed (older) revision on top;
                       both land in the same deterministic fixed frame.
@@ -1498,9 +1599,15 @@ export function TextToCadStudio({
                         { id: crypto.randomUUID(), ...a },
                       ])
                     }
+                    // Real "geometry loaded" signal gates the reveal (MTR-214);
+                    // suppress the inner deforming-cloud fallback during the
+                    // handoff so the morphed particles stay the only loader.
+                    onReady={() => setModelReady(true)}
+                    hideLoadingFallback={inTransition}
                     className="absolute inset-0 h-full w-full"
                   />
                 </Suspense>
+                </div>
               )}
 
               {/* Transition overlay — deforming loader (blob for a fresh build,
@@ -1526,31 +1633,26 @@ export function TextToCadStudio({
                           ? `/api/files/preview/${transition.assetId}`
                           : null
                       }
+                      // Morph done → FREEZE at the final shape ("hold"); the
+                      // load-gated effect flips to "reveal" once the solid is
+                      // ready, so there's no timer-guessed pop (MTR-214).
                       onMorphComplete={() =>
                         setTransition((t) =>
-                          t ? { ...t, phase: "reveal" } : null
+                          t && t.phase === "morph"
+                            ? { ...t, phase: "hold" }
+                            : t
                         )
                       }
                     />
                   </Suspense>
-                  {generating && !transition && snapshot && (
-                    <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 p-6">
-                      {/* Live build preview — the latest snapshot render of the
-                          in-progress solid, cross-fading as frames land. Status
-                          + the interactive question now live in the morphing
-                          generation thread above the composer (MTR-209); the
-                          particle cloud is the visual backdrop here (MTR-210). */}
-                      <SnapshotPreview
-                        render={snapshot.render}
-                        step={snapshot.step}
-                      />
-                    </div>
-                  )}
+                  {/* The live build preview now renders INSIDE the generation
+                      thread's status bubble (round 4), not over the particle
+                      cloud — so nothing competes with the backdrop here. */}
                 </div>
               )}
 
               {/* Empty state — no model, nothing generating. */}
-              {!showTransition && !showModel && (
+              {!showTransition && !mountModel && (
                 <div className="flex h-full w-full flex-col">
                   <Suspense fallback={<div className="min-h-0 flex-1" />}>
                     <MaterializingBlob className="min-h-0 flex-1" />
@@ -1760,12 +1862,20 @@ export function TextToCadStudio({
                   Download
                 </a>
               )}
-              {/* Editable STEP source (MTR-196) — self-hides when the selected
-                  asset has no B-rep STEP (mesh-mode / remeshed parts). */}
+              {/* Editable STEP source (MTR-196). `available` is threaded from
+                  the turn/part (MTR-215) so the button is present or absent from
+                  first paint — no async probe that inserts late and reflows the
+                  row. Undefined (legacy turns) falls back to the self-probe. */}
               <StepDownloadLink
                 key={activeAssetId}
                 fileAssetId={activeAssetId}
                 label="Download STEP"
+                available={
+                  viewedParts.length > 1
+                    ? viewedParts.find((p) => p.fileAssetId === activeAssetId)
+                        ?.hasStep
+                    : viewedTurn?.hasStep
+                }
               />
               <button
                 type="button"
@@ -2081,44 +2191,36 @@ export function TextToCadStudio({
             At nav+ the pill is gone and the sidebar rail takes over. */}
         <div className="mx-auto grid max-w-6xl gap-8 px-4 pb-28 nav:pb-4 lg:grid-cols-[1fr_300px]">
           <div className="pointer-events-auto mx-auto w-full max-w-2xl">
-          {/* Quick check — shown ONLY when the silent brief step surfaced a
-              genuine choice. Answer (or skip) and it builds; the brief data
-              itself never renders as a form (MTR-194 pattern revision). */}
-          {brief && (brief.questions?.length ?? 0) > 0 && !generating && (
-            <QuickCheckCard
-              brief={brief}
-              onChange={setBrief}
-              onClose={() =>
-                // Close = keep the brief (and the recommended defaults) but
-                // stop asking; the next send builds with it directly.
-                setBrief({ ...brief, questions: undefined })
-              }
-              onBuild={submit}
-              canBuild={prompt.trim().length >= 3}
-            />
-          )}
-          {/* Morphing generation thread (MTR-209): the composer "sends" the
-              prompt as a RIGHT-aligned bubble, a one-line status loader sits
-              LEFT-aligned below it, and when a question fires the status
-              container physically morphs into the questionnaire — then back.
-              Unmounts (exits down) on completion, returning to the rest
-              composer. */}
+          {/* Morphing generation thread (MTR-209). Present for the WHOLE
+              in-flight window (submit → done), across BOTH entry paths (chip
+              or typed): the composer "sends" the prompt into a right-aligned
+              bubble and UNMOUNTS (below), while this left-aligned system bubble
+              carries "Checking the spec" → the quick-check / mid-cycle
+              questionnaire → the live status, morphing its own size between
+              each. Exits (morphs back to the empty composer) on completion. */}
           <AnimatePresence>
-            {generating && submittedPrompt !== null && (
+            {inFlight && (
               <GenerationThread
                 key="gen-thread"
-                promptText={submittedPrompt}
-                statusText={
-                  progress.length
-                    ? describeEvent(progress[progress.length - 1]).text
-                    : "Getting started"
-                }
+                promptText={submittedPrompt ?? ""}
+                statusText={statusText}
+                preview={snapshot}
                 pendingQuestion={pendingQuestion}
                 onAnswer={answerQuestion}
+                brief={brief}
+                briefActive={briefActive}
+                onBriefChange={setBrief}
+                onBuild={submit}
+                onCancelBrief={cancelBrief}
+                canBuild={prompt.trim().length >= 3}
                 reduce={!!reduceMotion}
               />
             )}
           </AnimatePresence>
+          {/* Resting composer — UNMOUNTED while a build is in flight (round 2
+              note #3): it conceptually became the sent bubble, so a disabled
+              ghost input serves no purpose. It morphs back (empty) at rest. */}
+          {!inFlight && (
           <div
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
@@ -2217,13 +2319,6 @@ export function TextToCadStudio({
                 >
                   <PaperclipIcon className="size-4" />
                 </button>
-                {/* Silent pre-build spec check in flight (fresh builds). */}
-                {briefLoading && (
-                  <span className="inline-flex h-8 items-center gap-1.5 px-2 text-xs font-medium text-muted-foreground">
-                    <Loader2Icon className="size-3.5 animate-spin" />
-                    Checking the spec…
-                  </span>
-                )}
               </div>
               <input
                 ref={fileInputRef}
@@ -2244,14 +2339,11 @@ export function TextToCadStudio({
                 title={composerLabel}
                 className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-foreground text-background disabled:opacity-40"
               >
-                {generating ? (
-                  <Loader2Icon className="size-4 animate-spin" />
-                ) : (
-                  <ArrowUpIcon className="size-4" strokeWidth={2.5} />
-                )}
+                <ArrowUpIcon className="size-4" strokeWidth={2.5} />
               </button>
             </div>
           </div>
+          )}
           </div>
         </div>
       </div>
@@ -2371,11 +2463,13 @@ function BuildsList({
 
 /**
  * Live build preview — the latest snapshot render of the in-progress solid,
- * shown over the generating blob. Cross-fades when a new frame replaces the
- * old: the previous frame stays mounted underneath while the new one
- * transitions in (opacity only; prefers-reduced-motion swaps instantly).
+ * shown INSIDE the generation thread's status bubble above the status line
+ * (MTR-209 round 4). Cross-fades when a new frame replaces the old: the previous
+ * frame stays mounted underneath while the new one transitions in (opacity only;
+ * prefers-reduced-motion swaps instantly). Full-width, contained, so it sits
+ * cleanly in the bubble; the bubble's `layout` springs open to hold it.
  */
-function SnapshotPreview({ render, step }: { render: string; step: number }) {
+function BubblePreview({ render, step }: { render: string; step: number }) {
   const [prev, setPrev] = useState<{ render: string; step: number } | null>(
     null
   );
@@ -2397,14 +2491,14 @@ function SnapshotPreview({ render, step }: { render: string; step: number }) {
     };
   }, [render, step]);
   return (
-    <div className="glass relative w-40 max-w-[60%] overflow-hidden rounded-xl shadow-lg sm:w-52">
+    <div className="relative mb-2.5 max-h-40 overflow-hidden rounded-lg border border-foreground/10 bg-background/40">
       {prev && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={`data:image/png;base64,${prev.render}`}
           alt=""
           aria-hidden
-          className="absolute inset-0 h-full w-full object-cover"
+          className="absolute inset-0 h-full w-full object-contain"
         />
       )}
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -2412,7 +2506,7 @@ function SnapshotPreview({ render, step }: { render: string; step: number }) {
         src={`data:image/png;base64,${render}`}
         alt="Live preview of the model being built"
         className={cn(
-          "relative block h-auto w-full transition-opacity duration-[250ms] motion-reduce:transition-none",
+          "relative block max-h-40 w-full object-contain transition-opacity duration-[250ms] motion-reduce:transition-none",
           faded ? "opacity-100" : "opacity-0"
         )}
       />
@@ -2429,125 +2523,45 @@ function SnapshotPreview({ render, step }: { render: string; step: number }) {
  * request whether the user hits this card's button or just sends normally.
  */
 /**
- * Quick check (MTR-191 ask-site a / MTR-194 pattern revision): the ONLY
- * user-facing surface of the brief step. The brief itself is machinery —
- * grounded dims ride along to the generate prompt invisibly; this card
- * appears solely when the model surfaced a genuine choice the prompt didn't
- * settle, as tappable options with the recommendation pre-selected.
- */
-function QuickCheckCard({
-  brief,
-  onChange,
-  onClose,
-  onBuild,
-  canBuild,
-}: {
-  brief: CadBrief;
-  onChange: (b: CadBrief) => void;
-  onClose: () => void;
-  onBuild: () => void;
-  canBuild: boolean;
-}) {
-  const questions = brief.questions ?? [];
-
-  const chosenFor = (q: NonNullable<CadBrief["questions"]>[number]) =>
-    brief.decisions?.find((d) => d.q === q.question)?.a ?? q.default ?? null;
-
-  function choose(
-    q: NonNullable<CadBrief["questions"]>[number],
-    label: string
-  ) {
-    const rest = (brief.decisions ?? []).filter((d) => d.q !== q.question);
-    onChange({ ...brief, decisions: [...rest, { q: q.question, a: label }] });
-  }
-
-  return (
-    <div className="mb-2 max-h-[45vh] overflow-y-auto rounded-2xl border border-foreground/15 bg-card/95 p-3 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80">
-      <div className="flex items-start gap-2">
-        <ClipboardListIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-        <div className="min-w-0 flex-1">
-          <span className="block text-sm font-medium">Quick check</span>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {questions.length === 1
-              ? "One choice before building — the recommended option is selected."
-              : "A couple of choices before building — recommended options are selected."}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Skip questions"
-          title="Skip — the next send builds with the recommended options"
-          className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 hover:bg-foreground/10 hover:text-foreground"
-        >
-          <XIcon className="size-3.5" />
-        </button>
-      </div>
-
-      {questions.map((q) => {
-        const chosen = chosenFor(q);
-        return (
-          <div key={q.id} className="mt-3">
-            <p className="text-sm">{q.question}</p>
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {q.options.map((o) => {
-                const selected = chosen === o.label;
-                return (
-                  <button
-                    key={o.label}
-                    type="button"
-                    onClick={() => choose(q, o.label)}
-                    aria-pressed={selected}
-                    title={o.detail}
-                    className={`cursor-pointer rounded-full border px-2.5 py-1 text-xs transition-colors ${
-                      selected
-                        ? "border-foreground bg-foreground text-background"
-                        : "border-foreground/15 bg-foreground/5 hover:border-foreground/30"
-                    }`}
-                  >
-                    {o.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })}
-
-      <div className="mt-3">
-        <button
-          type="button"
-          onClick={onBuild}
-          disabled={!canBuild}
-          className="cursor-pointer rounded-lg bg-foreground px-3 py-1.5 text-sm font-medium text-background disabled:opacity-40"
-        >
-          Build
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/**
- * The morphing generation thread (MTR-209). One surface that carries the whole
+ * The morphing generation thread (MTR-209). ONE surface that carries the whole
  * generation lifecycle in an iMessage sent/received metaphor:
- *   • the submitted prompt as a RIGHT-aligned "sent" bubble (truncated, 1 line),
- *   • a LEFT-aligned "received" system bubble that shows a one-line status
- *     loader and *physically morphs* (shared-layout resize) into the
- *     questionnaire when a mid-cycle question fires, then morphs back.
- * All motion is transform/opacity + layout (no per-frame CPU); `reduce`
- * collapses everything to instant opacity swaps for prefers-reduced-motion.
- * Mounted while a build runs; exits (down) on completion → back to rest.
+ *   • the submitted prompt as a RIGHT-aligned "sent" bubble (truncated, 1 line);
+ *   • a LEFT-aligned "received" system bubble that is the single evolving
+ *     container — it shows a one-line status loader (with a live preview
+ *     thumbnail above it once a render lands, round 4), and *physically morphs*
+ *     into a full-width questionnaire (a pre-build quick-check OR a mid-cycle
+ *     question) when one fires, then morphs back.
+ *
+ * Alignment discipline (rounds 1–3): user/sent = right, black; collapsed
+ * system = left, light; an OPEN spec/questionnaire panel = full width.
+ *
+ * Size interpolation (round 5): the received bubble owns `layout`, so every
+ * open/close/grow (status↔questionnaire, thumbnail appearing, width 85%↔full)
+ * springs its size via FLIP. The content swap uses `mode="popLayout"` so the
+ * incoming panel sizes the box while the outgoing fades on top — never a flash
+ * of empty container, never a height snap. `reduce` collapses all of it to
+ * instant opacity swaps for prefers-reduced-motion.
+ *
+ * Mounted for the whole in-flight window (submit → done), so the resting
+ * composer is unmounted meanwhile (round 2 note #3) — it *became* this bubble.
  */
 function GenerationThread({
   promptText,
   statusText,
+  preview,
   pendingQuestion,
   onAnswer,
+  brief,
+  briefActive,
+  onBriefChange,
+  onBuild,
+  onCancelBrief,
+  canBuild,
   reduce,
 }: {
   promptText: string;
   statusText: string;
+  preview: { render: string; step: number } | null;
   pendingQuestion: {
     questionId: string;
     text: string;
@@ -2556,14 +2570,24 @@ function GenerationThread({
     answering: boolean;
   } | null;
   onAnswer: (pick: { optionId?: string; text?: string }) => void;
+  brief: CadBrief | null;
+  briefActive: boolean;
+  onBriefChange: (b: CadBrief) => void;
+  onBuild: () => void;
+  onCancelBrief: () => void;
+  canBuild: boolean;
   reduce: boolean;
 }) {
   const spring = reduce
     ? { duration: 0 }
-    : ({ type: "spring", stiffness: 480, damping: 42, mass: 0.9 } as const);
+    : ({ type: "spring", stiffness: 420, damping: 40, mass: 0.9 } as const);
   const fade = reduce
     ? { duration: 0 }
     : ({ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] } as const);
+
+  // An open spec/questionnaire panel expands the system bubble to full width;
+  // the collapsed status stays a narrow left bubble (round 3 note #3).
+  const panelOpen = !!pendingQuestion || (briefActive && !!brief);
 
   return (
     <motion.div
@@ -2580,40 +2604,71 @@ function GenerationThread({
         </div>
       </motion.div>
 
-      {/* Received — the system bubble. `layout` on THIS element is what makes
-          the container physically morph between the short status line and the
-          taller questionnaire (a real resize, not a cross-fade swap). */}
+      {/* Received — the single evolving system container. `layout` here springs
+          its size (width + height) between every state; the popLayout swap
+          below cross-fades the content without an empty intermediate box. */}
       <motion.div layout={!reduce} className="flex justify-start">
         <motion.div
           layout={!reduce}
           transition={spring}
-          className="max-w-[92%] overflow-hidden rounded-2xl rounded-bl-md border border-foreground/10 bg-card/95 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/80"
+          className={cn(
+            "overflow-hidden rounded-2xl rounded-bl-md border border-foreground/10 bg-card/95 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/80",
+            panelOpen ? "w-full" : "max-w-[85%]"
+          )}
         >
-          <AnimatePresence mode="wait" initial={false}>
+          <AnimatePresence mode="popLayout" initial={false}>
             {pendingQuestion ? (
               <motion.div
                 key={`q:${pendingQuestion.questionId}`}
+                layout={!reduce}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={fade}
-                className="p-3"
+                className="p-3.5"
               >
                 <Questionnaire question={pendingQuestion} onAnswer={onAnswer} />
+              </motion.div>
+            ) : briefActive && brief ? (
+              <motion.div
+                key="brief"
+                layout={!reduce}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={fade}
+                className="p-3.5"
+              >
+                <BriefQuestionnaire
+                  brief={brief}
+                  onChange={onBriefChange}
+                  onBuild={onBuild}
+                  onCancel={onCancelBrief}
+                  canBuild={canBuild}
+                />
               </motion.div>
             ) : (
               <motion.div
                 key="status"
+                layout={!reduce}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={fade}
-                className="flex items-center gap-2.5 px-3.5 py-2.5"
+                className="px-3.5 py-2.5"
               >
-                <Loader2Icon className="size-4 shrink-0 animate-spin text-muted-foreground" />
-                <span className="text-sm font-medium text-foreground">
-                  {statusText}
-                </span>
+                {/* Live preview render lands INSIDE the bubble, above the
+                    status line (round 4). The bubble's `layout` springs open to
+                    hold it — no jump. */}
+                {preview && (
+                  <BubblePreview render={preview.render} step={preview.step} />
+                )}
+                <div className="flex items-center gap-2.5">
+                  <Loader2Icon className="size-4 shrink-0 animate-spin text-muted-foreground" />
+                  <span className="text-sm font-medium text-foreground">
+                    {statusText}
+                  </span>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
@@ -2623,16 +2678,77 @@ function GenerationThread({
   );
 }
 
+/** A full-width, contained answer card (MTR-209 round 3 look): optional
+ *  thumbnail, label, a `recommended` chip on the default, and a check when
+ *  armed. Selecting ARMS it (highlight) — commit is a separate deliberate
+ *  action (the panel's send/Build CTA), never an instant fire on tap. */
+function OptionCard({
+  label,
+  detail,
+  thumbnail,
+  recommended,
+  selected,
+  disabled,
+  onSelect,
+}: {
+  label: string;
+  detail?: string;
+  thumbnail?: string;
+  recommended?: boolean;
+  selected: boolean;
+  disabled?: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      aria-pressed={selected}
+      onClick={onSelect}
+      title={detail}
+      className={cn(
+        "flex w-full cursor-pointer items-center gap-3 rounded-xl border p-2.5 text-left transition-colors disabled:opacity-50",
+        selected
+          ? "border-foreground bg-foreground/[0.08]"
+          : "border-foreground/15 bg-foreground/[0.03] hover:border-foreground/40 hover:bg-foreground/[0.06]"
+      )}
+    >
+      {thumbnail && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={`data:image/png;base64,${thumbnail}`}
+          alt=""
+          className="size-12 shrink-0 rounded-lg bg-background/40 object-contain"
+        />
+      )}
+      <span className="min-w-0 flex-1 text-sm text-foreground">{label}</span>
+      {recommended && (
+        <span className="shrink-0 rounded-full border border-foreground/15 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+          recommended
+        </span>
+      )}
+      {selected && (
+        <CheckIcon className="size-4 shrink-0 text-foreground" strokeWidth={2.5} />
+      )}
+    </button>
+  );
+}
+
 /**
- * The mid-cycle question (MTR-191), restyled for the morphing thread (MTR-209):
- * question text on top, each answer a full-width contained card (an inline
- * thumbnail when the option carries a visual draft variant), and — ALWAYS — a
- * custom free-text field as the last option so the user can bypass the presets
- * and answer in their own words. Picking a card sends `optionId`; the custom
- * field sends `text`. Ignoring it still lets the server take the default after
- * the timeout, so it never traps an away user.
+ * The mid-cycle question (MTR-191), styled as the round-3 questionnaire
+ * (MTR-209): question text on top, each answer a full-width contained card, an
+ * always-present custom free-text row, a one-line helper, and a PROMINENT
+ * full-width commit CTA.
+ *
+ * Select-then-send (round 3 note #2): tapping a card ARMS it — the build does
+ * NOT fire on tap. The recommended option is pre-armed so a satisfied user can
+ * just hit send. Typing in the free-text row arms the custom answer instead
+ * (and its own send button commits it). One deliberate confirm either way; a
+ * preset arms → `optionId`, custom → `text`.
+ *
+ * Exported for unit tests (select-then-send dispatch); not a public API.
  */
-function Questionnaire({
+export function Questionnaire({
   question,
   onAnswer,
 }: {
@@ -2644,8 +2760,19 @@ function Questionnaire({
   };
   onAnswer: (pick: { optionId?: string; text?: string }) => void;
 }) {
+  const [armed, setArmed] = useState<string | null>(
+    question.defaultOptionId ?? null
+  );
   const [custom, setCustom] = useState("");
-  const canCustom = custom.trim().length > 0 && !question.answering;
+  const usingCustom = custom.trim().length > 0;
+  const canSend = !question.answering && (usingCustom || armed !== null);
+
+  function commit() {
+    if (question.answering) return;
+    if (usingCustom) onAnswer({ text: custom.trim() });
+    else if (armed) onAnswer({ optionId: armed });
+  }
+
   return (
     <div>
       <div className="flex items-start gap-2">
@@ -2656,48 +2783,39 @@ function Questionnaire({
       </div>
 
       <div className="mt-3 flex flex-col gap-2">
-        {question.options.map((o) => {
-          const isDefault = o.id === question.defaultOptionId;
-          return (
-            <button
-              key={o.id}
-              type="button"
-              disabled={question.answering}
-              onClick={() => onAnswer({ optionId: o.id })}
-              title={o.detail}
-              className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-foreground/15 bg-foreground/[0.03] p-2.5 text-left transition-colors hover:border-foreground/40 hover:bg-foreground/[0.06] disabled:opacity-50"
-            >
-              {o.thumbnail && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={`data:image/png;base64,${o.thumbnail}`}
-                  alt=""
-                  className="size-12 shrink-0 rounded-lg bg-background/40 object-contain"
-                />
-              )}
-              <span className="min-w-0 flex-1 text-sm text-foreground">
-                {o.label}
-              </span>
-              {isDefault && (
-                <span className="shrink-0 rounded-full border border-foreground/15 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                  recommended
-                </span>
-              )}
-            </button>
-          );
-        })}
+        {question.options.map((o) => (
+          <OptionCard
+            key={o.id}
+            label={o.label}
+            detail={o.detail}
+            thumbnail={o.thumbnail}
+            recommended={o.id === question.defaultOptionId}
+            selected={armed === o.id && !usingCustom}
+            disabled={question.answering}
+            onSelect={() => {
+              setArmed(o.id);
+              setCustom("");
+            }}
+          />
+        ))}
 
-        {/* Always-present custom free-text escape hatch (MTR-209). */}
+        {/* Always-present custom free-text escape hatch with its own send. */}
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (canCustom) onAnswer({ text: custom });
+            if (usingCustom && !question.answering) onAnswer({ text: custom.trim() });
           }}
-          className="flex items-center gap-2 rounded-xl border border-dashed border-foreground/25 p-1.5 pl-3"
+          className={cn(
+            "flex items-center gap-2 rounded-xl border border-dashed p-1.5 pl-3 transition-colors",
+            usingCustom ? "border-foreground/50" : "border-foreground/25"
+          )}
         >
           <input
             value={custom}
-            onChange={(e) => setCustom(e.target.value)}
+            onChange={(e) => {
+              setCustom(e.target.value);
+              if (e.target.value.trim()) setArmed(null);
+            }}
             disabled={question.answering}
             maxLength={2000}
             placeholder="Or answer in your own words…"
@@ -2707,7 +2825,7 @@ function Questionnaire({
           />
           <button
             type="submit"
-            disabled={!canCustom}
+            disabled={!usingCustom || question.answering}
             aria-label="Send custom answer"
             className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground text-background disabled:opacity-30"
           >
@@ -2716,11 +2834,121 @@ function Questionnaire({
         </form>
       </div>
 
-      <p className="mt-2.5 text-[11px] text-muted-foreground">
+      {/* Prominent full-width commit CTA (round 2 note #4). */}
+      <button
+        type="button"
+        onClick={commit}
+        disabled={!canSend}
+        className="mt-3 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-foreground px-3 py-2.5 text-sm font-medium text-background disabled:opacity-40"
+      >
+        {question.answering ? (
+          <>
+            <Loader2Icon className="size-4 animate-spin" /> Applying…
+          </>
+        ) : (
+          <>
+            {usingCustom ? "Send answer" : "Use this answer"}
+            <ArrowUpIcon className="size-3.5" strokeWidth={2.5} />
+          </>
+        )}
+      </button>
+
+      <p className="mt-2 text-[11px] text-muted-foreground">
         {question.answering
           ? "Applying your choice…"
-          : "Pick one, or the recommended option is used automatically to keep the build moving."}
+          : "Pick an option or write your own, then send — the recommended choice is used if you skip."}
       </p>
+    </div>
+  );
+}
+
+/**
+ * Pre-build quick check (MTR-191 ask-site a / MTR-194): the ONLY user-facing
+ * surface of the silent brief step, styled as the round-3 questionnaire and
+ * rendered INSIDE the system bubble (round 2 note #2 — it morphs out of the
+ * status container, no longer a detached card). Each choice is a full-width
+ * card with the recommendation pre-selected; a PROMINENT full-width Build CTA
+ * commits the spec, and Cancel returns to the composer to edit the prompt.
+ */
+function BriefQuestionnaire({
+  brief,
+  onChange,
+  onBuild,
+  onCancel,
+  canBuild,
+}: {
+  brief: CadBrief;
+  onChange: (b: CadBrief) => void;
+  onBuild: () => void;
+  onCancel: () => void;
+  canBuild: boolean;
+}) {
+  const questions = brief.questions ?? [];
+
+  const chosenFor = (q: NonNullable<CadBrief["questions"]>[number]) =>
+    brief.decisions?.find((d) => d.q === q.question)?.a ?? q.default ?? null;
+
+  function choose(
+    q: NonNullable<CadBrief["questions"]>[number],
+    label: string
+  ) {
+    const rest = (brief.decisions ?? []).filter((d) => d.q !== q.question);
+    onChange({ ...brief, decisions: [...rest, { q: q.question, a: label }] });
+  }
+
+  return (
+    <div>
+      <div className="flex items-start gap-2">
+        <ClipboardListIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <span className="block text-sm font-medium text-foreground">
+            Quick check
+          </span>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {questions.length === 1
+              ? "One choice before building — the recommended option is selected."
+              : "A couple of choices before building — recommended options are selected."}
+          </p>
+        </div>
+      </div>
+
+      {questions.map((q) => {
+        const chosen = chosenFor(q);
+        return (
+          <div key={q.id} className="mt-3">
+            <p className="text-sm text-foreground">{q.question}</p>
+            <div className="mt-2 flex flex-col gap-2">
+              {q.options.map((o) => (
+                <OptionCard
+                  key={o.label}
+                  label={o.label}
+                  detail={o.detail}
+                  recommended={o.label === q.default}
+                  selected={chosen === o.label}
+                  onSelect={() => choose(q, o.label)}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+
+      <button
+        type="button"
+        onClick={onBuild}
+        disabled={!canBuild}
+        className="mt-3 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-foreground px-3 py-2.5 text-sm font-medium text-background disabled:opacity-40"
+      >
+        Build
+        <ArrowUpIcon className="size-3.5" strokeWidth={2.5} />
+      </button>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="mt-2 w-full cursor-pointer text-center text-[11px] text-muted-foreground hover:text-foreground"
+      >
+        Cancel and edit prompt
+      </button>
     </div>
   );
 }
