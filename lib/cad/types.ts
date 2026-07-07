@@ -217,13 +217,55 @@ export interface CadQuestion {
 
 /**
  * Callback the executor hands the harness so a running build can SUSPEND, ask
- * the user one multiple-choice question, and RESUME with the chosen option id
- * (MTR-191, riding MTR-175's resumable job). Resolves to the selected option
- * id (or the default on timeout). Absent for legacy callers and secondary
+ * the user one multiple-choice question, and RESUME with the answer (MTR-191,
+ * riding MTR-175's resumable job). Resolves to EITHER a selected option id OR a
+ * free-text custom answer encoded with {@link CUSTOM_ANSWER_PREFIX} (MTR-216) —
+ * the caller runs {@link resolveStoredAnswer} to tell them apart. Falls back to
+ * the default option id on timeout. Absent for legacy callers and secondary
  * best-of candidates — the harness then proceeds with its own judgment instead
  * of pausing, so asking is always optional.
  */
 export type CadQuestionAsker = (question: CadQuestion) => Promise<string>;
+
+/**
+ * Free-text ("answer in your own words") replies to a mid-cycle question
+ * (MTR-216) are stored in `cadJobs.answers` under the same key as preset picks,
+ * but sentinel-prefixed so the executor can distinguish an intentional typed
+ * answer from a preset option id AND from a stale/garbage value (a preset id
+ * that no longer matches after the question changed). The answer route encodes;
+ * the executor + agentic loop decode via {@link resolveStoredAnswer}. Option
+ * ids are always `opt-N` / `q-N`, so they can never collide with this prefix.
+ */
+export const CUSTOM_ANSWER_PREFIX = "custom:";
+
+/** Encode a trimmed free-text answer for storage in `cadJobs.answers`. */
+export function encodeCustomAnswer(text: string): string {
+  return `${CUSTOM_ANSWER_PREFIX}${text}`;
+}
+
+/** A stored answer resolved against the options that were actually offered. */
+export type ResolvedAnswer =
+  | { kind: "option"; option: CadQuestionOption }
+  | { kind: "text"; text: string };
+
+/**
+ * Resolve a value stored in `cadJobs.answers` against the offered options.
+ * Returns the matched preset option, a decoded free-text answer, or `null` when
+ * the value is neither (a stale option id from a changed question / schema
+ * drift, or an empty custom answer) — callers fall back to the default.
+ */
+export function resolveStoredAnswer(
+  value: string,
+  options: CadQuestionOption[]
+): ResolvedAnswer | null {
+  const option = options.find((o) => o.id === value);
+  if (option) return { kind: "option", option };
+  if (value.startsWith(CUSTOM_ANSWER_PREFIX)) {
+    const text = value.slice(CUSTOM_ANSWER_PREFIX.length).trim();
+    if (text) return { kind: "text", text };
+  }
+  return null;
+}
 
 /** Terminal payload the streaming route appends after the harness finishes. */
 export interface CadDoneEvent {

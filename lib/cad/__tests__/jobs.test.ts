@@ -464,6 +464,38 @@ describe("executeCadJob", () => {
       })
     );
   });
+
+  it("honors a free-text custom answer instead of the default (MTR-216)", async () => {
+    doneSuccess();
+    // The always-present custom field stores a sentinel-encoded answer that
+    // matches no preset option — it must be honored, not treated as stale.
+    jobRow.answers = { q1: "custom:a Pi 5 with the PoE HAT" };
+    let chosen: string | undefined;
+    runHarness.mockImplementation(
+      async (input: {
+        onQuestion?: (q: typeof questionInput) => Promise<string>;
+      }) => {
+        chosen = await input.onQuestion?.(questionInput);
+        return okHarnessResult();
+      }
+    );
+
+    await executeCadJob(baseInput);
+
+    // onQuestion returns the raw encoded value so the harness/agentic consumer
+    // can decode it; the recorded answer is NOT viaDefault and its label is the
+    // decoded text (never the raw sentinel).
+    expect(chosen).toBe("custom:a Pi 5 with the PoE HAT");
+    expect(jobRow.progress).toContainEqual(
+      expect.objectContaining({
+        type: "answer",
+        questionId: "q1",
+        optionId: "custom:a Pi 5 with the PoE HAT",
+        label: "a Pi 5 with the PoE HAT",
+        viaDefault: false,
+      })
+    );
+  });
 });
 
 // --- Metering + credits substrate (MTR-181) --------------------------------

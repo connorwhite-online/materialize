@@ -22,6 +22,7 @@ import type {
   CadJobProgressEntry,
   CadQuestion,
 } from "@/lib/cad/types";
+import { resolveStoredAnswer } from "@/lib/cad/types";
 
 /**
  * Background-job execution for text-to-CAD generation (MTR-175,
@@ -285,10 +286,12 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
           .limit(1);
         const pick = row?.answers?.[q.id];
         if (typeof pick === "string" && pick) {
-          // Only honor an option we actually offered — a stale/garbage answer
-          // (schema drift, replayed old question id) falls back to the default.
-          chosen = q.options.some((o) => o.id === pick) ? pick : fallback;
-          viaDefault = chosen !== pick;
+          // Honor a preset pick OR a free-text custom answer (MTR-216); only a
+          // value that resolves to neither — a stale option id after the
+          // question changed, schema drift — falls back to the default.
+          const resolved = resolveStoredAnswer(pick, q.options);
+          chosen = resolved ? pick : fallback;
+          viaDefault = resolved == null;
           break;
         }
       } catch {
@@ -301,7 +304,15 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
       viaDefault = true;
     }
 
-    const label = q.options.find((o) => o.id === chosen)?.label ?? chosen;
+    // Human-readable label for the thread: the option's label for a preset, the
+    // typed text for a custom answer (MTR-216), never the raw sentinel.
+    const resolvedChosen = resolveStoredAnswer(chosen, q.options);
+    const label =
+      resolvedChosen?.kind === "option"
+        ? resolvedChosen.option.label
+        : resolvedChosen?.kind === "text"
+          ? resolvedChosen.text
+          : chosen;
     // Resume: record the resolution (visible in thread history + replay) and
     // flip back to running BEFORE returning, so the harness continues under a
     // running job.
