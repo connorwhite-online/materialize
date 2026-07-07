@@ -1367,7 +1367,7 @@ export function TextToCadStudio({
               <Link
                 href="/prometheus/eval"
                 title="Harness scorecard"
-                className="hidden items-center gap-1.5 rounded-lg border border-foreground/15 px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground sm:inline-flex"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-foreground/15 px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               >
                 <ClipboardListIcon className="size-3.5" />
                 <span className="hidden lg:inline">Scorecard</span>
@@ -1375,7 +1375,7 @@ export function TextToCadStudio({
               <Link
                 href="/prometheus/exemplars"
                 title="Verified exemplars (debug)"
-                className="hidden items-center gap-1.5 rounded-lg border border-foreground/15 px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground sm:inline-flex"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-foreground/15 px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               >
                 <Layers className="size-3.5" />
                 <span className="hidden lg:inline">Exemplars</span>
