@@ -9,21 +9,23 @@ import { parseAnswerBody } from "../route";
 
 /**
  * MTR-209 — the answer endpoint accepts a preset `optionId` (card pick) OR a
- * free-text `text` (the always-present custom field). Both collapse to one
- * `answer` string. These cover the branch table without the auth/DB shell.
+ * free-text `text` (the always-present custom field). A preset is stored bare
+ * (so it matches an offered option id); a free-text answer is sentinel-encoded
+ * (`custom:`, MTR-216) so the executor honors it as a typed constraint instead
+ * of discarding it. These cover the branch table without the auth/DB shell.
  */
 describe("parseAnswerBody", () => {
-  it("accepts a valid preset optionId", () => {
+  it("accepts a valid preset optionId (stored bare)", () => {
     expect(parseAnswerBody({ questionId: "q1", optionId: "hot" })).toEqual({
       questionId: "q1",
       answer: "hot",
     });
   });
 
-  it("accepts a free-text answer and trims it", () => {
+  it("accepts a free-text answer, trims it, and sentinel-encodes it", () => {
     expect(
       parseAnswerBody({ questionId: "q1", text: "  a warm grey, matte  " })
-    ).toEqual({ questionId: "q1", answer: "a warm grey, matte" });
+    ).toEqual({ questionId: "q1", answer: "custom:a warm grey, matte" });
   });
 
   it("prefers optionId when both are present", () => {
@@ -32,10 +34,10 @@ describe("parseAnswerBody", () => {
     ).toEqual({ questionId: "q1", answer: "cold" });
   });
 
-  it("falls back to text when optionId is empty/invalid", () => {
+  it("falls back to encoded text when optionId is empty/invalid", () => {
     expect(
       parseAnswerBody({ questionId: "q1", optionId: "", text: "custom" })
-    ).toEqual({ questionId: "q1", answer: "custom" });
+    ).toEqual({ questionId: "q1", answer: "custom:custom" });
   });
 
   it("rejects a missing/blank questionId", () => {

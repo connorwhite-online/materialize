@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { cadGenerations, cadJobs } from "@/lib/db/schema";
 import { canUseTextToCad } from "@/lib/features";
 import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
+import { encodeCustomAnswer } from "@/lib/cad/types";
 
 /**
  * Answer a mid-cycle interactive question on a background CAD job (MTR-191).
@@ -29,8 +30,10 @@ const MAX_OPTION_LEN = 200;
 /**
  * Validate + normalize an answer body. The client sends EITHER a preset
  * `optionId` (a card pick) OR a free-text `text` (the always-present custom
- * field, MTR-209). Both collapse to a single `answer` string stored in
- * `cadJobs.answers[questionId]` — the same column the executor already reads.
+ * field, MTR-209). Both land in `cadJobs.answers[questionId]` — the same column
+ * the executor already reads — but a free-text answer is sentinel-encoded
+ * (MTR-216) so the executor can tell an intentional typed answer from a preset
+ * option id and honor it downstream instead of discarding it as non-matching.
  * Pure + exported so the branch table is unit-tested without the route's
  * auth/DB shell.
  */
@@ -44,15 +47,17 @@ export function parseAnswerBody(
   const optionId = (body as { optionId?: unknown })?.optionId;
   const text = (body as { text?: unknown })?.text;
 
-  // Preset pick takes precedence when present and valid.
+  // Preset pick takes precedence when present and valid — stored bare so it
+  // matches an offered option id.
   if (typeof optionId === "string" && optionId && optionId.length <= MAX_OPTION_LEN) {
     return { questionId, answer: optionId };
   }
-  // Otherwise accept a non-empty, length-bounded free-text answer.
+  // Otherwise accept a non-empty, length-bounded free-text answer, encoded with
+  // the custom-answer sentinel so the executor honors it as a typed constraint.
   if (typeof text === "string") {
     const trimmed = text.trim();
     if (trimmed && trimmed.length <= MAX_TEXT_LEN) {
-      return { questionId, answer: trimmed };
+      return { questionId, answer: encodeCustomAnswer(trimmed) };
     }
   }
   return null;

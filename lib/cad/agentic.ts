@@ -43,6 +43,7 @@ import type {
   CadQuestionOption,
   CadRunResult,
 } from "./types";
+import { resolveStoredAnswer } from "./types";
 
 /**
  * Interactive-question budget for the agentic loop (MTR-191). Mirrors the
@@ -806,8 +807,19 @@ export async function runAgenticHarness(
           options,
           defaultOptionId,
         });
+        // The answer is either a preset option id or a free-text custom answer
+        // the user typed (MTR-216) — thread the latter through as a hard
+        // constraint instead of collapsing it to the first option.
+        const resolved = resolveStoredAnswer(chosenId, options);
+        if (resolved?.kind === "text") {
+          return [
+            textBlock(
+              `The user answered in their own words: "${resolved.text}". Treat this as a hard constraint and honor it for the rest of the build.`
+            ),
+          ];
+        }
         const chosen =
-          options.find((o) => o.id === chosenId) ??
+          (resolved?.kind === "option" ? resolved.option : undefined) ??
           options.find((o) => o.id === defaultOptionId) ??
           options[0];
         return [
