@@ -8,6 +8,10 @@ import {
 import { runCadCode } from "./runner-client";
 import { SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, extractCode, gradeRun } from "./prompt";
 import { buildKnowledgeBlock, type CadProcess } from "./knowledge";
+import {
+  needsEnclosureRecipe,
+  ENCLOSURE_SPLIT_REPAIR_NOTE,
+} from "./knowledge/enclosure-recipe";
 import { judgeAesthetics } from "./critique";
 import type { DimensionScore } from "./critique-core";
 import { conceptImage, CONCEPT_IMAGE_NOTE } from "./concept";
@@ -613,6 +617,26 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
       validation: lastRun.validation,
     });
     if (grade.pass) {
+      // Enclosure split enforcement (MTR-213): an enclosure-shaped prompt is
+      // two-piece by default (recipe step 4), but nothing downstream forced it —
+      // a base+lid returned as one solid silently ships as a single shell. When
+      // the run produced a single part for such a prompt, spend a repair turn on
+      // a TARGETED parts-dict hint (never the generic fuse-into-one hint that
+      // caused the collapse). Runs before the dimension/aesthetic passes:
+      // structure comes first. On the last attempt we accept what we have rather
+      // than hard-fail a valid single solid.
+      const producedAssembly = (lastRun.parts?.length ?? 0) >= 2;
+      if (
+        needsEnclosureRecipe(input.prompt) &&
+        !producedAssembly &&
+        useModel &&
+        attempt < maxAttempts
+      ) {
+        repairNote = ENCLOSURE_SPLIT_REPAIR_NOTE;
+        emit({ type: "repairing", attempt, maxAttempts, reason: repairNote });
+        continue;
+      }
+
       // Dimension contract (MTR-197): assert the brief's callouts against the
       // built geometry. Deterministic, no model call. A failed target that we
       // have budget to fix earns a dimension-specific repair turn BEFORE the

@@ -87,6 +87,26 @@ import trimesh
 result = trimesh.creation.box(extents=(40, 8, 8)).apply_translation((20, 4, 4))
 """
 
+# MTR-213: a base + lid returned as ONE `result` compound (two disjoint,
+# comparable, watertight bodies). The old fragment gate hard-failed this and the
+# repair loop collapsed it to a single shell; now it is promoted to a base/lid
+# assembly.
+PROMOTE_COMPOUND_SCRIPT = """
+import trimesh
+base = trimesh.creation.box(extents=(40, 30, 16)).apply_translation((0, 0, 8))
+lid = trimesh.creation.box(extents=(40, 30, 8)).apply_translation((0, 0, 22))
+result = trimesh.util.concatenate([base, lid])
+"""
+
+# One real solid trailing a small loose chip — genuine debris, NOT an assembly.
+# Must still fail the fragment gate (promotion is conservative by design).
+DEBRIS_SCRIPT = """
+import trimesh
+solid = trimesh.creation.box(extents=(40, 30, 20))
+chip = trimesh.creation.box(extents=(5, 5, 5)).apply_translation((80, 80, 80))
+result = trimesh.util.concatenate([solid, chip])
+"""
+
 
 def run(code, **extra):
     body = {"code": code, "formats": ["stl"], "engine": "mesh", **extra}
@@ -239,6 +259,34 @@ def test_run_checks_fea_supported_box():
         f"expected an error-shaped fea check: {p2['checks']}"
 
 
+def test_run_promotes_two_body_compound_to_assembly():
+    """MTR-213: a single `result` compound of two comparable watertight bodies
+    round-trips as a base/lid assembly (parts length 2, ordered low->high z),
+    not a hard fragment-gate failure."""
+    p = run(PROMOTE_COMPOUND_SCRIPT)
+    assert p.get("promotedFromSingle") is True, f"compound not promoted: {p.get('error')}"
+    parts = p.get("parts")
+    assert parts and len(parts) == 2, f"expected 2 promoted parts, got {parts}"
+    assert [pt["name"] for pt in parts] == ["base", "lid"], [pt["name"] for pt in parts]
+    assert p["ok"] is True, p.get("error")
+    for pt in parts:
+        assert pt["validation"]["isWatertight"], pt
+        assert pt["validation"].get("bodyCount", 1) == 1, pt
+    # base (lower body) is the taller 16mm box; lid is the 8mm box.
+    assert abs(parts[0]["geometry"]["dimensions"]["z"] - 16.0) < 0.5, parts[0]["geometry"]
+    assert abs(parts[1]["geometry"]["dimensions"]["z"] - 8.0) < 0.5, parts[1]["geometry"]
+
+
+def test_run_debris_still_fails_fragment_gate():
+    """MTR-213 guard: a solid trailing a loose chip is genuine debris, not an
+    assembly — promotion must NOT fire and the fragment-gate error stands."""
+    p = run(DEBRIS_SCRIPT)
+    assert p.get("promotedFromSingle") is not True, "debris must not be promoted"
+    assert p.get("parts") is None, "debris must not become a parts assembly"
+    assert p["ok"] is False, "a solid + loose chip must fail the fragment gate"
+    assert "disconnected solids" in (p.get("error") or ""), p.get("error")
+
+
 def test_session_lifecycle():
     """create -> plain exec -> result exec (full payload) -> snapshot ->
     clobber -> rollback -> re-export -> delete. Shapes pinned by
@@ -344,6 +392,8 @@ TESTS = [
     test_run_voxel_kill_switch_still_global,
     test_run_checks_networks_two_cavities,
     test_run_checks_fea_supported_box,
+    test_run_promotes_two_body_compound_to_assembly,
+    test_run_debris_still_fails_fragment_gate,
     test_session_lifecycle,
     test_session_cap_429,
     test_session_exec_timeout_kills_session,

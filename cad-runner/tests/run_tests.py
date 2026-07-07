@@ -9,7 +9,12 @@ and fea_probe localizes a cantilever's root as the hotspot.
 import sys
 import time
 import traceback
+import os
 from pathlib import Path
+
+# app.py fails closed at import without a secret (arbitrary code execution is
+# not safe to expose); the assembly-promotion unit tests import it directly.
+os.environ.setdefault("CAD_RUNNER_ALLOW_NO_AUTH", "true")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -283,6 +288,45 @@ def test_split_shell_printed_fit():
         assert in_band.all(), "uncovered material outside the lip-clearance band"
 
 
+def test_promote_clean_base_lid_compound():
+    """MTR-213: a single `result` mesh that splits into two comparable,
+    individually-watertight bodies promotes to a base/lid assembly ordered
+    low->high z — instead of hard-failing the fragment gate (which collapsed
+    enclosures to one shell)."""
+    import app
+    base = trimesh.creation.box(extents=(40, 30, 16)).apply_translation((0, 0, 8))
+    lid = trimesh.creation.box(extents=(40, 30, 8)).apply_translation((0, 0, 22))
+    compound = trimesh.util.concatenate([base, lid])
+    assert len(compound.split(only_watertight=False)) == 2, "fixture must be 2 bodies"
+    promoted = app._promote_disconnected_bodies(compound)
+    assert promoted is not None, "clean base+lid compound must promote"
+    assert [n for n, _ in promoted] == ["base", "lid"], [n for n, _ in promoted]
+    zb, zl = float(promoted[0][1].centroid[2]), float(promoted[1][1].centroid[2])
+    assert zb < zl, f"base must sit below lid ({zb:.1f} vs {zl:.1f})"
+
+
+def test_promote_rejects_genuine_debris():
+    """The conservative gate: a real base+lid trailing a loose chip (an
+    un-unioned nub) is NOT promoted — the fragment error must stand so the model
+    fixes it. A lone solid + chip is likewise no assembly. But a sub-mm^3
+    tessellation sliver alongside the parts IS tolerated."""
+    import app
+    base = trimesh.creation.box(extents=(40, 30, 16)).apply_translation((0, 0, 8))
+    lid = trimesh.creation.box(extents=(40, 30, 8)).apply_translation((0, 0, 22))
+    chip = trimesh.creation.box(extents=(5, 5, 5)).apply_translation((80, 80, 80))
+    assert app._promote_disconnected_bodies(
+        trimesh.util.concatenate([base, lid, chip])
+    ) is None, "a loose chip beside the parts must block promotion"
+    solid = trimesh.creation.box(extents=(40, 30, 20))
+    assert app._promote_disconnected_bodies(
+        trimesh.util.concatenate([solid, chip])
+    ) is None, "a solid + chip is not a 2-part assembly"
+    sliver = trimesh.creation.box(extents=(0.5, 0.5, 0.5)).apply_translation((80, 80, 80))
+    ok = app._promote_disconnected_bodies(trimesh.util.concatenate([base, lid, sliver]))
+    assert ok is not None and [n for n, _ in ok] == ["base", "lid"], \
+        "a sub-mm^3 sliver must be tolerated alongside the real parts"
+
+
 TESTS = [
     test_gyroid_thickness_is_real_mm,
     test_gyroid_two_isolated_networks,
@@ -294,6 +338,8 @@ TESTS = [
     test_fea_refusals,
     test_transforms_move_primitives,
     test_split_shell_printed_fit,
+    test_promote_clean_base_lid_compound,
+    test_promote_rejects_genuine_debris,
 ]
 
 
