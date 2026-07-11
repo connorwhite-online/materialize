@@ -13,9 +13,9 @@ import { MetaballLoader } from "@/components/ui/metaball-loader";
  */
 export function PageTransitionLoader() {
   const pathname = usePathname();
-  const prevPathname = useRef<string>();
+  const prevPathname = useRef<string | undefined>(undefined);
   const [isVisible, setIsVisible] = useState(false);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     // On first mount, initialize the ref but don't show loader
