@@ -6,6 +6,7 @@ import { MotionConfig } from "motion/react";
 import { AuthModalProvider } from "@/components/auth/auth-modal";
 import { ThemeProvider } from "@/components/theme-provider";
 import { PendingPrintFileProvider } from "@/components/upload/pending-print-file";
+import { PageTransitionLoader } from "@/components/nav/page-transition-loader";
 import { Iterate } from "iterate-ui-next/devtools";
 
 // Display face for the hero wordmark — loaded as a local OTF from
@@ -129,6 +130,7 @@ export default function RootLayout({
             <ThemeProvider>
               <AuthModalProvider>
                 <PendingPrintFileProvider>{children}</PendingPrintFileProvider>
+                <PageTransitionLoader />
               </AuthModalProvider>
             </ThemeProvider>
           </MotionConfig>
