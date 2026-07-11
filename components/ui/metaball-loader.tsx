@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 interface MetaballLoaderProps {
   size?: number;
@@ -60,8 +60,8 @@ export function MetaballLoader({
   // Build the animated metaball
   const cx = 60;
   const cy = 60;
-  const uid = Math.random().toString(36).slice(2, 9);
-  const filterId = `goo-${uid}`;
+  const uid = useId();
+  const filterId = `goo${uid}`;
 
   // Spline for smooth easing (cubic-bezier ease-in-out)
   const ease = "0.45 0 0.55 1;0.45 0 0.55 1";
