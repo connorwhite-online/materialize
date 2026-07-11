@@ -15,7 +15,7 @@ export function PageTransitionLoader() {
   const pathname = usePathname();
   const prevPathname = useRef<string>();
   const [isVisible, setIsVisible] = useState(false);
-  const timeoutRef = useRef<NodeJS.Timeout>();
+  const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     // On first mount, initialize the ref but don't show loader
