@@ -2228,7 +2228,7 @@ export function TextToCadStudio({
             z-40); lift the composer above it so its controls stay tappable.
             At nav+ the pill is gone and the sidebar rail takes over. */}
         <div className="mx-auto grid max-w-6xl gap-8 px-4 pb-28 nav:pb-4 lg:grid-cols-[1fr_300px]">
-          <div className="pointer-events-auto mx-auto w-full max-w-2xl">
+          <div className="pointer-events-auto mx-auto w-full min-w-0 max-w-2xl">
           {/* Morphing generation thread (MTR-209). Present for the WHOLE
               in-flight window (submit → done), across BOTH entry paths (chip
               or typed): the composer "sends" the prompt into a right-aligned
@@ -2636,10 +2636,14 @@ function GenerationThread({
       animate={{ opacity: 1, y: 0 }}
       exit={reduce ? { opacity: 0 } : { opacity: 0, y: 14 }}
       transition={fade}
-      className="mb-2 flex flex-col gap-2"
+      className="mb-2 flex min-w-0 flex-col gap-2"
     >
-      {/* Sent — the user's prompt, right-aligned, truncated to one line. */}
-      <motion.div layout={!reduce} className="flex justify-end">
+      {/* Sent — the user's prompt, right-aligned, truncated to one line. The
+          min-w-0 on this row (and the ancestors) lets truncate actually clip:
+          without it the bubble's nowrap text expands the grid/flex track to the
+          full string width and the "85%" cap resolves against an over-wide
+          parent, running the bubble off the right edge (MTR-218). */}
+      <motion.div layout={!reduce} className="flex min-w-0 justify-end">
         <div className="max-w-[85%] truncate rounded-2xl rounded-br-md bg-foreground px-3.5 py-2 text-sm text-background shadow-sm">
           {promptText}
         </div>
@@ -2648,7 +2652,7 @@ function GenerationThread({
       {/* Received — the single evolving system container. `layout` here springs
           its size (width + height) between every state; the popLayout swap
           below cross-fades the content without an empty intermediate box. */}
-      <motion.div layout={!reduce} className="flex justify-start">
+      <motion.div layout={!reduce} className="flex min-w-0 justify-start">
         <motion.div
           layout={!reduce}
           transition={spring}
