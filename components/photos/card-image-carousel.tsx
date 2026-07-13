@@ -24,8 +24,8 @@ interface Props {
  * Snap-scrolling image carousel for file/project cards. Images
  * stack horizontally with `snap-x snap-mandatory` so swipe / drag /
  * wheel naturally lock to one image at a time. A bottom-centered
- * pill renders dot indicators (active dot is double width with a
- * smooth width transition); the `lg` variant flanks the pill with
+ * pill renders dot indicators (active dot scales to double width
+ * without reflowing siblings); the `lg` variant flanks the pill with
  * chevron pills for click-to-page navigation on bigger cards.
  *
  * No carousel chrome shows when the array has only one image — the
@@ -144,15 +144,17 @@ export function CardImageCarousel({
                 e.stopPropagation();
                 goTo(i);
               }}
-              // Fixed-width slot so the active dot's width animation
-              // doesn't reflow siblings and jitter the centered pill.
-              className="flex h-2 w-4 shrink-0 cursor-pointer items-center justify-center"
+              // Fixed w-2 slot (same pitch as before). Grow the active
+              // indicator with scaleX so siblings don't reflow and the
+              // centered pill stays put — without the extra gap that
+              // fixed w-4 slots introduced.
+              className="flex h-2 w-2 shrink-0 cursor-pointer items-center justify-center"
             >
               <span
                 aria-hidden
                 className={cn(
-                  "block h-2 rounded-full bg-white transition-[width,opacity] duration-300 ease-out",
-                  i === activeIndex ? "w-4" : "w-2 opacity-60"
+                  "block h-2 w-2 origin-center rounded-full bg-white transition-[transform,opacity] duration-300 ease-out",
+                  i === activeIndex ? "scale-x-[2]" : "opacity-60"
                 )}
               />
             </button>
