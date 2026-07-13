@@ -144,11 +144,18 @@ export function CardImageCarousel({
                 e.stopPropagation();
                 goTo(i);
               }}
-              className={cn(
-                "h-2 cursor-pointer rounded-full bg-white transition-[width,opacity] duration-300 ease-out",
-                i === activeIndex ? "w-4" : "w-2 opacity-60"
-              )}
-            />
+              // Fixed-width slot so the active dot's width animation
+              // doesn't reflow siblings and jitter the centered pill.
+              className="flex h-2 w-4 shrink-0 cursor-pointer items-center justify-center"
+            >
+              <span
+                aria-hidden
+                className={cn(
+                  "block h-2 rounded-full bg-white transition-[width,opacity] duration-300 ease-out",
+                  i === activeIndex ? "w-4" : "w-2 opacity-60"
+                )}
+              />
+            </button>
           ))}
         </div>
         {size === "lg" && (
