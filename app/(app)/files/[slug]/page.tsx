@@ -808,6 +808,7 @@ export default async function FileDetailPage(props: {
               {canDownload && assets[0] && (
                 <StepDownloadLink
                   fileAssetId={assets[0].id}
+                  size="sm"
                   className="w-full"
                 />
               )}
@@ -872,7 +873,7 @@ export default async function FileDetailPage(props: {
             </div>
           )}
 
-          <Card>
+          <Card className="bg-muted/50">
             <CardContent className="space-y-5">
               <h2 className="text-base font-semibold">Discussion</h2>
               <CommentsSection

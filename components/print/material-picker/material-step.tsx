@@ -394,7 +394,7 @@ export function MaterialStep({
           setActiveGroup(value === ALL_GROUPS ? null : value)
         }
       >
-        <SelectTrigger size="sm" className="min-w-44">
+        <SelectTrigger className="min-w-44">
           <SelectValue>
             {(value) => {
               if (value === ALL_GROUPS || value == null) return "All materials";
@@ -487,7 +487,7 @@ function MaterialCardButton({
       // them iOS Safari treats the page as wider than the viewport
       // and auto-zooms the layout to fit, leaving content visibly
       // clipped on the right edge.
-      className="flex w-full min-w-0 items-start gap-3 rounded-xl border border-border bg-card p-3 text-left transition-colors enabled:hover:border-primary/40 disabled:cursor-default"
+      className="flex w-full min-w-0 items-start gap-3 rounded-xl border border-border bg-card p-3 text-left transition-[box-shadow,border-color] duration-200 enabled:hover:shadow-[0_2px_6px_-2px_rgba(0,0,0,0.10),0_8px_18px_-8px_rgba(0,0,0,0.12)] disabled:cursor-default"
     >
       <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-muted/60">
         {card.materialImage && (

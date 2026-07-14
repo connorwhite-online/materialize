@@ -7,6 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Logomark } from "@/components/icons/logomark";
 import { SignInForm } from "./sign-in-form";
 import { SignUpForm } from "./sign-up-form";
 
@@ -61,6 +62,7 @@ export function AuthModalProvider({ children }: { children: React.ReactNode }) {
       >
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
+            <Logomark height={24} className="mx-auto text-foreground" />
             <DialogTitle className="text-center">
               {mode === "sign-in" ? "Sign in" : "Create an account"}
             </DialogTitle>

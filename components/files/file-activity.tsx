@@ -127,10 +127,10 @@ export function FileActivity({
   downloads: DownloadActivity[];
 }) {
   return (
-    <Card className="gap-0 py-0 overflow-hidden">
+    <Card className="gap-0 py-0 overflow-hidden bg-muted/50">
       <Tabs defaultValue="prints" className="gap-0">
         <div className="px-4 pt-4 pb-3 border-b border-border/60 flex items-center justify-between gap-3">
-          <h2 className="text-sm font-medium">Activity</h2>
+          <h2 className="text-base font-semibold">Activity</h2>
           <TabsList>
             <TabsTrigger value="prints">
               Printed

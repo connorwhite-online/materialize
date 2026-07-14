@@ -29,13 +29,11 @@ export interface ProjectTab {
 export function ProjectTabs({ tabs }: { tabs: ProjectTab[] }) {
   if (tabs.length === 0) return null;
   return (
-    // Single subtle container: rounded corners, subtle border, 8px
-    // padding. Tabs use the flat line style and content sits directly
-    // inside — no nested sub-boxes (kept deliberately un-nested).
-    <Tabs
-      defaultValue={tabs[0].value}
-      className="gap-2 rounded-2xl border border-border bg-card p-2"
-    >
+    // No wrapping container — the tab line sits directly on the page
+    // and content sits under it. Dropping the bordered/filled/padded box
+    // removes a layer of visual nesting (the panels already carry their
+    // own structure).
+    <Tabs defaultValue={tabs[0].value} className="gap-2">
       <TabsList className="w-full justify-start">
         {tabs.map((tab) => (
           <TabsTrigger key={tab.value} value={tab.value}>

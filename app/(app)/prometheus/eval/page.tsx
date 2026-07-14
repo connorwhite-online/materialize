@@ -314,13 +314,20 @@ export default async function TextToCadEvalPage() {
               />
             </div>
           )}
-          <p className="text-[11px] leading-relaxed text-muted-foreground/70">
-            Save = thread reached a saved file · Abandon = single-generation
-            threads never saved · Gens→save = avg generations in a saved thread ·
-            Revise-after = revisions off an already-succeeded parent ·
-            Print-thru = saved threads whose asset became a print order ·
-            Cost = recomputed at current CAD_PRICE_* units, else token volume.
-          </p>
+          <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11px] leading-relaxed text-muted-foreground/70">
+            <dt className="font-medium text-foreground/80">Save</dt>
+            <dd>thread reached a saved file</dd>
+            <dt className="font-medium text-foreground/80">Abandon</dt>
+            <dd>single-generation threads never saved</dd>
+            <dt className="font-medium text-foreground/80">Gens→save</dt>
+            <dd>avg generations in a saved thread</dd>
+            <dt className="font-medium text-foreground/80">Revise-after</dt>
+            <dd>revisions off an already-succeeded parent</dd>
+            <dt className="font-medium text-foreground/80">Print-thru</dt>
+            <dd>saved threads whose asset became a print order</dd>
+            <dt className="font-medium text-foreground/80">Cost</dt>
+            <dd>recomputed at current CAD_PRICE_* units, else token volume</dd>
+          </dl>
         </div>
       )}
     </div>

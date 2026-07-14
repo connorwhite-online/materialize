@@ -7,6 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { ChevronRight } from "@/components/icons/chevron-right";
+import { Layers } from "@/components/icons/layers";
+import { Sparkles } from "@/components/icons/sparkles";
 import {
   findMaterialBySlug,
   type CatalogMaterial,
@@ -145,16 +147,28 @@ export default async function MaterialDetailPage(props: {
         </div>
 
         <div>
-          <div className="mb-2 flex flex-wrap items-center gap-1.5">
-            <Badge variant="outline">{group.name}</Badge>
-            {tags.slice(0, 4).map((t) => (
-              <Badge key={t.id} variant="secondary" className="text-[10px]">
-                {t.name}
-              </Badge>
-            ))}
+          <h1 className="text-3xl font-bold">{material.name}</h1>
+
+          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <Layers size={14} className="shrink-0 text-muted-foreground" />
+              <Badge variant="outline">{group.name}</Badge>
+            </div>
+            {tags.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Sparkles
+                  size={14}
+                  className="shrink-0 text-muted-foreground"
+                />
+                {tags.slice(0, 4).map((t) => (
+                  <Badge key={t.id} variant="secondary" className="text-[10px]">
+                    {t.name}
+                  </Badge>
+                ))}
+              </div>
+            )}
           </div>
 
-          <h1 className="text-3xl font-bold">{material.name}</h1>
           {material.description && (
             <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
               {material.description}

@@ -14,6 +14,7 @@ import {
 import { eq, and, asc, desc, inArray, sql } from "drizzle-orm";
 import { notUnsavedStudioDraft } from "@/lib/studio-drafts";
 import { CollectionSection } from "./collection-section";
+import { LibrarySection } from "./library-section";
 import {
   LibraryFileCard,
   type LibraryFileCardItem,
@@ -561,25 +562,30 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
         );
       })}
 
-      {/* Projects (owned + purchased bundles) */}
+      {/* Projects (owned + purchased bundles) — collapsible */}
       {projectGridItems.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-sm font-medium text-muted-foreground">
-            Projects
-          </p>
+        <LibrarySection
+          name="Projects"
+          count={projectGridItems.length}
+          countNoun="Project"
+        >
           <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {projectGridItems.map((p) => (
               <LibraryProjectCard key={p.id} item={p} />
             ))}
           </div>
-        </div>
+        </LibrarySection>
       )}
 
-      {/* Uncollected files — not collapsible, just a soft panel */}
+      {/* Uncollected files — collapsible */}
       {mainGridItems.length > 0 && (
-        <div className="rounded-2xl bg-muted/50 p-5">
+        <LibrarySection
+          name="Files"
+          count={mainGridItems.length}
+          countNoun="File"
+        >
           <FileGrid items={mainGridItems} isOwner={isOwner} />
-        </div>
+        </LibrarySection>
       )}
     </div>
   );
