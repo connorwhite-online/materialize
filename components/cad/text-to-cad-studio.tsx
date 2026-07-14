@@ -33,6 +33,13 @@ import {
 import { zipSync } from "fflate";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Button } from "@/components/ui/button";
+import { MetaballLoader } from "@/components/ui/metaball-loader";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ChevronDown } from "@/components/icons/chevron-down";
 import { ChevronRight } from "@/components/icons/chevron-right";
 import { ClockRewind } from "@/components/icons/clock-rewind";
@@ -1476,24 +1483,40 @@ export function TextToCadStudio({
             </div>
             <div className="flex shrink-0 items-center gap-2">
               {/* Owner-only debug affordances (MTR-208): the whole studio is
-                  owner-gated, so these links are inherently owner-only. The
-                  eval scorecard had NO link from anywhere before this. */}
-              <Link
-                href="/prometheus/eval"
-                title="Harness scorecard"
-                className="inline-flex items-center gap-1.5 rounded-lg border border-foreground/15 px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-              >
-                <ClipboardListIcon className="size-3.5" />
-                <span className="hidden lg:inline">Scorecard</span>
-              </Link>
-              <Link
-                href="/prometheus/exemplars"
-                title="Verified exemplars (debug)"
-                className="inline-flex items-center gap-1.5 rounded-lg border border-foreground/15 px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-              >
-                <Layers className="size-3.5" />
-                <span className="hidden lg:inline">Exemplars</span>
-              </Link>
+                  owner-gated, so these are inherently owner-only. Scorecard +
+                  Exemplars are folded into a single three-dot menu so the
+                  toolbar reads as one row of same-size icon buttons. */}
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      aria-label="More options"
+                      title="More options"
+                      className="shrink-0 rounded-lg"
+                    >
+                      <EllipsisVerticalIcon className="size-4" />
+                    </Button>
+                  }
+                />
+                <DropdownMenuContent align="end" className="min-w-40">
+                  <DropdownMenuItem
+                    render={<Link href="/prometheus/eval" />}
+                    className="px-2.5 py-2 text-sm"
+                  >
+                    <ClipboardListIcon className="size-4" />
+                    Scorecard
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    render={<Link href="/prometheus/exemplars" />}
+                    className="px-2.5 py-2 text-sm"
+                  >
+                    <Layers className="size-4" />
+                    Exemplars
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               {/* Builds history — mobile only; pops a scrollable dropdown down
                   from this icon. At lg+ the Builds sidebar block takes over. */}
               <div className="relative lg:hidden">
@@ -1861,38 +1884,37 @@ export function TextToCadStudio({
           {/* Actions for the viewed model (the selected part, for assemblies) */}
           {!generating && activeAssetId && (
             <div className="mt-4 flex flex-wrap gap-3">
-              <Link
-                href={`/print/${activeAssetId}`}
-                className="cursor-pointer rounded-lg bg-foreground px-4 py-2 text-sm font-medium text-background"
-              >
+              <Button render={<Link href={`/print/${activeAssetId}`} />}>
                 Print
-              </Link>
+              </Button>
               {/* Assembly + "All parts" selected → one .zip of every part's
                   STL ("Download Files", MTR-44). A specific part (or a single
                   solid) → that one STL. */}
               {viewedParts.length > 1 && effectiveSelectedPartId === null ? (
-                <button
-                  type="button"
-                  onClick={downloadAssemblyZip}
-                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-foreground/15 px-4 py-2 text-sm hover:bg-foreground/5"
-                >
+                <Button variant="outline" onClick={downloadAssemblyZip}>
                   <PackageIcon className="size-4" />
                   Download Files ({viewedParts.length})
-                </button>
+                </Button>
               ) : (
-                <a
-                  href={`/api/files/preview/${activeAssetId}`}
-                  download={`${
-                    (viewedParts.length > 1
-                      ? viewedParts.find((p) => p.fileAssetId === activeAssetId)
-                          ?.name
-                      : activeThread && threadLabel(activeThread)) || "model"
-                  }.stl`}
-                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-foreground/15 px-4 py-2 text-sm hover:bg-foreground/5"
+                <Button
+                  variant="outline"
+                  render={
+                    <a
+                      href={`/api/files/preview/${activeAssetId}`}
+                      download={`${
+                        (viewedParts.length > 1
+                          ? viewedParts.find(
+                              (p) => p.fileAssetId === activeAssetId
+                            )?.name
+                          : activeThread && threadLabel(activeThread)) ||
+                        "model"
+                      }.stl`}
+                    />
+                  }
                 >
                   <DownloadIcon className="size-4" />
                   Download
-                </a>
+                </Button>
               )}
               {/* Editable STEP source (MTR-196). `available` is threaded from
                   the turn/part (MTR-215) so the button is present or absent from
@@ -1909,8 +1931,8 @@ export function TextToCadStudio({
                     : viewedTurn?.hasStep
                 }
               />
-              <button
-                type="button"
+              <Button
+                variant="outline"
                 onClick={saveToProfile}
                 disabled={savingModel || savedAssets.has(activeAssetId)}
                 title={
@@ -1918,7 +1940,6 @@ export function TextToCadStudio({
                     ? "Saves the pinned (Active) version"
                     : undefined
                 }
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-foreground/15 px-4 py-2 text-sm hover:bg-foreground/5 disabled:opacity-60"
               >
                 {savedAssets.has(activeAssetId) ? (
                   <>
@@ -1929,14 +1950,14 @@ export function TextToCadStudio({
                 ) : (
                   "Save"
                 )}
-              </button>
+              </Button>
               {viewedTurn?.projectSlug && (
-                <Link
-                  href={`/projects/${viewedTurn.projectSlug}`}
-                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-foreground/15 px-4 py-2 text-sm hover:bg-foreground/5"
+                <Button
+                  variant="outline"
+                  render={<Link href={`/projects/${viewedTurn.projectSlug}`} />}
                 >
                   Open assembly project
-                </Link>
+                </Button>
               )}
             </div>
           )}
@@ -2709,7 +2730,9 @@ function GenerationThread({
                   <BubblePreview render={preview.render} step={preview.step} />
                 )}
                 <div className="flex items-center gap-2.5">
-                  <Loader2Icon className="size-4 shrink-0 animate-spin text-muted-foreground" />
+                  <span className="flex shrink-0 text-muted-foreground">
+                    <MetaballLoader size={22} />
+                  </span>
                   <span className="text-sm font-medium text-foreground">
                     {statusText}
                   </span>
@@ -2769,7 +2792,7 @@ function OptionCard({
       <span className="min-w-0 flex-1 text-sm text-foreground">{label}</span>
       {recommended && (
         <span className="shrink-0 rounded-full border border-foreground/15 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-          recommended
+          Recommended
         </span>
       )}
       {selected && (

@@ -1,8 +1,11 @@
 "use client";
 
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { FileUploader } from "@/components/upload/file-uploader";
+
+const FEATHER_PX = 28;
 
 type Format = "stl" | "obj" | "3mf" | "step" | "amf";
 
@@ -45,6 +48,41 @@ export function WhatNextPane({
   uploaderLabel = "Upload a file",
   tilesLabel = "Your recent files",
 }: WhatNextPaneProps) {
+  // Scroll-aware edge feathering: only fade an edge when there's
+  // content hidden beyond it. At rest (scrollLeft 0) the left edge
+  // stays crisp so the first tile isn't dimmed; the right fades while
+  // more tiles remain, and vice-versa once scrolled to the end.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState({ atStart: true, atEnd: true });
+
+  const updateEdges = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const atStart = el.scrollLeft <= 1;
+    const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 1;
+    setEdges((prev) =>
+      prev.atStart === atStart && prev.atEnd === atEnd
+        ? prev
+        : { atStart, atEnd }
+    );
+  }, []);
+
+  useEffect(() => {
+    updateEdges();
+    const el = scrollRef.current;
+    if (!el) return;
+    el.addEventListener("scroll", updateEdges, { passive: true });
+    window.addEventListener("resize", updateEdges);
+    return () => {
+      el.removeEventListener("scroll", updateEdges);
+      window.removeEventListener("resize", updateEdges);
+    };
+  }, [updateEdges, tiles.length]);
+
+  const leftPx = edges.atStart ? 0 : FEATHER_PX;
+  const rightPx = edges.atEnd ? 0 : FEATHER_PX;
+  const carouselMask = `linear-gradient(to right, transparent 0, #000 ${leftPx}px, #000 calc(100% - ${rightPx}px), transparent 100%)`;
+
   return (
     <div className="space-y-5">
       {/* Uploader */}
@@ -64,7 +102,18 @@ export function WhatNextPane({
       {tiles.length > 0 && (
         <div>
           <h2 className="mb-2.5 text-sm font-medium">{tilesLabel}</h2>
-          <div className="flex gap-3 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {/* Feathered edges: a horizontal mask fades tiles as they
+              scroll out of view. The fade is applied per-edge only when
+              that edge has hidden content (see updateEdges), so the
+              first tile stays crisp until the user scrolls. */}
+          <div
+            ref={scrollRef}
+            className="flex gap-3 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            style={{
+              maskImage: carouselMask,
+              WebkitMaskImage: carouselMask,
+            }}
+          >
             {tiles.map((tile) => (
               <Link
                 key={tile.fileAssetId}

@@ -23,7 +23,7 @@ export function CatalogMaterialCard({
 }: CatalogMaterialCardProps) {
   return (
     <Link href={`/materials/${material.slug}`}>
-      <Card className="group gap-0 p-1 overflow-hidden transition-colors hover:border-primary/30">
+      <Card className="group gap-0 p-1 overflow-hidden transition-[color,box-shadow,border-color] duration-200 hover:border-primary/30 hover:shadow-[0_2px_4px_-2px_rgba(0,0,0,0.08),0_10px_24px_-8px_rgba(0,0,0,0.14),0_20px_44px_-14px_rgba(0,0,0,0.10)]">
         <div className="relative aspect-[4/3] w-full overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted/40 to-muted/10">
           {material.featuredImage && (
             <Image

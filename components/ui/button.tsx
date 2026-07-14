@@ -13,7 +13,11 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-primary text-primary-foreground shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_8px_-4px_rgba(0,0,0,0.35)] before:from-white/28 before:opacity-100 hover:bg-primary/90 hover:shadow-[0_2px_3px_rgba(0,0,0,0.16),0_6px_12px_-5px_rgba(0,0,0,0.4)] hover:before:from-white/34 active:shadow-[inset_0_1px_2px_rgba(0,0,0,0.18),0_1px_2px_rgba(0,0,0,0.12)] active:before:from-white/12 active:before:opacity-70",
+          // bg-clip-border (not the base's padding-box) so the filled
+          // background extends under the transparent 1px border — the
+          // padding-box clip let the light page bg show through that
+          // 1px ring, reading as a stray white outline on the dark pill.
+          "bg-clip-border bg-primary text-primary-foreground shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_8px_-4px_rgba(0,0,0,0.35)] before:from-white/28 before:opacity-100 hover:bg-primary/90 hover:shadow-[0_2px_3px_rgba(0,0,0,0.16),0_6px_12px_-5px_rgba(0,0,0,0.4)] hover:before:from-white/34 active:shadow-[inset_0_1px_2px_rgba(0,0,0,0.18),0_1px_2px_rgba(0,0,0,0.12)] active:before:from-white/12 active:before:opacity-70",
         outline:
           "border-border bg-card/80 shadow-[0_2px_5px_-2px_rgba(0,0,0,0.16)] backdrop-blur-sm before:from-white/55 before:opacity-100 hover:bg-card hover:text-foreground hover:shadow-[0_4px_8px_-4px_rgba(0,0,0,0.24)] hover:before:from-white/65 aria-expanded:bg-muted aria-expanded:text-foreground active:before:from-white/30 active:before:opacity-70 dark:border-input dark:bg-input/30 dark:shadow-[0_2px_5px_-2px_rgba(0,0,0,0.5)] dark:before:from-white/12 dark:hover:bg-input/50 dark:hover:before:from-white/16",
         secondary:

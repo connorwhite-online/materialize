@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { FileBoxIcon } from "lucide-react";
 
 import { getCadStepDownloadUrl } from "@/app/actions/cad-generation";
+import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /**
@@ -34,11 +35,14 @@ export function StepDownloadLink({
   className,
   label = "Download STEP (editable CAD)",
   available,
+  size = "default",
 }: {
   fileAssetId: string;
   className?: string;
   label?: string;
   available?: boolean;
+  /** Matches the design-system Button sizing of the surrounding row. */
+  size?: "default" | "sm";
 }) {
   const [url, setUrl] = useState<string | null>(null);
 
@@ -69,10 +73,7 @@ export function StepDownloadLink({
   // Legacy path: stay hidden until the probe resolves a URL.
   if (!known && !url) return null;
 
-  const baseClass = cn(
-    "inline-flex items-center justify-center gap-1.5 rounded-lg border border-foreground/15 px-4 py-2 text-sm",
-    className
-  );
+  const baseClass = cn(buttonVariants({ variant: "outline", size }), className);
 
   // Known-present but the signed URL is still resolving: hold the slot with a
   // disabled button of the exact final width so enabling it causes no shift.
@@ -93,7 +94,7 @@ export function StepDownloadLink({
       href={url}
       target="_blank"
       rel="noopener noreferrer"
-      className={cn(baseClass, "cursor-pointer hover:bg-foreground/5")}
+      className={baseClass}
     >
       <FileBoxIcon className="size-4 shrink-0" />
       {label}

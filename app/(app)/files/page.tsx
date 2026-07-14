@@ -820,7 +820,7 @@ function UserCard({ user }: { user: UserRow }) {
   return (
     <Link
       href={`/${user.username}`}
-      className="group flex items-center gap-2.5 rounded-l-full rounded-r-2xl border border-border bg-card p-1.5 pr-3 transition-colors hover:border-foreground/20 hover:bg-muted/30"
+      className="group flex items-center gap-2.5 rounded-l-full rounded-r-3xl border border-border bg-card p-1.5 pr-3 transition-colors hover:border-foreground/20 hover:bg-muted/30"
     >
       <UserAvatar
         seed={user.username}

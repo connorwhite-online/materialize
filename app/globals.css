@@ -94,7 +94,7 @@
      blur is what turns the opacity into glass. Tuned to ~0.72 so
      content reads through softly without losing contrast on text. */
   --card-translucent: oklch(1 0.006 80 / 0.7);
-  --popover-translucent: oklch(1 0.006 80 / 0.72);
+  --popover-translucent: oklch(1 0.006 80 / 0.82);
   --primary: oklch(0.205 0.008 80);
   --primary-foreground: oklch(0.985 0.006 80);
   --secondary: oklch(0.95 0.008 80);
@@ -149,7 +149,7 @@
   /* Dark-mode glass sits a touch more opaque (0.78/0.8) — dark
      translucent surfaces lose legibility faster than light ones. */
   --card-translucent: oklch(0.205 0.006 80 / 0.78);
-  --popover-translucent: oklch(0.205 0.006 80 / 0.8);
+  --popover-translucent: oklch(0.205 0.006 80 / 0.88);
   --primary: oklch(0.922 0.005 80);
   --primary-foreground: oklch(0.205 0.006 80);
   --secondary: oklch(0.269 0.007 80);
@@ -307,8 +307,8 @@
   @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
     .glass-surface {
       background-color: var(--popover-translucent);
-      -webkit-backdrop-filter: blur(20px) saturate(1.8);
-      backdrop-filter: blur(20px) saturate(1.8);
+      -webkit-backdrop-filter: blur(28px) saturate(1.8);
+      backdrop-filter: blur(28px) saturate(1.8);
     }
   }
 }
@@ -361,6 +361,16 @@
     /* Distribute heading text evenly across lines instead of leaving a
        short orphan on the last line. */
     text-wrap: balance;
+  }
+  /* Frama is a display face — at our small type steps (text-sm 14px /
+     text-xs 12px) it reads awkwardly, so headings at those sizes drop
+     back to the system sans. This makes the "no tiny display type"
+     rule systemic: section labels, card titles, etc. no longer need a
+     per-element `font-sans` patch, and Frama is reserved for headings
+     at text-base and up. An explicit `font-heading` utility still wins
+     if a call site deliberately opts a small heading back in. */
+  :is(h1, h2, h3, h4, h5, h6):is(.text-xs, .text-sm) {
+    font-family: var(--font-sans);
   }
   /* Avoid single-word orphans in body copy. */
   p {

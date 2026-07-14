@@ -152,7 +152,7 @@ export function SignInForm({ onSuccess, redirectUrl = "/dashboard" }: SignInForm
             setCode("");
             setError("");
           }}
-          className="block w-full text-center text-xs text-muted-foreground transition-colors hover:text-foreground"
+          className="block w-full cursor-pointer text-center text-xs text-muted-foreground transition-colors hover:text-foreground"
         >
           Use a different account
         </button>

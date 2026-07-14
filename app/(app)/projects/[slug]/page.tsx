@@ -22,7 +22,9 @@ import { loadProjectBySlug } from "./loader";
 import { generateDownloadUrl } from "@/lib/storage";
 import { Card, CardContent } from "@/components/ui/card";
 import { ExpandableDescription } from "@/components/ui/expandable-description";
+import { DownloadIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Factory } from "@/components/icons/factory";
 import { OwnerBar } from "@/components/ui/owner-bar";
 import { DeleteProjectButton } from "@/components/projects/delete-project-button";
 import { BomDisplay } from "@/components/projects/bom-display";
@@ -787,27 +789,27 @@ export default async function ProjectDetailPage(props: {
 
             {renderPurchasePanel()}
 
-            <div className="flex flex-col gap-2">
-              {bundledFiles.length > 0 && (
+            {bundledFiles.length > 0 && (
+              <div className="flex gap-2">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="w-full"
+                  className="flex-1"
                   render={<Link href="#project-files" />}
                 >
-                  Download files
+                  <DownloadIcon className="size-4" />
+                  Download
                 </Button>
-              )}
-              {bundledFiles.length > 0 && (
                 <Button
                   size="sm"
-                  className="w-full"
+                  className="flex-1"
                   render={<Link href={`/print?project=${project.slug}`} />}
                 >
-                  Print this project
+                  <Factory className="size-4" />
+                  Print
                 </Button>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
 

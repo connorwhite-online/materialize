@@ -12,6 +12,7 @@ import type { CheckoutModel } from "@/lib/env";
 import { WhatNextPane } from "@/components/print/what-next-pane";
 import { ProjectFileChecklist } from "@/components/print/project-file-checklist";
 import { CartSlotStack } from "@/components/print/cart-slot-stack";
+import { useCart } from "@/components/print/cart-context";
 import {
   Select,
   SelectContent,
@@ -143,6 +144,7 @@ export function PrintPageContent({
 }: PrintPageContentProps) {
   const { isSignedIn, isLoaded } = useUser();
   const router = useRouter();
+  const cart = useCart();
   const pendingPrintFile = usePendingPrintFile();
   const [picked, setPicked] = useState<PickedFile | null>(null);
   const [unit, setUnit] = useState<Unit>("mm");
@@ -288,20 +290,37 @@ export function PrintPageContent({
   const anonReady = draft?.status === "ready";
   const isActive = !!(picked && (authedActive || anonUploading || anonReady));
 
+  // The right-hand cart column renders nothing when there are no
+  // carts (CartSlotStack returns null for an empty cart). In that
+  // idle+empty case we drop the two-column grid and center the title
+  // + uploader in the content area, rather than pinning them to the
+  // left third with dead space on the right. cart items load via the
+  // CartSlotStack refresh below (kept mounted, just visually hidden),
+  // so this flips to the two-column layout once carts surface.
+  const hasCartContent =
+    !!cart && (cart.items.length > 0 || cart.localItems.length > 0);
+  const centeredIdle = !isActive && !hasCartContent;
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
       {!isActive && (
-        <div className="mb-6">
+        <div className={centeredIdle ? "mx-auto mb-6 max-w-3xl" : "mb-6"}>
           <h1 className="text-2xl font-bold">{headline}</h1>
           <p className="mt-2 text-muted-foreground">{subheadline}</p>
         </div>
       )}
 
-      <div className="grid items-start gap-8 lg:grid-cols-3">
+      <div
+        className={
+          centeredIdle
+            ? "mx-auto max-w-3xl"
+            : "grid items-start gap-8 lg:grid-cols-3"
+        }
+      >
         {/* min-w-0 so the recent-files carousel's overflow-x-auto
             scrolls inside the column instead of blowing out the grid
             track and forcing horizontal page scroll on mobile. */}
-        <div className="min-w-0 lg:col-span-2">
+        <div className={centeredIdle ? "min-w-0" : "min-w-0 lg:col-span-2"}>
           {isActive && picked ? (
             <ActiveColumn
               picked={picked}
@@ -342,7 +361,13 @@ export function PrintPageContent({
             />
           )}
         </div>
-        <div className="min-w-0 lg:sticky lg:top-6">
+        {/* Kept mounted even when empty (hidden) so its on-mount cart
+            refresh runs and `hasCartContent` can flip to true. */}
+        <div
+          className={
+            centeredIdle ? "hidden" : "min-w-0 lg:sticky lg:top-6"
+          }
+        >
           <CartSlotStack expandedVendorId={expandedVendorId} />
         </div>
       </div>
