@@ -5,7 +5,12 @@ import {
   type _Object,
 } from "@aws-sdk/client-s3";
 import { db } from "@/lib/db";
-import { fileAssets } from "@/lib/db/schema";
+import {
+  disputes,
+  fileAssets,
+  ownershipClaimIntents,
+} from "@/lib/db/schema";
+import { eq, gt, isNotNull, or } from "drizzle-orm";
 import { logError } from "@/lib/logger";
 import { constantTimeEqual } from "@/lib/auth/constant-time-equal";
 
@@ -85,12 +90,28 @@ export async function GET(request: Request) {
     const s3 = getS3Client();
     const bucket = getBucketName();
 
-    // Pull every storage_key currently referenced by file_assets.
-    // Small table, fits in memory. A Set gives O(1) lookup during sweep.
-    const referencedRows = await db
-      .select({ storageKey: fileAssets.storageKey })
-      .from(fileAssets);
-    const referenced = new Set(referencedRows.map((r) => r.storageKey));
+    // A model is live when referenced by a file asset, an unexpired claim
+    // receipt, or a filed dispute. The latter keeps original-file evidence
+    // available for the full human-review lifecycle.
+    const [assetRows, claimRows] = await Promise.all([
+      db.select({ storageKey: fileAssets.storageKey }).from(fileAssets),
+      db
+        .select({ storageKey: ownershipClaimIntents.storageKey })
+        .from(ownershipClaimIntents)
+        .leftJoin(
+          disputes,
+          eq(disputes.claimIntentId, ownershipClaimIntents.id)
+        )
+        .where(
+          or(
+            gt(ownershipClaimIntents.expiresAt, new Date()),
+            isNotNull(disputes.id)
+          )
+        ),
+    ]);
+    const referenced = new Set(
+      [...assetRows, ...claimRows].map((row) => row.storageKey)
+    );
 
     const now = Date.now();
     const minAgeMs = ORPHAN_MIN_AGE_HOURS * 60 * 60 * 1000;

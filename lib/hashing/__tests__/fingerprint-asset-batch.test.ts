@@ -9,26 +9,42 @@ const whereArgsCalls: unknown[] = [];
 vi.mock("@/lib/db", () => ({
   db: {
     select: () => ({
-      from: () => ({
-        innerJoin: () => ({
+      from: () => {
+        const query = {
+          innerJoin: () => query,
           where: (...args: unknown[]) => {
             whereArgsCalls.push(args);
             return innerJoinResults.shift() ?? [];
           },
-        }),
-      }),
+        };
+        return query;
+      },
     }),
   },
 }));
 
 vi.mock("@/lib/db/schema", () => ({
-  files: { id: "id", userId: "user_id", slug: "slug", name: "name" },
+  files: {
+    id: "id",
+    userId: "user_id",
+    slug: "slug",
+    name: "name",
+    thumbnailUrl: "thumbnail_url",
+    status: "status",
+    visibility: "visibility",
+  },
   fileAssets: {
     id: "id",
     fileId: "file_id",
     contentHash: "content_hash",
     originalFilename: "original_filename",
     fileSize: "file_size",
+  },
+  users: {
+    id: "id",
+    username: "username",
+    displayName: "display_name",
+    avatarUrl: "avatar_url",
   },
 }));
 
@@ -52,14 +68,39 @@ describe("checkByteHashCollisionBatch", () => {
     whereArgsCalls.length = 0;
   });
 
-  it("returns an empty set and skips the query when there are no hashes", async () => {
+  it("returns an empty map and skips the query when there are no hashes", async () => {
     const result = await checkByteHashCollisionBatch([], "user-1");
-    expect(result).toEqual(new Set());
+    expect(result).toEqual(new Map());
     expect(whereArgsCalls).toHaveLength(0);
   });
 
   it("issues exactly one query for any number of hashes and returns the colliding subset", async () => {
-    innerJoinResults = [[{ contentHash: "hash-a" }, { contentHash: "hash-c" }]];
+    innerJoinResults = [[
+      {
+        contentHash: "hash-a",
+        fileId: "file-a",
+        fileName: "Public A",
+        fileSlug: "public-a",
+        thumbnailUrl: "a.webp",
+        status: "published",
+        visibility: "public",
+        ownerUsername: "alice",
+        ownerDisplayName: "Alice",
+        ownerAvatarUrl: "alice.webp",
+      },
+      {
+        contentHash: "hash-c",
+        fileId: "file-c",
+        fileName: "Private C",
+        fileSlug: "private-c",
+        thumbnailUrl: "c.webp",
+        status: "draft",
+        visibility: "private",
+        ownerUsername: "carol",
+        ownerDisplayName: "Carol",
+        ownerAvatarUrl: "carol.webp",
+      },
+    ]];
 
     const result = await checkByteHashCollisionBatch(
       ["hash-a", "hash-b", "hash-c"],
@@ -67,7 +108,24 @@ describe("checkByteHashCollisionBatch", () => {
     );
 
     expect(whereArgsCalls).toHaveLength(1);
-    expect(result).toEqual(new Set(["hash-a", "hash-c"]));
+    expect(result.get("hash-a")).toEqual({
+      fileId: "file-a",
+      fileName: "Public A",
+      fileSlug: "public-a",
+      thumbnailUrl: "a.webp",
+      ownerUsername: "alice",
+      ownerDisplayName: "Alice",
+      ownerAvatarUrl: "alice.webp",
+    });
+    expect(result.get("hash-c")).toEqual({
+      fileId: "file-c",
+      fileName: null,
+      fileSlug: null,
+      thumbnailUrl: null,
+      ownerUsername: null,
+      ownerDisplayName: null,
+      ownerAvatarUrl: null,
+    });
     expect(result.has("hash-b")).toBe(false);
   });
 

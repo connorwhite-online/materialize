@@ -70,8 +70,10 @@ vi.mock("@/lib/db", () => ({
               limit: () => arr,
             });
           },
-          innerJoin: () => ({
-            where: () => {
+          innerJoin: () => {
+            const joinQuery = {
+              innerJoin: () => joinQuery,
+              where: () => {
               // Dedup checks. Both with and without a trailing
               // .limit() are exercised by createFileListing
               // (byte/geom/coarse) and createDraftFileForPrint. Rows
@@ -81,8 +83,10 @@ vi.mock("@/lib/db", () => ({
               return Object.assign(next, {
                 limit: () => next,
               });
-            },
-          }),
+              },
+            };
+            return joinQuery;
+          },
         };
       },
     }),
@@ -90,7 +94,15 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("@/lib/db/schema", () => ({
-  files: { id: "id", userId: "user_id", status: "status" },
+  files: {
+    id: "id",
+    userId: "user_id",
+    status: "status",
+    visibility: "visibility",
+    slug: "slug",
+    name: "name",
+    thumbnailUrl: "thumbnail_url",
+  },
   fileAssets: { id: "id", fileId: "file_id" },
   collections: { id: "id", userId: "user_id" },
   collectionItems: { collectionId: "collection_id" },
@@ -98,6 +110,13 @@ vi.mock("@/lib/db/schema", () => ({
   purchases: { id: "id", fileId: "file_id", projectId: "project_id" },
   projects: { id: "id", userId: "user_id" },
   projectFiles: { projectId: "project_id", fileId: "file_id" },
+  users: {
+    id: "id",
+    username: "username",
+    displayName: "display_name",
+    avatarUrl: "avatar_url",
+  },
+  ownershipClaimIntents: { id: "id" },
 }));
 
 // Mock the R2 storage layer so computeContentHash can run without a
@@ -219,18 +238,37 @@ describe("createFileListing", () => {
     // Two queued rows: the batched cross-user query (hit) then the
     // batched same-user query (no hit) — one query each regardless
     // of asset count, per the collision-batching change.
-    innerJoinResults = [[{ contentHash: FIXED_BYTE_HASH }], []];
+    innerJoinResults = [[{
+      contentHash: FIXED_BYTE_HASH,
+      fileId: "existing-file-id",
+      fileName: "Original Model",
+      fileSlug: "original-model",
+      thumbnailUrl: "https://example.com/original.webp",
+      status: "published",
+      visibility: "public",
+      ownerUsername: "original-creator",
+      ownerDisplayName: "Original Creator",
+      ownerAvatarUrl: null,
+    }], []];
 
     const result = await createFileListing(formData);
 
     expect(result).toEqual({
-      error: {
-        name: [
-          "This file has already been listed by another creator. Re-uploading others' files is not permitted.",
-        ],
+      duplicate: {
+        claimIntentId: "test-file-id",
+        file: {
+          name: "Original Model",
+          slug: "original-model",
+          thumbnailUrl: "https://example.com/original.webp",
+        },
+        owner: {
+          username: "original-creator",
+          displayName: "Original Creator",
+          avatarUrl: null,
+        },
       },
     });
-    expect(mockInsert).not.toHaveBeenCalled();
+    expect(mockInsert).toHaveBeenCalledTimes(1);
   });
 
   it("allows a multi-asset upload through when the batched queries find no collisions", async () => {

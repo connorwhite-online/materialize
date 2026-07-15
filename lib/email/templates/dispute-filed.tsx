@@ -18,19 +18,31 @@ export async function sendDisputeFiledEmail(params: {
   fileId: string;
   raisedByUserId: string;
   reason: string;
+  claimKind?: "flagged_listing" | "duplicate_upload";
+  originalFilename?: string;
+  evidencePhotoCount?: number;
 }): Promise<void> {
   const title = params.fileName ?? "Untitled listing";
+  const isDuplicateUpload = params.claimKind === "duplicate_upload";
   const link = params.fileSlug
     ? `${APP_URL}/files/${params.fileSlug}`
     : `${APP_URL}/files`;
 
   const text = [
-    "A creator disputed an auto-archived listing.",
+    isDuplicateUpload
+      ? "A creator claimed ownership after uploading a byte-identical file."
+      : "A creator disputed an auto-archived listing.",
     "",
     `Listing: ${title}`,
     link,
     `File id: ${params.fileId}`,
     `Raised by (user id): ${params.raisedByUserId}`,
+    ...(params.originalFilename
+      ? [`Original upload: ${params.originalFilename}`]
+      : []),
+    ...(params.evidencePhotoCount !== undefined
+      ? [`Evidence photos: ${params.evidencePhotoCount}`]
+      : []),
     "",
     "Reason:",
     params.reason,
@@ -40,11 +52,11 @@ export async function sendDisputeFiledEmail(params: {
 
   await sendEmail({
     to: OPERATOR_EMAIL,
-    subject: `Listing dispute: ${title}`,
+    subject: `${isDuplicateUpload ? "Ownership claim" : "Listing dispute"}: ${title}`,
     text,
     react: (
       <div>
-        <h2>Listing dispute filed</h2>
+        <h2>{isDuplicateUpload ? "Ownership claim filed" : "Listing dispute filed"}</h2>
         <p>
           <strong>Listing:</strong> {title} (<a href={link}>{link}</a>)
         </p>
@@ -54,6 +66,16 @@ export async function sendDisputeFiledEmail(params: {
         <p>
           <strong>Raised by (user id):</strong> {params.raisedByUserId}
         </p>
+        {params.originalFilename && (
+          <p>
+            <strong>Original upload:</strong> {params.originalFilename}
+          </p>
+        )}
+        {params.evidencePhotoCount !== undefined && (
+          <p>
+            <strong>Evidence photos:</strong> {params.evidencePhotoCount}
+          </p>
+        )}
         <p>
           <strong>Reason:</strong>
         </p>

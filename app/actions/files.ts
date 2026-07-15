@@ -51,6 +51,7 @@ import {
   printOrders,
   printOrderItems,
   users,
+  ownershipClaimIntents,
 } from "@/lib/db/schema";
 import { eq, and, ne, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -76,6 +77,7 @@ import {
   fingerprintAndPersistAsset,
   checkByteHashCollisionBatch,
   findExistingSameUserAssetsBatch,
+  type DuplicateFileSummary,
 } from "@/lib/hashing/fingerprint-asset";
 import { after } from "next/server";
 
@@ -291,7 +293,12 @@ export async function createFileListing(formData: FormData) {
     // check) against the batched results in memory, then walk the
     // array in order for the first non-null finding.
     type CollisionFinding =
-      | { kind: "cross-user" }
+      | {
+          kind: "cross-user";
+          hash: string;
+          assetIndex: number;
+          existing: DuplicateFileSummary;
+        }
       | { kind: "same-user"; fileName: string; fileSlug: string };
     const nonNullHashes = byteHashes.filter((h): h is string => !!h);
     const [crossUserHashes, sameUserMatches] = await Promise.all([
@@ -308,8 +315,16 @@ export async function createFileListing(formData: FormData) {
     const findings: Array<CollisionFinding | null> = incomingAssets.map(
       (asset, i): CollisionFinding | null => {
         const hash = byteHashes[i];
-        if (hash && crossUserHashes.has(hash)) {
-          return { kind: "cross-user" };
+        const existingCrossUser = hash
+          ? crossUserHashes.get(hash)
+          : undefined;
+        if (hash && existingCrossUser) {
+          return {
+            kind: "cross-user",
+            hash,
+            assetIndex: i,
+            existing: existingCrossUser,
+          };
         }
         const existing =
           (hash && sameUserMatches.byHash.get(hash)) ||
@@ -330,11 +345,32 @@ export async function createFileListing(formData: FormData) {
     );
     const firstFinding = findings.find((f) => f !== null);
     if (firstFinding?.kind === "cross-user") {
+      const uploadedAsset = incomingAssets[firstFinding.assetIndex];
+      const [claimIntent] = await db
+        .insert(ownershipClaimIntents)
+        .values({
+          raisedByUserId: userId,
+          existingFileId: firstFinding.existing.fileId,
+          storageKey: uploadedAsset.storageKey,
+          originalFilename: uploadedAsset.originalFilename,
+          fileSize: uploadedAsset.fileSize,
+          contentHash: firstFinding.hash,
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        })
+        .returning({ id: ownershipClaimIntents.id });
       return {
-        error: {
-          name: [
-            "This file has already been listed by another creator. Re-uploading others' files is not permitted.",
-          ],
+        duplicate: {
+          claimIntentId: claimIntent.id,
+          file: {
+            name: firstFinding.existing.fileName,
+            slug: firstFinding.existing.fileSlug,
+            thumbnailUrl: firstFinding.existing.thumbnailUrl,
+          },
+          owner: {
+            username: firstFinding.existing.ownerUsername,
+            displayName: firstFinding.existing.ownerDisplayName,
+            avatarUrl: firstFinding.existing.ownerAvatarUrl,
+          },
         },
       };
     }

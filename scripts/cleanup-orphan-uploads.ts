@@ -84,10 +84,15 @@ async function main() {
 
   const sql = neon(databaseUrl);
 
-  // Pull every storage_key currently referenced by file_assets. Small
-  // table, fits in memory. A single Set is the fastest lookup.
+  // Keep normal assets plus original uploads retained for an active claim
+  // receipt or a filed ownership dispute.
   const referencedRows = (await sql`
     SELECT storage_key FROM file_assets
+    UNION
+    SELECT i.storage_key
+    FROM ownership_claim_intents i
+    LEFT JOIN disputes d ON d.claim_intent_id = i.id
+    WHERE i.expires_at > now() OR d.id IS NOT NULL
   `) as { storage_key: string }[];
   const referenced = new Set(referencedRows.map((r) => r.storage_key));
   console.log(`file_assets references ${referenced.size} storage keys`);

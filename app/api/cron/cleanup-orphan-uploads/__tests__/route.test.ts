@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  */
 
 let fileAssetRows: Array<{ storageKey: string }> = [];
+let claimIntentRows: Array<{ storageKey: string }> = [];
 let r2Objects: Array<{
   Key?: string;
   Size?: number;
@@ -41,8 +42,15 @@ vi.mock("@aws-sdk/client-s3", () => {
 vi.mock("@/lib/db", () => ({
   db: {
     select: () => ({
-      from: () => {
+      from: (table: { _table?: string }) => {
         if (throwOnDb) throw new Error("db error");
+        if (table?._table === "ownership_claim_intents") {
+          return {
+            leftJoin: () => ({
+              where: () => Promise.resolve(claimIntentRows),
+            }),
+          };
+        }
         return Promise.resolve(fileAssetRows);
       },
     }),
@@ -51,6 +59,14 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("@/lib/db/schema", () => ({
   fileAssets: { storageKey: "storage_key" },
+  ownershipClaimIntents: {
+    _table: "ownership_claim_intents",
+    id: "id",
+    storageKey: "storage_key",
+    expiresAt: "expires_at",
+    toString: () => "ownership_claim_intents",
+  },
+  disputes: { id: "id", claimIntentId: "claim_intent_id" },
 }));
 
 vi.mock("@/lib/logger", () => ({
@@ -84,6 +100,7 @@ describe("cron/cleanup-orphan-uploads", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     fileAssetRows = [];
+    claimIntentRows = [];
     r2Objects = [];
     throwOnDb = false;
 
@@ -187,6 +204,21 @@ describe("cron/cleanup-orphan-uploads", () => {
       (c) => (c[0] as { _type: string })._type === "DeleteObjectsCommand"
     );
     expect(deleteCalls).toHaveLength(0);
+  });
+
+  it("does NOT delete an original model retained as ownership evidence", async () => {
+    claimIntentRows = [{ storageKey: "uploads/user/claimed-model.stl" }];
+    r2Objects = [
+      {
+        Key: "uploads/user/claimed-model.stl",
+        Size: 5000,
+        LastModified: objectAgedHours(48),
+      },
+    ];
+
+    const res = await GET(makeRequest("Bearer test-secret"));
+    expect(res.status).toBe(200);
+    expect((await res.json()).orphans).toBe(0);
   });
 
   it("does NOT delete unreferenced keys younger than 24h (age safety rail)", async () => {

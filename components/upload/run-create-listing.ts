@@ -46,9 +46,30 @@ export type CreateListingResult =
   | { ok: true }
   | {
       ok: false;
+      duplicate: DuplicateUploadMatch;
+      error?: never;
+      fieldErrors?: never;
+    }
+  | {
+      ok: false;
+      duplicate?: never;
       error?: string;
       fieldErrors?: Record<string, string[] | undefined>;
     };
+
+export interface DuplicateUploadMatch {
+  claimIntentId: string;
+  file: {
+    name: string | null;
+    slug: string | null;
+    thumbnailUrl: string | null;
+  };
+  owner: {
+    username: string | null;
+    displayName: string | null;
+    avatarUrl: string | null;
+  };
+}
 
 export async function runCreateListing(
   input: CreateListingInput
@@ -163,6 +184,12 @@ export async function runCreateListing(
     // On success the action calls redirect() and we never reach
     // here. Reaching the next line means it returned an error
     // object.
+    if (result && typeof result === "object" && "duplicate" in result) {
+      return {
+        ok: false,
+        duplicate: result.duplicate,
+      };
+    }
     if (result && typeof result === "object" && "error" in result) {
       return {
         ok: false,

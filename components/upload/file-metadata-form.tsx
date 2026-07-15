@@ -5,7 +5,11 @@ import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { listMyCollections } from "@/app/actions/collections";
 import { listMyProjects } from "@/app/actions/projects";
-import { runCreateListing } from "./run-create-listing";
+import {
+  runCreateListing,
+  type DuplicateUploadMatch,
+} from "./run-create-listing";
+import { DuplicateUploadDialog } from "./duplicate-upload-dialog";
 import { MATERIALS } from "@/lib/materials";
 import {
   DESIGN_TAG_OPTIONS,
@@ -137,6 +141,8 @@ export function FileMetadataForm({
   const [phase, setPhase] = useState<SubmitPhase>("idle");
   const [progress, setProgress] = useState(0);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [duplicateMatch, setDuplicateMatch] =
+    useState<DuplicateUploadMatch | null>(null);
   const [errors, setErrors] = useState<Record<string, string[] | undefined> | null>(
     null
   );
@@ -176,6 +182,7 @@ export function FileMetadataForm({
 
     setSubmitError(null);
     setErrors(null);
+    setDuplicateMatch(null);
 
     const result = await runCreateListing({
       file,
@@ -194,8 +201,11 @@ export function FileMetadataForm({
     });
 
     if (!result.ok) {
-      if (result.fieldErrors) setErrors(result.fieldErrors);
-      if (result.error) setSubmitError(result.error);
+      if (result.duplicate) setDuplicateMatch(result.duplicate);
+      if ("fieldErrors" in result && result.fieldErrors) {
+        setErrors(result.fieldErrors);
+      }
+      if ("error" in result && result.error) setSubmitError(result.error);
       setPhase("idle");
     }
     // On success the server action redirects — we never reach here.
@@ -597,6 +607,12 @@ export function FileMetadataForm({
           {submitLabel}
         </Button>
       </div>
+      {duplicateMatch && (
+        <DuplicateUploadDialog
+          match={duplicateMatch}
+          onClose={() => setDuplicateMatch(null)}
+        />
+      )}
     </form>
   );
 }
