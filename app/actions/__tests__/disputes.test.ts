@@ -92,8 +92,8 @@ describe("duplicateUploadDispute", () => {
       claimIntentId: "intent-1",
       reason: "I designed this model from my own sketches.",
       evidencePhotoKeys: [
-        "photos/user-1/a/prototype.jpg",
-        "photos/user-1/b/sketch.png",
+        "uploads/user-1/ownership-claim-photos/a/prototype.jpg",
+        "uploads/user-1/ownership-claim-photos/b/sketch.png",
       ],
     });
 
@@ -105,8 +105,8 @@ describe("duplicateUploadDispute", () => {
         claimIntentId: "intent-1",
         reason: "I designed this model from my own sketches.",
         evidencePhotoKeys: [
-          "photos/user-1/a/prototype.jpg",
-          "photos/user-1/b/sketch.png",
+          "uploads/user-1/ownership-claim-photos/a/prototype.jpg",
+          "uploads/user-1/ownership-claim-photos/b/sketch.png",
         ],
       },
     ]);

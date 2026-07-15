@@ -127,7 +127,12 @@ export async function duplicateUploadDispute(input: {
     if (photoKeys.length > MAX_EVIDENCE_PHOTOS) {
       return { error: `Attach no more than ${MAX_EVIDENCE_PHOTOS} photos.` };
     }
-    if (photoKeys.some((key) => !key.startsWith(`photos/${userId}/`))) {
+    if (
+      photoKeys.some(
+        (key) =>
+          !key.startsWith(`uploads/${userId}/ownership-claim-photos/`)
+      )
+    ) {
       return { error: "Invalid evidence photo." };
     }
 

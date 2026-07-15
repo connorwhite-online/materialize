@@ -82,6 +82,7 @@ vi.mock("@/lib/db", () => ({
               const next = (innerJoinResults.shift() ?? []) as unknown[];
               return Object.assign(next, {
                 limit: () => next,
+                orderBy: () => next,
               });
               },
             };
@@ -102,8 +103,9 @@ vi.mock("@/lib/db/schema", () => ({
     slug: "slug",
     name: "name",
     thumbnailUrl: "thumbnail_url",
+    organizationId: "organization_id",
   },
-  fileAssets: { id: "id", fileId: "file_id" },
+  fileAssets: { id: "id", fileId: "file_id", createdAt: "created_at" },
   collections: { id: "id", userId: "user_id" },
   collectionItems: { collectionId: "collection_id" },
   filePhotos: { id: "id", fileId: "file_id" },
@@ -129,6 +131,7 @@ vi.mock("@/lib/storage", () => ({
   ),
   generateUploadUrl: vi.fn(async () => "https://example.com/upload"),
   deleteObject: vi.fn(async () => undefined),
+  copyObject: vi.fn(async () => undefined),
 }));
 
 vi.mock("@/lib/logger", () => ({

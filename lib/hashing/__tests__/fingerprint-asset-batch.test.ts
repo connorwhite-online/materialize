@@ -14,7 +14,8 @@ vi.mock("@/lib/db", () => ({
           innerJoin: () => query,
           where: (...args: unknown[]) => {
             whereArgsCalls.push(args);
-            return innerJoinResults.shift() ?? [];
+            const rows = innerJoinResults.shift() ?? [];
+            return Object.assign(rows, { orderBy: () => rows });
           },
         };
         return query;
@@ -32,6 +33,7 @@ vi.mock("@/lib/db/schema", () => ({
     thumbnailUrl: "thumbnail_url",
     status: "status",
     visibility: "visibility",
+    organizationId: "organization_id",
   },
   fileAssets: {
     id: "id",
@@ -39,6 +41,7 @@ vi.mock("@/lib/db/schema", () => ({
     contentHash: "content_hash",
     originalFilename: "original_filename",
     fileSize: "file_size",
+    createdAt: "created_at",
   },
   users: {
     id: "id",

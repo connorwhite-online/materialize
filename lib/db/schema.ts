@@ -639,7 +639,7 @@ export const disputes = pgTable("disputes", {
     .references(() => users.id, { onDelete: "cascade" }),
   claimIntentId: uuid("claim_intent_id").references(
     () => ownershipClaimIntents.id,
-    { onDelete: "restrict" }
+    { onDelete: "set null" }
   ),
   reason: text("reason").notNull(),
   evidencePhotoKeys: jsonb("evidence_photo_keys")
@@ -657,6 +657,9 @@ export const disputes = pgTable("disputes", {
   index("disputes_raised_by_idx").on(table.raisedByUserId),
   index("disputes_status_idx").on(table.status),
   uniqueIndex("disputes_claim_intent_uniq").on(table.claimIntentId),
+  uniqueIndex("disputes_open_file_raiser_uniq")
+    .on(table.fileId, table.raisedByUserId)
+    .where(sql`${table.status} = 'open'`),
   check(
     "disputes_target_exactly_one",
     sql`(${table.fileId} IS NOT NULL AND ${table.projectId} IS NULL) OR (${table.fileId} IS NULL AND ${table.projectId} IS NOT NULL)`

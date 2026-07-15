@@ -66,7 +66,11 @@ export function DuplicateUploadDialog({
       const photoKeys =
         uploadedPhotoKeys ??
         (
-          await Promise.all(photos.map((photo) => uploadPhotoToR2(photo)))
+          await Promise.all(
+            photos.map((photo) =>
+              uploadPhotoToR2(photo, { purpose: "ownership_claim" })
+            )
+          )
         ).map((result) => result.storageKey);
       setUploadedPhotoKeys(photoKeys);
 

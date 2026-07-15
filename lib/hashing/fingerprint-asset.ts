@@ -2,7 +2,7 @@ import "server-only";
 
 import { db } from "@/lib/db";
 import { fileAssets, files, users } from "@/lib/db/schema";
-import { and, eq, inArray, ne, or } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, or } from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
 import { logError } from "@/lib/logger";
 import { fingerprintFromStream, type MeshFormat } from "./mesh-fingerprint";
@@ -160,7 +160,8 @@ export interface DuplicateFileSummary {
  */
 export async function checkByteHashCollisionBatch(
   byteHashes: string[],
-  userId: string
+  userId: string,
+  organizationId: string | null = null
 ): Promise<Map<string, DuplicateFileSummary>> {
   if (byteHashes.length === 0) return new Map();
   const hits = await db
@@ -180,8 +181,20 @@ export async function checkByteHashCollisionBatch(
     .innerJoin(files, eq(fileAssets.fileId, files.id))
     .innerJoin(users, eq(files.userId, users.id))
     .where(
-      and(inArray(fileAssets.contentHash, byteHashes), ne(files.userId, userId))
-    );
+      and(
+        inArray(fileAssets.contentHash, byteHashes),
+        ne(files.userId, userId),
+        ...(organizationId
+          ? [
+              or(
+                isNull(files.organizationId),
+                ne(files.organizationId, organizationId)
+              ),
+            ]
+          : [])
+      )
+    )
+    .orderBy(asc(fileAssets.createdAt));
 
   const collisions = new Map<string, DuplicateFileSummary>();
   for (const hit of hits) {
@@ -197,9 +210,8 @@ export async function checkByteHashCollisionBatch(
       ownerDisplayName: isPublic ? hit.ownerDisplayName : null,
       ownerAvatarUrl: isPublic ? hit.ownerAvatarUrl : null,
     };
-    const current = collisions.get(hit.contentHash);
-    // Prefer a public listing if the same bytes exist in multiple rows.
-    if (!current || (!current.fileSlug && summary.fileSlug)) {
+    // Query order makes the earliest asset the canonical incumbent.
+    if (!collisions.has(hit.contentHash)) {
       collisions.set(hit.contentHash, summary);
     }
   }

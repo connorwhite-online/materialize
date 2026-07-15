@@ -10,13 +10,13 @@ import {
   fileAssets,
   ownershipClaimIntents,
 } from "@/lib/db/schema";
-import { eq, gt, isNotNull, or } from "drizzle-orm";
+import { and, eq, gt, isNotNull, or } from "drizzle-orm";
 import { logError } from "@/lib/logger";
 import { constantTimeEqual } from "@/lib/auth/constant-time-equal";
 
 /**
- * Daily cron that garbage-collects R2 objects under `uploads/` that no
- * `file_assets` row points to and are older than a safety threshold.
+ * Daily cron that garbage-collects R2 objects under `uploads/` that no file
+ * asset or retained ownership-claim evidence points to.
  *
  * These orphans happen when a presigned PUT to R2 succeeds but the
  * subsequent createDraftFileForPrint / createFileListing server action
@@ -24,7 +24,7 @@ import { constantTimeEqual } from "@/lib/auth/constant-time-equal";
  * is no foreground cleanup path.
  *
  * Safety rails:
- *   - Only touches keys with the `uploads/` prefix.
+ *   - Only touches keys with the `uploads/` prefix (including claim photos).
  *   - Only deletes objects older than ORPHAN_MIN_AGE_HOURS (24h) — an
  *     in-flight upload that is still being wired to its fileAssets row
  *     won't get swept out from under it.
@@ -93,7 +93,10 @@ export async function GET(request: Request) {
     // A model is live when referenced by a file asset, an unexpired claim
     // receipt, or a filed dispute. The latter keeps original-file evidence
     // available for the full human-review lifecycle.
-    const [assetRows, claimRows] = await Promise.all([
+    const evidenceCutoff = new Date(
+      Date.now() - 365 * 24 * 60 * 60 * 1000
+    );
+    const [assetRows, claimRows, disputeEvidenceRows] = await Promise.all([
       db.select({ storageKey: fileAssets.storageKey }).from(fileAssets),
       db
         .select({ storageKey: ownershipClaimIntents.storageKey })
@@ -105,12 +108,31 @@ export async function GET(request: Request) {
         .where(
           or(
             gt(ownershipClaimIntents.expiresAt, new Date()),
-            isNotNull(disputes.id)
+            and(
+              isNotNull(disputes.id),
+              or(
+                eq(disputes.status, "open"),
+                gt(disputes.createdAt, evidenceCutoff)
+              )
+            )
+          )
+        ),
+      db
+        .select({ evidencePhotoKeys: disputes.evidencePhotoKeys })
+        .from(disputes)
+        .where(
+          or(
+            eq(disputes.status, "open"),
+            gt(disputes.createdAt, evidenceCutoff)
           )
         ),
     ]);
     const referenced = new Set(
-      [...assetRows, ...claimRows].map((row) => row.storageKey)
+      [
+        ...assetRows.map((row) => row.storageKey),
+        ...claimRows.map((row) => row.storageKey),
+        ...disputeEvidenceRows.flatMap((row) => row.evidencePhotoKeys),
+      ]
     );
 
     const now = Date.now();

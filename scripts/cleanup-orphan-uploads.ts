@@ -92,7 +92,12 @@ async function main() {
     SELECT i.storage_key
     FROM ownership_claim_intents i
     LEFT JOIN disputes d ON d.claim_intent_id = i.id
-    WHERE i.expires_at > now() OR d.id IS NOT NULL
+    WHERE i.expires_at > now()
+       OR (d.id IS NOT NULL AND (d.status = 'open' OR d.created_at > now() - interval '1 year'))
+    UNION
+    SELECT jsonb_array_elements_text(evidence_photo_keys)
+    FROM disputes
+    WHERE status = 'open' OR created_at > now() - interval '1 year'
   `) as { storage_key: string }[];
   const referenced = new Set(referencedRows.map((r) => r.storage_key));
   console.log(`file_assets references ${referenced.size} storage keys`);

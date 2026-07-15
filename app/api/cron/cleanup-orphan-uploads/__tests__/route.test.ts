@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 let fileAssetRows: Array<{ storageKey: string }> = [];
 let claimIntentRows: Array<{ storageKey: string }> = [];
+let disputeEvidenceRows: Array<{ evidencePhotoKeys: string[] }> = [];
 let r2Objects: Array<{
   Key?: string;
   Size?: number;
@@ -51,6 +52,11 @@ vi.mock("@/lib/db", () => ({
             }),
           };
         }
+        if (table?._table === "disputes") {
+          return {
+            where: () => Promise.resolve(disputeEvidenceRows),
+          };
+        }
         return Promise.resolve(fileAssetRows);
       },
     }),
@@ -58,7 +64,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("@/lib/db/schema", () => ({
-  fileAssets: { storageKey: "storage_key" },
+  fileAssets: { _table: "file_assets", storageKey: "storage_key" },
   ownershipClaimIntents: {
     _table: "ownership_claim_intents",
     id: "id",
@@ -66,7 +72,14 @@ vi.mock("@/lib/db/schema", () => ({
     expiresAt: "expires_at",
     toString: () => "ownership_claim_intents",
   },
-  disputes: { id: "id", claimIntentId: "claim_intent_id" },
+  disputes: {
+    _table: "disputes",
+    id: "id",
+    claimIntentId: "claim_intent_id",
+    status: "status",
+    createdAt: "created_at",
+    evidencePhotoKeys: "evidence_photo_keys",
+  },
 }));
 
 vi.mock("@/lib/logger", () => ({
@@ -101,6 +114,7 @@ describe("cron/cleanup-orphan-uploads", () => {
     vi.clearAllMocks();
     fileAssetRows = [];
     claimIntentRows = [];
+    disputeEvidenceRows = [];
     r2Objects = [];
     throwOnDb = false;
 
@@ -211,6 +225,27 @@ describe("cron/cleanup-orphan-uploads", () => {
     r2Objects = [
       {
         Key: "uploads/user/claimed-model.stl",
+        Size: 5000,
+        LastModified: objectAgedHours(48),
+      },
+    ];
+
+    const res = await GET(makeRequest("Bearer test-secret"));
+    expect(res.status).toBe(200);
+    expect((await res.json()).orphans).toBe(0);
+  });
+
+  it("does NOT delete a photo attached to an ownership dispute", async () => {
+    disputeEvidenceRows = [
+      {
+        evidencePhotoKeys: [
+          "uploads/user/ownership-claim-photos/evidence/photo.jpg",
+        ],
+      },
+    ];
+    r2Objects = [
+      {
+        Key: "uploads/user/ownership-claim-photos/evidence/photo.jpg",
         Size: 5000,
         LastModified: objectAgedHours(48),
       },

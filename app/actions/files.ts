@@ -71,7 +71,11 @@ import {
 } from "@/lib/validations/incoming-asset";
 import { deriveListingName, buildListingSlug } from "@/lib/filenames";
 import { logError, isRedirectError } from "@/lib/logger";
-import { generateDownloadUrl, deleteObject } from "@/lib/storage";
+import {
+  generateDownloadUrl,
+  deleteObject,
+  copyObject,
+} from "@/lib/storage";
 import { type MeshFormat } from "@/lib/hashing/mesh-fingerprint";
 import {
   fingerprintAndPersistAsset,
@@ -302,7 +306,7 @@ export async function createFileListing(formData: FormData) {
       | { kind: "same-user"; fileName: string; fileSlug: string };
     const nonNullHashes = byteHashes.filter((h): h is string => !!h);
     const [crossUserHashes, sameUserMatches] = await Promise.all([
-      checkByteHashCollisionBatch(nonNullHashes, userId),
+      checkByteHashCollisionBatch(nonNullHashes, userId, organizationId),
       findExistingSameUserAssetsBatch(
         userId,
         incomingAssets.map((asset, i) => ({
@@ -346,18 +350,36 @@ export async function createFileListing(formData: FormData) {
     const firstFinding = findings.find((f) => f !== null);
     if (firstFinding?.kind === "cross-user") {
       const uploadedAsset = incomingAssets[firstFinding.assetIndex];
+      // Freeze the bytes at a fresh server-only key. The browser's original
+      // presigned PUT remains valid briefly and must not be the evidence an
+      // operator later reviews.
+      const evidenceStorageKey =
+        `uploads/${userId}/ownership-evidence/${nanoid()}`;
+      await copyObject(uploadedAsset.storageKey, evidenceStorageKey);
+      const evidenceHash = await computeByteHashOnly(evidenceStorageKey);
+      if (evidenceHash !== firstFinding.hash) {
+        await deleteObject(evidenceStorageKey).catch(() => undefined);
+        return {
+          error: {
+            name: ["The uploaded file changed during verification. Please upload it again."],
+          },
+        };
+      }
       const [claimIntent] = await db
         .insert(ownershipClaimIntents)
         .values({
           raisedByUserId: userId,
           existingFileId: firstFinding.existing.fileId,
-          storageKey: uploadedAsset.storageKey,
+          storageKey: evidenceStorageKey,
           originalFilename: uploadedAsset.originalFilename,
           fileSize: uploadedAsset.fileSize,
           contentHash: firstFinding.hash,
           expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
         })
         .returning({ id: ownershipClaimIntents.id });
+      await deleteObject(uploadedAsset.storageKey).catch((error) => {
+        logError("createFileListing.deleteDuplicateSource", error);
+      });
       return {
         duplicate: {
           claimIntentId: claimIntent.id,
