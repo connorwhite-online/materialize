@@ -93,11 +93,11 @@ async function main() {
     FROM ownership_claim_intents i
     LEFT JOIN disputes d ON d.claim_intent_id = i.id
     WHERE i.expires_at > now()
-       OR (d.id IS NOT NULL AND (d.status = 'open' OR d.resolved_at > now() - interval '1 year'))
+       OR (d.id IS NOT NULL AND (d.status = 'open' OR d.resolved_at IS NULL OR d.resolved_at > now() - interval '1 year'))
     UNION
     SELECT jsonb_array_elements_text(evidence_photo_keys)
     FROM disputes
-    WHERE status = 'open' OR resolved_at > now() - interval '1 year'
+    WHERE status = 'open' OR resolved_at IS NULL OR resolved_at > now() - interval '1 year'
   `) as { storage_key: string }[];
   const referenced = new Set(referencedRows.map((r) => r.storage_key));
   console.log(`file_assets references ${referenced.size} storage keys`);
@@ -180,6 +180,27 @@ async function main() {
       }
     }
   }
+
+  await sql`
+    UPDATE disputes
+    SET evidence_photo_keys = '[]'::jsonb
+    WHERE status <> 'open'
+      AND resolved_at < now() - interval '1 year'
+  `;
+  await sql`
+    DELETE FROM ownership_claim_intents i
+    WHERE i.expires_at < now()
+      AND NOT EXISTS (
+        SELECT 1
+        FROM disputes d
+        WHERE d.claim_intent_id = i.id
+          AND (
+            d.status = 'open'
+            OR d.resolved_at IS NULL
+            OR d.resolved_at > now() - interval '1 year'
+          )
+      )
+  `;
 
   console.log(`\nDeleted ${deleted} orphan objects.`);
 }

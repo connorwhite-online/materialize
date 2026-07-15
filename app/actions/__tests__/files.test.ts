@@ -23,12 +23,14 @@ vi.mock("@/lib/db", () => ({
       return {
         values: (...a: unknown[]) => {
           mockValues(...a);
-          return {
+          const insertQuery = {
+            onConflictDoNothing: () => insertQuery,
             returning: () => {
               mockReturning();
               return [{ id: "test-file-id", slug: "test-model-abc123" }];
             },
           };
+          return insertQuery;
         },
       };
     },
@@ -119,6 +121,7 @@ vi.mock("@/lib/db/schema", () => ({
     existingFileId: "existing_file_id",
     contentHash: "content_hash",
     expiresAt: "expires_at",
+    consumedAt: "consumed_at",
   },
   disputes: { id: "id", claimIntentId: "claim_intent_id" },
 }));

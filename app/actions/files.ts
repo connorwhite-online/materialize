@@ -402,6 +402,7 @@ export async function createFileListing(formData: FormData) {
             ),
             eq(ownershipClaimIntents.contentHash, firstFinding.hash),
             gt(ownershipClaimIntents.expiresAt, new Date()),
+            isNull(ownershipClaimIntents.consumedAt),
             isNull(disputes.id)
           )
         )
@@ -442,7 +443,35 @@ export async function createFileListing(formData: FormData) {
           contentHash: firstFinding.hash,
           expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
         })
+        .onConflictDoNothing()
         .returning({ id: ownershipClaimIntents.id });
+      if (!claimIntent) {
+        const [winner] = await db
+          .select({ id: ownershipClaimIntents.id })
+          .from(ownershipClaimIntents)
+          .where(
+            and(
+              eq(ownershipClaimIntents.raisedByUserId, userId),
+              eq(
+                ownershipClaimIntents.existingFileId,
+                firstFinding.existing.fileId
+              ),
+              eq(ownershipClaimIntents.contentHash, firstFinding.hash),
+              isNull(ownershipClaimIntents.consumedAt)
+            )
+          )
+          .limit(1);
+        await deleteObject(evidenceStorageKey).catch(() => undefined);
+        if (!winner) {
+          return {
+            error: {
+              name: ["Could not retain ownership evidence. Please try again."],
+            },
+          };
+        }
+        await deleteObject(uploadedAsset.storageKey).catch(() => undefined);
+        return duplicateUploadResult(winner.id, firstFinding.existing);
+      }
       await deleteObject(uploadedAsset.storageKey).catch((error) => {
         logError("createFileListing.deleteDuplicateSource", error);
       });

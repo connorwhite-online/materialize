@@ -1,7 +1,7 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   disputes,
@@ -181,12 +181,28 @@ export async function duplicateUploadDispute(input: {
       return { error: "You already have an open claim for this file." };
     }
 
-    await db.insert(disputes).values({
-      fileId: intent.existingFileId,
-      raisedByUserId: userId,
-      claimIntentId: intent.id,
-      reason,
-      evidencePhotoKeys: photoKeys,
+    await db.transaction(async (tx) => {
+      const [claimedIntent] = await tx
+        .update(ownershipClaimIntents)
+        .set({ consumedAt: new Date() })
+        .where(
+          and(
+            eq(ownershipClaimIntents.id, intent.id),
+            eq(ownershipClaimIntents.raisedByUserId, userId),
+            isNull(ownershipClaimIntents.consumedAt)
+          )
+        )
+        .returning({ id: ownershipClaimIntents.id });
+      if (!claimedIntent) {
+        throw new Error("Ownership claim receipt was already consumed");
+      }
+      await tx.insert(disputes).values({
+        fileId: intent.existingFileId,
+        raisedByUserId: userId,
+        claimIntentId: intent.id,
+        reason,
+        evidencePhotoKeys: photoKeys,
+      });
     });
 
     try {

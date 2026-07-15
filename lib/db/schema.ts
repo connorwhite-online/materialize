@@ -615,6 +615,7 @@ export const ownershipClaimIntents = pgTable("ownership_claim_intents", {
   fileSize: integer("file_size").notNull(),
   contentHash: text("content_hash").notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -622,6 +623,9 @@ export const ownershipClaimIntents = pgTable("ownership_claim_intents", {
   index("ownership_claim_intents_user_idx").on(table.raisedByUserId),
   index("ownership_claim_intents_file_idx").on(table.existingFileId),
   index("ownership_claim_intents_expires_idx").on(table.expiresAt),
+  uniqueIndex("ownership_claim_intents_active_uniq")
+    .on(table.raisedByUserId, table.existingFileId, table.contentHash)
+    .where(sql`${table.consumedAt} IS NULL`),
 ]);
 
 // Creator-filed disputes against an auto-archived listing (see the
@@ -659,7 +663,7 @@ export const disputes = pgTable("disputes", {
   uniqueIndex("disputes_claim_intent_uniq").on(table.claimIntentId),
   uniqueIndex("disputes_open_file_raiser_uniq")
     .on(table.fileId, table.raisedByUserId)
-    .where(sql`${table.status} = 'open'`),
+    .where(sql`${table.status} = 'open' AND ${table.claimIntentId} IS NOT NULL`),
   check(
     "disputes_target_exactly_one",
     sql`(${table.fileId} IS NOT NULL AND ${table.projectId} IS NULL) OR (${table.fileId} IS NULL AND ${table.projectId} IS NOT NULL)`

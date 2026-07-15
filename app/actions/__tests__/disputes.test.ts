@@ -26,6 +26,35 @@ vi.mock("@/lib/db", () => ({
         return Promise.resolve();
       },
     }),
+    transaction: async (
+      callback: (tx: {
+        update: () => {
+          set: () => {
+            where: () => {
+              returning: () => Array<{ id: string }>;
+            };
+          };
+        };
+        insert: () => {
+          values: (values: unknown) => Promise<void>;
+        };
+      }) => Promise<void>
+    ) =>
+      callback({
+        update: () => ({
+          set: () => ({
+            where: () => ({
+              returning: () => [{ id: "intent-1" }],
+            }),
+          }),
+        }),
+        insert: () => ({
+          values: (values: unknown) => {
+            insertedValues.push(values);
+            return Promise.resolve();
+          },
+        }),
+      }),
   },
 }));
 
@@ -52,6 +81,7 @@ vi.mock("@/lib/db/schema", () => ({
     storageKey: "storage_key",
     originalFilename: "original_filename",
     expiresAt: "expires_at",
+    consumedAt: "consumed_at",
   },
 }));
 

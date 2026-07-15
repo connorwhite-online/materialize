@@ -121,6 +121,7 @@ export async function GET(request: Request) {
               isNotNull(disputes.id),
               or(
                 eq(disputes.status, "open"),
+                isNull(disputes.resolvedAt),
                 gt(disputes.resolvedAt, evidenceCutoff)
               )
             )
@@ -132,6 +133,7 @@ export async function GET(request: Request) {
         .where(
           or(
             eq(disputes.status, "open"),
+            isNull(disputes.resolvedAt),
             gt(disputes.resolvedAt, evidenceCutoff)
           )
         ),
@@ -240,6 +242,7 @@ export async function GET(request: Request) {
                   eq(disputes.claimIntentId, ownershipClaimIntents.id),
                   or(
                     eq(disputes.status, "open"),
+                    isNull(disputes.resolvedAt),
                     gt(disputes.resolvedAt, evidenceCutoff)
                   )
                 )
