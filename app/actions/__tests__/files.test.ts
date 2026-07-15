@@ -211,8 +211,10 @@ describe("createFileListing", () => {
   it("rejects repeated storage keys before hashing", async () => {
     const formData = new FormData();
     formData.set("name", "Repeated asset");
+    formData.set("description", "");
     formData.set("price", "0");
     formData.set("license", "cc_by");
+    formData.set("tags", "");
     const asset = {
       storageKey: "uploads/test-user-id/a/model.stl",
       originalFilename: "model.stl",
