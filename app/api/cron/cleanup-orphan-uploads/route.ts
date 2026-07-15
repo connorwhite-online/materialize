@@ -15,6 +15,7 @@ import {
   eq,
   gt,
   isNotNull,
+  isNull,
   lt,
   ne,
   notExists,
