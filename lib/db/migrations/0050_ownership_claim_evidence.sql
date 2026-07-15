@@ -14,21 +14,12 @@ CREATE TABLE IF NOT EXISTS "ownership_claim_intents" (
 --> statement-breakpoint
 ALTER TABLE "disputes" ADD COLUMN IF NOT EXISTS "claim_intent_id" uuid;--> statement-breakpoint
 ALTER TABLE "disputes" ADD COLUMN IF NOT EXISTS "evidence_photo_keys" jsonb DEFAULT '[]'::jsonb NOT NULL;--> statement-breakpoint
-DO $$ BEGIN
-	IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ownership_claim_intents_raised_by_user_id_users_id_fk') THEN
-		ALTER TABLE "ownership_claim_intents" ADD CONSTRAINT "ownership_claim_intents_raised_by_user_id_users_id_fk" FOREIGN KEY ("raised_by_user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
-	END IF;
-END $$;--> statement-breakpoint
-DO $$ BEGIN
-	IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ownership_claim_intents_existing_file_id_files_id_fk') THEN
-		ALTER TABLE "ownership_claim_intents" ADD CONSTRAINT "ownership_claim_intents_existing_file_id_files_id_fk" FOREIGN KEY ("existing_file_id") REFERENCES "public"."files"("id") ON DELETE cascade ON UPDATE no action;
-	END IF;
-END $$;--> statement-breakpoint
-DO $$ BEGIN
-	IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'disputes_claim_intent_id_ownership_claim_intents_id_fk') THEN
-		ALTER TABLE "disputes" ADD CONSTRAINT "disputes_claim_intent_id_ownership_claim_intents_id_fk" FOREIGN KEY ("claim_intent_id") REFERENCES "public"."ownership_claim_intents"("id") ON DELETE set null ON UPDATE no action;
-	END IF;
-END $$;--> statement-breakpoint
+ALTER TABLE "ownership_claim_intents" DROP CONSTRAINT IF EXISTS "ownership_claim_intents_raised_by_user_id_users_id_fk";--> statement-breakpoint
+ALTER TABLE "ownership_claim_intents" ADD CONSTRAINT "ownership_claim_intents_raised_by_user_id_users_id_fk" FOREIGN KEY ("raised_by_user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "ownership_claim_intents" DROP CONSTRAINT IF EXISTS "ownership_claim_intents_existing_file_id_files_id_fk";--> statement-breakpoint
+ALTER TABLE "ownership_claim_intents" ADD CONSTRAINT "ownership_claim_intents_existing_file_id_files_id_fk" FOREIGN KEY ("existing_file_id") REFERENCES "public"."files"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "disputes" DROP CONSTRAINT IF EXISTS "disputes_claim_intent_id_ownership_claim_intents_id_fk";--> statement-breakpoint
+ALTER TABLE "disputes" ADD CONSTRAINT "disputes_claim_intent_id_ownership_claim_intents_id_fk" FOREIGN KEY ("claim_intent_id") REFERENCES "public"."ownership_claim_intents"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "ownership_claim_intents_user_idx" ON "ownership_claim_intents" USING btree ("raised_by_user_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "ownership_claim_intents_file_idx" ON "ownership_claim_intents" USING btree ("existing_file_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "ownership_claim_intents_expires_idx" ON "ownership_claim_intents" USING btree ("expires_at");--> statement-breakpoint

@@ -50,6 +50,17 @@ vi.mock("@/lib/db", () => ({
       from: (...args: unknown[]) => {
         mockFrom(...args);
         mockSelect();
+        const joinQuery = {
+          innerJoin: () => joinQuery,
+          leftJoin: () => joinQuery,
+          where: () => {
+            const next = (innerJoinResults.shift() ?? []) as unknown[];
+            return Object.assign(next, {
+              limit: () => next,
+              orderBy: () => next,
+            });
+          },
+        };
         return {
           // Bare .where() — `canWriteFile` calls .limit(1) after,
           // so we make the returned array chainable. The same path
@@ -70,24 +81,8 @@ vi.mock("@/lib/db", () => ({
               limit: () => arr,
             });
           },
-          innerJoin: () => {
-            const joinQuery = {
-              innerJoin: () => joinQuery,
-              where: () => {
-              // Dedup checks. Both with and without a trailing
-              // .limit() are exercised by createFileListing
-              // (byte/geom/coarse) and createDraftFileForPrint. Rows
-              // come off the queue in call order; unseeded calls
-              // fall back to "no collisions" to match prior behavior.
-              const next = (innerJoinResults.shift() ?? []) as unknown[];
-              return Object.assign(next, {
-                limit: () => next,
-                orderBy: () => next,
-              });
-              },
-            };
-            return joinQuery;
-          },
+          innerJoin: () => joinQuery,
+          leftJoin: () => joinQuery,
         };
       },
     }),
@@ -118,7 +113,14 @@ vi.mock("@/lib/db/schema", () => ({
     displayName: "display_name",
     avatarUrl: "avatar_url",
   },
-  ownershipClaimIntents: { id: "id" },
+  ownershipClaimIntents: {
+    id: "id",
+    raisedByUserId: "raised_by_user_id",
+    existingFileId: "existing_file_id",
+    contentHash: "content_hash",
+    expiresAt: "expires_at",
+  },
+  disputes: { id: "id", claimIntentId: "claim_intent_id" },
 }));
 
 // Mock the R2 storage layer so computeContentHash can run without a
@@ -206,6 +208,27 @@ describe("createFileListing", () => {
     expect(result).toHaveProperty("error");
   });
 
+  it("rejects repeated storage keys before hashing", async () => {
+    const formData = new FormData();
+    formData.set("name", "Repeated asset");
+    formData.set("price", "0");
+    formData.set("license", "cc_by");
+    const asset = {
+      storageKey: "uploads/test-user-id/a/model.stl",
+      originalFilename: "model.stl",
+      format: "stl",
+      fileSize: 100,
+    };
+    formData.set("assetsJson", JSON.stringify([asset, asset]));
+
+    const result = await createFileListing(formData);
+
+    expect(result).toEqual({
+      error: { name: ["The same uploaded file was attached more than once."] },
+    });
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
   // The generateDownloadUrl mock always resolves to the same fixed
   // base64 payload ("AAEC" -> bytes 00 01 02), so computeByteHashOnly
   // deterministically produces this SHA-256 for every asset in the
@@ -252,7 +275,7 @@ describe("createFileListing", () => {
       ownerUsername: "original-creator",
       ownerDisplayName: "Original Creator",
       ownerAvatarUrl: null,
-    }], []];
+    }], [], []];
 
     const result = await createFileListing(formData);
 

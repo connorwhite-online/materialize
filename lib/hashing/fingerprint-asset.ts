@@ -2,7 +2,16 @@ import "server-only";
 
 import { db } from "@/lib/db";
 import { fileAssets, files, users } from "@/lib/db/schema";
-import { and, asc, eq, inArray, isNull, ne, or } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  ne,
+  or,
+} from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
 import { logError } from "@/lib/logger";
 import { fingerprintFromStream, type MeshFormat } from "./mesh-fingerprint";
@@ -183,15 +192,15 @@ export async function checkByteHashCollisionBatch(
     .where(
       and(
         inArray(fileAssets.contentHash, byteHashes),
-        ne(files.userId, userId),
-        ...(organizationId
-          ? [
-              or(
-                isNull(files.organizationId),
-                ne(files.organizationId, organizationId)
-              ),
-            ]
-          : [])
+        organizationId
+          ? or(
+              isNull(files.organizationId),
+              ne(files.organizationId, organizationId)
+            )
+          : or(
+              isNotNull(files.organizationId),
+              ne(files.userId, userId)
+            )
       )
     )
     .orderBy(asc(fileAssets.createdAt));
@@ -235,7 +244,8 @@ export async function findExistingSameUserAssetsBatch(
     byteHash: string | null;
     originalFilename: string;
     fileSize: number;
-  }>
+  }>,
+  organizationId: string | null = null
 ): Promise<{
   byHash: Map<string, SameUserAssetHit>;
   byNameSize: Map<string, SameUserAssetHit>;
@@ -248,8 +258,15 @@ export async function findExistingSameUserAssetsBatch(
   );
   // Filename+size fallback only applies to non-empty filenames with a
   // real size, same guard as the serial version.
-  const nameSizePairs = items.filter(
-    (i) => i.originalFilename && i.fileSize > 0
+  const nameSizePairs = Array.from(
+    new Map(
+      items
+        .filter((i) => i.originalFilename && i.fileSize > 0)
+        .map((item) => [
+          `${item.originalFilename}::${item.fileSize}`,
+          item,
+        ])
+    ).values()
   );
 
   if (hashes.length === 0 && nameSizePairs.length === 0) {
@@ -278,7 +295,14 @@ export async function findExistingSameUserAssetsBatch(
     })
     .from(fileAssets)
     .innerJoin(files, eq(fileAssets.fileId, files.id))
-    .where(and(eq(files.userId, userId), or(...matchConditions)));
+    .where(
+      and(
+        organizationId
+          ? eq(files.organizationId, organizationId)
+          : and(eq(files.userId, userId), isNull(files.organizationId)),
+        or(...matchConditions)
+      )
+    );
 
   for (const row of rows) {
     const hit: SameUserAssetHit = {

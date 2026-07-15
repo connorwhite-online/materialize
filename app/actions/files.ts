@@ -52,8 +52,9 @@ import {
   printOrderItems,
   users,
   ownershipClaimIntents,
+  disputes,
 } from "@/lib/db/schema";
-import { eq, and, ne, inArray } from "drizzle-orm";
+import { eq, and, gt, inArray, isNull, ne } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { nanoid } from "nanoid";
@@ -84,6 +85,27 @@ import {
   type DuplicateFileSummary,
 } from "@/lib/hashing/fingerprint-asset";
 import { after } from "next/server";
+
+function duplicateUploadResult(
+  claimIntentId: string,
+  existing: DuplicateFileSummary
+) {
+  return {
+    duplicate: {
+      claimIntentId,
+      file: {
+        name: existing.fileName,
+        slug: existing.fileSlug,
+        thumbnailUrl: existing.thumbnailUrl,
+      },
+      owner: {
+        username: existing.ownerUsername,
+        displayName: existing.ownerDisplayName,
+        avatarUrl: existing.ownerAvatarUrl,
+      },
+    },
+  } as const;
+}
 
 // Sync helper: stream R2 -> SHA-256 of raw bytes. This is the only
 // fingerprint work we do on the upload's hot path now — the geometry
@@ -269,6 +291,19 @@ export async function createFileListing(formData: FormData) {
   if (incomingAssets.length === 0) {
     return { error: { name: ["No file attached. Please re-upload."] } };
   }
+  if (incomingAssets.length > MAX_PROJECT_FILES) {
+    return {
+      error: {
+        name: [`A listing can contain at most ${MAX_PROJECT_FILES} files.`],
+      },
+    };
+  }
+  if (
+    new Set(incomingAssets.map((asset) => asset.storageKey)).size !==
+    incomingAssets.length
+  ) {
+    return { error: { name: ["The same uploaded file was attached more than once."] } };
+  }
 
   // Verify each storageKey belongs to this user before we touch R2.
   for (const asset of incomingAssets) {
@@ -313,7 +348,8 @@ export async function createFileListing(formData: FormData) {
           byteHash: byteHashes[i],
           originalFilename: asset.originalFilename,
           fileSize: asset.fileSize,
-        }))
+        })),
+        organizationId
       ),
     ]);
     const findings: Array<CollisionFinding | null> = incomingAssets.map(
@@ -350,6 +386,36 @@ export async function createFileListing(formData: FormData) {
     const firstFinding = findings.find((f) => f !== null);
     if (firstFinding?.kind === "cross-user") {
       const uploadedAsset = incomingAssets[firstFinding.assetIndex];
+      const [reusableIntent] = await db
+        .select({ id: ownershipClaimIntents.id })
+        .from(ownershipClaimIntents)
+        .leftJoin(
+          disputes,
+          eq(disputes.claimIntentId, ownershipClaimIntents.id)
+        )
+        .where(
+          and(
+            eq(ownershipClaimIntents.raisedByUserId, userId),
+            eq(
+              ownershipClaimIntents.existingFileId,
+              firstFinding.existing.fileId
+            ),
+            eq(ownershipClaimIntents.contentHash, firstFinding.hash),
+            gt(ownershipClaimIntents.expiresAt, new Date()),
+            isNull(disputes.id)
+          )
+        )
+        .limit(1);
+      if (reusableIntent) {
+        await deleteObject(uploadedAsset.storageKey).catch((error) => {
+          logError("createFileListing.deleteRepeatedDuplicate", error);
+        });
+        return duplicateUploadResult(
+          reusableIntent.id,
+          firstFinding.existing
+        );
+      }
+
       // Freeze the bytes at a fresh server-only key. The browser's original
       // presigned PUT remains valid briefly and must not be the evidence an
       // operator later reviews.
@@ -380,21 +446,7 @@ export async function createFileListing(formData: FormData) {
       await deleteObject(uploadedAsset.storageKey).catch((error) => {
         logError("createFileListing.deleteDuplicateSource", error);
       });
-      return {
-        duplicate: {
-          claimIntentId: claimIntent.id,
-          file: {
-            name: firstFinding.existing.fileName,
-            slug: firstFinding.existing.fileSlug,
-            thumbnailUrl: firstFinding.existing.thumbnailUrl,
-          },
-          owner: {
-            username: firstFinding.existing.ownerUsername,
-            displayName: firstFinding.existing.ownerDisplayName,
-            avatarUrl: firstFinding.existing.ownerAvatarUrl,
-          },
-        },
-      };
+      return duplicateUploadResult(claimIntent.id, firstFinding.existing);
     }
     if (firstFinding?.kind === "same-user") {
       return {

@@ -10,7 +10,16 @@ import {
   fileAssets,
   ownershipClaimIntents,
 } from "@/lib/db/schema";
-import { and, eq, gt, isNotNull, or } from "drizzle-orm";
+import {
+  and,
+  eq,
+  gt,
+  isNotNull,
+  lt,
+  ne,
+  notExists,
+  or,
+} from "drizzle-orm";
 import { logError } from "@/lib/logger";
 import { constantTimeEqual } from "@/lib/auth/constant-time-equal";
 
@@ -112,7 +121,7 @@ export async function GET(request: Request) {
               isNotNull(disputes.id),
               or(
                 eq(disputes.status, "open"),
-                gt(disputes.createdAt, evidenceCutoff)
+                gt(disputes.resolvedAt, evidenceCutoff)
               )
             )
           )
@@ -123,7 +132,7 @@ export async function GET(request: Request) {
         .where(
           or(
             eq(disputes.status, "open"),
-            gt(disputes.createdAt, evidenceCutoff)
+            gt(disputes.resolvedAt, evidenceCutoff)
           )
         ),
     ]);
@@ -204,6 +213,40 @@ export async function GET(request: Request) {
         }
       }
     }
+
+    // Tombstone metadata at the same boundary as the blobs: closed-claim
+    // photos are no longer advertised after one year, and expired intents
+    // with no active/recent dispute are removed entirely.
+    await db
+      .update(disputes)
+      .set({ evidencePhotoKeys: [] })
+      .where(
+        and(
+          ne(disputes.status, "open"),
+          lt(disputes.resolvedAt, evidenceCutoff)
+        )
+      );
+    await db
+      .delete(ownershipClaimIntents)
+      .where(
+        and(
+          lt(ownershipClaimIntents.expiresAt, new Date()),
+          notExists(
+            db
+              .select({ id: disputes.id })
+              .from(disputes)
+              .where(
+                and(
+                  eq(disputes.claimIntentId, ownershipClaimIntents.id),
+                  or(
+                    eq(disputes.status, "open"),
+                    gt(disputes.resolvedAt, evidenceCutoff)
+                  )
+                )
+              )
+          )
+        )
+      );
 
     const result = { scanned, orphans: orphans.length, deleted, reclaimedBytes };
     console.log("[cron/cleanup-orphan-uploads] swept", result);

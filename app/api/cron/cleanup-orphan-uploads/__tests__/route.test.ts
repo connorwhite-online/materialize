@@ -60,6 +60,14 @@ vi.mock("@/lib/db", () => ({
         return Promise.resolve(fileAssetRows);
       },
     }),
+    update: () => ({
+      set: () => ({
+        where: () => Promise.resolve(),
+      }),
+    }),
+    delete: () => ({
+      where: () => Promise.resolve(),
+    }),
   },
 }));
 
@@ -78,6 +86,7 @@ vi.mock("@/lib/db/schema", () => ({
     claimIntentId: "claim_intent_id",
     status: "status",
     createdAt: "created_at",
+    resolvedAt: "resolved_at",
     evidencePhotoKeys: "evidence_photo_keys",
   },
 }));
