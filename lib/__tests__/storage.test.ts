@@ -48,12 +48,18 @@ vi.mock("@aws-sdk/client-s3", () => {
     params: unknown;
     constructor(params: unknown) { this.params = params; }
   }
+  class CopyObjectCommand {
+    _cmd = "Copy";
+    params: unknown;
+    constructor(params: unknown) { this.params = params; }
+  }
   return {
     S3Client,
     PutObjectCommand,
     GetObjectCommand,
     HeadObjectCommand,
     DeleteObjectCommand,
+    CopyObjectCommand,
   };
 });
 
@@ -86,6 +92,7 @@ import {
   generateDownloadUrl,
   objectExists,
   deleteObject,
+  copyObject,
 } from "../storage";
 
 beforeEach(() => {
@@ -130,6 +137,28 @@ describe("generateDownloadUrl", () => {
   it("propagates errors from getSignedUrl", async () => {
     getSignedUrlMock.mockRejectedValue(new Error("get presign failed"));
     await expect(generateDownloadUrl("some/key")).rejects.toThrow("get presign failed");
+  });
+});
+
+describe("copyObject", () => {
+  it("copies to a server-only destination with an encoded source", async () => {
+    sendMock.mockResolvedValue({});
+
+    await copyObject(
+      "uploads/user 1/source/model.stl",
+      "uploads/user-1/ownership-evidence/frozen"
+    );
+
+    const command = sendMock.mock.calls[0][0] as {
+      _cmd: string;
+      params: { Key: string; CopySource: string };
+    };
+    expect(command._cmd).toBe("Copy");
+    expect(command.params).toEqual({
+      Bucket: "test-bucket",
+      Key: "uploads/user-1/ownership-evidence/frozen",
+      CopySource: "test-bucket/uploads/user%201/source/model.stl",
+    });
   });
 });
 

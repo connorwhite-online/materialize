@@ -9,6 +9,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  */
 
 let fileAssetRows: Array<{ storageKey: string }> = [];
+let claimIntentRows: Array<{ storageKey: string }> = [];
+let disputeEvidenceRows: Array<{ evidencePhotoKeys: string[] }> = [];
 let r2Objects: Array<{
   Key?: string;
   Size?: number;
@@ -41,16 +43,52 @@ vi.mock("@aws-sdk/client-s3", () => {
 vi.mock("@/lib/db", () => ({
   db: {
     select: () => ({
-      from: () => {
+      from: (table: { _table?: string }) => {
         if (throwOnDb) throw new Error("db error");
+        if (table?._table === "ownership_claim_intents") {
+          return {
+            leftJoin: () => ({
+              where: () => Promise.resolve(claimIntentRows),
+            }),
+          };
+        }
+        if (table?._table === "disputes") {
+          return {
+            where: () => Promise.resolve(disputeEvidenceRows),
+          };
+        }
         return Promise.resolve(fileAssetRows);
       },
+    }),
+    update: () => ({
+      set: () => ({
+        where: () => Promise.resolve(),
+      }),
+    }),
+    delete: () => ({
+      where: () => Promise.resolve(),
     }),
   },
 }));
 
 vi.mock("@/lib/db/schema", () => ({
-  fileAssets: { storageKey: "storage_key" },
+  fileAssets: { _table: "file_assets", storageKey: "storage_key" },
+  ownershipClaimIntents: {
+    _table: "ownership_claim_intents",
+    id: "id",
+    storageKey: "storage_key",
+    expiresAt: "expires_at",
+    toString: () => "ownership_claim_intents",
+  },
+  disputes: {
+    _table: "disputes",
+    id: "id",
+    claimIntentId: "claim_intent_id",
+    status: "status",
+    createdAt: "created_at",
+    resolvedAt: "resolved_at",
+    evidencePhotoKeys: "evidence_photo_keys",
+  },
 }));
 
 vi.mock("@/lib/logger", () => ({
@@ -84,6 +122,8 @@ describe("cron/cleanup-orphan-uploads", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     fileAssetRows = [];
+    claimIntentRows = [];
+    disputeEvidenceRows = [];
     r2Objects = [];
     throwOnDb = false;
 
@@ -187,6 +227,42 @@ describe("cron/cleanup-orphan-uploads", () => {
       (c) => (c[0] as { _type: string })._type === "DeleteObjectsCommand"
     );
     expect(deleteCalls).toHaveLength(0);
+  });
+
+  it("does NOT delete an original model retained as ownership evidence", async () => {
+    claimIntentRows = [{ storageKey: "uploads/user/claimed-model.stl" }];
+    r2Objects = [
+      {
+        Key: "uploads/user/claimed-model.stl",
+        Size: 5000,
+        LastModified: objectAgedHours(48),
+      },
+    ];
+
+    const res = await GET(makeRequest("Bearer test-secret"));
+    expect(res.status).toBe(200);
+    expect((await res.json()).orphans).toBe(0);
+  });
+
+  it("does NOT delete a photo attached to an ownership dispute", async () => {
+    disputeEvidenceRows = [
+      {
+        evidencePhotoKeys: [
+          "uploads/user/ownership-claim-photos/evidence/photo.jpg",
+        ],
+      },
+    ];
+    r2Objects = [
+      {
+        Key: "uploads/user/ownership-claim-photos/evidence/photo.jpg",
+        Size: 5000,
+        LastModified: objectAgedHours(48),
+      },
+    ];
+
+    const res = await GET(makeRequest("Bearer test-secret"));
+    expect(res.status).toBe(200);
+    expect((await res.json()).orphans).toBe(0);
   });
 
   it("does NOT delete unreferenced keys younger than 24h (age safety rail)", async () => {

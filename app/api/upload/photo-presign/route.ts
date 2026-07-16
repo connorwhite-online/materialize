@@ -34,10 +34,11 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { filename, contentType, fileSize } = body as {
+    const { filename, contentType, fileSize, purpose } = body as {
       filename?: string;
       contentType?: string;
       fileSize?: number;
+      purpose?: string;
     };
 
     if (!filename || typeof filename !== "string") {
@@ -67,7 +68,11 @@ export async function POST(request: Request) {
     }
 
     const safeName = sanitizeFilename(filename);
-    const storageKey = `photos/${userId}/${nanoid()}/${safeName}`;
+    const prefix =
+      purpose === "ownership_claim"
+        ? `uploads/${userId}/ownership-claim-photos`
+        : `photos/${userId}`;
+    const storageKey = `${prefix}/${nanoid()}/${safeName}`;
     const uploadUrl = await generateUploadUrl(storageKey, ct);
 
     return Response.json({ uploadUrl, storageKey });

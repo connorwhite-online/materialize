@@ -598,10 +598,40 @@ export const disputeStatusEnum = pgEnum("dispute_status", [
   "rejected",
 ]);
 
+// A short-lived, server-created receipt for an upload that matched another
+// creator's byte hash. Keeping the uploaded object referenced here lets the
+// uploader turn it into ownership evidence without uploading the model again.
+// Unclaimed receipts expire and are then eligible for the orphan-upload sweep.
+export const ownershipClaimIntents = pgTable("ownership_claim_intents", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  raisedByUserId: text("raised_by_user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  existingFileId: uuid("existing_file_id")
+    .notNull()
+    .references(() => files.id, { onDelete: "cascade" }),
+  storageKey: text("storage_key").notNull(),
+  originalFilename: text("original_filename").notNull(),
+  fileSize: integer("file_size").notNull(),
+  contentHash: text("content_hash").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+}, (table) => [
+  index("ownership_claim_intents_user_idx").on(table.raisedByUserId),
+  index("ownership_claim_intents_file_idx").on(table.existingFileId),
+  index("ownership_claim_intents_expires_idx").on(table.expiresAt),
+  uniqueIndex("ownership_claim_intents_active_uniq")
+    .on(table.raisedByUserId, table.existingFileId, table.contentHash)
+    .where(sql`${table.consumedAt} IS NULL`),
+]);
+
 // Creator-filed disputes against an auto-archived listing (see the
-// geometry-collision flow). MVP workflow: a row lands here in `open` and
-// an email fires to the operator, who reviews and flips the status by
-// hand. No automated resolution — deliberately human-in-the-loop.
+// geometry-collision flow), plus ownership claims raised from a blocked
+// byte-identical upload. A row lands here in `open` and an email fires to
+// the operator, who reviews and flips the status by hand.
 export const disputes = pgTable("disputes", {
   id: uuid("id").primaryKey().defaultRandom(),
   fileId: uuid("file_id").references(() => files.id, { onDelete: "cascade" }),
@@ -611,7 +641,15 @@ export const disputes = pgTable("disputes", {
   raisedByUserId: text("raised_by_user_id")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
+  claimIntentId: uuid("claim_intent_id").references(
+    () => ownershipClaimIntents.id,
+    { onDelete: "set null" }
+  ),
   reason: text("reason").notNull(),
+  evidencePhotoKeys: jsonb("evidence_photo_keys")
+    .$type<string[]>()
+    .notNull()
+    .default([]),
   status: disputeStatusEnum("status").notNull().default("open"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
@@ -622,6 +660,10 @@ export const disputes = pgTable("disputes", {
   index("disputes_project_id_idx").on(table.projectId),
   index("disputes_raised_by_idx").on(table.raisedByUserId),
   index("disputes_status_idx").on(table.status),
+  uniqueIndex("disputes_claim_intent_uniq").on(table.claimIntentId),
+  uniqueIndex("disputes_open_file_raiser_uniq")
+    .on(table.fileId, table.raisedByUserId)
+    .where(sql`${table.status} = 'open' AND ${table.claimIntentId} IS NOT NULL`),
   check(
     "disputes_target_exactly_one",
     sql`(${table.fileId} IS NOT NULL AND ${table.projectId} IS NULL) OR (${table.fileId} IS NULL AND ${table.projectId} IS NOT NULL)`

@@ -29,7 +29,8 @@ export function validatePhoto(file: File): string | null {
 }
 
 export async function uploadPhotoToR2(
-  file: File
+  file: File,
+  options?: { purpose?: "ownership_claim" }
 ): Promise<{ storageKey: string }> {
   const presignRes = await fetch("/api/upload/photo-presign", {
     method: "POST",
@@ -38,6 +39,7 @@ export async function uploadPhotoToR2(
       filename: file.name || "pasted-image",
       contentType: file.type,
       fileSize: file.size,
+      purpose: options?.purpose,
     }),
   });
   if (!presignRes.ok) {

@@ -51,8 +51,10 @@ import {
   printOrders,
   printOrderItems,
   users,
+  ownershipClaimIntents,
+  disputes,
 } from "@/lib/db/schema";
-import { eq, and, ne, inArray } from "drizzle-orm";
+import { eq, and, gt, inArray, isNull, ne } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { nanoid } from "nanoid";
@@ -70,14 +72,40 @@ import {
 } from "@/lib/validations/incoming-asset";
 import { deriveListingName, buildListingSlug } from "@/lib/filenames";
 import { logError, isRedirectError } from "@/lib/logger";
-import { generateDownloadUrl, deleteObject } from "@/lib/storage";
+import {
+  generateDownloadUrl,
+  deleteObject,
+  copyObject,
+} from "@/lib/storage";
 import { type MeshFormat } from "@/lib/hashing/mesh-fingerprint";
 import {
   fingerprintAndPersistAsset,
   checkByteHashCollisionBatch,
   findExistingSameUserAssetsBatch,
+  type DuplicateFileSummary,
 } from "@/lib/hashing/fingerprint-asset";
 import { after } from "next/server";
+
+function duplicateUploadResult(
+  claimIntentId: string,
+  existing: DuplicateFileSummary
+) {
+  return {
+    duplicate: {
+      claimIntentId,
+      file: {
+        name: existing.fileName,
+        slug: existing.fileSlug,
+        thumbnailUrl: existing.thumbnailUrl,
+      },
+      owner: {
+        username: existing.ownerUsername,
+        displayName: existing.ownerDisplayName,
+        avatarUrl: existing.ownerAvatarUrl,
+      },
+    },
+  } as const;
+}
 
 // Sync helper: stream R2 -> SHA-256 of raw bytes. This is the only
 // fingerprint work we do on the upload's hot path now — the geometry
@@ -263,6 +291,19 @@ export async function createFileListing(formData: FormData) {
   if (incomingAssets.length === 0) {
     return { error: { name: ["No file attached. Please re-upload."] } };
   }
+  if (incomingAssets.length > MAX_PROJECT_FILES) {
+    return {
+      error: {
+        name: [`A listing can contain at most ${MAX_PROJECT_FILES} files.`],
+      },
+    };
+  }
+  if (
+    new Set(incomingAssets.map((asset) => asset.storageKey)).size !==
+    incomingAssets.length
+  ) {
+    return { error: { name: ["The same uploaded file was attached more than once."] } };
+  }
 
   // Verify each storageKey belongs to this user before we touch R2.
   for (const asset of incomingAssets) {
@@ -291,25 +332,39 @@ export async function createFileListing(formData: FormData) {
     // check) against the batched results in memory, then walk the
     // array in order for the first non-null finding.
     type CollisionFinding =
-      | { kind: "cross-user" }
+      | {
+          kind: "cross-user";
+          hash: string;
+          assetIndex: number;
+          existing: DuplicateFileSummary;
+        }
       | { kind: "same-user"; fileName: string; fileSlug: string };
     const nonNullHashes = byteHashes.filter((h): h is string => !!h);
     const [crossUserHashes, sameUserMatches] = await Promise.all([
-      checkByteHashCollisionBatch(nonNullHashes, userId),
+      checkByteHashCollisionBatch(nonNullHashes, userId, organizationId),
       findExistingSameUserAssetsBatch(
         userId,
         incomingAssets.map((asset, i) => ({
           byteHash: byteHashes[i],
           originalFilename: asset.originalFilename,
           fileSize: asset.fileSize,
-        }))
+        })),
+        organizationId
       ),
     ]);
     const findings: Array<CollisionFinding | null> = incomingAssets.map(
       (asset, i): CollisionFinding | null => {
         const hash = byteHashes[i];
-        if (hash && crossUserHashes.has(hash)) {
-          return { kind: "cross-user" };
+        const existingCrossUser = hash
+          ? crossUserHashes.get(hash)
+          : undefined;
+        if (hash && existingCrossUser) {
+          return {
+            kind: "cross-user",
+            hash,
+            assetIndex: i,
+            existing: existingCrossUser,
+          };
         }
         const existing =
           (hash && sameUserMatches.byHash.get(hash)) ||
@@ -330,13 +385,97 @@ export async function createFileListing(formData: FormData) {
     );
     const firstFinding = findings.find((f) => f !== null);
     if (firstFinding?.kind === "cross-user") {
-      return {
-        error: {
-          name: [
-            "This file has already been listed by another creator. Re-uploading others' files is not permitted.",
-          ],
-        },
-      };
+      const uploadedAsset = incomingAssets[firstFinding.assetIndex];
+      const [reusableIntent] = await db
+        .select({ id: ownershipClaimIntents.id })
+        .from(ownershipClaimIntents)
+        .leftJoin(
+          disputes,
+          eq(disputes.claimIntentId, ownershipClaimIntents.id)
+        )
+        .where(
+          and(
+            eq(ownershipClaimIntents.raisedByUserId, userId),
+            eq(
+              ownershipClaimIntents.existingFileId,
+              firstFinding.existing.fileId
+            ),
+            eq(ownershipClaimIntents.contentHash, firstFinding.hash),
+            gt(ownershipClaimIntents.expiresAt, new Date()),
+            isNull(ownershipClaimIntents.consumedAt),
+            isNull(disputes.id)
+          )
+        )
+        .limit(1);
+      if (reusableIntent) {
+        await deleteObject(uploadedAsset.storageKey).catch((error) => {
+          logError("createFileListing.deleteRepeatedDuplicate", error);
+        });
+        return duplicateUploadResult(
+          reusableIntent.id,
+          firstFinding.existing
+        );
+      }
+
+      // Freeze the bytes at a fresh server-only key. The browser's original
+      // presigned PUT remains valid briefly and must not be the evidence an
+      // operator later reviews.
+      const evidenceStorageKey =
+        `uploads/${userId}/ownership-evidence/${nanoid()}`;
+      await copyObject(uploadedAsset.storageKey, evidenceStorageKey);
+      const evidenceHash = await computeByteHashOnly(evidenceStorageKey);
+      if (evidenceHash !== firstFinding.hash) {
+        await deleteObject(evidenceStorageKey).catch(() => undefined);
+        return {
+          error: {
+            name: ["The uploaded file changed during verification. Please upload it again."],
+          },
+        };
+      }
+      const [claimIntent] = await db
+        .insert(ownershipClaimIntents)
+        .values({
+          raisedByUserId: userId,
+          existingFileId: firstFinding.existing.fileId,
+          storageKey: evidenceStorageKey,
+          originalFilename: uploadedAsset.originalFilename,
+          fileSize: uploadedAsset.fileSize,
+          contentHash: firstFinding.hash,
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        })
+        .onConflictDoNothing()
+        .returning({ id: ownershipClaimIntents.id });
+      if (!claimIntent) {
+        const [winner] = await db
+          .select({ id: ownershipClaimIntents.id })
+          .from(ownershipClaimIntents)
+          .where(
+            and(
+              eq(ownershipClaimIntents.raisedByUserId, userId),
+              eq(
+                ownershipClaimIntents.existingFileId,
+                firstFinding.existing.fileId
+              ),
+              eq(ownershipClaimIntents.contentHash, firstFinding.hash),
+              isNull(ownershipClaimIntents.consumedAt)
+            )
+          )
+          .limit(1);
+        await deleteObject(evidenceStorageKey).catch(() => undefined);
+        if (!winner) {
+          return {
+            error: {
+              name: ["Could not retain ownership evidence. Please try again."],
+            },
+          };
+        }
+        await deleteObject(uploadedAsset.storageKey).catch(() => undefined);
+        return duplicateUploadResult(winner.id, firstFinding.existing);
+      }
+      await deleteObject(uploadedAsset.storageKey).catch((error) => {
+        logError("createFileListing.deleteDuplicateSource", error);
+      });
+      return duplicateUploadResult(claimIntent.id, firstFinding.existing);
     }
     if (firstFinding?.kind === "same-user") {
       return {

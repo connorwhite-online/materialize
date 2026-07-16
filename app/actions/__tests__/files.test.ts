@@ -23,12 +23,14 @@ vi.mock("@/lib/db", () => ({
       return {
         values: (...a: unknown[]) => {
           mockValues(...a);
-          return {
+          const insertQuery = {
+            onConflictDoNothing: () => insertQuery,
             returning: () => {
               mockReturning();
               return [{ id: "test-file-id", slug: "test-model-abc123" }];
             },
           };
+          return insertQuery;
         },
       };
     },
@@ -50,6 +52,17 @@ vi.mock("@/lib/db", () => ({
       from: (...args: unknown[]) => {
         mockFrom(...args);
         mockSelect();
+        const joinQuery = {
+          innerJoin: () => joinQuery,
+          leftJoin: () => joinQuery,
+          where: () => {
+            const next = (innerJoinResults.shift() ?? []) as unknown[];
+            return Object.assign(next, {
+              limit: () => next,
+              orderBy: () => next,
+            });
+          },
+        };
         return {
           // Bare .where() — `canWriteFile` calls .limit(1) after,
           // so we make the returned array chainable. The same path
@@ -70,19 +83,8 @@ vi.mock("@/lib/db", () => ({
               limit: () => arr,
             });
           },
-          innerJoin: () => ({
-            where: () => {
-              // Dedup checks. Both with and without a trailing
-              // .limit() are exercised by createFileListing
-              // (byte/geom/coarse) and createDraftFileForPrint. Rows
-              // come off the queue in call order; unseeded calls
-              // fall back to "no collisions" to match prior behavior.
-              const next = (innerJoinResults.shift() ?? []) as unknown[];
-              return Object.assign(next, {
-                limit: () => next,
-              });
-            },
-          }),
+          innerJoin: () => joinQuery,
+          leftJoin: () => joinQuery,
         };
       },
     }),
@@ -90,14 +92,38 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("@/lib/db/schema", () => ({
-  files: { id: "id", userId: "user_id", status: "status" },
-  fileAssets: { id: "id", fileId: "file_id" },
+  files: {
+    id: "id",
+    userId: "user_id",
+    status: "status",
+    visibility: "visibility",
+    slug: "slug",
+    name: "name",
+    thumbnailUrl: "thumbnail_url",
+    organizationId: "organization_id",
+  },
+  fileAssets: { id: "id", fileId: "file_id", createdAt: "created_at" },
   collections: { id: "id", userId: "user_id" },
   collectionItems: { collectionId: "collection_id" },
   filePhotos: { id: "id", fileId: "file_id" },
   purchases: { id: "id", fileId: "file_id", projectId: "project_id" },
   projects: { id: "id", userId: "user_id" },
   projectFiles: { projectId: "project_id", fileId: "file_id" },
+  users: {
+    id: "id",
+    username: "username",
+    displayName: "display_name",
+    avatarUrl: "avatar_url",
+  },
+  ownershipClaimIntents: {
+    id: "id",
+    raisedByUserId: "raised_by_user_id",
+    existingFileId: "existing_file_id",
+    contentHash: "content_hash",
+    expiresAt: "expires_at",
+    consumedAt: "consumed_at",
+  },
+  disputes: { id: "id", claimIntentId: "claim_intent_id" },
 }));
 
 // Mock the R2 storage layer so computeContentHash can run without a
@@ -110,6 +136,7 @@ vi.mock("@/lib/storage", () => ({
   ),
   generateUploadUrl: vi.fn(async () => "https://example.com/upload"),
   deleteObject: vi.fn(async () => undefined),
+  copyObject: vi.fn(async () => undefined),
 }));
 
 vi.mock("@/lib/logger", () => ({
@@ -184,6 +211,29 @@ describe("createFileListing", () => {
     expect(result).toHaveProperty("error");
   });
 
+  it("rejects repeated storage keys before hashing", async () => {
+    const formData = new FormData();
+    formData.set("name", "Repeated asset");
+    formData.set("description", "");
+    formData.set("price", "0");
+    formData.set("license", "cc_by");
+    formData.set("tags", "");
+    const asset = {
+      storageKey: "uploads/test-user-id/a/model.stl",
+      originalFilename: "model.stl",
+      format: "stl",
+      fileSize: 100,
+    };
+    formData.set("assetsJson", JSON.stringify([asset, asset]));
+
+    const result = await createFileListing(formData);
+
+    expect(result).toEqual({
+      error: { name: ["The same uploaded file was attached more than once."] },
+    });
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
   // The generateDownloadUrl mock always resolves to the same fixed
   // base64 payload ("AAEC" -> bytes 00 01 02), so computeByteHashOnly
   // deterministically produces this SHA-256 for every asset in the
@@ -219,18 +269,37 @@ describe("createFileListing", () => {
     // Two queued rows: the batched cross-user query (hit) then the
     // batched same-user query (no hit) — one query each regardless
     // of asset count, per the collision-batching change.
-    innerJoinResults = [[{ contentHash: FIXED_BYTE_HASH }], []];
+    innerJoinResults = [[{
+      contentHash: FIXED_BYTE_HASH,
+      fileId: "existing-file-id",
+      fileName: "Original Model",
+      fileSlug: "original-model",
+      thumbnailUrl: "https://example.com/original.webp",
+      status: "published",
+      visibility: "public",
+      ownerUsername: "original-creator",
+      ownerDisplayName: "Original Creator",
+      ownerAvatarUrl: null,
+    }], [], []];
 
     const result = await createFileListing(formData);
 
     expect(result).toEqual({
-      error: {
-        name: [
-          "This file has already been listed by another creator. Re-uploading others' files is not permitted.",
-        ],
+      duplicate: {
+        claimIntentId: "test-file-id",
+        file: {
+          name: "Original Model",
+          slug: "original-model",
+          thumbnailUrl: "https://example.com/original.webp",
+        },
+        owner: {
+          username: "original-creator",
+          displayName: "Original Creator",
+          avatarUrl: null,
+        },
       },
     });
-    expect(mockInsert).not.toHaveBeenCalled();
+    expect(mockInsert).toHaveBeenCalledTimes(1);
   });
 
   it("allows a multi-asset upload through when the batched queries find no collisions", async () => {

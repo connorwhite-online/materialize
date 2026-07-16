@@ -5,13 +5,28 @@ import {
   type _Object,
 } from "@aws-sdk/client-s3";
 import { db } from "@/lib/db";
-import { fileAssets } from "@/lib/db/schema";
+import {
+  disputes,
+  fileAssets,
+  ownershipClaimIntents,
+} from "@/lib/db/schema";
+import {
+  and,
+  eq,
+  gt,
+  isNotNull,
+  isNull,
+  lt,
+  ne,
+  notExists,
+  or,
+} from "drizzle-orm";
 import { logError } from "@/lib/logger";
 import { constantTimeEqual } from "@/lib/auth/constant-time-equal";
 
 /**
- * Daily cron that garbage-collects R2 objects under `uploads/` that no
- * `file_assets` row points to and are older than a safety threshold.
+ * Daily cron that garbage-collects R2 objects under `uploads/` that no file
+ * asset or retained ownership-claim evidence points to.
  *
  * These orphans happen when a presigned PUT to R2 succeeds but the
  * subsequent createDraftFileForPrint / createFileListing server action
@@ -19,7 +34,7 @@ import { constantTimeEqual } from "@/lib/auth/constant-time-equal";
  * is no foreground cleanup path.
  *
  * Safety rails:
- *   - Only touches keys with the `uploads/` prefix.
+ *   - Only touches keys with the `uploads/` prefix (including claim photos).
  *   - Only deletes objects older than ORPHAN_MIN_AGE_HOURS (24h) — an
  *     in-flight upload that is still being wired to its fileAssets row
  *     won't get swept out from under it.
@@ -85,12 +100,52 @@ export async function GET(request: Request) {
     const s3 = getS3Client();
     const bucket = getBucketName();
 
-    // Pull every storage_key currently referenced by file_assets.
-    // Small table, fits in memory. A Set gives O(1) lookup during sweep.
-    const referencedRows = await db
-      .select({ storageKey: fileAssets.storageKey })
-      .from(fileAssets);
-    const referenced = new Set(referencedRows.map((r) => r.storageKey));
+    // A model is live when referenced by a file asset, an unexpired claim
+    // receipt, or a filed dispute. The latter keeps original-file evidence
+    // available for the full human-review lifecycle.
+    const evidenceCutoff = new Date(
+      Date.now() - 365 * 24 * 60 * 60 * 1000
+    );
+    const [assetRows, claimRows, disputeEvidenceRows] = await Promise.all([
+      db.select({ storageKey: fileAssets.storageKey }).from(fileAssets),
+      db
+        .select({ storageKey: ownershipClaimIntents.storageKey })
+        .from(ownershipClaimIntents)
+        .leftJoin(
+          disputes,
+          eq(disputes.claimIntentId, ownershipClaimIntents.id)
+        )
+        .where(
+          or(
+            gt(ownershipClaimIntents.expiresAt, new Date()),
+            and(
+              isNotNull(disputes.id),
+              or(
+                eq(disputes.status, "open"),
+                isNull(disputes.resolvedAt),
+                gt(disputes.resolvedAt, evidenceCutoff)
+              )
+            )
+          )
+        ),
+      db
+        .select({ evidencePhotoKeys: disputes.evidencePhotoKeys })
+        .from(disputes)
+        .where(
+          or(
+            eq(disputes.status, "open"),
+            isNull(disputes.resolvedAt),
+            gt(disputes.resolvedAt, evidenceCutoff)
+          )
+        ),
+    ]);
+    const referenced = new Set(
+      [
+        ...assetRows.map((row) => row.storageKey),
+        ...claimRows.map((row) => row.storageKey),
+        ...disputeEvidenceRows.flatMap((row) => row.evidencePhotoKeys),
+      ]
+    );
 
     const now = Date.now();
     const minAgeMs = ORPHAN_MIN_AGE_HOURS * 60 * 60 * 1000;
@@ -161,6 +216,41 @@ export async function GET(request: Request) {
         }
       }
     }
+
+    // Tombstone metadata at the same boundary as the blobs: closed-claim
+    // photos are no longer advertised after one year, and expired intents
+    // with no active/recent dispute are removed entirely.
+    await db
+      .update(disputes)
+      .set({ evidencePhotoKeys: [] })
+      .where(
+        and(
+          ne(disputes.status, "open"),
+          lt(disputes.resolvedAt, evidenceCutoff)
+        )
+      );
+    await db
+      .delete(ownershipClaimIntents)
+      .where(
+        and(
+          lt(ownershipClaimIntents.expiresAt, new Date()),
+          notExists(
+            db
+              .select({ id: disputes.id })
+              .from(disputes)
+              .where(
+                and(
+                  eq(disputes.claimIntentId, ownershipClaimIntents.id),
+                  or(
+                    eq(disputes.status, "open"),
+                    isNull(disputes.resolvedAt),
+                    gt(disputes.resolvedAt, evidenceCutoff)
+                  )
+                )
+              )
+          )
+        )
+      );
 
     const result = { scanned, orphans: orphans.length, deleted, reclaimedBytes };
     console.log("[cron/cleanup-orphan-uploads] swept", result);

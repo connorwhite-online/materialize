@@ -122,4 +122,20 @@ describe("POST /api/upload/photo-presign", () => {
     );
     expect(res.status).toBe(200);
   });
+
+  it("places ownership evidence under the orphan-cleaned uploads prefix", async () => {
+    const res = await POST(
+      makeRequest({
+        filename: "prototype.jpg",
+        contentType: "image/jpeg",
+        fileSize: 5000,
+        purpose: "ownership_claim",
+      })
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.storageKey).toMatch(
+      /^uploads\/user-1\/ownership-claim-photos\//
+    );
+  });
 });

@@ -1,8 +1,17 @@
 import "server-only";
 
 import { db } from "@/lib/db";
-import { fileAssets, files } from "@/lib/db/schema";
-import { and, eq, inArray, ne, or } from "drizzle-orm";
+import { fileAssets, files, users } from "@/lib/db/schema";
+import {
+  and,
+  asc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  ne,
+  or,
+} from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
 import { logError } from "@/lib/logger";
 import { fingerprintFromStream, type MeshFormat } from "./mesh-fingerprint";
@@ -142,31 +151,80 @@ export interface SameUserAssetHit {
   fileName: string;
 }
 
+export interface DuplicateFileSummary {
+  fileId: string;
+  fileName: string | null;
+  fileSlug: string | null;
+  thumbnailUrl: string | null;
+  ownerUsername: string | null;
+  ownerDisplayName: string | null;
+  ownerAvatarUrl: string | null;
+}
+
 /**
  * Batched cross-user byte-hash collision check for a multi-asset
- * upload. Given every non-null byteHash from the batch, returns the
- * subset that collide with an existing `fileAssets.contentHash`
- * belonging to a *different* user — one query for the whole batch,
- * mirroring `app/actions/files.ts`'s per-asset `checkByteHashCollision`
- * but without the N separate round trips.
+ * upload. Returns one incumbent listing per matching hash. Public listing
+ * metadata is included for the duplicate-intent UI; private/draft listings
+ * are deliberately redacted while still blocking the duplicate.
  */
 export async function checkByteHashCollisionBatch(
   byteHashes: string[],
-  userId: string
-): Promise<Set<string>> {
-  if (byteHashes.length === 0) return new Set();
+  userId: string,
+  organizationId: string | null = null
+): Promise<Map<string, DuplicateFileSummary>> {
+  if (byteHashes.length === 0) return new Map();
   const hits = await db
-    .select({ contentHash: fileAssets.contentHash })
+    .select({
+      contentHash: fileAssets.contentHash,
+      fileId: files.id,
+      fileName: files.name,
+      fileSlug: files.slug,
+      thumbnailUrl: files.thumbnailUrl,
+      status: files.status,
+      visibility: files.visibility,
+      ownerUsername: users.username,
+      ownerDisplayName: users.displayName,
+      ownerAvatarUrl: users.avatarUrl,
+    })
     .from(fileAssets)
     .innerJoin(files, eq(fileAssets.fileId, files.id))
+    .innerJoin(users, eq(files.userId, users.id))
     .where(
-      and(inArray(fileAssets.contentHash, byteHashes), ne(files.userId, userId))
-    );
-  return new Set(
-    hits
-      .map((h) => h.contentHash)
-      .filter((h): h is string => h !== null && h !== undefined)
-  );
+      and(
+        inArray(fileAssets.contentHash, byteHashes),
+        organizationId
+          ? or(
+              isNull(files.organizationId),
+              ne(files.organizationId, organizationId)
+            )
+          : or(
+              isNotNull(files.organizationId),
+              ne(files.userId, userId)
+            )
+      )
+    )
+    .orderBy(asc(fileAssets.createdAt));
+
+  const collisions = new Map<string, DuplicateFileSummary>();
+  for (const hit of hits) {
+    if (!hit.contentHash) continue;
+    const isPublic =
+      hit.status === "published" && hit.visibility === "public";
+    const summary: DuplicateFileSummary = {
+      fileId: hit.fileId,
+      fileName: isPublic ? hit.fileName : null,
+      fileSlug: isPublic ? hit.fileSlug : null,
+      thumbnailUrl: isPublic ? hit.thumbnailUrl : null,
+      ownerUsername: isPublic ? hit.ownerUsername : null,
+      ownerDisplayName: isPublic ? hit.ownerDisplayName : null,
+      ownerAvatarUrl: isPublic ? hit.ownerAvatarUrl : null,
+    };
+    // Query order makes the earliest asset the canonical incumbent.
+    if (!collisions.has(hit.contentHash)) {
+      collisions.set(hit.contentHash, summary);
+    }
+  }
+  return collisions;
 }
 
 /**
@@ -186,7 +244,8 @@ export async function findExistingSameUserAssetsBatch(
     byteHash: string | null;
     originalFilename: string;
     fileSize: number;
-  }>
+  }>,
+  organizationId: string | null = null
 ): Promise<{
   byHash: Map<string, SameUserAssetHit>;
   byNameSize: Map<string, SameUserAssetHit>;
@@ -199,8 +258,15 @@ export async function findExistingSameUserAssetsBatch(
   );
   // Filename+size fallback only applies to non-empty filenames with a
   // real size, same guard as the serial version.
-  const nameSizePairs = items.filter(
-    (i) => i.originalFilename && i.fileSize > 0
+  const nameSizePairs = Array.from(
+    new Map(
+      items
+        .filter((i) => i.originalFilename && i.fileSize > 0)
+        .map((item) => [
+          `${item.originalFilename}::${item.fileSize}`,
+          item,
+        ])
+    ).values()
   );
 
   if (hashes.length === 0 && nameSizePairs.length === 0) {
@@ -229,7 +295,14 @@ export async function findExistingSameUserAssetsBatch(
     })
     .from(fileAssets)
     .innerJoin(files, eq(fileAssets.fileId, files.id))
-    .where(and(eq(files.userId, userId), or(...matchConditions)));
+    .where(
+      and(
+        organizationId
+          ? eq(files.organizationId, organizationId)
+          : and(eq(files.userId, userId), isNull(files.organizationId)),
+        or(...matchConditions)
+      )
+    );
 
   for (const row of rows) {
     const hit: SameUserAssetHit = {

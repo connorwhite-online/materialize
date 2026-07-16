@@ -6,6 +6,7 @@ import {
   GetObjectCommand,
   HeadObjectCommand,
   DeleteObjectCommand,
+  CopyObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { requireEnv } from "./env";
@@ -126,4 +127,19 @@ export async function deleteObject(key: string): Promise<void> {
     Key: key,
   });
   await getS3().send(command);
+}
+
+/** Server-side copy used to freeze user uploads into immutable evidence keys. */
+export async function copyObject(sourceKey: string, destinationKey: string): Promise<void> {
+  const copySource = `${getBucket()}/${sourceKey
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/")}`;
+  await getS3().send(
+    new CopyObjectCommand({
+      Bucket: getBucket(),
+      Key: destinationKey,
+      CopySource: copySource,
+    })
+  );
 }
