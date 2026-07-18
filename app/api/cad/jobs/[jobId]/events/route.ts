@@ -11,6 +11,7 @@ import {
   STALE_JOB_ERROR,
   isStaleCadJob,
 } from "@/lib/cad/job-staleness";
+import { persistGenerationFailure } from "@/lib/cad/persist";
 
 /**
  * SSE progress stream for a background CAD generation job (MTR-175).
@@ -166,6 +167,9 @@ export async function GET(
               // Executor should self-timeout first (lib/cad/jobs.ts); this is
               // the backup when the after() callback was hard-killed. SSE
               // pings keep the page looking live even for a user who stayed.
+              // Also fail the generation row — previously only the job was
+              // flipped, leaving cad_generations stuck at `pending` so the
+              // scorecard/failure miner undercounted these timeouts.
               jobError = STALE_JOB_ERROR;
               await db
                 .update(cadJobs)
@@ -181,6 +185,10 @@ export async function GET(
                     inArray(cadJobs.status, ["queued", "running"])
                   )
                 );
+              await persistGenerationFailure(
+                job.generationId,
+                STALE_JOB_ERROR
+              ).catch(() => undefined);
               status = "failed";
             }
             emitNew();
