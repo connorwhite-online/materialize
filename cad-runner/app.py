@@ -1044,6 +1044,16 @@ def _build_run_payload(
                 payload["remeshed"] = bool(entry.get("remeshed"))
                 if entry.get("topo") is not None:
                     payload["topo"] = entry["topo"]
+                # Construction features for studio chips (aligned with topo
+                # face ids when available). Best-effort; empty → no chips.
+                try:
+                    from features import finalize_features
+
+                    feats = finalize_features(single, entry.get("topo"))
+                    if feats:
+                        payload["features"] = feats
+                except Exception:  # noqa: BLE001
+                    pass
                 if entry["error"]:
                     payload["error"] = entry["error"]
                 payload["ok"] = (
@@ -1112,6 +1122,15 @@ def _execute(
         # (MTR-187): scrub secrets from the child env, then block egress/spawn.
         _scrub_child_env()
         _install_exec_guard()
+
+        # Feature-chip instrumentation (construction ops → face ids). Best-
+        # effort: never fails the run if hooks can't install.
+        try:
+            from features import ensure_feature_hooks
+
+            ensure_feature_hooks(engine, code)
+        except Exception:  # noqa: BLE001
+            pass
 
         ns: dict = {}
         exec(compile(code, "<generated>", "exec"), ns, ns)  # noqa: S102
@@ -1323,6 +1342,14 @@ def _session_exec_reply(
         reply["namespace"] = _session_namespace_summary(ns)
         return reply
 
+    # Feature-chip hooks (same as /run). Idempotent across session execs.
+    try:
+        from features import ensure_feature_hooks
+
+        ensure_feature_hooks(engine, msg.get("code") or "")
+    except Exception:  # noqa: BLE001
+        pass
+
     buf = io.StringIO()
     try:
         with contextlib.redirect_stdout(buf):
@@ -1340,7 +1367,7 @@ def _session_exec_reply(
     if has_shape:
         payload = _build_run_payload(
             ns,
-            msg.get("formats") or ["stl", "step"],
+            msg.get("formats") or ["stl", "step", "topo"],
             engine,
             bool(msg.get("allowRemesh")),
             msg.get("checks"),

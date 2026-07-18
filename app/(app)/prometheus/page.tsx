@@ -16,6 +16,7 @@ import {
 import { generateDownloadUrl } from "@/lib/storage";
 import { canUseTextToCad } from "@/lib/features";
 import { isCadRating } from "@/lib/cad/feedback";
+import { parseFeatures } from "@/lib/cad/features";
 import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
 import {
   TextToCadStudio,
@@ -76,6 +77,7 @@ export default async function TextToCadPage() {
     fileAssetId: cadGenerations.fileAssetId,
     projectId: cadGenerations.projectId,
     sourceCode: cadGenerations.sourceCode,
+    features: cadGenerations.features,
     parentGenerationId: cadGenerations.parentGenerationId,
     threadId: cadGenerations.threadId,
     error: cadGenerations.error,
@@ -208,6 +210,7 @@ export default async function TextToCadPage() {
         : null,
       fileAssetId: r.fileAssetId,
       sourceCode: r.sourceCode,
+      features: parseFeatures(r.features),
       error: r.error,
       rating: isCadRating(r.rating) ? r.rating : null,
       feedbackTags: r.feedbackTags ?? [],
@@ -269,6 +272,7 @@ export default async function TextToCadPage() {
     renderUrl: m.renderUrl,
     fileAssetId: m.fileAssetId,
     sourceCode: m.sourceCode,
+    features: m.features,
     error: m.error,
     rating: m.rating,
     feedbackTags: m.feedbackTags,

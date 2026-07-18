@@ -50,10 +50,11 @@ import {
   type DimensionTarget,
 } from "./dimension-check";
 import { enrichRepairHint } from "./repair-taxonomy";
-import type {
-  CadProgressEvent,
-  CadQuestionAsker,
-  CadRunResult,
+import {
+  BREP_OUTPUT_FORMATS,
+  type CadProgressEvent,
+  type CadQuestionAsker,
+  type CadRunResult,
 } from "./types";
 
 /** Owner feedback on the version being revised (CON-181). */
@@ -579,7 +580,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
     }
 
     emit({ type: "phase", phase: "executing", attempt, maxAttempts });
-    lastRun = await runCadCode(lastCode, ["stl", "step"], input.signal, {
+    lastRun = await runCadCode(lastCode, BREP_OUTPUT_FORMATS, input.signal, {
       checks: runChecks,
     });
 
@@ -594,7 +595,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
       lastRun.validation.isSolid &&
       !lastRun.validation.isWatertight
     ) {
-      const remeshed = await runCadCode(lastCode, ["stl", "step"], input.signal, {
+      const remeshed = await runCadCode(lastCode, BREP_OUTPUT_FORMATS, input.signal, {
         allowRemesh: true,
         checks: runChecks,
       });

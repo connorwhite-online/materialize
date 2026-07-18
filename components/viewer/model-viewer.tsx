@@ -64,6 +64,10 @@ import {
   type CadTopology,
   type TopoEdge,
 } from "./topology";
+import {
+  positionsForTriangleRanges,
+  triangleRangesForFaceIds,
+} from "@/lib/cad/features";
 
 type Vec3 = [number, number, number];
 
@@ -675,6 +679,12 @@ interface ModelViewerProps {
    */
   topoUrl?: string;
   /**
+   * Programmatic face highlight for feature chips: topo face ids whose
+   * triangles are overlaid (same FaceHighlight as annotate). No-op when
+   * topo is absent or the id set is empty.
+   */
+  highlightFaceIds?: number[];
+  /**
    * Fired once the model's geometry has loaded and committed (the Suspense
    * boundary resolved). The studio uses this to gate the particle→solid
    * crossfade on the mesh actually being ready, instead of a fixed timer
@@ -808,6 +818,7 @@ interface InspectBounds {
 function InspectModel({
   modelUrl,
   topoUrl,
+  highlightFaceIds,
   color,
   planes,
   onBounds,
@@ -822,6 +833,8 @@ function InspectModel({
   modelUrl: string;
   /** B-rep topology sidecar URL (MTR-174); enables exact face/edge picking. */
   topoUrl?: string;
+  /** Feature-chip highlight: topo face ids to overlay. */
+  highlightFaceIds?: number[];
   color?: string;
   planes: Plane[] | undefined;
   onBounds: (b: InspectBounds) => void;
@@ -844,6 +857,24 @@ function InspectModel({
   // Exact CAD identity when the part shipped a topology sidecar (MTR-174);
   // null → fall back to the mesh flood-fill / feature-edge path.
   const topo = useTopology(topoUrl);
+
+  // Feature-chip highlight positions (topo face ids → STL triangle verts).
+  const featureHighlight = useMemo(() => {
+    if (!topo || !geom || !highlightFaceIds?.length) return null;
+    const posAttr = geom.attributes.position;
+    if (!posAttr) return null;
+    const index = geom.index;
+    const triCount = (index ? index.count : posAttr.count) / 3;
+    const ranges = triangleRangesForFaceIds(topo, highlightFaceIds);
+    if (ranges.length === 0) return null;
+    const positions = positionsForTriangleRanges(
+      posAttr.array as ArrayLike<number>,
+      index ? (index.array as ArrayLike<number>) : null,
+      triCount,
+      ranges
+    );
+    return positions.length > 0 ? positions : null;
+  }, [topo, geom, highlightFaceIds]);
 
   // Click = select; drag = rotate. r3f fires onClick even after a drag, so gate
   // on pointer travel (e.delta) to keep orbit-rotate usable. Measure picks a
@@ -956,6 +987,11 @@ function InspectModel({
       )}
       {pending?.kind === "edge" && (
         <EdgeHighlight a={pending.edge.a} b={pending.edge.b} color="#f59e0b" />
+      )}
+
+      {/* Feature-chip highlight (construction-history UX). */}
+      {featureHighlight && (
+        <FaceHighlight positions={featureHighlight} color="#0ea5e9" />
       )}
     </group>
   );
@@ -1159,6 +1195,7 @@ export function ModelViewer({
   ghostUrl,
   assemblyParts,
   topoUrl,
+  highlightFaceIds,
   onReady,
   hideLoadingFallback = false,
 }: ModelViewerProps) {
@@ -1328,6 +1365,7 @@ export function ModelViewer({
                     <InspectModel
                       modelUrl={modelUrl}
                       topoUrl={topoUrl}
+                      highlightFaceIds={highlightFaceIds}
                       color={materialColor}
                       planes={planes}
                       onBounds={setBounds}
@@ -1361,6 +1399,7 @@ export function ModelViewer({
                     <InspectModel
                       modelUrl={modelUrl}
                       topoUrl={topoUrl}
+                      highlightFaceIds={highlightFaceIds}
                       color={materialColor}
                       planes={planes}
                       onBounds={setBounds}

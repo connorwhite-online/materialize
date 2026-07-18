@@ -19,8 +19,9 @@ import { createDraftFileForPrint } from "@/app/actions/files";
 import { generateThreadTitle } from "./title";
 import { harnessConfigFingerprint } from "./fingerprint";
 import type { HarnessResult } from "./harness";
+import { bindFeatureParamNames, parseFeatures } from "./features";
 import type { CadProcess } from "./knowledge/dfm";
-import type { CadPart } from "./types";
+import type { CadFeature, CadPart } from "./types";
 
 /** A filename-safe stem from a display name (download names + dedup safety). */
 function slugStem(name: string | undefined, fallback: string): string {
@@ -93,10 +94,8 @@ async function persistStepForAsset(opts: {
  * The sidecar attaches a B-rep topology manifest (per-face tessellation with
  * face/edge identity — MTR-174 Phase 2, `cad-runner/app.py` `_export_topology`)
  * on the run payload at `run.topo` when "topo" is among the requested formats.
- * It's an excess field the harness passes through verbatim (not on the shared
- * CadRunResult type), so read it structurally/defensively like resultExtras:
- * absent today (the harness requests ["stl","step"]), and picked up the moment
- * topo is wired — no change here needed.
+ * Read structurally/defensively: absent on mesh-mode / older sidecars /
+ * export failure. Live B-rep runs request ["stl","step","topo"].
  *
  * Addressing scheme (spec item 3): the manifest is stored verbatim, and
  * face/edge selector refs are the manifest's own per-face / per-edge identity
@@ -107,8 +106,20 @@ async function persistStepForAsset(opts: {
  * reopening the kernel.
  */
 function runTopology(result: HarnessResult): unknown {
-  const run = result.run as { topo?: unknown } | undefined;
-  return run?.topo ?? null;
+  return result.run?.topo ?? null;
+}
+
+/**
+ * Construction features from the sidecar (feature-chip UX). Bind any
+ * unbound numeric params to uniquely-matching top-level source names so
+ * Reset/Update works even when the runner couldn't resolve them.
+ */
+function runFeatures(result: HarnessResult): CadFeature[] | null {
+  const raw = result.run?.features;
+  if (!raw || !Array.isArray(raw) || raw.length === 0) return null;
+  const parsed = parseFeatures(raw);
+  if (parsed.length === 0) return null;
+  return bindFeatureParamNames(parsed, result.sourceCode ?? "");
 }
 
 /**
@@ -218,6 +229,8 @@ export interface PersistedGeneration {
    * round-trip. Absent/false for mesh-mode / sdf_kit (no B-rep).
    */
   hasStep?: boolean;
+  /** Construction features for feature chips (empty when none). */
+  features?: CadFeature[];
 }
 
 export interface PersistError {
@@ -490,6 +503,8 @@ export async function persistGenerationSuccess(opts: {
       // B-rep topology sidecar key (MTR-174) when the run carried a manifest;
       // null otherwise (re-derivable from the STEP). GC-swept via cad-topo/.
       topoStorageKey,
+      // Construction features for feature chips (null when none / mesh-mode).
+      features: runFeatures(result),
       aestheticScore: result.aestheticScore ?? null,
       // Remesh is a recorded decision (docs/text-to-cad/02 §C) — persist
       // whether the printable mesh came from the lossy voxel fallback so
@@ -527,6 +542,7 @@ export async function persistGenerationSuccess(opts: {
     sourceCode: result.sourceCode,
     title,
     remeshed: result.run?.remeshed ?? false,
+    features: runFeatures(result) ?? [],
   };
 }
 
@@ -691,6 +707,9 @@ async function persistAssembly(opts: {
       projectId,
       renderStorageKey,
       topoStorageKey,
+      // Assemblies: features from the primary solid when the sidecar emitted
+      // them (per-part topo isn't shipped — chips are best-effort here).
+      features: runFeatures(result),
       aestheticScore: result.aestheticScore ?? null,
       // An assembly counts as remeshed when the run was, or ANY part's
       // mesh came from the voxel fallback (docs/text-to-cad/02 §C).
@@ -724,5 +743,6 @@ async function persistAssembly(opts: {
     })),
     projectSlug,
     remeshed: result.run?.remeshed ?? false,
+    features: runFeatures(result) ?? [],
   };
 }

@@ -85,7 +85,7 @@ export interface RunCadCodeOptions {
  */
 export async function runCadCode(
   code: string,
-  formats: CadOutputFormat[] = ["stl", "step"],
+  formats: CadOutputFormat[] = ["stl", "step", "topo"],
   signal?: AbortSignal,
   opts?: RunCadCodeOptions
 ): Promise<CadRunResult> {

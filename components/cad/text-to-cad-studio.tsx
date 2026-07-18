@@ -50,16 +50,20 @@ import {
   getCadTopoUrl,
   recordCadFeedback,
   renameCadGeneration,
+  rerunCadWithParams,
   saveCadFileToProfile,
   setActiveCadVersion,
 } from "@/app/actions/cad-generation";
 import { StepDownloadLink } from "@/components/files/step-download-button";
 import { diffParams, extractParams } from "@/components/cad/param-diff";
+import { FeatureChips } from "@/components/cad/feature-chips";
 import type {
   CadStreamEvent,
   CadProgressEvent,
   CadQuestionOption,
+  CadFeature,
 } from "@/lib/cad/types";
+import { parseFeatures } from "@/lib/cad/features";
 // Type-only: lib/cad/brief is server-only at runtime; the type is erased.
 import type { CadBrief } from "@/lib/cad/brief";
 import type { ViewerAnnotation } from "@/components/viewer/model-viewer";
@@ -112,6 +116,11 @@ export interface StudioTurn {
   renderUrl: string | null;
   fileAssetId: string | null;
   sourceCode: string | null;
+  /**
+   * Instrumented construction features for the feature-chip strip.
+   * Empty/absent on mesh-mode or legacy generations.
+   */
+  features?: CadFeature[];
   error: string | null;
   rating: CadRating | null;
   feedbackTags: string[];
@@ -423,6 +432,10 @@ export function TextToCadStudio({
   // "confirmed no topology" (mesh-mode / legacy) so we never refetch and the
   // viewer stays on its flood-fill fallback.
   const [topoUrls, setTopoUrls] = useState<Record<string, string | null>>({});
+  // Feature-chip popover: which construction op is open (also drives viewer
+  // highlight of that op's faceIds).
+  const [activeFeatureId, setActiveFeatureId] = useState<string | null>(null);
+  const [featureUpdating, setFeatureUpdating] = useState(false);
   // The submitted prompt, held for the life of a generation so it can ride in
   // the RIGHT-aligned "sent" bubble of the morphing generation thread (MTR-209)
   // while the composer empties. Restored into the composer on error so a failed
@@ -743,6 +756,85 @@ export function TextToCadStudio({
     viewedTurn.id in topoUrls &&
     topoUrls[viewedTurn.id] == null;
 
+  const viewedFeatures = viewedTurn?.features ?? [];
+  const activeFeature =
+    viewedFeatures.find((f) => f.id === activeFeatureId) ?? null;
+  const highlightFaceIds =
+    activeFeature && activeFeature.faceIds.length > 0
+      ? activeFeature.faceIds
+      : undefined;
+
+  // Drop the open feature chip when the viewed turn changes.
+  useEffect(() => {
+    setActiveFeatureId(null);
+  }, [viewedTurn?.id]);
+
+  async function applyFeatureUpdate(
+    _feature: CadFeature,
+    sourceParams: Record<string, number>
+  ): Promise<{ error?: string } | void> {
+    if (!viewedTurn) return { error: "No generation selected." };
+    setFeatureUpdating(true);
+    try {
+      const res = await rerunCadWithParams({
+        generationId: viewedTurn.id,
+        params: sourceParams,
+      });
+      if ("error" in res) return { error: res.error };
+
+      const newTurn: StudioTurn = {
+        id: res.generationId,
+        prompt:
+          Object.entries(sourceParams)
+            .map(([n, v]) => `${n} → ${v}`)
+            .slice(0, 3)
+            .join(" · ") || "Update params",
+        status: "succeeded",
+        renderUrl: res.renderUrl,
+        fileAssetId: res.fileAssetId,
+        sourceCode: res.sourceCode,
+        features: res.features,
+        error: null,
+        rating: null,
+        feedbackTags: [],
+        feedbackNote: null,
+        parts: res.parts,
+        projectSlug: res.projectSlug,
+        remeshed: res.remeshed,
+        hasStep: res.hasStep,
+        parentGenerationId: res.parentGenerationId,
+      };
+
+      const rootId = activeRootIdRef.current;
+      setThreads((prev) =>
+        prev.map((t) => {
+          if (t.rootId !== rootId) return t;
+          if (t.turns.some((x) => x.id === newTurn.id)) return t;
+          return {
+            ...t,
+            lastActivity: Date.now(),
+            activeGenerationId: newTurn.id,
+            turns: [...t.turns, newTurn],
+          };
+        })
+      );
+      setViewTurnId(newTurn.id);
+      setActiveFeatureId(null);
+      // Fresh topo for the new revision — clear any cached miss.
+      setTopoUrls((u) => {
+        const next = { ...u };
+        delete next[newTurn.id];
+        return next;
+      });
+    } catch (err) {
+      return {
+        error: err instanceof Error ? err.message : "Update failed.",
+      };
+    } finally {
+      setFeatureUpdating(false);
+    }
+  }
+
   function startNewBuild() {
     // Abandoning an in-flight build is an explicit cancel: close the events
     // stream AND ask the server to stop the job (fire-and-forget — the row
@@ -914,6 +1006,7 @@ export function TextToCadStudio({
       renderUrl: ev.renderUrl,
       fileAssetId: ev.fileAssetId,
       sourceCode: ev.sourceCode,
+      features: parseFeatures(ev.features),
       error: null,
       rating: null,
       feedbackTags: [],
@@ -1635,6 +1728,7 @@ export function TextToCadStudio({
                       compareBaseAssetId ?? activeAssetId
                     }`}
                     topoUrl={viewerTopoUrl}
+                    highlightFaceIds={highlightFaceIds}
                     ghostUrl={
                       compareBaseAssetId
                         ? `/api/files/preview/${activeAssetId}`
@@ -2168,27 +2262,44 @@ export function TextToCadStudio({
             </div>
           )}
 
-          {/* Parametric source for the current build — collapsible */}
+          {/* Construction features (chips) + collapsible parametric source */}
           {!generating && viewedTurn?.sourceCode && (
-            <div>
-              <button
-                type="button"
-                onClick={() => setShowSource((v) => !v)}
-                className="flex w-full cursor-pointer items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
-              >
-                <Layers className="size-4 shrink-0" />
-                <span>Parametric source</span>
-                {showSource ? (
-                  <ChevronDown className="ml-auto size-4 shrink-0" />
-                ) : (
-                  <ChevronRight className="ml-auto size-4 shrink-0" />
-                )}
-              </button>
-              {showSource && (
-                <pre className="mt-2 max-h-72 overflow-auto rounded-lg bg-muted/40 p-3 text-xs">
-                  {viewedTurn.sourceCode}
-                </pre>
+            <div className="space-y-3">
+              {viewedFeatures.length > 0 && (
+                <div>
+                  <div className="mb-2 flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                    <Layers className="size-4 shrink-0" />
+                    <span>Features</span>
+                  </div>
+                  <FeatureChips
+                    features={viewedFeatures}
+                    activeId={activeFeatureId}
+                    onActiveChange={setActiveFeatureId}
+                    onUpdate={applyFeatureUpdate}
+                    disabled={featureUpdating}
+                  />
+                </div>
               )}
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setShowSource((v) => !v)}
+                  className="flex w-full cursor-pointer items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
+                >
+                  <Layers className="size-4 shrink-0" />
+                  <span>Parametric source</span>
+                  {showSource ? (
+                    <ChevronDown className="ml-auto size-4 shrink-0" />
+                  ) : (
+                    <ChevronRight className="ml-auto size-4 shrink-0" />
+                  )}
+                </button>
+                {showSource && (
+                  <pre className="mt-2 max-h-72 overflow-auto rounded-lg bg-muted/40 p-3 text-xs">
+                    {viewedTurn.sourceCode}
+                  </pre>
+                )}
+              </div>
             </div>
           )}
 
