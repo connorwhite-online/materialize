@@ -12,7 +12,12 @@
  * its clustering should emit these class ids, seeded by this human-curated map.
  */
 
-/** The 8 failure classes (CAD Skills' taxonomy). Stable ids — MTR-186's labels. */
+/**
+ * CAD Skills' 8 kernel classes plus `disconnected_assembly` (MTR-213 follow-up):
+ * the fragment-gate message contains "fused"/"export" and used to mis-classify
+ * as `tool_failure`, steering the repair loop to UNION the shells — collapsing
+ * a stacked assembly into one unprintable solid. Stable ids — MTR-186 labels.
+ */
 export type KernelFailureClass =
   | "source_import_syntax"
   | "invalid_missing_geometry"
@@ -21,6 +26,7 @@ export type KernelFailureClass =
   | "missing_feature"
   | "selector_fragility"
   | "positioning_joint_mismatch"
+  | "disconnected_assembly"
   | "tool_failure";
 
 export const KERNEL_FAILURE_CLASS_IDS: KernelFailureClass[] = [
@@ -31,6 +37,7 @@ export const KERNEL_FAILURE_CLASS_IDS: KernelFailureClass[] = [
   "missing_feature",
   "selector_fragility",
   "positioning_joint_mismatch",
+  "disconnected_assembly",
   "tool_failure",
 ];
 
@@ -156,14 +163,30 @@ export const KERNEL_FAILURE_TAXONOMY: Record<KernelFailureClass, FailureClassSpe
       "Assembled parts must touch with zero interpenetration — position them at their real assembled coordinates, never translated apart for presentation.",
     ],
   },
+  disconnected_assembly: {
+    label:
+      "disconnected solids in one result (needs parts dict — do NOT fuse)",
+    patterns: [
+      /disconnected solids/i,
+      /via the parts dict/i,
+      /export separate pieces/i,
+    ],
+    fixes: [
+      "Do NOT union/fuse the disconnected bodies into one solid — they are separate printable parts (a stacked base+lid compound in preview is the tell).",
+      'Assign each piece to a `parts` dict and drop `result`: `parts = {"base": <solid>, "lid": <solid>}` (name them for what they are). Each entry must be ONE watertight solid.',
+      "Only fuse genuine debris (a loose nub) INTO its parent part; never merge the independently-printed shells together.",
+    ],
+  },
   tool_failure: {
     label: "kernel/tool failure (boolean or export crashed)",
     patterns: [
       /brep|topods|standard_(failure|constructionerror)|occ|opencascade/i,
-      /boolean|fuse|common|cut\s*failed/i,
+      // Require "fail" so "one fused solid" / "fuse into" in fragment-gate
+      // copy cannot land here (that path is disconnected_assembly above).
+      /boolean\s*(fuse|common|cut)?\s*fail|fuse\s*fail|common\s*fail|cut\s*fail/i,
       /not\s*watertight/i,
       /killed|oom|memory|timed?\s*out|segmentation/i,
-      /export|stl|step/i,
+      /export\s*fail|stl\s*fail|step\s*fail/i,
     ],
     fixes: [
       "Simplify the boolean sequence: fewer overlapping/tangent booleans, and make solids genuinely OVERLAP (not merely touch) before fusing.",

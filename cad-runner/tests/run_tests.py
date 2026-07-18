@@ -305,6 +305,18 @@ def test_promote_clean_base_lid_compound():
     assert zb < zl, f"base must sit below lid ({zb:.1f} vs {zl:.1f})"
 
 
+def test_promote_thin_lid_compound():
+    """A thin lid (~6% of base volume) must still promote — the old 15% gate
+    left stacked compounds in the preview with no parts[] split."""
+    import app
+    base = trimesh.creation.box(extents=(40, 30, 20)).apply_translation((0, 0, 10))
+    lid = trimesh.creation.box(extents=(40, 30, 1.2)).apply_translation((0, 0, 21))
+    compound = trimesh.util.concatenate([base, lid])
+    promoted = app._promote_disconnected_bodies(compound)
+    assert promoted is not None, "thin lid must promote as a real part"
+    assert [n for n, _ in promoted] == ["base", "lid"]
+
+
 def test_promote_rejects_genuine_debris():
     """The conservative gate: a real base+lid trailing a loose chip (an
     un-unioned nub) is NOT promoted — the fragment error must stand so the model
@@ -339,6 +351,7 @@ TESTS = [
     test_transforms_move_primitives,
     test_split_shell_printed_fit,
     test_promote_clean_base_lid_compound,
+    test_promote_thin_lid_compound,
     test_promote_rejects_genuine_debris,
 ]
 

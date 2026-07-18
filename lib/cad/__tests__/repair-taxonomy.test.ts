@@ -6,7 +6,7 @@ import {
   KERNEL_FAILURE_TAXONOMY,
 } from "@/lib/cad/repair-taxonomy";
 
-describe("classifyKernelError — 8-class taxonomy (MTR-198)", () => {
+describe("classifyKernelError — kernel taxonomy (MTR-198 / MTR-213)", () => {
   it("classifies a fillet failure and names the standard fix", () => {
     const m = classifyKernelError(
       "BRepFilletAPI: fillet radius 6.0 too large — try a smaller value"
@@ -35,6 +35,18 @@ describe("classifyKernelError — 8-class taxonomy (MTR-198)", () => {
     expect(m?.class).toBe("source_import_syntax");
   });
 
+  it("classifies fragment-gate disconnected solids as parts-dict (not fuse)", () => {
+    const m = classifyKernelError(
+      "part contains 2 disconnected solids (volumes 19200, 9600 mm^3) — " +
+        "every exported part must be one fused solid: union intentional " +
+        "geometry into the body, delete stray debris, or export separate " +
+        "pieces via the parts dict"
+    );
+    expect(m?.class).toBe("disconnected_assembly");
+    expect(m?.fixes.join(" ")).toMatch(/`parts`\s*dict/i);
+    expect(m?.fixes.join(" ")).toMatch(/do not union\/fuse/i);
+  });
+
   it("falls back to tool_failure for a generic kernel/boolean crash", () => {
     const m = classifyKernelError("OCC boolean fuse failed unexpectedly");
     expect(m?.class).toBe("tool_failure");
@@ -60,8 +72,10 @@ describe("enrichRepairHint", () => {
 });
 
 describe("taxonomy shape (initial label set for MTR-186)", () => {
-  it("exposes exactly 8 stable class ids, each with patterns + fixes", () => {
-    expect(KERNEL_FAILURE_CLASS_IDS).toHaveLength(8);
+  it("exposes stable class ids, each with patterns + fixes", () => {
+    // 8 CAD-Skills classes + disconnected_assembly (fragment-gate → parts dict).
+    expect(KERNEL_FAILURE_CLASS_IDS).toHaveLength(9);
+    expect(KERNEL_FAILURE_CLASS_IDS).toContain("disconnected_assembly");
     for (const id of KERNEL_FAILURE_CLASS_IDS) {
       const spec = KERNEL_FAILURE_TAXONOMY[id];
       expect(spec.patterns.length).toBeGreaterThan(0);

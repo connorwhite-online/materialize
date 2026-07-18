@@ -107,6 +107,24 @@ chip = trimesh.creation.box(extents=(5, 5, 5)).apply_translation((80, 80, 80))
 result = trimesh.util.concatenate([solid, chip])
 """
 
+# Model assigned BOTH a compound `result` and a correct `parts` dict — `parts`
+# must win (taking `result` first discarded the split and left a stacked compound).
+PARTS_AND_RESULT_SCRIPT = """
+import trimesh
+base = trimesh.creation.box(extents=(40, 30, 16)).apply_translation((0, 0, 8))
+lid = trimesh.creation.box(extents=(40, 30, 8)).apply_translation((0, 0, 22))
+result = trimesh.util.concatenate([base, lid])
+parts = {"housing": base, "cover": lid}
+"""
+
+# Thin lid (~6% of base volume) — must promote under the relaxed volume gate.
+THIN_LID_SCRIPT = """
+import trimesh
+base = trimesh.creation.box(extents=(40, 30, 20)).apply_translation((0, 0, 10))
+lid = trimesh.creation.box(extents=(40, 30, 1.2)).apply_translation((0, 0, 21))
+result = trimesh.util.concatenate([base, lid])
+"""
+
 
 def run(code, **extra):
     body = {"code": code, "formats": ["stl"], "engine": "mesh", **extra}
@@ -287,6 +305,29 @@ def test_run_debris_still_fails_fragment_gate():
     assert "disconnected solids" in (p.get("error") or ""), p.get("error")
 
 
+def test_run_prefers_parts_dict_over_result_compound():
+    """When both `result` and `parts` are assigned, the explicit parts dict
+    wins — including the author's names — instead of promoting/failing the
+    compound `result`."""
+    p = run(PARTS_AND_RESULT_SCRIPT)
+    assert p["ok"] is True, p.get("error")
+    parts = p.get("parts") or []
+    assert [pt["name"] for pt in parts] == ["housing", "cover"], [
+        pt["name"] for pt in parts
+    ]
+    # Came from the explicit dict, not the compound promoter.
+    assert p.get("promotedFromSingle") is not True, p
+
+
+def test_run_promotes_thin_lid_compound():
+    """Thin lids below the old 15%-of-max volume gate still promote."""
+    p = run(THIN_LID_SCRIPT)
+    assert p.get("promotedFromSingle") is True, f"thin lid not promoted: {p.get('error')}"
+    parts = p.get("parts") or []
+    assert [pt["name"] for pt in parts] == ["base", "lid"], [pt["name"] for pt in parts]
+    assert p["ok"] is True, p.get("error")
+
+
 def test_session_lifecycle():
     """create -> plain exec -> result exec (full payload) -> snapshot ->
     clobber -> rollback -> re-export -> delete. Shapes pinned by
@@ -394,6 +435,8 @@ TESTS = [
     test_run_checks_fea_supported_box,
     test_run_promotes_two_body_compound_to_assembly,
     test_run_debris_still_fails_fragment_gate,
+    test_run_prefers_parts_dict_over_result_compound,
+    test_run_promotes_thin_lid_compound,
     test_session_lifecycle,
     test_session_cap_429,
     test_session_exec_timeout_kills_session,

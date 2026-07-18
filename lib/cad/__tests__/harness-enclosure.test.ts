@@ -24,7 +24,7 @@ vi.mock("@/lib/cad/concept", () => ({
   CONCEPT_IMAGE_NOTE: "",
 }));
 
-import { runHarness } from "@/lib/cad/harness";
+import { repairHintFor, runHarness } from "@/lib/cad/harness";
 
 function singleShell(): CadRunResult {
   return {
@@ -73,6 +73,20 @@ function repairPrompts(): string[] {
     .map((c) => ((c as unknown[])[0] as { prompt?: string } | undefined)?.prompt ?? "")
     .filter((p) => p.includes("TWO-PIECE enclosure"));
 }
+
+describe("repairHintFor disconnected assembly (MTR-213 follow-up)", () => {
+  it("steers fragment-gate failures to a parts dict, not a fuse", () => {
+    const hint = repairHintFor(
+      "part contains 2 disconnected solids (volumes 19200, 1200 mm^3) — " +
+        "every exported part must be one fused solid: union intentional " +
+        "geometry into the body, delete stray debris, or export separate " +
+        "pieces via the parts dict"
+    );
+    expect(hint).toMatch(/`parts`\s*dict/i);
+    expect(hint).toMatch(/do not fuse/i);
+    expect(hint).not.toMatch(/drastically simplify/i);
+  });
+});
 
 describe("runHarness enclosure split enforcement (MTR-213)", () => {
   beforeEach(() => {
