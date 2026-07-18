@@ -7,6 +7,10 @@ import { cadGenerations, cadJobs } from "@/lib/db/schema";
 import { canUseTextToCad } from "@/lib/features";
 import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
 import type { CadJobProgressEntry } from "@/lib/cad/types";
+import {
+  STALE_JOB_ERROR,
+  isStaleCadJob,
+} from "@/lib/cad/job-staleness";
 
 /**
  * SSE progress stream for a background CAD generation job (MTR-175).
@@ -29,11 +33,6 @@ const HEARTBEAT_MS = 15_000;
 // Close politely before the platform kills the function; the studio's
 // reconnect logic reattaches and the replay resumes where it left off.
 const HARD_CEILING_MS = 290_000;
-// A job whose executor died without writing a terminal status (platform kill
-// past maxDuration, process crash) would otherwise tail forever as "running".
-// Executions are bounded by the generate route's maxDuration=300s, so a
-// running job older than this is provably dead — reap it on read.
-const STALE_RUNNING_MS = 10 * 60_000;
 const TERMINAL_STATUSES = new Set(["done", "failed", "cancelled"]);
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -162,16 +161,12 @@ export async function GET(
             const born = row.startedAt ?? row.createdAt;
             if (
               (status === "running" || status === "queued") &&
-              born &&
-              Date.now() - born.getTime() > STALE_RUNNING_MS
+              isStaleCadJob(born)
             ) {
-              // Same family as JOB_TIMEOUT_MESSAGE in lib/cad/jobs.ts — the
-              // executor should self-timeout before the platform kill, but a
-              // crash / OOM / missed deadline still lands here.
-              jobError =
-                "Generation timed out or was interrupted before finishing. " +
-                "Simplify the script (avoid edge-by-edge fillet loops) or " +
-                "split into parts, then try again.";
+              // Executor should self-timeout first (lib/cad/jobs.ts); this is
+              // the backup when the after() callback was hard-killed. SSE
+              // pings keep the page looking live even for a user who stayed.
+              jobError = STALE_JOB_ERROR;
               await db
                 .update(cadJobs)
                 .set({
