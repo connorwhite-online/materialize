@@ -44,9 +44,9 @@ export function frameTransformFor(geometry: THREE.BufferGeometry): FrameTransfor
 
 /**
  * Shared frame for a multi-part assembly: fit the UNION of all part bounding
- * boxes (parts stay in their native assembly coordinates). Hiding a part must
- * not recenter the rest — the frame is computed from all parts once, so
- * isolation is pure visibility (MTR-174).
+ * boxes (parts stay in their native assembly coordinates). Used for the
+ * "All parts" overview — part-tab isolation switches to the single-solid
+ * frame so the selected part fills the viewport (MTR-174).
  */
 export function frameTransformForAll(
   geometries: THREE.BufferGeometry[]

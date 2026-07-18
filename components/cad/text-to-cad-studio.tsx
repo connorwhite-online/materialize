@@ -68,6 +68,10 @@ import { parseFeatures } from "@/lib/cad/features";
 import type { CadBrief } from "@/lib/cad/brief";
 import type { ViewerAnnotation } from "@/components/viewer/model-viewer";
 import { planComposerSubmit } from "@/components/cad/composer-submit";
+import {
+  isAssemblyOverview,
+  resolveEffectiveSelectedPartId,
+} from "@/components/cad/assembly-selection";
 import { useKeyboardStickyBottom } from "@/lib/hooks/use-keyboard-sticky-bottom";
 import {
   CAD_FEEDBACK_TAGS,
@@ -620,11 +624,11 @@ export function TextToCadStudio({
   // over from the previous turn no longer matches any part. Left unguarded that
   // made the assembly viewer render every part with `visible=false` → a blank
   // canvas (MTR-188 item 3: "a revision leaves the viewer blank / pointing at a
-  // stale part"). Resolve the selection against the CURRENT parts and treat a
-  // non-match as "All parts".
-  const effectiveSelectedPartId =
-    viewedParts.find((p) => p.fileAssetId === selectedPartId)?.fileAssetId ??
-    null;
+  // stale part"). Resolve against the CURRENT parts; non-match → "All parts".
+  const effectiveSelectedPartId = resolveEffectiveSelectedPartId(
+    viewedParts,
+    selectedPartId
+  );
   const activeAssetId = effectiveSelectedPartId ?? viewedTurn?.fileAssetId ?? null;
 
   // Clear a stale isolation when the viewed turn changes (revision or history
@@ -730,6 +734,12 @@ export function TextToCadStudio({
     viewedTurn.id !== latestGoodTurn.id
       ? latestGoodTurn.fileAssetId
       : null;
+  // "All parts" keeps the shared assembly frame + explode; a part tab frames
+  // that part alone so it fills the viewport (hide-in-place left small /
+  // off-center parts looking blank when stacked in assembly coordinates).
+  const showAssemblyOverview =
+    !compareBaseAssetId &&
+    isAssemblyOverview(viewedParts.length, effectiveSelectedPartId);
   const compareAvailable =
     !!viewedTurn &&
     !!latestGoodTurn?.fileAssetId &&
@@ -1701,26 +1711,27 @@ export function TextToCadStudio({
                   {/* Compare mode swaps the solid model for the thread's
                       latest and ghosts the viewed (older) revision on top;
                       both land in the same deterministic fixed frame.
-                      Assemblies (MTR-174) render every part in assembly
-                      position in ONE shared frame; part tabs below isolate
-                      by hiding the others — the key stays per-turn so
-                      switching tabs never remounts/reframes the canvas. */}
+                      Assemblies (MTR-174): "All parts" renders every part in
+                      assembly position in ONE shared frame. A part tab drops
+                      to the single-solid path so that part is re-framed to
+                      fill the viewport (hide-in-place left stacked/offset
+                      parts looking empty). Visibility also keys off
+                      effectiveSelectedPartId — raw selectedPartId can go
+                      stale across a revision and blank the canvas (MTR-188). */}
                   <ModelViewer
                     key={
                       compareBaseAssetId
                         ? `${compareBaseAssetId}::${activeAssetId}`
-                        : viewedParts.length > 1
+                        : showAssemblyOverview
                           ? `asm::${viewedTurn?.fileAssetId}`
                           : activeAssetId
                     }
                     assemblyParts={
-                      viewedParts.length > 1 && !compareBaseAssetId
+                      showAssemblyOverview
                         ? viewedParts.map((p) => ({
                             url: `/api/files/preview/${p.fileAssetId}`,
                             name: p.name,
-                            visible:
-                              selectedPartId === null ||
-                              p.fileAssetId === selectedPartId,
+                            visible: true,
                           }))
                         : undefined
                     }
@@ -1849,17 +1860,18 @@ export function TextToCadStudio({
           )}
 
           {/* Assembly view tabs (MTR-174): default = every part in assembly
-              position; a part tab isolates it by hiding the others (same
-              frame — no recenter). Print/Download/Save follow the selection
-              (primary part while viewing All). */}
+              position; a part tab frames that part alone (fills viewport).
+              Print/Download/Save follow the selection (primary part while
+              viewing All). Highlight uses effectiveSelectedPartId so a stale
+              raw selection never leaves every tab unpressed. */}
           {!generating && viewedParts.length > 1 && (
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => setSelectedPartId(null)}
-                aria-pressed={selectedPartId === null}
+                aria-pressed={effectiveSelectedPartId === null}
                 className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-                  selectedPartId === null
+                  effectiveSelectedPartId === null
                     ? "border-foreground/30 bg-foreground/5 text-foreground"
                     : "border-foreground/10 text-muted-foreground hover:bg-foreground/5"
                 }`}
@@ -1867,7 +1879,7 @@ export function TextToCadStudio({
                 All parts
               </button>
               {viewedParts.map((p) => {
-                const isActive = p.fileAssetId === selectedPartId;
+                const isActive = p.fileAssetId === effectiveSelectedPartId;
                 return (
                   <button
                     key={p.fileAssetId}
