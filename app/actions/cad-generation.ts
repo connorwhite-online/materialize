@@ -48,9 +48,11 @@ import {
   persistGenerationSuccess,
   persistGenerationFailure,
 } from "@/lib/cad/persist";
+import { BREP_OUTPUT_FORMATS } from "@/lib/cad/types";
 import type { HarnessResult } from "@/lib/cad/harness";
+import { substituteParams, extractParams } from "@/components/cad/param-diff";
+import { parseFeatures } from "@/lib/cad/features";
 import { CAD_EXEMPLARS } from "@/lib/cad/knowledge/exemplars";
-import { substituteParams } from "@/components/cad/param-diff";
 
 // Generation itself lives in the jobs path (app/api/cad/generate ->
 // lib/cad/jobs.ts -> lib/cad/orchestrate.ts). The old inline generateCadModel
@@ -783,7 +785,7 @@ export async function runCadTemplate(input: {
   const generationId = row.id;
 
   try {
-    const run = await runCadCode(source, ["stl", "step"]);
+    const run = await runCadCode(source, BREP_OUTPUT_FORMATS);
     if (!run.ok) {
       await persistGenerationFailure(
         generationId,
@@ -836,5 +838,176 @@ export async function runCadTemplate(input: {
       1
     ).catch(() => undefined);
     return { error: "Could not build this template. Please try again." };
+  }
+}
+
+/** Result of a no-LLM param rerun (feature-chip Update). */
+export interface RerunCadWithParamsResult {
+  generationId: string;
+  fileAssetId: string;
+  renderUrl: string | null;
+  sourceCode: string;
+  parentGenerationId: string;
+  parts: { name: string; fileAssetId: string }[];
+  projectSlug: string | null;
+  remeshed: boolean;
+  hasStep: boolean;
+  features: ReturnType<typeof parseFeatures>;
+}
+
+/**
+ * Re-run a generation's parametric source with substituted top-level numbers
+ * (feature-chip Update). NO LLM: substitute → sidecar → persist as a new
+ * revision under the parent. Only names present in the parent's
+ * `extractParams` set are accepted — a stale/hostile client can't inject
+ * lines. Owner-only; gated like every other studio surface.
+ */
+export async function rerunCadWithParams(input: {
+  generationId: string;
+  params: Record<string, number>;
+}): Promise<RerunCadWithParamsResult | { error: string }> {
+  const { userId } = await auth();
+  if (!userId) return { error: "Unauthorized" };
+
+  const user = (await currentUser()) as ClerkUserLike;
+  if (!canUseTextToCad(primaryEmail(user))) return { error: "Not found" };
+
+  const parentId = input.generationId?.trim();
+  if (!parentId) return { error: "Not found" };
+
+  const [parent] = await db
+    .select({
+      id: cadGenerations.id,
+      sourceCode: cadGenerations.sourceCode,
+      threadId: cadGenerations.threadId,
+      status: cadGenerations.status,
+      engine: cadGenerations.engine,
+      title: cadGenerations.title,
+    })
+    .from(cadGenerations)
+    .where(
+      and(eq(cadGenerations.id, parentId), eq(cadGenerations.userId, userId))
+    )
+    .limit(1);
+
+  if (!parent || parent.status !== "succeeded" || !parent.sourceCode) {
+    return { error: "Generation not found." };
+  }
+
+  // Sanitize: finite numbers only, and only names that are real top-level
+  // params of this source. Unknown keys are dropped.
+  const allowed = extractParams(parent.sourceCode);
+  const params: Record<string, number> = {};
+  for (const [name, value] of Object.entries(input.params ?? {})) {
+    if (
+      name in allowed &&
+      typeof value === "number" &&
+      Number.isFinite(value)
+    ) {
+      params[name] = value;
+    }
+  }
+  if (Object.keys(params).length === 0) {
+    return { error: "No editable parameters to apply." };
+  }
+
+  const source = substituteParams(parent.sourceCode, params);
+  // Diff summary for the revision prompt line shown in history.
+  const changed = Object.entries(params)
+    .filter(([name, v]) => allowed[name] !== v)
+    .map(([name, v]) => `${name} ${allowed[name]} → ${v}`)
+    .slice(0, 3);
+  const prompt =
+    changed.length > 0
+      ? `Update params: ${changed.join(" · ")}`
+      : "Update params";
+
+  // Thread title for the revision's file name (root-row title fallback).
+  let nameOverride: string | undefined;
+  if (parent.threadId) {
+    const [thread] = await db
+      .select({ title: cadThreads.title })
+      .from(cadThreads)
+      .where(eq(cadThreads.id, parent.threadId))
+      .limit(1);
+    nameOverride = thread?.title ?? parent.title ?? undefined;
+  } else {
+    nameOverride = parent.title ?? undefined;
+  }
+
+  const [row] = await db
+    .insert(cadGenerations)
+    .values({
+      userId,
+      prompt,
+      engine: parent.engine || "build123d",
+      status: "pending",
+      parentGenerationId: parent.id,
+      threadId: parent.threadId ?? null,
+    })
+    .returning({ id: cadGenerations.id });
+  const generationId = row.id;
+
+  try {
+    const run = await runCadCode(source, BREP_OUTPUT_FORMATS, undefined, {
+      engine: parent.engine || "build123d",
+    });
+    if (!run.ok) {
+      await persistGenerationFailure(
+        generationId,
+        run.error || "Param update failed.",
+        source,
+        1
+      );
+      return {
+        error:
+          run.error ||
+          "Those parameters couldn't be built. Try different values or revise in chat.",
+      };
+    }
+
+    const result: HarnessResult = {
+      ok: true,
+      sourceCode: source,
+      attempts: 1,
+      run,
+      route: "param-rerun",
+    };
+
+    const persisted = await persistGenerationSuccess({
+      userId,
+      generationId,
+      prompt,
+      isRoot: false,
+      nameOverride,
+      result,
+    });
+    if ("error" in persisted) return { error: persisted.error };
+
+    revalidatePath("/prometheus");
+    return {
+      generationId: persisted.generationId,
+      fileAssetId: persisted.fileAssetId,
+      renderUrl: persisted.renderUrl,
+      sourceCode: persisted.sourceCode,
+      parentGenerationId: parent.id,
+      parts: (persisted.parts ?? []).map((p) => ({
+        name: p.name,
+        fileAssetId: p.fileAssetId,
+      })),
+      projectSlug: persisted.projectSlug ?? null,
+      remeshed: persisted.remeshed ?? false,
+      hasStep: persisted.hasStep ?? false,
+      features: parseFeatures(persisted.features),
+    };
+  } catch (error) {
+    logError("rerunCadWithParams", error);
+    await persistGenerationFailure(
+      generationId,
+      "Param update failed.",
+      source,
+      1
+    ).catch(() => undefined);
+    return { error: "Could not apply those parameters. Please try again." };
   }
 }

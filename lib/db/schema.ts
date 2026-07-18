@@ -1557,6 +1557,22 @@ export const cadGenerations = pgTable(
     // inline — so the history query stays small. Null until produced.
     topoStorageKey: text("topo_storage_key"),
     /**
+     * Instrumented construction features for the feature-chip UX
+     * (extrude/fillet/chamfer/… + faceIds into topo). Small jsonb list —
+     * kept on the row so the studio can render chips without a second
+     * fetch. Null when the run produced none (mesh-mode / legacy).
+     */
+    features: jsonb("features").$type<
+      {
+        id: string;
+        op: string;
+        label: string;
+        params: Record<string, number>;
+        paramNames?: Record<string, string>;
+        faceIds: number[];
+      }[]
+    >(),
+    /**
      * Config fingerprint: WHICH harness configuration produced this row
      * (per-role models, flags, router verdict) — the treatment beside the
      * outcome, so quality changes are attributable (lib/cad/fingerprint.ts).

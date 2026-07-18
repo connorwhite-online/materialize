@@ -4,7 +4,48 @@
  */
 
 /** Output formats the sidecar can export from a build123d script. */
-export type CadOutputFormat = "stl" | "step";
+export type CadOutputFormat = "stl" | "step" | "topo";
+
+/**
+ * Formats requested for every B-rep generation (harness / agentic / template
+ * / param-rerun). `"topo"` unlocks exact face picking + feature-chip
+ * highlight (MTR-174 substrate); mesh-mode runs ignore it.
+ */
+export const BREP_OUTPUT_FORMATS: CadOutputFormat[] = ["stl", "step", "topo"];
+
+/**
+ * One construction operation the sidecar instrumented during a B-rep run
+ * (feature chips / construction-history UX). `faceIds` index the same
+ * `topo.faces` list the viewer uses for exact picking; empty when topo
+ * wasn't produced or the op's faces didn't survive to the final solid.
+ */
+export type CadFeatureOp =
+  | "extrude"
+  | "fillet"
+  | "chamfer"
+  | "loft"
+  | "revolve"
+  | "shell"
+  | "hole"
+  | "boolean"
+  | "other";
+
+export interface CadFeature {
+  /** Stable within this generation (e.g. "fillet-0"). */
+  id: string;
+  op: CadFeatureOp;
+  /** Short UI label, e.g. "Fillet r=2.4". */
+  label: string;
+  /** Numeric values bound to this op when known (radius, amount, …). */
+  params: Record<string, number>;
+  /**
+   * Maps a control key in `params` → a top-level source parameter name
+   * (`fillet_r`) so Reset/Update can rewrite the script without an LLM.
+   */
+  paramNames?: Record<string, string>;
+  /** Indices into `topo.faces` for highlight. */
+  faceIds: number[];
+}
 
 /** Geometry stats the sidecar measures off the produced solid. */
 export interface CadGeometry {
@@ -96,6 +137,17 @@ export interface CadRunResult {
   parts?: CadPart[];
   /** True when the watertight result came from the voxel-remesh fallback. */
   remeshed?: boolean;
+  /**
+   * B-rep topology manifest (MTR-174) when `"topo"` was requested and the
+   * sidecar succeeded. Absent on mesh-mode / older sidecars / export failure
+   * — consumers must tolerate it missing (fall back to mesh flood-fill).
+   */
+  topo?: unknown;
+  /**
+   * Instrumented construction features for the feature-chip UX. Present on
+   * B-rep runs when the sidecar wrapped ops; empty/absent otherwise.
+   */
+  features?: CadFeature[];
   /**
    * Post-export checks the caller requested (sidecar `checks` request):
    * `fit` carries the MTR-204 component-fit verdicts; `networks`/`fea`
@@ -295,6 +347,8 @@ export interface CadDoneEvent {
    * instead of probing after mount — no late pop-in / row reflow (MTR-215).
    */
   hasStep?: boolean;
+  /** Construction features for the feature-chip strip (empty when none). */
+  features?: CadFeature[];
 }
 
 /** Full event union carried over the SSE stream from /api/cad/generate. */

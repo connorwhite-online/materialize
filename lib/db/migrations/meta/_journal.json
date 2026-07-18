@@ -365,6 +365,13 @@
       "when": 1786001200000,
       "tag": "0051_ownership_claim_fk_hardening",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1786001300000,
+      "tag": "0052_cad_generation_features",
+      "breakpoints": true
     }
   ]
 }

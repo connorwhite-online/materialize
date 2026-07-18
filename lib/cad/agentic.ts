@@ -38,6 +38,7 @@ import {
 } from "./session-client";
 import { getObjectBytes } from "@/lib/storage";
 import type { HarnessInput, HarnessResult } from "./harness";
+import { BREP_OUTPUT_FORMATS } from "./types";
 import type {
   CadProgressEvent,
   CadQuestionOption,
@@ -553,7 +554,7 @@ export async function runAgenticHarness(
         });
         execCount++;
         const res = await execInSession(sessionId!, code, {
-          formats: ["stl", "step"],
+          formats: BREP_OUTPUT_FORMATS,
           signal: input.signal,
         });
         steps.push(`# ---- step ${execCount} ----\n${code}`);
