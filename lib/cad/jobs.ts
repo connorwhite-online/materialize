@@ -60,6 +60,22 @@ const DEFAULT_QUESTION_TIMEOUT_S = 120;
 const MAX_QUESTION_TIMEOUT_S = 600;
 
 /**
+ * Active compute budget for one job (excludes time spent in `awaiting_input`).
+ * Must stay under the generate route's `maxDuration=300` — when Vercel kills
+ * the function at that ceiling with no terminal write, the events route reaps
+ * the row after 10 minutes as "Generation was interrupted…". Aborting here
+ * writes a clean failure instead. Env-overridable for tests.
+ */
+export function jobComputeBudgetMs(): number {
+  const n = Number(process.env.CAD_JOB_COMPUTE_BUDGET_MS);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 270_000;
+}
+
+/** User-facing message when the compute budget elapses (not a cancel). */
+export const JOB_TIMEOUT_MESSAGE =
+  "Generation timed out before finishing. The script was too heavy for one pass — simplify (apply fillets/chamfers in one selector batch, never edge-by-edge in a loop), reduce detail, or split into parts, then try again.";
+
+/**
  * How many mid-cycle questions a single generation may pause for (MTR-191).
  * Default 1 — one focused question is the product intent; env-tunable. 0
  * disables interactive questions entirely (the asker resolves to the default
@@ -164,6 +180,43 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
 
   const controller = new AbortController();
   let cancelRequested = false;
+  let timedOut = false;
+
+  // Wall-clock compute budget: abort cleanly BEFORE the platform kills the
+  // after() callback (maxDuration=300s). Time spent awaiting a user pick is
+  // paused out so a mid-cycle question doesn't burn the budget.
+  let remainingBudgetMs = jobComputeBudgetMs();
+  let budgetSegmentStartedAt = 0;
+  let budgetTimer: ReturnType<typeof setTimeout> | null = null;
+  const clearBudgetTimer = () => {
+    if (budgetTimer) {
+      clearTimeout(budgetTimer);
+      budgetTimer = null;
+    }
+  };
+  const armBudget = () => {
+    clearBudgetTimer();
+    if (remainingBudgetMs <= 0) {
+      timedOut = true;
+      controller.abort();
+      return;
+    }
+    budgetSegmentStartedAt = Date.now();
+    budgetTimer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, remainingBudgetMs);
+  };
+  const pauseBudget = () => {
+    if (budgetSegmentStartedAt > 0) {
+      remainingBudgetMs = Math.max(
+        0,
+        remainingBudgetMs - (Date.now() - budgetSegmentStartedAt)
+      );
+      budgetSegmentStartedAt = 0;
+    }
+    clearBudgetTimer();
+  };
 
   // --- Batched progress writes -------------------------------------------
   // Events are buffered and flushed at most every FLUSH_INTERVAL_MS so a
@@ -268,6 +321,8 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
     await markJob({ status: "awaiting_input", updatedAt: new Date() }).catch(
       (err) => logError("executeCadJob.ask", err)
     );
+    // Don't burn the Vercel compute budget while the user is picking.
+    pauseBudget();
 
     const deadline = Date.now() + timeoutS * 1000;
     let chosen: string | null = null;
@@ -324,10 +379,11 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
       viaDefault,
     });
     await flush();
-    if (!cancelRequested && !controller.signal.aborted) {
+    if (!cancelRequested && !controller.signal.aborted && !timedOut) {
       await markJob({ status: "running", updatedAt: new Date() }).catch((err) =>
         logError("executeCadJob.resume", err)
       );
+      armBudget();
     }
     return chosen;
   };
@@ -387,15 +443,18 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
     }
 
     await markJob({ status: "running", startedAt: new Date() });
+    armBudget();
   } catch (error) {
     logError("executeCadJob.start", error);
+    clearBudgetTimer();
     return;
   }
 
   // Cooperative cancellation: poll cancelRequestedAt and abort the signal
   // the harness/sidecar/model calls run under. A client disconnect no
   // longer aborts anything — this flag (set by the cancel endpoint) is the
-  // only trigger.
+  // only trigger. (Budget timeout also aborts the same signal; timedOut
+  // distinguishes that from an explicit cancel.)
   const cancelPoll = setInterval(() => {
     void (async () => {
       try {
@@ -444,10 +503,20 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
     );
     meteredRoute = result.route;
 
-    // runGenerative swallows AbortError into { ok: false }; catch the
-    // cancel case here so it lands as `cancelled`, not `failed`.
+    // runGenerative swallows AbortError into { ok: false }; catch cancel
+    // vs compute-budget timeout here so they don't both land as `failed`.
     if (cancelRequested) {
       await finishCancelled();
+      return;
+    }
+    if (timedOut) {
+      const failed = await persistGenerationFailure(
+        generationId,
+        JOB_TIMEOUT_MESSAGE,
+        result.sourceCode,
+        result.attempts
+      );
+      await finishFailed(failed.error);
       return;
     }
 
@@ -511,7 +580,14 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
       route: result.route,
     });
   } catch (error) {
-    if (cancelRequested || (error as Error)?.name === "AbortError") {
+    if (timedOut) {
+      await persistGenerationFailure(generationId, JOB_TIMEOUT_MESSAGE).catch(
+        () => undefined
+      );
+      await finishFailed(JOB_TIMEOUT_MESSAGE).catch((err) =>
+        logError("executeCadJob.timeout", err)
+      );
+    } else if (cancelRequested || (error as Error)?.name === "AbortError") {
       await finishCancelled().catch((err) =>
         logError("executeCadJob.cancel", err)
       );
@@ -527,6 +603,7 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
     }
   } finally {
     clearInterval(cancelPoll);
+    clearBudgetTimer();
     if (flushTimer) clearTimeout(flushTimer);
   }
 }

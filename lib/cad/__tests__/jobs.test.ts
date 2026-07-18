@@ -120,6 +120,7 @@ import {
   createCadJob,
   appendJobProgress,
   executeCadJob,
+  JOB_TIMEOUT_MESSAGE,
   MAX_PROGRESS_EVENTS,
 } from "@/lib/cad/jobs";
 
@@ -159,6 +160,7 @@ beforeEach(() => {
   delete process.env.CAD_MAX_QUESTIONS_PER_JOB;
   delete process.env.CAD_CREDITS_ENABLED;
   delete process.env.CAD_CREDIT_COST_SIMPLE;
+  delete process.env.CAD_JOB_COMPUTE_BUDGET_MS;
   persistGenerationFailure.mockImplementation(async (...args: unknown[]) => ({
     error: args[1] as string,
     generationId: args[0] as string,
@@ -167,6 +169,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  delete process.env.CAD_JOB_COMPUTE_BUDGET_MS;
 });
 
 describe("createCadJob", () => {
@@ -352,6 +355,42 @@ describe("executeCadJob", () => {
       "gen-1",
       "Generation cancelled."
     );
+  });
+
+  it("marks failed (not cancelled) when the compute budget elapses mid-run", async () => {
+    vi.useFakeTimers();
+    process.env.CAD_JOB_COMPUTE_BUDGET_MS = "50";
+    runHarness.mockImplementation(
+      ({ signal }: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener("abort", () =>
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" }))
+          );
+        })
+    );
+
+    const running = executeCadJob(baseInput);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(60);
+    await running;
+
+    expect(persistGenerationFailure).toHaveBeenCalledWith(
+      "gen-1",
+      JOB_TIMEOUT_MESSAGE
+    );
+    expect(updateCalls).toContainEqual(
+      expect.objectContaining({
+        status: "failed",
+        error: JOB_TIMEOUT_MESSAGE,
+        finishedAt: expect.any(Date),
+      })
+    );
+    const last = jobRow.progress[jobRow.progress.length - 1];
+    expect(last).toEqual({
+      type: "error",
+      error: JOB_TIMEOUT_MESSAGE,
+      generationId: "gen-1",
+    });
   });
 
   // --- Interactive specification (MTR-191) -------------------------------

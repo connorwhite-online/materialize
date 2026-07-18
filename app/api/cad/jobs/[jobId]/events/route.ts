@@ -165,8 +165,13 @@ export async function GET(
               born &&
               Date.now() - born.getTime() > STALE_RUNNING_MS
             ) {
+              // Same family as JOB_TIMEOUT_MESSAGE in lib/cad/jobs.ts — the
+              // executor should self-timeout before the platform kill, but a
+              // crash / OOM / missed deadline still lands here.
               jobError =
-                "Generation was interrupted before finishing. Please try again.";
+                "Generation timed out or was interrupted before finishing. " +
+                "Simplify the script (avoid edge-by-edge fillet loops) or " +
+                "split into parts, then try again.";
               await db
                 .update(cadJobs)
                 .set({
