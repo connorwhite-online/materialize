@@ -345,6 +345,18 @@ function buildUserPrompt(
  */
 export function repairHintFor(note: string): string {
   const n = note.toLowerCase();
+  // Fragment gate: multiple bodies in one `result`. Must NOT steer toward
+  // fuse/union — that collapses a stacked assembly into one shell (MTR-213).
+  if (/disconnected solids/.test(n) || /via the parts dict/.test(n)) {
+    return (
+      "The script put multiple printable pieces into a single `result` " +
+      "compound (the stacked preview is the tell). Do NOT fuse them into " +
+      "one body. Assign each piece to a `parts` dict — " +
+      '`parts = {"base": <solid>, "lid": <solid>}` (name them for what they ' +
+      "are) — and remove the `result =` assignment. Fuse only stray debris " +
+      "INTO its parent part."
+    );
+  }
   // sdf_kit's to_mesh refuses over-budget grids with a message that already
   // names a pitch that fits — pass it through verbatim, it IS the fix.
   if (/cells exceeds/.test(n) && /use pitch >=/.test(n)) {

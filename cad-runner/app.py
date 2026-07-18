@@ -894,7 +894,88 @@ def _base_payload(compiled: bool = False) -> dict:
 _PROMOTE_MIN_PARTS = 2
 _PROMOTE_MAX_PARTS = 4
 _PROMOTE_SLIVER_VOLUME = 1.0  # mm^3 — a body below this is a tessellation sliver
-_PROMOTE_LARGE_FRAC = 0.15    # a body is a "real part" if >= 15% of the biggest
+# Thin lids / hollow shells are often << the base volume; 15% rejected real
+# two-piece enclosures and left a stacked compound in the preview with no
+# parts[]. 5% still rejects a 5³ chip next to a ~40×30×20 solid (~0.6%).
+_PROMOTE_LARGE_FRAC = 0.05
+
+
+def _shape_z(shape) -> float:
+    """Z of a shape's center — trimesh (`.centroid`) or B-rep (`.center()`)."""
+    c = getattr(shape, "centroid", None)
+    if c is not None:
+        try:
+            return float(c[2])
+        except Exception:  # noqa: BLE001
+            pass
+    center = getattr(shape, "center", None)
+    if callable(center):
+        try:
+            v = center()
+            return float(getattr(v, "Z", None) if hasattr(v, "Z") else v[2])
+        except Exception:  # noqa: BLE001
+            pass
+    # CadQuery solid
+    try:
+        return float(shape.Center().z)
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+def _name_parts_by_z(items):
+    """Order solids/meshes low→high z; name base/lid for the two-body case."""
+    ordered = sorted(items, key=lambda bv: _shape_z(bv[0]))
+    names = (
+        ["base", "lid"]
+        if len(ordered) == 2
+        else [f"part{i + 1}" for i in range(len(ordered))]
+    )
+    return [(names[i], ordered[i][0]) for i in range(len(ordered))]
+
+
+def _explode_brep_solids(shape, engine: str):
+    """If a B-rep `result` is a multi-solid compound, return [(name, solid)]
+    ordered low→high z so we can promote BEFORE mesh export and keep STEP.
+    Returns None for meshes, single solids, or when solids can't be listed."""
+    import trimesh
+
+    if isinstance(shape, trimesh.Trimesh):
+        return None
+    try:
+        if engine == "build123d":
+            solids = list(shape.solids())
+        elif engine == "cadquery":
+            solids_sel = shape.solids() if hasattr(shape, "solids") else None
+            if solids_sel is None:
+                return None
+            solids = (
+                list(solids_sel.vals())
+                if hasattr(solids_sel, "vals")
+                else list(solids_sel)
+            )
+        else:
+            return None
+    except Exception:  # noqa: BLE001
+        return None
+    if len(solids) < _PROMOTE_MIN_PARTS or len(solids) > _PROMOTE_MAX_PARTS:
+        return None
+    # Mirror the mesh promoter's volume gate so a solid + loose chip isn't
+    # silently accepted as an assembly just because it's still B-rep.
+    try:
+        vols = [abs(float(getattr(s, "volume", 0.0) or 0.0)) for s in solids]
+    except Exception:  # noqa: BLE001
+        vols = [0.0] * len(solids)
+    v_max = max(vols) if vols else 0.0
+    if v_max < _PROMOTE_SLIVER_VOLUME:
+        return None
+    large, other = [], []
+    for s, v in zip(solids, vols):
+        (large if v >= _PROMOTE_LARGE_FRAC * v_max else other).append((s, v))
+    if not (_PROMOTE_MIN_PARTS <= len(large) <= _PROMOTE_MAX_PARTS):
+        return None
+    if any(v >= _PROMOTE_SLIVER_VOLUME for _, v in other):
+        return None
+    return _name_parts_by_z(large)
 
 
 def _promote_disconnected_bodies(mesh):
@@ -914,9 +995,8 @@ def _promote_disconnected_bodies(mesh):
     v_max = max(vols) if vols else 0.0
     if v_max < _PROMOTE_SLIVER_VOLUME:
         return None
-    # "Real parts" are the large, comparable-volume bodies; requiring each >= 15%
-    # of the biggest is what separates a genuine base+lid (comparable) from a
-    # solid trailing a stray chip.
+    # "Real parts" are bodies >= _PROMOTE_LARGE_FRAC of the biggest; that
+    # separates a genuine base+thin-lid from a solid trailing a stray chip.
     large, other = [], []
     for b, v in zip(bodies, vols):
         (large if v >= _PROMOTE_LARGE_FRAC * v_max else other).append((b, v))
@@ -932,13 +1012,7 @@ def _promote_disconnected_bodies(mesh):
     # open shell that only reads closed as part of the compound.
     if not all(bool(b.is_watertight) for b, _ in large):
         return None
-    ordered = sorted(large, key=lambda bv: float(bv[0].centroid[2]))
-    names = (
-        ["base", "lid"]
-        if len(ordered) == 2
-        else [f"part{i + 1}" for i in range(len(ordered))]
-    )
-    return [(names[i], ordered[i][0]) for i in range(len(ordered))]
+    return _name_parts_by_z(large)
 
 
 def _assemble_parts_payload(
@@ -1008,66 +1082,74 @@ def _build_run_payload(
     parts_ns = ns.get("parts")
 
     with tempfile.TemporaryDirectory() as tmp:
-        if single is not None:
-            entry, mesh = _process_shape(
-                single, formats, tmp, "model", engine, allow_remesh,
-                include_views=True,
-            )
-            # Assembly rescue (MTR-213): a watertight `result` that the fragment
-            # gate flagged as multiple bodies is promoted to a real base/lid
-            # assembly when it's a clean split (comparable large watertight
-            # bodies, negligible debris) rather than hard-failed into a repair
-            # loop that collapses the enclosure to one shell.
-            promoted = None
-            if (
-                mesh is not None
-                and entry["validation"].get("bodyCount", 1) > 1
-                and entry["validation"].get("isWatertight")
-            ):
-                promoted = _promote_disconnected_bodies(mesh)
-            if promoted is not None:
-                _assemble_parts_payload(
-                    payload, promoted, formats, tmp, engine, allow_remesh
-                )
-                payload["promotedFromSingle"] = True
-                # Fit/network checks reference the whole enclosure, so run them
-                # against the original compound mesh (the parts share it).
-                if checks and mesh is not None:
-                    payload["checks"] = _run_checks(mesh, checks)
-            else:
-                payload["files"] = entry["files"]
-                payload["renderPng"] = entry["renderPng"]
-                if entry.get("renders") is not None:
-                    payload["renders"] = entry["renders"]
-                payload["geometry"] = entry["geometry"]
-                payload["validation"] = entry["validation"]
-                payload["remeshed"] = bool(entry.get("remeshed"))
-                if entry.get("topo") is not None:
-                    payload["topo"] = entry["topo"]
-                # Construction features for studio chips (aligned with topo
-                # face ids when available). Best-effort; empty → no chips.
-                try:
-                    from features import finalize_features
-
-                    feats = finalize_features(single, entry.get("topo"))
-                    if feats:
-                        payload["features"] = feats
-                except Exception:  # noqa: BLE001
-                    pass
-                if entry["error"]:
-                    payload["error"] = entry["error"]
-                payload["ok"] = (
-                    entry["validation"]["isSolid"]
-                    and entry["validation"]["isWatertight"]
-                    and entry["validation"].get("bodyCount", 1) == 1
-                )
-                if checks and mesh is not None:
-                    payload["checks"] = _run_checks(mesh, checks)
-        elif isinstance(parts_ns, dict) and parts_ns:
+        # Prefer an explicit `parts` dict when both are assigned — the prompt
+        # forbids both, but models still emit `result = compound` alongside
+        # `parts = {...}`. Taking `result` first used to discard a correct
+        # split and leave a stacked compound in the preview.
+        if isinstance(parts_ns, dict) and parts_ns:
             _assemble_parts_payload(
                 payload, list(parts_ns.items()), formats, tmp, engine,
                 allow_remesh,
             )
+        elif single is not None:
+            # B-rep multi-solid compound → promote BEFORE mesh export so each
+            # part keeps editable STEP (mesh promotion can only ship STL).
+            brep_parts = _explode_brep_solids(single, engine)
+            if brep_parts is not None:
+                _assemble_parts_payload(
+                    payload, brep_parts, formats, tmp, engine, allow_remesh
+                )
+                payload["promotedFromSingle"] = True
+            else:
+                entry, mesh = _process_shape(
+                    single, formats, tmp, "model", engine, allow_remesh,
+                    include_views=True,
+                )
+                # Mesh assembly rescue (MTR-213): a watertight multi-body
+                # `result` promotes to a real base/lid assembly when it's a
+                # clean split rather than hard-failing into a fuse repair.
+                promoted = None
+                if (
+                    mesh is not None
+                    and entry["validation"].get("bodyCount", 1) > 1
+                    and entry["validation"].get("isWatertight")
+                ):
+                    promoted = _promote_disconnected_bodies(mesh)
+                if promoted is not None:
+                    _assemble_parts_payload(
+                        payload, promoted, formats, tmp, engine, allow_remesh
+                    )
+                    payload["promotedFromSingle"] = True
+                    # Fit/network checks reference the whole enclosure.
+                    if checks and mesh is not None:
+                        payload["checks"] = _run_checks(mesh, checks)
+                else:
+                    payload["files"] = entry["files"]
+                    payload["renderPng"] = entry["renderPng"]
+                    if entry.get("renders") is not None:
+                        payload["renders"] = entry["renders"]
+                    payload["geometry"] = entry["geometry"]
+                    payload["validation"] = entry["validation"]
+                    payload["remeshed"] = bool(entry.get("remeshed"))
+                    if entry.get("topo") is not None:
+                        payload["topo"] = entry["topo"]
+                    try:
+                        from features import finalize_features
+
+                        feats = finalize_features(single, entry.get("topo"))
+                        if feats:
+                            payload["features"] = feats
+                    except Exception:  # noqa: BLE001
+                        pass
+                    if entry["error"]:
+                        payload["error"] = entry["error"]
+                    payload["ok"] = (
+                        entry["validation"]["isSolid"]
+                        and entry["validation"]["isWatertight"]
+                        and entry["validation"].get("bodyCount", 1) == 1
+                    )
+                    if checks and mesh is not None:
+                        payload["checks"] = _run_checks(mesh, checks)
         else:
             payload["error"] = (
                 "script did not assign `result` or a non-empty `parts` dict"

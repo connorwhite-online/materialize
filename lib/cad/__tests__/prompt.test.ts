@@ -29,10 +29,10 @@ describe("SYSTEM_PROMPT parts-dict contract (MTR-44)", () => {
     expect(SYSTEM_PROMPT).toMatch(/never assign both/i);
   });
 
-  it("warns against disjoint bodies in a single result (fragment gate)", () => {
+  it("warns against disjoint bodies in a single result", () => {
     // The known failure mode this steering exists to prevent.
     expect(SYSTEM_PROMPT).toMatch(/disjoint bodies/i);
-    expect(SYSTEM_PROMPT).toMatch(/fragment gate/i);
+    expect(SYSTEM_PROMPT).toMatch(/parts` wins|`parts` wins/i);
   });
 
   it("cadquery variant keeps a single-solid contract (no parts dict path)", () => {

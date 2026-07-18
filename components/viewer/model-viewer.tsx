@@ -1003,10 +1003,11 @@ const ASSEMBLY_SHADES = ["#a0a0a0", "#8f979f", "#b3afa7", "#9aa6ab"];
 /**
  * Multi-part assembly in ONE shared frame (MTR-174): every part keeps its
  * native assembly-position coordinates; the frame fits the UNION bounding box
- * of all parts (visible or not), so isolating a part just hides the others —
- * no recenter, no reframe. Cross-section clipping and face annotation work on
- * every visible part; the stencil cap + edge guides are single-mesh tools and
- * stay off here.
+ * of all parts. The studio uses this for the "All parts" overview — part-tab
+ * isolation drops to the single-solid FixedFrameModel path so the selected
+ * part is re-framed to fill the viewport. Cross-section clipping and face
+ * annotation work on every visible part; the stencil cap + edge guides are
+ * single-mesh tools and stay off here.
  */
 /** Separation magnitude at explode = 1, as a multiple of each part's
  *  centroid-offset from the assembly centroid. */
@@ -1049,8 +1050,10 @@ function InspectAssembly({
   const done = useRef(false);
 
   // Per-part explode vectors (native mm): assembly-centroid → part-centroid.
-  // Concentric parts (a lid over a base) have a near-zero vector and barely
-  // separate — that's the honest centroid-outward behavior (MTR-188).
+  // Concentric / nested parts (a lid over a base) share nearly the same
+  // centroid, so the outward vector is ~0 and explode used to do nothing
+  // useful. Fall back to spacing those parts along the union's longest axis
+  // by index so the slider still separates a stacked assembly (MTR-188).
   const explodeVectors = useMemo(() => {
     const union = new Box3();
     const centers = geometries.map((g) => {
@@ -1063,7 +1066,24 @@ function InspectAssembly({
     });
     const asmCenter = new Vector3();
     union.getCenter(asmCenter);
-    return centers.map((c) => c.clone().sub(asmCenter));
+    const unionSize = new Vector3();
+    union.getSize(unionSize);
+    // Longest axis of the assembly bbox — prefer Y (build-up) on ties so a
+    // typical lid/base stack separates vertically.
+    let axis: "x" | "y" | "z" = "y";
+    if (unionSize.x > unionSize.y && unionSize.x >= unionSize.z) axis = "x";
+    else if (unionSize.z > unionSize.y && unionSize.z > unionSize.x) axis = "z";
+    const axisLen = Math.max(unionSize[axis], 1);
+    const n = geometries.length;
+    return centers.map((c, i) => {
+      const v = c.clone().sub(asmCenter);
+      if (v.lengthSq() >= 1e-4) return v;
+      // Near-coincident centroid: fan out along the chosen axis by index.
+      const t = i - (n - 1) / 2;
+      const fallback = new Vector3();
+      fallback[axis] = t * axisLen * 0.75;
+      return fallback;
+    });
   }, [geometries]);
 
   // Same click = select / drag = rotate gate as InspectModel. Measure picks a
