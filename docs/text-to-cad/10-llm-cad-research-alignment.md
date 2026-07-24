@@ -350,23 +350,22 @@ re-derive from metered tokens (cadbench's rule, already our metering design).
 
 ## 5. Recommendations (cold-executable list)
 
-Ordered by leverage-per-effort. Each should become an MTR issue; this session's
-Linear connection could only reach the legacy `connorwhitestudio` workspace, so
-filing into MTR + project assignment (Text-to-CAD Studio) is a follow-up for a
-session with workspace access.
+Ordered by leverage-per-effort. This review is tracked as **MTR-219**; the
+recommendations were filed 2026-07-24 as **MTR-220–228** (Text-to-CAD Studio
+project):
 
-| # | Action | Anchors | Effort |
-| --- | --- | --- | --- |
-| 1 | **Env audit**: `CAD_MODEL_*` values in prod + one `cad-cost-report` pass to attribute the observed Opus spend by role×model×route | `lib/cad/models.ts`, `scripts/cad-cost-report.ts` | hours |
-| 2 | **Prompt caching**: `cache_control` on the invariant prefix in both call sites; verify via `cacheReadTokens` going nonzero in `cadJobs.usage` | `model-client.ts:126`, `agentic.ts:121` | small |
-| 3 | **Modular system prompt**: router-gated mesh/SDF/exchanger sections | `prompt.ts:9-58`, `orchestrate.ts:38` | small-medium |
-| 4 | **CoT-to-critic**: include plan/brief + generator reasoning summary in the judge call | `critique.ts`, `harness.ts:719` | small |
-| 5 | **Timeline v1**: order feature chips by op sequence; timeline strip UI | `feature-chips.tsx`, `lib/cad/features.ts` | medium |
-| 6 | **Statement-span feature binding**: sidecar records source spans per op; chips own code spans; unlocks statement-scoped repair (edit step 4, pin the rest) | `cad-runner/features.py`, `features.ts:79`, FlexCAD/CAD-Editor pattern | medium-large |
-| 7 | **Symbolic-selector prompt contract**: SSR/CapType-style "attach refinements to named features, not global queries" rule in SYSTEM_PROMPT + repair playbook | `prompt.ts`, `knowledge/repair-playbook.ts` | small |
-| 8 | **Judge down-tier A/B through the calibration harness** (answers doc 07's open question with data) | `scripts/evals/calibration.ts`, `drift.ts` | small-medium |
-| 9 | **Eval scoring upgrade**: adopt cadbench's harmonic geometry×spec composite with a validity gate in `scripts/evals/run.ts`; consider a private run of our harness against the 100-task suite as an external yardstick | `scripts/evals/`, gNucleus validator | medium |
-| 10 | **Watch-items** (no action): CADFusion-style train-time DPO once flywheel volume justifies; Zoo API as build-vs-buy fallback; Backflip-style mesh→parametric for uploaded STLs; cross-generation timeline anchors after doc 01 phase 2 lands | — | — |
+| # | Action | Anchors | Effort | Linear |
+| --- | --- | --- | --- | --- |
+| 1 | **Env audit**: `CAD_MODEL_*` values in prod + one `cad-cost-report` pass to attribute the observed Opus spend by role×model×route | `lib/cad/models.ts`, `scripts/cad-cost-report.ts` | hours | MTR-220 |
+| 2 | **Prompt caching**: `cache_control` on the invariant prefix in both call sites; verify via `cacheReadTokens` going nonzero in `cadJobs.usage` | `model-client.ts:126`, `agentic.ts:121` | small | MTR-221 |
+| 3 | **Modular system prompt**: router-gated mesh/SDF/exchanger sections | `prompt.ts:9-58`, `orchestrate.ts:38` | small-medium | MTR-222 |
+| 4 | **CoT-to-critic**: include plan/brief + generator reasoning summary in the judge call | `critique.ts`, `harness.ts:719` | small | MTR-223 |
+| 5 | **Timeline v1**: order feature chips by op sequence; timeline strip UI | `feature-chips.tsx`, `lib/cad/features.ts` | medium | MTR-224 |
+| 6 | **Statement-span feature binding**: sidecar records source spans per op; chips own code spans; unlocks statement-scoped repair (edit step 4, pin the rest) | `cad-runner/features.py`, `features.ts:79`, FlexCAD/CAD-Editor pattern | medium-large | MTR-225 |
+| 7 | **Symbolic-selector prompt contract**: SSR/CapType-style "attach refinements to named features, not global queries" rule in SYSTEM_PROMPT + repair playbook | `prompt.ts`, `knowledge/repair-playbook.ts` | small | MTR-226 |
+| 8 | **Judge down-tier A/B through the calibration harness** (answers doc 07's open question with data) | `scripts/evals/calibration.ts`, `drift.ts` | small-medium | MTR-227 |
+| 9 | **Eval scoring upgrade**: adopt cadbench's harmonic geometry×spec composite with a validity gate in `scripts/evals/run.ts`; consider a private run of our harness against the 100-task suite as an external yardstick | `scripts/evals/`, gNucleus validator | medium | MTR-228 |
+| 10 | **Watch-items** (no action): CADFusion-style train-time DPO once flywheel volume justifies; Zoo API as build-vs-buy fallback; Backflip-style mesh→parametric for uploaded STLs; cross-generation timeline anchors after doc 01 phase 2 lands | — | — | — |
 
 Items 1–4 are the cost package (target: >50% model-cost reduction on the modal
 generation with zero quality risk, most of it from #2). Items 5–7 are the timeline
