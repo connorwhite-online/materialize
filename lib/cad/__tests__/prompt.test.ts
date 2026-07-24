@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   SYSTEM_PROMPT,
   SYSTEM_PROMPT_CADQUERY,
+  buildSystemPrompt,
+  selectSystemPromptSections,
   extractCode,
   gradeRun,
 } from "../prompt";
@@ -40,6 +42,51 @@ describe("SYSTEM_PROMPT parts-dict contract (MTR-44)", () => {
     // single-solid. If that ever changes, this test should be updated
     // deliberately, not by accident.
     expect(SYSTEM_PROMPT_CADQUERY).toContain("result");
+  });
+});
+
+describe("system prompt gating (MTR-222)", () => {
+  it("assembles core-only sections for a plain mechanical prompt", () => {
+    const sections = selectSystemPromptSections("a bracket with two M5 bolt holes");
+    expect(sections).toEqual({ mesh: false, sdf: false, exchanger: false });
+    const prompt = buildSystemPrompt(sections);
+    expect(prompt).toContain("build123d");
+    expect(prompt).toContain("SYMBOLIC SELECTORS");
+    expect(prompt).not.toContain("MESH MODE");
+    expect(prompt).not.toContain("ORGANIC-FUNCTIONAL");
+    expect(prompt).not.toContain("DUAL-FLUID EXCHANGERS");
+  });
+
+  it("includes the mesh + SDF/TPMS sections and the exchanger bullets for a two-fluid prompt", () => {
+    const prompt = "a dual-fluid gyroid heat exchanger, hot across cold";
+    const sections = selectSystemPromptSections(prompt);
+    expect(sections).toEqual({ mesh: true, sdf: true, exchanger: true });
+    const assembled = buildSystemPrompt(sections);
+    expect(assembled).toContain("MESH MODE");
+    expect(assembled).toContain("ORGANIC-FUNCTIONAL");
+    expect(assembled).toContain("DUAL-FLUID EXCHANGERS");
+  });
+
+  it("includes the mesh + TPMS sections (but not the exchanger bullets) for an organic-shaped prompt", () => {
+    const prompt = "a flowing, organic gyroid lattice lamp shade";
+    const sections = selectSystemPromptSections(prompt);
+    expect(sections.mesh).toBe(true);
+    expect(sections.sdf).toBe(true);
+    expect(sections.exchanger).toBe(false);
+    const assembled = buildSystemPrompt(sections);
+    expect(assembled).toContain("MESH MODE");
+    expect(assembled).toContain("ORGANIC-FUNCTIONAL");
+    expect(assembled).not.toContain("DUAL-FLUID EXCHANGERS");
+  });
+
+  it("keeps the full SYSTEM_PROMPT export containing every section for compatibility", () => {
+    expect(SYSTEM_PROMPT).toContain("build123d");
+    expect(SYSTEM_PROMPT).toContain("MESH MODE");
+    expect(SYSTEM_PROMPT).toContain("ORGANIC-FUNCTIONAL");
+    expect(SYSTEM_PROMPT).toContain("DUAL-FLUID EXCHANGERS");
+    expect(SYSTEM_PROMPT).toEqual(
+      buildSystemPrompt({ mesh: true, sdf: true, exchanger: true })
+    );
   });
 });
 
