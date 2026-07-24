@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { withDbRetry } from "@/lib/db/retry";
 import {
   cadGenerations,
+  cadJobs,
   cadThreads,
   fileAssets,
   files,
@@ -84,6 +85,7 @@ export default async function TextToCadPage() {
     rating: cadGenerations.rating,
     feedbackTags: cadGenerations.feedbackTags,
     feedbackNote: cadGenerations.feedbackNote,
+    networksReport: cadGenerations.networksReport,
     createdAt: cadGenerations.createdAt,
   };
 
@@ -124,6 +126,41 @@ export default async function TextToCadPage() {
   ]);
 
   const rows = [...threadGenRows, ...legacyRows];
+
+  // Live builds survive navigation: for every still-pending generation, find
+  // its non-terminal job so the studio can REATTACH to the events stream on
+  // load. The DB is the source of truth here — the old sessionStorage-only
+  // resume forgot running jobs whenever the tab (or its storage) went away,
+  // stranding a build that was still executing server-side behind a
+  // "no printable model" empty state.
+  const pendingGenIds = rows
+    .filter((r) => r.status === "pending")
+    .map((r) => r.id);
+  const activeJobByGen = new Map<string, string>();
+  if (pendingGenIds.length > 0) {
+    const activeJobs = await withDbRetry(() =>
+      db
+        .select({
+          id: cadJobs.id,
+          generationId: cadJobs.generationId,
+          createdAt: cadJobs.createdAt,
+        })
+        .from(cadJobs)
+        .where(
+          and(
+            inArray(cadJobs.generationId, pendingGenIds),
+            inArray(cadJobs.status, ["queued", "running", "awaiting_input"])
+          )
+        )
+        .orderBy(desc(cadJobs.createdAt))
+    );
+    for (const j of activeJobs) {
+      // Newest job wins per generation (rows arrive newest-first).
+      if (!activeJobByGen.has(j.generationId)) {
+        activeJobByGen.set(j.generationId, j.id);
+      }
+    }
+  }
 
   // Reconstruct multi-part assemblies: each assembly generation links to a
   // Project bundling its part files, so an assembly survives reload/navigation
@@ -222,6 +259,12 @@ export default async function TextToCadPage() {
         : null,
       // Not persisted (no column yet) — the badge shows in-session only.
       remeshed: false,
+      // Isolation verdict (MTR-179) — persisted, so the badge survives reload.
+      networksReport: r.networksReport ?? null,
+      // Non-terminal job for a still-pending generation — the studio
+      // reattaches to its events stream on load (live builds survive
+      // navigation).
+      activeJobId: activeJobByGen.get(r.id) ?? null,
       // STEP availability threaded so "Download STEP" renders at first paint
       // (no post-mount pop-in / row reflow, MTR-215).
       hasStep: r.fileAssetId ? assetsWithStep.has(r.fileAssetId) : false,
@@ -280,8 +323,10 @@ export default async function TextToCadPage() {
     parts: m.parts,
     projectSlug: m.projectSlug,
     remeshed: m.remeshed,
+    networksReport: m.networksReport,
     hasStep: m.hasStep,
     parentGenerationId: m.parentGenerationId,
+    activeJobId: m.activeJobId,
   });
 
   for (const thread of threadRows) {

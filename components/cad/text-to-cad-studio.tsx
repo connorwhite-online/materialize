@@ -62,7 +62,14 @@ import type {
   CadProgressEvent,
   CadQuestionOption,
   CadFeature,
+  CadNetworksReport,
+  CadUsageSummary,
 } from "@/lib/cad/types";
+import {
+  networksFailure,
+  networksInconclusive,
+  networksSummary,
+} from "@/lib/cad/network-check";
 import { parseFeatures } from "@/lib/cad/features";
 // Type-only: lib/cad/brief is server-only at runtime; the type is erased.
 import type { CadBrief } from "@/lib/cad/brief";
@@ -136,6 +143,11 @@ export interface StudioTurn {
   /** True when the result was voxel-remeshed (an approximation). */
   remeshed: boolean;
   /**
+   * Dual-fluid isolation verdict (MTR-179) when the generation declared
+   * fluid circuits (exchanger builds); null/absent otherwise.
+   */
+  networksReport?: CadNetworksReport | null;
+  /**
    * True when the primary asset carried an editable STEP source (MTR-196).
    * Threaded from the server / done event so the "Download STEP" action is
    * present at first paint — no probe-driven late pop-in (MTR-215). Optional:
@@ -149,6 +161,13 @@ export interface StudioTurn {
    * through.
    */
   parentGenerationId?: string | null;
+  /**
+   * Non-terminal cadJobs row still executing this (pending) generation —
+   * server-derived, so a live build survives navigation/new tabs: the
+   * studio reattaches to this job's events stream on load. Null/absent on
+   * settled turns.
+   */
+  activeJobId?: string | null;
 }
 
 export interface StudioThread {
@@ -358,6 +377,11 @@ export function TextToCadStudio({
   );
   const [prompt, setPrompt] = useState("");
   const [progress, setProgress] = useState<CadProgressEvent[]>([]);
+  // Live cost meter (usage SSE frames, flushed mid-run by the executor):
+  // drives the tokens-so-far readout next to the stage status.
+  const [liveUsage, setLiveUsage] = useState<CadUsageSummary | null>(null);
+  // 1s heartbeat for the stage-elapsed timer while a build is in flight.
+  const [nowMs, setNowMs] = useState(() => Date.now());
   // Live build preview: the LATEST snapshot render only (replace, never
   // accumulate — each frame is a whole base64 PNG). Kept out of `progress`
   // so the status transcript stays tiny.
@@ -507,11 +531,35 @@ export function TextToCadStudio({
     };
   }, [activeRootId, viewTurnId, persistResume]);
 
-  // Reattach on return: if a background job from a previous visit is stored,
-  // tail its events stream — replay + live tail means an already-finished
-  // job resolves instantly and a running one keeps streaming (MTR-175).
+  // Reattach on return: tail the events stream of any in-flight build —
+  // replay + live tail means an already-finished job resolves instantly and
+  // a running one keeps streaming (MTR-175). Two sources, in order:
+  //   1. sessionStorage (same-tab return — carries prompt/thread context);
+  //   2. the SERVER's view (turns with an activeJobId) — sessionStorage is
+  //      per-tab and best-effort, and forgetting a job that was still
+  //      running stranded live builds behind a dead empty state.
   useEffect(() => {
-    const saved = readStoredJob();
+    let saved = readStoredJob();
+    if (!saved) {
+      let fromDb: (StoredJob & { at: number }) | null = null;
+      for (const thread of initialThreads) {
+        for (const turn of thread.turns) {
+          if (turn.status !== "pending" || !turn.activeJobId) continue;
+          // Threads are ordered by lastActivity; prefer the newest.
+          if (!fromDb || thread.lastActivity > fromDb.at) {
+            fromDb = {
+              jobId: turn.activeJobId,
+              generationId: turn.id,
+              prompt: turn.prompt,
+              parentId: turn.parentGenerationId ?? null,
+              rootId: thread.rootId,
+              at: thread.lastActivity,
+            };
+          }
+        }
+      }
+      saved = fromDb;
+    }
     if (!saved) return;
     const controller = new AbortController();
     abortRef.current?.abort();
@@ -519,6 +567,7 @@ export function TextToCadStudio({
     jobRef.current = saved;
     if (saved.rootId) setActiveRootId(saved.rootId);
     setProgress([]);
+    setLiveUsage(null);
     setSnapshot(null);
     setError(null);
     // Repopulate the "sent" bubble so a reattached build shows its prompt in
@@ -543,6 +592,14 @@ export function TextToCadStudio({
     // Mount-only by design: reattach exactly once per studio mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Tick the stage-elapsed timer once a second while a build is in flight.
+  useEffect(() => {
+    if (!generating) return;
+    setNowMs(Date.now());
+    const tick = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(tick);
+  }, [generating]);
 
   // Close the build three-dot menu on any outside click.
   useEffect(() => {
@@ -811,6 +868,7 @@ export function TextToCadStudio({
         parts: res.parts,
         projectSlug: res.projectSlug,
         remeshed: res.remeshed,
+        networksReport: res.networksReport ?? null,
         hasStep: res.hasStep,
         parentGenerationId: res.parentGenerationId,
       };
@@ -864,6 +922,7 @@ export function TextToCadStudio({
     setActiveRootId(null);
     setViewTurnId(null);
     setProgress([]);
+    setLiveUsage(null);
     setPendingQuestion(null);
     setSnapshot(null);
     setBrief(null);
@@ -889,6 +948,7 @@ export function TextToCadStudio({
       .find((x) => x.status === "succeeded" && x.fileAssetId);
     setViewTurnId(lastGood?.id ?? null);
     setProgress([]);
+    setLiveUsage(null);
     setSnapshot(null);
     setBrief(null);
     setBriefLoading(false);
@@ -1024,6 +1084,7 @@ export function TextToCadStudio({
       parts: ev.parts ?? [],
       projectSlug: ev.projectSlug ?? null,
       remeshed: ev.remeshed ?? false,
+      networksReport: ev.networksReport ?? null,
       // STEP presence rides the done event so the action row is stable at first
       // paint (MTR-215).
       hasStep: ev.hasStep ?? false,
@@ -1228,6 +1289,7 @@ export function TextToCadStudio({
 
     setError(null);
     setProgress([]);
+    setLiveUsage(null);
     setSnapshot(null);
     // A revision deforms the model currently on screen (edit-in-place); a fresh
     // build has none, so the wireframe blob deforms instead.
@@ -1395,6 +1457,10 @@ export function TextToCadStudio({
               // accumulate (each frame is a whole base64 PNG; the progress
               // transcript must stay light).
               setSnapshot({ render: ev.render, step: ev.step });
+            } else if (ev.type === "usage") {
+              // Live cost meter — replace, never append (synthesized by the
+              // events route from the job row, not part of the transcript).
+              setLiveUsage(ev.usage);
             } else if (ev.type === "question") {
               // Mid-cycle question (MTR-191): the job suspended awaiting a pick.
               // Replay-safe — reattaching mid-question re-emits this and we just
@@ -1495,6 +1561,38 @@ export function TextToCadStudio({
     : progress.length
       ? describeEvent(progress[progress.length - 1]).text
       : "Getting started";
+  // Stage-elapsed timer: the current stage began at the FIRST event of the
+  // trailing run whose display text matches the latest one. Uses the entry's
+  // own emit stamp (`t`, persisted server-side) so a reattached/replayed
+  // build shows true elapsed time, not time-since-reconnect.
+  const stageStartMs = useMemo(() => {
+    if (progress.length === 0) return null;
+    const lastText = describeEvent(progress[progress.length - 1]).text;
+    let start: number | null = null;
+    for (let i = progress.length - 1; i >= 0; i--) {
+      const e = progress[i];
+      if (describeEvent(e).text !== lastText) break;
+      start = (e as { t?: number }).t ?? start;
+    }
+    return start;
+  }, [progress]);
+  const stageSecs =
+    stageStartMs != null
+      ? Math.max(0, Math.floor((nowMs - stageStartMs) / 1000))
+      : null;
+  const totalTokens =
+    liveUsage?.model?.reduce(
+      (sum, m) => sum + m.inputTokens + m.outputTokens,
+      0
+    ) ?? 0;
+  // "2m 14s · 148k tokens" under the stage label — the build's live vitals.
+  const statusDetail =
+    [
+      stageSecs != null && stageSecs >= 1 ? formatElapsed(stageSecs) : null,
+      totalTokens > 0 ? `${formatTokens(totalTokens)} tokens` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ") || null;
   // Cancel the quick-check → back to the resting composer with the prompt kept
   // so it can be edited (round 2 note #4 escape hatch).
   const cancelBrief = () => {
@@ -1811,7 +1909,10 @@ export function TextToCadStudio({
                 </div>
               )}
 
-              {/* Empty state — no model, nothing generating. */}
+              {/* Empty state — no model, nothing generating. A still-pending
+                  turn is NOT "no model": either its job is alive (reattach
+                  picks it up on load) or it died without a terminal write —
+                  say which, never imply a finished-and-empty build. */}
               {!showTransition && !mountModel && (
                 <div className="flex h-full w-full flex-col">
                   <Suspense fallback={<div className="min-h-0 flex-1" />}>
@@ -1819,7 +1920,11 @@ export function TextToCadStudio({
                   </Suspense>
                   {activeThread && (
                     <p className="shrink-0 px-6 pb-8 text-center text-sm text-muted-foreground">
-                      No printable model in this build yet.
+                      {viewedTurn?.status === "pending" && viewedTurn.activeJobId
+                        ? "This build is still generating — reload to reattach to its live progress."
+                        : viewedTurn?.status === "pending"
+                          ? "This build was interrupted before finishing — send a revision to rebuild it."
+                          : "No printable model in this build yet."}
                     </p>
                   )}
                 </div>
@@ -1939,6 +2044,33 @@ export function TextToCadStudio({
               fine detail and exact dimensions may differ.
             </p>
           )}
+
+          {/* Dual-fluid isolation verdict (MTR-179) — present only on
+              exchanger-class builds that declared fluid circuits. Copy states
+              the voxel-resolution bound, never "leak-free" (honesty rail).
+              Three states: red (verified leak/blockage), amber (part too
+              large to verify at wall resolution — no verdict), green
+              (verified isolated at the stated bound). */}
+          {!generating &&
+            viewedTurn?.networksReport &&
+            (networksFailure(viewedTurn.networksReport) ? (
+              <p className="mt-3 flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                <AlertTriangleIcon className="size-4 shrink-0" />
+                Fluid circuits not isolated —{" "}
+                {networksFailure(viewedTurn.networksReport)}
+              </p>
+            ) : networksInconclusive(viewedTurn.networksReport) ? (
+              <p className="mt-3 flex items-center gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
+                <AlertTriangleIcon className="size-4 shrink-0" />
+                Isolation not verified —{" "}
+                {networksInconclusive(viewedTurn.networksReport)}
+              </p>
+            ) : (
+              <p className="mt-3 flex items-center gap-2 rounded-lg bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-400">
+                <CheckIcon className="size-4 shrink-0" />
+                Verified: {networksSummary(viewedTurn.networksReport)}
+              </p>
+            ))}
 
           {/* Feedback — the in-the-moment eval signal (feeds /text-to-cad/eval).
               Sits ABOVE the actions; auto-prompts after each generation until
@@ -2386,6 +2518,7 @@ export function TextToCadStudio({
                 key="gen-thread"
                 promptText={submittedPrompt ?? ""}
                 statusText={statusText}
+                statusDetail={statusDetail}
                 preview={snapshot}
                 pendingQuestion={pendingQuestion}
                 onAnswer={answerQuestion}
@@ -2733,6 +2866,7 @@ function BubblePreview({ render, step }: { render: string; step: number }) {
 function GenerationThread({
   promptText,
   statusText,
+  statusDetail,
   preview,
   pendingQuestion,
   onAnswer,
@@ -2746,6 +2880,8 @@ function GenerationThread({
 }: {
   promptText: string;
   statusText: string;
+  /** Live vitals under the stage label: "2m 14s · 148k tokens". */
+  statusDetail: string | null;
   preview: { render: string; step: number } | null;
   pendingQuestion: {
     questionId: string;
@@ -2856,8 +2992,17 @@ function GenerationThread({
                   <span className="flex shrink-0 text-muted-foreground">
                     <MetaballLoader size={22} />
                   </span>
-                  <span className="text-sm font-medium text-foreground">
-                    {statusText}
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-foreground">
+                      {statusText}
+                    </span>
+                    {/* Live vitals: stage elapsed + tokens so far. Fixed
+                        tabular digits so the ticking seconds don't wiggle. */}
+                    {statusDetail && (
+                      <span className="block text-xs tabular-nums text-muted-foreground">
+                        {statusDetail}
+                      </span>
+                    )}
                   </span>
                 </div>
               </motion.div>
@@ -3168,6 +3313,20 @@ function ViewerSkeleton({ label }: { label: string }) {
   );
 }
 
+/** "42s" under a minute, then "2m 14s" — compact, stable-width. */
+function formatElapsed(totalSecs: number): string {
+  const m = Math.floor(totalSecs / 60);
+  const s = totalSecs % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+/** "740" / "9.4k" / "148k" — coarse on purpose, it's a vibe meter. */
+function formatTokens(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 10_000) return `${(n / 1000).toFixed(1)}k`;
+  return `${Math.round(n / 1000)}k`;
+}
+
 function describeEvent(ev: CadProgressEvent): {
   text: string;
   sub: string | null;
@@ -3203,6 +3362,18 @@ function describeEvent(ev: CadProgressEvent): {
         text: "Continuing your build",
         sub: ev.viaDefault ? `Using ${ev.label}` : `Building ${ev.label}`,
       };
+    // Observability breadcrumbs (route/fallback): persisted for the job
+    // trail and debugging, not user-narrated — show neutral copy. The
+    // fallback copy is honest without being alarming: the build is being
+    // redone by the scripted engine.
+    case "route":
+      return { text: "Designing your model", sub: null };
+    case "fallback":
+      return { text: "Rebuilding with a fresh approach", sub: null };
+    // Never lands in `progress` (handled as live state) — here only to keep
+    // the switch exhaustive.
+    case "usage":
+      return { text: "Designing your model", sub: null };
   }
 }
 
