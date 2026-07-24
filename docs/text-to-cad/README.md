@@ -94,6 +94,11 @@ Beyond the workstream specs, [09-cad-skills-research.md](./09-cad-skills-researc
 (MTR-195, 2026-07-05) is a competitive deep-dive of CAD Skills
 (earthtojake/text-to-cad): what it validates about this architecture, the gaps adopted
 from it (MTR-196–201), and the fulfillment-rails strategic play (MTR-202).
+[10-llm-cad-research-alignment.md](./10-llm-cad-research-alignment.md) (2026-07-24)
+extends it with the academic frontier (Seek-CAD, GenCAD, cadbench.ai, and the
+2023–26 landscape): the verdict on the editable-feature-timeline thesis, and a
+prioritized cost package (prompt caching, prompt modularization, role routing) for
+the harness. Its recommendations still need MTR issues filed.
 
 Related pre-existing issues: MTR-35 (annotation v1, shipped — 01 is its v2), MTR-44
 (assemblies 2/2), MTR-46 (enhancement backlog), MTR-48 (studio cleanups — superseded in
