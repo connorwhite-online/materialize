@@ -1,6 +1,7 @@
 import "server-only";
 
 import { meterSidecarCall } from "./metering";
+import { sidecarDispatcher } from "./sidecar-fetch";
 import type { CadOutputFormat, CadRunResult } from "./types";
 
 /**
@@ -62,6 +63,10 @@ async function sessionFetch<T>(
       headers: headers(),
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
       signal: init.signal,
+      // Outlive the sidecar's exec ceiling — undici's default 300s headers
+      // timeout killed long session execs at the HTTP layer mid-build.
+      // Not in RequestInit's types, but honored by Node's fetch.
+      ...({ dispatcher: sidecarDispatcher } as object),
     });
   } catch (err) {
     // Preserve aborts (caller cancellation, not infrastructure failure).

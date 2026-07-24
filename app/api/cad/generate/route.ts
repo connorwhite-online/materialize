@@ -67,9 +67,13 @@ export const dynamic = "force-dynamic";
 // repair attempt) runs via after(), and on Vercel after() callbacks execute
 // within THIS function's lifetime — so maxDuration still bounds the total
 // effort a job can spend. Prod must run on a plan that allows this (and
-// host the sidecar). The unbounded upgrade path is moving executeCadJob to
-// the Railway worker (docs/text-to-cad/02 §B option 2) — the job/events/
-// cancel contract doesn't change.
+// host the sidecar). NOTE: the agentic harness's default wall clock is now
+// 600s (large TPMS builds) — locally/self-hosted that's unbounded by any
+// platform, but under this 300s Vercel window a long build gets killed
+// mid-run; either raise maxDuration (Pro/Fluid allows 800) or trim the
+// harness via CAD_AGENTIC_MAX_MS to fit. The unbounded upgrade path is
+// moving executeCadJob to the Railway worker (docs/text-to-cad/02 §B
+// option 2) — the job/events/cancel contract doesn't change.
 export const maxDuration = 300;
 
 export async function POST(request: Request) {

@@ -8,6 +8,7 @@ import {
 import { runCadCode } from "./runner-client";
 import { SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, extractCode, gradeRun } from "./prompt";
 import { buildKnowledgeBlock, type CadProcess } from "./knowledge";
+import { needsExchangerRecipe } from "./knowledge/exchanger-recipe";
 import {
   needsEnclosureRecipe,
   ENCLOSURE_SPLIT_REPAIR_NOTE,
@@ -50,6 +51,7 @@ import {
   type DimensionTarget,
 } from "./dimension-check";
 import { enrichRepairHint } from "./repair-taxonomy";
+import { getNetworksReport, networksFailure } from "./network-check";
 import {
   BREP_OUTPUT_FORMATS,
   type CadProgressEvent,
@@ -378,6 +380,24 @@ export function repairHintFor(note: string): string {
   if (/no result|oom|crash|killed|memory|timed out/.test(n)) {
     return "The previous attempt CRASHED or hung the geometry kernel — it was too heavy. Drastically SIMPLIFY: far fewer boolean operations, no large loops or dense patterns, coarser detail, simple primitives. Build the simplest geometry that still reads as the requested object.";
   }
+  // Dual-fluid isolation failures (MTR-179): concrete geometry fixes, not
+  // "try again". The diagnosis in the note already names leak vs blockage.
+  if (/fluid circuits failed isolation/.test(n)) {
+    return (
+      "Fix the dual-fluid core, in order of likelihood: (1) LEAK — the wall " +
+      "is thinner than the mesh can resolve: raise `wall` (>= 1.0mm polymer) " +
+      "and keep to_mesh pitch <= wall/3; or a plenum face never sealed the " +
+      "other fluid — every port face needs the OTHER circuit ramp-sealed " +
+      "(seal_a/seal_b via seal_ramp over >= half a cell), which " +
+      "exchanger_core() does for you. (2) BLOCKAGE — a circuit split in two " +
+      "means its channels never reach the plenum: don't seal a fluid on its " +
+      "OWN port face, and keep the core >= 1.5 cells per axis. (3) Probe " +
+      "misplaced — fluid_ports probes must sit in open fluid space (plenum " +
+      "centers, off the bore axis). Prefer `exchanger_core(...)` from " +
+      "`exchanger` over hand-rolling the seals; it returns correct " +
+      "fluid_ports/fluid_plugs."
+    );
+  }
   // The harness runs the sidecar with allowRemesh: false (docs/text-to-cad/02
   // §C) — a non-watertight result is the model's to fix, not the voxelizer's.
   if (/not watertight/.test(n)) {
@@ -661,6 +681,34 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
         attempt < maxAttempts
       ) {
         repairNote = `dimensions are out of spec — ${formatDimensionRepairHints(dimensionChecks)}`;
+        emit({ type: "repairing", attempt, maxAttempts, reason: repairNote });
+        continue;
+      }
+
+      // Dual-fluid isolation (MTR-179): the sidecar ran check_networks
+      // because the script declared `fluid_ports` (exchanger builds). A leak
+      // or blockage earns a targeted repair turn before the (paid) aesthetic
+      // judge — an exchanger that mixes its fluids is scrap however it looks.
+      const networksFail = networksFailure(getNetworksReport(lastRun));
+      if (networksFail && useModel && attempt < maxAttempts) {
+        repairNote = `the fluid circuits failed isolation — ${networksFail}`;
+        emit({ type: "repairing", attempt, maxAttempts, reason: repairNote });
+        continue;
+      }
+
+      // Exchanger prompt with NO networks report at all: the script never
+      // (validly) declared fluid_ports, so the isolation check silently
+      // never ran — the exact hole that shipped an unverified solid block
+      // as a "finished" exchanger. Verification is not optional for a
+      // two-fluid part; spend a repair turn demanding the declaration.
+      if (
+        needsExchangerRecipe(input.prompt) &&
+        !getNetworksReport(lastRun) &&
+        useModel &&
+        attempt < maxAttempts
+      ) {
+        repairNote =
+          "this is a dual-fluid part but NO isolation check ran — declare `fluid_ports` (a LIST of {\"name\": \"a_in\", \"point\": [x,y,z], \"r\": mm} probes, one per inlet/outlet, each sitting in open fluid space), `fluid_plugs` (a LIST of {\"a\": [x,y,z], \"b\": [x,y,z], \"r\": mm} capsules spanning each port bore), and `fluid_min_feature = wall`. exchanger_core() returns ports and plugs ready-made. An exchanger without a verified isolation check cannot ship.";
         emit({ type: "repairing", attempt, maxAttempts, reason: repairNote });
         continue;
       }

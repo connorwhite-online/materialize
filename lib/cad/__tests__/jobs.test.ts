@@ -255,7 +255,11 @@ describe("executeCadJob", () => {
         fileSlug: "slug-1",
       })
     );
-    expect(jobRow.progress).toContainEqual(phaseEvent(1));
+    // Entries are stamped with `t` (emit time) at persist — match the
+    // meaningful fields, not the clock.
+    expect(jobRow.progress).toContainEqual(
+      expect.objectContaining(phaseEvent(1))
+    );
     expect(persistGenerationSuccess).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "user-1",

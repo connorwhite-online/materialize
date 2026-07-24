@@ -48,7 +48,7 @@ import {
   persistGenerationSuccess,
   persistGenerationFailure,
 } from "@/lib/cad/persist";
-import { BREP_OUTPUT_FORMATS } from "@/lib/cad/types";
+import { BREP_OUTPUT_FORMATS, type CadNetworksReport } from "@/lib/cad/types";
 import type { HarnessResult } from "@/lib/cad/harness";
 import { substituteParams, extractParams } from "@/components/cad/param-diff";
 import { parseFeatures } from "@/lib/cad/features";
@@ -851,6 +851,8 @@ export interface RerunCadWithParamsResult {
   parts: { name: string; fileAssetId: string }[];
   projectSlug: string | null;
   remeshed: boolean;
+  /** Dual-fluid isolation verdict (MTR-179) when circuits were declared. */
+  networksReport: CadNetworksReport | null;
   hasStep: boolean;
   features: ReturnType<typeof parseFeatures>;
 }
@@ -997,6 +999,7 @@ export async function rerunCadWithParams(input: {
       })),
       projectSlug: persisted.projectSlug ?? null,
       remeshed: persisted.remeshed ?? false,
+      networksReport: persisted.networksReport ?? null,
       hasStep: persisted.hasStep ?? false,
       features: parseFeatures(persisted.features),
     };

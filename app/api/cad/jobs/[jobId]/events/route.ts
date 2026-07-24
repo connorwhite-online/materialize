@@ -31,9 +31,12 @@ const HEARTBEAT_MS = 15_000;
 const HARD_CEILING_MS = 290_000;
 // A job whose executor died without writing a terminal status (platform kill
 // past maxDuration, process crash) would otherwise tail forever as "running".
-// Executions are bounded by the generate route's maxDuration=300s, so a
-// running job older than this is provably dead — reap it on read.
-const STALE_RUNNING_MS = 10 * 60_000;
+// Measured against the job's HEARTBEAT (updatedAt, bumped per progress
+// append), not its age — so it must exceed only the longest legitimately
+// SILENT stretch: one sidecar exec (up to 600s wall, CAD_RUN_TIMEOUT_S)
+// plus the aesthetic judge, during which no progress events fire. 15min
+// covers that with margin while closing dead tails reasonably fast.
+const STALE_RUNNING_MS = 15 * 60_000;
 const TERMINAL_STATUSES = new Set(["done", "failed", "cancelled"]);
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -64,6 +67,7 @@ export async function GET(
         status: cadJobs.status,
         progress: cadJobs.progress,
         error: cadJobs.error,
+        usage: cadJobs.usage,
         generationId: cadJobs.generationId,
         ownerId: cadGenerations.userId,
       })
@@ -104,6 +108,19 @@ export async function GET(
       // Replay everything persisted so far, then tail.
       emitNew();
 
+      // Live cost meter: cadJobs.usage is flushed mid-run by the executor;
+      // synthesize a `usage` frame whenever it changes (same pattern as the
+      // snapshot column — kept OUT of the append-only progress log).
+      let sentUsageJson = "";
+      const emitUsage = (usage: unknown) => {
+        if (!usage) return;
+        const json = JSON.stringify(usage);
+        if (json === sentUsageJson) return;
+        sentUsageJson = json;
+        send(`data: ${JSON.stringify({ type: "usage", usage })}\n\n`);
+      };
+      emitUsage(job.usage);
+
       const startedAt = Date.now();
       let lastBeat = Date.now();
       let sentSnapshotStep = 0;
@@ -121,8 +138,10 @@ export async function GET(
                 status: cadJobs.status,
                 progress: cadJobs.progress,
                 error: cadJobs.error,
+                usage: cadJobs.usage,
                 startedAt: cadJobs.startedAt,
                 createdAt: cadJobs.createdAt,
+                updatedAt: cadJobs.updatedAt,
                 snapshotStep: cadJobs.snapshotStep,
               })
               .from(cadJobs)
@@ -133,6 +152,7 @@ export async function GET(
             status = row.status;
             entries = row.progress ?? [];
             jobError = row.error;
+            emitUsage(row.usage);
             // Live preview: the render lives in its own column (not the
             // append-only progress log); fetch it only when the step moved.
             if (row.snapshotStep > sentSnapshotStep) {
@@ -150,20 +170,23 @@ export async function GET(
                 });
               }
             }
-            // Reap-on-read: a running/queued job whose execution window has
-            // provably passed died without a terminal write — mark it failed
-            // so this tail (and every future reattach) closes instead of
-            // polling a corpse. Plain write, not withDbRetry (write path).
+            // Reap-on-read: a running/queued job whose HEARTBEAT went stale
+            // died without a terminal write — mark it failed so this tail
+            // (and every future reattach) closes instead of polling a
+            // corpse. The heartbeat is cadJobs.updatedAt, bumped on every
+            // progress append (appendJobProgress) — age-since-start falsely
+            // reaped long legitimate builds and let dead jobs linger for
+            // the whole window. Plain write, not withDbRetry (write path).
             // `awaiting_input` (MTR-191) is deliberately EXCLUDED: it's a live
             // suspend on user input bounded by the question's own timeout, not
             // a dead job — reaping it would kill a legitimately-waiting build
             // (and the SQL guard below wouldn't match it anyway, desyncing the
             // local `status`).
-            const born = row.startedAt ?? row.createdAt;
+            const lastBeat = row.updatedAt ?? row.startedAt ?? row.createdAt;
             if (
               (status === "running" || status === "queued") &&
-              born &&
-              Date.now() - born.getTime() > STALE_RUNNING_MS
+              lastBeat &&
+              Date.now() - lastBeat.getTime() > STALE_RUNNING_MS
             ) {
               jobError =
                 "Generation was interrupted before finishing. Please try again.";

@@ -6,6 +6,7 @@ import { clientForCredentials, hasModelCredentials } from "./model-client";
 import { activeCadContext, meterModelUsage } from "./metering";
 import { SYSTEM_PROMPT, gradeRun } from "./prompt";
 import { buildKnowledgeBlock } from "./knowledge";
+import { needsExchangerRecipe } from "./knowledge/exchanger-recipe";
 import { selectExemplars, formatExemplars } from "./knowledge/exemplars";
 import { judgeAesthetics, type AestheticJudgement } from "./critique";
 import { CAD_FEEDBACK_TAG_LABELS, type CadFeedbackTag } from "./feedback";
@@ -16,6 +17,12 @@ import {
   type DimensionCheckResult,
   type DimensionTarget,
 } from "./dimension-check";
+import {
+  getNetworksReport,
+  networksFailure,
+  networksInconclusive,
+  networksSummary,
+} from "./network-check";
 import { cadBriefSchema } from "./brief";
 import { enrichRepairHint } from "./repair-taxonomy";
 import { modelForRole } from "./models";
@@ -72,7 +79,12 @@ function maxAgenticQuestions(): number {
 // Tool-turn cap: each turn = one model call + its tool executions. Complex
 // parts per doc 03 need >4 execs; 16 bounds cost without strangling them.
 const MAX_TOOL_TURNS = 16;
-const DEFAULT_MAX_MS = 240_000;
+// Wall-clock budget. 600s: a full-scale TPMS/exchanger build spends 3-4
+// minutes in a SINGLE final mesh, so the old 240s cut large parts off
+// mid-assembly. Local/self-hosted runs are unbounded by the platform;
+// on Vercel the generate route's maxDuration must cover this (or trim it
+// back via CAD_AGENTIC_MAX_MS) — see app/api/cad/generate/route.ts.
+const DEFAULT_MAX_MS = 600_000;
 // Same default + headroom rationale as model-client.
 const DEFAULT_MODEL = "claude-sonnet-4-6";
 const MAX_TOKENS = 8192;
@@ -255,7 +267,7 @@ const LOOP_GUIDANCE = `You are working in a PERSISTENT Python session via tools 
 Review doctrine (MTR-199) — renders are DIAGNOSTIC, not authoritative:
 - Convert every VISUAL concern into a follow-up GEOMETRY check before acting on it. If a hole looks off-centre or a wall looks thin, the next tool call is measure() (or an exec that prints the coordinate/bbox), NOT a blind regenerate. Only treat a concern as real once a measurement confirms it.
 - Do NOT loop on snapshots/renders: rerender only after a source repair actually changed visible geometry. Re-viewing an unchanged solid burns budget for no signal.
-- HONESTY: report only checks that actually ran. Never claim structural safety, tolerance compliance, or manufacturability beyond geometric plausibility — you validate watertightness, body count, bounding box, and stated dimension targets, nothing more.
+- HONESTY: report only checks that actually ran. Never claim structural safety, tolerance compliance, or manufacturability beyond geometric plausibility — you validate watertightness, body count, bounding box, stated dimension targets, and (only when the script declares \`fluid_ports\`) dual-fluid circuit isolation at voxel resolution, nothing more. Isolation verified at pitch p means "no leak wider than ~p mm", never "leak-free".
 
 Off-the-shelf parts (MTR-200): for any real named component the design must FIT or MATE with (a fastener, bearing, board, connector), call search_parts / fetch_part BEFORE modeling a placeholder box. When the result carries a bd_warehouse constructor, run its importLine + constructor in exec and mate/subtract against that solid — never hand-model a standard part. Otherwise size the cavity/cutout/standoff from the returned envelope (or imported STEP). If sourcing misses or is unavailable, fall back to the documented envelope — a network failure is not proof the part doesn't exist.
 
@@ -393,6 +405,14 @@ export async function runAgenticHarness(
   let toolTurns = 0;
   let execCount = 0;
   let finished = false;
+  // True when the loop exited because the turn/time budget ran out while the
+  // model was still mid-build (as opposed to a graceful stop or finish()).
+  // bestRun in this state is whatever last passed the shallow structural
+  // grade — possibly an unfinished exploration/preview snapshot, not the
+  // model's intended final part (e.g. a plenum-shape sanity-check solid
+  // returned as a "finished" dual-fluid exchanger because nothing
+  // distinguished it from a real result).
+  let budgetCutoff = false;
   // Interactive-question budget spent so far (MTR-191).
   let questionsAsked = 0;
   const questionBudget = maxAgenticQuestions();
@@ -490,6 +510,23 @@ export async function runAgenticHarness(
         if (finished) break;
       }
       messages.push({ role: "user", content: results });
+
+      // Wrap-up nudge: with the budget nearly spent, tell the model to stop
+      // exploring and consolidate NOW, before the hard cutoff below discards
+      // whatever intermediate/preview state `result` happens to hold. Without
+      // this a multi-part build (e.g. a manifolded exchanger) can get cut off
+      // mid-assembly and silently return a sanity-check shape as "finished".
+      const turnsLeft = MAX_TOOL_TURNS - toolTurns;
+      if (!finished && turnsLeft > 0 && turnsLeft <= 2) {
+        const last = results[results.length - 1];
+        if (Array.isArray(last.content)) {
+          last.content.push(
+            textBlock(
+              `BUDGET WARNING: only ${turnsLeft} tool turn(s) left before this build is cut off and whatever \`result\` currently holds is returned as final. Stop exploring or sanity-checking sub-shapes — on your NEXT exec, assemble the COMPLETE part (every feature combined: hollow core, hollowed/subtracted plenums or fittings, all cavities) into \`result\`, then call finish() immediately. Do not leave \`result\` pointing at an intermediate preview, a shape-only sanity check, or anything short of the finished part.`
+            )
+          );
+        }
+      }
     }
   } catch (err) {
     if ((err as Error)?.name === "AbortError") throw err;
@@ -503,6 +540,22 @@ export async function runAgenticHarness(
       // Best-effort, and never with the (possibly aborted) request signal.
       await deleteSession(sessionId).catch(() => undefined);
     }
+  }
+
+  budgetCutoff =
+    !finished && (toolTurns >= MAX_TOOL_TURNS || Date.now() - startedAt > maxMs);
+  // Hard turn/time cutoff while the model was still mid-build (not a
+  // graceful stop, not finish()): bestRun is whatever last passed the
+  // shallow structural grade, which may be an unfinished exploration or
+  // sanity-check shape rather than the assembled part — the failure mode
+  // that returned a solid block for a manifolded dual-fluid exchanger. Never
+  // ship that silently as "done"; fall back to the scripted harness, which
+  // builds single-shot with its own repair loop instead of running out of
+  // an incremental-build budget mid-assembly.
+  if (budgetCutoff && bestRun) {
+    throw new CadAgenticError(
+      "agentic harness hit its turn/time budget mid-build (finish() was never called) — the best-so-far result may be an unfinished exploration snapshot, not the intended part"
+    );
   }
 
   // Grade/judge the accepted run once when the agent didn't already — keeps
@@ -662,6 +715,27 @@ export async function runAgenticHarness(
               dimensions: dimSummary.ran > 0
                 ? { verified: dimSummary.label, failures: dimHints || undefined }
                 : null,
+              // Dual-fluid isolation (MTR-179): present when the script
+              // declared fluid_ports and the sidecar ran check_networks.
+              // For an exchanger-class prompt a MISSING report is itself a
+              // defect (the declaration never happened or was malformed) —
+              // say so instead of a silent null, or the model finishes an
+              // unverified two-fluid part without noticing.
+              fluidIsolation: getNetworksReport(lastRun)
+                ? {
+                    verified: networksSummary(getNetworksReport(lastRun)),
+                    failure:
+                      networksFailure(getNetworksReport(lastRun)) || undefined,
+                    inconclusive:
+                      networksInconclusive(getNetworksReport(lastRun)) ||
+                      undefined,
+                  }
+                : needsExchangerRecipe(input.prompt)
+                  ? {
+                      failure:
+                        "no isolation check ran — declare fluid_ports (LIST of {name, point:[x,y,z], r}), fluid_plugs (LIST of {a, b, r} capsules), and fluid_min_feature = wall in an exec, then re-grade. A dual-fluid part cannot finish unverified.",
+                    }
+                  : null,
               aesthetic: judgement.available
                 ? {
                     score: judgement.score,
