@@ -43,6 +43,14 @@ import { CAD_FEEDBACK_TAG_LABELS, type CadFeedbackTag } from "../../lib/cad/feed
 import type { CadRunResult } from "../../lib/cad/types";
 import { EVAL_CASES, type EvalCase, type EvalTier } from "./cases";
 import { gradeTurn, type EvalTurn, type TurnGrade } from "./turns";
+import {
+  caseComposite,
+  formatComposite,
+  isBrepExpectedTier,
+  isEditabilityGated,
+  runDeliveredBrep,
+  type CompositeSignals,
+} from "./composite";
 
 const RUNNER_URL = process.env.CAD_RUNNER_URL;
 // A/B the B-rep front-end: build123d (default) vs cadquery. Point CAD_RUNNER_URL
@@ -273,6 +281,33 @@ interface CaseResult {
   negResults: NegativeCheckResult[] | null;
   /** MTR-183 per-turn grades for a revision chain; empty for single-shot cases. */
   turnGrades: TurnGrade[];
+  /** MTR-228 editability-gated harmonic composite (0..1). */
+  composite: number;
+  /** True when the composite was zeroed by the editability gate (remeshed / no B-rep). */
+  editabilityGated: boolean;
+}
+
+/**
+ * MTR-228 composite signals for a completed run. Validity is re-derived via
+ * `gradeRun(run)` WITHOUT the legacy expectedDims, so an off-target dimension
+ * degrades the accuracy fraction instead of zeroing the whole geometry axis.
+ */
+function compositeSignals(
+  c: EvalCase,
+  run: CadRunResult,
+  dimResults: DimensionCheckResult[],
+  negResults: NegativeCheckResult[] | null
+): CompositeSignals {
+  const dims = summarizeDimensionChecks(dimResults);
+  return {
+    valid: gradeRun(run).pass,
+    dimsRan: dims.ran,
+    dimsPassed: dims.passed,
+    negTotal: negResults?.length ?? 0,
+    negClean: negResults?.filter((n) => !n.violated).length ?? 0,
+    brepExpected: isBrepExpectedTier(c.tier),
+    brepDelivered: runDeliveredBrep(run),
+  };
 }
 
 /** Run a case's revision chain (MTR-183), grading each turn deterministically. */
@@ -324,6 +359,13 @@ function turnTag(r: CaseResult): string {
   const chain = passed === r.turnGrades.length ? "✓" : "✗";
   return `  turns ${passed}/${r.turnGrades.length} ${chain}`;
 }
+/** Per-case: MTR-228 composite, flagging an editability-gate zero. */
+function compositeTag(r: CaseResult): string {
+  return (
+    `  composite ${formatComposite(r.composite)}` +
+    (r.editabilityGated ? " (remeshed — no B-rep, gated to 0)" : "")
+  );
+}
 
 async function main() {
   const results: CaseResult[] = [];
@@ -344,7 +386,17 @@ async function main() {
       // valid solid to revise; a broken base is a base failure, not a turn one.
       const turnGrades =
         c.turns?.length && grade.pass ? await runRevisionChain(c, code, run) : [];
-      const cr: CaseResult = { c, grade, aesthetic, dimResults, negResults, turnGrades };
+      const signals = compositeSignals(c, run, dimResults, negResults);
+      const cr: CaseResult = {
+        c,
+        grade,
+        aesthetic,
+        dimResults,
+        negResults,
+        turnGrades,
+        composite: caseComposite(signals),
+        editabilityGated: isEditabilityGated(signals),
+      };
       results.push(cr);
       const tag = aesthetic == null ? "" : `  aesthetic ${aesthetic}/100`;
       console.log(
@@ -352,7 +404,8 @@ async function main() {
           tag +
           dimTag(cr) +
           negTag(cr) +
-          turnTag(cr)
+          turnTag(cr) +
+          compositeTag(cr)
       );
     } catch (err) {
       results.push({
@@ -362,6 +415,8 @@ async function main() {
         dimResults: [],
         negResults: null,
         turnGrades: [],
+        composite: 0,
+        editabilityGated: false,
       });
       console.log(`ERROR (${err})`);
     }
@@ -369,7 +424,8 @@ async function main() {
 
   // Scorecard by tier: validity pass-rate + mean design-quality score +
   // dimension accuracy (passed/ran across the tier, honesty-railed) + negative
-  // checks clean (cases with all forbidden properties absent).
+  // checks clean (cases with all forbidden properties absent) + the MTR-228
+  // editability-gated harmonic composite (see scripts/evals/composite.ts).
   const tiers: EvalTier[] = [
     "primitive",
     "bracket",
@@ -397,8 +453,12 @@ async function main() {
     const clean = judged.filter((r) => r.negResults!.every((n) => !n.violated)).length;
     return `${clean}/${judged.length}`;
   };
+  // MTR-228: mean editability-gated harmonic composite. Zeros (invalid, spec
+  // violated, remesh-gated) stay in the mean — that is the point.
+  const meanComposite = (rs: CaseResult[]): string =>
+    formatComposite(rs.reduce((a, r) => a + r.composite, 0) / rs.length);
   console.log(
-    `\n=== Scorecard [engine: ${ENGINE}, model: ${GEN_MODEL}] (validity | aesthetic | dim-acc | neg-clean) ===`
+    `\n=== Scorecard [engine: ${ENGINE}, model: ${GEN_MODEL}] (validity | aesthetic | dim-acc | neg-clean | composite) ===`
   );
   for (const tier of tiers) {
     const inTier = results.filter((r) => r.c.tier === tier);
@@ -408,7 +468,7 @@ async function main() {
       inTier.map((r) => r.aesthetic).filter((x): x is number => x != null)
     );
     console.log(
-      `${tier.padEnd(18)} ${pass}/${inTier.length}    ${(a == null ? "—" : `${a}/100`).padEnd(8)} ${dimAccuracy(inTier).padEnd(8)} ${negClean(inTier)}`
+      `${tier.padEnd(18)} ${pass}/${inTier.length}    ${(a == null ? "—" : `${a}/100`).padEnd(8)} ${dimAccuracy(inTier).padEnd(8)} ${negClean(inTier).padEnd(8)} ${meanComposite(inTier)}`
     );
   }
   const passed = results.filter((r) => r.grade.pass).length;
@@ -416,7 +476,7 @@ async function main() {
     results.map((r) => r.aesthetic).filter((x): x is number => x != null)
   );
   console.log(
-    `${"TOTAL".padEnd(18)} ${passed}/${results.length}    ${(meanA == null ? "—" : `${meanA}/100`).padEnd(8)} ${dimAccuracy(results).padEnd(8)} ${negClean(results)}`
+    `${"TOTAL".padEnd(18)} ${passed}/${results.length}    ${(meanA == null ? "—" : `${meanA}/100`).padEnd(8)} ${dimAccuracy(results).padEnd(8)} ${negClean(results).padEnd(8)} ${meanComposite(results)}`
   );
 
   // Revision scorecard (MTR-183): score the CONVERSATION, not just the first
