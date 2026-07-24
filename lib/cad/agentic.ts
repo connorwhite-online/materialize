@@ -4,7 +4,11 @@ import Anthropic from "@anthropic-ai/sdk";
 
 import { clientForCredentials, hasModelCredentials } from "./model-client";
 import { activeCadContext, meterModelUsage } from "./metering";
-import { SYSTEM_PROMPT, gradeRun } from "./prompt";
+import {
+  buildSystemPrompt as buildCoreSystemPrompt,
+  selectSystemPromptSections,
+  gradeRun,
+} from "./prompt";
 import { buildKnowledgeBlock } from "./knowledge";
 import { needsExchangerRecipe } from "./knowledge/exchanger-recipe";
 import { selectExemplars, formatExemplars } from "./knowledge/exemplars";
@@ -274,12 +278,15 @@ Off-the-shelf parts (MTR-200): for any real named component the design must FIT 
 Interactive specification (MTR-191): when a SINGLE genuine choice would materially change the part and neither the prompt nor the brief settles it (board variant, lid style, mount vs. clip, overall silhouette), call ask_user ONCE early — before you've built the geometry that choice governs — rather than guessing. Budget is 1 question per build; spend it on the highest-leverage fork only. Never ask about anything you can look up, measure, or safely default; a revisable guess beats stalling on a trivial question.`;
 
 function buildSystemPrompt(input: HarnessInput): string {
+  // Router-gated core (MTR-222): selected once per job from the user prompt,
+  // same gating style as buildKnowledgeBlock below.
+  const core = buildCoreSystemPrompt(selectSystemPromptSections(input.prompt));
   const knowledge = buildKnowledgeBlock({
     prompt: input.prompt,
     process: input.process,
   });
   const exemplars = formatExemplars(selectExemplars(input.prompt));
-  return [SYSTEM_PROMPT, knowledge, exemplars, LOOP_GUIDANCE]
+  return [core, knowledge, exemplars, LOOP_GUIDANCE]
     .filter(Boolean)
     .join("\n\n");
 }
