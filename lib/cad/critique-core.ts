@@ -7,6 +7,8 @@
  * judges" and "what the evals measure".
  */
 
+import type { CadBrief } from "./brief";
+
 export const AESTHETIC_DIMENSIONS = [
   "recognizability",
   "proportion",
@@ -44,6 +46,42 @@ Score each dimension 0-5 (0 worst, 5 best):
 Output ONLY strict JSON, no prose:
 {"recognizability":{"score":N,"reason":"...","fix":"..."},"proportion":{...},"cohesion":{...},"surfacing":{...},"refinement":{...}}
 A longer reason does not mean a lower score.`;
+
+/**
+ * The generator's stated design intent (MTR-223, after Seek-CAD): the plan
+ * step's text and/or the design brief, threaded to the judge so it critiques
+ * intent-vs-outcome instead of outcome alone. Optional and additive — with no
+ * intent the judge prompt is byte-identical to the pre-MTR-223 one.
+ */
+export interface JudgeIntent {
+  /** The plan step's short design plan (or the agent's opening plan text). */
+  plan?: string;
+  /** The design brief the generation was built against. */
+  brief?: CadBrief;
+}
+
+/**
+ * Framing for the intent block. The guard sentence is load-bearing: the known
+ * failure mode of intent-aware judging is sycophancy — grading the stated
+ * intent instead of the pixels — so the rubric must pin the judge to the
+ * rendered result.
+ */
+const INTENT_FRAMING =
+  "Design intent (from the generator) — use this to understand what was attempted. Judge ONLY the rendered result against the user's request; intent explains choices, it never excuses visual defects.";
+
+/**
+ * Build the judge's user prompt. Pure and shared (harness judge + tests) so
+ * the intent framing can't drift between call sites. Without intent the
+ * output is exactly `Requested object: <prompt>` — unchanged from before.
+ */
+export function buildJudgePrompt(prompt: string, intent?: JudgeIntent): string {
+  const base = `Requested object: ${prompt}`;
+  const blocks: string[] = [];
+  if (intent?.plan) blocks.push(`Plan:\n${intent.plan}`);
+  if (intent?.brief) blocks.push(`Brief: ${JSON.stringify(intent.brief)}`);
+  if (blocks.length === 0) return base;
+  return [base, INTENT_FRAMING, ...blocks].join("\n\n");
+}
 
 export interface DimensionScore {
   score: number;

@@ -460,6 +460,15 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
   // The brief (fresh) or the caller's priorBrief (revision) rides the result
   // unchanged — persistence is the caller's job.
   const resultBrief = input.priorSourceCode ? input.priorBrief : (brief ?? undefined);
+  // Design intent for the aesthetic judge (MTR-223): the brief this run is
+  // actually built against — the fresh brief, or the revision's prior brief
+  // when it parses. Best-effort; undefined leaves the judge prompt unchanged.
+  const priorBriefParsed =
+    input.priorSourceCode && input.priorBrief != null
+      ? cadBriefSchema.safeParse(input.priorBrief)
+      : null;
+  const judgeBrief =
+    brief ?? (priorBriefParsed?.success ? priorBriefParsed.data : undefined);
 
   // Off-the-shelf part sourcing (MTR-200): resolve the brief's named components
   // to real envelopes ONCE, up front, and thread the block into every generate
@@ -720,6 +729,10 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
         renderPng: lastRun.renderPng,
         renders: lastRun.renders,
         prompt: input.prompt,
+        // CoT-to-critic (MTR-223): the plan + brief this attempt was built
+        // against — context for intent-vs-outcome judging, never an excuse
+        // for visual defects.
+        intent: { plan, brief: judgeBrief },
         signal: input.signal,
       });
       const aestheticScore = judgement.available
