@@ -122,9 +122,31 @@ async function completeWithTools(opts: {
     {
       model: opts.model || DEFAULT_MODEL,
       max_tokens: MAX_TOKENS,
-      system: opts.system,
-      messages: opts.messages,
-      tools: opts.tools,
+      // Prompt caching (MTR-221) — 3 of the max 4 breakpoints per request:
+      //   1. last tool definition (tools render before system, so this pins
+      //      the tool schemas as their own cached span),
+      //   2. final system block (system + knowledge + exemplars are
+      //      byte-stable within a job, so together with #1 the whole
+      //      invariant prefix caches),
+      //   3. a moving breakpoint on the newest tool_result turn
+      //      (withMovingCacheBreakpoint) so the growing conversation caches
+      //      incrementally turn-over-turn.
+      // All three go on non-mutating copies — the caller's messages/TOOLS
+      // arrays never carry markers, so breakpoints move instead of
+      // accumulating past the 4-per-request budget.
+      system: [
+        {
+          type: "text",
+          text: opts.system,
+          cache_control: { type: "ephemeral" },
+        },
+      ],
+      messages: withMovingCacheBreakpoint(opts.messages),
+      tools: opts.tools.map((tool, i) =>
+        i === opts.tools.length - 1
+          ? { ...tool, cache_control: { type: "ephemeral" as const } }
+          : tool
+      ),
     },
     { signal: opts.signal }
   );
@@ -140,6 +162,36 @@ async function completeWithTools(opts: {
     ms: Date.now() - started,
   });
   return message;
+}
+
+/**
+ * Copy of `messages` with cache_control on the final content block of the
+ * newest tool_result user turn — the standard agentic incremental-caching
+ * breakpoint: each request then re-reads the entire prior conversation from
+ * cache and only pays full price for the newest turn. Non-mutating so the
+ * caller's history never accumulates markers across turns (the breakpoint
+ * moves). No-op until the first tool_result turn exists.
+ */
+function withMovingCacheBreakpoint(
+  messages: Anthropic.MessageParam[]
+): Anthropic.MessageParam[] {
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== "user" || !Array.isArray(last.content)) {
+    return messages;
+  }
+  const blocks = last.content;
+  const final = blocks[blocks.length - 1];
+  if (final?.type !== "tool_result") return messages;
+  return [
+    ...messages.slice(0, -1),
+    {
+      ...last,
+      content: [
+        ...blocks.slice(0, -1),
+        { ...final, cache_control: { type: "ephemeral" } },
+      ],
+    },
+  ];
 }
 
 const NO_INPUT = {
