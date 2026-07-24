@@ -27,7 +27,7 @@ import {
   networksInconclusive,
   networksSummary,
 } from "./network-check";
-import { cadBriefSchema } from "./brief";
+import { cadBriefSchema, type CadBrief } from "./brief";
 import { enrichRepairHint } from "./repair-taxonomy";
 import { modelForRole } from "./models";
 import {
@@ -440,6 +440,12 @@ export async function runAgenticHarness(
   const dimensionTargets = extractAgenticDimensionTargets(input);
   let dimensionChecks: DimensionCheckResult[] = [];
 
+  // Design intent for the aesthetic judge (MTR-223): the caller-threaded brief
+  // (the loop builds no brief of its own) plus the agent's opening plan text,
+  // captured from its first substantive text output below.
+  const intentBrief = parseAgenticIntentBrief(input);
+  let agentPlan: string | undefined;
+
   const emit = (event: CadProgressEvent) => {
     try {
       input.onProgress?.(event);
@@ -551,6 +557,16 @@ export async function runAgenticHarness(
       }
 
       messages.push({ role: "assistant", content: message.content });
+      // First substantive text output = the agent's stated plan (MTR-223),
+      // threaded to the aesthetic judge as design intent.
+      if (!agentPlan) {
+        const text = message.content
+          .filter((b): b is Anthropic.TextBlock => b.type === "text")
+          .map((b) => b.text.trim())
+          .filter(Boolean)
+          .join("\n\n");
+        if (text) agentPlan = text;
+      }
       const toolUses = message.content.filter(
         (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
       );
@@ -624,6 +640,7 @@ export async function runAgenticHarness(
       renderPng: bestRun.renderPng,
       renders: bestRun.renders,
       prompt: input.prompt,
+      intent: { plan: agentPlan, brief: intentBrief },
       signal: input.signal,
     });
   }
@@ -761,6 +778,9 @@ export async function runAgenticHarness(
           renderPng: lastRun.renderPng,
           renders: lastRun.renders,
           prompt: input.prompt,
+          // CoT-to-critic (MTR-223): the agent's own stated plan + the
+          // caller-threaded brief, as intent context for the judge.
+          intent: { plan: agentPlan, brief: intentBrief },
           signal: input.signal,
         });
         if (lastRun === bestRun) judgedBest = true;
@@ -985,4 +1005,16 @@ function extractAgenticDimensionTargets(input: HarnessInput): DimensionTarget[] 
   const parsed = cadBriefSchema.safeParse(source);
   if (!parsed.success) return [];
   return (parsed.data.dimensionTargets as DimensionTarget[] | undefined) ?? [];
+}
+
+/**
+ * The caller-threaded brief as judge intent (MTR-223) — same source and
+ * best-effort parse as the dimension targets above; undefined when absent or
+ * malformed so the judge prompt stays unchanged.
+ */
+function parseAgenticIntentBrief(input: HarnessInput): CadBrief | undefined {
+  const source = input.providedBrief ?? input.priorBrief;
+  if (source == null) return undefined;
+  const parsed = cadBriefSchema.safeParse(source);
+  return parsed.success ? parsed.data : undefined;
 }
