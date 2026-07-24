@@ -57,6 +57,7 @@ import {
 import { StepDownloadLink } from "@/components/files/step-download-button";
 import { diffParams, extractParams } from "@/components/cad/param-diff";
 import { FeatureChips } from "@/components/cad/feature-chips";
+import { featureIdsForFaceIds } from "@/components/cad/feature-timeline";
 import type {
   CadStreamEvent,
   CadProgressEvent,
@@ -830,6 +831,15 @@ export function TextToCadStudio({
     activeFeature && activeFeature.faceIds.length > 0
       ? activeFeature.faceIds
       : undefined;
+  // Reverse highlight (MTR-224): faces the user annotated in the viewer →
+  // the owning timeline chips. Only exact-topo face pins participate (mesh
+  // flood-fill picks carry no face id, so they can't resolve to a feature).
+  const annotatedFeatureIds = featureIdsForFaceIds(
+    viewedFeatures,
+    annotations.flatMap((a) =>
+      a.kind === "face" && a.topo ? [a.topo.faceId] : []
+    )
+  );
 
   // Drop the open feature chip when the viewed turn changes.
   useEffect(() => {
@@ -2421,6 +2431,7 @@ export function TextToCadStudio({
                     onActiveChange={setActiveFeatureId}
                     onUpdate={applyFeatureUpdate}
                     disabled={featureUpdating}
+                    markedIds={annotatedFeatureIds}
                   />
                 </div>
               )}
