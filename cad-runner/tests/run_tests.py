@@ -23,9 +23,11 @@ import trimesh
 import trimesh.sample
 
 from sdf_kit import (
-    box, capsule, from_mesh, gyroid, mask, offset_field, shell_field, smin,
-    sphere, to_mesh, translate, union,
+    box, capsule, dual_sheet, from_mesh, gyroid, mask, offset_field,
+    seal_ramp, shell_field, smin, sphere, to_mesh, tpms_dist, translate,
+    union,
 )
+from exchanger import exchanger_core
 from networks import check_networks
 from fea import fea_probe
 
@@ -126,6 +128,251 @@ def test_gyroid_two_isolated_networks():
         f"minWallVoxels {mw} implausible for a 1.2mm sheet at pitch {report['pitch']:.3f}"
 
 
+def test_dual_sheet_defaults_match_sheet_gyroid():
+    """With no seals, dual_sheet IS the sheet form of gyroid — same solid."""
+    rng = np.random.default_rng(11)
+    P = rng.uniform(-15, 15, (5000, 3))
+    got = dual_sheet(P, 10.0, 1.2)
+    want = gyroid(P, 10.0, 1.2)
+    assert np.allclose(got, want, atol=1e-9), "unsealed dual_sheet != sheet gyroid"
+
+
+def test_dual_sheet_seal_swallows_one_labyrinth():
+    """seal_b=1 must solidify fluid B's labyrinth while leaving A's open —
+    the manifold-capping primitive. And the midsurface must stay solid under
+    ANY seal combination (the isolation guarantee)."""
+    rng = np.random.default_rng(12)
+    P = rng.uniform(-15, 15, (20000, 3))
+    d = tpms_dist(P, 10.0)
+    sealed_b = dual_sheet(P, 10.0, 1.2, seal_b=1.0)
+    deep_a, deep_b = d > 2.0, d < -2.0
+    assert np.all(sealed_b[deep_b] < 0), "seal_b left fluid B voids open"
+    assert np.all(sealed_b[deep_a] > 0), "seal_b swallowed fluid A too"
+    sealed_a = dual_sheet(P, 10.0, 1.2, seal_a=1.0)
+    assert np.all(sealed_a[deep_a] < 0), "seal_a left fluid A voids open"
+    assert np.all(sealed_a[deep_b] > 0), "seal_a swallowed fluid B too"
+    near_mid = np.abs(d) < 0.4  # inside a 1.2mm wall regardless of seals
+    for s in (sealed_a, sealed_b, dual_sheet(P, 10.0, 1.2)):
+        assert np.all(s[near_mid] < 0), "midsurface not solid — leak possible"
+
+
+def test_seal_ramp_is_a_clamped_smoothstep():
+    r = seal_ramp(np.array([-3.0, 0.0, 1.0, 2.0, 5.0]), 2.0)
+    assert r[0] == 1.0 and r[1] == 1.0, "sealed side must be exactly 1"
+    assert abs(r[2] - 0.5) < 1e-9, "midpoint must be 0.5"
+    assert r[3] == 0.0 and r[4] == 0.0, "open side must be exactly 0"
+    assert np.all(np.diff(r) <= 0), "ramp must be monotone"
+
+
+_CROSS_CORE = {}
+
+
+def _cross_core():
+    """Memoized 20mm cross-flow exchanger build shared by several tests."""
+    if not _CROSS_CORE:
+        field, ports, plugs, bounds = exchanger_core(
+            (20, 20, 20), cell=8.0, wall=1.2)
+        mesh = to_mesh(field, *bounds, pitch=0.4)
+        _CROSS_CORE.update(mesh=mesh, ports=ports, plugs=plugs)
+    return _CROSS_CORE
+
+
+def _assert_isolated(report):
+    assert report["isolated"] is True, f"expected isolation, got {report}"
+    assert report["components"] == 2, f"expected 2 circuits, got {report}"
+    ports = report["ports"]
+    assert ports["a_in"] == ports["a_out"], f"circuit a split: {ports}"
+    assert ports["b_in"] == ports["b_out"], f"circuit b split: {ports}"
+    assert ports["a_in"] != ports["b_in"], f"circuits share a void: {ports}"
+    mw = report["minWallVoxels"]
+    assert mw is not None and mw >= 1, f"no measurable wall: {report}"
+
+
+def test_exchanger_core_cross_isolated():
+    """The deliverable invariant: a manifolded cross-flow exchanger meshes
+    watertight and its two circuits verify isolated (bores plugged)."""
+    built = _cross_core()
+    assert built["mesh"].is_watertight, "cross exchanger not watertight"
+    report = check_networks(built["mesh"], built["ports"], plugs=built["plugs"])
+    _assert_isolated(report)
+
+
+def test_exchanger_core_open_ports_need_plugs():
+    """Without plugs the open ports connect both circuits through outside
+    air — the check must (correctly) refuse to call that isolated. This
+    documents WHY the plugs exist; a false 'isolated' here would mean the
+    verifier can no longer see leaks at all."""
+    built = _cross_core()
+    report = check_networks(built["mesh"], built["ports"])
+    assert report["isolated"] is False, (
+        f"open-port part reported isolated without plugs: {report}")
+
+
+def test_exchanger_core_counter_isolated():
+    """Counterflow variant: split plenums on the X faces, solid divider."""
+    field, ports, plugs, bounds = exchanger_core(
+        (20, 20, 24), cell=8.0, wall=1.2, flow="counter")
+    mesh = to_mesh(field, *bounds, pitch=0.4)
+    assert mesh.is_watertight, "counter exchanger not watertight"
+    report = check_networks(mesh, ports, plugs=plugs)
+    _assert_isolated(report)
+
+
+def test_exchanger_core_refusals():
+    """Undersized cores and oversized ports must refuse with messages the
+    repair loop can act on."""
+    try:
+        exchanger_core((8, 8, 8), cell=8.0, wall=1.0)
+    except ValueError as e:
+        assert "1.5 cells" in str(e), f"unhelpful refusal: {e}"
+    else:
+        raise AssertionError("sub-1.5-cell core was accepted")
+    try:
+        exchanger_core((20, 20, 20), cell=8.0, wall=1.0, port_r=50.0)
+    except ValueError as e:
+        assert "port_r" in str(e), f"unhelpful refusal: {e}"
+    else:
+        raise AssertionError("oversized port_r was accepted")
+    # Per-port dict: the oversized entry is named in the refusal.
+    try:
+        exchanger_core((20, 20, 20), cell=8.0, wall=1.0,
+                       port_r={"a_in": 50.0})
+    except ValueError as e:
+        assert 'port_r["a_in"]' in str(e), f"unhelpful refusal: {e}"
+    else:
+        raise AssertionError("oversized per-port radius was accepted")
+
+
+def test_exchanger_core_asymmetric_ports_isolated():
+    """Per-port radii (the asymmetric inlet/outlet case that pushed a build
+    off the paved path): distinct bores land in the plugs, and the circuits
+    still verify isolated."""
+    field, ports, plugs, bounds = exchanger_core(
+        (24, 24, 20), cell=8.0, wall=1.2,
+        port_r={"a_in": 4.0, "a_out": 3.0, "b": 2.0})
+    by_name = {}
+    for port, plug in zip(ports, plugs):
+        by_name[port["name"]] = plug["r"]
+    assert by_name["a_in"] == 4.0 and by_name["a_out"] == 3.0, by_name
+    assert by_name["b_in"] == 2.0 and by_name["b_out"] == 2.0, by_name
+    mesh = to_mesh(field, *bounds, pitch=0.4)
+    assert mesh.is_watertight, "asymmetric-port exchanger not watertight"
+    report = check_networks(mesh, ports, plugs=plugs, min_feature=1.2)
+    _assert_isolated(report)
+
+
+def test_exchanger_core_hose_hoods_isolated():
+    """Integrated hood-loft hose manifolds (the feature that replaces
+    hand-rolled manifolds, whose sign bugs bored leak paths through cores):
+    each hooded port opens its FULL plenum window and lofts rect-to-round
+    (cubic-eased) down to the hose bore. The mesh stays one watertight body,
+    the circuits verify isolated (box plugs capping the windows), and the
+    bounds cover the barb runs."""
+    field, ports, plugs, bounds = exchanger_core(
+        (24, 24, 20), cell=8.0, wall=1.2,
+        hose={"a_in": 12.0, "a_out": 10.0, "b": 6.0})
+    # Hooded ports have no bore: one BOX plug per port, no capsules.
+    assert len(plugs) == 4, f"expected one box plug per port: {len(plugs)}"
+    assert all("c" in p and "h" in p for p in plugs), f"not boxes: {plugs}"
+    lo, hi = bounds
+    # Hoods protrude along X (fluid A) and Y (fluid B) — well past the core.
+    assert hi[0] > 35 and hi[1] > 35, f"bounds ignore the hoods: {bounds}"
+    mesh = to_mesh(field, *bounds, pitch=0.4)
+    assert mesh.is_watertight, "hooded exchanger not watertight"
+    assert len(mesh.split(only_watertight=False)) == 1, "hoods disconnected"
+    report = check_networks(mesh, ports, plugs=plugs, min_feature=1.2)
+    _assert_isolated(report)
+
+
+def test_exchanger_core_counter_hoods_isolated():
+    """Counterflow with hoods: two hooded ports share each X face (split
+    windows) — the hoods must coexist without merging channels."""
+    field, ports, plugs, bounds = exchanger_core(
+        (20, 20, 28), cell=8.0, wall=1.2, flow="counter",
+        hose={"a": 5.0, "b": 5.0})
+    mesh = to_mesh(field, *bounds, pitch=0.4)
+    assert mesh.is_watertight, "counter hooded exchanger not watertight"
+    report = check_networks(mesh, ports, plugs=plugs, min_feature=1.2)
+    _assert_isolated(report)
+
+
+def test_exchanger_core_face_spec_orientation():
+    """Orientation contract (a_face/b_face): the user's own exchanger spec
+    ("hot ports on the 150x60 faces of a 150x60x80 core") has now shipped
+    wrong twice because the model ordered `size` by habit. With the face
+    dims declared, a wrong ordering must refuse AND name the right one; the
+    right ordering must pass validation."""
+    try:
+        exchanger_core((150, 60, 80), cell=10.0, wall=1.2,
+                       a_face=(150, 60), b_face=(80, 60))
+    except ValueError as e:
+        msg = str(e)
+        assert "reorder size to 80x150x60" in msg, f"no corrected order: {e}"
+    else:
+        raise AssertionError("wrong size ordering was accepted")
+    # The corrected ordering builds without complaint (validation only —
+    # no meshing needed here; the hood tests cover geometry).
+    field, ports, plugs, bounds = exchanger_core(
+        (80, 150, 60), cell=10.0, wall=1.2,
+        a_face=(150, 60), b_face=(80, 60))
+    assert len(ports) == 4
+
+
+def test_exchanger_core_hose_overlap_refused():
+    """Counterflow puts two ports on each X face; hoses fat enough to merge
+    there would join the circuits OUTSIDE the core — must refuse, naming
+    both ports."""
+    try:
+        exchanger_core((20, 20, 24), cell=8.0, wall=1.2, flow="counter",
+                       hose={"a": 18.0, "b": 18.0})
+    except ValueError as e:
+        msg = str(e)
+        assert "share a face" in msg and "a_in" in msg, f"unhelpful: {e}"
+    else:
+        raise AssertionError("overlapping barbs were accepted")
+
+
+def test_check_networks_min_feature_refines_pitch():
+    """On a part large enough that the default extent/64 probe would be
+    coarser than the walls, declaring min_feature must pull the pitch down
+    to <= min_feature/2 — the fix for sound 1.2mm walls reading as phantom
+    leaks under a 2.66mm probe on a 150mm-class exchanger."""
+    def hollow(P):
+        return shell_field(box(P, (0, 0, 0), (50, 50, 50)), 6.0)
+
+    m = to_mesh(hollow, (-53, -53, -53), (53, 53, 53), pitch=1.0)
+    ports = [
+        {"name": "a_in", "point": [-20, 0, 0], "r": 4.0},
+        {"name": "b_in", "point": [20, 0, 0], "r": 4.0},
+    ]
+    # Default probe on a ~106mm part: 106/64 ≈ 1.66mm.
+    coarse = check_networks(m, ports)
+    assert coarse["pitch"] > 1.5, f"expected coarse default, got {coarse}"
+    fine = check_networks(m, ports, min_feature=3.0)
+    assert fine["pitch"] <= 1.5 + 1e-9, f"min_feature ignored: {fine}"
+    assert "inconclusive" not in fine, f"should be conclusive: {fine}"
+
+
+def test_check_networks_inconclusive_over_voxel_budget():
+    """When the voxel budget cannot afford a min_feature-resolving pitch,
+    the check must decline the verdict (inconclusive) rather than render a
+    phantom-leak report — 'not verified' is honest, 'leaked' would be noise."""
+    import networks as networks_mod
+
+    built = _cross_core()
+    saved = networks_mod._VOXEL_BUDGET
+    networks_mod._VOXEL_BUDGET = 5_000  # force the coarsening loop
+    try:
+        report = check_networks(
+            built["mesh"], built["ports"], plugs=built["plugs"],
+            min_feature=1.2)
+    finally:
+        networks_mod._VOXEL_BUDGET = saved
+    assert report.get("inconclusive") is True, f"expected inconclusive: {report}"
+    assert "isolated" not in report, f"inconclusive must carry no verdict: {report}"
+    assert "UNVERIFIED" in report.get("reason", ""), f"reason unclear: {report}"
+
+
 def test_from_mesh_matches_analytic_box():
     """The B-rep bridge: from_mesh of a box must reproduce the analytic box
     SDF within ~pitch at sampled points."""
@@ -164,9 +411,11 @@ def test_to_mesh_budget_names_a_pitch():
     except ValueError as e:
         msg = str(e)
         assert "pitch >=" in msg, f"error does not name a pitch: {msg}"
+        import sdf_kit as sdf_kit_mod
+
         suggested = float(msg.rsplit("pitch >=", 1)[1].strip())
         n = [int(np.ceil(400 / suggested)) + 1 for _ in range(3)]
-        assert n[0] * n[1] * n[2] <= 8_000_000, \
+        assert n[0] * n[1] * n[2] <= sdf_kit_mod._CELL_BUDGET, \
             f"suggested pitch {suggested} still busts the budget"
         return
     raise AssertionError("to_mesh accepted an 8e9-cell grid")
@@ -342,6 +591,20 @@ def test_promote_rejects_genuine_debris():
 TESTS = [
     test_gyroid_thickness_is_real_mm,
     test_gyroid_two_isolated_networks,
+    test_dual_sheet_defaults_match_sheet_gyroid,
+    test_dual_sheet_seal_swallows_one_labyrinth,
+    test_seal_ramp_is_a_clamped_smoothstep,
+    test_exchanger_core_cross_isolated,
+    test_exchanger_core_open_ports_need_plugs,
+    test_exchanger_core_counter_isolated,
+    test_exchanger_core_refusals,
+    test_exchanger_core_asymmetric_ports_isolated,
+    test_exchanger_core_hose_hoods_isolated,
+    test_exchanger_core_counter_hoods_isolated,
+    test_exchanger_core_face_spec_orientation,
+    test_exchanger_core_hose_overlap_refused,
+    test_check_networks_min_feature_refines_pitch,
+    test_check_networks_inconclusive_over_voxel_budget,
     test_from_mesh_matches_analytic_box,
     test_from_mesh_blends_watertight,
     test_to_mesh_budget_names_a_pitch,

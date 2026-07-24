@@ -22,11 +22,23 @@ cadquery-ocp-novtk==7.9.3.1.1
 # pulls typing_extensions transitively.
 bd_warehouse==0.2.0
 trimesh==4.5.3
+# trimesh.simplify_quadric_decimation backend — decimates oversized STL
+# exports (large TPMS meshes) down under the output cap instead of dropping
+# them (see _decimate_stl_to_cap in app.py).
+fast-simplification==0.1.13
 # trimesh.repair.fill_holes needs networkx for boundary-loop detection — the
 # mesh auto-repair pass silently no-ops on holes without it.
 networkx==3.6.1
 # trimesh's voxel marching-cubes (organic remesh fallback) needs scikit-image.
 scikit-image==0.26.0
+# trimesh.intersections.slice_mesh_plane(cap=True) needs shapely (cut-loop
+# polygons), rtree (polygon enclosure tree), AND mapbox-earcut (cap
+# triangulation) — missing any one of them, the section-cutaway render
+# (MTR-199) silently returns None (the failure is swallowed by design) and
+# hollow parts ship with no section view.
+shapely==2.1.2
+rtree==1.4.1
+mapbox-earcut==2.0.0
 # sdf_kit v2 (from_mesh voxel SDF), networks.py (void labeling), and fea.py
 # (sparse hex solve) use scipy directly. Was transitive via scikit-image;
 # now a first-class dependency, pinned like everything else.

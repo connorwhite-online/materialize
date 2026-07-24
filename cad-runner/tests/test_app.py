@@ -126,6 +126,39 @@ result = trimesh.util.concatenate([base, lid])
 """
 
 
+# Complete dual-fluid exchanger via the composed generator: the script only
+# assigns fluid_ports/fluid_plugs and the sidecar auto-verifies isolation.
+EXCHANGER_SCRIPT = """
+from sdf_kit import to_mesh
+from exchanger import exchanger_core
+field, ports, plugs, bounds = exchanger_core((20, 20, 20), cell=8.0, wall=1.2)
+result = to_mesh(field, *bounds, pitch=0.4)
+fluid_ports = ports
+fluid_plugs = plugs
+"""
+
+# Same build, but the declarations use the dict shorthand a model actually
+# emitted (name -> point / name -> capsule dict) instead of the canonical
+# lists — the sidecar must coerce these, not silently skip the check.
+EXCHANGER_DICT_DECL_SCRIPT = """
+from sdf_kit import to_mesh
+from exchanger import exchanger_core
+field, ports, plugs, bounds = exchanger_core((20, 20, 20), cell=8.0, wall=1.2)
+result = to_mesh(field, *bounds, pitch=0.4)
+fluid_ports = {p["name"]: {"point": p["point"], "r": p["r"]} for p in ports}
+fluid_plugs = {f"plug{i}": p for i, p in enumerate(plugs)}
+"""
+
+EXCHANGER_BROKEN_DECL_SCRIPT = """
+from sdf_kit import to_mesh
+from exchanger import exchanger_core
+field, ports, plugs, bounds = exchanger_core((20, 20, 20), cell=8.0, wall=1.2)
+result = to_mesh(field, *bounds, pitch=0.4)
+fluid_ports = {"a_in": "not-a-point", "b_in": None}
+fluid_plugs = plugs
+"""
+
+
 def run(code, **extra):
     body = {"code": code, "formats": ["stl"], "engine": "mesh", **extra}
     r = client.post("/run", json=body)
@@ -253,6 +286,117 @@ def test_run_checks_networks_two_cavities():
     ports = net["ports"]
     assert ports["a_in"] == ports["a_out"] != ports["b_in"] == ports["b_out"], \
         f"bad port mapping: {ports}"
+
+
+def test_run_script_declared_fluid_ports():
+    """Dual-fluid contract: a script that assigns `fluid_ports` (+ optional
+    `fluid_plugs`) gets the networks isolation check automatically — no
+    request-side checks needed. exchanger_core hands scripts both lists."""
+    p = run(EXCHANGER_SCRIPT)
+    assert p["ok"] is True, p.get("error")
+    net = (p.get("checks") or {}).get("networks")
+    assert net, f"fluid_ports did not trigger a networks check: {list(p)}"
+    assert net.get("error") is None, f"networks check errored: {net}"
+    assert net["isolated"] is True, f"expected isolation: {net}"
+    assert net["components"] == 2, f"expected 2 circuits: {net}"
+    assert net["plugs"] == 4, f"expected 4 refilled bores: {net}"
+
+
+def test_run_fluid_ports_dict_shorthand_coerced():
+    """Models emit fluid_ports as dicts (name -> {point, r}); the sidecar
+    must coerce that to the canonical list and still run the check — the
+    silent isinstance(list) skip once shipped an unverified solid block."""
+    p = run(EXCHANGER_DICT_DECL_SCRIPT)
+    assert p["ok"] is True, p.get("error")
+    net = (p.get("checks") or {}).get("networks")
+    assert net, f"dict-form fluid_ports did not trigger the check: {list(p)}"
+    assert net.get("error") is None, f"coercion failed: {net}"
+    assert net["isolated"] is True, f"expected isolation: {net}"
+
+
+def test_run_fluid_ports_garbage_is_an_error_not_a_skip():
+    """An unparseable fluid_ports declaration must surface as a networks
+    ERROR (repair-loop food), never a silent skip and never a vacuous
+    zero-port PASS."""
+    p = run(EXCHANGER_BROKEN_DECL_SCRIPT)
+    net = (p.get("checks") or {}).get("networks")
+    assert net, "broken fluid_ports produced no networks entry at all"
+    assert net.get("error"), f"expected a declaration error: {net}"
+    assert "fluid_ports malformed" in net["error"], net["error"]
+    assert net.get("isolated") is None, f"must carry no verdict: {net}"
+
+
+def test_decimate_stl_to_cap_direct():
+    """Oversized-STL handling: a mesh whose binary STL exceeds
+    MAX_OUTPUT_BYTES must slim to fit (watertight preserved, reduction +
+    method recorded on the entry) instead of shipping nothing — a 150mm-class
+    TPMS core measures >200MB raw, and dropping the file voided the build."""
+    import trimesh
+
+    sphere = trimesh.creation.icosphere(subdivisions=5, radius=20.0)
+    raw_bytes = 84 + 50 * len(sphere.faces)
+    saved = app_module.MAX_OUTPUT_BYTES
+    app_module.MAX_OUTPUT_BYTES = raw_bytes // 4  # force the over-cap path
+    entry = {}
+    try:
+        slim = app_module._decimate_stl_to_cap(sphere, entry)
+    finally:
+        app_module.MAX_OUTPUT_BYTES = saved
+    assert slim is not None, "slimming returned nothing for a clean sphere"
+    assert slim.is_watertight, "slimmed mesh must stay watertight"
+    assert 84 + 50 * len(slim.faces) <= raw_bytes // 4, (
+        f"slimmed STL still over cap: {len(slim.faces)} faces")
+    d = entry.get("decimatedForExport")
+    assert d and d["toTriangles"] < d["fromTriangles"], (
+        f"reduction not recorded: {entry}")
+    assert d["method"] in ("quadric", "voxel"), f"method missing: {d}"
+
+
+def test_decimate_voxel_fallback_preserves_cavities():
+    """When quadric decimation can't stay watertight (dense TPMS meshes do
+    this reliably), the voxel-remesh fallback must (a) produce a watertight
+    under-cap mesh and (b) keep internal voids VOID — a `.fill()`-style
+    remesh would pave an exchanger's channels shut and ship a brick."""
+    import numpy as np
+    import trimesh
+
+    # Hollow box: 40mm outer shell, 30mm cavity, no openings. Needs enough
+    # faces that the face-target -> pitch estimate lands well below the
+    # cavity size (a coarse test mesh would voxel-remesh at a pitch bigger
+    # than the walls and prove nothing).
+    outer = trimesh.creation.box(extents=(40, 40, 40))
+    inner = trimesh.creation.box(extents=(30, 30, 30))
+    inner.invert()  # cavity = inverted inner shell
+    hollow = trimesh.util.concatenate([outer, inner])
+    for _ in range(5):
+        hollow = hollow.subdivide()  # 24 -> ~24.5k faces
+    assert hollow.is_watertight
+
+    raw_bytes = 84 + 50 * len(hollow.faces)
+    saved_cap = app_module.MAX_OUTPUT_BYTES
+    saved_fn = trimesh.Trimesh.simplify_quadric_decimation
+
+    def _forced_failure(self, **kwargs):
+        raise RuntimeError("forced: exercise the voxel fallback")
+
+    trimesh.Trimesh.simplify_quadric_decimation = _forced_failure
+    app_module.MAX_OUTPUT_BYTES = raw_bytes // 2
+    entry = {}
+    try:
+        slim = app_module._decimate_stl_to_cap(hollow, entry)
+    finally:
+        app_module.MAX_OUTPUT_BYTES = saved_cap
+        trimesh.Trimesh.simplify_quadric_decimation = saved_fn
+
+    assert slim is not None, "voxel fallback produced nothing"
+    assert slim.is_watertight, "voxel fallback must be watertight"
+    d = entry.get("decimatedForExport")
+    assert d and d["method"] == "voxel", f"expected voxel method: {d}"
+    # Cavity preservation: solid volume ≈ shell only (40^3 - 30^3 = 37k),
+    # nowhere near the filled 64k. Generous tolerance for pitch quantization.
+    vol = abs(float(slim.volume))
+    assert vol < 55_000, f"cavity was paved shut: volume {vol:.0f} mm^3"
+    assert vol > 20_000, f"shell lost: volume {vol:.0f} mm^3"
 
 
 def test_run_checks_fea_supported_box():
@@ -432,6 +576,11 @@ TESTS = [
     test_run_open_mesh_remesh_is_a_decision,
     test_run_voxel_kill_switch_still_global,
     test_run_checks_networks_two_cavities,
+    test_run_script_declared_fluid_ports,
+    test_run_fluid_ports_dict_shorthand_coerced,
+    test_run_fluid_ports_garbage_is_an_error_not_a_skip,
+    test_decimate_stl_to_cap_direct,
+    test_decimate_voxel_fallback_preserves_cavities,
     test_run_checks_fea_supported_box,
     test_run_promotes_two_body_compound_to_assembly,
     test_run_debris_still_fails_fragment_gate,

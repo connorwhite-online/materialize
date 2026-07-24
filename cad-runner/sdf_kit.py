@@ -15,6 +15,11 @@ shell/offset field operators, point-warp transforms, and `from_mesh` — the
 B-rep bridge that turns any trimesh (e.g. a tessellated build123d flange) into
 an SDF you can smin into an implicit body.
 
+v3 adds the dual-fluid vocabulary: `tpms_dist` (signed mm distance to a TPMS
+midsurface), `seal_ramp` (0..1 face-seal weights), and `dual_sheet` (the
+two-fluid separator with per-point channel capping). `exchanger.py` composes
+them into a complete manifolded heat-exchanger block.
+
 Importable by sidecar-exec'd model code: `from sdf_kit import *`.
 """
 import numpy as np
@@ -26,6 +31,7 @@ __all__ = [
     "smin", "smax", "subtract", "union", "intersect",
     "sphere", "box", "capsule", "cyl_z", "sq_prism",
     "gyroid", "schwarz_p", "diamond",
+    "tpms_dist", "seal_ramp", "dual_sheet",
     "mask", "shell_field", "offset_field",
     "translate", "rotate_z",
     "from_mesh", "to_mesh", "split_shell",
@@ -119,9 +125,14 @@ def _thickness_at(thickness, P):
     return np.asarray(thickness, float)
 
 
-def _tpms(g, gx, gy, gz, w, thickness, P, solid):
+def _tpms_d(g, gx, gy, gz, w):
+    """Raw trig field -> signed real-mm distance to the F=0 midsurface."""
     grad = w * np.sqrt(gx * gx + gy * gy + gz * gz)
-    d = g / np.maximum(grad, 0.15 * w)
+    return g / np.maximum(grad, 0.15 * w)
+
+
+def _tpms(g, gx, gy, gz, w, thickness, P, solid):
+    d = _tpms_d(g, gx, gy, gz, w)
     t = _thickness_at(thickness, P)
     if solid:
         # one network: everything on the g<0 side, fattened by t/2 past the
@@ -132,13 +143,7 @@ def _tpms(g, gx, gy, gz, w, thickness, P, solid):
     return np.abs(d) - 0.5 * t
 
 
-def gyroid(P, cell, thickness, solid=False):
-    """Gyroid TPMS. `cell` = lattice period in mm; `thickness` = wall in mm
-    (scalar, per-point array, or callable(P) for graded density). Default sheet
-    form is the two-network separator; solid=True keeps one network as solid
-    infill. Clip to a region with `mask` — the field fills all of space."""
-    P = np.asarray(P, float)
-    w = 2.0 * np.pi / cell
+def _gyroid_field(P, w):
     sx, cx = np.sin(w * P[:, 0]), np.cos(w * P[:, 0])
     sy, cy = np.sin(w * P[:, 1]), np.cos(w * P[:, 1])
     sz, cz = np.sin(w * P[:, 2]), np.cos(w * P[:, 2])
@@ -146,6 +151,40 @@ def gyroid(P, cell, thickness, solid=False):
     gx = cx * cy - sz * sx
     gy = cy * cz - sx * sy
     gz = cz * cx - sy * sz
+    return g, gx, gy, gz
+
+
+def _schwarz_p_field(P, w):
+    sx, sy, sz = (np.sin(w * P[:, i]) for i in range(3))
+    cx, cy, cz = (np.cos(w * P[:, i]) for i in range(3))
+    return cx + cy + cz, -sx, -sy, -sz
+
+
+def _diamond_field(P, w):
+    sx, sy, sz = (np.sin(w * P[:, i]) for i in range(3))
+    cx, cy, cz = (np.cos(w * P[:, i]) for i in range(3))
+    g = sx * sy * sz + sx * cy * cz + cx * sy * cz + cx * cy * sz
+    gx = cx * sy * sz + cx * cy * cz - sx * sy * cz - sx * cy * sz
+    gy = sx * cy * sz - sx * sy * cz + cx * cy * cz - cx * sy * sz
+    gz = sx * sy * cz - sx * cy * sz - cx * sy * sz + cx * cy * cz
+    return g, gx, gy, gz
+
+
+_TPMS_FIELDS = {
+    "gyroid": _gyroid_field,
+    "schwarz_p": _schwarz_p_field,
+    "diamond": _diamond_field,
+}
+
+
+def gyroid(P, cell, thickness, solid=False):
+    """Gyroid TPMS. `cell` = lattice period in mm; `thickness` = wall in mm
+    (scalar, per-point array, or callable(P) for graded density). Default sheet
+    form is the two-network separator; solid=True keeps one network as solid
+    infill. Clip to a region with `mask` — the field fills all of space."""
+    P = np.asarray(P, float)
+    w = 2.0 * np.pi / cell
+    g, gx, gy, gz = _gyroid_field(P, w)
     return _tpms(g, gx, gy, gz, w, thickness, P, solid)
 
 
@@ -154,10 +193,8 @@ def schwarz_p(P, cell, thickness, solid=False):
     than the gyroid. Same contract as `gyroid`."""
     P = np.asarray(P, float)
     w = 2.0 * np.pi / cell
-    sx, sy, sz = (np.sin(w * P[:, i]) for i in range(3))
-    cx, cy, cz = (np.cos(w * P[:, i]) for i in range(3))
-    g = cx + cy + cz
-    return _tpms(g, -sx, -sy, -sz, w, thickness, P, solid)
+    g, gx, gy, gz = _schwarz_p_field(P, w)
+    return _tpms(g, gx, gy, gz, w, thickness, P, solid)
 
 
 def diamond(P, cell, thickness, solid=False):
@@ -165,13 +202,56 @@ def diamond(P, cell, thickness, solid=False):
     same cell size. Same contract as `gyroid`."""
     P = np.asarray(P, float)
     w = 2.0 * np.pi / cell
-    sx, sy, sz = (np.sin(w * P[:, i]) for i in range(3))
-    cx, cy, cz = (np.cos(w * P[:, i]) for i in range(3))
-    g = sx * sy * sz + sx * cy * cz + cx * sy * cz + cx * cy * sz
-    gx = cx * sy * sz + cx * cy * cz - sx * sy * cz - sx * cy * sz
-    gy = sx * cy * sz - sx * sy * cz + cx * cy * cz - cx * sy * sz
-    gz = sx * sy * cz - sx * cy * sz - cx * sy * sz + cx * cy * cz
+    g, gx, gy, gz = _diamond_field(P, w)
     return _tpms(g, gx, gy, gz, w, thickness, P, solid)
+
+
+def tpms_dist(P, cell, kind="gyroid"):
+    """Signed real-mm distance to a TPMS midsurface (F=0). Positive on fluid
+    A's side of the sheet, negative on fluid B's — the substrate `dual_sheet`
+    builds on, and handy on its own for probing which labyrinth a point is in
+    (e.g. placing `fluid_ports` probes clear of the wall)."""
+    P = np.asarray(P, float)
+    w = 2.0 * np.pi / cell
+    g, gx, gy, gz = _TPMS_FIELDS[kind](P, w)
+    return _tpms_d(g, gx, gy, gz, w)
+
+
+def seal_ramp(region, width):
+    """Seal weight in [0, 1] from a region field: 1 where region <= 0 (fully
+    sealed), smoothstepping to 0 where region >= width mm. Feed the result to
+    `dual_sheet`'s seal_a/seal_b; combine seals from several faces with
+    np.maximum (NOT +, which can overshoot 1 and is fine but sloppy)."""
+    u = np.clip(1.0 - np.asarray(region, float) / max(float(width), 1e-9),
+                0.0, 1.0)
+    return u * u * (3.0 - 2.0 * u)
+
+
+def dual_sheet(P, cell, wall, kind="gyroid", seal_a=0.0, seal_b=0.0):
+    """Two-fluid TPMS separator with per-point channel sealing — the manifold
+    capping primitive for heat-exchanger cores.
+
+    The solid is { -h_b(x) <= d(x) <= h_a(x) } where d is the signed mm
+    distance to the midsurface and h = wall/2 + seal * (a bound above max|d|).
+    With seal_a = seal_b = 0 this is exactly the sheet form of `gyroid` et al.
+    Where a seal weight (0..1, from `seal_ramp`, a per-point array, or a
+    callable(P)) approaches 1, that fluid's labyrinth is swallowed by solid —
+    so sealing fluid B near fluid A's port face leaves only A's channels
+    reaching that face, which is how each manifold stays single-fluid.
+
+    Isolation is unconditional regardless of seals: the solid always contains
+    the d=0 midsurface (h_a, h_b >= wall/2 > 0), so any path between the two
+    voids would have to cross solid. Keep `wall` >= the printable minimum —
+    the thinnest point of a gyroid sheet runs ~12% under nominal."""
+    P = np.asarray(P, float)
+    d = tpms_dist(P, cell, kind)
+    # > max|d| for every kind: |g| <= 3 (schwarz_p worst case) over the
+    # 0.15*w gradient floor gives |d| <= 3/(0.15*w) ~= 3.18*cell.
+    swallow = 3.5 * cell
+    t = _thickness_at(wall, P)
+    ha = 0.5 * t + _thickness_at(seal_a, P) * swallow
+    hb = 0.5 * t + _thickness_at(seal_b, P) * swallow
+    return np.maximum(d - ha, -d - hb)
 
 
 # ---- field operators ---------------------------------------------------------
@@ -252,6 +332,11 @@ def _crossing_parity(mesh, pts, rng):
     return inside
 
 
+# Enclosed void pockets under this many voxels are voxelization aliasing,
+# not geometry — filled as material without a ray test (see _solid_voxels).
+_TINY_POCKET_VOX = 32
+
+
 def _solid_voxels(mesh, pitch, pad=2):
     """Voxel occupancy of a mesh's solid material at `pitch`, padded by `pad`
     void voxels per side. Returns (bool grid, world coords of voxel (0,0,0)
@@ -271,10 +356,29 @@ def _solid_voxels(mesh, pitch, pad=2):
         open_air.update(np.unique(face))
     open_air.discard(0)
     solid = surf.copy()
+    open_lut = np.zeros(n + 1, bool)
+    if open_air:
+        open_lut[list(open_air)] = True
+    # Sub-resolution pocket triage. A curved surface voxelized at pitch p
+    # traps a huge number of MICROSCOPIC enclosed bubbles between shell
+    # voxels (measured: a 150mm gyroid at 0.6mm -> 102k pockets, and the old
+    # per-pocket full-grid scan + ray test priced that at ~24 minutes). A
+    # pocket a few voxels big can neither carry fluid nor matter to an SDF
+    # at this pitch — it is aliasing, not geometry — so fill it as material
+    # in one vectorized pass and spend ray-parity classification only on
+    # real cavities (plenums, labyrinths, deliberate voids). Filling adds
+    # solid, which can only ever SEPARATE void networks, and any channel
+    # thin enough to thread a sub-32-voxel pocket is already below the
+    # check's honest resolution bound (~pitch).
+    sizes = np.bincount(lbl.ravel(), minlength=n + 1)
+    tiny_lut = (sizes < _TINY_POCKET_VOX) & ~open_lut
+    tiny_lut[0] = False
+    if tiny_lut.any():
+        solid |= tiny_lut[lbl]
     rng = np.random.default_rng(0)  # deterministic runs
     enclosed, samples = [], []
     for lab in range(1, n + 1):
-        if lab in open_air:
+        if open_lut[lab] or tiny_lut[lab]:
             continue
         vox = np.argwhere(lbl == lab)
         take = vox[:: max(1, len(vox) // 5)][:5]
@@ -356,7 +460,14 @@ def split_shell(body_field, cavity_field, z_split, lip_h=3.0, lip_t=1.1,
 
 
 # ---- meshing ---------------------------------------------------------------
-_CELL_BUDGET = 8_000_000
+# Marching-cubes grid ceiling. 60M cells ≈ 480MB for the float64 field (plus
+# ~2x transient inside skimage) — comfortable under the child's 8GB RLIMIT_AS
+# and the 600s exec ceiling (measured: ~160s to evaluate+march 44M cells of a
+# hooded exchanger field). The old 8M budget dated from the 60s-timeout era
+# and forced 150mm-class exchangers to mesh at pitch 1.0 against 1.2mm walls
+# (over the wall/3 contract): visibly stair-stepped hoods and a real pinhole
+# risk in the printed part.
+_CELL_BUDGET = 60_000_000
 def to_mesh(field, lo, hi, pitch=0.7):
     """Evaluate `field(P)->(N,) sdf` on a grid over [lo,hi] (mm) and
     marching-cubes the level-0 surface into a watertight trimesh. The grid is
