@@ -104,6 +104,30 @@ describe("runCadGeneration routing", () => {
     expect(r.sourceCode).toBe("harness");
   });
 
+  it("stamps route + fallback events into the progress stream (observability)", async () => {
+    completeText.mockResolvedValue("COMPLEX");
+    runAgenticHarness.mockRejectedValue(new Error("session died"));
+    const events: Array<{ type: string; [k: string]: unknown }> = [];
+    await runCadGeneration({
+      prompt: "a 6-port enclosure",
+      onProgress: (ev) => events.push(ev as (typeof events)[number]),
+    });
+    expect(events).toContainEqual({ type: "route", route: "complex" });
+    const fb = events.find((e) => e.type === "fallback");
+    expect(fb).toMatchObject({ from: "agentic", to: "scripted" });
+    expect(String(fb?.reason)).toContain("session died");
+  });
+
+  it("stamps the simple route too", async () => {
+    completeText.mockResolvedValue("SIMPLE");
+    const events: Array<{ type: string }> = [];
+    await runCadGeneration({
+      prompt: "a cube",
+      onProgress: (ev) => events.push(ev as (typeof events)[number]),
+    });
+    expect(events).toContainEqual({ type: "route", route: "simple" });
+  });
+
   it("complex propagates aborts instead of falling back", async () => {
     completeText.mockResolvedValue("COMPLEX");
     const abort = new Error("aborted");

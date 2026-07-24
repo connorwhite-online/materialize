@@ -21,7 +21,7 @@ import { harnessConfigFingerprint } from "./fingerprint";
 import type { HarnessResult } from "./harness";
 import { bindFeatureParamNames, parseFeatures } from "./features";
 import type { CadProcess } from "./knowledge/dfm";
-import type { CadFeature, CadPart } from "./types";
+import type { CadFeature, CadNetworksReport, CadPart } from "./types";
 
 /** A filename-safe stem from a display name (download names + dedup safety). */
 function slugStem(name: string | undefined, fallback: string): string {
@@ -223,6 +223,11 @@ export interface PersistedGeneration {
   projectSlug?: string | null;
   /** True when the result was voxel-remeshed (an approximation). */
   remeshed?: boolean;
+  /**
+   * Dual-fluid isolation verdict (MTR-179) when the run declared fluid
+   * circuits; null/absent for parts without them (the overwhelming default).
+   */
+  networksReport?: CadNetworksReport | null;
   /**
    * True when an editable STEP source was persisted for the primary asset
    * (MTR-196) — lets the studio show "Download STEP (editable CAD)" without a
@@ -510,6 +515,9 @@ export async function persistGenerationSuccess(opts: {
       // whether the printable mesh came from the lossy voxel fallback so
       // the eval scorecard can report a remesh rate.
       remeshed: result.run?.remeshed ?? false,
+      // Dual-fluid isolation verdict (MTR-179) when the run declared fluid
+      // circuits — drives the studio isolation badge across reloads.
+      networksReport: result.run?.checks?.networks ?? null,
       // Treatment beside the outcome: which harness config ran (attribution),
       // including the target process this build was guided for (MTR-171).
       configFingerprint: harnessConfigFingerprint(result.route, opts.process),
@@ -542,6 +550,7 @@ export async function persistGenerationSuccess(opts: {
     sourceCode: result.sourceCode,
     title,
     remeshed: result.run?.remeshed ?? false,
+    networksReport: result.run?.checks?.networks ?? null,
     features: runFeatures(result) ?? [],
   };
 }
@@ -716,6 +725,9 @@ async function persistAssembly(opts: {
       remeshed:
         (result.run?.remeshed ?? false) ||
         parts.some((p) => p.remeshed === true),
+      // Isolation verdict rides the compound run (checks run on the whole
+      // mesh before any assembly promotion).
+      networksReport: result.run?.checks?.networks ?? null,
       configFingerprint: harnessConfigFingerprint(result.route, opts.process),
       ...resultExtras(result),
       // Thread owns the title going forward; root-row title stays as the
@@ -743,6 +755,7 @@ async function persistAssembly(opts: {
     })),
     projectSlug,
     remeshed: result.run?.remeshed ?? false,
+    networksReport: result.run?.checks?.networks ?? null,
     features: runFeatures(result) ?? [],
   };
 }

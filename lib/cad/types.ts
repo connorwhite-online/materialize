@@ -113,11 +113,58 @@ export interface CadFitCheckResult {
   note?: string;
 }
 
+/**
+ * Dual-fluid isolation verdict (networks.py `check_networks`, MTR-179).
+ * Verified at voxel resolution: `isolated: true` means "no leak path wider
+ * than ~pitch mm" — surface copy must state that bound, never "leak-free".
+ */
+export interface CadNetworksReport {
+  /** Voxel pitch used (mm) — the honesty bound on leak width. */
+  pitch?: number;
+  /** Void components touching any declared port. */
+  components?: number;
+  /** Port name -> void component id; null = the probe found no void. */
+  ports?: Record<string, number | null>;
+  /**
+   * True when every port resolved, each circuit prefix (`a_...`/`b_...`)
+   * owns exactly one void component, and no component hosts two circuits.
+   */
+  isolated?: boolean;
+  /** Thinnest solid separation between circuits, in voxels (null = ample). */
+  minWallVoxels?: number | null;
+  /** Port bores virtually refilled before flood-fill (open-port parts). */
+  plugs?: number;
+  /**
+   * The part is too large for a probe fine enough to resolve its declared
+   * minimum feature (fluid_min_feature) — NO verdict was rendered. "Not
+   * verified", never "leaked": a verdict at that resolution would alias
+   * sound walls into phantom leaks.
+   */
+  inconclusive?: boolean;
+  /** Why the check was inconclusive (resolution vs voxel budget). */
+  reason?: string;
+  /** The check itself failed to run. */
+  error?: string;
+}
+
 /** Result of executing one CAD script in the sidecar. */
 export interface CadRunResult {
   ok: boolean;
   /** Base64-encoded file bytes per requested format. Present only when ok. */
   files: Partial<Record<CadOutputFormat, string>>;
+  /**
+   * Present when the exported STL was slimmed to fit the output cap (large
+   * TPMS meshes): validation/geometry describe the FULL mesh, the shipped
+   * file is the reduced one. method "quadric" = detail-preserving
+   * decimation; "voxel" = occupancy remesh at `pitch` mm (guaranteed
+   * watertight, ~pitch of surface detail lost).
+   */
+  decimatedForExport?: {
+    fromTriangles: number;
+    toTriangles: number;
+    method: "quadric" | "voxel";
+    pitch?: number;
+  };
   /** Base64 PNG preview render (no `data:` prefix). */
   renderPng?: string;
   /**
@@ -149,10 +196,12 @@ export interface CadRunResult {
    */
   features?: CadFeature[];
   /**
-   * Post-export checks the caller requested (sidecar `checks` request):
-   * `fit` carries the MTR-204 component-fit verdicts; `networks`/`fea`
-   * (MTR-179/180) pass through untyped. Absent when no checks were requested
-   * or the sidecar predates them — consumers must tolerate it missing.
+   * Post-export checks (sidecar `checks` request, or auto-triggered by the
+   * script — `fluid_ports` requests `networks` without any caller wiring):
+   * `fit` carries the MTR-204 component-fit verdicts; `networks` the
+   * dual-fluid isolation verdict; `fea` (MTR-180) passes through untyped.
+   * Absent when no checks ran or the sidecar predates them — consumers must
+   * tolerate it missing.
    */
   checks?: {
     fit?: {
@@ -161,6 +210,7 @@ export interface CadRunResult {
       pitchMm?: number;
       error?: string;
     };
+    networks?: CadNetworksReport;
     [key: string]: unknown;
   };
   /** stderr / exception message when compile or export failed. */
@@ -238,6 +288,38 @@ export type CadProgressEvent =
       optionId: string;
       label: string;
       viaDefault: boolean;
+    }
+  | {
+      /**
+       * Observability: which engine the router picked ("complex" = agentic,
+       * "simple"/"legacy" = scripted, "organic" = generative, …). Emitted
+       * once per job when the verdict is known, so the persisted progress
+       * trail records how the build actually ran.
+       */
+      type: "route";
+      route: string;
+    }
+  | {
+      /**
+       * Observability: an engine failed mid-run and the orchestrator fell
+       * back (e.g. agentic session died -> scripted rebuild). Without this
+       * the progress log showed the fallback's attempts with no hint that a
+       * whole first engine ran and failed before them.
+       */
+      type: "fallback";
+      from: string;
+      to: string;
+      reason: string;
+    }
+  | {
+      /**
+       * Live cost meter: cumulative usage so far, synthesized by the events
+       * route from cadJobs.usage (periodically flushed mid-run) — NEVER
+       * persisted into the progress log (it would spam the append-only
+       * array). The studio shows tokens-so-far off this.
+       */
+      type: "usage";
+      usage: CadUsageSummary;
     };
 
 /**
@@ -342,6 +424,11 @@ export interface CadDoneEvent {
   /** True when the result was voxel-remeshed (an approximation). */
   remeshed?: boolean;
   /**
+   * Dual-fluid isolation verdict (MTR-179) when the run declared fluid
+   * circuits — the studio badge is stable at first paint.
+   */
+  networksReport?: CadNetworksReport | null;
+  /**
    * True when the primary asset carried an editable STEP source (MTR-196).
    * Threaded so the studio can render the "Download STEP" action at first paint
    * instead of probing after mount — no late pop-in / row reflow (MTR-215).
@@ -364,7 +451,13 @@ export type CadStreamEvent =
  * events route (/api/cad/jobs/[jobId]/events) replays these verbatim, so
  * CadProgressEvent / CadDoneEvent stay backward compatible by construction.
  */
-export type CadJobProgressEntry = CadStreamEvent;
+/**
+ * One persisted progress entry: a stream event stamped with `t` (epoch ms,
+ * added by the executor at emit time). The stamp is what makes stage timing
+ * honest across reloads — a replayed transcript arrives in one burst, so
+ * arrival time carries no duration signal; `t` does.
+ */
+export type CadJobProgressEntry = CadStreamEvent & { t?: number };
 
 // --- Generation cost metering (MTR-181) ------------------------------------
 //

@@ -1573,6 +1573,22 @@ export const cadGenerations = pgTable(
       }[]
     >(),
     /**
+     * Dual-fluid isolation verdict (networks check, MTR-179) for
+     * exchanger-class generations: {pitch, components, ports, isolated,
+     * minWallVoxels, plugs}. Kept on the row so the studio renders the
+     * isolation badge without a second fetch. Null when the run declared no
+     * fluid circuits (most parts) or predates the check.
+     */
+    networksReport: jsonb("networks_report").$type<{
+      pitch?: number;
+      components?: number;
+      ports?: Record<string, number | null>;
+      isolated?: boolean;
+      minWallVoxels?: number | null;
+      plugs?: number;
+      error?: string;
+    }>(),
+    /**
      * Config fingerprint: WHICH harness configuration produced this row
      * (per-role models, flags, router verdict) — the treatment beside the
      * outcome, so quality changes are attributable (lib/cad/fingerprint.ts).
@@ -1640,6 +1656,14 @@ export const cadJobs = pgTable(
       .default(sql`'[]'::jsonb`),
     // Failure message when status=failed (mirrors cadGenerations.error).
     error: text("error"),
+    /**
+     * The REAL failure: exception message + stack + stage, for debugging.
+     * `error` above stays the user-facing copy ("Generation failed. Please
+     * try again.") — this column exists because scrubbing the message for
+     * the UI used to scrub it for everyone, and diagnosing a failed job
+     * meant hoping the dev console hadn't rotated. Never render to users.
+     */
+    errorDetail: text("error_detail"),
     // Cooperative cancellation — the cancel endpoint sets this; the
     // worker checks it between attempts and flips status to cancelled.
     cancelRequestedAt: timestamp("cancel_requested_at", {

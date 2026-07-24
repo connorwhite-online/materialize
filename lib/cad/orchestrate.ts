@@ -10,6 +10,7 @@ import {
   runGenerative,
 } from "./generative";
 import { sessionsAvailable } from "./session-client";
+import type { CadProgressEvent } from "./types";
 import { logError } from "@/lib/logger";
 
 /**
@@ -127,6 +128,17 @@ function agenticEnabled(): boolean {
 export async function runCadGeneration(
   input: HarnessInput
 ): Promise<HarnessResult> {
+  // Observability: stamp the routing verdict (and any engine fallback) into
+  // the progress stream, so the persisted job trail records HOW the build
+  // ran — before this, an agentic run that died and silently rebuilt via
+  // the scripted harness was indistinguishable from a scripted-only run.
+  const note = (event: CadProgressEvent) => {
+    try {
+      input.onProgress?.(event);
+    } catch {
+      /* progress is cosmetic */
+    }
+  };
   const generative = () =>
     runGenerative({
       prompt: input.prompt,
@@ -141,6 +153,12 @@ export async function runCadGeneration(
       generativeEnabled() &&
       (await shouldUseGenerative(input.prompt, input.signal));
     const n = !input.priorSourceCode && !useGenerative ? bestOfN() : 1;
+    const route = useGenerative
+      ? "legacy-generative"
+      : n > 1
+        ? `legacy-bestof${n}`
+        : "legacy";
+    note({ type: "route", route });
     const result = await (useGenerative
       ? generative()
       : n > 1
@@ -151,21 +169,31 @@ export async function runCadGeneration(
 
   const kind = await classifyCadRequest(input.prompt, input.signal);
   if (kind === "organic" && generativeEnabled()) {
+    note({ type: "route", route: "organic" });
     return { ...(await generative()), route: "organic" };
   }
   if (kind === "complex") {
     try {
+      note({ type: "route", route: "complex" });
       return { ...(await runAgenticHarness(input)), route: "complex" };
     } catch (err) {
       // Abort = the caller hung up, not an agentic failure — propagate.
       if ((err as Error)?.name === "AbortError") throw err;
       logError("runCadGeneration:agentic-fallback", err);
+      note({
+        type: "fallback",
+        from: "agentic",
+        to: "scripted",
+        reason: (err as Error)?.message ?? String(err),
+      });
       return { ...(await runHarness(input)), route: "complex-fallback" };
     }
   }
   const n = !input.priorSourceCode ? bestOfN() : 1;
   if (n > 1) {
+    note({ type: "route", route: `simple-bestof${n}` });
     return { ...(await runBestOf(input, n)), route: `simple-bestof${n}` };
   }
+  note({ type: "route", route: "simple" });
   return { ...(await runHarness(input)), route: "simple" };
 }

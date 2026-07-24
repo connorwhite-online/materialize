@@ -29,6 +29,7 @@ import base64
 import contextlib
 import hmac
 import io
+import json
 import multiprocessing as mp
 import os
 import queue as queue_mod
@@ -54,9 +55,15 @@ if _HERE not in sys.path:
 app = FastAPI(title="materialize-cad-runner")
 
 # Defaults; override via env in the deployment.
-# 60s wall clock: a dense mesh-mode marching-cubes grid or a heavy build123d
-# loft/boolean can need well over the old 30s. CPU limit tracks it (below).
-RUN_TIMEOUT_S = int(os.environ.get("CAD_RUN_TIMEOUT_S", "60"))
+# 600s wall clock. This is a HANG/RUNAWAY backstop, not a complexity budget:
+# the exec namespace is not a sandbox (see module docstring), so without a
+# ceiling one degenerate script pins the worker forever. It must therefore be
+# generous enough that legitimately heavy geometry never hits it — a
+# full-scale TPMS exchanger (150mm-class core: marching cubes + repair +
+# multi-view renders + wall-resolution isolation probe + STL decimation)
+# measures ~5-6 minutes end to end; the old 60s ceiling amputated it at the
+# first mesh. CPU limit tracks it (below).
+RUN_TIMEOUT_S = int(os.environ.get("CAD_RUN_TIMEOUT_S", "600"))
 # RLIMIT_AS caps *virtual* address space, not RSS. Python + build123d +
 # OpenCASCADE (plus numpy/scipy/BLAS) map well over 1 GB of address space at
 # import time, so a low cap can ENOMEM before user code even runs. Default to
@@ -69,7 +76,10 @@ MEM_LIMIT_BYTES = int(
 )
 # Track the wall-clock budget — CPU-bound work (marching cubes, OCC booleans)
 # would otherwise hit SIGXCPU long before the wall-clock terminate fires.
-CPU_LIMIT_S = int(os.environ.get("CAD_RUN_CPU_S", "55"))
+# Default rides just under RUN_TIMEOUT_S so raising one via env raises both.
+CPU_LIMIT_S = int(
+    os.environ.get("CAD_RUN_CPU_S", str(max(RUN_TIMEOUT_S - 5, 5)))
+)
 # Session mode (docs/text-to-cad/03 §A): idle TTL + concurrent-session cap.
 # Expiry is enforced by a lazy sweep on every session call — no background
 # thread; this sidecar runs single-worker and the cap is tiny, so a reaper
@@ -86,7 +96,9 @@ SESSION_MAX = int(os.environ.get("CAD_SESSION_MAX", "4"))
 #     ends the session on breach (the child exits; the parent then 410s later
 #     calls). Memory is already bounded per child by RLIMIT_AS, and a session
 #     child is one persistent process, so that cap is inherently cumulative.
-SESSION_CPU_BUDGET_S = int(os.environ.get("CAD_SESSION_CPU_S", "300"))
+# 900s: an agentic session on a large part legitimately spends several
+# multi-minute meshes (explore, preview, final) — 300s starved those.
+SESSION_CPU_BUDGET_S = int(os.environ.get("CAD_SESSION_CPU_S", "900"))
 SESSION_MAX_EXECS = int(os.environ.get("CAD_SESSION_MAX_EXECS", "250"))
 SESSION_MAX_OUTPUT_BYTES = int(
     os.environ.get("CAD_SESSION_MAX_OUTPUT_BYTES", str(512 * 1024 * 1024))
@@ -98,6 +110,21 @@ SESSION_MAX_OUTPUT_BYTES = int(
 MAX_OUTPUT_BYTES = int(
     os.environ.get("CAD_MAX_OUTPUT_BYTES", str(96 * 1024 * 1024))
 )
+def _obs(event: str, **fields) -> None:
+    """Structured observability: one JSON line per pipeline event on stdout
+    ({"cad": "<event>", ...}), interleaved with uvicorn's access log. This is
+    the sidecar's flight recorder — a session killed by CPU budget, a run
+    that timed out, a decimated export — so a failed generation can be
+    diagnosed from logs instead of archaeology. Grep with: `grep '"cad"'`.
+    Never throws; logging must not break a run."""
+    try:
+        rec: dict = {"cad": event, "t": round(time.time(), 3)}
+        rec.update({k: v for k, v in fields.items() if v is not None})
+        print(json.dumps(rec), flush=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 RUNNER_SECRET = os.environ.get("CAD_RUNNER_SECRET", "")
 # Prefer a secret read from a FILE (CAD_RUNNER_SECRET_FILE) over the env var
 # (MTR-187). A secret in the environment is inherited by every spawned child and
@@ -314,6 +341,168 @@ def _install_exec_guard() -> None:
         sys.addaudithook(_hook)
     except Exception:  # noqa: BLE001 — never let hardening break execution
         pass
+
+
+# Rendering proxy ceiling: preview PNGs are ~640px — a multi-million-face
+# TPMS mesh buys nothing there but costs matplotlib minutes per view (the
+# painter's-algorithm sort is O(n log n) on faces with a big constant). The
+# proxy is for PIXELS only; validation, checks, and exports always use the
+# full mesh.
+_RENDER_PROXY_FACES = int(os.environ.get("CAD_RENDER_PROXY_FACES", "400000"))
+
+
+def _render_proxy(mesh):
+    """Decimated stand-in for rendering only. Watertightness is irrelevant
+    for pixels, so the fast quadric path is always acceptable here; any
+    failure falls back to the full mesh."""
+    try:
+        if len(mesh.faces) > _RENDER_PROXY_FACES * 1.3:
+            proxy = mesh.simplify_quadric_decimation(
+                face_count=_RENDER_PROXY_FACES
+            )
+            if len(proxy.faces) > 0:
+                return proxy
+    except Exception:  # noqa: BLE001 — proxy is an optimization, never a gate
+        pass
+    return mesh
+
+
+def _decimate_stl_to_cap(mesh, entry: dict):
+    """Slim a copy of `mesh` so its binary STL fits under MAX_OUTPUT_BYTES
+    (binary STL = 84 bytes header + 50 bytes/triangle). Large TPMS/lattice
+    meshes legitimately exceed the cap (a 150mm gyroid core measures >200MB)
+    — dropping the file made the whole build useless, and surface detail
+    past ~2M triangles is below print resolution anyway.
+
+    Two-step escalation, never shipping a broken STL:
+      1. quadric decimation (fast_simplification) — best detail
+         preservation, but on dense TPMS meshes it reliably leaves a few
+         hundred non-manifold spots that no repair ladder closes (measured);
+      2. occupancy voxel remesh — marching cubes over the cavity-aware
+         `_solid_voxels` grid (NOT `.fill()`, which would pave internal
+         channels shut) at a pitch computed to land under the face target.
+         Guaranteed watertight by construction; loses ~pitch of surface
+         detail, which is why it is the fallback, not the default.
+
+    Returns the slimmed mesh or None (caller falls through to the
+    drop-with-error path). Validation/geometry stay computed on the FULL
+    mesh; only the exported artifact is slimmed, and the reduction (with
+    method) is recorded on the entry so consumers can see it."""
+    target = int((MAX_OUTPUT_BYTES * 0.9 - 84) / 50)
+    if target <= 0 or len(mesh.faces) <= target:
+        return None
+
+    def record(slim, method, pitch=None):
+        info = {
+            "fromTriangles": int(len(mesh.faces)),
+            "toTriangles": int(len(slim.faces)),
+            "method": method,
+        }
+        if pitch is not None:
+            info["pitch"] = round(float(pitch), 3)
+        entry["decimatedForExport"] = info
+        return slim
+
+    try:
+        import numpy as np
+
+        slim = mesh.simplify_quadric_decimation(face_count=target)
+        _weld_vertices(slim)
+        # Export acceptance: CLOSED (zero boundary edges), consistently
+        # wound, volume preserved, under the cap. Deliberately NOT
+        # trimesh's is_watertight: quadric collapse on dense TPMS meshes
+        # leaves a few hundred non-manifold T-junction edges (out of
+        # millions) that no slicer trips on — while its vertices keep the
+        # ORIGINAL smooth surface. Rejecting on that flag forced the voxel
+        # remesh fallback, whose mid-cell vertices shipped a Minecraft
+        # staircase to an actual user. Closed + volume-true is the bar;
+        # the blemish count is recorded, not hidden.
+        if (
+            slim.is_winding_consistent
+            and len(slim.faces) * 50 + 84 <= MAX_OUTPUT_BYTES
+        ):
+            edge_counts = np.unique(
+                slim.edges_sorted, axis=0, return_counts=True
+            )[1]
+            open_edges = int((edge_counts == 1).sum())
+            non_manifold = int((edge_counts > 2).sum())
+            vol_ok = (
+                float(mesh.volume) > 0
+                and abs(float(slim.volume) / float(mesh.volume) - 1.0) < 0.02
+            )
+            if open_edges == 0 and vol_ok:
+                slimmed = record(slim, "quadric")
+                if non_manifold:
+                    entry["decimatedForExport"]["nonManifoldEdges"] = (
+                        non_manifold
+                    )
+                return slimmed
+    except Exception:  # noqa: BLE001 — escalate to the voxel remesh
+        pass
+
+    try:
+        import numpy as np
+        import trimesh
+        from skimage import measure as sk_measure
+
+        from sdf_kit import _solid_voxels
+
+        # Marching cubes emits ~2 triangles per pitch^2 of surface, so the
+        # pitch that lands on `target` faces is sqrt(2*area/target); 10%
+        # margin, then coarsen-and-retry for the estimate's error bar.
+        pitch = float(np.sqrt(2.0 * float(mesh.area) / target)) * 1.1
+        for _ in range(4):
+            solid, origin = _solid_voxels(mesh, pitch, pad=2)
+            # Signed distance from the occupancy grid (EDT both ways), NOT a
+            # binary ±1 field: marching cubes interpolates vertices along the
+            # gradient, so surfaces land at sub-voxel positions. A binary
+            # field snaps every vertex to mid-cell and ships a Minecraft
+            # staircase — exactly what a user saw in their STL viewer while
+            # the full-res mesh (and every preview render) looked smooth.
+            from scipy import ndimage as sp_ndimage
+
+            F = (
+                sp_ndimage.distance_transform_edt(~solid)
+                - sp_ndimage.distance_transform_edt(solid)
+            ).astype(np.float32)
+            verts, faces, _, _ = sk_measure.marching_cubes(F, level=0.0)
+            remesh = trimesh.Trimesh(
+                vertices=origin + verts * pitch, faces=faces
+            )
+            remesh.merge_vertices()
+            # NO fix_normals here: marching cubes orients faces from the
+            # field gradient, which is already globally consistent — and for
+            # a part with a sealed internal cavity, fix_normals re-orients
+            # the disconnected cavity shell to positive volume, silently
+            # ADDING the cavity's volume instead of subtracting it
+            # (measured: hollow box 52k -> 92k mm^3). Guard only against a
+            # globally-inverted result.
+            if float(remesh.volume) < 0:
+                remesh.invert()
+            if len(remesh.faces) * 50 + 84 > MAX_OUTPUT_BYTES:
+                pitch *= 1.25
+                continue
+            # Same sub-voxel debris filter as to_mesh: quantization can
+            # shed closed slivers that would trip the fragment gate.
+            try:
+                bodies = remesh.split(only_watertight=False)
+                if len(bodies) > 1:
+                    tol = (2.0 * pitch) ** 3
+                    kept = [b for b in bodies if abs(float(b.volume)) > tol]
+                    if kept and len(kept) < len(bodies):
+                        remesh = (
+                            trimesh.util.concatenate(kept)
+                            if len(kept) > 1
+                            else kept[0]
+                        )
+            except Exception:  # noqa: BLE001 — debris filter is best-effort
+                pass
+            if remesh.is_watertight:
+                return record(remesh, "voxel", pitch)
+            pitch *= 1.25
+    except Exception:  # noqa: BLE001 — slimming is best-effort
+        pass
+    return None
 
 
 def _encode_output(raw: bytes, kind: str, entry: dict) -> Optional[str]:
@@ -766,23 +955,27 @@ def _process_shape(
         if include_views:
             # Multi-view renders (docs/text-to-cad/07 §A): threeQuarter at the
             # legacy full size, the extra views smaller. renderPng stays the
-            # threeQuarter view for compatibility.
+            # threeQuarter view for compatibility. All views draw the RENDER
+            # PROXY — a large TPMS mesh at full resolution costs matplotlib
+            # minutes per view and was the wall-clock hog on 150mm exchangers.
+            draw = _render_proxy(mesh)
             renders: dict = {}
             for view, (elev, azim) in _VIEW_ANGLES.items():
                 figsize = _FULL_FIGSIZE if view == "threeQuarter" else _SMALL_FIGSIZE
-                png = _render(mesh, elev=elev, azim=azim, figsize=figsize)
+                png = _render(draw, elev=elev, azim=azim, figsize=figsize)
                 if png:
                     renders[view] = png
             # Section cutaway for hollow parts (MTR-199): a mid-plane slice
             # reveals bores / channels / shell interiors that no exterior view
             # can show. Gated on a cheap fill-ratio heuristic so solid parts
-            # don't get a pointless (and misleading) empty section.
+            # don't get a pointless (and misleading) empty section. Sliced on
+            # the proxy too — pixels only.
             try:
                 ex = mesh.extents
                 bbox_vol = float(ex[0]) * float(ex[1]) * float(ex[2])
                 fill = float(mesh.volume) / bbox_vol if bbox_vol > 0 else 1.0
                 if fill < _SECTION_FILL_RATIO:
-                    section = _render_section(mesh)
+                    section = _render_section(draw)
                     if section:
                         renders["section"] = section
             except Exception:  # noqa: BLE001
@@ -790,13 +983,25 @@ def _process_shape(
             entry["renders"] = renders
             entry["renderPng"] = renders.get("threeQuarter")
         else:
-            entry["renderPng"] = _render(mesh)
+            entry["renderPng"] = _render(_render_proxy(mesh))
     except Exception as mesh_err:  # noqa: BLE001
         entry["error"] = f"analysis: {mesh_err}"
         mesh = None
 
-    # Encode the (possibly repaired) STL, under the output-flood cap.
+    # Encode the (possibly repaired) STL, under the output-flood cap. An
+    # over-cap STL from a valid mesh is decimated to fit first (large TPMS
+    # meshes); only when that fails does the cap drop the file.
     if "stl" in formats and os.path.exists(stl_path):
+        try:
+            if (
+                mesh is not None
+                and os.path.getsize(stl_path) > MAX_OUTPUT_BYTES
+            ):
+                slim = _decimate_stl_to_cap(mesh, entry)
+                if slim is not None:
+                    slim.export(stl_path)
+        except Exception:  # noqa: BLE001 — fall through to the plain cap
+            pass
         with open(stl_path, "rb") as f:
             encoded = _encode_output(f.read(), "stl", entry)
         if encoded is not None:
@@ -822,6 +1027,95 @@ def _plain(obj):
     return obj
 
 
+def _coerce_fluid_ports(declared):
+    """Liberal parse of a script's `fluid_ports` -> (ports, error). Canonical
+    form is a list of {"name", "point": [x,y,z], "r"}; generated scripts also
+    emit dicts of name -> point-tuple or name -> {"point"/"center", "r"}, so
+    accept those rather than silently skipping the isolation check. The probe
+    radius defaults to 2mm when omitted (the sphere only needs to overlap
+    open fluid space). Returns (None, message) when the declaration cannot be
+    understood — the caller surfaces that as a networks-check error."""
+    _BAD = (
+        "fluid_ports malformed — expected a list of "
+        '{"name": "a_in", "point": [x, y, z], "r": mm} entries '
+        "(names <circuit>_<role>, e.g. a_in/a_out/b_in/b_out)"
+    )
+    items = []
+    if isinstance(declared, dict):
+        for name, v in declared.items():
+            if isinstance(v, dict):
+                items.append({
+                    "name": name,
+                    "point": v.get("point", v.get("center")),
+                    "r": v.get("r", v.get("radius", 2.0)),
+                })
+            else:
+                items.append({"name": name, "point": v, "r": 2.0})
+    elif isinstance(declared, (list, tuple)):
+        items = list(declared)
+    else:
+        return None, _BAD
+    try:
+        ports = [
+            {
+                "name": str(p["name"]),
+                "point": [float(c) for c in p["point"]],
+                "r": float(p.get("r", 2.0)),
+            }
+            for p in items
+        ]
+    except Exception as err:  # noqa: BLE001
+        return None, f"{_BAD} ({err})"
+    if not ports or any(len(p["point"]) != 3 for p in ports):
+        return None, _BAD
+    return ports, None
+
+
+def _coerce_fluid_plugs(declared):
+    """Liberal parse of `fluid_plugs` -> (plugs, error). Canonical forms are
+    {"a": [x,y,z], "b": [x,y,z], "r"} capsules (port bores, refilled) and
+    {"c": [x,y,z], "h": [hx,hy,hz]} boxes (hood-loft windows — exchanger_core
+    emits these for hosed ports); a dict of name -> plug is also accepted.
+    Anything else — including axis/center shorthand that omits the capsule
+    length — is an ERROR, not a silent drop: running the check with the
+    plugs discarded guarantees a false leak through outside air and burns
+    repair turns on a phantom."""
+    _BAD = (
+        "fluid_plugs malformed — expected a list of "
+        '{"a": [x, y, z], "b": [x, y, z], "r": mm} capsules and/or '
+        '{"c": [x, y, z], "h": [hx, hy, hz]} boxes spanning each port '
+        "opening (exchanger_core returns these ready-made)"
+    )
+    if isinstance(declared, dict):
+        items = list(declared.values())
+    elif isinstance(declared, (list, tuple)):
+        items = list(declared)
+    else:
+        return None, _BAD
+    plugs = []
+    try:
+        for p in items:
+            if "c" in p and "h" in p:
+                plug = {
+                    "c": [float(v) for v in p["c"]],
+                    "h": [float(v) for v in p["h"]],
+                }
+                if len(plug["c"]) != 3 or len(plug["h"]) != 3:
+                    return None, _BAD
+            else:
+                plug = {
+                    "a": [float(v) for v in p["a"]],
+                    "b": [float(v) for v in p["b"]],
+                    "r": float(p["r"]),
+                }
+                if len(plug["a"]) != 3 or len(plug["b"]) != 3:
+                    return None, _BAD
+            plugs.append(plug)
+    except Exception as err:  # noqa: BLE001
+        return None, f"{_BAD} ({err})"
+    return plugs, None
+
+
 def _run_checks(mesh, checks: dict) -> dict:
     """Post-export physics/plumbing probes (MTR-179/180) on the final mesh.
     Runs in the child; networks/fea are imported lazily so /run stays cheap
@@ -830,14 +1124,27 @@ def _run_checks(mesh, checks: dict) -> dict:
     out: dict = {}
     net = checks.get("networks")
     if net is not None:
-        try:
-            from networks import check_networks
+        if net.get("error"):
+            # Pre-diagnosed failure (malformed fluid_ports/fluid_plugs):
+            # surface it verbatim. Never run the check with an empty port
+            # list — zero ports vacuously grades "isolated" and would turn
+            # a broken declaration into a false PASS.
+            out["networks"] = {"error": str(net["error"])}
+        else:
+            try:
+                from networks import check_networks
 
-            out["networks"] = _plain(
-                check_networks(mesh, net.get("ports") or [], pitch=net.get("pitch"))
-            )
-        except Exception as err:  # noqa: BLE001
-            out["networks"] = {"error": str(err)}
+                out["networks"] = _plain(
+                    check_networks(
+                        mesh,
+                        net.get("ports") or [],
+                        pitch=net.get("pitch"),
+                        plugs=net.get("plugs"),
+                        min_feature=net.get("minFeature"),
+                    )
+                )
+            except Exception as err:  # noqa: BLE001
+                out["networks"] = {"error": str(err)}
     fea_spec = checks.get("fea")
     if fea_spec is not None:
         try:
@@ -1059,6 +1366,8 @@ def _assemble_parts_payload(
     }
     payload["parts"] = parts
     payload["remeshed"] = any(p.get("remeshed") for p in parts)
+    if first.get("decimatedForExport"):
+        payload["decimatedForExport"] = first["decimatedForExport"]
     payload["ok"] = all_ok
 
 
@@ -1080,6 +1389,40 @@ def _build_run_payload(
     payload = _base_payload(compiled=True)
     single = ns.get("result")
     parts_ns = ns.get("parts")
+
+    # Script-declared fluid ports (dual-fluid exchangers): the geometry author
+    # knows where its circuits open, the caller can't guess coordinates. A
+    # `fluid_ports` declaration in the namespace (e.g. straight from
+    # exchanger_core()) requests the networks isolation check on the produced
+    # mesh. Request-supplied checks win. Malformed declarations are NOT
+    # silently ignored: a script that clearly TRIED to declare circuits but
+    # got the shape wrong must surface as a check error the repair loop can
+    # act on — silence here once shipped an unverified solid block as a
+    # "finished" exchanger (the model used a dict of name->tuple, the old
+    # isinstance(list) gate skipped it, and nothing downstream noticed).
+    declared = ns.get("fluid_ports")
+    if declared:
+        ports, ports_err = _coerce_fluid_ports(declared)
+        plugs_decl = ns.get("fluid_plugs")
+        plugs, plugs_err = (None, None)
+        if plugs_decl:
+            plugs, plugs_err = _coerce_fluid_plugs(plugs_decl)
+        checks = dict(checks or {})
+        if ports_err or plugs_err:
+            checks.setdefault(
+                "networks", {"error": ports_err or plugs_err}
+            )
+        else:
+            spec: dict = {"ports": ports}
+            if plugs:
+                spec["plugs"] = plugs
+            # `fluid_min_feature` (mm): the finest wall/channel the isolation
+            # verdict must resolve — scripts set it alongside fluid_ports
+            # (typically = wall). Keeps the probe honest on large parts.
+            mf = ns.get("fluid_min_feature")
+            if isinstance(mf, (int, float)) and float(mf) > 0:
+                spec["minFeature"] = float(mf)
+            checks.setdefault("networks", spec)
 
     with tempfile.TemporaryDirectory() as tmp:
         # Prefer an explicit `parts` dict when both are assigned — the prompt
@@ -1131,6 +1474,8 @@ def _build_run_payload(
                     payload["geometry"] = entry["geometry"]
                     payload["validation"] = entry["validation"]
                     payload["remeshed"] = bool(entry.get("remeshed"))
+                    if entry.get("decimatedForExport"):
+                        payload["decimatedForExport"] = entry["decimatedForExport"]
                     if entry.get("topo") is not None:
                         payload["topo"] = entry["topo"]
                     try:
@@ -1506,6 +1851,8 @@ def _session_worker(
             # end the session, so a long-lived child can't run unbounded execs.
             exec_count += 1
             if exec_count > SESSION_MAX_EXECS:
+                _obs("session_budget_exhausted", kind="execs",
+                     execs=exec_count, cap=SESSION_MAX_EXECS)
                 reply = _base_payload()
                 reply["error"] = (
                     f"session exec budget exhausted (>{SESSION_MAX_EXECS} "
@@ -1533,6 +1880,8 @@ def _session_worker(
             except Exception:  # noqa: BLE001
                 pass
             if output_bytes > SESSION_MAX_OUTPUT_BYTES:
+                _obs("session_budget_exhausted", kind="output",
+                     bytes=output_bytes, cap=SESSION_MAX_OUTPUT_BYTES)
                 break
         elif op == "import_step":
             # Off-the-shelf part sourcing (MTR-200): load a fetched STEP into the
@@ -1653,7 +2002,8 @@ def _sweep_sessions() -> None:
             if now - s.last_used > SESSION_TTL_S
         ]
         closing = [_sessions.pop(sid) for sid in expired]
-    for s in closing:
+    for sid, s in zip(expired, closing):
+        _obs("session_expired", sid=sid, ttlS=SESSION_TTL_S)
         s.close()
 
 
@@ -1689,6 +2039,7 @@ def create_session(req: SessionCreateRequest, request: Request) -> dict:
             )
         session_id = uuid.uuid4().hex
         _sessions[session_id] = _Session(req.engine)
+    _obs("session_created", sid=session_id, engine=req.engine)
     return {"sessionId": session_id}
 
 
@@ -1698,6 +2049,7 @@ def session_exec(
 ) -> dict:
     _check_auth(request)
     session = _get_session(session_id)
+    t0 = time.monotonic()
     with session.lock:
         if session.dead:  # lost a race with a concurrent failing call
             raise HTTPException(status_code=410, detail="session terminated")
@@ -1711,10 +2063,31 @@ def session_exec(
             },
             RUN_TIMEOUT_S,
         )
+    ms = int((time.monotonic() - t0) * 1000)
     if reply is not None:
+        _obs(
+            "exec_done",
+            sid=session_id,
+            ok=bool(reply.get("ok")),
+            ms=ms,
+            error=reply.get("error"),
+            networksIsolated=(
+                (reply.get("checks") or {}).get("networks") or {}
+            ).get("isolated"),
+        )
         return reply
     # The child is gone (killed on timeout, or crashed/OOMed). This exec
     # reports in the /run error shape; the session is dead — later calls 410.
+    # The kill reason is the single most useful diagnostic when a generation
+    # "just fails": timeout = the exec outran RUN_TIMEOUT_S; crash = OOM,
+    # SIGKILL from the session CPU budget, or a sidecar restart.
+    _obs(
+        "session_killed",
+        sid=session_id,
+        reason=failure or "crash",
+        ms=ms,
+        timeoutS=RUN_TIMEOUT_S,
+    )
     payload = _base_payload()
     payload["error"] = (
         f"timed out after {RUN_TIMEOUT_S}s"
@@ -1792,6 +2165,7 @@ def session_delete(session_id: str, request: Request) -> dict:
 @app.post("/run")
 async def run(req: RunRequest, request: Request) -> dict:
     _check_auth(request)
+    t0 = time.monotonic()
 
     ctx = mp.get_context("spawn")
     out: "mp.Queue" = ctx.Queue()
@@ -1839,13 +2213,33 @@ async def run(req: RunRequest, request: Request) -> dict:
             proc.kill()
     proc.join()
 
+    ms = int((time.monotonic() - t0) * 1000)
     if payload is not None:
+        _obs(
+            "run_done",
+            ok=bool(payload.get("ok")),
+            ms=ms,
+            engine=req.engine,
+            error=payload.get("error"),
+            faces=(payload.get("geometry") or {}).get("triangleCount"),
+            decimated=payload.get("decimatedForExport"),
+            networksIsolated=(
+                (payload.get("checks") or {}).get("networks") or {}
+            ).get("isolated"),
+        )
         return payload
 
     error = (
         f"timed out after {RUN_TIMEOUT_S}s"
         if timed_out
         else "worker produced no result (likely OOM/crash)"
+    )
+    _obs(
+        "run_died",
+        reason="timeout" if timed_out else "crash",
+        ms=ms,
+        engine=req.engine,
+        timeoutS=RUN_TIMEOUT_S,
     )
     return {
         "ok": False,

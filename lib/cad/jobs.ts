@@ -113,7 +113,11 @@ export async function appendJobProgress(
 
   await db
     .update(cadJobs)
-    .set({ progress: next })
+    // updatedAt is the job's HEARTBEAT: every progress write bumps it, and
+    // the events route reaps a "running" job only when the heartbeat goes
+    // stale — not on age since start, which falsely killed long legitimate
+    // builds and let genuinely dead ones linger for the full window.
+    .set({ progress: next, updatedAt: new Date() })
     .where(eq(cadJobs.id, jobId));
 }
 
@@ -202,7 +206,9 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
       writeSnapshot(event.render, event.step);
       return;
     }
-    buffer.push(event);
+    // Stamp emit time: replayed transcripts arrive in one burst, so the
+    // studio's stage timers need the entry's own clock, not arrival time.
+    buffer.push({ ...event, t: Date.now() });
     const elapsed = Date.now() - lastFlush;
     if (elapsed >= FLUSH_INTERVAL_MS) {
       lastFlush = Date.now();
@@ -364,11 +370,22 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
       ...usagePatch(),
     });
   };
-  const finishFailed = async (message: string) => {
+  const finishFailed = async (message: string, detail?: unknown) => {
     await flushTerminal({ type: "error", error: message, generationId });
+    // errorDetail carries the REAL exception (message + stack) for
+    // debugging; `error` stays the user-facing copy. Truncated so a
+    // pathological error can't bloat the row.
+    const errorDetail = detail
+      ? String(
+          (detail as Error)?.stack ??
+            (detail as Error)?.message ??
+            detail
+        ).slice(0, 8_000)
+      : undefined;
     await markJob({
       status: "failed",
       error: message,
+      ...(errorDetail ? { errorDetail } : {}),
       finishedAt: new Date(),
       ...usagePatch(),
     });
@@ -396,6 +413,12 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
   // the harness/sidecar/model calls run under. A client disconnect no
   // longer aborts anything — this flag (set by the cancel endpoint) is the
   // only trigger.
+  // Live usage flush: piggyback on the cancel poll's tick to persist the
+  // meter's running totals to cadJobs.usage while the job executes. The
+  // events route turns changes into `usage` SSE frames, so the studio can
+  // show tokens-so-far live. Best-effort and change-gated (one small UPDATE
+  // per tick at most); the terminal write still lands the final summary.
+  let lastUsageJson = "";
   const cancelPoll = setInterval(() => {
     void (async () => {
       try {
@@ -410,6 +433,16 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
         }
       } catch {
         // Best-effort — a failed poll just delays cancellation one tick.
+      }
+      try {
+        const usage = meter.summarize(meteredRoute);
+        const json = JSON.stringify(usage);
+        if (json !== lastUsageJson) {
+          lastUsageJson = json;
+          await markJob({ usage });
+        }
+      } catch {
+        // Best-effort — the live meter is cosmetic until the terminal write.
       }
     })();
   }, CANCEL_POLL_MS);
@@ -492,6 +525,7 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
       parts: persisted.parts,
       projectSlug: persisted.projectSlug,
       remeshed: persisted.remeshed,
+      networksReport: persisted.networksReport ?? null,
       // STEP availability rides along so the studio's action row is stable at
       // first paint (no post-mount "Download STEP" pop-in, MTR-215).
       hasStep: persisted.hasStep,
@@ -521,8 +555,8 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
         generationId,
         "Generation failed. Please try again."
       ).catch(() => undefined);
-      await finishFailed("Generation failed. Please try again.").catch((err) =>
-        logError("executeCadJob.fail", err)
+      await finishFailed("Generation failed. Please try again.", error).catch(
+        (err) => logError("executeCadJob.fail", err)
       );
     }
   } finally {

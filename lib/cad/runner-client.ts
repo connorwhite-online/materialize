@@ -1,6 +1,7 @@
 import "server-only";
 
 import { meterSidecarCall } from "./metering";
+import { sidecarDispatcher } from "./sidecar-fetch";
 import type { CadOutputFormat, CadRunResult } from "./types";
 
 /**
@@ -123,6 +124,10 @@ async function runCadCodeLive(
       allowRemesh: opts?.allowRemesh ?? false,
     }),
     signal,
+    // Outlive the sidecar's exec ceiling — undici's default 300s headers
+    // timeout killed a finished-and-verified 438s build at the HTTP layer.
+    // Not in RequestInit's types, but honored by Node's fetch.
+    ...({ dispatcher: sidecarDispatcher } as object),
   });
 
   if (!res.ok) {
