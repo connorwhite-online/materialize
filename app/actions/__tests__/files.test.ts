@@ -357,3 +357,150 @@ describe("archiveFileListing", () => {
     expect(mockSet).toHaveBeenCalledWith({ status: "archived" });
   });
 });
+
+// deleteFileListing (MTR-231): ACTIVE_ORDER_STATUSES gates whether a
+// delete request soft-archives (protecting order references) or hard-
+// deletes with cascade. This suite uses its own isolated db/db-schema
+// mocks (vi.doMock + vi.resetModules + dynamic import) rather than the
+// shared module-level mock above — that one always returns a single
+// fixed row for every bare `.where()` call regardless of table, which
+// works for createFileListing/canWriteFile's needs but can't express
+// deleteFileListing's several differently-shaped per-table queries
+// (purchases, fileAssets, cartItems, printOrders, printOrderItems).
+describe("deleteFileListing", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  const FILE_ROW = {
+    id: "file-1",
+    userId: "test-user-id",
+    slug: "test-slug",
+    organizationId: null as string | null,
+  };
+
+  /**
+   * Wires up isolated db/db-schema mocks for one deleteFileListing
+   * call and returns the freshly-imported action. `tableRows` maps a
+   * table's export name to what db.select().from(thatTable) should
+   * resolve with — every deleteFileListing query is a plain
+   * `.where(...)` (optionally `.limit(1)`, optionally preceded by
+   * `.innerJoin(...)`), so one shape covers every call site.
+   */
+  async function setupDeleteFileListing(tableRows: {
+    purchasesDirect?: unknown[];
+    purchasesViaProject?: unknown[];
+    fileAssetIds?: unknown[];
+    cartItems?: unknown[];
+    printOrderItems?: unknown[];
+    printOrders?: unknown[];
+  }) {
+    // Table sentinels — identity-compared inside the db mock below, so
+    // the schema mock must hand out these exact same objects.
+    const FILES = { __name: "files", id: "id" };
+    const FILE_ASSETS = { __name: "fileAssets", id: "id", fileId: "file_id" };
+    const PURCHASES = { __name: "purchases", id: "id", fileId: "file_id", status: "status" };
+    const PROJECTS = { __name: "projects", id: "id" };
+    const PROJECT_FILES = { __name: "projectFiles", projectId: "project_id", fileId: "file_id" };
+    const CART_ITEMS = { __name: "cartItems", id: "id", fileAssetId: "file_asset_id" };
+    const PRINT_ORDERS = { __name: "printOrders", id: "id", fileAssetId: "file_asset_id", status: "status" };
+    const PRINT_ORDER_ITEMS = { __name: "printOrderItems", id: "id", fileAssetId: "file_asset_id", printOrderId: "print_order_id" };
+    const FILE_PHOTOS = { __name: "filePhotos", id: "id", fileId: "file_id", storageKey: "storage_key" };
+
+    // Two innerJoin chains exist (purchases→projects→projectFiles, and
+    // printOrderItems→printOrders) — dispatch by the table .from() was
+    // called on, since that's stable across both call sites.
+    const joinResultsByTable = new Map<unknown, unknown[]>([
+      [PURCHASES, tableRows.purchasesViaProject ?? []],
+      [PRINT_ORDER_ITEMS, tableRows.printOrderItems ?? []],
+    ]);
+    const bareResultsByTable = new Map<unknown, unknown[]>([
+      [FILES, [FILE_ROW]],
+      [PURCHASES, tableRows.purchasesDirect ?? []],
+      [FILE_ASSETS, tableRows.fileAssetIds ?? []],
+      [CART_ITEMS, tableRows.cartItems ?? []],
+      [PRINT_ORDERS, tableRows.printOrders ?? []],
+      [FILE_PHOTOS, []],
+    ]);
+
+    vi.doMock("@/lib/db/schema", () => ({
+      files: FILES,
+      fileAssets: FILE_ASSETS,
+      purchases: PURCHASES,
+      projects: PROJECTS,
+      projectFiles: PROJECT_FILES,
+      cartItems: CART_ITEMS,
+      printOrders: PRINT_ORDERS,
+      printOrderItems: PRINT_ORDER_ITEMS,
+      filePhotos: FILE_PHOTOS,
+      collections: { __name: "collections", id: "id", userId: "user_id" },
+      collectionItems: { __name: "collectionItems", collectionId: "collection_id" },
+      users: { __name: "users", id: "id" },
+      ownershipClaimIntents: { __name: "ownershipClaimIntents", id: "id" },
+      disputes: { __name: "disputes", id: "id" },
+    }));
+
+    vi.doMock("@/lib/db", () => ({
+      db: {
+        select: () => ({
+          from: (table: unknown) => {
+            const bareArr = bareResultsByTable.get(table) ?? [];
+            const chain = {
+              where: () =>
+                Object.assign([...bareArr], { limit: () => bareArr }),
+            };
+            const joinArr = joinResultsByTable.get(table) ?? [];
+            return {
+              ...chain,
+              innerJoin: () => ({
+                innerJoin: () => ({
+                  where: () => Object.assign([...joinArr], { limit: () => joinArr }),
+                }),
+                where: () => Object.assign([...joinArr], { limit: () => joinArr }),
+              }),
+            };
+          },
+        }),
+        update: () => ({
+          set: (v: unknown) => {
+            mockSet(v);
+            return { where: () => Promise.resolve() };
+          },
+        }),
+        delete: () => ({ where: () => Promise.resolve() }),
+      },
+    }));
+
+    const mod = await import("../files");
+    return mod.deleteFileListing;
+  }
+
+  it("MTR-231: a blocked order referencing the file's asset soft-archives instead of hard-deleting", async () => {
+    const deleteFileListing = await setupDeleteFileListing({
+      printOrders: [{ id: "order-1", status: "blocked" }],
+      fileAssetIds: [{ id: "asset-1" }],
+    });
+
+    const result = await deleteFileListing("file-1");
+
+    expect(result).toEqual({
+      archived: true,
+      reason: "in-flight",
+      buyerCount: 1,
+    });
+    expect(mockSet).toHaveBeenCalledWith({
+      status: "archived",
+      visibility: "private",
+    });
+  });
+
+  it("hard-deletes when no buyers and no in-flight orders reference the file", async () => {
+    const deleteFileListing = await setupDeleteFileListing({
+      fileAssetIds: [],
+    });
+
+    const result = await deleteFileListing("file-1");
+
+    expect(result).toEqual({ deleted: true });
+  });
+});
