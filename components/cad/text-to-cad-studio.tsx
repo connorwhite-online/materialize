@@ -51,6 +51,7 @@ import {
   recordCadFeedback,
   renameCadGeneration,
   rerunCadWithParams,
+  reviseCadFeatureStatement,
   saveCadFileToProfile,
   setActiveCadVersion,
 } from "@/app/actions/cad-generation";
@@ -846,67 +847,108 @@ export function TextToCadStudio({
     setActiveFeatureId(null);
   }, [viewedTurn?.id]);
 
+  /** Adopt a feature-revision result (param rerun or stmt edit) as a turn. */
+  function adoptFeatureRevision(
+    res: Extract<
+      Awaited<ReturnType<typeof rerunCadWithParams>>,
+      { generationId: string }
+    >,
+    promptLabel: string
+  ) {
+    const newTurn: StudioTurn = {
+      id: res.generationId,
+      prompt: promptLabel,
+      status: "succeeded",
+      renderUrl: res.renderUrl,
+      fileAssetId: res.fileAssetId,
+      sourceCode: res.sourceCode,
+      features: res.features,
+      error: null,
+      rating: null,
+      feedbackTags: [],
+      feedbackNote: null,
+      parts: res.parts,
+      projectSlug: res.projectSlug,
+      remeshed: res.remeshed,
+      networksReport: res.networksReport ?? null,
+      hasStep: res.hasStep,
+      parentGenerationId: res.parentGenerationId,
+    };
+
+    const rootId = activeRootIdRef.current;
+    setThreads((prev) =>
+      prev.map((t) => {
+        if (t.rootId !== rootId) return t;
+        if (t.turns.some((x) => x.id === newTurn.id)) return t;
+        return {
+          ...t,
+          lastActivity: Date.now(),
+          activeGenerationId: newTurn.id,
+          turns: [...t.turns, newTurn],
+        };
+      })
+    );
+    setViewTurnId(newTurn.id);
+    setActiveFeatureId(null);
+    // Fresh topo for the new revision — clear any cached miss.
+    setTopoUrls((u) => {
+      const next = { ...u };
+      delete next[newTurn.id];
+      return next;
+    });
+  }
+
   async function applyFeatureUpdate(
-    _feature: CadFeature,
-    sourceParams: Record<string, number>
+    feature: CadFeature,
+    draft: Record<string, number>
   ): Promise<{ error?: string } | void> {
     if (!viewedTurn) return { error: "No generation selected." };
     setFeatureUpdating(true);
     try {
+      // Control-key draft; the server re-derives every binding (top-level
+      // name or span literal, MTR-225) from its own copy of the source.
       const res = await rerunCadWithParams({
         generationId: viewedTurn.id,
-        params: sourceParams,
+        featureId: feature.id,
+        params: draft,
       });
       if ("error" in res) return { error: res.error };
-
-      const newTurn: StudioTurn = {
-        id: res.generationId,
-        prompt:
-          Object.entries(sourceParams)
-            .map(([n, v]) => `${n} → ${v}`)
-            .slice(0, 3)
-            .join(" · ") || "Update params",
-        status: "succeeded",
-        renderUrl: res.renderUrl,
-        fileAssetId: res.fileAssetId,
-        sourceCode: res.sourceCode,
-        features: res.features,
-        error: null,
-        rating: null,
-        feedbackTags: [],
-        feedbackNote: null,
-        parts: res.parts,
-        projectSlug: res.projectSlug,
-        remeshed: res.remeshed,
-        networksReport: res.networksReport ?? null,
-        hasStep: res.hasStep,
-        parentGenerationId: res.parentGenerationId,
-      };
-
-      const rootId = activeRootIdRef.current;
-      setThreads((prev) =>
-        prev.map((t) => {
-          if (t.rootId !== rootId) return t;
-          if (t.turns.some((x) => x.id === newTurn.id)) return t;
-          return {
-            ...t,
-            lastActivity: Date.now(),
-            activeGenerationId: newTurn.id,
-            turns: [...t.turns, newTurn],
-          };
-        })
+      adoptFeatureRevision(
+        res,
+        Object.entries(draft)
+          .filter(([k, v]) => feature.params[k] !== v)
+          .map(([k, v]) => `${k} → ${v}`)
+          .slice(0, 3)
+          .join(" · ") || "Update params"
       );
-      setViewTurnId(newTurn.id);
-      setActiveFeatureId(null);
-      // Fresh topo for the new revision — clear any cached miss.
-      setTopoUrls((u) => {
-        const next = { ...u };
-        delete next[newTurn.id];
-        return next;
-      });
     } catch (err) {
       return {
         error: err instanceof Error ? err.message : "Update failed.",
+      };
+    } finally {
+      setFeatureUpdating(false);
+    }
+  }
+
+  /** Statement-scoped LLM edit for one chip (MTR-225, route stmt-edit). */
+  async function applyFeatureStatementEdit(
+    feature: CadFeature,
+    instruction: string
+  ): Promise<{ error?: string; fallback?: boolean } | void> {
+    if (!viewedTurn) return { error: "No generation selected." };
+    setFeatureUpdating(true);
+    try {
+      const res = await reviseCadFeatureStatement({
+        generationId: viewedTurn.id,
+        featureId: feature.id,
+        instruction,
+      });
+      if ("error" in res) return res;
+      adoptFeatureRevision(res, `Edit ${feature.label}: ${instruction}`);
+    } catch (err) {
+      return {
+        error: err instanceof Error ? err.message : "Edit failed.",
+        fallback: true,
       };
     } finally {
       setFeatureUpdating(false);
@@ -2427,9 +2469,11 @@ export function TextToCadStudio({
                   </div>
                   <FeatureChips
                     features={viewedFeatures}
+                    sourceCode={viewedTurn.sourceCode}
                     activeId={activeFeatureId}
                     onActiveChange={setActiveFeatureId}
                     onUpdate={applyFeatureUpdate}
+                    onEditStatement={applyFeatureStatementEdit}
                     disabled={featureUpdating}
                     markedIds={annotatedFeatureIds}
                   />

@@ -45,6 +45,12 @@ export interface CadFeature {
   paramNames?: Record<string, string>;
   /** Indices into `topo.faces` for highlight. */
   faceIds: number[];
+  /**
+   * 1-based inclusive source-line range of the statement that executed this
+   * op (MTR-225). Enables span-literal param edits and statement-scoped
+   * repair; absent when the sidecar couldn't resolve it.
+   */
+  span?: [number, number];
 }
 
 /** Geometry stats the sidecar measures off the produced solid. */
