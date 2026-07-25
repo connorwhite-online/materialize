@@ -40,6 +40,52 @@ type LibraryItem = LibraryFileCardItem;
 // notice flags the cap to the user so nothing silently disappears.
 const LIBRARY_MAX_FILES = 500;
 
+/**
+ * Resolves which owned files belong to which collection, and which
+ * owned files are "standalone" (belong to the Files grid).
+ *
+ * MTR-239: a file can be both bundled in an owned project AND a member
+ * of a collection. The collection lookup must run against the FULL
+ * owned-file set (`allOwnedItems`) — not one that's already had
+ * project-bundled files filtered out — or a collection containing a
+ * project-bundled file renders as empty. The project-bundled dedupe
+ * only applies to the standalone Files grid.
+ *
+ * Pure and DB-free so it's unit-testable without a database.
+ */
+export function resolveCollectionMembership(
+  allOwnedItems: LibraryItem[],
+  collectionItemRows: Array<{ collectionId: string; fileId: string | null }>,
+  fileIdsInOwnedProjects: Set<string>
+): {
+  itemsInCollection: Map<string, LibraryItem[]>;
+  standaloneOwnedItems: LibraryItem[];
+} {
+  const itemMap = new Map(allOwnedItems.map((f) => [f.id, f]));
+  const itemsInCollection = new Map<string, LibraryItem[]>();
+  const idsInAnyCollection = new Set<string>();
+
+  for (const row of collectionItemRows) {
+    if (!row.fileId) continue;
+    const item = itemMap.get(row.fileId);
+    if (!item) continue;
+    idsInAnyCollection.add(row.fileId);
+    if (!itemsInCollection.has(row.collectionId)) {
+      itemsInCollection.set(row.collectionId, []);
+    }
+    itemsInCollection.get(row.collectionId)!.push(item);
+  }
+
+  // Standalone grid: neither in a collection nor bundled into an owned
+  // project (preserves the pre-existing dedupe intent for this grid
+  // only — collection sections keep project-bundled files).
+  const standaloneOwnedItems = allOwnedItems.filter(
+    (f) => !idsInAnyCollection.has(f.id) && !fileIdsInOwnedProjects.has(f.id)
+  );
+
+  return { itemsInCollection, standaloneOwnedItems };
+}
+
 export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
   // Unsaved text-to-CAD drafts live in the studio, not the library —
   // even for the owner (docs/text-to-cad/05 §B).
@@ -67,9 +113,21 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
     rawPurchasedProjects,
   ] = await Promise.all([
     // Fetch one extra so we can tell if the library was truncated
-    // without a second count() query.
+    // without a second count() query. Explicit column list — only
+    // what LibraryFileCardItem needs (library-file-card.tsx:21-40) —
+    // rather than every column on `files` (description, tags, etc.).
     db
-      .select()
+      .select({
+        id: files.id,
+        name: files.name,
+        slug: files.slug,
+        price: files.price,
+        visibility: files.visibility,
+        thumbnailUrl: files.thumbnailUrl,
+        coverPhotoId: files.coverPhotoId,
+        flaggedReason: files.flaggedReason,
+        recommendedMaterialId: files.recommendedMaterialId,
+      })
       .from(files)
       .where(and(...fileConditions))
       .orderBy(desc(files.createdAt))
@@ -210,13 +268,31 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
     projectFileRows,
     projectPhotoRows,
   ] = await Promise.all([
+    // Only the `dimensions` sub-object is consumed below (the card's
+    // "W × D × H" line) — select it via a jsonb path expression instead
+    // of the full `geometryData` blob (which also carries volume/
+    // triangleCount, unused here). We deliberately select
+    // `geometryData->'dimensions'` rather than the bbox*Um columns
+    // (schema.ts:546-548): those are populated only for the mesh
+    // formats the fingerprint pass parses (stl/obj/3mf, and only after
+    // that async pass completes) and are never set for step/amf, while
+    // `geometryData` is populated by the CraftCloud quote-caching route
+    // for any format a listing has been quoted in. Switching to the
+    // bbox columns would blank out dimensions for step/amf assets and
+    // for freshly uploaded stl/obj/3mf assets that haven't finished
+    // fingerprinting yet — a real regression, not just a legacy-data
+    // edge case.
     allFileIds.length > 0
       ? db
           .select({
             id: fileAssets.id,
             fileId: fileAssets.fileId,
             format: fileAssets.format,
-            geometryData: fileAssets.geometryData,
+            dimensions: sql<{
+              x: number;
+              y: number;
+              z: number;
+            } | null>`${fileAssets.geometryData}->'dimensions'`,
             createdAt: fileAssets.createdAt,
           })
           .from(fileAssets)
@@ -227,7 +303,7 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
             id: string;
             fileId: string | null;
             format: typeof fileAssets.format._.data;
-            geometryData: typeof fileAssets.geometryData._.data;
+            dimensions: { x: number; y: number; z: number } | null;
             createdAt: Date;
           }>
         ),
@@ -357,7 +433,7 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
   for (const asset of assetRows) {
     if (!asset.fileId) continue;
     if (!primaryAssetByFileId.has(asset.fileId)) {
-      const dims = asset.geometryData?.dimensions;
+      const dims = asset.dimensions;
       // Older CraftCloud responses sometimes returned partial shapes
       // (e.g. {x: null, y: null, z: null}) that we persisted before
       // the normalize at the cache boundary; treat anything missing
@@ -443,51 +519,42 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
     })
   );
 
-  const ownedItems: LibraryItem[] = ownedFiles
-    .filter((f) => !fileIdsInOwnedProjects.has(f.id))
-    .map((f) => {
-      const asset = primaryAssetByFileId.get(f.id);
-      const allPhotos = photoIdsByFileId.get(f.id) ?? [];
-      const additionalPhotoIds = f.coverPhotoId
-        ? allPhotos.filter((id) => id !== f.coverPhotoId)
-        : allPhotos;
-      return {
-        id: f.id,
-        name: f.name,
-        slug: f.slug,
-        price: f.price,
-        visibility: f.visibility,
-        source: "owned" as const,
-        thumbnailUrl: f.thumbnailUrl,
-        additionalPhotoIds,
-        primaryAssetId: asset?.id ?? null,
-        primaryFormat: asset?.format ?? null,
-        dimensions: asset?.dimensions ?? null,
-        flaggedReason: f.flaggedReason,
-        recommendedMaterialId: f.recommendedMaterialId,
-      };
-    });
+  // Unfiltered — a file that's bundled in an owned project can still be
+  // a member of a collection, and the collection-membership resolution
+  // below needs to find it. Only the standalone "Files" grid dedupes
+  // project-bundled files out (see `mainGridItems`).
+  const allOwnedItems: LibraryItem[] = ownedFiles.map((f) => {
+    const asset = primaryAssetByFileId.get(f.id);
+    const allPhotos = photoIdsByFileId.get(f.id) ?? [];
+    const additionalPhotoIds = f.coverPhotoId
+      ? allPhotos.filter((id) => id !== f.coverPhotoId)
+      : allPhotos;
+    return {
+      id: f.id,
+      name: f.name,
+      slug: f.slug,
+      price: f.price,
+      visibility: f.visibility,
+      source: "owned" as const,
+      thumbnailUrl: f.thumbnailUrl,
+      additionalPhotoIds,
+      primaryAssetId: asset?.id ?? null,
+      primaryFormat: asset?.format ?? null,
+      dimensions: asset?.dimensions ?? null,
+      flaggedReason: f.flaggedReason,
+      recommendedMaterialId: f.recommendedMaterialId,
+    };
+  });
 
-  const itemMap = new Map(ownedItems.map((f) => [f.id, f]));
-  const itemsInCollection = new Map<string, LibraryItem[]>();
-  const idsInAnyCollection = new Set<string>();
+  const { itemsInCollection, standaloneOwnedItems } =
+    resolveCollectionMembership(
+      allOwnedItems,
+      collectionItemRows,
+      fileIdsInOwnedProjects
+    );
 
-  for (const row of collectionItemRows) {
-    if (!row.fileId) continue;
-    const item = itemMap.get(row.fileId);
-    if (!item) continue;
-    idsInAnyCollection.add(row.fileId);
-    if (!itemsInCollection.has(row.collectionId)) {
-      itemsInCollection.set(row.collectionId, []);
-    }
-    itemsInCollection.get(row.collectionId)!.push(item);
-  }
-
-  const uncollectedOwned = ownedItems.filter(
-    (f) => !idsInAnyCollection.has(f.id)
-  );
   const mainGridItems: LibraryItem[] = [
-    ...uncollectedOwned,
+    ...standaloneOwnedItems,
     ...purchasedItems,
   ];
   const projectGridItems: LibraryProjectCardItem[] = [
@@ -495,8 +562,17 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
     ...purchasedProjects,
   ];
 
+  // Owned-file count excludes project-bundled files, matching the
+  // pre-fix `ownedItems` semantics: a file bundled into a project is
+  // already represented by that project's own "item" (1 project =
+  // 1 item, regardless of how many files it bundles), so it isn't
+  // double-counted here even though it may now also appear inside a
+  // collection section above.
+  const ownedFileCount = allOwnedItems.filter(
+    (f) => !fileIdsInOwnedProjects.has(f.id)
+  ).length;
   const totalItems =
-    ownedItems.length +
+    ownedFileCount +
     purchasedItems.length +
     ownedProjectItems.length +
     purchasedProjects.length;
