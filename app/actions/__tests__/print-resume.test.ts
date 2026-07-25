@@ -221,4 +221,42 @@ describe("resumePrintOrder", () => {
     );
     expect(nulledSession).toBeUndefined();
   });
+
+  // MTR-233 — CON-159's pi_ guard only fired when craftCloudOrderId
+  // was still null. A row whose CraftCloud order HAS landed (or is
+  // mid-placement behind a `placing:` sentinel) fell through to the
+  // generic retrieve, which throws on a `pi_…` value — the throw was
+  // swallowed and the user looped on "Checkout already in progress."
+  // forever. The classifier now catches every `pi_…` shape uniformly.
+  it("MTR-233: pi_ stripeSessionId with craftCloudOrderId already set returns the agent-order message, not a thrown-retrieve loop", async () => {
+    selectedOrder = {
+      ...baseOrder,
+      stripeSessionId: "pi_auto_approved_123",
+      craftCloudOrderId: "placing:some-nanoid",
+    };
+
+    const result = await resumePrintOrder("order-id-1");
+
+    expect(result).toEqual({
+      error: "Your order is being placed — it will appear under Orders shortly.",
+    });
+    expect(mockRetrieve).not.toHaveBeenCalled();
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("MTR-233: pi_ stripeSessionId with no craftCloudOrderId yet still returns the agent-order message (pre-existing behavior preserved)", async () => {
+    selectedOrder = {
+      ...baseOrder,
+      stripeSessionId: "pi_auto_approved_456",
+      craftCloudOrderId: null,
+    };
+
+    const result = await resumePrintOrder("order-id-1");
+
+    expect(result).toEqual({
+      error: "Your order is being placed — it will appear under Orders shortly.",
+    });
+    expect(mockRetrieve).not.toHaveBeenCalled();
+  });
+
 });

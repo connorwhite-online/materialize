@@ -293,4 +293,27 @@ describe("completePrintOrder multi-tab/device guard", () => {
     );
     expect(nulledSession).toBeUndefined();
   });
+
+  // MTR-233 — place-auto-approved-orders promotes auto_approved →
+  // cart_created but deliberately leaves the off-session PaymentIntent
+  // id (pi_…) in stripeSessionId. Before the fix, the multi-tab guard
+  // only skipped the session_claim: sentinel, so it tried
+  // sessions.retrieve("pi_…"), threw, swallowed the error, and fell
+  // through to a claim attempt that could never succeed — looping the
+  // user on "Checkout already in progress." forever.
+  it("MTR-233: a cart_created order carrying a leftover pi_ stripeSessionId returns a clean error instead of a thrown-retrieve loop", async () => {
+    selectedOrder = {
+      ...baseOrder,
+      status: "cart_created",
+      stripeSessionId: "pi_auto_approved_789",
+    };
+
+    const result = await completePrintOrder(callArgs);
+
+    expect(result).toEqual({
+      error: "Your order is being placed — it will appear under Orders shortly.",
+    });
+    expect(stripeRetrieve).not.toHaveBeenCalled();
+    expect(stripeCreate).not.toHaveBeenCalled();
+  });
 });
