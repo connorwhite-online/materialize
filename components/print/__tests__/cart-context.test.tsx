@@ -107,6 +107,7 @@ function localItemParams(
     vendorName: "Unionfab",
     materialConfigId: "pla-white",
     shippingId: "ship-1",
+    priceId: "price-1",
     quoteId: "quote-1",
     quantity: 1,
     materialPrice: 10,

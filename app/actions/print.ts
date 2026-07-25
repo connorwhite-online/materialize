@@ -42,6 +42,7 @@ import {
   createOrder,
   createStripeCheckout,
   getOrderStatus,
+  getPrice,
   CraftCloudApiError,
 } from "@/lib/craftcloud/client";
 import { getCheckoutModel, isSandboxMode } from "@/lib/env";
@@ -55,6 +56,65 @@ import { promoteStudioDraftsForAssets } from "@/lib/studio-drafts";
 import { dedupeShippingByShipId } from "@/lib/pricing/shipping";
 import type { Address, Currency } from "@/lib/craftcloud/types";
 import { calcServiceFee } from "@/lib/fees";
+
+const QUOTE_EXPIRED_ERROR =
+  "This quote has expired. Please pick a material again — prices may have changed.";
+
+// Rounding-only tolerance: getPrice() returns dollars as a float;
+// converting to cents can introduce a fractional-cent difference
+// between what the client displayed and what we re-derive here.
+// Anything beyond this is treated as a tampered or stale price, never
+// a legitimate business discount (MTR-130).
+const PRICE_RECONCILE_TOLERANCE_CENTS = 1;
+
+/**
+ * Re-derive the authoritative per-unit material price for a quote
+ * from CraftCloud (via the priceId the client already polled to
+ * stability) instead of trusting the client-supplied materialPrice.
+ * Money-critical — do not weaken the tolerance without a documented
+ * policy decision (see MTR-130's STOP condition on divergence
+ * tolerance).
+ *
+ * Returns an error when:
+ *   - priceId is unknown/expired to CraftCloud, or
+ *   - quoteId can't be found in that price response (consumed/stale), or
+ *   - the claimed price diverges from the authoritative one beyond a
+ *     rounding tolerance.
+ */
+async function reconcileMaterialPrice(params: {
+  priceId: string;
+  quoteId: string;
+  claimedPriceCents: number;
+}): Promise<{ ok: true; priceCents: number } | { ok: false; error: string }> {
+  let snapshot;
+  try {
+    snapshot = await getPrice(params.priceId);
+  } catch (error) {
+    if (error instanceof CraftCloudApiError && error.isQuoteExpired()) {
+      return { ok: false, error: QUOTE_EXPIRED_ERROR };
+    }
+    throw error;
+  }
+
+  const quote = snapshot.quotes?.find((q) => q.quoteId === params.quoteId);
+  if (!quote) {
+    return { ok: false, error: QUOTE_EXPIRED_ERROR };
+  }
+
+  const authoritativeCents = Math.round(quote.price * 100);
+  if (
+    Math.abs(authoritativeCents - params.claimedPriceCents) >
+    PRICE_RECONCILE_TOLERANCE_CENTS
+  ) {
+    return {
+      ok: false,
+      error:
+        "Pricing has changed since you selected this option. Please refresh and try again.",
+    };
+  }
+
+  return { ok: true, priceCents: authoritativeCents };
+}
 
 /**
  * Lightweight check for vendor minimum production prices. Creates a
@@ -136,6 +196,7 @@ export async function discardDraftOrder(
  */
 export async function createPrintOrder(params: {
   fileAssetId: string;
+  priceId: string;
   quoteId: string;
   vendorId: string;
   vendorName?: string;
@@ -164,6 +225,17 @@ export async function createPrintOrder(params: {
       return { error: "File not found" };
     }
 
+    // Re-derive the authoritative per-unit price from CraftCloud
+    // instead of trusting the client-supplied materialPrice — a
+    // tampered request must not flow into the charge (MTR-130).
+    const claimedMaterialSubtotal = Math.round(data.materialPrice * 100);
+    const reconciled = await reconcileMaterialPrice({
+      priceId: data.priceId,
+      quoteId: data.quoteId,
+      claimedPriceCents: claimedMaterialSubtotal,
+    });
+    if (!reconciled.ok) return { error: reconciled.error };
+
     // Create Craft Cloud cart. The v5 API only wants { id: quoteId }
     // in each entry — the quote already encodes vendor, material,
     // model, and quantity by reference, so sending the full blob
@@ -181,7 +253,7 @@ export async function createPrintOrder(params: {
     const minimum = cart.minimumProductionPrice?.[data.vendorId];
     const productionFeeCents = Math.round((minimum?.productionFee ?? 0) * 100);
 
-    const materialSubtotal = Math.round(data.materialPrice * 100);
+    const materialSubtotal = reconciled.priceCents;
     const shippingSubtotal = Math.round(data.shippingPrice * 100);
     // Service fee is 3% of the pre-shipping subtotal — charging
     // a platform fee on freight would make our cut scale with
@@ -316,6 +388,29 @@ export async function checkoutVendorGroup(
 
     if (items.length === 0) return { error: "No items in cart for this vendor" };
 
+    // Re-derive each item's authoritative per-unit price from
+    // CraftCloud (via the priceId captured when it was added to cart)
+    // instead of trusting the stored cartItems.materialPrice at
+    // checkout time — a tampered add-to-cart write, or a price that
+    // simply went stale between add and checkout, must not silently
+    // flow into the Stripe charge (MTR-130). Legacy rows written
+    // before the priceId column existed have no way to reconcile —
+    // skip them (best-effort) rather than blocking checkout on an
+    // existing cart.
+    const reconciledMaterialCentsById = new Map<string, number>();
+    for (const item of items) {
+      if (!item.priceId) continue;
+      const reconciled = await reconcileMaterialPrice({
+        priceId: item.priceId,
+        quoteId: item.quoteId,
+        claimedPriceCents: item.materialPrice,
+      });
+      if (!reconciled.ok) return { error: reconciled.error };
+      reconciledMaterialCentsById.set(item.id, reconciled.priceCents);
+    }
+    const materialCentsFor = (item: (typeof items)[number]) =>
+      reconciledMaterialCentsById.get(item.id) ?? item.materialPrice;
+
     const shippingIds = [...new Set(items.map((i) => i.shippingId))];
     const currency = items[0].currency as Currency;
 
@@ -336,7 +431,7 @@ export async function checkoutVendorGroup(
     // downstream reads (Stripe line items, checkout page) can use
     // the canonical total instead of re-summing item rows.
     const totalMaterial = items.reduce(
-      (sum, i) => sum + i.materialPrice * i.quantity,
+      (sum, i) => sum + materialCentsFor(i) * i.quantity,
       0
     );
     const totalShipping = dedupeShippingByShipId(items);
@@ -384,7 +479,7 @@ export async function checkoutVendorGroup(
         vendorName: i.vendorName ?? null,
         materialConfigId: i.materialConfigId,
         quantity: i.quantity,
-        materialSubtotal: i.materialPrice,
+        materialSubtotal: materialCentsFor(i),
         shippingSubtotal: 0,
       }))
     );
@@ -817,14 +912,20 @@ export async function completePrintOrder(params: {
     // instead of creating a second Stripe session for the same order.
     // Without this guard the user can end up with two open sessions
     // and pay twice. Skip when the value is a sentinel from an
-    // in-flight claim — the claim re-fetch below handles that.
-    if (
-      order.stripeSessionId &&
-      !isSessionClaimSentinel(order.stripeSessionId)
-    ) {
+    // in-flight claim — the claim re-fetch below handles that. A
+    // `pi_…` value means this order was auto-approved and charged
+    // off-session by an agent — there's no Checkout session to
+    // resume, so bail with a friendly message instead of letting
+    // sessions.retrieve throw (MTR-233).
+    const existingRefKind = classifyPaymentRef(order.stripeSessionId);
+    if (existingRefKind === "payment_intent") {
+      return { error: AGENT_CHARGED_ORDER_ERROR };
+    }
+    if (existingRefKind === "session") {
+      const existingSessionId = order.stripeSessionId!;
       try {
         const existing = await stripe.checkout.sessions.retrieve(
-          order.stripeSessionId
+          existingSessionId
         );
         if (existing.status === "open" && existing.url) {
           return { checkoutUrl: existing.url };
@@ -848,7 +949,7 @@ export async function completePrintOrder(params: {
           .where(
             and(
               eq(printOrders.id, params.orderId),
-              eq(printOrders.stripeSessionId, order.stripeSessionId)
+              eq(printOrders.stripeSessionId, existingSessionId)
             )
           );
       } catch (err) {
@@ -885,13 +986,14 @@ export async function completePrintOrder(params: {
       if (refreshed.status !== "cart_created") {
         return { error: "Order already processed" };
       }
-      if (
-        refreshed.stripeSessionId &&
-        !isSessionClaimSentinel(refreshed.stripeSessionId)
-      ) {
+      const refreshedRefKind = classifyPaymentRef(refreshed.stripeSessionId);
+      if (refreshedRefKind === "payment_intent") {
+        return { error: AGENT_CHARGED_ORDER_ERROR };
+      }
+      if (refreshedRefKind === "session") {
         try {
           const existing = await stripe.checkout.sessions.retrieve(
-            refreshed.stripeSessionId
+            refreshed.stripeSessionId!
           );
           if (existing.status === "open" && existing.url) {
             return { checkoutUrl: existing.url };
@@ -967,8 +1069,31 @@ export async function completePrintOrder(params: {
 
 const SESSION_CLAIM_PREFIX = "session_claim:";
 
-function isSessionClaimSentinel(value: string | null | undefined): boolean {
-  return typeof value === "string" && value.startsWith(SESSION_CLAIM_PREFIX);
+// Surfaced whenever we'd otherwise try to treat an off-session
+// PaymentIntent id as a Checkout session — same copy resumePrintOrder
+// has always shown for this case (MTR-233). Agent auto-approved orders
+// store the PI id directly in stripeSessionId (lib/mcp/internal/
+// orders.ts:353); there's no Checkout session to resume.
+const AGENT_CHARGED_ORDER_ERROR =
+  "Your order is being placed — it will appear under Orders shortly.";
+
+type PaymentRefKind = "session" | "payment_intent" | "claim" | "none";
+
+/**
+ * printOrders.stripeSessionId is an overloaded column (AGENTS.md
+ * "Implicit contracts"): a Stripe Checkout session id (`cs_…`), an
+ * off-session PaymentIntent id (`pi_…`, agent auto-approved path), or
+ * a `session_claim:<nanoid>` sentinel written while a claim is
+ * in-flight. Every read of this column must classify it before
+ * deciding what to do — in particular, `stripe.checkout.sessions.
+ * retrieve()` must only ever be called on a `"session"` value; calling
+ * it on a `pi_…` id throws (MTR-233).
+ */
+function classifyPaymentRef(value: string | null | undefined): PaymentRefKind {
+  if (!value) return "none";
+  if (value.startsWith(SESSION_CLAIM_PREFIX)) return "claim";
+  if (value.startsWith("pi_")) return "payment_intent";
+  return "session";
 }
 
 async function releaseSessionClaim(orderId: string, sentinel: string) {
@@ -1162,37 +1287,28 @@ export async function resumePrintOrder(
       return { error: "Order has no saved address" };
     }
 
-    // CON-159: Auto-approved orders store the off-session PaymentIntent
-    // id (pi_…) in stripeSessionId. The PI is NOT a Checkout session —
-    // sessions.retrieve("pi_…") would throw. These rows are awaiting
-    // CraftCloud placement by the place-auto-approved-orders cron; the
-    // Resume button cannot do anything useful. Suppress it with a
-    // friendly message instead of letting sessions.retrieve throw.
-    if (
-      order.stripeSessionId &&
-      order.stripeSessionId.startsWith("pi_") &&
-      !order.craftCloudOrderId
-    ) {
-      return {
-        error:
-          "Your order is being placed — it will appear under Orders shortly.",
-      };
-    }
-
     const stripe = getStripe();
 
     // Same multi-tab guard as completePrintOrder: if a real session
     // is already attached, retrieve it; if it's open, return that URL
     // so two Resume clicks across tabs land on the same Stripe page.
     // Skip claim sentinels — they signal a sibling worker is mid-flight
-    // and the lost-race branch below handles the wait.
-    if (
-      order.stripeSessionId &&
-      !isSessionClaimSentinel(order.stripeSessionId)
-    ) {
+    // and the lost-race branch below handles the wait. A `pi_…` value
+    // means this order was auto-approved and charged off-session by an
+    // agent (CON-159) — it's awaiting CraftCloud placement by the
+    // place-auto-approved-orders cron and there's no Checkout session
+    // to resume, regardless of whether craftCloudOrderId has landed
+    // yet. Bail with a friendly message instead of letting
+    // sessions.retrieve throw (MTR-233).
+    const resumeRefKind = classifyPaymentRef(order.stripeSessionId);
+    if (resumeRefKind === "payment_intent") {
+      return { error: AGENT_CHARGED_ORDER_ERROR };
+    }
+    if (resumeRefKind === "session") {
+      const resumeSessionId = order.stripeSessionId!;
       try {
         const existing = await stripe.checkout.sessions.retrieve(
-          order.stripeSessionId
+          resumeSessionId
         );
         if (existing.status === "open" && existing.url) {
           return { checkoutUrl: existing.url };
@@ -1215,7 +1331,7 @@ export async function resumePrintOrder(
           .where(
             and(
               eq(printOrders.id, orderId),
-              eq(printOrders.stripeSessionId, order.stripeSessionId)
+              eq(printOrders.stripeSessionId, resumeSessionId)
             )
           );
       } catch (error) {
@@ -1247,13 +1363,16 @@ export async function resumePrintOrder(
       if (refreshed.status !== "cart_created") {
         return { error: "Order already processed" };
       }
-      if (
-        refreshed.stripeSessionId &&
-        !isSessionClaimSentinel(refreshed.stripeSessionId)
-      ) {
+      const refreshedResumeRefKind = classifyPaymentRef(
+        refreshed.stripeSessionId
+      );
+      if (refreshedResumeRefKind === "payment_intent") {
+        return { error: AGENT_CHARGED_ORDER_ERROR };
+      }
+      if (refreshedResumeRefKind === "session") {
         try {
           const existing = await stripe.checkout.sessions.retrieve(
-            refreshed.stripeSessionId
+            refreshed.stripeSessionId!
           );
           if (existing.status === "open" && existing.url) {
             return { checkoutUrl: existing.url };
@@ -1420,14 +1539,15 @@ export async function requestOrderRefund(
     // generic "contact support" error despite the money and PI id
     // being right there), and a claim sentinel isn't a real payment
     // reference at all.
-    if (isSessionClaimSentinel(order.stripeSessionId)) {
+    const refundRefKind = classifyPaymentRef(order.stripeSessionId);
+    if (refundRefKind === "claim") {
       return { error: "No payment found for this order" };
     }
 
     const stripe = getStripe();
     let paymentIntentId: string;
 
-    if (order.stripeSessionId.startsWith("pi_")) {
+    if (refundRefKind === "payment_intent") {
       // Auto-approved agent order — stripeSessionId IS the
       // PaymentIntent id (lib/mcp/internal/orders.ts:353). Refund it
       // directly, mirroring cancelAutoApprovedOrder in

@@ -1,0 +1,12 @@
+-- Reconcile print-order price against the CraftCloud quote (MTR-130):
+-- cart_items gains `price_id`, the CraftCloud priceId the row's
+-- quoteId was resolved from. checkoutVendorGroup re-derives the
+-- authoritative per-unit price via getPrice(priceId) at checkout time
+-- instead of trusting the stored materialPrice. Nullable — rows
+-- written before this column existed have no way to reconcile and are
+-- skipped (best-effort) rather than blocking checkout.
+--
+-- Hand-written idempotent per the 0039+ convention (each statement
+-- safe to re-apply; the neon-http migrator runs them over HTTP with no
+-- wrapping transaction).
+ALTER TABLE "cart_items" ADD COLUMN IF NOT EXISTS "price_id" text;

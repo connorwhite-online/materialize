@@ -32,6 +32,10 @@ export interface LocalCartItem {
   vendorName?: string;
   materialConfigId: string;
   shippingId: string;
+  // CraftCloud priceId the quoteId was resolved from — threaded so
+  // addToCart can re-derive the authoritative price via getPrice()
+  // instead of trusting materialPrice below (MTR-130).
+  priceId: string;
   quoteId: string;
   quantity: number;
   materialPrice: number;
@@ -58,6 +62,7 @@ interface CartContextValue {
   close: () => void;
   addItem: (params: {
     fileAssetId: string;
+    priceId: string;
     quoteId: string;
     vendorId: string;
     vendorName?: string;
@@ -370,6 +375,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
         const cartResult = await addToCart({
           fileAssetId: draft.fileAssetId,
+          priceId: item.priceId,
           quoteId: item.quoteId,
           vendorId: item.vendorId,
           vendorName: item.vendorName,

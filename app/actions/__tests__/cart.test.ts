@@ -1,5 +1,50 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// vi.hoisted runs before vi.mock factories (and before module imports).
+const { MockCraftCloudApiError } = vi.hoisted(() => {
+  class MockCraftCloudApiError extends Error {
+    status: number;
+    body: string;
+    path: string;
+    constructor(status: number, body: string, path: string) {
+      super(`Craft Cloud API error ${status} at ${path}: ${body}`);
+      this.name = "CraftCloudApiError";
+      this.status = status;
+      this.body = body;
+      this.path = path;
+    }
+    isQuoteExpired() {
+      if (this.status !== 400 && this.status !== 404) return false;
+      const l = this.body.toLowerCase();
+      return (
+        l.includes("quote") &&
+        (l.includes("not found") ||
+          l.includes("expired") ||
+          l.includes("invalid"))
+      );
+    }
+  }
+  return { MockCraftCloudApiError };
+});
+
+// MTR-130: getPrice(priceId) is the source of truth addToCart
+// reconciles the claimed materialPrice against. Defaults to a quote
+// matching baseParams (quoteId "quote-1", $42.50) so the existing
+// suite's calls reconcile cleanly without per-test setup.
+const mockGetPrice = vi.fn((..._args: unknown[]) =>
+  Promise.resolve({
+    priceId: "price-1",
+    allComplete: true,
+    quotes: [{ quoteId: "quote-1", price: 42.5, currency: "USD" }],
+    shipping: [],
+  })
+);
+
+vi.mock("@/lib/craftcloud/client", () => ({
+  getPrice: (...args: unknown[]) => mockGetPrice(...args),
+  CraftCloudApiError: MockCraftCloudApiError,
+}));
+
 let cartRows: unknown[] = [];
 let insertedValues: unknown[] = [];
 let upsertSet: unknown = null;
@@ -105,6 +150,7 @@ import { userCanPrintAsset } from "@/lib/entitlement";
 
 const baseParams = {
   fileAssetId: "aaaaaaaa-bbbb-4ccc-9ddd-eeeeeeeeeeee",
+  priceId: "price-1",
   quoteId: "quote-1",
   vendorId: "vendor-1",
   materialConfigId: "config-1",
@@ -142,6 +188,9 @@ describe("addToCart", () => {
     expect(inserted.materialPrice).toBe(4250);
     expect(inserted.shippingPrice).toBe(800);
     expect(inserted.quantity).toBe(2);
+    // priceId is persisted so a later checkoutVendorGroup can
+    // re-reconcile this row against CraftCloud (MTR-130).
+    expect(inserted.priceId).toBe("price-1");
     // ON CONFLICT path is wired to bump the existing row's quantity
     // (capped at 100 via LEAST). updatedAt also re-stamps so cart
     // staleness UI reflects the latest touch.
@@ -149,6 +198,41 @@ describe("addToCart", () => {
     expect(setShape).not.toBeNull();
     expect(setShape).toHaveProperty("quantity");
     expect(setShape).toHaveProperty("updatedAt");
+  });
+
+  // MTR-130 — addToCart must re-derive the price from CraftCloud
+  // (getPrice(priceId)) instead of trusting the caller's materialPrice.
+  it("MTR-130: rejects a tampered (too-low) materialPrice instead of trusting the request body", async () => {
+    const result = await addToCart({ ...baseParams, materialPrice: 1 });
+    expect(result).toMatchObject({
+      error: expect.stringMatching(/pricing has changed|refresh/i),
+    });
+    expect(insertedValues).toHaveLength(0);
+  });
+
+  it("MTR-130: quoteId absent from CraftCloud's price response surfaces a clear re-quote error", async () => {
+    mockGetPrice.mockResolvedValueOnce({
+      priceId: "price-1",
+      allComplete: true,
+      quotes: [{ quoteId: "some-other-quote", price: 42.5, currency: "USD" }],
+      shipping: [],
+    });
+    const result = await addToCart(baseParams);
+    expect(result).toMatchObject({
+      error: expect.stringMatching(/expired|pick a material/i),
+    });
+    expect(insertedValues).toHaveLength(0);
+  });
+
+  it("MTR-130: an expired priceId (CraftCloudApiError) surfaces the same actionable re-quote error", async () => {
+    mockGetPrice.mockRejectedValueOnce(
+      new MockCraftCloudApiError(404, "Quote not found or expired", "/v5/price/price-1")
+    );
+    const result = await addToCart(baseParams);
+    expect(result).toMatchObject({
+      error: expect.stringMatching(/expired|pick a material/i),
+    });
+    expect(insertedValues).toHaveLength(0);
   });
 
   it("rejects invalid params", async () => {
@@ -263,6 +347,12 @@ describe("repriceCartItem", () => {
     expect(set.quantity).toBe(5);
     expect(set.quoteId).toBe("quote-fresh");
     expect(set.materialPrice).toBe(727);
+    // priceId is nulled out on reprice — the old priceId's CraftCloud
+    // snapshot won't contain the new quoteId, so leaving it in place
+    // would make checkoutVendorGroup's reconciliation (MTR-130)
+    // false-reject this row later. A null priceId instead falls back
+    // to the legacy "trust as written" bucket.
+    expect(set.priceId).toBeNull();
   });
 
   it("rejects invalid quantity", async () => {

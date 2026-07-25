@@ -854,6 +854,12 @@ export const cartItems = pgTable("cart_items", {
     .notNull()
     .references(() => fileAssets.id, { onDelete: "cascade" }),
   quoteId: text("quote_id").notNull(),
+  // CraftCloud priceId the quoteId was resolved from — lets
+  // checkoutVendorGroup re-derive the authoritative per-unit price via
+  // getPrice(priceId) at checkout time instead of trusting the stored
+  // materialPrice (MTR-130). Nullable: rows written before this column
+  // existed have no way to reconcile and are skipped (best-effort).
+  priceId: text("price_id"),
   vendorId: text("vendor_id").notNull(),
   // Friendly vendor name captured at add-time so we don't have to
   // round-trip to CraftCloud's catalog on every cart render.

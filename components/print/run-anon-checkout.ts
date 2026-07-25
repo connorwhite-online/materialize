@@ -24,6 +24,10 @@ import { reportClientError } from "@/lib/observability/report-client-error";
 export interface AnonCheckoutInput {
   file: File;
   selectedQuote: {
+    // CraftCloud priceId the quoteId was resolved from — threaded so
+    // createPrintOrder can re-derive the authoritative price via
+    // getPrice() instead of trusting `price` below (MTR-130).
+    priceId: string;
     quoteId: string;
     vendorId: string;
     vendorName?: string;
@@ -129,6 +133,7 @@ export async function runAnonCheckout(
     // 4. Create the printOrder row + CraftCloud cart.
     const orderResult = await createPrintOrder({
       fileAssetId: draft.fileAssetId,
+      priceId: input.selectedQuote.priceId,
       quoteId: input.selectedQuote.quoteId,
       vendorId: input.selectedQuote.vendorId,
       vendorName: input.selectedQuote.vendorName,
