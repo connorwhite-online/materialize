@@ -5,8 +5,10 @@ import { modelForRole } from "./models";
 import { logError } from "@/lib/logger";
 import {
   CRITIQUE_RUBRIC,
+  buildJudgePrompt,
   parseJudgement,
   type AestheticJudgement,
+  type JudgeIntent,
 } from "./critique-core";
 
 /**
@@ -30,10 +32,12 @@ export {
   AESTHETIC_DIMENSIONS,
   PASS_THRESHOLD,
   CRITIQUE_RUBRIC,
+  buildJudgePrompt,
   parseJudgement,
   type AestheticDimension,
   type DimensionScore,
   type AestheticJudgement,
+  type JudgeIntent,
 } from "./critique-core";
 
 /** On whenever credentials are present; CAD_CRITIQUE=false disables. */
@@ -52,11 +56,12 @@ export function aestheticJudgeEnabled(): boolean {
 async function runVisionJudge(
   prompt: string,
   pngs: string[],
+  intent?: JudgeIntent,
   signal?: AbortSignal
 ): Promise<string> {
   return completeText({
     system: CRITIQUE_RUBRIC,
-    prompt: `Requested object: ${prompt}`,
+    prompt: buildJudgePrompt(prompt, intent),
     model: process.env.CAD_AESTHETIC_JUDGE_MODEL || modelForRole("critique"),
     role: "critique",
     images: pngs.map((data) => ({ data, mediaType: "image/png" as const })),
@@ -73,6 +78,12 @@ export async function judgeAesthetics(opts: {
    */
   renders?: Partial<Record<string, string>> | null;
   prompt: string;
+  /**
+   * The generator's stated design intent (MTR-223): plan text and/or brief,
+   * framed so the judge understands what was attempted but still grades only
+   * the rendered result. Omitted = judge prompt identical to before.
+   */
+  intent?: JudgeIntent;
   signal?: AbortSignal;
 }): Promise<AestheticJudgement> {
   const views = Object.values(opts.renders ?? {}).filter(
@@ -83,7 +94,7 @@ export async function judgeAesthetics(opts: {
     return { available: false };
   }
   try {
-    const text = await runVisionJudge(opts.prompt, images, opts.signal);
+    const text = await runVisionJudge(opts.prompt, images, opts.intent, opts.signal);
     const parsed = parseJudgement(text);
     if (!parsed) return { available: false };
     return {

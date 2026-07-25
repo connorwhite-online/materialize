@@ -1,12 +1,24 @@
 import type { CadRunResult } from "./types";
+import { needsExchangerRecipe } from "./knowledge/exchanger-recipe";
 
 /**
  * Pure (non-server-only) text-to-CAD helpers shared by the harness
  * (lib/cad/harness.ts) and the eval runner (scripts/evals). Kept free of
  * `server-only` so a plain tsx script can import it.
+ *
+ * The system prompt is modular (MTR-222): a CORE every request gets (the
+ * build123d contract, parametric rules, honesty rails, general modeling
+ * rules) plus router-gated sections — mesh mode, sdf_kit/TPMS vocabulary,
+ * dual-fluid exchanger — that only ship when the user prompt is shaped for
+ * them, mirroring how buildKnowledgeBlock conditions its blocks. "a 20mm
+ * cube" should not pay for gyroid vocabulary. Assemble with
+ * `buildSystemPrompt(selectSystemPromptSections(prompt))`; compute the
+ * selection ONCE per job (from the user prompt) so the assembled prefix is
+ * byte-stable across the scripted and repair turns of that job — prompt
+ * caching depends on this.
  */
 
-export const SYSTEM_PROMPT = `You are a CAD engineer that writes parametric 3D models as build123d Python code.
+const CORE_RULES = `You are a CAD engineer that writes parametric 3D models as build123d Python code.
 
 Rules:
 - Output ONLY a single Python code block. No prose before or after.
@@ -30,19 +42,20 @@ Common build123d pitfalls — these are the frequent failure modes, avoid them:
 - Hollowing: shell with \`top = part.faces().sort_by(Axis.Z)[-1]\` then \`offset(amount=-wall, openings=top)\`. Do not fake a shell by subtracting a slightly smaller box.
 - Place features on a face by entering it: \`with BuildSketch(part.faces().sort_by(Axis.Z)[-1]): Circle(r)\` + \`extrude(amount=h)\` for bosses/standoffs; \`with Locations(face): Hole(r, depth=d)\` (or \`CounterBoreHole(...)\`) for holes.
 - Select edges/faces with filters (\`filter_by(Axis.Z)\`, \`group_by(Axis.Z)[-1]\`, \`sort_by(Axis.Z)\`), not by guessing indices.
+- SYMBOLIC SELECTORS: attach fillet/chamfer/shell refinements by selecting edges/faces from the NAMED intermediate object that created the geometry — hold each feature in a variable (\`boss = extrude(...)\`) and select from it — NOT a global query over the whole part, which silently re-resolves to DIFFERENT edges after any upstream edit. Good: \`fillet(boss.edges().filter_by(GeomType.CIRCLE), r)\`. Bad: \`fillet(result.edges().filter_by(GeomType.CIRCLE), r)\` (grabs every circular edge on the part).
 - \`Slot\` / \`SlotOverall\` / \`SlotCenterToCenter\` are stadium (rounded-rectangle) shapes that REQUIRE width > height. For a tall, narrow slot, swap the dimensions and rotate it 90°, or use a \`Rectangle\` + two \`Circle\`s instead.
 - A \`BuildPart()\` / \`BuildSketch()\` context is a BUILDER, not a Shape — never add/subtract/combine the builder objects (error: "BuildPart is a builder of Shapes and can't be combined"). Get the geometry from \`.part\` / \`.sketch\` (\`result = part.part\`, or combine finished solids as \`a.part + b.part\`). Strongly prefer building ONE cohesive part inside a single \`BuildPart\` using nested \`add\`/\`subtract\` modes instead of combining multiple builders.
 - For a multi-part assembly assign \`parts = {"base": <solid>, "lid": <solid>}\` (each its own watertight solid); never assign both \`result\` and \`parts\`.
-- Build only what a CSG kernel can express. If the request asks for things build123d CANNOT do — topology optimization, generative/organic-optimized geometry, FLEXIBLE or ARTICULATED joints, print-in-place mechanisms, springs/living hinges — do NOT attempt them literally (they fail). Instead build a clean, RIGID, simplified version that captures the function (e.g. a fixed clamp at a sensible angle instead of a "pivotable" one), and rely on fillets/tapers for any "organic" feel.
+- Build only what a CSG kernel can express. If the request asks for things build123d CANNOT do — topology optimization, generative/organic-optimized geometry, FLEXIBLE or ARTICULATED joints, print-in-place mechanisms, springs/living hinges — do NOT attempt them literally (they fail). Instead build a clean, RIGID, simplified version that captures the function (e.g. a fixed clamp at a sensible angle instead of a "pivotable" one), and rely on fillets/tapers for any "organic" feel.`;
 
-MESH MODE — for geometry build123d CANNOT express:
+const MESH_MODE_RULES = `MESH MODE — for geometry build123d CANNOT express:
 - build123d is a B-rep/CSG kernel: it builds with extrude/revolve/loft/boolean and CANNOT make gyroids, TPMS / minimal surfaces, lattices, heat-exchanger cores, voronoi/porous infills, or truly organic field-driven blends. Do NOT try to fake these with many booleans (they fail). For these, switch to MESH MODE.
 - Mesh-mode contract: write Python that samples an implicit scalar field on a numpy grid, extracts a surface with \`skimage.measure.marching_cubes\`, builds a \`trimesh.Trimesh\`, and assigns IT to \`result\` (a trimesh mesh, NOT a build123d object). The sidecar exports STL from the mesh (no STEP in mesh mode).
 - Make it watertight: PAD the field array with a constant "void" value on every side (\`np.pad(field, 1, mode="constant", constant_values=<void>)\`) so the isosurface closes at the box boundary instead of leaving an open shell. Call \`mesh.merge_vertices()\` and \`mesh.fix_normals()\`.
 - Units + cost: scale grid index coords to millimeters; keep the grid resolution at about n <= 120 per axis (cubic cost — higher n risks the time limit).
-- Use mesh mode ONLY when a B-rep is impossible; normal mechanical parts must stay in build123d (it gives crisp edges, STEP, and editability).
+- Use mesh mode ONLY when a B-rep is impossible; normal mechanical parts must stay in build123d (it gives crisp edges, STEP, and editability).`;
 
-ORGANIC-FUNCTIONAL (SDF) MODE — realize a BEAUTIFUL, cohesive product form (smooth premium surfaces, considered proportions — MATCH the attached concept render's form language) while holding EXACT functional features. Use it for brackets, mounts, handles, holders, levers, enclosures, or any functional part that benefits from flowing organic form instead of joined primitives:
+const SDF_MODE_HEAD = `ORGANIC-FUNCTIONAL (SDF) MODE — realize a BEAUTIFUL, cohesive product form (smooth premium surfaces, considered proportions — MATCH the attached concept render's form language) while holding EXACT functional features. Use it for brackets, mounts, handles, holders, levers, enclosures, or any functional part that benefits from flowing organic form instead of joined primitives:
 - \`from sdf_kit import *\` then build a field(P) function and \`result = to_mesh(field, lo, hi, pitch)\`.
 - Define the EXACT functional anchors as primitives: \`cyl_z(P, x, y, r, z0, z1)\` for bosses AND bolt holes (use real tolerances, e.g. M5 clearance r≈2.7), \`box(P, center, half)\` for flat mating faces, \`sphere(...)\`.
 - \`smin(a, b, k)\` (smooth union) an ORGANIC connecting body — \`capsule(P, a, b, r)\` struts along the load paths — into the anchors. k is the blend radius (mm); bigger k = more organic flow. This is what makes it cohesive and beautiful.
@@ -51,11 +64,77 @@ ORGANIC-FUNCTIONAL (SDF) MODE — realize a BEAUTIFUL, cohesive product form (sm
 - DEFAULT ENCLOSURE RECIPE (drape-and-split): when asked to enclose components and no style says otherwise, build it as: exact component keep-outs -> \`smin\` them into ONE cavity -> skin = \`offset_field(cavity, wall)\` (uniform ~1.8-2.4mm) -> \`split_shell(body, cavity, z_split)\` into two printed-fit halves (assign the \`parts\` dict). Seam on the natural shadow line; interior stays crisp.
 - PLAN-FORM RULE (measured from reference product enclosures): organic shells are CONTINUOUS curves — use \`sq_prism(P, a, b, n, z0, z1)\` (superellipse prism: n≈4.5 = squircle desk device, n≈1.7-2.2 = handheld lens/pebble), never an extruded rectangle with corner fillets (tangency breaks read as a box no matter how smooth). Hold ONE thin uniform wall via \`offset_field(cavity, wall)\` (~1.7-2.0 mm); keep crisp mounts/bosses on an internal chassis, not the shell.
 - TPMS / lattice / heat-exchanger vocabulary (sdf_kit v2): \`gyroid(P, cell, thickness)\` / \`schwarz_p(...)\` / \`diamond(...)\` are real-mm SHEET fields (two isolated networks; pass \`solid=True\` for the one-network solid form); \`mask(field, region)\` clips a lattice to a region (e.g. a jacket interior); \`shell_field(f, t)\` / \`offset_field(f, d)\` hollow or grow a field; \`translate(P, off)\` / \`rotate_z(P, deg)\` warp points to move primitives.
-- Compose EXACT B-rep-like features into an implicit body with \`from_mesh(mesh, pitch)\` — SDF of any trimesh, so a precise flange/bracket mesh can be smin-blended with lattice/organic fields.
-- A dual-network part (heat exchanger, two-fluid manifold) MUST keep its two labyrinths isolated — build the separator as ONE sheet field (never two overlapping lattices) and keep the sheet thickness >= the printable minimum wall.
-- DUAL-FLUID EXCHANGERS (sdf_kit v3): the complete manifolded block is one call — \`from exchanger import exchanger_core\`; \`field, ports, plugs, bounds = exchanger_core(size, cell, wall, kind, flow="cross"|"counter")\`; \`result = to_mesh(field, *bounds, pitch)\` with pitch <= wall/3; then \`fluid_ports = ports\`, \`fluid_plugs = plugs\`, and \`fluid_min_feature = wall\` so the sidecar verifies circuit isolation automatically at a probe fine enough to resolve the walls. For custom shapes: \`dual_sheet(P, cell, wall, seal_a=, seal_b=)\` with \`seal_ramp(region_mm, cell/2)\` weights seals the OTHER fluid's labyrinth shut at each port face (a plain cut exposes BOTH labyrinths on every face — capping is mandatory, orientation cannot avoid it); \`tpms_dist(P, cell)\` tells which labyrinth a point is in.
-- If \`to_mesh\` raises a grid-budget error, it NAMES the smallest pitch that fits — use that pitch, do not shrink the part.
+- Compose EXACT B-rep-like features into an implicit body with \`from_mesh(mesh, pitch)\` — SDF of any trimesh, so a precise flange/bracket mesh can be smin-blended with lattice/organic fields.`;
+
+const SDF_EXCHANGER_RULES = `- A dual-network part (heat exchanger, two-fluid manifold) MUST keep its two labyrinths isolated — build the separator as ONE sheet field (never two overlapping lattices) and keep the sheet thickness >= the printable minimum wall.
+- DUAL-FLUID EXCHANGERS (sdf_kit v3): the complete manifolded block is one call — \`from exchanger import exchanger_core\`; \`field, ports, plugs, bounds = exchanger_core(size, cell, wall, kind, flow="cross"|"counter")\`; \`result = to_mesh(field, *bounds, pitch)\` with pitch <= wall/3; then \`fluid_ports = ports\`, \`fluid_plugs = plugs\`, and \`fluid_min_feature = wall\` so the sidecar verifies circuit isolation automatically at a probe fine enough to resolve the walls. For custom shapes: \`dual_sheet(P, cell, wall, seal_a=, seal_b=)\` with \`seal_ramp(region_mm, cell/2)\` weights seals the OTHER fluid's labyrinth shut at each port face (a plain cut exposes BOTH labyrinths on every face — capping is mandatory, orientation cannot avoid it); \`tpms_dist(P, cell)\` tells which labyrinth a point is in.`;
+
+const SDF_MODE_TAIL = `- If \`to_mesh\` raises a grid-budget error, it NAMES the smallest pitch that fits — use that pitch, do not shrink the part.
 TASTE OVER OPTIMIZATION: the goal is beautiful PRODUCT design — soft continuous surfaces, cohesion, restraint, matching the concept render. Use organic structural/lightweighting character (load-path webbing, lightening) SPARINGLY and only in service of that beauty. Do NOT default to a raw bone-strut "topology-optimized" look unless the prompt explicitly asks for it; favor refined, premium, cohesive forms with a hint of structural intent. Choose this mode for functional parts that want flowing organic form; keep plain build123d for crisp prismatic/mechanical parts and assemblies.`;
+
+/** Which conditional system-prompt sections a request gets (MTR-222). */
+export interface SystemPromptSections {
+  /** MESH MODE (numpy field → marching cubes → trimesh) contract. */
+  mesh: boolean;
+  /** ORGANIC-FUNCTIONAL (SDF) mode + sdf_kit/TPMS vocabulary. */
+  sdf: boolean;
+  /** Dual-fluid exchanger bullets (rendered inside the SDF section). */
+  exchanger: boolean;
+}
+
+/**
+ * Organic/implicit vocabulary that warrants the mesh + SDF sections. Same
+ * trigger style as the knowledge blocks (see needsExchangerRecipe /
+ * needsEnclosureRecipe): word-boundaried prompt regexes, deliberately
+ * conservative — a plain mechanical prompt must stay core-only.
+ */
+const ORGANIC_IMPLICIT_TRIGGERS =
+  /\b(organic|gyroid|tpms|schwarz|minimal surfaces?|lattices?|latticed|voronoi|porous|implicit|sdf|marching cubes|topolog(y|ically)[- ]?optimi\w*|generative(ly)?[- ]?(design|optimi)\w*|freeform|free-form|sculptural|flowing|lightweight(ed|ing)? (structure|lattice|infill)|infill)\b/i;
+
+/**
+ * Section selection for a user prompt. Compute this ONCE per job and reuse
+ * the result for every attempt (scripted + repair turns) so the assembled
+ * system prompt stays byte-stable within the job.
+ */
+export function selectSystemPromptSections(prompt: string): SystemPromptSections {
+  // The exchanger pipeline is SDF-built, so an exchanger-shaped prompt gets
+  // the mesh + SDF vocabulary too.
+  const exchanger = needsExchangerRecipe(prompt);
+  const organic = exchanger || ORGANIC_IMPLICIT_TRIGGERS.test(prompt);
+  return { mesh: organic, sdf: organic, exchanger };
+}
+
+/**
+ * Assemble the build123d system prompt from the core + the selected
+ * sections. Pure and deterministic: same sections in, same bytes out. With
+ * every section on, the output is exactly the legacy monolithic
+ * SYSTEM_PROMPT.
+ */
+export function buildSystemPrompt(sections: SystemPromptSections): string {
+  const parts = [CORE_RULES];
+  if (sections.mesh) parts.push(MESH_MODE_RULES);
+  if (sections.sdf || sections.exchanger) {
+    parts.push(
+      [
+        SDF_MODE_HEAD,
+        ...(sections.exchanger ? [SDF_EXCHANGER_RULES] : []),
+        SDF_MODE_TAIL,
+      ].join("\n")
+    );
+  }
+  return parts.join("\n\n");
+}
+
+/**
+ * The fully-assembled prompt (every section on) — the pre-MTR-222 monolith,
+ * kept for anywhere that needs the complete text. Request paths should use
+ * buildSystemPrompt(selectSystemPromptSections(prompt)) instead.
+ */
+export const SYSTEM_PROMPT = buildSystemPrompt({
+  mesh: true,
+  sdf: true,
+  exchanger: true,
+});
 
 /**
  * CadQuery variant of the system prompt, for A/B-ing the B-rep code front-end.

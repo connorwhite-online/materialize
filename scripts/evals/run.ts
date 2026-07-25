@@ -20,7 +20,8 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 import {
-  SYSTEM_PROMPT,
+  buildSystemPrompt,
+  selectSystemPromptSections,
   SYSTEM_PROMPT_CADQUERY,
   extractCode,
   gradeRun,
@@ -48,7 +49,14 @@ const RUNNER_URL = process.env.CAD_RUNNER_URL;
 // A/B the B-rep front-end: build123d (default) vs cadquery. Point CAD_RUNNER_URL
 // at the matching sidecar (cadquery runs in its own venv on another port).
 const ENGINE = process.env.CAD_EVAL_ENGINE === "cadquery" ? "cadquery" : "build123d";
-const SYSTEM = ENGINE === "cadquery" ? SYSTEM_PROMPT_CADQUERY : SYSTEM_PROMPT;
+// Router-gated system prompt (MTR-222), mirroring the harness: computed ONCE
+// per case (job) from the case's prompt and reused across that case's whole
+// revision chain so the assembled prefix is byte-stable within the job. The
+// cadquery A/B front-end is untouched — no gating, always the full variant.
+function systemPromptFor(prompt: string): string {
+  if (ENGINE === "cadquery") return SYSTEM_PROMPT_CADQUERY;
+  return buildSystemPrompt(selectSystemPromptSections(prompt));
+}
 const GEN_MODEL =
   process.env.CAD_MODEL_IMPLEMENT ||
   process.env.CAD_MODEL_DEFAULT ||
@@ -90,18 +98,18 @@ function buildUserPrompt(prompt: string): string {
 }
 
 /** One generation from a fully-built user prompt (fresh or revision framing). */
-async function generateRaw(userPrompt: string): Promise<string> {
+async function generateRaw(userPrompt: string, system: string): Promise<string> {
   const msg = await client.messages.create({
     model: GEN_MODEL,
     max_tokens: 8192,
-    system: SYSTEM,
+    system,
     messages: [{ role: "user", content: userPrompt }],
   });
   return extractCode(textOf(msg));
 }
 
-async function generate(prompt: string): Promise<string> {
-  return generateRaw(buildUserPrompt(prompt));
+async function generate(prompt: string, system: string): Promise<string> {
+  return generateRaw(buildUserPrompt(prompt), system);
 }
 
 /**
@@ -279,14 +287,15 @@ interface CaseResult {
 async function runRevisionChain(
   c: EvalCase,
   turn0Code: string,
-  turn0Run: CadRunResult
+  turn0Run: CadRunResult,
+  system: string
 ): Promise<TurnGrade[]> {
   const grades: TurnGrade[] = [];
   let priorCode = turn0Code;
   let priorRun = turn0Run;
   for (const turn of c.turns ?? []) {
     try {
-      const nextCode = await generateRaw(buildRevisePrompt(turn, priorCode));
+      const nextCode = await generateRaw(buildRevisePrompt(turn, priorCode), system);
       const nextRun = await runCode(nextCode);
       grades.push(
         gradeTurn({ prevCode: priorCode, nextCode, prevRun: priorRun, nextRun, assert: turn.assert })
@@ -330,7 +339,10 @@ async function main() {
   for (const c of EVAL_CASES) {
     process.stdout.write(`• ${c.id} … `);
     try {
-      const code = await generate(c.prompt);
+      // Compute once per case (job) so the whole revision chain shares the
+      // same byte-stable system prompt, mirroring the harness.
+      const system = systemPromptFor(c.prompt);
+      const code = await generate(c.prompt, system);
       const run = await runCode(code);
       const grade = gradeRun(run, c.expectedDims);
       // Dimension contract (MTR-197 machinery — same code path as the harness).
@@ -343,7 +355,7 @@ async function main() {
       // Multi-turn revision chain (MTR-183) — only meaningful once turn 0 is a
       // valid solid to revise; a broken base is a base failure, not a turn one.
       const turnGrades =
-        c.turns?.length && grade.pass ? await runRevisionChain(c, code, run) : [];
+        c.turns?.length && grade.pass ? await runRevisionChain(c, code, run, system) : [];
       const cr: CaseResult = { c, grade, aesthetic, dimResults, negResults, turnGrades };
       results.push(cr);
       const tag = aesthetic == null ? "" : `  aesthetic ${aesthetic}/100`;
