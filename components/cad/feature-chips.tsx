@@ -37,10 +37,11 @@ import {
   ShapesIcon,
   SlashIcon,
   SparklesIcon,
+  WandSparklesIcon,
 } from "lucide-react";
 
 import type { CadFeature } from "@/lib/cad/types";
-import { featureParamsToSourceParams } from "@/lib/cad/features";
+import { editableFeatureKeys } from "@/lib/cad/features";
 import {
   timelineEntries,
   type TimelineIconKind,
@@ -65,14 +66,28 @@ const POPOVER_WIDTH_PX = 224;
 
 export interface FeatureChipsProps {
   features: CadFeature[];
+  /**
+   * The generation's source — editability of each control (top-level name
+   * binding or span-literal, MTR-225) is derived from it client-side; the
+   * server re-derives from its own copy on apply.
+   */
+  sourceCode: string;
   /** Currently open feature id (or null). */
   activeId: string | null;
   onActiveChange: (id: string | null) => void;
-  /** Apply substituted params → new revision. */
+  /** Apply a control-key draft → new revision (server resolves bindings). */
   onUpdate: (
     feature: CadFeature,
-    sourceParams: Record<string, number>
+    draft: Record<string, number>
   ) => Promise<{ error?: string } | void>;
+  /**
+   * Statement-scoped LLM edit for this chip (MTR-225). `fallback: true` in
+   * the result means "retry as a normal chat revision".
+   */
+  onEditStatement?: (
+    feature: CadFeature,
+    instruction: string
+  ) => Promise<{ error?: string; fallback?: boolean } | void>;
   disabled?: boolean;
   /**
    * Feature ids to mark as "referenced" — chips owning a face the user
@@ -83,9 +98,11 @@ export interface FeatureChipsProps {
 
 export function FeatureChips({
   features,
+  sourceCode,
   activeId,
   onActiveChange,
   onUpdate,
+  onEditStatement,
   disabled,
   markedIds,
 }: FeatureChipsProps) {
@@ -214,9 +231,11 @@ export function FeatureChips({
           key={activeFeature.id}
           panelId={panelId}
           feature={activeFeature}
+          sourceCode={sourceCode}
           left={popoverLeft}
           onClose={() => onActiveChange(null)}
           onUpdate={onUpdate}
+          onEditStatement={onEditStatement}
           disabled={disabled}
         />
       )}
@@ -227,28 +246,34 @@ export function FeatureChips({
 function FeatureParamsPopover({
   panelId,
   feature,
+  sourceCode,
   left,
   onClose,
   onUpdate,
+  onEditStatement,
   disabled,
 }: {
   panelId: string;
   feature: CadFeature;
+  sourceCode: string;
   left: number;
   onClose: () => void;
   onUpdate: FeatureChipsProps["onUpdate"];
+  onEditStatement?: FeatureChipsProps["onEditStatement"];
   disabled?: boolean;
 }) {
   const originals = feature.params;
   const [draft, setDraft] = useState<Record<string, number>>(originals);
   const [error, setError] = useState<string | null>(null);
+  const [instruction, setInstruction] = useState("");
   const [pending, startTransition] = useTransition();
 
   const paramKeys = Object.keys(feature.params);
-  const hasBindings =
-    !!feature.paramNames &&
-    Object.keys(feature.paramNames).length > 0 &&
-    paramKeys.some((k) => feature.paramNames?.[k]);
+  // Editable = bound to a top-level name OR a unique literal in the
+  // feature's statement span (MTR-225). Same derivation the server re-runs.
+  const editable = editableFeatureKeys(feature, sourceCode);
+  const hasBindings = paramKeys.some((k) => editable.has(k));
+  const canEditStatement = !!onEditStatement && !!feature.span;
   const dirty = paramKeys.some((k) => draft[k] !== originals[k]);
 
   const handleReset = () => {
@@ -258,16 +283,39 @@ function FeatureParamsPopover({
 
   const handleUpdate = () => {
     if (!hasBindings) return;
-    const sourceParams = featureParamsToSourceParams(feature, draft);
-    if (Object.keys(sourceParams).length === 0) {
+    const changed: Record<string, number> = {};
+    for (const key of paramKeys) {
+      if (editable.has(key) && draft[key] !== originals[key]) {
+        changed[key] = draft[key];
+      }
+    }
+    if (Object.keys(changed).length === 0) {
       setError("No bound parameters to update.");
       return;
     }
     setError(null);
     startTransition(async () => {
-      const res = await onUpdate(feature, sourceParams);
+      const res = await onUpdate(feature, changed);
       if (res && "error" in res && res.error) {
         setError(res.error);
+        return;
+      }
+      onClose();
+    });
+  };
+
+  const handleEditStatement = () => {
+    const text = instruction.trim();
+    if (!onEditStatement || !text) return;
+    setError(null);
+    startTransition(async () => {
+      const res = await onEditStatement(feature, text);
+      if (res && "error" in res && res.error) {
+        setError(
+          res.fallback
+            ? `${res.error} Try asking for it as a chat revision instead.`
+            : res.error
+        );
         return;
       }
       onClose();
@@ -293,7 +341,7 @@ function FeatureParamsPopover({
       ) : (
         <ul className="space-y-2">
           {paramKeys.map((key) => {
-            const bound = !!feature.paramNames?.[key];
+            const bound = editable.has(key);
             return (
               <li key={key} className="flex items-center gap-2">
                 <label
@@ -322,7 +370,7 @@ function FeatureParamsPopover({
         </ul>
       )}
 
-      {!hasBindings && paramKeys.length > 0 && (
+      {!hasBindings && paramKeys.length > 0 && !canEditStatement && (
         <p className="mt-2 text-[11px] text-muted-foreground">
           These values aren&apos;t bound to named source parameters — revise
           in chat to change them.
@@ -354,6 +402,49 @@ function FeatureParamsPopover({
           Update
         </Button>
       </div>
+
+      {canEditStatement && (
+        <form
+          className="mt-3 border-t border-foreground/10 pt-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleEditStatement();
+          }}
+        >
+          <label
+            htmlFor={`${panelId}-stmt`}
+            className="mb-1 block text-[11px] text-muted-foreground"
+          >
+            Describe a change to this step
+          </label>
+          <div className="flex items-center gap-1.5">
+            <input
+              id={`${panelId}-stmt`}
+              type="text"
+              value={instruction}
+              maxLength={500}
+              placeholder="e.g. make this fillet bigger"
+              disabled={pending || disabled}
+              onChange={(e) => setInstruction(e.target.value)}
+              className="min-w-0 flex-1 rounded-md border border-foreground/15 bg-transparent px-2 py-1 text-xs disabled:opacity-50"
+            />
+            <Button
+              type="submit"
+              size="sm"
+              variant="secondary"
+              disabled={!instruction.trim() || pending || disabled}
+              className="h-7 gap-1 px-2 text-xs"
+            >
+              {pending ? (
+                <Loader2Icon className="size-3 animate-spin" />
+              ) : (
+                <WandSparklesIcon className="size-3" />
+              )}
+              Apply
+            </Button>
+          </div>
+        </form>
+      )}
     </div>
   );
 }
