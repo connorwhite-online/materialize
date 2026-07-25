@@ -252,9 +252,15 @@ export async function deleteProjectCircuit(circuitId: string) {
       return { error: "Diagram not found" };
     }
 
-    // Best-effort R2 cleanup. For image-kind rows source == preview,
-    // so guarding against a double-delete with a Set keeps the
-    // second call from racing on a key that already vanished.
+    // Row first: a DB failure leaves nothing changed (safe to retry).
+    // Deleting the R2 objects first risked a DB failure stranding a
+    // row that points at missing bytes — the circuit-source serving
+    // route hard-502s on that.
+    await db.delete(projectCircuits).where(eq(projectCircuits.id, circuitId));
+
+    // Best-effort R2 cleanup, each key guarded independently. For
+    // image-kind rows source == preview, so de-duping with a Set keeps
+    // the second delete from racing on a key that already vanished.
     const keys = new Set<string>();
     if (row.sourceStorageKey) keys.add(row.sourceStorageKey);
     if (row.previewStorageKey) keys.add(row.previewStorageKey);
@@ -265,8 +271,6 @@ export async function deleteProjectCircuit(circuitId: string) {
         logError("deleteProjectCircuit:storage", e);
       }
     }
-
-    await db.delete(projectCircuits).where(eq(projectCircuits.id, circuitId));
 
     revalidatePath(`/projects/${row.projectSlug}`);
     return { success: true };

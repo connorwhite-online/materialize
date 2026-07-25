@@ -269,14 +269,19 @@ export async function deleteProjectPhoto(photoId: string) {
       if (!access.ok) return { error: "Photo not found" };
     }
 
+    // Row first: a DB failure leaves nothing changed (safe to retry).
+    // The prior R2-then-DB ordering meant a DB failure after a
+    // successful storage delete stranded the row pointing at missing
+    // bytes (a broken gallery tile). Storage cleanup stays
+    // best-effort below.
+    await db.delete(projectPhotos).where(eq(projectPhotos.id, photoId));
+
     try {
       await deleteObject(photo.storageKey);
     } catch (e) {
-      // R2 hiccup shouldn't strand the DB row — best-effort.
+      // R2 hiccup shouldn't strand the action — best-effort.
       logError("deleteProjectPhoto:storage", e);
     }
-
-    await db.delete(projectPhotos).where(eq(projectPhotos.id, photoId));
 
     revalidatePath(`/projects/${photo.projectSlug}`);
     return { success: true };
