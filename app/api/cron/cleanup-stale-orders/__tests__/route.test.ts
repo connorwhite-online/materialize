@@ -414,7 +414,7 @@ describe("cron/cleanup-stale-orders", () => {
     expect(body.prunedWebhookEvents).toBe(1);
   });
 
-  it("CON-159: issues a refund before cancelling a charged (pi_) row", async () => {
+  it("CON-159/MTR-229: pre-arms refundFailedAt in the claim itself, then clears it after a successful refund", async () => {
     staleOrderRows = [{ id: "order-pi", stripeSessionId: "pi_charged_123" }];
 
     const res = await GET(makeRequest("Bearer test-secret"));
@@ -429,17 +429,23 @@ describe("cron/cleanup-stale-orders", () => {
       expect.objectContaining({ idempotencyKey: "agent-cancel-refund:order-pi" })
     );
 
-    // Row was cancelled
+    // MTR-229 kill-window fix: the claim UPDATE itself cancels the row
+    // AND pre-arms refundFailedAt, so a kill between the claim and the
+    // Stripe call still leaves the row visible to retry-failed-refunds
+    // (which scans isNotNull(refundFailedAt) regardless of status).
     const cancelledCall = updateCalls.find((c) => c.status === "cancelled");
     expect(cancelledCall).toBeDefined();
-    // No refundFailedAt update fired
-    const refundFailedCall = updateCalls.find(
-      (c) => "refundFailedAt" in c
+    expect(cancelledCall?.refundFailedAt).toBeInstanceOf(Date);
+
+    // Once the refund actually succeeds, a follow-up write clears the
+    // flag — no separate "status" key on this call, just the clear.
+    const clearedCall = updateCalls.find(
+      (c) => !("status" in c) && c.refundFailedAt === null
     );
-    expect(refundFailedCall).toBeUndefined();
+    expect(clearedCall).toBeDefined();
   });
 
-  it("CON-159: sets refundFailedAt when the refund fails and still cancels the row (MTR-229: as a follow-up write after the claim)", async () => {
+  it("CON-159: sets refundFailedAt (already pre-armed by the claim) when the refund fails, and cancels the row", async () => {
     staleOrderRows = [{ id: "order-pi", stripeSessionId: "pi_charged_123" }];
     mockRefundCreate.mockRejectedValueOnce(new Error("stripe is down"));
 
@@ -449,16 +455,18 @@ describe("cron/cleanup-stale-orders", () => {
     const body = await res.json();
     expect(body.cancelledOrders).toBe(1);
 
-    // The claim (cancel) update fired first, with no refundFailedAt.
+    // The claim (cancel) update pre-arms refundFailedAt in the SAME
+    // write — MTR-229's kill-window fix. No separate follow-up write
+    // is needed on failure since the flag is already set.
     const cancelledCall = updateCalls.find((c) => c.status === "cancelled");
     expect(cancelledCall).toBeDefined();
-    expect(cancelledCall?.refundFailedAt).toBeUndefined();
+    expect(cancelledCall?.refundFailedAt).toBeInstanceOf(Date);
 
-    // A SEPARATE follow-up update set refundFailedAt after the refund
-    // attempt failed — MTR-229 only ever refunds/marks-failed AFTER a
-    // successful claim, as its own write.
-    const refundFailedCall = updateCalls.find((c) => "refundFailedAt" in c);
-    expect(refundFailedCall?.refundFailedAt).toBeInstanceOf(Date);
+    // No clearing update fired (the refund failed).
+    const clearedCall = updateCalls.find(
+      (c) => !("status" in c) && c.refundFailedAt === null
+    );
+    expect(clearedCall).toBeUndefined();
 
     // Error was logged
     expect(logError).toHaveBeenCalledWith(

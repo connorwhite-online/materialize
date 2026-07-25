@@ -91,9 +91,16 @@ const STALE_ORDER_LIMIT = 200;
 // Worst case ~200 serial refund+cancel calls (see STALE_ORDER_LIMIT)
 // at up to ~2s each ≈ 400s; 300s (the platform's default Pro-plan
 // ceiling) covers the common case. A run that hits the ceiling still
-// leaves partial progress — every write is per-row and unconditional
-// only after its own refund attempt completes — so a mid-sweep kill
-// just means more rows for tomorrow, not a double-refund.
+// leaves partial progress — every write is per-row, and for
+// uncharged rows a mid-sweep kill just means more rows for tomorrow.
+// For CHARGED (pi_) rows specifically, what makes a mid-sweep kill
+// safe is that refundFailedAt is pre-armed INSIDE the same claim
+// UPDATE that cancels the row (MTR-229) — a kill between the claim
+// and the Stripe refund call still leaves the row flagged, so the
+// hourly retry-failed-refunds cron (which scans isNotNull(refundFailedAt)
+// regardless of status) picks it up instead of the row silently
+// falling out of every future stale-order SELECT (which only matches
+// status='cart_created').
 export const maxDuration = 300;
 
 /**
@@ -355,9 +362,30 @@ export async function GET(request: Request) {
         // invocation of this same sweep, etc.) already moved the row
         // off cart_created — skip it entirely, and critically, never
         // issue a refund for it.
+        //
+        // For charged (pi_) rows, refundFailedAt is set INSIDE this
+        // same claim UPDATE — pre-armed before the Stripe call ever
+        // runs. This closes a kill-window the claim-first ordering
+        // would otherwise open: if the function is killed between the
+        // claim and stripe.refunds.create (see the maxDuration note
+        // above — a mid-sweep kill is an expected, tolerated event),
+        // the row would be left cancelled with NO refund and NO
+        // refundFailedAt. Since tomorrow's sweep only selects
+        // status='cart_created', such a row would never be revisited
+        // — charged, cancelled, invisible. Pre-arming means the
+        // hourly retry-failed-refunds cron (which selects
+        // isNotNull(refundFailedAt) regardless of status) picks it up
+        // instead. It refunds with the SAME
+        // `agent-cancel-refund:<orderId>` idempotency key used below,
+        // so pre-arming can never cause a double refund even if both
+        // crons end up racing to refund the same row.
         const claimedRows = await db
           .update(printOrders)
-          .set({ status: "cancelled" })
+          .set(
+            isChargedRow
+              ? { status: "cancelled", refundFailedAt: new Date() }
+              : { status: "cancelled" }
+          )
           .where(
             and(
               eq(printOrders.id, row.id),
@@ -373,9 +401,10 @@ export async function GET(request: Request) {
 
         if (isChargedRow) {
           // The order was charged via off-session PI but never placed.
-          // The claim above already cancelled it; now issue the
-          // refund. On refund failure, set refundFailedAt so
-          // retry-failed-refunds picks it up.
+          // The claim above already cancelled it AND pre-armed
+          // refundFailedAt; now issue the refund. On success, clear
+          // the flag — no further action needed. On failure, leave it
+          // set (it already is) so retry-failed-refunds retries.
           try {
             await stripe.refunds.create(
               {
@@ -388,12 +417,12 @@ export async function GET(request: Request) {
               },
               { idempotencyKey: `agent-cancel-refund:${row.id}` }
             );
-          } catch (refundErr) {
-            logError("cron/cleanup-stale-orders.refundCharged", refundErr);
             await db
               .update(printOrders)
-              .set({ refundFailedAt: new Date() })
+              .set({ refundFailedAt: null })
               .where(eq(printOrders.id, row.id));
+          } catch (refundErr) {
+            logError("cron/cleanup-stale-orders.refundCharged", refundErr);
           }
         }
 
