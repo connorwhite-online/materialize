@@ -38,6 +38,7 @@ import { sanitizeRichHtml } from "@/lib/sanitize/sanitize-html";
 import { logError, isRedirectError } from "@/lib/logger";
 import {
   canWriteProject,
+  isProjectCollaborator,
   resolveOwnerForCreate,
   viewerCanAttachAllFiles,
 } from "@/lib/authorization";
@@ -761,9 +762,16 @@ export async function removeProjectCollaborator(
 
 /**
  * Public reader for the project detail page. Returns the joined user
- * info so the avatar row renders without a follow-up query. Open to
- * anyone who can see the project — the detail page itself gates
- * visibility before calling this.
+ * info so the avatar row renders without a follow-up query.
+ *
+ * This is an independently invokable server action — a caller can hit
+ * it directly with any project id, not just through the detail page —
+ * so it gates visibility itself rather than trusting the caller to
+ * have already checked. Public + published projects stay open to
+ * anyone; everything else requires the viewer to have write access
+ * (owner / org member / collaborator) OR to already be a collaborator
+ * on the row (covers the case where a future role split makes some
+ * collaborators read-only).
  */
 export async function listProjectCollaborators(projectId: string): Promise<
   Array<{
@@ -776,6 +784,33 @@ export async function listProjectCollaborators(projectId: string): Promise<
   }>
 > {
   try {
+    const [projectRow] = await db
+      .select({
+        status: projects.status,
+        visibility: projects.visibility,
+        userId: projects.userId,
+        organizationId: projects.organizationId,
+      })
+      .from(projects)
+      .where(eq(projects.id, projectId))
+      .limit(1);
+    if (!projectRow) return [];
+
+    const isPublic =
+      projectRow.status === "published" && projectRow.visibility === "public";
+    if (!isPublic) {
+      const { userId } = await auth();
+      if (!userId) return [];
+      const access = await canWriteProject(userId, projectId);
+      if (!access.ok) {
+        const { collaborator } = await isProjectCollaborator(
+          userId,
+          projectId
+        );
+        if (!collaborator) return [];
+      }
+    }
+
     const rows = await db
       .select({
         id: users.id,
