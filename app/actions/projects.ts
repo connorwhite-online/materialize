@@ -38,6 +38,7 @@ import { sanitizeRichHtml } from "@/lib/sanitize/sanitize-html";
 import { logError, isRedirectError } from "@/lib/logger";
 import {
   canWriteProject,
+  isProjectCollaborator,
   resolveOwnerForCreate,
   viewerCanAttachAllFiles,
 } from "@/lib/authorization";
@@ -143,34 +144,55 @@ export async function createProject(formData: FormData) {
     const visibility: "public" | "private" =
       parsed.data.visibility ?? "public";
 
-    const [project] = await db
-      .insert(projects)
-      .values({
-        userId,
-        organizationId,
-        name: parsed.data.name,
-        description: parsed.data.description,
-        buildGuide: parsed.data.buildGuide,
-        slug,
-        price: parsed.data.price,
-        license: parsed.data.license,
-        visibility,
-        tags: parsed.data.tags,
-        category: parsed.data.category,
-        designTags: parsed.data.designTags,
-        thumbnailUrl: parsed.data.thumbnailUrl,
-        repoUrl: parsed.data.repoUrl,
-        status: "published",
-      })
-      .returning();
+    // Sanitize before persisting so the column is clean for every
+    // consumer (emails, llms.txt, MCP responses), not just the
+    // sanitizing render path. Mirrors updateProjectBuildGuide. The
+    // schema already trims buildGuide down to undefined when empty, so
+    // this only runs sanitizeRichHtml when there's real content — a
+    // sanitized result that collapses to nothing (e.g. a script-only
+    // paste) still resolves to undefined, same as never submitting one.
+    const sanitizedBuildGuide = parsed.data.buildGuide
+      ? (await sanitizeRichHtml(parsed.data.buildGuide)).trim() || undefined
+      : parsed.data.buildGuide;
 
-    await db.insert(projectFiles).values(
-      parsed.data.fileIds.map((fileId, i) => ({
-        projectId: project.id,
-        fileId,
-        position: i,
-      }))
-    );
+    // Both inserts happen atomically — a failure between them (e.g. an
+    // FK violation from a file deleted after the viewerCanAttachAllFiles
+    // check above) must not leave a published, publicly-visible project
+    // with zero files.
+    const project = await db.transaction(async (tx) => {
+      const [p] = await tx
+        .insert(projects)
+        .values({
+          userId,
+          organizationId,
+          name: parsed.data.name,
+          description: parsed.data.description,
+          buildGuide: sanitizedBuildGuide,
+          slug,
+          price: parsed.data.price,
+          license: parsed.data.license,
+          visibility,
+          tags: parsed.data.tags,
+          category: parsed.data.category,
+          designTags: parsed.data.designTags,
+          thumbnailUrl: parsed.data.thumbnailUrl,
+          repoUrl: parsed.data.repoUrl,
+          status: "published",
+        })
+        .returning();
+
+      if (parsed.data.fileIds.length > 0) {
+        await tx.insert(projectFiles).values(
+          parsed.data.fileIds.map((fileId, i) => ({
+            projectId: p.id,
+            fileId,
+            position: i,
+          }))
+        );
+      }
+
+      return p;
+    });
 
     revalidatePath("/dashboard");
     redirect(`/projects/${project.slug}`);
@@ -761,9 +783,16 @@ export async function removeProjectCollaborator(
 
 /**
  * Public reader for the project detail page. Returns the joined user
- * info so the avatar row renders without a follow-up query. Open to
- * anyone who can see the project — the detail page itself gates
- * visibility before calling this.
+ * info so the avatar row renders without a follow-up query.
+ *
+ * This is an independently invokable server action — a caller can hit
+ * it directly with any project id, not just through the detail page —
+ * so it gates visibility itself rather than trusting the caller to
+ * have already checked. Public + published projects stay open to
+ * anyone; everything else requires the viewer to have write access
+ * (owner / org member / collaborator) OR to already be a collaborator
+ * on the row (covers the case where a future role split makes some
+ * collaborators read-only).
  */
 export async function listProjectCollaborators(projectId: string): Promise<
   Array<{
@@ -776,6 +805,33 @@ export async function listProjectCollaborators(projectId: string): Promise<
   }>
 > {
   try {
+    const [projectRow] = await db
+      .select({
+        status: projects.status,
+        visibility: projects.visibility,
+        userId: projects.userId,
+        organizationId: projects.organizationId,
+      })
+      .from(projects)
+      .where(eq(projects.id, projectId))
+      .limit(1);
+    if (!projectRow) return [];
+
+    const isPublic =
+      projectRow.status === "published" && projectRow.visibility === "public";
+    if (!isPublic) {
+      const { userId } = await auth();
+      if (!userId) return [];
+      const access = await canWriteProject(userId, projectId);
+      if (!access.ok) {
+        const { collaborator } = await isProjectCollaborator(
+          userId,
+          projectId
+        );
+        if (!collaborator) return [];
+      }
+    }
+
     const rows = await db
       .select({
         id: users.id,

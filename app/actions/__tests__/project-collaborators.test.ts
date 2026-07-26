@@ -15,6 +15,8 @@ let projectsRow: {
   organizationId: string | null;
   name: string;
   slug: string;
+  status?: string;
+  visibility?: string;
 } | null = null;
 let userLookup: {
   id: string;
@@ -23,11 +25,12 @@ let userLookup: {
   avatarUrl: string | null;
 } | null = null;
 let orgMembersRow: { id: string; role: string } | null = null;
-let collabRowsForProject: Array<{
-  id: string;
-  userId: string;
-  role: string;
-}> = [];
+// Shape varies by caller: addProjectCollaborator's canWriteProject
+// check reads {id, userId, role} rows; listProjectCollaborators'
+// roster select reads the joined {id, username, displayName,
+// avatarUrl, role, addedAt} shape. Both go through the same mock
+// variable, so it's loosely typed here.
+let collabRowsForProject: Array<Record<string, unknown>> = [];
 const inserted: Array<Record<string, unknown>> = [];
 const deletedFilters: Array<unknown> = [];
 let insertConflictReturnEmpty = false;
@@ -142,22 +145,31 @@ vi.mock("@/lib/notifications/notify", () => ({
 
 import {
   addProjectCollaborator,
+  listProjectCollaborators,
   removeProjectCollaborator,
 } from "../projects";
+import { setMockUserId } from "@/vitest.setup";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  setMockUserId("test-user-id");
   inserted.length = 0;
   deletedFilters.length = 0;
   collabRowsForProject = [];
   orgMembersRow = null;
   insertConflictReturnEmpty = false;
+  // Published + public by default so the pre-existing addProjectCollaborator
+  // / removeProjectCollaborator suites (which never set status/visibility)
+  // keep exercising the owner-only write path unaffected by the new
+  // listProjectCollaborators visibility gate below.
   projectsRow = {
     id: "proj_1",
     userId: "test-user-id",
     organizationId: null,
     name: "My Project",
     slug: "my-project-abc",
+    status: "published",
+    visibility: "public",
   };
   userLookup = {
     id: "user_invitee",
@@ -241,6 +253,110 @@ describe("addProjectCollaborator", () => {
       "Already a collaborator."
     );
     expect(notifyMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("listProjectCollaborators (MTR-234)", () => {
+  const roster = [
+    {
+      id: "user_invitee",
+      username: "alice",
+      displayName: "Alice",
+      avatarUrl: null,
+      role: "editor",
+      addedAt: new Date("2026-01-01"),
+    },
+  ];
+
+  it("returns the roster for a public published project, even anonymously", async () => {
+    setMockUserId(null);
+    projectsRow = {
+      id: "proj_1",
+      userId: "user_owner",
+      organizationId: null,
+      name: "My Project",
+      slug: "my-project-abc",
+      status: "published",
+      visibility: "public",
+    };
+    collabRowsForProject = roster;
+
+    const result = await listProjectCollaborators("proj_1");
+    expect(result).toEqual(roster);
+  });
+
+  it("returns [] for a private project when the viewer is anonymous", async () => {
+    setMockUserId(null);
+    projectsRow = {
+      id: "proj_1",
+      userId: "user_owner",
+      organizationId: null,
+      name: "My Project",
+      slug: "my-project-abc",
+      status: "draft",
+      visibility: "private",
+    };
+    collabRowsForProject = roster;
+
+    const result = await listProjectCollaborators("proj_1");
+    expect(result).toEqual([]);
+  });
+
+  it("returns the roster for a private project when the viewer is the owner", async () => {
+    setMockUserId("test-user-id");
+    projectsRow = {
+      id: "proj_1",
+      userId: "test-user-id",
+      organizationId: null,
+      name: "My Project",
+      slug: "my-project-abc",
+      status: "draft",
+      visibility: "private",
+    };
+    collabRowsForProject = roster;
+
+    const result = await listProjectCollaborators("proj_1");
+    expect(result).toEqual(roster);
+  });
+
+  it("returns the roster for a private project when the viewer is a collaborator", async () => {
+    setMockUserId("test-user-id");
+    projectsRow = {
+      id: "proj_1",
+      userId: "user_owner",
+      organizationId: null,
+      name: "My Project",
+      slug: "my-project-abc",
+      status: "draft",
+      visibility: "private",
+    };
+    // canWriteProject's base ownership check fails (viewer isn't the
+    // owner / an org member), so it falls through to the collaborator
+    // check — which the mock also serves from collabRowsForProject.
+    collabRowsForProject = [{ id: "pc_1", userId: "test-user-id", role: "editor" }];
+
+    const result = await listProjectCollaborators("proj_1");
+    expect(result).toEqual(collabRowsForProject);
+  });
+
+  it("returns [] for a private project when the viewer has no access", async () => {
+    setMockUserId("stranger");
+    projectsRow = {
+      id: "proj_1",
+      userId: "user_owner",
+      organizationId: null,
+      name: "My Project",
+      slug: "my-project-abc",
+      status: "draft",
+      visibility: "private",
+    };
+    // Empty (not `roster`) so isProjectCollaborator's follow-up query
+    // — which the mock serves from this same variable regardless of
+    // the queried userId — also correctly denies "stranger".
+    collabRowsForProject = [];
+
+    const result = await listProjectCollaborators("proj_1");
+    expect(result).toEqual([]);
   });
 });
 

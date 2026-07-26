@@ -28,7 +28,26 @@ import { buildListingSlug } from "@/lib/filenames";
 import { logError } from "@/lib/logger";
 import { LICENSE_ENUM_VALUES, type LicenseId } from "@/lib/licenses";
 import { MAX_BUILD_GUIDE_LENGTH } from "@/lib/validations/project";
+import { sanitizeRichHtml } from "@/lib/sanitize/sanitize-html";
 import { bestEffortDeleteR2 } from "./files";
+
+/**
+ * Scrub agent-submitted build-guide HTML against the shared allowlist
+ * before it's persisted — same write-time invariant as
+ * updateProjectBuildGuide / createProject on the web side
+ * (lib/sanitize/html-schema.ts). Sanitize AFTER normalizeProjectMeta's
+ * length cap, not before: slicing sanitized output could still leave
+ * a truncated tag, but sanitizing already-truncated input can't
+ * reintroduce anything unsafe — rehype-sanitize only removes, never
+ * repairs, so a cap-then-sanitize order is the safe one.
+ */
+async function cleanBuildGuide(
+  value: string | null | undefined
+): Promise<string | null | undefined> {
+  if (!value) return value;
+  const sanitized = (await sanitizeRichHtml(value)).trim();
+  return sanitized || null;
+}
 
 const MAX_BOM_ITEMS = 200;
 const MAX_CAPTION_LENGTH = 500;
@@ -174,6 +193,11 @@ export async function createProjectForUser(
     const visibility = meta.visibility ?? "public";
     const status = meta.status ?? "published";
     const slug = buildListingSlug(meta.name ?? input.name, nanoid(6));
+    // Sanitize AFTER normalizeProjectMeta's length cap — slicing
+    // sanitized output could split a tag, but sanitizing already-capped
+    // input is safe either way (rehype-sanitize only removes markup, it
+    // never reconstructs a truncated tag into something unsafe).
+    const sanitizedBuildGuide = await cleanBuildGuide(meta.buildGuide);
 
     const [project] = await db
       .insert(projects)
@@ -182,7 +206,7 @@ export async function createProjectForUser(
         name: meta.name ?? input.name,
         slug,
         description: meta.description ?? null,
-        buildGuide: meta.buildGuide ?? null,
+        buildGuide: sanitizedBuildGuide ?? null,
         price: meta.price ?? 0,
         license: meta.license ?? "cc_by",
         visibility,
@@ -411,6 +435,12 @@ export async function updateProjectForUser(params: {
   const meta = normalizeProjectMeta(params.metadata);
   if (Object.keys(meta).length === 0) {
     return { projectId: row.id, slug: row.slug };
+  }
+  // Same seam as createProjectForUser — sanitize AFTER
+  // normalizeProjectMeta's length cap, and only when the caller
+  // actually touched buildGuide this call.
+  if ("buildGuide" in meta) {
+    meta.buildGuide = (await cleanBuildGuide(meta.buildGuide)) ?? null;
   }
   await db.update(projects).set(meta).where(eq(projects.id, row.id));
   return { projectId: row.id, slug: row.slug };

@@ -58,11 +58,12 @@ import {
   type FeedPhoto,
 } from "@/components/photos/photos-feed";
 import { userOwnsProject } from "@/lib/entitlement";
-import { isOrgMember } from "@/lib/authorization";
+import { canWriteProject, isOrgMember } from "@/lib/authorization";
 import { listProjectCollaborators } from "@/app/actions/projects";
 import { ProjectCollaborators } from "@/components/projects/project-collaborators";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { swallow } from "@/lib/utils/swallow";
+import { resolveProjectVisibility } from "./access";
 
 function truncate(s: string, n: number) {
   return s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s;
@@ -127,17 +128,28 @@ export default async function ProjectDetailPage(props: {
   const project = await loadProjectBySlug(slug);
 
   if (!project) notFound();
-  // "Owner" here means write-access for visibility purposes — covers
-  // the personal owner AND any member of the org that owns the
-  // project. Same shape as the file detail page.
+  // "Owner" here means the strict owner-lifecycle set — the personal
+  // owner AND any member of the org that owns the project. Reserved
+  // for destructive / ownership controls (delete, metadata edit,
+  // collaborator management) — see canWrite below for content-editing
+  // access, which additionally admits per-project collaborators.
   const isOwner =
     !!userId &&
     (userId === project.userId ||
       (project.organizationId !== null &&
         (await isOrgMember(userId, project.organizationId)).member));
+  // Write access for CONTENT — owner, org member, or per-project
+  // collaborator (canWriteProject folds all three into one check).
+  // Collaborators edit content; only isOwner owns lifecycle.
+  const canWrite = userId
+    ? (await canWriteProject(userId, project.id)).ok
+    : false;
   if (
-    !isOwner &&
-    (project.status !== "published" || project.visibility !== "public")
+    !resolveProjectVisibility({
+      status: project.status,
+      visibility: project.visibility,
+      canWrite,
+    })
   ) {
     notFound();
   }
@@ -394,14 +406,16 @@ export default async function ProjectDetailPage(props: {
 
   let ownerBuyerCount = 0;
   // Files the viewer owns that aren't already bundled here — feeds the
-  // "Add files" picker. Owner-only; only the viewer's own files are
-  // offered (addFilesToProject re-validates attachability server-side).
+  // "Add files" picker. Gated on canWrite (not isOwner) so a
+  // collaborator's own files populate the picker too; only the
+  // viewer's own files are offered (addFilesToProject re-validates
+  // attachability server-side).
   let availableFilesToAdd: Array<{
     id: string;
     name: string;
     thumbnailUrl: string | null;
   }> = [];
-  if (isOwner && userId) {
+  if (canWrite && userId) {
     const [buyerRows, ownFiles] = await Promise.all([
       db
         .select({ id: purchases.id })
@@ -466,7 +480,7 @@ export default async function ProjectDetailPage(props: {
     meta: bundledFiles.length,
     content: (
       <div>
-        {isOwner && (
+        {canWrite && (
           <div className="mb-3 flex items-center justify-end">
             <AddProjectFilesDialog
               projectId={project.id}
@@ -519,17 +533,18 @@ export default async function ProjectDetailPage(props: {
     ),
   });
 
-  // Build guide — owner-authored HTML with chapters + inline media.
-  // Read-only here; editing happens on the focused /build-guide/edit
-  // page. Owners always get the tab (with the empty-state prompt + edit
-  // link); non-owners only once a guide exists.
-  if (project.buildGuide || isOwner) {
+  // Build guide — owner/collaborator-authored HTML with chapters +
+  // inline media. Read-only here; editing happens on the focused
+  // /build-guide/edit page (already collaborator-gated). Content
+  // editors (canWrite) always get the tab (with the empty-state
+  // prompt + edit link); everyone else only once a guide exists.
+  if (project.buildGuide || canWrite) {
     tabs.push({
       value: "build-guide",
       label: "Build Guide",
       content: (
         <div className="space-y-3">
-          {isOwner && (
+          {canWrite && (
             <Button
               variant="outline"
               size="sm"
@@ -543,7 +558,7 @@ export default async function ProjectDetailPage(props: {
           {project.buildGuide ? (
             <BuildGuideReader html={project.buildGuide} />
           ) : (
-            isOwner && (
+            canWrite && (
               <p className="text-sm text-muted-foreground">
                 Document how to build this project — steps, photos, wiring
                 notes, code snippets. Organize it into chapters and add
@@ -557,16 +572,17 @@ export default async function ProjectDetailPage(props: {
   }
 
   // Bill of materials — the additional parts a builder needs beyond
-  // the printed files. Owners always get the tab (the editor lives
-  // here now, not the sidebar); non-owners only once items exist.
-  if (bomItems.length > 0 || isOwner) {
+  // the printed files. Content editors (canWrite) always get the tab
+  // (the editor lives here now, not the sidebar); everyone else only
+  // once items exist.
+  if (bomItems.length > 0 || canWrite) {
     tabs.push({
       value: "bom",
       label: "Components",
       meta: bomItems.length || undefined,
       content: (
         <div className="space-y-3">
-          {isOwner && (
+          {canWrite && (
             <div className="flex justify-end">
               <EditBomDialog
                 projectId={project.id}
@@ -599,9 +615,10 @@ export default async function ProjectDetailPage(props: {
     });
   }
 
-  // Wiring / circuit diagrams — owners always get the tab (uploader
-  // inline when empty); non-owners only once a diagram exists.
-  if (circuits.length > 0 || isOwner) {
+  // Wiring / circuit diagrams — content editors (canWrite) always get
+  // the tab (uploader inline when empty); everyone else only once a
+  // diagram exists.
+  if (circuits.length > 0 || canWrite) {
     tabs.push({
       value: "wiring",
       label: "Wiring",
@@ -610,7 +627,7 @@ export default async function ProjectDetailPage(props: {
         <CircuitGallery
           projectId={project.id}
           circuits={circuits}
-          canManage={isOwner}
+          canManage={canWrite}
         />
       ),
     });
@@ -726,7 +743,7 @@ export default async function ProjectDetailPage(props: {
       <div className="flex flex-col gap-8">
         {/* Admin-only bar — visibility status + owner controls, above
             all page content. Collaborators see the status only. */}
-        {(isOwner || collaborators.some((c) => c.id === userId)) && (
+        {canWrite && (
           <OwnerBar
             visibility={project.visibility === "public" ? "public" : "private"}
           >

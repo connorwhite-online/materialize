@@ -14,7 +14,11 @@ let buyerRowsResponse: Array<{ id: string }> = [];
 let orgMembersResponse: Array<{ organizationId: string; role?: string }> = [];
 const insertedProjects: Array<Record<string, unknown>> = [];
 const insertedProjectFiles: Array<Record<string, unknown>> = [];
-const insertedRouter: { latestTable: string | null } = { latestTable: null };
+// MTR-235: forces the project_files insert inside createProject's
+// db.transaction to throw, so tests can assert the transaction rolls
+// back (no orphaned `projects` row) instead of just checking the
+// error is surfaced.
+let projectFilesInsertShouldReject = false;
 
 // Wraps an array in the chainable shape Drizzle's select returns
 // (so `.limit()` works after `.where()`) without abandoning the
@@ -26,36 +30,74 @@ function chainable<T>(arr: T[]) {
   });
 }
 
+// Shared insert-routing logic used both by the top-level `db.insert`
+// (for actions that don't need a transaction) and by the buffered
+// `tx.insert` inside `db.transaction` below. `commit(vals)` is how
+// the caller decides whether a given table's write actually lands in
+// the "real" insertedProjects / insertedProjectFiles trackers.
+function makeInsert(
+  commitProject: (vals: Record<string, unknown>) => void,
+  commitProjectFiles: (vals: Array<Record<string, unknown>>) => void
+) {
+  const router: { latestTable: string | null } = { latestTable: null };
+  return (table: { __name?: string }) => {
+    router.latestTable = table.__name ?? null;
+    return {
+      values: (
+        vals: Record<string, unknown> | Array<Record<string, unknown>>
+      ) => {
+        if (router.latestTable === "projects") {
+          commitProject(vals as Record<string, unknown>);
+          return {
+            returning: () => [
+              {
+                id: "test-project-id",
+                slug: "chess-set-abc123",
+                userId: "test-user-id",
+                name: (vals as Record<string, unknown>).name,
+                visibility: "public",
+              },
+            ],
+          };
+        }
+        if (router.latestTable === "project_files") {
+          if (projectFilesInsertShouldReject) {
+            throw new Error("FK violation: file no longer exists");
+          }
+          const arr = Array.isArray(vals) ? vals : [vals];
+          commitProjectFiles(arr);
+          return Promise.resolve();
+        }
+        return Promise.resolve();
+      },
+    };
+  };
+}
+
 vi.mock("@/lib/db", () => ({
   db: {
-    insert: (table: { __name?: string }) => {
-      // Track which table was last inserted into via a tag on the
-      // schema mock below.
-      insertedRouter.latestTable = table.__name ?? null;
-      return {
-        values: (vals: Record<string, unknown> | Array<Record<string, unknown>>) => {
-          if (insertedRouter.latestTable === "projects") {
-            insertedProjects.push(vals as Record<string, unknown>);
-            return {
-              returning: () => [
-                {
-                  id: "test-project-id",
-                  slug: "chess-set-abc123",
-                  userId: "test-user-id",
-                  name: (vals as Record<string, unknown>).name,
-                  visibility: "public",
-                },
-              ],
-            };
-          }
-          if (insertedRouter.latestTable === "project_files") {
-            const arr = Array.isArray(vals) ? vals : [vals];
-            insertedProjectFiles.push(...arr);
-            return Promise.resolve();
-          }
-          return Promise.resolve();
-        },
+    insert: makeInsert(
+      (vals) => insertedProjects.push(vals),
+      (vals) => insertedProjectFiles.push(...vals)
+    ),
+    // Buffers writes locally and only merges them into the shared
+    // insertedProjects / insertedProjectFiles trackers if the callback
+    // resolves — mirroring real transaction rollback so MTR-235's
+    // "no orphaned project row on failure" test is meaningful rather
+    // than just checking the error is returned.
+    transaction: async (cb: (tx: unknown) => Promise<unknown>) => {
+      const bufferedProjects: Array<Record<string, unknown>> = [];
+      const bufferedProjectFiles: Array<Record<string, unknown>> = [];
+      const tx = {
+        insert: makeInsert(
+          (vals) => bufferedProjects.push(vals),
+          (vals) => bufferedProjectFiles.push(...vals)
+        ),
       };
+      const result = await cb(tx);
+      insertedProjects.push(...bufferedProjects);
+      insertedProjectFiles.push(...bufferedProjectFiles);
+      return result;
     },
     update: () => ({
       set: () => ({ where: () => Promise.resolve() }),
@@ -135,6 +177,7 @@ describe("createProject", () => {
     orgMembersResponse = [];
     insertedProjects.length = 0;
     insertedProjectFiles.length = 0;
+    projectFilesInsertShouldReject = false;
   });
 
   // Real UUIDs (v4 with correct variant nibble) — validation schema
@@ -254,6 +297,81 @@ describe("createProject", () => {
     expect(result).toBeDefined();
     expect((result as { error?: unknown }).error).toBeTruthy();
     expect(insertedProjects.length).toBe(0);
+  });
+
+  // MTR-235: the projects + project_files inserts are wrapped in
+  // db.transaction so a failure between them can't leave a published,
+  // publicly-visible project with zero files.
+  it("rolls back the projects insert when the project_files insert fails (MTR-235)", async () => {
+    ownedFilesResponse = [
+      { id: FILE_1, userId: "test-user-id", organizationId: null },
+    ];
+    projectFilesInsertShouldReject = true;
+
+    const formData = new FormData();
+    formData.set("name", "Chess Set");
+    formData.set("price", "0");
+    formData.set("license", "cc_by");
+    formData.append("fileIds", FILE_1);
+
+    const result = await createProject(formData);
+    expect((result as { error?: unknown }).error).toBeTruthy();
+    // Rolled back — no orphaned projects row and no project_files rows,
+    // not just an error message.
+    expect(insertedProjects.length).toBe(0);
+    expect(insertedProjectFiles.length).toBe(0);
+  });
+
+  // MTR-236: buildGuide is sanitized before insert so the column is
+  // clean for every consumer (emails, llms.txt, MCP responses), not
+  // just the sanitizing render path.
+  it("sanitizes buildGuide before insert (MTR-236)", async () => {
+    ownedFilesResponse = [
+      { id: FILE_1, userId: "test-user-id", organizationId: null },
+    ];
+
+    const formData = new FormData();
+    formData.set("name", "Chess Set");
+    formData.set("price", "0");
+    formData.set("license", "cc_by");
+    formData.set(
+      "buildGuide",
+      '<p>Step 1</p><script>alert("xss")</script>'
+    );
+    formData.append("fileIds", FILE_1);
+
+    let threw: unknown;
+    try {
+      await createProject(formData);
+    } catch (err) {
+      threw = err;
+    }
+    expect((threw as Error)?.message).toContain("REDIRECT:/projects/");
+    expect(insertedProjects.length).toBe(1);
+    const buildGuide = insertedProjects[0].buildGuide as string;
+    expect(buildGuide).not.toContain("<script>");
+    expect(buildGuide).toContain("Step 1");
+  });
+
+  it("leaves an empty/undefined buildGuide untouched (MTR-236)", async () => {
+    ownedFilesResponse = [
+      { id: FILE_1, userId: "test-user-id", organizationId: null },
+    ];
+
+    const formData = new FormData();
+    formData.set("name", "Chess Set");
+    formData.set("price", "0");
+    formData.set("license", "cc_by");
+    formData.append("fileIds", FILE_1);
+
+    let threw: unknown;
+    try {
+      await createProject(formData);
+    } catch (err) {
+      threw = err;
+    }
+    expect((threw as Error)?.message).toContain("REDIRECT:/projects/");
+    expect(insertedProjects[0].buildGuide).toBeUndefined();
   });
 });
 
