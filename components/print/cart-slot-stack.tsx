@@ -317,10 +317,21 @@ function CartSlot({
     else cart.removeItem(item.id);
   };
 
-  const handleUpdateQty = (item: DisplayItem, qty: number) => {
+  // DB cart items re-quote server-side on a quantity change; a failed
+  // re-quote is REJECTED (not silently committed with a stale quote —
+  // MONEY-1), so surface it in the same error banner checkout errors
+  // use. Local (anon, pre-materialize) items are plain client state
+  // and never hit this path.
+  const handleUpdateQty = async (item: DisplayItem, qty: number) => {
     if (!cart) return;
-    if (item.isLocal) cart.updateLocalItemQuantity(item.id, qty);
-    else cart.updateQuantity(item.id, qty);
+    if (item.isLocal) {
+      cart.updateLocalItemQuantity(item.id, qty);
+      return;
+    }
+    const result = await cart.updateQuantity(item.id, qty);
+    if (!result.ok) {
+      setError(result.error);
+    }
   };
 
   return (

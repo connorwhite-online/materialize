@@ -15,12 +15,11 @@ import {
   getCart,
   addToCart,
   removeFromCart,
-  updateCartItemQuantity,
   repriceCartItem,
   getCartItemCount,
 } from "@/app/actions/cart";
 import { createDraftFileForPrint } from "@/app/actions/files";
-import { reportClientError } from "@/lib/observability/report-client-error";
+import { uploadFileToR2 } from "@/components/upload/upload-file-to-r2";
 import { pollQuotes, type QuoteSnapshot } from "./poll-quotes";
 
 export interface LocalCartItem {
@@ -79,7 +78,10 @@ interface CartContextValue {
   ) => { ok: true } | { error: string };
   removeItem: (id: string) => Promise<void>;
   removeLocalItem: (localId: string) => void;
-  updateQuantity: (id: string, quantity: number) => Promise<void>;
+  updateQuantity: (
+    id: string,
+    quantity: number
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
   updateLocalItemQuantity: (localId: string, quantity: number) => void;
   materializeLocalItems: () => Promise<{ ok: boolean; error?: string }>;
   refresh: () => Promise<void>;
@@ -203,25 +205,55 @@ export function CartProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateQuantity = useCallback(
-    async (id: string, quantity: number) => {
+    async (
+      id: string,
+      quantity: number
+    ): Promise<{ ok: true } | { ok: false; error: string }> => {
+      const item = items.find((i) => i.id === id);
+      if (!item) {
+        // Nothing to optimistically move and nothing to re-quote
+        // against — this shouldn't happen from the rendered cart UI
+        // (the id came from a rendered `items` row), but if it does,
+        // reject rather than blind-write a bare quantity (MONEY-1: a
+        // quantity write with no accompanying quote update is exactly
+        // the desync this guards against).
+        return {
+          ok: false,
+          error: "Couldn't find that cart item — refresh your cart and try again.",
+        };
+      }
+      const previousQuantity = item.quantity;
+
       // Optimistically move the quantity number now; the price below
       // re-quotes in the background (CraftCloud per-unit prices drop
       // with volume, so we can't just flat-multiply the stored unit
-      // price). The UI shows a price skeleton meanwhile.
-      const item = items.find((i) => i.id === id);
+      // price). The UI shows a price skeleton meanwhile. Reverted by
+      // `reject` below if the re-quote doesn't land cleanly.
       setItems((prev) =>
         prev.map((i) => (i.id === id ? { ...i, quantity } : i))
       );
-      if (!item) {
-        await updateCartItemQuantity(id, quantity);
-        return;
-      }
 
       // Cancel any earlier in-flight re-quote for this line.
       repriceAbortRef.current.get(id)?.abort();
       const controller = new AbortController();
       repriceAbortRef.current.set(id, controller);
       const { signal } = controller;
+
+      // A re-quote failure (no matching quote, or a persist failure)
+      // must NOT silently commit the new quantity against the OLD
+      // quoteId — the quoteId bakes in the quantity it was originally
+      // quoted at, and checkoutVendorGroup bills `quantity * price`
+      // while CraftCloud produces whatever the quoteId itself encodes.
+      // Reject the change and restore the last-known-good quantity
+      // instead (MONEY-1) so the UI can show an inline retry prompt.
+      const reject = (error: string): { ok: false; error: string } => {
+        setItems((prev) =>
+          prev.map((i) =>
+            i.id === id ? { ...i, quantity: previousQuantity } : i
+          )
+        );
+        return { ok: false, error };
+      };
 
       setRepricing(id, true);
       try {
@@ -247,7 +279,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
             snapshots.push(snapshot);
           },
         });
-        if (signal.aborted) return;
+        if (signal.aborted) {
+          // Superseded by a newer quantity change for this same line —
+          // that call owns the optimistic value now; don't touch it.
+          return { ok: false, error: "Superseded by a newer quantity change" };
+        }
 
         const latest = snapshots[snapshots.length - 1];
         const match = latest?.quotes.find(
@@ -256,35 +292,36 @@ export function CartProvider({ children }: { children: ReactNode }) {
             q.materialConfigId === item.materialConfigId
         );
 
-        if (match) {
-          const result = await repriceCartItem({
-            cartItemId: id,
-            quantity,
-            quoteId: match.quoteId,
-            materialPrice: match.price,
-          });
-          if (!("error" in result)) {
-            const newMaterialCents = Math.round(match.price * 100);
-            setItems((prev) =>
-              prev.map((i) =>
-                i.id === id
-                  ? { ...i, quantity, quoteId: match.quoteId, materialPrice: newMaterialCents }
-                  : i
-              )
-            );
-            return;
-          }
+        if (!match) {
+          return reject(
+            "Couldn't get an updated price for this quantity. Please try again."
+          );
         }
-        // No matching quote (or persist failed) — fall back to a plain
-        // quantity write so the DB still reflects the new count. The
-        // stored unit price stays as-is; the staleness UI already warns
-        // when a line's quote is at risk.
-        await updateCartItemQuantity(id, quantity);
+
+        const result = await repriceCartItem({
+          cartItemId: id,
+          quantity,
+          quoteId: match.quoteId,
+          materialPrice: match.price,
+        });
+        if ("error" in result) {
+          return reject(result.error);
+        }
+
+        const newMaterialCents = Math.round(match.price * 100);
+        setItems((prev) =>
+          prev.map((i) =>
+            i.id === id
+              ? { ...i, quantity, quoteId: match.quoteId, materialPrice: newMaterialCents }
+              : i
+          )
+        );
+        return { ok: true };
       } catch (err) {
         if (signal.aborted || (err as { name?: string }).name === "AbortError") {
-          return;
+          return { ok: false, error: "Superseded by a newer quantity change" };
         }
-        await updateCartItemQuantity(id, quantity);
+        return reject("Couldn't re-price this item. Please try again.");
       } finally {
         // Only clear the repricing indicator if this call still owns
         // the abort ref for `id` — a superseded (aborted) call must
@@ -329,41 +366,14 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
     try {
       for (const item of queue) {
-        const presignRes = await fetch("/api/upload/presign", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            filename: item.originalFilename,
-            contentType: "application/octet-stream",
-            fileSize: item.file.size,
-          }),
+        // Presign + PUT to R2 (shared helper — MONEY-3).
+        const uploaded = await uploadFileToR2({
+          file: item.file,
+          filename: item.originalFilename,
+          kind: "cart-materialize",
         });
-        if (!presignRes.ok) {
-          const data = await presignRes.json().catch(() => ({}));
-          return {
-            ok: false,
-            error: data.error || "Upload presign failed",
-          };
-        }
-        const { uploadUrl, storageKey, format } = (await presignRes.json()) as {
-          uploadUrl: string;
-          storageKey: string;
-          format: "stl" | "obj" | "3mf" | "step" | "amf";
-        };
-
-        const putRes = await fetch(uploadUrl, {
-          method: "PUT",
-          headers: { "Content-Type": "application/octet-stream" },
-          body: item.file,
-        });
-        if (!putRes.ok) {
-          reportClientError(
-            "upload.r2-put-failed",
-            new Error(`R2 upload failed (${putRes.status})`),
-            { status: putRes.status, kind: "cart-materialize", fileSize: item.file.size }
-          );
-          return { ok: false, error: "File upload failed" };
-        }
+        if ("error" in uploaded) return { ok: false, error: uploaded.error };
+        const { storageKey, format } = uploaded;
 
         const draft = await createDraftFileForPrint({
           storageKey,

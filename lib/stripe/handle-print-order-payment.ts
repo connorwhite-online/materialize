@@ -1,7 +1,7 @@
 import "server-only";
 import { db } from "@/lib/db";
-import { printOrders } from "@/lib/db/schema";
-import { and, eq, isNull } from "drizzle-orm";
+import { printOrders, printOrderItems, cartItems } from "@/lib/db/schema";
+import { and, eq, isNull, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { createOrder } from "@/lib/craftcloud/client";
 import { logError } from "@/lib/logger";
@@ -59,6 +59,63 @@ function isClaimSentinel(value: string | null | undefined): boolean {
   return typeof value === "string" && value.startsWith(CLAIM_PREFIX);
 }
 
+/**
+ * MONEY-2: `checkoutVendorGroup` deliberately leaves `cartItems` rows
+ * in place (see its docstring in app/actions/print.ts) so an
+ * abandoned checkout doesn't lose the cart. This is the other half —
+ * once an order has actually placed, clear the cart lines it came
+ * from.
+ *
+ * `printOrderItems` doesn't store the source `cartItems.id` (no
+ * schema change for this fix), so rows are matched back via the same
+ * (fileAssetId, quoteId) pair the cartItems unique index already
+ * keys on — each cart line's quoteId is a fresh CraftCloud quote, so
+ * this can't accidentally sweep up an unrelated item a user added
+ * after abandoning an earlier checkout attempt for the same file.
+ *
+ * Single-file orders from `createPrintOrder` (the non-cart "Print
+ * with X" flow) never write `printOrderItems`, so they no-op here —
+ * nothing to clear.
+ *
+ * Idempotent and best-effort by design: called from every branch that
+ * observes (or just achieved) an "ordered" status, including retries.
+ * Deleting already-deleted rows matches 0 rows and doesn't error. A
+ * failure here is logged, never thrown — the order placement it runs
+ * after must not be rolled back or retried over a cart-cleanup blip.
+ */
+async function clearCartItemsForOrder(
+  printOrderId: string,
+  userId: string
+): Promise<void> {
+  try {
+    const orderItems = await db
+      .select({
+        fileAssetId: printOrderItems.fileAssetId,
+        quoteId: printOrderItems.quoteId,
+      })
+      .from(printOrderItems)
+      .where(eq(printOrderItems.printOrderId, printOrderId));
+
+    if (orderItems.length === 0) return;
+
+    await db.delete(cartItems).where(
+      and(
+        eq(cartItems.userId, userId),
+        or(
+          ...orderItems.map((i) =>
+            and(
+              eq(cartItems.fileAssetId, i.fileAssetId),
+              eq(cartItems.quoteId, i.quoteId)
+            )
+          )
+        )
+      )
+    );
+  } catch (err) {
+    logError("handlePrintOrderPayment.clearCartItems", err);
+  }
+}
+
 export async function handlePrintOrderPayment(
   printOrderId: string,
   opts?: { paymentIntentId?: string }
@@ -106,8 +163,16 @@ export async function handlePrintOrderPayment(
       throw new Error(`Print order not found: ${printOrderId}`);
     }
 
-    // Guard #1 — status advanced. Pure duplicate delivery.
-    if (order.status !== "cart_created") return;
+    // Guard #1 — status advanced. Pure duplicate delivery. If an
+    // earlier delivery placed the order but died before clearing the
+    // cart (MONEY-2), this retry is what finishes the job — idempotent,
+    // so re-running it on a delivery that already cleared is a no-op.
+    if (order.status !== "cart_created") {
+      if (order.status === "ordered") {
+        await clearCartItemsForOrder(printOrderId, order.userId);
+      }
+      return;
+    }
 
     // Another worker holds an active claim. Stay out of their way.
     if (isClaimSentinel(order.craftCloudOrderId)) {
@@ -123,6 +188,7 @@ export async function handlePrintOrderPayment(
         .update(printOrders)
         .set({ status: "ordered" })
         .where(eq(printOrders.id, printOrderId));
+      await clearCartItemsForOrder(printOrderId, order.userId);
     }
     return;
   }
@@ -194,6 +260,13 @@ export async function handlePrintOrderPayment(
   if (placed.length > 0) {
     await notifyPrintOrderPlaced(printOrderId);
   }
+
+  // MONEY-2: clear the cart lines this order came from now that it has
+  // actually placed. Best-effort/idempotent, and deliberately run
+  // whether or not WE were the writer above — if a parallel worker won
+  // the placement race, the cart still needs clearing exactly once,
+  // and clearCartItemsForOrder is a no-op the second time either way.
+  await clearCartItemsForOrder(printOrderId, order.userId);
 }
 
 /**

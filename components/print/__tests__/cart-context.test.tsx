@@ -10,8 +10,10 @@
 //      reentry guard. A partial failure must not re-upload items that
 //      already landed in the DB cart on retry.
 //   2. updateQuantity (:200-291) — the repriceAbortRef cancel-and-
-//      replace race guard and the "no match / persist failure -> plain
-//      quantity write" fallback.
+//      replace race guard and the "no match / persist failure ->
+//      REJECT the change and revert the optimistic quantity" path
+//      (MONEY-1 — a silent fallback quantity write here used to desync
+//      cartItems.quantity from the still-old-quantity quoteId).
 //
 // Model: components/print/__tests__/run-anon-checkout.test.ts (mocks
 // fetch for presign/R2, mocks server actions).
@@ -172,9 +174,39 @@ function mockFetchRouter() {
         headers: { "content-type": "application/json" },
       });
     }
-    // R2 PUT (or anything else) — succeed.
-    return new Response(null, { status: 200 });
+    throw new Error(`unexpected fetch in test: ${href}`);
   });
+}
+
+// The shared uploadFileToR2 helper (MONEY-3) does the R2 PUT leg via
+// XHR, not fetch — this minimal stub mirrors the one used in
+// components/upload/__tests__/run-create-listing.test.ts. Fires the
+// load event synchronously (via microtask) on send().
+class FakeXHR {
+  static nextStatus = 200;
+  static nextError: "network" | null = null;
+
+  upload = { addEventListener: () => {} };
+  _listeners = new Map<string, (() => void)[]>();
+  status = 200;
+
+  addEventListener(type: string, cb: () => void) {
+    const list = this._listeners.get(type) ?? [];
+    list.push(cb);
+    this._listeners.set(type, list);
+  }
+  open() {}
+  setRequestHeader() {}
+  send() {
+    queueMicrotask(() => {
+      if (FakeXHR.nextError === "network") {
+        for (const cb of this._listeners.get("error") ?? []) cb();
+        return;
+      }
+      this.status = FakeXHR.nextStatus;
+      for (const cb of this._listeners.get("load") ?? []) cb();
+    });
+  }
 }
 
 const baseCartItem = {
@@ -207,6 +239,10 @@ describe("cart-context: materializeLocalItems (anon queue-drain)", () => {
       return "complete";
     };
     pollCalls = [];
+    FakeXHR.nextStatus = 200;
+    FakeXHR.nextError = null;
+    // @ts-expect-error — stub for test
+    globalThis.XMLHttpRequest = FakeXHR;
   });
 
   it("a mid-queue failure removes already-materialized items and leaves the failing one queued for retry", async () => {
@@ -385,7 +421,14 @@ describe("cart-context: updateQuantity re-pricing", () => {
     expect(updated?.materialPrice).toBe(1250); // cents
   });
 
-  it("falls back to a plain quantity write when no quote matches the item's vendor/material", async () => {
+  // MONEY-1: a re-quote failure must REJECT the quantity change rather
+  // than silently persist a quantity that no longer matches the
+  // line's baked-in quoteId (checkoutVendorGroup bills
+  // `quantity * price` while CraftCloud produces whatever the
+  // quoteId itself encodes — a silent fallback write desyncs them).
+  // `updateCartItemQuantity` must never be called from this path
+  // anymore; the optimistic quantity bump must be reverted.
+  it("rejects the quantity change (reverting the optimistic bump) when no quote matches the item's vendor/material", async () => {
     pollQuotesImpl = async (opts) => {
       pollCalls.push(opts);
       opts.onSnapshot({
@@ -399,15 +442,21 @@ describe("cart-context: updateQuantity re-pricing", () => {
 
     const result = await seedOneItem();
 
+    let outcome: { ok: boolean; error?: string } | undefined;
     await act(async () => {
-      await result.current!.updateQuantity("ci-1", 4);
+      outcome = await result.current!.updateQuantity("ci-1", 4);
     });
 
+    expect(outcome?.ok).toBe(false);
     expect(repriceCartItemImpl).not.toHaveBeenCalled();
-    expect(updateCartItemQuantityImpl).toHaveBeenCalledWith("ci-1", 4);
+    expect(updateCartItemQuantityImpl).not.toHaveBeenCalled();
+    // Reverted to the pre-change (DB-confirmed) quantity, not left at
+    // the optimistically-bumped 4.
+    const item = result.current!.items.find((i) => i.id === "ci-1");
+    expect(item?.quantity).toBe(baseCartItem.quantity);
   });
 
-  it("falls back to a plain quantity write when repriceCartItem persist fails despite a matching quote", async () => {
+  it("rejects the quantity change (reverting the optimistic bump) when repriceCartItem persist fails despite a matching quote", async () => {
     pollQuotesImpl = async (opts) => {
       pollCalls.push(opts);
       opts.onSnapshot({
@@ -421,19 +470,23 @@ describe("cart-context: updateQuantity re-pricing", () => {
 
     const result = await seedOneItem();
 
+    let outcome: { ok: boolean; error?: string } | undefined;
     await act(async () => {
-      await result.current!.updateQuantity("ci-1", 2);
+      outcome = await result.current!.updateQuantity("ci-1", 2);
     });
 
+    expect(outcome).toEqual({ ok: false, error: "db write failed" });
     expect(repriceCartItemImpl).toHaveBeenCalled();
-    expect(updateCartItemQuantityImpl).toHaveBeenCalledWith("ci-1", 2);
+    expect(updateCartItemQuantityImpl).not.toHaveBeenCalled();
+    const item = result.current!.items.find((i) => i.id === "ci-1");
+    expect(item?.quantity).toBe(baseCartItem.quantity);
   });
 
   it("a rapid second call aborts the first in-flight pollQuotes via its own AbortSignal", async () => {
     const result = await seedOneItem();
 
-    let pA!: Promise<void>;
-    let pB!: Promise<void>;
+    let pA!: Promise<{ ok: boolean; error?: string }>;
+    let pB!: Promise<{ ok: boolean; error?: string }>;
     await act(async () => {
       // Fired back-to-back, synchronously, mirroring a user clicking
       // +1 twice quickly before the first re-quote lands.
