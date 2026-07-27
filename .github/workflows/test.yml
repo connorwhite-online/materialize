@@ -26,3 +26,11 @@ jobs:
 
       - name: Type check
         run: npx tsc --noEmit
+
+      # DX-32: non-blocking on purpose — this is the first run wiring lint
+      # into CI at all, and the existing backlog hasn't been triaged yet.
+      # Flip continue-on-error to false (making lint required) once that
+      # backlog is cleared; don't try to fix it all in one PR before then.
+      - name: Lint
+        run: npm run lint
+        continue-on-error: true
