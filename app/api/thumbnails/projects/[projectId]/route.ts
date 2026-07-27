@@ -5,7 +5,10 @@ import { eq, and, asc } from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
 import { logError } from "@/lib/logger";
 import { canWriteProject } from "@/lib/authorization";
-import { thumbnailPlaceholderResponse } from "../../placeholder";
+import {
+  thumbnailPlaceholderResponse,
+  resolveSafeImageContentType,
+} from "../../placeholder";
 
 /** Same guard as in /api/thumbnails/[fileId]/route.ts — see that file for rationale. */
 const UUID_RE =
@@ -186,14 +189,23 @@ export async function GET(
       return new Response("Upstream fetch failed", { status: 502 });
     }
 
-    const contentType =
-      upstream.headers.get("content-type") ?? "application/octet-stream";
+    // SEC-1 — never echo the uploader's stored Content-Type verbatim;
+    // only a fixed raster-image allowlist may pass through same-origin
+    // (see resolveSafeImageContentType in ../../placeholder).
+    const { contentType, isAttachment } = resolveSafeImageContentType(
+      upstream.headers.get("content-type"),
+      false
+    );
     const headers: Record<string, string> = {
       "Content-Type": contentType,
+      "X-Content-Type-Options": "nosniff",
       "Cache-Control": publicListing
         ? "public, max-age=300, stale-while-revalidate=600"
         : "private, max-age=60",
     };
+    if (isAttachment) {
+      headers["Content-Disposition"] = "attachment";
+    }
     const upstreamEtag = upstream.headers.get("etag");
     if (upstreamEtag) headers.ETag = upstreamEtag;
     const upstreamLength = upstream.headers.get("content-length");
