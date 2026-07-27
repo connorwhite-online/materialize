@@ -843,7 +843,7 @@ export async function runCadTemplate(input: {
       "Template build failed.",
       source,
       1
-    ).catch(() => undefined);
+    ).catch((err) => logError("cad.persistGenerationFailure", err));
     return { error: "Could not build this template. Please try again." };
   }
 }
@@ -1053,7 +1053,7 @@ export async function rerunCadWithParams(input: {
       "Param update failed.",
       source,
       1
-    ).catch(() => undefined);
+    ).catch((err) => logError("cad.persistGenerationFailure", err));
     return { error: "Could not apply those parameters. Please try again." };
   }
 }
@@ -1259,7 +1259,7 @@ export async function reviseCadFeatureStatement(input: {
       "Step edit failed.",
       source,
       1
-    ).catch(() => undefined);
+    ).catch((err) => logError("cad.persistGenerationFailure", err));
     return { error: "Could not apply that edit.", fallback: true };
   }
 }

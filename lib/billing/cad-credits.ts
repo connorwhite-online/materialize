@@ -70,7 +70,12 @@ function creditEnv(name: string): number {
  */
 export function creditCostForRoute(route: string | null | undefined): number {
   const r = route ?? "";
-  if (r === "organic") return creditEnv("CAD_CREDIT_COST_ORGANIC");
+  // "legacy-generative" (CAD-11) is the non-agentic path's generative
+  // backend — same priced engine as "organic", just taken when the agentic
+  // kill switch is off. Without this case it fell through to the SIMPLE
+  // tier and undercharged the priciest backend.
+  if (r === "organic" || r === "legacy-generative")
+    return creditEnv("CAD_CREDIT_COST_ORGANIC");
   if (r.startsWith("complex")) return creditEnv("CAD_CREDIT_COST_COMPLEX");
   return creditEnv("CAD_CREDIT_COST_SIMPLE");
 }

@@ -184,7 +184,7 @@ describe("appendJobProgress", () => {
     jobRow.progress = [phaseEvent(1)];
     await appendJobProgress("job-1", [phaseEvent(2), phaseEvent(3)]);
     expect(jobRow.progress).toHaveLength(3);
-    expect(jobRow.progress[2]).toEqual(phaseEvent(3));
+    expect(jobRow.progress[2]).toEqual({ ...phaseEvent(3), seq: 2 });
   });
 
   it("caps the array at MAX_PROGRESS_EVENTS, keeping the first and last entries", async () => {
@@ -201,13 +201,39 @@ describe("appendJobProgress", () => {
     expect(jobRow.progress).toHaveLength(MAX_PROGRESS_EVENTS);
     // First entry survives (the setup story)...
     expect(jobRow.progress[0]).toEqual(phaseEvent(0));
-    // ...and the newest entry survives (the current state / terminal record).
-    expect(jobRow.progress[jobRow.progress.length - 1]).toEqual(appended);
+    // ...and the newest entry survives (the current state / terminal
+    // record), stamped with the seq that continues past the 200 pre-seq
+    // entries (index fallback: 0..199 -> next seq is 200).
+    expect(jobRow.progress[jobRow.progress.length - 1]).toEqual({
+      ...appended,
+      seq: MAX_PROGRESS_EVENTS,
+    });
   });
 
   it("no-ops on an empty batch", async () => {
     await appendJobProgress("job-1", []);
     expect(updateCalls).toHaveLength(0);
+  });
+
+  // CAD-7: seq must be monotonic and survive the drop-the-middle cap so the
+  // events route's cursor never desyncs from a length pinned at the cap.
+  it("stamps a monotonic seq that continues across repeated appends", async () => {
+    jobRow.progress = [];
+    await appendJobProgress("job-1", [phaseEvent(1), phaseEvent(2)]);
+    expect(jobRow.progress.map((e) => e.seq)).toEqual([0, 1]);
+    await appendJobProgress("job-1", [phaseEvent(3)]);
+    expect(jobRow.progress.map((e) => e.seq)).toEqual([0, 1, 2]);
+  });
+
+  it("falls back to array index for pre-migration entries with no seq", async () => {
+    // Simulates a row written before `seq` existed: no entry carries one.
+    jobRow.progress = [phaseEvent(1), phaseEvent(2)];
+    await appendJobProgress("job-1", [phaseEvent(3)]);
+    // The two legacy entries are untouched (still seq-less); the new one
+    // continues from their positional index (1) + 1.
+    expect(jobRow.progress[0].seq).toBeUndefined();
+    expect(jobRow.progress[1].seq).toBeUndefined();
+    expect(jobRow.progress[2].seq).toBe(2);
   });
 });
 
@@ -297,6 +323,7 @@ describe("executeCadJob", () => {
       type: "error",
       error: "not watertight",
       generationId: "gen-1",
+      seq: expect.any(Number),
     });
     expect(persistGenerationSuccess).not.toHaveBeenCalled();
   });
@@ -323,6 +350,7 @@ describe("executeCadJob", () => {
       type: "error",
       error: "Generation cancelled.",
       generationId: "gen-1",
+      seq: expect.any(Number),
     });
   });
 
