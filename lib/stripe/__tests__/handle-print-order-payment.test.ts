@@ -1,10 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Per-test we set:
-//   - dbOrder: what db.select().from().where() returns on the post-claim re-fetch
+//   - dbOrder: what db.select().from(printOrders).where() returns on the
+//     post-claim re-fetch
+//   - printOrderItemRows: what db.select().from(printOrderItems).where()
+//     returns — MONEY-2's clearCartItemsForOrder reads this to decide
+//     which cartItems rows to delete. Defaults to [] (single-item
+//     orders from createPrintOrder never write printOrderItems), which
+//     makes clearCartItemsForOrder a no-op for every pre-existing test
+//     below — none of them need to change.
 //   - claimReturns: rows the claim UPDATE().returning() resolves to
 //     ([] = claim failed, [{id}] = claim succeeded)
 let dbOrder: Record<string, unknown> | null = null;
+let printOrderItemRows: Array<{ fileAssetId: string; quoteId: string }> = [];
 let claimReturns: Array<{ id: string }> = [];
 // When set, `.returning()` calls consume from this queue in order
 // (one entry per UPDATE...returning() call within a single
@@ -19,12 +27,20 @@ let returningQueue: Array<Array<{ id: string }>> | null = null;
 // Spies for assertions about which UPDATEs ran with which payload.
 const mockUpdateSet = vi.fn();
 const mockUpdateWhere = vi.fn();
+// MONEY-2: spy on the cartItems cleanup DELETE.
+const mockDeleteWhere = vi.fn();
+let deleteShouldThrow: Error | null = null;
 
 vi.mock("@/lib/db", () => ({
   db: {
     select: () => ({
-      from: () => ({
-        where: () => (dbOrder ? [dbOrder] : []),
+      from: (table: { __name?: string }) => ({
+        where: () =>
+          table?.__name === "printOrderItems"
+            ? printOrderItemRows
+            : dbOrder
+              ? [dbOrder]
+              : [],
       }),
     }),
     update: () => ({
@@ -50,17 +66,42 @@ vi.mock("@/lib/db", () => ({
         };
       },
     }),
+    delete: () => ({
+      where: (w: unknown) => {
+        mockDeleteWhere(w);
+        if (deleteShouldThrow) return Promise.reject(deleteShouldThrow);
+        return Promise.resolve();
+      },
+    }),
   },
 }));
 
 vi.mock("@/lib/db/schema", () => ({
-  printOrders: { id: "id", status: "status", craftCloudOrderId: "cc_order_id" },
+  printOrders: {
+    __name: "printOrders",
+    id: "id",
+    status: "status",
+    craftCloudOrderId: "cc_order_id",
+  },
+  printOrderItems: {
+    __name: "printOrderItems",
+    printOrderId: "print_order_id",
+    fileAssetId: "file_asset_id",
+    quoteId: "quote_id",
+  },
+  cartItems: {
+    __name: "cartItems",
+    userId: "user_id",
+    fileAssetId: "file_asset_id",
+    quoteId: "quote_id",
+  },
 }));
 
 vi.mock("drizzle-orm", () => ({
   and: (...xs: unknown[]) => ({ and: xs }),
   eq: (a: unknown, b: unknown) => ({ eq: [a, b] }),
   isNull: (a: unknown) => ({ isNull: a }),
+  or: (...xs: unknown[]) => ({ or: xs }),
 }));
 
 const mockCreateOrder = vi.fn();
@@ -112,8 +153,10 @@ describe("handlePrintOrderPayment", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     dbOrder = null;
+    printOrderItemRows = [];
     claimReturns = [];
     returningQueue = null;
+    deleteShouldThrow = null;
   });
 
   it("happy path: claim wins, places order, writes real id", async () => {
@@ -136,6 +179,133 @@ describe("handlePrintOrderPayment", () => {
     expect(mockUpdateSet).toHaveBeenNthCalledWith(2, {
       craftCloudOrderId: "cc-new",
       status: "ordered",
+    });
+  });
+
+  // MONEY-2: checkoutVendorGroup no longer deletes cartItems at order
+  // creation — this handler clears them once the order actually
+  // places, so an abandoned checkout keeps its cart intact.
+  describe("MONEY-2: cart-clear on successful placement", () => {
+    it("clears cartItems matching the order's printOrderItems after a fresh placement", async () => {
+      claimReturns = [{ id: "order-1" }];
+      dbOrder = {
+        id: "order-1",
+        userId: "user-1",
+        status: "cart_created",
+        craftCloudCartId: "cart-1",
+        craftCloudOrderId: SENTINEL,
+        shippingAddress: baseAddress,
+      };
+      printOrderItemRows = [
+        { fileAssetId: "asset-1", quoteId: "quote-1" },
+        { fileAssetId: "asset-2", quoteId: "quote-2" },
+      ];
+      mockCreateOrder.mockResolvedValue({ orderId: "cc-new" });
+
+      await handlePrintOrderPayment("order-1");
+
+      expect(mockDeleteWhere).toHaveBeenCalledTimes(1);
+      expect(mockDeleteWhere).toHaveBeenCalledWith({
+        and: [
+          { eq: ["user_id", "user-1"] },
+          {
+            or: [
+              {
+                and: [
+                  { eq: ["file_asset_id", "asset-1"] },
+                  { eq: ["quote_id", "quote-1"] },
+                ],
+              },
+              {
+                and: [
+                  { eq: ["file_asset_id", "asset-2"] },
+                  { eq: ["quote_id", "quote-2"] },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+    });
+
+    it("does not touch cartItems for a single-file order with no printOrderItems (createPrintOrder flow)", async () => {
+      claimReturns = [{ id: "order-1" }];
+      dbOrder = {
+        id: "order-1",
+        userId: "user-1",
+        status: "cart_created",
+        craftCloudCartId: "cart-1",
+        craftCloudOrderId: SENTINEL,
+        shippingAddress: baseAddress,
+      };
+      printOrderItemRows = []; // no cart-derived order items
+      mockCreateOrder.mockResolvedValue({ orderId: "cc-new" });
+
+      await handlePrintOrderPayment("order-1");
+
+      expect(mockDeleteWhere).not.toHaveBeenCalled();
+    });
+
+    it("is idempotent: a duplicate delivery after the order already placed clears the cart again without erroring (Guard #1)", async () => {
+      claimReturns = []; // status already advanced, claim can't win
+      dbOrder = {
+        id: "order-1",
+        userId: "user-1",
+        status: "ordered",
+        craftCloudCartId: "cart-1",
+        craftCloudOrderId: "cc-prev",
+        shippingAddress: baseAddress,
+      };
+      printOrderItemRows = [{ fileAssetId: "asset-1", quoteId: "quote-1" }];
+
+      await expect(handlePrintOrderPayment("order-1")).resolves.toBeUndefined();
+
+      expect(mockCreateOrder).not.toHaveBeenCalled();
+      expect(mockDeleteWhere).toHaveBeenCalledTimes(1);
+    });
+
+    it("is idempotent: the Guard #2 heal path also clears the cart", async () => {
+      claimReturns = [];
+      dbOrder = {
+        id: "order-1",
+        userId: "user-1",
+        status: "cart_created",
+        craftCloudCartId: "cart-1",
+        craftCloudOrderId: "cc-prev", // real id from a previous successful place
+        shippingAddress: baseAddress,
+      };
+      printOrderItemRows = [{ fileAssetId: "asset-1", quoteId: "quote-1" }];
+
+      await handlePrintOrderPayment("order-1");
+
+      expect(mockDeleteWhere).toHaveBeenCalledTimes(1);
+    });
+
+    it("a failure while clearing the cart is logged, not thrown — the order placement already committed must not roll back or retry", async () => {
+      claimReturns = [{ id: "order-1" }];
+      dbOrder = {
+        id: "order-1",
+        userId: "user-1",
+        status: "cart_created",
+        craftCloudCartId: "cart-1",
+        craftCloudOrderId: SENTINEL,
+        shippingAddress: baseAddress,
+      };
+      printOrderItemRows = [{ fileAssetId: "asset-1", quoteId: "quote-1" }];
+      mockCreateOrder.mockResolvedValue({ orderId: "cc-new" });
+      deleteShouldThrow = new Error("db blip");
+
+      await expect(handlePrintOrderPayment("order-1")).resolves.toBeUndefined();
+
+      expect(logError).toHaveBeenCalledWith(
+        "handlePrintOrderPayment.clearCartItems",
+        deleteShouldThrow
+      );
+      // The order itself still placed successfully.
+      expect(mockUpdateSet).toHaveBeenNthCalledWith(2, {
+        craftCloudOrderId: "cc-new",
+        status: "ordered",
+      });
     });
   });
 
@@ -337,8 +507,10 @@ describe("handlePrintOrderPayment (two_step)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     dbOrder = null;
+    printOrderItemRows = [];
     claimReturns = [];
     returningQueue = null;
+    deleteShouldThrow = null;
   });
 
   it("advances cart_created → awaiting_production_payment with PI id + timestamp", async () => {

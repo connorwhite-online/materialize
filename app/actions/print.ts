@@ -33,7 +33,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { printOrders, printOrderItems, cartItems, fileAssets, files } from "@/lib/db/schema";
-import { eq, and, inArray, isNull } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
 import { deriveAppUrl } from "@/lib/utils/request-url";
@@ -397,9 +397,18 @@ export async function checkOrderStatus(
 /**
  * Check out all cart items for a single vendor. Creates one
  * CraftCloud cart (with all the vendor's quote IDs), one printOrders
- * row, and one printOrderItems row per cart item. The cart items are
- * deleted after commitment. The caller should then run
- * completePrintOrder to create the Stripe session.
+ * row, and one printOrderItems row per cart item. The caller should
+ * then run completePrintOrder to create the Stripe session.
+ *
+ * MONEY-2: the source `cartItems` rows are intentionally left in
+ * place here — this runs before any Stripe session exists and before
+ * `shippingAddress` is persisted, so a user who abandons the tab
+ * between this call and completePrintOrder would otherwise lose the
+ * entire cart with no recovery path until the 48h stale-order cron
+ * cancels the order. Clearing the cart is deferred to the Stripe
+ * webhook's successful-placement branch
+ * (`clearCartItemsForOrder` in lib/stripe/handle-print-order-payment.ts),
+ * so the cart only disappears once payment actually places the order.
  */
 export async function checkoutVendorGroup(
   vendorId: string
@@ -512,14 +521,9 @@ export async function checkoutVendorGroup(
       }))
     );
 
-    await db
-      .delete(cartItems)
-      .where(
-        inArray(
-          cartItems.id,
-          items.map((i) => i.id)
-        )
-      );
+    // MONEY-2: cartItems are deliberately NOT deleted here — see the
+    // docstring above checkoutVendorGroup. They're cleared once the
+    // Stripe webhook confirms the order actually placed.
 
     // An order is a save (docs/text-to-cad/05 §B) — promote any unsaved
     // text-to-CAD drafts among the ordered assets. Best-effort.

@@ -171,7 +171,7 @@ describe("checkoutVendorGroup", () => {
     expect(mockCreateCart).not.toHaveBeenCalled();
   });
 
-  it("happy path: creates the CraftCloud cart, inserts order + items, deletes cart rows", async () => {
+  it("happy path: creates the CraftCloud cart, inserts order + items, LEAVES cart rows alone (MONEY-2)", async () => {
     cartItemsRows = [makeCartItem()];
 
     const result = await checkoutVendorGroup("vendor-1");
@@ -218,7 +218,12 @@ describe("checkoutVendorGroup", () => {
       }),
     ]);
 
-    expect(deleteWhere).toHaveBeenCalledTimes(1);
+    // MONEY-2: cartItems now survive checkoutVendorGroup — an
+    // abandoned checkout (order created, Stripe session never
+    // completed) must not lose the cart. Clearing is deferred to the
+    // Stripe webhook's successful-placement branch
+    // (lib/stripe/handle-print-order-payment.ts).
+    expect(deleteWhere).not.toHaveBeenCalled();
   });
 
   // MTR-130 — cart rows carrying a priceId get their materialPrice
