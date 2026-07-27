@@ -34,6 +34,7 @@ function makeFile(): File {
 const baseInput: AnonCheckoutInput = {
   file: makeFile(),
   selectedQuote: {
+    priceId: "price-1",
     quoteId: "q-1",
     vendorId: "v-1",
     materialConfigId: "mc-1",
@@ -212,6 +213,7 @@ describe("runAnonCheckout", () => {
     expect(orderSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         fileAssetId: "asset-1",
+        priceId: "price-1",
         quoteId: "q-1",
         vendorId: "v-1",
         materialConfigId: "mc-1",

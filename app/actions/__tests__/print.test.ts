@@ -47,11 +47,26 @@ const mockGetOrderStatus = vi.fn(
       ],
     })
 );
+// MTR-130: getPrice(priceId) is the source of truth every
+// createPrintOrder/checkoutVendorGroup call reconciles the claimed
+// materialPrice against. Defaults to a quote matching "quote-1" at
+// $10 — tests that pass materialPrice: 10 with quoteId: "quote-1"
+// (the existing suite's convention) reconcile cleanly without any
+// per-test setup.
+const mockGetPrice = vi.fn((..._args: unknown[]) =>
+  Promise.resolve({
+    priceId: "price-1",
+    allComplete: true,
+    quotes: [{ quoteId: "quote-1", price: 10, currency: "USD" }],
+    shipping: [],
+  })
+);
 
 vi.mock("@/lib/craftcloud/client", () => ({
   createCart: (...args: unknown[]) => mockCreateCart(...args),
   createOrder: vi.fn(),
   getOrderStatus: (...args: unknown[]) => mockGetOrderStatus(...args),
+  getPrice: (...args: unknown[]) => mockGetPrice(...args),
   createStripeCheckout: vi.fn(),
   CraftCloudApiError: MockCraftCloudApiError,
 }));
@@ -124,6 +139,7 @@ describe("createPrintOrder", () => {
     vi.mocked(userCanPrintAsset).mockResolvedValueOnce(false);
     const result = await createPrintOrder({
       fileAssetId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      priceId: "price-1",
       quoteId: "quote-1",
       vendorId: "vendor-1",
       materialConfigId: "pla-white",
@@ -140,6 +156,7 @@ describe("createPrintOrder", () => {
   it("creates a cart and inserts order record", async () => {
     const result = await createPrintOrder({
       fileAssetId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      priceId: "price-1",
       quoteId: "quote-1",
       vendorId: "vendor-1",
       materialConfigId: "pla-white",
@@ -168,6 +185,7 @@ describe("createPrintOrder", () => {
     // serviceFee = Math.round(1000 * 0.03) = 30 cents
     await createPrintOrder({
       fileAssetId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      priceId: "price-1",
       quoteId: "quote-1",
       vendorId: "vendor-1",
       materialConfigId: "pla-white",
@@ -195,6 +213,7 @@ describe("createPrintOrder", () => {
 
     const result = await createPrintOrder({
       fileAssetId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      priceId: "price-1",
       quoteId: "quote-1",
       vendorId: "vendor-1",
       materialConfigId: "pla-white",
@@ -219,6 +238,7 @@ describe("createPrintOrder", () => {
 
     const result = await createPrintOrder({
       fileAssetId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      priceId: "price-1",
       quoteId: "quote-1",
       vendorId: "vendor-1",
       materialConfigId: "pla-white",
@@ -232,6 +252,102 @@ describe("createPrintOrder", () => {
     if (!("error" in result)) throw new Error("expected error");
     expect(result.error).toMatch(/expired|pick a material/i);
     expect(result.error).not.toContain("/v5/");
+  });
+
+  // MTR-130 — the server must re-derive the price from CraftCloud
+  // (getPrice(priceId)) instead of trusting the caller's materialPrice.
+  it("MTR-130: rejects a tampered (too-low) materialPrice instead of trusting the request body", async () => {
+    // Authoritative quote price is $10 (mockGetPrice default); the
+    // caller claims $1 — a browser-side tamper attempt.
+    const result = await createPrintOrder({
+      fileAssetId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      priceId: "price-1",
+      quoteId: "quote-1",
+      vendorId: "vendor-1",
+      materialConfigId: "pla-white",
+      shippingId: "ship-1",
+      quantity: 1,
+      materialPrice: 1,
+      shippingPrice: 5,
+      currency: "USD",
+    });
+
+    if (!("error" in result)) throw new Error("expected error");
+    expect(result.error).toMatch(/pricing has changed|refresh/i);
+    // Must bail BEFORE reserving a CraftCloud cart for the tampered order.
+    expect(mockCreateCart).not.toHaveBeenCalled();
+  });
+
+  it("MTR-130: accepts a materialPrice that matches CraftCloud's quote within rounding tolerance", async () => {
+    const result = await createPrintOrder({
+      fileAssetId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      priceId: "price-1",
+      quoteId: "quote-1",
+      vendorId: "vendor-1",
+      materialConfigId: "pla-white",
+      shippingId: "ship-1",
+      quantity: 1,
+      materialPrice: 10,
+      shippingPrice: 5,
+      currency: "USD",
+    });
+
+    expect(result).toHaveProperty("orderId");
+    expect(mockCreateCart).toHaveBeenCalled();
+    // The reconciled (server-derived) price is what's persisted, not
+    // the raw client value — defense in depth even though they match.
+    expect(mockDbInsertValues).toHaveBeenCalledWith(
+      expect.objectContaining({ materialSubtotal: 1000 })
+    );
+  });
+
+  it("MTR-130: quoteId absent from CraftCloud's price response surfaces a clear re-quote error", async () => {
+    mockGetPrice.mockResolvedValueOnce({
+      priceId: "price-1",
+      allComplete: true,
+      quotes: [{ quoteId: "some-other-quote", price: 10, currency: "USD" }],
+      shipping: [],
+    });
+
+    const result = await createPrintOrder({
+      fileAssetId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      priceId: "price-1",
+      quoteId: "quote-1",
+      vendorId: "vendor-1",
+      materialConfigId: "pla-white",
+      shippingId: "ship-1",
+      quantity: 1,
+      materialPrice: 10,
+      shippingPrice: 5,
+      currency: "USD",
+    });
+
+    if (!("error" in result)) throw new Error("expected error");
+    expect(result.error).toMatch(/expired|pick a material/i);
+    expect(mockCreateCart).not.toHaveBeenCalled();
+  });
+
+  it("MTR-130: an expired priceId (CraftCloudApiError) surfaces the same actionable re-quote error", async () => {
+    mockGetPrice.mockRejectedValueOnce(
+      new MockCraftCloudApiError(404, "Quote not found or expired", "/v5/price/price-1")
+    );
+
+    const result = await createPrintOrder({
+      fileAssetId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      priceId: "price-1",
+      quoteId: "quote-1",
+      vendorId: "vendor-1",
+      materialConfigId: "pla-white",
+      shippingId: "ship-1",
+      quantity: 1,
+      materialPrice: 10,
+      shippingPrice: 5,
+      currency: "USD",
+    });
+
+    if (!("error" in result)) throw new Error("expected error");
+    expect(result.error).toMatch(/expired|pick a material/i);
+    expect(mockCreateCart).not.toHaveBeenCalled();
   });
 });
 

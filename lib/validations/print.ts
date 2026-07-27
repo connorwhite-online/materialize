@@ -31,6 +31,10 @@ export type QuotesRequest = z.infer<typeof quotesRequestSchema>;
 
 export const printOrderSchema = z.object({
   fileAssetId: z.string().uuid(),
+  // CraftCloud priceId the quote poll resolved quoteId from — lets the
+  // server re-derive the authoritative per-unit price via getPrice()
+  // instead of trusting the client-supplied materialPrice (MTR-130).
+  priceId: z.string().min(1),
   quoteId: z.string().min(1),
   vendorId: z.string().min(1),
   vendorName: z.string().min(1).optional(),
@@ -44,6 +48,9 @@ export const printOrderSchema = z.object({
 
 export const addToCartSchema = z.object({
   fileAssetId: z.string().uuid(),
+  // See printOrderSchema.priceId — same reconciliation contract for
+  // add-to-cart writes (MTR-130).
+  priceId: z.string().min(1),
   quoteId: z.string().min(1),
   vendorId: z.string().min(1),
   vendorName: z.string().min(1).optional(),

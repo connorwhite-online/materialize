@@ -798,6 +798,12 @@ const ACTIVE_ORDER_STATUSES = [
   "ordered",
   "in_production",
   "shipped",
+  // Factory-rejected but PAID and the primary self-service refund
+  // state (print.ts requestOrderRefund treats blocked as "refund is
+  // straightforward"). Deleting the file while an order sits blocked
+  // would cascade-destroy the buyer's refund path and order history
+  // while the Stripe charge stands (MTR-231).
+  "blocked",
 ] as const;
 
 export async function deleteFileListing(

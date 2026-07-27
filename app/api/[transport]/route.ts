@@ -1113,6 +1113,12 @@ const handler = createMcpHandler(
         description:
           "Creates a draft order against the user's account. The user is notified by email and must approve and pay via the returned confirmationUrl before the order is placed with the vendor. USD only. Idempotency is keyed on (user, idempotencyKey).",
         inputSchema: {
+          priceId: z
+            .string()
+            .min(1)
+            .describe(
+              "The priceId returned alongside this quote by materialize_get_quote — required so the server can re-verify the price against CraftCloud before charging."
+            ),
           quoteId: z.string().min(1),
           fileAssetId: z.string().uuid(),
           vendorId: z.string().min(1),
@@ -1153,6 +1159,7 @@ const handler = createMcpHandler(
             agentName: auth.tokenName,
             idempotencyKey: input.idempotencyKey,
             fileAssetId: input.fileAssetId,
+            priceId: input.priceId,
             quoteId: input.quoteId,
             vendorId: input.vendorId,
             vendorName: input.vendorName,

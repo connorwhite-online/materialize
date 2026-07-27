@@ -50,6 +50,7 @@ vi.mock("../price-display", () => ({
   PriceDisplay: (props: {
     onSelectShipping: (s: unknown) => void;
     onCheckout: () => void;
+    isCheckingOut?: boolean;
   }) => (
     <div>
       <button
@@ -66,7 +67,13 @@ vi.mock("../price-display", () => ({
       >
         select shipping
       </button>
-      <button onClick={props.onCheckout}>checkout</button>
+      {/* Mirrors the real PriceDisplay's disabled + label behavior off
+          isCheckingOut (price-display.tsx:258,262) so MTR-232's guard
+          test below can assert on it without needing the real
+          component (which needs a live selectedShipping etc). */}
+      <button onClick={props.onCheckout} disabled={props.isCheckingOut}>
+        {props.isCheckingOut ? "Processing..." : "checkout"}
+      </button>
     </div>
   ),
 }));
@@ -136,10 +143,20 @@ vi.mock("../cart-context", () => ({
   useCart: () => null,
 }));
 
-// The configurator reads real auth state via useUser. These cases all
-// exercise the anon (draft) path, so report signed-out.
+// The configurator reads real auth state via useUser. Most cases here
+// exercise the anon (draft) path, so this defaults to signed-out;
+// MTR-232's guard test below (which needs the authed fileAssetId path
+// so createPrintOrder's await gives two rapid clicks a real gap to
+// race in) flips it via clerkAuthState.isSignedIn. vi.hoisted is
+// required here — vi.mock factories can't close over plain outer-scope
+// bindings.
+const clerkAuthState = vi.hoisted(() => ({ isSignedIn: false }));
 vi.mock("@clerk/nextjs", () => ({
-  useUser: () => ({ isLoaded: true, isSignedIn: false, user: null }),
+  useUser: () => ({
+    isLoaded: true,
+    isSignedIn: clerkAuthState.isSignedIn,
+    user: null,
+  }),
 }));
 
 import { QuoteConfigurator } from "../quote-configurator";
@@ -189,6 +206,7 @@ function installLocalStorage() {
 describe("QuoteConfigurator wiring (CON-38)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clerkAuthState.isSignedIn = false;
     installLocalStorage();
 
     pollQuotesMock.mockImplementation(
@@ -369,5 +387,73 @@ describe("QuoteConfigurator wiring (CON-38)", () => {
     expect(vi.mocked(completePrintOrder).mock.calls[0][0]).toMatchObject({
       isAnonFlow: true,
     });
+  });
+
+  // MTR-232 — "Proceed to checkout" had no in-flight guard at all
+  // (isCheckingOut was hardcoded false), so a double-tap could create
+  // two printOrders rows / two real CraftCloud carts. Authed
+  // fileAssetId mode is used here specifically because its
+  // single-item path awaits createPrintOrder — giving two rapid
+  // clicks a real gap to race in, unlike the anon/draft branches
+  // which return synchronously before any await.
+  it("checkoutButtonInFlightRef collapses a checkout double-click into a single createPrintOrder call, and the button disables meanwhile", async () => {
+    clerkAuthState.isSignedIn = true;
+    const fetchMock = vi.fn(
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          json: async () => ({ priceId: "price-1" }),
+        } as unknown as Response)
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    let release: (v: { orderId: string; cartId: string }) => void = () => {};
+    vi.mocked(createPrintOrder).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        })
+    );
+
+    render(
+      <QuoteConfigurator
+        fileAssetId="asset-1"
+        filename="part.stl"
+        format="stl"
+        hasCachedModel
+        geometryData={null}
+      />
+    );
+
+    fireEvent.click(await screen.findByText("select quote"));
+    fireEvent.click(await screen.findByText("select shipping"));
+
+    const checkoutButton = screen.getByText("checkout");
+    fireEvent.click(checkoutButton);
+    // Second click while createPrintOrder is still pending — the real
+    // PriceDisplay would already have this button disabled
+    // (disabled={isCheckingOut}), but fire it anyway to prove the ref
+    // guard — not just the disabled prop — is what stops the second
+    // invocation.
+    fireEvent.click(screen.getByText("Processing..."));
+
+    await waitFor(() => {
+      const button = screen.getByText("Processing...") as HTMLButtonElement;
+      expect(button.disabled).toBe(true);
+    });
+    expect(createPrintOrder).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      release({ orderId: "order-1", cartId: "cart-1" });
+    });
+
+    // Success moves to the address step within this same component (no
+    // navigation), so the guard must have re-enabled the button rather
+    // than leaving it stuck — the button itself unmounts here since
+    // the step changed, so its absence from the DOM is the assertion.
+    expect(screen.queryByText("checkout")).toBeNull();
+    expect(screen.queryByText("Processing...")).toBeNull();
+    expect(createPrintOrder).toHaveBeenCalledTimes(1);
   });
 });
