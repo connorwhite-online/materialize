@@ -10,7 +10,7 @@ import {
   projectFiles,
   users,
 } from "@/lib/db/schema";
-import { eq, and, isNotNull, inArray, sql } from "drizzle-orm";
+import { eq, and, isNotNull, inArray, sql, asc } from "drizzle-orm";
 import { auth } from "@clerk/nextjs/server";
 import { isOrgMember } from "@/lib/authorization";
 import { Card, CardContent } from "@/components/ui/card";
@@ -43,6 +43,12 @@ type ProjectItem = {
 };
 
 type Item = FileItem | ProjectItem;
+
+// Cap collection item fetches at a user-friendly ceiling, mirroring
+// LIBRARY_MAX_FILES in components/profile/library-tab.tsx. Real
+// pagination is a future refactor; a truncation notice flags the cap
+// to the user so nothing silently disappears.
+const COLLECTION_MAX_ITEMS = 500;
 
 export default async function CollectionPage(props: {
   params: Promise<{ slug: string }>;
@@ -82,7 +88,7 @@ export default async function CollectionPage(props: {
 
   if (collection.visibility !== "public" && !isOwner) notFound();
 
-  const [fileRows, projectRows] = await Promise.all([
+  const [fileRowsRaw, projectRowsRaw] = await Promise.all([
     db
       .select({
         id: files.id,
@@ -102,7 +108,13 @@ export default async function CollectionPage(props: {
           eq(files.status, "published"),
           eq(files.visibility, "public")
         )
-      ),
+      )
+      // Ordered so a truncated fetch keeps the items the owner placed
+      // first, rather than an arbitrary DB-order subset.
+      .orderBy(asc(collectionItems.sortOrder))
+      // Fetch one extra so we can tell if the collection was
+      // truncated without a second count() query.
+      .limit(COLLECTION_MAX_ITEMS + 1),
     db
       .select({
         id: projects.id,
@@ -122,8 +134,19 @@ export default async function CollectionPage(props: {
           eq(projects.status, "published"),
           eq(projects.visibility, "public")
         )
-      ),
+      )
+      .orderBy(asc(collectionItems.sortOrder))
+      .limit(COLLECTION_MAX_ITEMS + 1),
   ]);
+  const fileRowsTruncated = fileRowsRaw.length > COLLECTION_MAX_ITEMS;
+  const fileRows = fileRowsTruncated
+    ? fileRowsRaw.slice(0, COLLECTION_MAX_ITEMS)
+    : fileRowsRaw;
+  const projectRowsTruncated = projectRowsRaw.length > COLLECTION_MAX_ITEMS;
+  const projectRows = projectRowsTruncated
+    ? projectRowsRaw.slice(0, COLLECTION_MAX_ITEMS)
+    : projectRowsRaw;
+  const itemsTruncated = fileRowsTruncated || projectRowsTruncated;
 
   // Look up file counts for each project — used in the "N files" badge.
   const projectIds = projectRows.map((p) => p.id);
@@ -202,6 +225,18 @@ export default async function CollectionPage(props: {
           {items.length} {items.length === 1 ? "item" : "items"}
         </p>
       </div>
+
+      {itemsTruncated && (
+        <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+          Showing the first {COLLECTION_MAX_ITEMS}{" "}
+          {fileRowsTruncated && projectRowsTruncated
+            ? "files and projects"
+            : fileRowsTruncated
+              ? "files"
+              : "projects"}
+          . Older items aren&apos;t shown here yet — reach out if you need a full export.
+        </div>
+      )}
 
       {items.length === 0 ? (
         <p className="text-muted-foreground">This collection is empty.</p>

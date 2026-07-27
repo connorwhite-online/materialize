@@ -10,11 +10,20 @@
 //
 // This test imports the REAL consumer maps (not copies). Two of them
 // (TERMINAL_STATUSES in lib/mcp/internal/orders.ts and
-// ACTIVE_ORDER_STATUSES in app/actions/files.ts) were not exported
-// prior to MTR-155 — a bare `export` keyword was added to each (no
-// logic change) so this test can assert against the live map instead
-// of a hand-copied duplicate that could drift silently. Those are
-// ordinary modules where an arbitrary named export is fine.
+// ACTIVE_ORDER_STATUSES, originally in app/actions/files.ts) were not
+// exported prior to MTR-155 — a bare `export` keyword was added to
+// each (no logic change) so this test can assert against the live map
+// instead of a hand-copied duplicate that could drift silently. Those
+// are ordinary modules where an arbitrary named export is fine.
+//
+// MTR-163 update: ACTIVE_ORDER_STATUSES has since been hoisted out of
+// app/actions/files.ts into lib/print-statuses.ts (a plain module, no
+// "use server" directive) — see that file's header comment. This was
+// required, not optional: app/actions/files.ts has a top-level
+// "use server" directive, and Next.js rejects any non-async-function
+// export from such a file at build time
+// (https://nextjs.org/docs/messages/invalid-use-server-value). It is
+// now importable here like PRINTED_STATUSES.
 //
 // The order-detail page's STATUS_LABELS is deliberately NOT covered
 // directly: it lives in an App Router page file
@@ -79,17 +88,29 @@ describe("allow-list consumers (partial by design — members must stay valid)",
     );
   });
 
-  // TODO(MTR-163): app/actions/files.ts's ACTIVE_ORDER_STATUSES can't
-  // be imported here — files.ts is a "use server" module, and `next
-  // build` rejects any non-async-function export from a "use server"
-  // file ("A 'use server' file can only export async functions").
-  // Exporting the const passes tsc/vitest but fails the Vercel build.
-  // MTR-163 will hoist this set into a plain shared module (e.g.
-  // lib/print-statuses.ts) so it can be asserted here without touching
-  // the server-action file's export surface.
-  it.todo(
-    "app/actions/files.ts ACTIVE_ORDER_STATUSES — every member is a real enum value (MTR-163: un-importable 'use server' const)"
-  );
+  it("lib/print-statuses.ts ACTIVE_ORDER_STATUSES — every member is a real enum value", async () => {
+    const { ACTIVE_ORDER_STATUSES } = await import("@/lib/print-statuses");
+    for (const status of ACTIVE_ORDER_STATUSES) {
+      expect(ALL_STATUSES).toContain(status);
+    }
+    // Document current coverage (also used by
+    // app/actions/files.ts:deleteFileListing and
+    // app/(app)/files/[slug]/page.tsx's owner buyer-count) so a future
+    // status addition/removal is visible in a PR diff instead of
+    // silently changing test intent.
+    expect([...ACTIVE_ORDER_STATUSES].sort()).toEqual(
+      [
+        "cart_created",
+        "awaiting_agent_approval",
+        "auto_approved",
+        "awaiting_production_payment",
+        "ordered",
+        "in_production",
+        "shipped",
+        "blocked",
+      ].sort()
+    );
+  });
 
   it("lib/print-statuses.ts PRINTED_STATUSES — every member is a real enum value", async () => {
     const { PRINTED_STATUSES } = await import("@/lib/print-statuses");
@@ -103,16 +124,14 @@ describe("allow-list consumers (partial by design — members must stay valid)",
 
   it("documents which statuses are NOT covered by the importable allow-lists (informational — not necessarily a bug)", async () => {
     const { TERMINAL_STATUSES } = await import("@/lib/mcp/internal/orders");
-    const { PRINTED_STATUSES } = await import("@/lib/print-statuses");
+    const { PRINTED_STATUSES, ACTIVE_ORDER_STATUSES } = await import(
+      "@/lib/print-statuses"
+    );
 
-    // ACTIVE_ORDER_STATUSES is intentionally excluded here — it's not
-    // importable ("use server" const, see TODO(MTR-163) above). So the
-    // three statuses it uniquely covers (cart_created,
-    // awaiting_agent_approval, awaiting_production_payment) show up as
-    // "uncovered" below even though the live app DOES classify them.
     const covered = new Set<string>([
       ...TERMINAL_STATUSES,
       ...PRINTED_STATUSES,
+      ...ACTIVE_ORDER_STATUSES,
     ]);
     const uncovered = ALL_STATUSES.filter((s) => !covered.has(s));
 
@@ -120,26 +139,19 @@ describe("allow-list consumers (partial by design — members must stay valid)",
     //   - quoting: documented dead (AGENTS.md: "the column default
     //     only; no writer ever sets it, no code reads it") — outside
     //     every allow-list by design.
-    //   - blocked: a mid-state pending user action (request a refund,
-    //     which then moves it to `refunded` — the actually-terminal
-    //     state), so its absence from TERMINAL_STATUSES is by design.
-    //   - cart_created / awaiting_agent_approval /
-    //     awaiting_production_payment: ONLY covered by the
-    //     un-importable ACTIVE_ORDER_STATUSES; once MTR-163 makes that
-    //     set importable, add it to `covered` above and these three
-    //     drop out of this list.
+    //   - refunded / cancelled: covered by TERMINAL_STATUSES already,
+    //     so they don't appear here — this list is only what's outside
+    //     ALL three allow-lists. `blocked` is now covered by
+    //     ACTIVE_ORDER_STATUSES (MTR-231) but not TERMINAL_STATUSES —
+    //     it's a mid-state pending user action (request a refund,
+    //     which then moves it to `refunded`, the actually-terminal
+    //     state) — so its absence from TERMINAL_STATUSES is by design,
+    //     and its presence in ACTIVE_ORDER_STATUSES removes it from
+    //     this uncovered list.
     // A change here signals a status's classification moved and the
     // sibling maps should be re-audited by a human, not silently
     // patched.
-    expect(uncovered.sort()).toEqual(
-      [
-        "awaiting_agent_approval",
-        "awaiting_production_payment",
-        "blocked",
-        "cart_created",
-        "quoting",
-      ].sort()
-    );
+    expect(uncovered.sort()).toEqual(["quoting"].sort());
   });
 });
 

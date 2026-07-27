@@ -8,6 +8,15 @@ import {
 } from "@/lib/db/schema";
 import { eq, and, desc, inArray, sql } from "drizzle-orm";
 import { withDbRetry } from "@/lib/db/retry";
+import { notUnsavedStudioDraft } from "@/lib/studio-drafts";
+
+// Cap owned + purchased file fetches at the same user-friendly ceiling
+// as the profile library tab (components/profile/library-tab.tsx). This
+// grid is explicitly "a convenience, not load-bearing" — a truncation
+// notice isn't worth the UI surface, so we just cap silently. The +1
+// sentinel mirrors the library tab's fetch-one-extra pattern in case a
+// future caller wants to detect truncation without a second query.
+const LIBRARY_MAX_FILES = 500;
 
 export interface LibraryTile {
   fileAssetId: string;
@@ -40,7 +49,7 @@ async function loadLibraryTilesOnce(userId: string): Promise<LibraryTile[]> {
   // ownedFiles and purchasedRows are independent reads (different
   // source tables, no shared dependency) — run them concurrently
   // instead of paying two sequential round trips.
-  const [ownedFiles, purchasedRows] = await Promise.all([
+  const [ownedFilesRaw, purchasedRowsRaw] = await Promise.all([
     db
       .select({
         id: files.id,
@@ -48,8 +57,9 @@ async function loadLibraryTilesOnce(userId: string): Promise<LibraryTile[]> {
         thumbnailUrl: files.thumbnailUrl,
       })
       .from(files)
-      .where(eq(files.userId, userId))
-      .orderBy(desc(files.createdAt)),
+      .where(and(eq(files.userId, userId), notUnsavedStudioDraft()))
+      .orderBy(desc(files.createdAt))
+      .limit(LIBRARY_MAX_FILES + 1),
     db
       .select({
         id: files.id,
@@ -60,8 +70,11 @@ async function loadLibraryTilesOnce(userId: string): Promise<LibraryTile[]> {
       .innerJoin(files, eq(purchases.fileId, files.id))
       .where(
         and(eq(purchases.buyerId, userId), eq(purchases.status, "completed"))
-      ),
+      )
+      .limit(LIBRARY_MAX_FILES + 1),
   ]);
+  const ownedFiles = ownedFilesRaw.slice(0, LIBRARY_MAX_FILES);
+  const purchasedRows = purchasedRowsRaw.slice(0, LIBRARY_MAX_FILES);
 
   const fileIds = [
     ...ownedFiles.map((f) => f.id),

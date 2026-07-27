@@ -24,7 +24,7 @@ import {
   organizationMembers,
 } from "@/lib/db/schema";
 import { eq, and, or, ne, desc, inArray, sql } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { nanoid } from "nanoid";
 import {
@@ -43,6 +43,15 @@ import {
   viewerCanAttachAllFiles,
 } from "@/lib/authorization";
 import { notifyCollaboratorAddedToProject } from "@/lib/notifications/notify";
+
+/**
+ * Cache tag for the idle-browse grid on app/(app)/files/page.tsx
+ * (PERF-16). Must match IDLE_BROWSE_CACHE_TAG there exactly — see the
+ * matching constant + comment in app/actions/files.ts for why this
+ * can't just be a shared import (page.tsx and "use server" files both
+ * reject the export shape that would require).
+ */
+const IDLE_BROWSE_CACHE_TAG = "idle-browse";
 
 /**
  * Projects the viewer can attach files to — their personal projects
@@ -195,6 +204,10 @@ export async function createProject(formData: FormData) {
     });
 
     revalidatePath("/dashboard");
+    // New projects publish immediately (status: "published" above) —
+    // bust the idle-browse cache (PERF-16) so it shows up right away
+    // instead of waiting out the TTL.
+    updateTag(IDLE_BROWSE_CACHE_TAG);
     redirect(`/projects/${project.slug}`);
   } catch (error) {
     if (isRedirectError(error)) throw error;
@@ -519,6 +532,7 @@ export async function publishProject(projectId: string) {
       .where(eq(projects.id, projectId));
 
     revalidatePath("/dashboard");
+    updateTag(IDLE_BROWSE_CACHE_TAG);
   } catch (error) {
     logError("publishProject", error);
   }
@@ -538,6 +552,7 @@ export async function archiveProject(projectId: string) {
       .where(eq(projects.id, projectId));
 
     revalidatePath("/dashboard");
+    updateTag(IDLE_BROWSE_CACHE_TAG);
   } catch (error) {
     logError("archiveProject", error);
   }
@@ -583,6 +598,7 @@ export async function deleteProject(
         .where(eq(projects.id, projectId));
       revalidatePath(`/projects/${project.slug}`);
       revalidatePath("/dashboard");
+      updateTag(IDLE_BROWSE_CACHE_TAG);
       return {
         archived: true,
         reason: "has-buyers",
@@ -594,6 +610,7 @@ export async function deleteProject(
 
     revalidatePath(`/projects/${project.slug}`);
     revalidatePath("/dashboard");
+    updateTag(IDLE_BROWSE_CACHE_TAG);
     return { deleted: true };
   } catch (error) {
     logError("deleteProject", error);
@@ -619,6 +636,7 @@ export async function toggleProjectVisibility(projectId: string) {
       .where(eq(projects.id, projectId));
 
     revalidatePath("/dashboard");
+    updateTag(IDLE_BROWSE_CACHE_TAG);
     return { visibility: newVisibility };
   } catch (error) {
     logError("toggleProjectVisibility", error);

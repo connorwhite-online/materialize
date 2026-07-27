@@ -10,13 +10,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ChevronRight } from "@/components/icons/chevron-right";
-import { CatalogMaterialCard } from "./catalog-material-card";
-import type { CatalogMaterial, MaterialGroup } from "@/lib/craftcloud/catalog";
+import {
+  CatalogMaterialCard,
+  type BrowseMaterial,
+  type BrowseMaterialGroup,
+} from "./catalog-material-card";
 
 const ALL_GROUPS = "all";
 
 interface CatalogBrowserProps {
-  groups: MaterialGroup[];
+  groups: BrowseMaterialGroup[];
 }
 
 /**
@@ -43,7 +46,7 @@ export function CatalogBrowser({ groups }: CatalogBrowserProps) {
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
 
   const { sortedGroups, popularMaterials } = useMemo(() => {
-    const sortIndexOf = (m: CatalogMaterial) => m.sortIndex ?? 9999;
+    const sortIndexOf = (m: BrowseMaterial) => m.sortIndex ?? 9999;
 
     // Order materials within each group by sortIndex so the most
     // common picks float to the top of the family section too.
@@ -51,9 +54,7 @@ export function CatalogBrowser({ groups }: CatalogBrowserProps) {
       .map((g) => ({
         ...g,
         materials: [...g.materials].sort(
-          (a, b) =>
-            sortIndexOf(a as CatalogMaterial) -
-            sortIndexOf(b as CatalogMaterial)
+          (a, b) => sortIndexOf(a) - sortIndexOf(b)
         ),
       }))
       // Then sort the groups themselves by their best (lowest)
@@ -62,20 +63,18 @@ export function CatalogBrowser({ groups }: CatalogBrowserProps) {
       // order when two groups happen to tie on their best material.
       .sort((a, b) => {
         const bestA = a.materials.reduce(
-          (min, m) => Math.min(min, sortIndexOf(m as CatalogMaterial)),
+          (min, m) => Math.min(min, sortIndexOf(m)),
           Infinity
         );
         const bestB = b.materials.reduce(
-          (min, m) => Math.min(min, sortIndexOf(m as CatalogMaterial)),
+          (min, m) => Math.min(min, sortIndexOf(m)),
           Infinity
         );
         return bestA - bestB;
       });
 
     const popularMaterials = sortedGroups
-      .flatMap((g) =>
-        g.materials.map((m) => ({ material: m as CatalogMaterial, group: g }))
-      )
+      .flatMap((g) => g.materials.map((m) => ({ material: m, group: g })))
       .sort(
         (a, b) => sortIndexOf(a.material) - sortIndexOf(b.material)
       )
@@ -156,7 +155,7 @@ export function CatalogBrowser({ groups }: CatalogBrowserProps) {
                 {g.materials.map((material) => (
                   <CatalogMaterialCard
                     key={material.id}
-                    material={material as CatalogMaterial}
+                    material={material}
                     group={g}
                   />
                 ))}
