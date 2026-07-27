@@ -183,8 +183,20 @@ async function realUploadModel(
 }
 
 async function realGetModel(modelId: string): Promise<CraftCloudModel & { parsing: boolean }> {
-  const res = await fetch(`${BASE_URL}/v5/model/${modelId}`);
+  const path = `/v5/model/${modelId}`;
+  const res = await fetch(`${BASE_URL}${path}`);
   const parsing = res.status === 206;
+  // SEC-26 — 206 ("still parsing") is itself in the 2xx `res.ok` range,
+  // so this only rejects genuine non-2xx responses. Before this check,
+  // a 500 (or any other error status) fell straight through to
+  // `res.json()` and got returned as if the model were `ready`, so a
+  // caller could hand a broken/nonexistent model along to price/cart
+  // requests downstream. Matches the CraftCloudApiError usage in
+  // apiRequest() above.
+  if (!res.ok && !parsing) {
+    const text = await res.text();
+    throw new CraftCloudApiError(res.status, text, path);
+  }
   const model = await res.json();
   return { ...model, parsing, status: parsing ? "parsing" : "ready" };
 }
