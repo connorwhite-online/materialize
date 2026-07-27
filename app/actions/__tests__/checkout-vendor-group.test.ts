@@ -48,14 +48,17 @@ const mockCreateCart = vi.fn((..._args: unknown[]) =>
   })
 );
 // MTR-130: getPrice(priceId) is the source of truth checkoutVendorGroup
-// reconciles each cart item's materialPrice against — but only when
-// the item carries a priceId (legacy rows, the makeCartItem() default,
-// don't and are skipped — see the reconciliation tests below).
+// reconciles each cart item's materialPrice (and, per MONEY-1, its
+// quantity) against — but only when the item carries a priceId (legacy
+// rows, the makeCartItem() default, don't and are skipped — see the
+// reconciliation tests below). quantity: 1 matches makeCartItem()'s
+// default quantity so tests that don't care about the quantity guard
+// reconcile cleanly.
 const mockGetPrice = vi.fn((..._args: unknown[]) =>
   Promise.resolve({
     priceId: "price-1",
     allComplete: true,
-    quotes: [{ quoteId: "quote-1", price: 10, currency: "USD" }],
+    quotes: [{ quoteId: "quote-1", price: 10, quantity: 1, currency: "USD" }],
     shipping: [],
   })
 );
@@ -257,11 +260,41 @@ describe("checkoutVendorGroup", () => {
     expect(mockGetPrice).not.toHaveBeenCalled();
   });
 
+  // MONEY-1: a cart line whose `quantity` column drifted from the
+  // quantity baked into its own `quoteId` (e.g. a fallback quantity
+  // write that didn't also refresh the quote) must hard-block
+  // checkout rather than bill `quantity * price` against a quote that
+  // encodes a different production quantity.
+  it("MONEY-1: rejects checkout when a priced cart item's quantity is out of sync with its quote's baked-in quantity", async () => {
+    mockGetPrice.mockResolvedValueOnce({
+      priceId: "price-1",
+      allComplete: true,
+      // Quote was minted for quantity 1, but the cart row's own
+      // quantity column has since moved to 4 without a fresh quote.
+      quotes: [{ quoteId: "quote-1", price: 10, quantity: 1, currency: "USD" }],
+      shipping: [],
+    });
+    cartItemsRows = [
+      makeCartItem({
+        priceId: "price-1",
+        quoteId: "quote-1",
+        materialPrice: 1000,
+        quantity: 4,
+      }),
+    ];
+
+    const result = await checkoutVendorGroup("vendor-1");
+
+    if (!("error" in result)) throw new Error("expected error");
+    expect(result.error).toMatch(/quantity is out of sync|refresh/i);
+    expect(mockCreateCart).not.toHaveBeenCalled();
+  });
+
   it("MTR-130: quoteId missing from the priceId's quotes surfaces a re-quote error", async () => {
     mockGetPrice.mockResolvedValueOnce({
       priceId: "price-1",
       allComplete: true,
-      quotes: [{ quoteId: "some-other-quote", price: 10, currency: "USD" }],
+      quotes: [{ quoteId: "some-other-quote", price: 10, quantity: 1, currency: "USD" }],
       shipping: [],
     });
     cartItemsRows = [

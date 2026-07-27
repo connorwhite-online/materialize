@@ -79,12 +79,28 @@ const PRICE_RECONCILE_TOLERANCE_CENTS = 1;
  *   - priceId is unknown/expired to CraftCloud, or
  *   - quoteId can't be found in that price response (consumed/stale), or
  *   - the claimed price diverges from the authoritative one beyond a
- *     rounding tolerance.
+ *     rounding tolerance, or
+ *   - `expectedQuantity` is given and diverges from the quote's own
+ *     baked-in quantity (MONEY-1).
  */
 async function reconcileMaterialPrice(params: {
   priceId: string;
   quoteId: string;
   claimedPriceCents: number;
+  /**
+   * When provided, also verify the CraftCloud quote's own baked-in
+   * quantity matches the quantity we're about to bill. A cart line's
+   * `quoteId` and `quantity` columns can drift apart if a quantity
+   * change's re-quote fails partway (see cart-context.tsx
+   * updateQuantity) — the quoteId still encodes the OLD quantity
+   * while cartItems.quantity holds the NEW one. checkoutVendorGroup
+   * bills `quantity * price` but CraftCloud produces whatever the
+   * quoteId itself bakes in, so a mismatch here must hard-block
+   * checkout rather than silently overcharge or undercharge
+   * (MONEY-1). Only checkoutVendorGroup passes this — createPrintOrder
+   * mints its quote and quantity together in one call and can't drift.
+   */
+  expectedQuantity?: number;
 }): Promise<{ ok: true; priceCents: number } | { ok: false; error: string }> {
   let snapshot;
   try {
@@ -99,6 +115,17 @@ async function reconcileMaterialPrice(params: {
   const quote = snapshot.quotes?.find((q) => q.quoteId === params.quoteId);
   if (!quote) {
     return { ok: false, error: QUOTE_EXPIRED_ERROR };
+  }
+
+  if (
+    params.expectedQuantity !== undefined &&
+    quote.quantity !== params.expectedQuantity
+  ) {
+    return {
+      ok: false,
+      error:
+        "This item's quantity is out of sync with its saved price. Please refresh and try again.",
+    };
   }
 
   const authoritativeCents = Math.round(quote.price * 100);
@@ -404,6 +431,7 @@ export async function checkoutVendorGroup(
         priceId: item.priceId,
         quoteId: item.quoteId,
         claimedPriceCents: item.materialPrice,
+        expectedQuantity: item.quantity,
       });
       if (!reconciled.ok) return { error: reconciled.error };
       reconciledMaterialCentsById.set(item.id, reconciled.priceCents);
