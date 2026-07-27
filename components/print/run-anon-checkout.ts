@@ -1,6 +1,6 @@
 import { createDraftFileForPrint } from "@/app/actions/files";
 import { createPrintOrder, completePrintOrder } from "@/app/actions/print";
-import { reportClientError } from "@/lib/observability/report-client-error";
+import { uploadFileToR2 } from "@/components/upload/upload-file-to-r2";
 
 /**
  * The anon-flow post-OTP checkout chain. Pure async function,
@@ -10,8 +10,7 @@ import { reportClientError } from "@/lib/observability/report-client-error";
  * component's lifecycle.
  *
  * The chain:
- *   1. POST /api/upload/presign            → uploadUrl, storageKey
- *   2. PUT to R2 via the presign URL
+ *   1-2. uploadFileToR2 (presign + R2 PUT, shared helper — MONEY-3)
  *   3. createDraftFileForPrint(storageKey) → fileAssetId
  *   4. createPrintOrder(...)               → orderId (+ CraftCloud cart)
  *   5. completePrintOrder(...)             → Stripe checkoutUrl
@@ -79,47 +78,13 @@ export async function runAnonCheckout(
   input: AnonCheckoutInput
 ): Promise<AnonCheckoutResult> {
   try {
-    // 1. Presign a new R2 upload URL for this file.
-    const presignRes = await fetch("/api/upload/presign", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        filename: input.file.name,
-        contentType: "application/octet-stream",
-        fileSize: input.file.size,
-      }),
+    // 1-2. Presign + PUT the file bytes to R2 (shared helper — MONEY-3).
+    const uploaded = await uploadFileToR2({
+      file: input.file,
+      kind: "anon-print",
     });
-    if (!presignRes.ok) {
-      const data = await presignRes.json().catch(() => ({}));
-      return {
-        ok: false,
-        error: data.error || `Upload presign failed (${presignRes.status})`,
-      };
-    }
-    const {
-      uploadUrl,
-      storageKey,
-      format: resolvedFormat,
-    } = (await presignRes.json()) as {
-      uploadUrl: string;
-      storageKey: string;
-      format: "stl" | "obj" | "3mf" | "step" | "amf";
-    };
-
-    // 2. PUT the file bytes to R2.
-    const putRes = await fetch(uploadUrl, {
-      method: "PUT",
-      headers: { "Content-Type": "application/octet-stream" },
-      body: input.file,
-    });
-    if (!putRes.ok) {
-      reportClientError(
-        "upload.r2-put-failed",
-        new Error(`R2 upload failed (${putRes.status})`),
-        { status: putRes.status, kind: "anon-print", fileSize: input.file.size }
-      );
-      return { ok: false, error: `R2 upload failed (${putRes.status})` };
-    }
+    if ("error" in uploaded) return { ok: false, error: uploaded.error };
+    const { storageKey, format: resolvedFormat } = uploaded;
 
     // 3. Create the draft file row + fileAsset linking the R2 key.
     const draft = await createDraftFileForPrint({

@@ -19,7 +19,7 @@ import {
   getCartItemCount,
 } from "@/app/actions/cart";
 import { createDraftFileForPrint } from "@/app/actions/files";
-import { reportClientError } from "@/lib/observability/report-client-error";
+import { uploadFileToR2 } from "@/components/upload/upload-file-to-r2";
 import { pollQuotes, type QuoteSnapshot } from "./poll-quotes";
 
 export interface LocalCartItem {
@@ -366,41 +366,14 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
     try {
       for (const item of queue) {
-        const presignRes = await fetch("/api/upload/presign", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            filename: item.originalFilename,
-            contentType: "application/octet-stream",
-            fileSize: item.file.size,
-          }),
+        // Presign + PUT to R2 (shared helper — MONEY-3).
+        const uploaded = await uploadFileToR2({
+          file: item.file,
+          filename: item.originalFilename,
+          kind: "cart-materialize",
         });
-        if (!presignRes.ok) {
-          const data = await presignRes.json().catch(() => ({}));
-          return {
-            ok: false,
-            error: data.error || "Upload presign failed",
-          };
-        }
-        const { uploadUrl, storageKey, format } = (await presignRes.json()) as {
-          uploadUrl: string;
-          storageKey: string;
-          format: "stl" | "obj" | "3mf" | "step" | "amf";
-        };
-
-        const putRes = await fetch(uploadUrl, {
-          method: "PUT",
-          headers: { "Content-Type": "application/octet-stream" },
-          body: item.file,
-        });
-        if (!putRes.ok) {
-          reportClientError(
-            "upload.r2-put-failed",
-            new Error(`R2 upload failed (${putRes.status})`),
-            { status: putRes.status, kind: "cart-materialize", fileSize: item.file.size }
-          );
-          return { ok: false, error: "File upload failed" };
-        }
+        if ("error" in uploaded) return { ok: false, error: uploaded.error };
+        const { storageKey, format } = uploaded;
 
         const draft = await createDraftFileForPrint({
           storageKey,

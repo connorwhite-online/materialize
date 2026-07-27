@@ -1,5 +1,5 @@
 import { createFileListing } from "@/app/actions/files";
-import { reportClientError } from "@/lib/observability/report-client-error";
+import { uploadFileToR2 } from "./upload-file-to-r2";
 
 /**
  * The full create-a-listing pipeline from a client-side picked
@@ -9,8 +9,8 @@ import { reportClientError } from "@/lib/observability/report-client-error";
  * UI state.
  *
  * Steps:
- *   1. POST /api/upload/presign → { uploadUrl, storageKey, format }
- *   2. PUT the file bytes to R2 via XHR (for upload progress)
+ *   1-2. uploadFileToR2 (presign + R2 PUT with progress, shared
+ *        helper — MONEY-3) → { uploadUrl, storageKey, format }
  *   3. Stuff the collected form fields + assetsJson into the
  *      passed-in FormData snapshot
  *   4. Call createFileListing(formData) — on success it calls
@@ -75,72 +75,19 @@ export async function runCreateListing(
   input: CreateListingInput
 ): Promise<CreateListingResult> {
   try {
-    // 1. Get a presigned URL for R2.
+    // 1-2. Presign + PUT the file to R2 with progress (shared helper —
+    //      MONEY-3). XHR under the hood because fetch on the client
+    //      doesn't expose upload progress events.
     input.onPhaseChange?.("uploading");
     input.onProgress?.(0);
 
-    const presignRes = await fetch("/api/upload/presign", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        filename: input.file.name,
-        contentType: "application/octet-stream",
-        fileSize: input.file.size,
-      }),
+    const uploaded = await uploadFileToR2({
+      file: input.file,
+      kind: "create-listing",
+      onProgress: input.onProgress,
     });
-    if (!presignRes.ok) {
-      const data = await presignRes.json().catch(() => ({}));
-      return {
-        ok: false,
-        error: data.error || `Presign failed (${presignRes.status})`,
-      };
-    }
-    const { uploadUrl, storageKey, format: serverFormat } =
-      (await presignRes.json()) as {
-        uploadUrl: string;
-        storageKey: string;
-        format: "stl" | "obj" | "3mf" | "step" | "amf";
-      };
-
-    // 2. PUT the file to R2 with progress. XHR instead of fetch
-    //    because fetch on the client doesn't expose upload
-    //    progress events.
-    await new Promise<void>((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.upload.addEventListener("progress", (ev) => {
-        if (ev.lengthComputable) {
-          input.onProgress?.(Math.round((ev.loaded / ev.total) * 100));
-        }
-      });
-      xhr.addEventListener("load", () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          resolve();
-        } else {
-          // A real HTTP status came back, so the request reached R2 and
-          // CORS is fine — don't misdirect to CORS here. A genuine CORS
-          // failure surfaces on the `error` event below with status 0.
-          //
-          // Report to Sentry explicitly: this is a handled error shown
-          // in the UI, so client Sentry won't auto-capture it — without
-          // this an outage that fails every PUT (e.g. the aws-sdk
-          // flexible-checksum 500) produces no signal at all.
-          reportClientError(
-            "upload.r2-put-failed",
-            new Error(`R2 upload failed (${xhr.status})`),
-            { status: xhr.status, storageKey, fileSize: input.file.size }
-          );
-          reject(new Error(`R2 upload failed (${xhr.status}).`));
-        }
-      });
-      xhr.addEventListener("error", () =>
-        reject(
-          new Error("Couldn't reach R2 (network or CORS). Please try again.")
-        )
-      );
-      xhr.open("PUT", uploadUrl);
-      xhr.setRequestHeader("Content-Type", "application/octet-stream");
-      xhr.send(input.file);
-    });
+    if ("error" in uploaded) return { ok: false, error: uploaded.error };
+    const { storageKey, format: serverFormat } = uploaded;
 
     // 3. Populate the remaining form fields and call the server
     //    action.

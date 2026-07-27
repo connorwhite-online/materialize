@@ -174,9 +174,39 @@ function mockFetchRouter() {
         headers: { "content-type": "application/json" },
       });
     }
-    // R2 PUT (or anything else) — succeed.
-    return new Response(null, { status: 200 });
+    throw new Error(`unexpected fetch in test: ${href}`);
   });
+}
+
+// The shared uploadFileToR2 helper (MONEY-3) does the R2 PUT leg via
+// XHR, not fetch — this minimal stub mirrors the one used in
+// components/upload/__tests__/run-create-listing.test.ts. Fires the
+// load event synchronously (via microtask) on send().
+class FakeXHR {
+  static nextStatus = 200;
+  static nextError: "network" | null = null;
+
+  upload = { addEventListener: () => {} };
+  _listeners = new Map<string, (() => void)[]>();
+  status = 200;
+
+  addEventListener(type: string, cb: () => void) {
+    const list = this._listeners.get(type) ?? [];
+    list.push(cb);
+    this._listeners.set(type, list);
+  }
+  open() {}
+  setRequestHeader() {}
+  send() {
+    queueMicrotask(() => {
+      if (FakeXHR.nextError === "network") {
+        for (const cb of this._listeners.get("error") ?? []) cb();
+        return;
+      }
+      this.status = FakeXHR.nextStatus;
+      for (const cb of this._listeners.get("load") ?? []) cb();
+    });
+  }
 }
 
 const baseCartItem = {
@@ -209,6 +239,10 @@ describe("cart-context: materializeLocalItems (anon queue-drain)", () => {
       return "complete";
     };
     pollCalls = [];
+    FakeXHR.nextStatus = 200;
+    FakeXHR.nextError = null;
+    // @ts-expect-error — stub for test
+    globalThis.XMLHttpRequest = FakeXHR;
   });
 
   it("a mid-queue failure removes already-materialized items and leaves the failing one queued for retry", async () => {
