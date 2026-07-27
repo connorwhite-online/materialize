@@ -61,6 +61,7 @@ import { FeatureChips } from "@/components/cad/feature-chips";
 import { featureIdsForFaceIds } from "@/components/cad/feature-timeline";
 import type {
   CadStreamEvent,
+  CadJobProgressEntry,
   CadProgressEvent,
   CadQuestionOption,
   CadFeature,
@@ -1454,12 +1455,20 @@ export function TextToCadStudio({
     parentId: string | undefined
   ): Promise<boolean> {
     const MAX_RETRIES = 3;
+    // Resumable-replay cursor (CAD-8): the highest persisted-entry `seq`
+    // (CAD-7) applied so far. Scoped OUTSIDE the retry loop so it survives
+    // across reconnect attempts for this same job — a dropped connection
+    // (proxy timeout, the route's own ~290s ceiling) resumes from here
+    // instead of re-streaming the whole transcript from the start. -1 means
+    // "nothing applied yet", matching the route's cold-start default.
+    let lastSeq = -1;
     for (let attempt = 0; ; attempt++) {
       let sawTerminal = false;
       try {
-        const res = await fetch(`/api/cad/jobs/${jobId}/events`, {
-          signal: controller.signal,
-        });
+        const res = await fetch(
+          `/api/cad/jobs/${jobId}/events?from=${lastSeq}`,
+          { signal: controller.signal }
+        );
         if (!res.ok || !res.body) throw new Error(`events ${res.status}`);
 
         const reader = res.body.getReader();
@@ -1478,11 +1487,19 @@ export function TextToCadStudio({
               .split("\n")
               .find((l) => l.startsWith("data:"));
             if (!dataLine) continue;
-            let ev: CadStreamEvent;
+            let ev: CadJobProgressEntry;
             try {
               ev = JSON.parse(dataLine.slice(5).trim());
             } catch {
               continue;
+            }
+            // Advance the replay cursor (CAD-8) for every persisted-log
+            // entry that carries one — synthesized frames (snapshot, usage)
+            // aren't part of cadJobs.progress and never carry `seq`, so they
+            // leave the cursor untouched, which is correct: reconnecting
+            // only needs to skip what the route can actually replay.
+            if (typeof ev.seq === "number" && ev.seq > lastSeq) {
+              lastSeq = ev.seq;
             }
             if (ev.type === "done") {
               sawTerminal = true;

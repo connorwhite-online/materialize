@@ -6,7 +6,9 @@ import { withDbRetry } from "@/lib/db/retry";
 import { cadGenerations, cadJobs } from "@/lib/db/schema";
 import { canUseTextToCad } from "@/lib/features";
 import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
+import { persistGenerationFailure } from "@/lib/cad/persist";
 import type { CadJobProgressEntry } from "@/lib/cad/types";
+import { logError } from "@/lib/logger";
 
 /**
  * SSE progress stream for a background CAD generation job (MTR-175).
@@ -46,6 +48,18 @@ export async function GET(
   props: { params: Promise<{ jobId: string }> }
 ) {
   const { jobId } = await props.params;
+  const url = new URL(request.url);
+  // Resumable replay cursor (CAD-8): the last seq the client already
+  // applied, so a reconnect after a dropped connection (proxy timeout, the
+  // route's own ~290s ceiling) doesn't re-send the whole transcript. Pairs
+  // with the `seq` CAD-7 stamps on each persisted entry; -1 (or an absent /
+  // malformed param) means "send everything" and matches the cold-start
+  // default below.
+  const fromParam = url.searchParams.get("from");
+  const parsedFrom = fromParam === null ? NaN : Number(fromParam);
+  const initialSeq = Number.isFinite(parsedFrom)
+    ? Math.max(-1, Math.floor(parsedFrom))
+    : -1;
 
   const { userId } = await auth();
   if (!userId) return new Response("Unauthorized", { status: 401 });
@@ -97,12 +111,24 @@ export async function GET(
       let status: string = job.status;
       let jobError = job.error;
       let entries: CadJobProgressEntry[] = job.progress ?? [];
-      let sent = 0;
+      // seq-based cursor (CAD-7): a positional index desyncs permanently
+      // once the array's length gets pinned at MAX_PROGRESS_EVENTS by the
+      // drop-the-middle cap (appendJobProgress) — `sent === length` forever
+      // after that, so nothing (not even the terminal frame) ever emits
+      // again. `seq` is stamped once per entry at append time and survives
+      // trimming, so comparing against it stays correct regardless of how
+      // the array's length moves. Entries written before `seq` existed fall
+      // back to their array index, matching appendJobProgress's own
+      // fallback so old and new rows agree on ordering.
+      let lastSeq = initialSeq;
       const emitNew = () => {
-        // The array can only shrink when the executor's ~200-entry cap
-        // dropped middle entries; resync instead of replaying from zero.
-        if (entries.length < sent) sent = entries.length;
-        for (; sent < entries.length; sent++) sendEvent(entries[sent]);
+        for (let i = 0; i < entries.length; i++) {
+          const s = entries[i].seq ?? i;
+          if (s > lastSeq) {
+            sendEvent(entries[i]);
+            lastSeq = s;
+          }
+        }
       };
 
       // Replay everything persisted so far, then tail.
@@ -190,7 +216,7 @@ export async function GET(
             ) {
               jobError =
                 "Generation was interrupted before finishing. Please try again.";
-              await db
+              const reaped = await db
                 .update(cadJobs)
                 .set({
                   status: "failed",
@@ -203,8 +229,21 @@ export async function GET(
                     eq(cadJobs.id, jobId),
                     inArray(cadJobs.status, ["queued", "running"])
                   )
-                );
+                )
+                .returning({ id: cadJobs.id });
               status = "failed";
+              // Only when OUR update actually matched a row (the .returning()
+              // guards a race where the job finished between the read above
+              // and this write — reaping it now would clobber a legitimate
+              // terminal status). Without this, cadGenerations.status stayed
+              // "pending" forever: the cadJobs row went failed but nothing
+              // ever told the generation, so the turn could never be
+              // reattached or resolved (CAD-9).
+              if (reaped.length > 0) {
+                await persistGenerationFailure(job.generationId, jobError).catch(
+                  (err) => logError("cad.events.reapPersistFailure", err)
+                );
+              }
             }
             emitNew();
           }

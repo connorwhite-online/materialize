@@ -104,7 +104,19 @@ export async function appendJobProgress(
     .limit(1);
   if (!row) return;
 
-  let next = [...(row.progress ?? []), ...incoming];
+  const existing = row.progress ?? [];
+  // Monotonic seq (CAD-7): continue from the highest seq already present,
+  // falling back to array index for pre-migration entries that never got
+  // one stamped. This must survive the drop-the-middle cap below — each
+  // surviving entry keeps its OWN seq, so trimming never rewinds the
+  // counter or collides with a future append.
+  let nextSeq =
+    existing.length > 0
+      ? Math.max(...existing.map((e, i) => e.seq ?? i)) + 1
+      : 0;
+  const stamped = incoming.map((e) => ({ ...e, seq: nextSeq++ }));
+
+  let next = [...existing, ...stamped];
   if (next.length > MAX_PROGRESS_EVENTS) {
     const head = Math.floor(MAX_PROGRESS_EVENTS / 2);
     const tail = MAX_PROGRESS_EVENTS - head;
@@ -554,7 +566,7 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
       await persistGenerationFailure(
         generationId,
         "Generation failed. Please try again."
-      ).catch(() => undefined);
+      ).catch((err) => logError("cad.persistGenerationFailure", err));
       await finishFailed("Generation failed. Please try again.", error).catch(
         (err) => logError("executeCadJob.fail", err)
       );
