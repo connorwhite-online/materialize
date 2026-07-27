@@ -157,6 +157,7 @@ export function CommentsSection({
             ) : (
               <PhotoPostRow
                 key={`p-${item.data.id}`}
+                target={target}
                 photo={item.data}
                 ownerId={ownerId}
                 viewerId={viewerId}
@@ -170,10 +171,12 @@ export function CommentsSection({
 }
 
 function PhotoPostRow({
+  target,
   photo,
   ownerId,
   viewerId,
 }: {
+  target: CommentTarget;
   photo: PhotoPost;
   ownerId: string;
   viewerId: string | null;
@@ -227,7 +230,9 @@ function PhotoPostRow({
               className="block max-h-80 max-w-full object-contain"
             />
           </button>
-          {canDelete && <DeletePhotoButton photoId={photo.id} />}
+          {canDelete && (
+            <DeletePhotoButton photoId={photo.id} targetType={target} />
+          )}
         </div>
         {photo.caption && (
           <p className="text-sm whitespace-pre-wrap break-words">
