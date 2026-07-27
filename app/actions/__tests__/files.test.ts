@@ -368,8 +368,21 @@ describe("archiveFileListing", () => {
 // deleteFileListing's several differently-shaped per-table queries
 // (purchases, fileAssets, cartItems, printOrders, printOrderItems).
 describe("deleteFileListing", () => {
+  // Declared outside setupDeleteFileListing so they survive
+  // vi.resetModules() (which recreates the vi.fn()s captured *inside*
+  // any vi.mock/vi.doMock factory on the next import) — the factories
+  // below call through to these by reference instead of creating their
+  // own, same trick as mockSet/mockInsert above.
+  const mockDeleteObject = vi.fn(async (_key: string) => undefined);
+  const mockLogErrorDelete = vi.fn();
+  const mockDbDelete = vi.fn();
+
   beforeEach(() => {
     vi.resetModules();
+    mockDeleteObject.mockReset();
+    mockDeleteObject.mockResolvedValue(undefined);
+    mockLogErrorDelete.mockClear();
+    mockDbDelete.mockClear();
   });
 
   const FILE_ROW = {
@@ -394,6 +407,15 @@ describe("deleteFileListing", () => {
     cartItems?: unknown[];
     printOrderItems?: unknown[];
     printOrders?: unknown[];
+    // deleteFileListing queries `fileAssets` up to twice on the
+    // hard-delete path: once for {id} (in-flight gating) and once for
+    // {storageKey, stepStorageKey} (R2 cleanup). Both calls target the
+    // same table identity, so a single fixed value can't tell them
+    // apart. When a test needs the second (full-row) shape to differ
+    // from the first (id-only) shape, pass an explicit call queue here;
+    // otherwise every `.from(fileAssets)` call just repeats
+    // `fileAssetIds` (preserves the original single-value behavior).
+    fileAssetsCalls?: unknown[][];
   }) {
     // Table sentinels — identity-compared inside the db mock below, so
     // the schema mock must hand out these exact same objects.
@@ -417,11 +439,24 @@ describe("deleteFileListing", () => {
     const bareResultsByTable = new Map<unknown, unknown[]>([
       [FILES, [FILE_ROW]],
       [PURCHASES, tableRows.purchasesDirect ?? []],
-      [FILE_ASSETS, tableRows.fileAssetIds ?? []],
       [CART_ITEMS, tableRows.cartItems ?? []],
       [PRINT_ORDERS, tableRows.printOrders ?? []],
       [FILE_PHOTOS, []],
     ]);
+
+    // fileAssets can be queried twice with different projections (see
+    // the fileAssetsCalls doc comment above) — model it as a queue,
+    // falling back to repeating the same fixed value for callers that
+    // don't care about the distinction.
+    const fileAssetsQueue = tableRows.fileAssetsCalls
+      ? [...tableRows.fileAssetsCalls]
+      : undefined;
+    function nextFileAssetsResult(): unknown[] {
+      if (fileAssetsQueue) {
+        return fileAssetsQueue.length > 0 ? fileAssetsQueue.shift()! : [];
+      }
+      return tableRows.fileAssetIds ?? [];
+    }
 
     vi.doMock("@/lib/db/schema", () => ({
       files: FILES,
@@ -444,7 +479,10 @@ describe("deleteFileListing", () => {
       db: {
         select: () => ({
           from: (table: unknown) => {
-            const bareArr = bareResultsByTable.get(table) ?? [];
+            const bareArr =
+              table === FILE_ASSETS
+                ? nextFileAssetsResult()
+                : (bareResultsByTable.get(table) ?? []);
             const chain = {
               where: () =>
                 Object.assign([...bareArr], { limit: () => bareArr }),
@@ -467,8 +505,25 @@ describe("deleteFileListing", () => {
             return { where: () => Promise.resolve() };
           },
         }),
-        delete: () => ({ where: () => Promise.resolve() }),
+        delete: (table: unknown) => {
+          mockDbDelete(table);
+          return { where: () => Promise.resolve() };
+        },
       },
+    }));
+
+    vi.doMock("@/lib/storage", () => ({
+      generateDownloadUrl: vi.fn(),
+      generateUploadUrl: vi.fn(),
+      deleteObject: (...args: [string]) => mockDeleteObject(...args),
+      copyObject: vi.fn(),
+    }));
+
+    vi.doMock("@/lib/logger", () => ({
+      logError: (...args: unknown[]) => mockLogErrorDelete(...args),
+      isRedirectError: (e: unknown) =>
+        e instanceof Error &&
+        (e.message.includes("NEXT_REDIRECT") || e.message.includes("REDIRECT")),
     }));
 
     const mod = await import("../files");
@@ -503,4 +558,183 @@ describe("deleteFileListing", () => {
 
     expect(result).toEqual({ deleted: true });
   });
+
+  // TEST-21 (2026-07-25 audit): a direct completed purchase soft-archives
+  // the listing instead of hard-deleting, so the buyer keeps their
+  // library entry / re-download access.
+  it("direct buyer: soft-archives with reason has-buyers, never touches R2 or hard-deletes", async () => {
+    const deleteFileListing = await setupDeleteFileListing({
+      purchasesDirect: [{ id: "purchase-1" }],
+    });
+
+    const result = await deleteFileListing("file-1");
+
+    expect(result).toEqual({
+      archived: true,
+      reason: "has-buyers",
+      buyerCount: 1,
+    });
+    expect(mockSet).toHaveBeenCalledWith({
+      status: "archived",
+      visibility: "private",
+    });
+    expect(mockDeleteObject).not.toHaveBeenCalled();
+    expect(mockDbDelete).not.toHaveBeenCalled();
+  });
+
+  // A buyer of a PROJECT that bundles this file also counts as a buyer —
+  // transitive entitlement (lib/entitlement.ts's ownsLoadedFile grants the
+  // same access), so deleting the file out from under them would silently
+  // break their download. No direct purchase row exists in this scenario;
+  // only the purchases->projects->projectFiles join finds them.
+  it("project-buyer-only (no direct purchase): still soft-archives with reason has-buyers", async () => {
+    const deleteFileListing = await setupDeleteFileListing({
+      purchasesDirect: [],
+      purchasesViaProject: [{ id: "purchase-2" }],
+    });
+
+    const result = await deleteFileListing("file-1");
+
+    expect(result).toEqual({
+      archived: true,
+      reason: "has-buyers",
+      buyerCount: 1,
+    });
+    expect(mockSet).toHaveBeenCalledWith({
+      status: "archived",
+      visibility: "private",
+    });
+    expect(mockDeleteObject).not.toHaveBeenCalled();
+    expect(mockDbDelete).not.toHaveBeenCalled();
+  });
+
+  it("active DB cart item referencing the file's asset: soft-archives with reason in-flight", async () => {
+    const deleteFileListing = await setupDeleteFileListing({
+      fileAssetIds: [{ id: "asset-1" }],
+      cartItems: [{ id: "cart-item-1" }],
+    });
+
+    const result = await deleteFileListing("file-1");
+
+    expect(result).toEqual({
+      archived: true,
+      reason: "in-flight",
+      buyerCount: 1,
+    });
+    expect(mockSet).toHaveBeenCalledWith({
+      status: "archived",
+      visibility: "private",
+    });
+    expect(mockDeleteObject).not.toHaveBeenCalled();
+  });
+
+  it("non-terminal print order item (cart_created) referencing the file's asset: soft-archives with reason in-flight", async () => {
+    const deleteFileListing = await setupDeleteFileListing({
+      fileAssetIds: [{ id: "asset-1" }],
+      printOrderItems: [{ id: "poi-1" }],
+    });
+
+    const result = await deleteFileListing("file-1");
+
+    expect(result).toEqual({
+      archived: true,
+      reason: "in-flight",
+      buyerCount: 1,
+    });
+  });
+
+  it("clean file: hard-deletes and scrubs the exact R2 key set (assets, .step source, photos, thumbnail)", async () => {
+    const deleteFileListing = await setupDeleteFileListing({
+      // First fileAssets call: {id} projection, used for in-flight gating.
+      // Second fileAssets call: {storageKey, stepStorageKey} projection,
+      // used to build the R2 key list.
+      fileAssetsCalls: [
+        [{ id: "asset-1" }, { id: "asset-2" }],
+        [
+          { storageKey: "uploads/u1/a1/model.stl", stepStorageKey: "uploads/u1/a1/model.step" },
+          { storageKey: "uploads/u1/a2/model2.stl", stepStorageKey: null },
+        ],
+      ],
+      cartItems: [],
+      printOrderItems: [],
+      printOrders: [],
+    });
+
+    const result = await deleteFileListing("file-1");
+
+    expect(result).toEqual({ deleted: true });
+    expect(mockDbDelete).toHaveBeenCalled();
+
+    const deletedKeys = mockDeleteObject.mock.calls.map((c) => c[0]).sort();
+    expect(deletedKeys).toEqual(
+      [
+        "uploads/u1/a1/model.stl",
+        "uploads/u1/a1/model.step",
+        "uploads/u1/a2/model2.stl",
+        "thumbnails/file-1.webp",
+      ].sort()
+    );
+  });
+
+  it("an R2 delete rejection does not block the DB delete, and logs the failing key", async () => {
+    const deleteFileListing = await setupDeleteFileListing({
+      fileAssetsCalls: [
+        [{ id: "asset-1" }],
+        [{ storageKey: "uploads/u1/a1/model.stl", stepStorageKey: null }],
+      ],
+      cartItems: [],
+      printOrderItems: [],
+      printOrders: [],
+    });
+    mockDeleteObject.mockImplementation(async (key: string) => {
+      if (key === "uploads/u1/a1/model.stl") {
+        throw new Error("R2 permission denied");
+      }
+      return undefined;
+    });
+
+    const result = await deleteFileListing("file-1");
+
+    // The DB row is still deleted even though one R2 object failed —
+    // a stale R2 object is preferred over a half-gone file row.
+    expect(result).toEqual({ deleted: true });
+    expect(mockDbDelete).toHaveBeenCalled();
+    expect(mockLogErrorDelete).toHaveBeenCalledWith(
+      "deleteFileListing.r2",
+      expect.objectContaining({ key: "uploads/u1/a1/model.stl" })
+    );
+  });
+
+  // NOTE on this harness's limits: the mock db's .where(...) is a no-op
+  // that returns a canned array regardless of the real inArray(status, ...)
+  // filter drizzle would generate — so a test can't ask "does the code
+  // correctly filter row X out by status", only "given the query already
+  // returned this row, what does deleteFileListing do with it". The
+  // in-flight branch reads as presence-based (any returned printOrders row
+  // means in-flight — line 916 in app/actions/files.ts is `if (inFlight >
+  // 0)`, not a second per-row status comparison), so exercising a couple of
+  // representative ACTIVE_ORDER_STATUSES-shaped rows (not just "blocked",
+  // which MTR-231 already covered) is a real regression guard: it would
+  // catch someone changing that branch to compare against a specific
+  // status string instead of trusting an already-filtered result set. Our
+  // own local list here — not imported from app/actions/files.ts per the
+  // batch's ground rules — is the CHARGED_OR_ABOUT_TO_BE_CHARGED subset of
+  // printOrderStatusEnum as documented on ACTIVE_ORDER_STATUSES.
+  it.each(["cart_created", "auto_approved", "shipped"])(
+    "a single-item print order in status %s blocks the hard-delete (archives instead)",
+    async (status) => {
+      const deleteFileListing = await setupDeleteFileListing({
+        fileAssetIds: [{ id: "asset-1" }],
+        printOrders: [{ id: "order-1", status }],
+      });
+
+      const result = await deleteFileListing("file-1");
+
+      expect(result).toEqual({
+        archived: true,
+        reason: "in-flight",
+        buyerCount: 1,
+      });
+    }
+  );
 });

@@ -21,6 +21,9 @@ const state: {
   // file (the transitive-read branch of ownsLoadedFile). Distinct from
   // the project-direct collaborator lookup used by userOwnsProject.
   collaboratorGrantViaFile: { id: string } | null;
+  // userCanPrintAsset reads a single row via fileAssets LEFT JOIN files.
+  // null means "no matching fileAssets row at all" (missing asset).
+  printAssetRow: { fileUserId: string | null; fileStatus: string | null } | null;
 } = {
   fileRow: null,
   projectRow: null,
@@ -32,6 +35,7 @@ const state: {
   legacyPrintOrder: null,
   multiItemPrintOrderItem: null,
   collaboratorGrantViaFile: null,
+  printAssetRow: null,
 };
 
 vi.mock("@/lib/db", () => ({
@@ -118,7 +122,15 @@ vi.mock("@/lib/db", () => ({
           }
           if (table.__name === "file_assets") {
             return {
+              // userHasUsedFile: bare where() resolving to a plain array.
               where: () => state.assets,
+              // userCanPrintAsset: leftJoin(files) -> where() -> limit(1).
+              leftJoin: () => ({
+                where: () => ({
+                  limit: () =>
+                    state.printAssetRow ? [state.printAssetRow] : [],
+                }),
+              }),
             };
           }
           if (table.__name === "print_orders") {
@@ -209,6 +221,7 @@ import {
   userOwnsFile,
   userOwnsProject,
   userHasUsedFile,
+  userCanPrintAsset,
 } from "@/lib/entitlement";
 
 describe("userOwnsFile", () => {
@@ -364,5 +377,55 @@ describe("userHasUsedFile", () => {
     state.fileDownload = null;
     state.assets = [];
     expect(await userHasUsedFile("u1", "f1")).toBe(false);
+  });
+});
+
+// TEST-23 (2026-07-25 audit): userCanPrintAsset (lib/entitlement.ts:212-224)
+// is the IDOR gate blocking ordering/carting another user's private/draft
+// asset by a guessed fileAssetId — every caller in app/actions/print.test.ts
+// and cart.test.ts mocks it out, so its own truth table had never actually
+// run. Exercise it directly against the same db-mock harness used above.
+describe("userCanPrintAsset", () => {
+  beforeEach(() => {
+    state.printAssetRow = null;
+  });
+
+  it("owner of a draft asset can print it", async () => {
+    state.printAssetRow = { fileUserId: "u1", fileStatus: "draft" };
+    expect(await userCanPrintAsset("u1", "asset-1")).toBe(true);
+  });
+
+  it("non-owner cannot print another user's draft asset", async () => {
+    state.printAssetRow = { fileUserId: "owner-1", fileStatus: "draft" };
+    expect(await userCanPrintAsset("u1", "asset-1")).toBe(false);
+  });
+
+  it("non-owner CAN print another user's published asset", async () => {
+    state.printAssetRow = { fileUserId: "owner-1", fileStatus: "published" };
+    expect(await userCanPrintAsset("u1", "asset-1")).toBe(true);
+  });
+
+  it("anonymous viewer can print a published asset", async () => {
+    state.printAssetRow = { fileUserId: "owner-1", fileStatus: "published" };
+    expect(await userCanPrintAsset(null, "asset-1")).toBe(true);
+  });
+
+  it("anonymous viewer cannot print a draft asset", async () => {
+    state.printAssetRow = { fileUserId: "owner-1", fileStatus: "draft" };
+    expect(await userCanPrintAsset(null, "asset-1")).toBe(false);
+  });
+
+  it("returns false when the fileAssetId doesn't exist", async () => {
+    state.printAssetRow = null;
+    expect(await userCanPrintAsset("u1", "missing-asset")).toBe(false);
+  });
+
+  it("returns false for an orphaned asset (leftJoin null fileId — no linked files row)", async () => {
+    // fileAssets.fileId is nullable until linked (lib/db/schema.ts:448);
+    // an unlinked asset's LEFT JOIN to files yields fileUserId/fileStatus
+    // both null. Neither the owner check nor the published check can pass.
+    state.printAssetRow = { fileUserId: null, fileStatus: null };
+    expect(await userCanPrintAsset("u1", "orphan-asset")).toBe(false);
+    expect(await userCanPrintAsset(null, "orphan-asset")).toBe(false);
   });
 });
