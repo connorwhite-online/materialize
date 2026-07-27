@@ -60,6 +60,26 @@ import {
 import { completeText } from "@/lib/cad/model-client";
 import { extractCode } from "@/lib/cad/prompt";
 import { CAD_EXEMPLARS } from "@/lib/cad/knowledge/exemplars";
+import {
+  checkCadGenerateRateLimit,
+  type CadRateLimitResult,
+} from "@/app/api/cad/generate/rate-limit";
+
+/**
+ * Shared not-ok formatter for the three studio server actions below
+ * (runCadTemplate, rerunCadWithParams, reviseCadFeatureStatement) — mirrors
+ * the 429 text POST /api/cad/generate returns for the same limiter result
+ * (app/api/cad/generate/route.ts), minus the HTTP-specific Retry-After
+ * header (there's no response object here to hang it on).
+ */
+function rateLimitErrorMessage(
+  rate: Extract<CadRateLimitResult, { ok: false }>
+): string {
+  return (
+    `You've started ${rate.count} generations in the last ` +
+    `${rate.windowMinutes} minutes. Give it a moment and try again.`
+  );
+}
 
 // Generation itself lives in the jobs path (app/api/cad/generate ->
 // lib/cad/jobs.ts -> lib/cad/orchestrate.ts). The old inline generateCadModel
@@ -759,6 +779,14 @@ export async function runCadTemplate(input: {
   const user = (await currentUser()) as ClerkUserLike;
   if (!canUseTextToCad(primaryEmail(user))) return { error: "Not found" };
 
+  // Per-user frequency backstop (MTR-169): this action drives a real
+  // billed sidecar exec just like POST /api/cad/generate, so it must be
+  // gated by the same rate limiter — mirrors route.ts's check.
+  const rate = await checkCadGenerateRateLimit(userId);
+  if (!rate.ok) {
+    return { error: rateLimitErrorMessage(rate) };
+  }
+
   const exemplar = CAD_EXEMPLARS.find(
     (e) => e.id === input.exemplarId && e.verified
   );
@@ -887,6 +915,14 @@ export async function rerunCadWithParams(input: {
 
   const user = (await currentUser()) as ClerkUserLike;
   if (!canUseTextToCad(primaryEmail(user))) return { error: "Not found" };
+
+  // Per-user frequency backstop (MTR-169): this action drives a real
+  // billed sidecar exec just like POST /api/cad/generate, so it must be
+  // gated by the same rate limiter — mirrors route.ts's check.
+  const rate = await checkCadGenerateRateLimit(userId);
+  if (!rate.ok) {
+    return { error: rateLimitErrorMessage(rate) };
+  }
 
   const parentId = input.generationId?.trim();
   if (!parentId) return { error: "Not found" };
@@ -1097,6 +1133,15 @@ export async function reviseCadFeatureStatement(input: {
 
   const user = (await currentUser()) as ClerkUserLike;
   if (!canUseTextToCad(primaryEmail(user))) return { error: "Not found" };
+
+  // Per-user frequency backstop (MTR-169): this action drives a model
+  // completion + a real billed sidecar exec just like
+  // POST /api/cad/generate, so it must be gated by the same rate limiter —
+  // mirrors route.ts's check.
+  const rate = await checkCadGenerateRateLimit(userId);
+  if (!rate.ok) {
+    return { error: rateLimitErrorMessage(rate) };
+  }
 
   const parentId = input.generationId?.trim();
   const instruction = input.instruction?.trim();
