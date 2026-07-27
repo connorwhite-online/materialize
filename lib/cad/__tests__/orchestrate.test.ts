@@ -85,6 +85,16 @@ describe("runCadGeneration routing", () => {
     expect(runAgenticHarness).not.toHaveBeenCalled();
   });
 
+  it("CAD-11: legacy path + generative selected reports route legacy-generative, not legacy", async () => {
+    process.env.CAD_AGENTIC = "false";
+    generativeEnabled.mockReturnValue(true);
+    shouldUseGenerative.mockResolvedValue(true);
+    const r = await runCadGeneration({ prompt: "a dragon figurine" });
+    expect(runGenerative).toHaveBeenCalledTimes(1);
+    expect(r.sourceCode).toBe("generative");
+    expect(r.route).toBe("legacy-generative");
+  });
+
   it("simple -> scripted loop", async () => {
     completeText.mockResolvedValue("SIMPLE");
     const r = await runCadGeneration({ prompt: "a cube" });

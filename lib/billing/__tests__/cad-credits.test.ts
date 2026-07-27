@@ -151,7 +151,14 @@ describe("flag OFF (the shipped default) — proof of inertness", () => {
 
 describe("creditCostForRoute (route → tier mapping)", () => {
   it("defaults every tier to 0 credits", () => {
-    for (const route of ["simple", "complex", "organic", "legacy", undefined]) {
+    for (const route of [
+      "simple",
+      "complex",
+      "organic",
+      "legacy",
+      "legacy-generative",
+      undefined,
+    ]) {
       expect(creditCostForRoute(route)).toBe(0);
     }
   });
@@ -168,6 +175,10 @@ describe("creditCostForRoute (route → tier mapping)", () => {
     expect(creditCostForRoute("complex")).toBe(5);
     expect(creditCostForRoute("complex-fallback")).toBe(5);
     expect(creditCostForRoute("organic")).toBe(3);
+    // CAD-11: the non-agentic path's generative backend is the same priced
+    // engine as "organic" — it must bill at the ORGANIC tier, not fall
+    // through to SIMPLE just because it doesn't start with "complex".
+    expect(creditCostForRoute("legacy-generative")).toBe(3);
   });
 
   it("treats garbage/negative env as 0", () => {
