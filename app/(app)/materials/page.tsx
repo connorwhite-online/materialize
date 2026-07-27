@@ -3,6 +3,7 @@ import {
   type MaterialGroup,
 } from "@/lib/craftcloud/catalog";
 import { CatalogBrowser } from "@/components/materials/catalog-browser";
+import type { BrowseMaterialGroup } from "@/components/materials/catalog-material-card";
 import { logError } from "@/lib/logger";
 import { safeJsonLdScript } from "@/lib/seo/json-ld";
 
@@ -38,6 +39,25 @@ export default async function MaterialsPage() {
   const totalMaterials = groups.reduce((sum, g) => sum + g.materials.length, 0);
   const unavailable = groups.length === 0;
 
+  // Narrow to just what CatalogBrowser/CatalogMaterialCard read before
+  // crossing into the "use client" boundary (PERF-17). The full
+  // CraftCloud MaterialGroup/CatalogMaterial carries ~25 fields per
+  // material — nested finishGroups/materialConfigs, mechanical/thermal
+  // property ranges, tags — that the browse grid never touches; only
+  // this DTO needs to serialize over the RSC wire.
+  const browseGroups: BrowseMaterialGroup[] = groups.map((g) => ({
+    id: g.id,
+    name: g.name,
+    materials: g.materials.map((m) => ({
+      id: m.id,
+      slug: m.slug,
+      name: m.name,
+      featuredImage: m.featuredImage,
+      descriptionShort: m.descriptionShort,
+      sortIndex: m.sortIndex,
+    })),
+  }));
+
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "ItemList",
@@ -68,7 +88,7 @@ export default async function MaterialsPage() {
         </p>
       </div>
 
-      {!unavailable && <CatalogBrowser groups={groups} />}
+      {!unavailable && <CatalogBrowser groups={browseGroups} />}
     </div>
   );
 }
