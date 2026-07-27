@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { DESIGN_TAG_OPTIONS, categorySchema } from "./file";
 import { LICENSE_ENUM_VALUES } from "@/lib/licenses";
+import { isHttpUrl, HTTP_URL_SCHEME_MESSAGE } from "@/lib/validations/url";
 
 // Hard ceilings — pasted JSON, scripted requests, or a runaway loop
 // shouldn't be able to push thousands of file IDs or tags into a
@@ -69,10 +70,15 @@ export const createProjectSchema = z.object({
   // Optional pointer to the project's source code / firmware repo.
   // Empty string from a form should resolve to undefined so the
   // database column stays NULL rather than holding "".
+  // SEC-B1 — rendered raw into href= on the public project page
+  // (components/projects/source-code-card.tsx); a bare .url() accepts
+  // `javascript:` URIs, which is a stored-XSS primitive. Pin to
+  // http(s) only, mirroring bomItemSchema.sourceUrl.
   repoUrl: z
     .string()
     .trim()
     .url("Must be a valid URL")
+    .refine(isHttpUrl, HTTP_URL_SCHEME_MESSAGE)
     .max(500)
     .optional()
     .or(z.literal("").transform(() => undefined)),
