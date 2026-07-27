@@ -112,9 +112,14 @@ async function runCadCodeLive(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(process.env.CAD_RUNNER_SECRET
-        ? { Authorization: `Bearer ${process.env.CAD_RUNNER_SECRET}` }
-        : {}),
+      // SEC-4 — sent unconditionally, not gated on the var being set.
+      // lib/env.ts's boot validation now requires CAD_RUNNER_SECRET
+      // whenever CAD_RUNNER_URL is live (non-mock), so by the time
+      // this code path runs the app has already refused to boot
+      // without it. This function only ever reaches here in live
+      // mode (USE_MOCK short-circuits above), so there's no mock-run
+      // path that would send a bogus header.
+      Authorization: `Bearer ${process.env.CAD_RUNNER_SECRET ?? ""}`,
     },
     body: JSON.stringify({
       code,

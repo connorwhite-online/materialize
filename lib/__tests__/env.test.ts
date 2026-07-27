@@ -98,6 +98,117 @@ describe("validateServerEnv", () => {
     const mod = await freshValidate();
     expect(() => mod.validateServerEnv()).toThrow(mod.EnvValidationError);
   });
+
+  // SEC-4: a real (non-mock) CAD_RUNNER_URL must not boot without
+  // CAD_RUNNER_SECRET — otherwise every sidecar request goes out
+  // unauthenticated (lib/cad/runner-client.ts, lib/cad/session-client.ts).
+  describe("CAD_RUNNER_SECRET required-when-live rule", () => {
+    it("throws when CAD_RUNNER_URL is live and CAD_RUNNER_SECRET is missing", async () => {
+      const env = validEnv();
+      env.CAD_RUNNER_URL = "https://runner.example.com";
+      delete env.CAD_RUNNER_SECRET;
+      delete env.CAD_RUNNER_USE_MOCK;
+      process.env = { ...env };
+
+      const mod = await freshValidate();
+      try {
+        mod.validateServerEnv();
+        throw new Error("expected validateServerEnv to throw");
+      } catch (err) {
+        expect(err).toBeInstanceOf(mod.EnvValidationError);
+        const missing = (err as InstanceType<typeof mod.EnvValidationError>)
+          .missing;
+        expect(missing).toContain("CAD_RUNNER_SECRET");
+      }
+    });
+
+    it("passes when CAD_RUNNER_URL is live and CAD_RUNNER_SECRET is set", async () => {
+      const env = validEnv();
+      env.CAD_RUNNER_URL = "https://runner.example.com";
+      env.CAD_RUNNER_SECRET = "shh-its-a-secret";
+      delete env.CAD_RUNNER_USE_MOCK;
+      process.env = { ...env };
+
+      const mod = await freshValidate();
+      expect(() => mod.validateServerEnv()).not.toThrow();
+    });
+
+    it("passes when CAD_RUNNER_URL is unset (mock mode) even without CAD_RUNNER_SECRET", async () => {
+      const env = validEnv();
+      delete env.CAD_RUNNER_URL;
+      delete env.CAD_RUNNER_SECRET;
+      delete env.CAD_RUNNER_USE_MOCK;
+      process.env = { ...env };
+
+      const mod = await freshValidate();
+      expect(() => mod.validateServerEnv()).not.toThrow();
+    });
+
+    it("passes when CAD_RUNNER_USE_MOCK=true forces mock mode, even with a URL and no secret", async () => {
+      const env = validEnv();
+      env.CAD_RUNNER_URL = "https://runner.example.com";
+      env.CAD_RUNNER_USE_MOCK = "true";
+      delete env.CAD_RUNNER_SECRET;
+      process.env = { ...env };
+
+      const mod = await freshValidate();
+      expect(() => mod.validateServerEnv()).not.toThrow();
+    });
+  });
+
+  // SEC-5: a live Stripe key must never pair with a mocked CraftCloud
+  // checkout — lib/craftcloud/client.ts's USE_MOCK defaults ON, so a
+  // prod deploy missing CRAFTCLOUD_USE_MOCK=false would take real
+  // Stripe money while fabricating craftCloudOrderIds.
+  describe("live-Stripe + mocked-CraftCloud boot rule", () => {
+    it("throws when Stripe is live and CRAFTCLOUD_USE_MOCK is unset (defaults to mock)", async () => {
+      const env = validEnv();
+      env.STRIPE_SECRET_KEY = "sk_live_abc123";
+      delete env.CRAFTCLOUD_USE_MOCK;
+      process.env = { ...env };
+
+      const mod = await freshValidate();
+      try {
+        mod.validateServerEnv();
+        throw new Error("expected validateServerEnv to throw");
+      } catch (err) {
+        expect(err).toBeInstanceOf(mod.EnvValidationError);
+        const missing = (err as InstanceType<typeof mod.EnvValidationError>)
+          .missing;
+        expect(missing).toContain("CRAFTCLOUD_USE_MOCK");
+      }
+    });
+
+    it("throws when Stripe is live and CRAFTCLOUD_USE_MOCK is explicitly not \"false\"", async () => {
+      const env = validEnv();
+      env.STRIPE_SECRET_KEY = "sk_live_abc123";
+      env.CRAFTCLOUD_USE_MOCK = "true";
+      process.env = { ...env };
+
+      const mod = await freshValidate();
+      expect(() => mod.validateServerEnv()).toThrow(mod.EnvValidationError);
+    });
+
+    it("passes when Stripe is live and CRAFTCLOUD_USE_MOCK is explicitly \"false\"", async () => {
+      const env = validEnv();
+      env.STRIPE_SECRET_KEY = "sk_live_abc123";
+      env.CRAFTCLOUD_USE_MOCK = "false";
+      process.env = { ...env };
+
+      const mod = await freshValidate();
+      expect(() => mod.validateServerEnv()).not.toThrow();
+    });
+
+    it("passes when Stripe is a test key regardless of CRAFTCLOUD_USE_MOCK", async () => {
+      const env = validEnv();
+      env.STRIPE_SECRET_KEY = "sk_test_abc123";
+      delete env.CRAFTCLOUD_USE_MOCK;
+      process.env = { ...env };
+
+      const mod = await freshValidate();
+      expect(() => mod.validateServerEnv()).not.toThrow();
+    });
+  });
 });
 
 // MTR-166: the CAD-runner mock is a sandbox gate and must flip the badge.
