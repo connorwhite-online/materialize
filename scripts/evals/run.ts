@@ -110,7 +110,12 @@ async function generateRaw(userPrompt: string, system: string): Promise<string> 
   const msg = await client.messages.create({
     model: GEN_MODEL,
     max_tokens: 8192,
-    system,
+    // Same breakpoint shape as completeText (MTR-221): the gated system prompt
+    // (~1.7-3.2k tokens) is byte-stable across a case's revision chain, so every
+    // call after the first reads it from cache. The judge call sites stay
+    // uncached on purpose — CRITIQUE_RUBRIC (~442 tokens) is below the model's
+    // 1024-token cache minimum, so a marker there would silently no-op.
+    system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
     messages: [{ role: "user", content: userPrompt }],
   });
   return extractCode(textOf(msg));
