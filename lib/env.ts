@@ -33,7 +33,7 @@ export function requireEnv(name: string): string {
  * Required server env. Every key here must be present and non-empty for
  * the app to boot. Add new HARD dependencies here; keep optional flags out.
  */
-const serverEnvSchema = z.object({
+const baseServerEnvSchema = z.object({
   // Database
   DATABASE_URL: z.string().min(1),
 
@@ -60,13 +60,71 @@ const serverEnvSchema = z.object({
 
   // Cron / internal job auth — only needed when cron routes are hit
   CRON_SECRET: z.string().min(1).optional(),
+
+  // CAD execution sidecar (SEC-4) — both optional on their own (an
+  // unset CAD_RUNNER_URL is the supported "mock mode" local/CI
+  // default), but a real CAD_RUNNER_URL with no CAD_RUNNER_SECRET
+  // would silently send every sidecar request unauthenticated. The
+  // cross-field rule enforcing that pairing lives in the
+  // `.superRefine` below, mirroring `isCadRunnerMock()`'s branching.
+  CAD_RUNNER_URL: z.string().min(1).optional(),
+  CAD_RUNNER_SECRET: z.string().min(1).optional(),
+  CAD_RUNNER_USE_MOCK: z.string().optional(),
+
+  // CraftCloud checkout mock gate (SEC-5) — validated below alongside
+  // STRIPE_SECRET_KEY so a live Stripe key can never pair with a
+  // mocked CraftCloud checkout (lib/craftcloud/client.ts's USE_MOCK
+  // defaults ON, so an unset var in prod would otherwise take real
+  // Stripe money while fabricating craftCloudOrderIds).
+  CRAFTCLOUD_USE_MOCK: z.string().optional(),
 });
 
-export type ServerEnv = z.infer<typeof serverEnvSchema>;
+/**
+ * Cross-field rules that can't be expressed as simple per-key
+ * presence checks.
+ */
+const serverEnvSchema = baseServerEnvSchema.superRefine((env, ctx) => {
+  // SEC-4 — a real (non-mock) CAD_RUNNER_URL requires
+  // CAD_RUNNER_SECRET, mirroring the mock condition in
+  // `isCadRunnerMock()` exactly — keep the two in sync by
+  // construction if that branching ever changes.
+  const runnerUrl = env.CAD_RUNNER_URL ?? "";
+  const forcedMock = env.CAD_RUNNER_USE_MOCK === "true";
+  const isMock = runnerUrl === "" || forcedMock;
+  if (!isMock && !env.CAD_RUNNER_SECRET) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["CAD_RUNNER_SECRET"],
+      message:
+        "CAD_RUNNER_SECRET is required when CAD_RUNNER_URL is set and CAD_RUNNER_USE_MOCK is not \"true\" — an unauthenticated sidecar request would otherwise be sent to a real, internet-reachable CAD runner.",
+    });
+  }
+
+  // SEC-5 — a live Stripe key (sk_live_*) must never pair with a
+  // mocked CraftCloud checkout. lib/craftcloud/client.ts's
+  // `USE_MOCK = process.env.CRAFTCLOUD_USE_MOCK !== "false"` defaults
+  // to mock, so a prod deploy that forgets to set
+  // CRAFTCLOUD_USE_MOCK=false would take real customer money via
+  // Stripe while fabricating a fake craftCloudOrderId — no print
+  // ever gets placed. Require the var to be explicitly "false"
+  // whenever Stripe is live.
+  const stripeIsLive = (env.STRIPE_SECRET_KEY ?? "").startsWith("sk_live_");
+  const craftCloudMocked = env.CRAFTCLOUD_USE_MOCK !== "false";
+  if (stripeIsLive && craftCloudMocked) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["CRAFTCLOUD_USE_MOCK"],
+      message:
+        'CRAFTCLOUD_USE_MOCK must be set to "false" when STRIPE_SECRET_KEY is a live key (sk_live_*) — otherwise real Stripe charges are taken while CraftCloud orders are only mocked, never actually placed.',
+    });
+  }
+});
+
+export type ServerEnv = z.infer<typeof baseServerEnvSchema>;
 
 /** The validated names, exported for tests / docs. */
 export const REQUIRED_SERVER_ENV = Object.keys(
-  serverEnvSchema.shape
+  baseServerEnvSchema.shape
 ) as (keyof ServerEnv)[];
 
 /** Thrown when one or more required server env vars are missing/empty. */

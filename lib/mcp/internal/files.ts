@@ -429,13 +429,7 @@ export async function requestPhotoUploadUrlForUser(params: {
   }
   const ct = (params.contentType ?? "image/jpeg").toLowerCase();
   if (
-    ![
-      "image/jpeg",
-      "image/jpg",
-      "image/png",
-      "image/webp",
-      "image/svg+xml",
-    ].includes(ct)
+    !["image/jpeg", "image/jpg", "image/png", "image/webp"].includes(ct)
   ) {
     return { error: "Unsupported photo content type" };
   }

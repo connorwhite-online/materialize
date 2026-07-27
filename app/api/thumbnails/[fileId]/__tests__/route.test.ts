@@ -294,6 +294,74 @@ describe("GET /api/thumbnails/[fileId]", () => {
 
       fetchSpy.mockRestore();
     });
+
+    it("SEC-1: downgrades a non-allowlisted stored content-type to a forced download, and always sets nosniff", async () => {
+      // The stored Content-Type comes from whatever the uploader set at
+      // presign time (SEC-1) — never trust it enough to echo verbatim.
+      // A stored `text/html` (or any type outside the raster-image
+      // allowlist) must not be served inline same-origin.
+      const fileId = "ba14f9ed-106b-46e3-8abc-123456789012";
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response("<script>alert(1)</script>", {
+          status: 200,
+          headers: { "Content-Type": "text/html" },
+        })
+      );
+
+      mockDbWhere
+        .mockResolvedValueOnce([
+          {
+            id: fileId,
+            thumbnailUrl: `/api/thumbnails/${fileId}`,
+            status: "published",
+            userId: "user-1",
+            coverPhotoId: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+            coverStorageKey: "photos/user-1/some-photo.bin",
+          },
+        ])
+        .mockResolvedValue([]);
+
+      const { req, context } = makeRequest(fileId);
+      const res = await GET(req, context);
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Content-Type")).toBe("application/octet-stream");
+      expect(res.headers.get("Content-Disposition")).toBe("attachment");
+      expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+
+      fetchSpy.mockRestore();
+    });
+
+    it("always sets X-Content-Type-Options: nosniff for an allowlisted image type too", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response("FAKE_WEBP_BYTES", {
+          status: 200,
+          headers: { "Content-Type": "image/webp" },
+        })
+      );
+
+      mockDbWhere
+        .mockResolvedValueOnce([
+          {
+            id: "ba14f9ed-106b-46e3-8abc-123456789012",
+            thumbnailUrl: "/api/thumbnails/ba14f9ed-106b-46e3-8abc-123456789012",
+            status: "published",
+            userId: "user-1",
+            coverPhotoId: null,
+            coverStorageKey: null,
+          },
+        ])
+        .mockResolvedValue([]);
+
+      const { req, context } = makeRequest("ba14f9ed-106b-46e3-8abc-123456789012");
+      const res = await GET(req, context);
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+      expect(res.headers.get("Content-Disposition")).toBeNull();
+
+      fetchSpy.mockRestore();
+    });
   });
 
   describe("draft visibility for org co-owners (MTR-136)", () => {

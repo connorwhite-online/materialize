@@ -125,4 +125,42 @@ describe("createProjectSchema", () => {
     });
     expect(out.success).toBe(false);
   });
+
+  // SEC-B1 — repoUrl renders raw into href= on the public project page
+  // (components/projects/source-code-card.tsx); a javascript: URI is
+  // a stored-XSS primitive.
+  describe("repoUrl", () => {
+    it("rejects a javascript: URL", () => {
+      const out = createProjectSchema.safeParse({
+        ...baseInput,
+        repoUrl: "javascript:alert(document.cookie)",
+      });
+      expect(out.success).toBe(false);
+    });
+
+    it("accepts a valid https:// repo URL", () => {
+      const out = createProjectSchema.safeParse({
+        ...baseInput,
+        repoUrl: "https://github.com/example/repo",
+      });
+      expect(out.success).toBe(true);
+    });
+
+    it("accepts a valid http:// repo URL", () => {
+      const out = createProjectSchema.safeParse({
+        ...baseInput,
+        repoUrl: "http://example.com/repo",
+      });
+      expect(out.success).toBe(true);
+    });
+
+    it("treats empty string repoUrl as undefined", () => {
+      const out = createProjectSchema.safeParse({
+        ...baseInput,
+        repoUrl: "",
+      });
+      expect(out.success).toBe(true);
+      if (out.success) expect(out.data.repoUrl).toBeUndefined();
+    });
+  });
 });

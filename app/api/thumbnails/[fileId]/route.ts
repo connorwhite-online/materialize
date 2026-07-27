@@ -5,7 +5,10 @@ import { eq, and } from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
 import { logError } from "@/lib/logger";
 import { isOrgMember } from "@/lib/authorization";
-import { thumbnailPlaceholderResponse } from "../placeholder";
+import {
+  thumbnailPlaceholderResponse,
+  resolveSafeImageContentType,
+} from "../placeholder";
 
 /**
  * Matches a canonical UUID v4 string (case-insensitive).
@@ -184,15 +187,18 @@ export async function GET(
       return new Response("Upstream fetch failed", { status: 502 });
     }
 
-    // Preserve the upstream content-type (R2 stores `.webp` thumbnails
-    // but curator photos may be jpeg/png/webp). Default to image/webp
-    // for the auto-captured path which is always .webp.
-    const contentType =
-      upstream.headers.get("content-type") ??
-      (storageKey.endsWith(".webp") ? "image/webp" : "application/octet-stream");
+    // SEC-1 — never echo the uploader's stored Content-Type verbatim;
+    // only a fixed raster-image allowlist may pass through same-origin
+    // (see resolveSafeImageContentType). Default to image/webp only
+    // for the auto-captured path, which is always our own `.webp`.
+    const { contentType, isAttachment } = resolveSafeImageContentType(
+      upstream.headers.get("content-type"),
+      storageKey.endsWith(".webp")
+    );
 
     const headers: Record<string, string> = {
       "Content-Type": contentType,
+      "X-Content-Type-Options": "nosniff",
       // Drafts are owner-gated above so they must not enter shared
       // caches. Published thumbnails are public — let edge + browser
       // hold onto them for a few minutes; the optimizer cache holds
@@ -201,6 +207,9 @@ export async function GET(
         ? "private, max-age=60"
         : "public, max-age=300, stale-while-revalidate=600",
     };
+    if (isAttachment) {
+      headers["Content-Disposition"] = "attachment";
+    }
     const upstreamEtag = upstream.headers.get("etag");
     if (upstreamEtag) headers.ETag = upstreamEtag;
     const upstreamLength = upstream.headers.get("content-length");
