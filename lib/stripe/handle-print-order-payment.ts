@@ -170,6 +170,22 @@ export async function handlePrintOrderPayment(
     )
     .returning({ id: printOrders.id });
 
+  // MTR-230: a zero-row result here means we placed a PAID vendor
+  // order whose id we never persisted — reconcile can't find it and
+  // cleanup may cancel-and-refund it out from under CraftCloud. The
+  // sibling reentry race above (line ~114) already logs; this closes
+  // the same gap on the write side. No control-flow change — the
+  // notify guard below is untouched.
+  if (placed.length === 0) {
+    logError(
+      "handlePrintOrderPayment.placeWriteLost",
+      new Error(
+        `CraftCloud order created but write lost for order ${printOrderId}`,
+        { cause: { printOrderId, craftCloudOrderId: ccOrderId } }
+      )
+    );
+  }
+
   // Fire creator notifications iff WE were the writer (sentinel still
   // matched). Otherwise a parallel worker already ran or is running
   // through this same path and would notify on its own. Helper
@@ -207,7 +223,7 @@ async function handleTwoStepFeeAuthorization(
       `handleTwoStepFeeAuthorization: missing paymentIntentId for order ${printOrderId} — cannot advance without a PI to capture`
     );
   }
-  await db
+  const updated = await db
     .update(printOrders)
     .set({
       status: "awaiting_production_payment",
@@ -219,7 +235,31 @@ async function handleTwoStepFeeAuthorization(
         eq(printOrders.id, printOrderId),
         eq(printOrders.status, "cart_created")
       )
-    );
+    )
+    .returning({ id: printOrders.id });
+
+  // MTR-230: zero rows is ambiguous — a benign duplicate Stripe
+  // delivery (the row already advanced past cart_created) or a row
+  // that landed in some OTHER unexpected status, in which case
+  // feePaymentIntentId is never recorded and the manual-capture 3%
+  // fee hold silently expires uncaptured. Re-read to tell them apart;
+  // only the latter is worth paging on — response/return semantics
+  // are unchanged either way.
+  if (updated.length === 0) {
+    const [current] = await db
+      .select({ status: printOrders.status })
+      .from(printOrders)
+      .where(eq(printOrders.id, printOrderId));
+    if (current?.status !== "awaiting_production_payment") {
+      logError(
+        "handlePrintOrderPayment.twoStepFeeNoOp",
+        new Error(
+          `two-step fee authorization write lost for order ${printOrderId}`,
+          { cause: { printOrderId, status: current?.status } }
+        )
+      );
+    }
+  }
 }
 
 async function releaseClaim(

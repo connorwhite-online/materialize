@@ -1,13 +1,23 @@
 import { db } from "@/lib/db";
 import {
   cartItems,
+  cadGenerations,
+  collectionItems,
+  disputes,
+  fileAssets,
+  files,
+  filePhotos,
+  printOrderItems,
   printOrders,
+  projectFiles,
+  purchases,
   webhookEventsProcessed,
 } from "@/lib/db/schema";
-import { and, eq, like, lt } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, ne } from "drizzle-orm";
 import { getStripe } from "@/lib/stripe";
 import { logError } from "@/lib/logger";
 import { constantTimeEqual } from "@/lib/auth/constant-time-equal";
+import { deleteObject } from "@/lib/storage";
 
 /**
  * Daily housekeeping sweeps. The path name predates the broader
@@ -22,6 +32,28 @@ import { constantTimeEqual } from "@/lib/auth/constant-time-equal";
  *      when Stripe checkout never opened, or when the chain partially
  *      failed. 48h is generous: real checkouts complete in seconds
  *      and a Stripe Checkout session expires after 24h.
+ *
+ *      Every cancel is claimed atomically (status='cart_created' guard
+ *      + `.returning()`) before anything else happens for that row —
+ *      see MTR-229. This matters because the per-minute
+ *      place-auto-approved-orders cron re-claims the SAME population
+ *      (`status='cart_created' AND stripeSessionId LIKE 'pi_%' AND
+ *      craftCloudOrderId IS NULL`, see that route's Phase 2) to retry
+ *      stuck charged rows. Without the claim guard, this sweep could
+ *      refund + cancel a row placement is actively placing at
+ *      CraftCloud, producing an order that's both placed AND refunded.
+ *      A row with ANY `craftCloudOrderId` (a `placing:` sentinel or a
+ *      real CraftCloud order id — two-step orders place the CraftCloud
+ *      order up-front) is excluded from the SELECT entirely for the
+ *      same reason. Rows the claim loses are counted in
+ *      `skippedContended`, never refunded.
+ *
+ *      MTR-33: once a row's cancel claim succeeds, the checkout's
+ *      draft files (created by createDraftFileForPrint for anon
+ *      checkouts) are hard-deleted along with their R2 object — but
+ *      only when nothing else references them. See
+ *      `cleanupDraftFilesForOrder` below for the full reference-check
+ *      list.
  *
  *   2. **Stale cart items** — `cart_items` rows older than 7 days
  *      get hard-deleted. The `quoteId` on each is stale long before
@@ -59,21 +91,213 @@ const STALE_ORDER_LIMIT = 200;
 // Worst case ~200 serial refund+cancel calls (see STALE_ORDER_LIMIT)
 // at up to ~2s each ≈ 400s; 300s (the platform's default Pro-plan
 // ceiling) covers the common case. A run that hits the ceiling still
-// leaves partial progress — every write is per-row and unconditional
-// only after its own refund attempt completes — so a mid-sweep kill
-// just means more rows for tomorrow, not a double-refund.
+// leaves partial progress — every write is per-row, and for
+// uncharged rows a mid-sweep kill just means more rows for tomorrow.
+// For CHARGED (pi_) rows specifically, what makes a mid-sweep kill
+// safe is that refundFailedAt is pre-armed INSIDE the same claim
+// UPDATE that cancels the row (MTR-229) — a kill between the claim
+// and the Stripe refund call still leaves the row flagged, so the
+// hourly retry-failed-refunds cron (which scans isNotNull(refundFailedAt)
+// regardless of status) picks it up instead of the row silently
+// falling out of every future stale-order SELECT (which only matches
+// status='cart_created').
 export const maxDuration = 300;
+
+/**
+ * MTR-33: true when the file is a checkout draft (`source='upload'`,
+ * `status='draft'`) with no reference OTHER than the order we're
+ * cancelling — checked against every fileId/fileAssetId FK in the
+ * schema at plan time (projectFiles, collectionItems, filePhotos,
+ * purchases, disputes on `files.id`; printOrders, printOrderItems,
+ * cadGenerations on the file's `fileAssets.id`).
+ */
+async function isDraftDeletionCandidate(fileId: string): Promise<boolean> {
+  const [file] = await db
+    .select({ source: files.source, status: files.status })
+    .from(files)
+    .where(eq(files.id, fileId))
+    .limit(1);
+  if (!file || file.source !== "upload" || file.status !== "draft") {
+    return false;
+  }
+
+  const [projectRef, collectionRef, photoRef, purchaseRef, disputeRef] =
+    await Promise.all([
+      db
+        .select({ id: projectFiles.id })
+        .from(projectFiles)
+        .where(eq(projectFiles.fileId, fileId))
+        .limit(1),
+      db
+        .select({ id: collectionItems.id })
+        .from(collectionItems)
+        .where(eq(collectionItems.fileId, fileId))
+        .limit(1),
+      db
+        .select({ id: filePhotos.id })
+        .from(filePhotos)
+        .where(eq(filePhotos.fileId, fileId))
+        .limit(1),
+      db
+        .select({ id: purchases.id })
+        .from(purchases)
+        .where(eq(purchases.fileId, fileId))
+        .limit(1),
+      db
+        .select({ id: disputes.id })
+        .from(disputes)
+        .where(eq(disputes.fileId, fileId))
+        .limit(1),
+    ]);
+
+  return (
+    projectRef.length === 0 &&
+    collectionRef.length === 0 &&
+    photoRef.length === 0 &&
+    purchaseRef.length === 0 &&
+    disputeRef.length === 0
+  );
+}
+
+/**
+ * Deletes one draft file (and its R2 object) IFF it is still an
+ * unreferenced upload-source draft. Returns whether it was deleted.
+ * R2 failures are best-effort — logged, never thrown — so a storage
+ * blip can't fail the whole sweep (the DB row is already gone at that
+ * point; a leftover R2 object is a much smaller problem).
+ */
+async function deleteUnreferencedDraftFile(
+  fileId: string,
+  orderId: string
+): Promise<boolean> {
+  const isCandidate = await isDraftDeletionCandidate(fileId);
+  if (!isCandidate) return false;
+
+  const assetRows = await db
+    .select({ id: fileAssets.id, storageKey: fileAssets.storageKey })
+    .from(fileAssets)
+    .where(eq(fileAssets.fileId, fileId));
+  const assetIds = assetRows.map((a) => a.id);
+
+  if (assetIds.length > 0) {
+    const [otherOrderRef, otherItemRef, cadRef] = await Promise.all([
+      db
+        .select({ id: printOrders.id })
+        .from(printOrders)
+        .where(
+          and(
+            inArray(printOrders.fileAssetId, assetIds),
+            ne(printOrders.id, orderId),
+            ne(printOrders.status, "cancelled")
+          )
+        )
+        .limit(1),
+      db
+        .select({ id: printOrderItems.id })
+        .from(printOrderItems)
+        .where(
+          and(
+            inArray(printOrderItems.fileAssetId, assetIds),
+            ne(printOrderItems.printOrderId, orderId)
+          )
+        )
+        .limit(1),
+      db
+        .select({ id: cadGenerations.id })
+        .from(cadGenerations)
+        .where(inArray(cadGenerations.fileAssetId, assetIds))
+        .limit(1),
+    ]);
+    if (
+      otherOrderRef.length > 0 ||
+      otherItemRef.length > 0 ||
+      cadRef.length > 0
+    ) {
+      return false;
+    }
+  }
+
+  // fileAssets cascade on the files delete.
+  await db.delete(files).where(eq(files.id, fileId));
+
+  for (const asset of assetRows) {
+    if (!asset.storageKey) continue;
+    try {
+      await deleteObject(asset.storageKey);
+    } catch (err) {
+      logError("cron/cleanup-stale-orders.deleteDraftFileObject", err);
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Resolves an order's draft-file candidates (its own `fileAssetId`
+ * plus, for multi-item orders, every `printOrderItems.fileAssetId`
+ * row) and deletes each one that's still an unreferenced upload
+ * draft. Returns the number deleted. Every step is best-effort per
+ * candidate — one bad row logs and moves on rather than aborting the
+ * rest of the order's cleanup.
+ */
+async function cleanupDraftFilesForOrder(order: {
+  id: string;
+  fileAssetId: string | null;
+}): Promise<number> {
+  const itemAssetRows = await db
+    .select({ fileAssetId: printOrderItems.fileAssetId })
+    .from(printOrderItems)
+    .where(eq(printOrderItems.printOrderId, order.id));
+
+  const candidateAssetIds = [
+    ...(order.fileAssetId ? [order.fileAssetId] : []),
+    ...itemAssetRows
+      .map((r) => r.fileAssetId)
+      .filter((id): id is string => !!id),
+  ];
+  if (candidateAssetIds.length === 0) return 0;
+
+  const assetFileRows = await db
+    .select({ fileId: fileAssets.fileId })
+    .from(fileAssets)
+    .where(inArray(fileAssets.id, candidateAssetIds));
+
+  const candidateFileIds = [
+    ...new Set(
+      assetFileRows.map((r) => r.fileId).filter((id): id is string => !!id)
+    ),
+  ];
+
+  let deleted = 0;
+  for (const fileId of candidateFileIds) {
+    try {
+      const wasDeleted = await deleteUnreferencedDraftFile(fileId, order.id);
+      if (wasDeleted) deleted++;
+    } catch (err) {
+      logError("cron/cleanup-stale-orders.deleteDraftFiles", err);
+    }
+  }
+  return deleted;
+}
 
 export async function GET(request: Request) {
   const auth = request.headers.get("authorization");
   const expected = process.env.CRON_SECRET;
   if (!expected) {
+    logError(
+      "cron/cleanup-stale-orders.auth",
+      new Error("CRON_SECRET not configured")
+    );
     return Response.json(
       { error: "CRON_SECRET not configured" },
       { status: 500 }
     );
   }
   if (!auth || !constantTimeEqual(auth, `Bearer ${expected}`)) {
+    logError(
+      "cron/cleanup-stale-orders.auth",
+      new Error("Unauthorized cron request")
+    );
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -88,6 +312,8 @@ export async function GET(request: Request) {
     let deletedCartItems: OpResult = "error";
     let prunedWebhookEvents: OpResult = "error";
     let hasMoreStaleOrders = false;
+    let skippedContended = 0;
+    let deletedDraftFiles = 0;
 
     try {
       // CON-159: Rows with a `pi_`-prefixed stripeSessionId are
@@ -95,21 +321,24 @@ export async function GET(request: Request) {
       // charged. Cancel them only after attempting a refund so we never
       // silently abandon a charged-but-unplaced order.
       //
-      // We split the operation into two passes:
-      //   1. Charged rows (pi_ stripeSessionId): refund first, then cancel.
-      //   2. Uncharged rows: cancel directly.
+      // MTR-229: excludes rows with ANY craftCloudOrderId (sentinel or
+      // real) — those are being actively placed or were placed
+      // up-front (two-step) and must never be swept here.
+      //
       // Fetch one row past the cap so we can tell whether there's a
       // remainder without a separate COUNT query.
       const fetchedRows = await db
         .select({
           id: printOrders.id,
           stripeSessionId: printOrders.stripeSessionId,
+          fileAssetId: printOrders.fileAssetId,
         })
         .from(printOrders)
         .where(
           and(
             eq(printOrders.status, "cart_created"),
-            lt(printOrders.createdAt, orderCutoff)
+            lt(printOrders.createdAt, orderCutoff),
+            isNull(printOrders.craftCloudOrderId)
           )
         )
         .limit(STALE_ORDER_LIMIT + 1);
@@ -127,11 +356,55 @@ export async function GET(request: Request) {
           typeof row.stripeSessionId === "string" &&
           row.stripeSessionId.startsWith("pi_");
 
+        // MTR-229: claim the row atomically before doing anything
+        // else. A zero-row result means another writer (the per-minute
+        // placement cron reclaiming a stuck charged row, an overlapping
+        // invocation of this same sweep, etc.) already moved the row
+        // off cart_created — skip it entirely, and critically, never
+        // issue a refund for it.
+        //
+        // For charged (pi_) rows, refundFailedAt is set INSIDE this
+        // same claim UPDATE — pre-armed before the Stripe call ever
+        // runs. This closes a kill-window the claim-first ordering
+        // would otherwise open: if the function is killed between the
+        // claim and stripe.refunds.create (see the maxDuration note
+        // above — a mid-sweep kill is an expected, tolerated event),
+        // the row would be left cancelled with NO refund and NO
+        // refundFailedAt. Since tomorrow's sweep only selects
+        // status='cart_created', such a row would never be revisited
+        // — charged, cancelled, invisible. Pre-arming means the
+        // hourly retry-failed-refunds cron (which selects
+        // isNotNull(refundFailedAt) regardless of status) picks it up
+        // instead. It refunds with the SAME
+        // `agent-cancel-refund:<orderId>` idempotency key used below,
+        // so pre-arming can never cause a double refund even if both
+        // crons end up racing to refund the same row.
+        const claimedRows = await db
+          .update(printOrders)
+          .set(
+            isChargedRow
+              ? { status: "cancelled", refundFailedAt: new Date() }
+              : { status: "cancelled" }
+          )
+          .where(
+            and(
+              eq(printOrders.id, row.id),
+              eq(printOrders.status, "cart_created")
+            )
+          )
+          .returning({ id: printOrders.id });
+
+        if (claimedRows.length === 0) {
+          skippedContended++;
+          continue;
+        }
+
         if (isChargedRow) {
           // The order was charged via off-session PI but never placed.
-          // Issue a refund before cancelling. On refund failure, still
-          // cancel but set refundFailedAt so retry-failed-refunds picks it up.
-          let refundFailedAt: Date | null = null;
+          // The claim above already cancelled it AND pre-armed
+          // refundFailedAt; now issue the refund. On success, clear
+          // the flag — no further action needed. On failure, leave it
+          // set (it already is) so retry-failed-refunds retries.
           try {
             await stripe.refunds.create(
               {
@@ -144,22 +417,25 @@ export async function GET(request: Request) {
               },
               { idempotencyKey: `agent-cancel-refund:${row.id}` }
             );
+            await db
+              .update(printOrders)
+              .set({ refundFailedAt: null })
+              .where(eq(printOrders.id, row.id));
           } catch (refundErr) {
             logError("cron/cleanup-stale-orders.refundCharged", refundErr);
-            refundFailedAt = new Date();
           }
-          await db
-            .update(printOrders)
-            .set({ status: "cancelled", refundFailedAt })
-            .where(eq(printOrders.id, row.id));
-        } else {
-          // No charge — safe to cancel without refund.
-          await db
-            .update(printOrders)
-            .set({ status: "cancelled" })
-            .where(eq(printOrders.id, row.id));
         }
+
         cancelled++;
+
+        // MTR-33: the order is cancelled either way at this point —
+        // its draft files (if any) are now orphaned. Best-effort;
+        // never let a draft-file cleanup failure fail the sweep.
+        try {
+          deletedDraftFiles += await cleanupDraftFilesForOrder(row);
+        } catch (err) {
+          logError("cron/cleanup-stale-orders.deleteDraftFiles", err);
+        }
       }
 
       cancelledOrders = cancelled;
@@ -197,6 +473,8 @@ export async function GET(request: Request) {
       deletedCartItems,
       prunedWebhookEvents: prunedWebhookEvents,
       hasMoreStaleOrders,
+      skippedContended,
+      deletedDraftFiles,
       cutoffs: {
         orders: orderCutoff.toISOString(),
         cartItems: cartCutoff.toISOString(),

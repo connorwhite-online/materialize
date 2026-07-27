@@ -33,12 +33,20 @@ export async function GET(request: Request) {
   const auth = request.headers.get("authorization");
   const expected = process.env.CRON_SECRET;
   if (!expected) {
+    logError(
+      "cron/retry-failed-refunds.auth",
+      new Error("CRON_SECRET not configured")
+    );
     return Response.json(
       { error: "CRON_SECRET not configured" },
       { status: 500 }
     );
   }
   if (!auth || !constantTimeEqual(auth, `Bearer ${expected}`)) {
+    logError(
+      "cron/retry-failed-refunds.auth",
+      new Error("Unauthorized cron request")
+    );
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
