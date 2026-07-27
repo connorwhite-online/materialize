@@ -1579,6 +1579,7 @@ def _render(mesh, elev: float = 22, azim: float = -55, figsize=(6.4, 4.8)) -> Op
     render is load-bearing now: the VLM aesthetic judge and the repair loop
     feed on it, so a real (if simple) Lambert-shaded view matters more
     than photoreal GL. Returns None on any failure — callers tolerate it."""
+    fig = None
     try:
         import numpy as np
         import matplotlib
@@ -1621,10 +1622,16 @@ def _render(mesh, elev: float = 22, azim: float = -55, figsize=(6.4, 4.8)) -> Op
         fig.savefig(
             buf, format="png", bbox_inches="tight", pad_inches=0, transparent=True
         )
-        plt.close(fig)
         return base64.b64encode(buf.getvalue()).decode()
     except Exception:  # noqa: BLE001
         return None
+    finally:
+        # Guarantee the Figure is released even when an exception fires
+        # between creation and the (now-removed) success-path close —
+        # in session mode (_session_worker) a leaked Figure per failed
+        # render accumulates toward the container memory cap.
+        if fig is not None:
+            plt.close(fig)
 
 
 def _render_section(mesh) -> Optional[str]:
