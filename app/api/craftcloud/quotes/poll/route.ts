@@ -68,6 +68,30 @@ export async function GET(request: Request) {
       })
       .filter((q): q is NonNullable<typeof q> => q !== null);
 
+    const rawCount = priceResponse.quotes?.length ?? 0;
+
+    // A handful of dropped quotes per poll is normal (a config that's
+    // brand-new on CraftCloud's side and hasn't hit our 24h-cached
+    // catalog yet). A large fraction of a poll's quotes disappearing
+    // is a different signal — the cached catalog is meaningfully
+    // stale and users are silently seeing fewer materials/vendors
+    // than CraftCloud actually quoted. console telemetry below still
+    // captures every poll; this only escalates the degraded case to
+    // Sentry so it doesn't take a support ticket to notice.
+    const DROPPED_CONFIG_RATIO_THRESHOLD = 0.25;
+    if (
+      rawCount > 0 &&
+      droppedNoConfig / rawCount > DROPPED_CONFIG_RATIO_THRESHOLD
+    ) {
+      logError(
+        "quotes.poll.droppedConfigs",
+        new Error(
+          `Dropped ${droppedNoConfig}/${rawCount} quotes (catalog missing materialConfigId) for priceId ${priceId}`,
+          { cause: { priceId, droppedNoConfig, rawCount } }
+        )
+      );
+    }
+
     // Lightweight telemetry. We log each snapshot so the server
     // log tells a story of how the quote set grows over time and
     // so "why is titanium so expensive?" is answerable from the
@@ -75,7 +99,7 @@ export async function GET(request: Request) {
     const prices = enrichedQuotes.map((q) => q.price).sort((a, b) => a - b);
     console.log("[quotes] poll", {
       priceId,
-      rawCount: priceResponse.quotes?.length ?? 0,
+      rawCount,
       enrichedCount: enrichedQuotes.length,
       droppedNoConfig,
       allComplete: priceResponse.allComplete,
