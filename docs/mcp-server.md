@@ -194,14 +194,15 @@ input: {
 }
 output: {
   orderId: string
-  status: "awaiting_user_approval"
-  confirmationUrl: string   // user-facing URL the agent can surface or open
+  status: "awaiting_user_approval" | "auto_approved"
+  confirmationUrl?: string  // present when awaiting_user_approval; the user-facing confirm-and-pay URL
   notificationsSent: { push: boolean; email: boolean }
-  expiresAt: string         // approval window
+  expiresAt?: string        // approval window; present when awaiting_user_approval
+  cancellationDeadline?: string  // present when auto_approved — the user-cancel window before placement
 }
 ```
 
-The `status` field is an **open enum** by design. Today only `awaiting_user_approval` ships; future values: `auto_approved_within_budget`, `auto_approved_with_2fa`, `cancelled_by_user`, `expired`. Agents must treat unknown statuses as terminal-or-pending based on a `terminal: boolean` companion field (see error model in §7).
+`status` here is a **synthetic two-value indicator** of which confirmation path `create_order` took, not the order's persisted row status: `"awaiting_user_approval"` (default — a human must confirm via `confirmationUrl`) or `"auto_approved"` (the token's spending policy allowed it and the off-session charge already succeeded). Both values ship today — `auto_approved` is not a future value gated behind agent-budget mode; it is live whenever `MATERIALIZE_AGENT_BILLING_ENABLED=true` and the token's policy permits the charge. Agents must still treat unrecognized future values as terminal-or-pending based on the `terminal: boolean` companion field (see error model in §7). For the order's actual lifecycle status once it exists, poll `get_order` below — its `status` is the raw persisted enum, not this synthetic pair.
 
 When the user approves out-of-band, the existing Stripe webhook chain (`/api/webhooks/stripe`) → `completePrintOrder` → CraftCloud cart placement runs unchanged. The MCP server is not in that critical path.
 
@@ -210,8 +211,9 @@ When the user approves out-of-band, the existing Stripe webhook chain (`/api/web
 input: { orderId: string }
 output: {
   orderId
-  status: "awaiting_user_approval" | "paid" | "in_production" | "shipped"
-        | "delivered" | "cancelled" | "expired" | "failed"
+  status: "cart_created" | "awaiting_agent_approval" | "auto_approved"
+        | "awaiting_production_payment" | "ordered" | "in_production"
+        | "shipped" | "received" | "blocked" | "refunded" | "cancelled"
   terminal: boolean
   vendor: { id, name }
   material: { id, name, finish, color }
@@ -221,6 +223,8 @@ output: {
   cancelReason?: string
 }
 ```
+
+`status` is the raw `printOrderStatusEnum` row value (`lib/db/schema.ts` § `printOrderStatusEnum`) as persisted on `printOrders` — not the synthetic `"awaiting_user_approval" | "auto_approved"` pair `create_order` returns above. In particular, an order that `create_order` reported as `"awaiting_user_approval"` shows up here as `awaiting_agent_approval` (the row status) until the user confirms.
 
 **`list_orders`**
 ```ts
