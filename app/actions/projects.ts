@@ -427,6 +427,7 @@ export async function addFilesToProject(
 
     revalidatePath("/dashboard");
     revalidatePath(`/projects/${project.slug}`);
+    updateTag(IDLE_BROWSE_CACHE_TAG);
     return { success: true };
   } catch (error) {
     logError("addFilesToProject", error);
@@ -457,6 +458,7 @@ export async function removeFileFromProject(
 
     revalidatePath("/dashboard");
     revalidatePath(`/projects/${project.slug}`);
+    updateTag(IDLE_BROWSE_CACHE_TAG);
     return { success: true };
   } catch (error) {
     logError("removeFileFromProject", error);

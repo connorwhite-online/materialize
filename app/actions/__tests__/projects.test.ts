@@ -66,7 +66,15 @@ function makeInsert(
           }
           const arr = Array.isArray(vals) ? vals : [vals];
           commitProjectFiles(arr);
-          return Promise.resolve();
+          // addFilesToProject chains .onConflictDoNothing() after
+          // .values(...); createProject's tx path does not and just
+          // awaits the .values(...) call directly. Support both by
+          // returning an already-resolved, awaitable promise that also
+          // exposes a chainable onConflictDoNothing().
+          const resolved = Promise.resolve();
+          return Object.assign(resolved, {
+            onConflictDoNothing: () => Promise.resolve(),
+          });
         }
         return Promise.resolve();
       },
@@ -165,9 +173,13 @@ vi.mock("@/lib/logger", () => ({
     (e.message.includes("NEXT_REDIRECT") || e.message.includes("REDIRECT")),
 }));
 
+import { updateTag } from "next/cache";
+
 import {
   createProject,
   deleteProject,
+  addFilesToProject,
+  removeFileFromProject,
 } from "../projects";
 
 describe("createProject", () => {
@@ -404,5 +416,44 @@ describe("deleteProject", () => {
       reason: "has-buyers",
       buyerCount: 2,
     });
+  });
+});
+
+// FIX-1: addFilesToProject / removeFileFromProject mutate project_files —
+// the same table the idle-browse grid's fileNotInAnyProjectCondition()
+// queries against — so both must bust the idle-browse cache tag on
+// success like every other eligibility-changing mutator in this file
+// (createProject, publishProject, archiveProject, deleteProject,
+// toggleProjectVisibility).
+describe("addFilesToProject / removeFileFromProject idle-browse cache bust", () => {
+  const FILE_1 = "11111111-1111-4111-8111-111111111111";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    projectFetchResponse = [
+      {
+        id: "test-project-id",
+        slug: "chess-set-abc123",
+        userId: "test-user-id",
+        organizationId: null,
+      },
+    ];
+    ownedFilesResponse = [
+      { id: FILE_1, userId: "test-user-id", organizationId: null },
+    ];
+    orgMembersResponse = [];
+    buyerRowsResponse = [];
+  });
+
+  it("addFilesToProject calls updateTag(IDLE_BROWSE_CACHE_TAG) on success", async () => {
+    const result = await addFilesToProject("test-project-id", [FILE_1]);
+    expect((result as { error?: unknown }).error).toBeUndefined();
+    expect(updateTag).toHaveBeenCalledWith("idle-browse");
+  });
+
+  it("removeFileFromProject calls updateTag(IDLE_BROWSE_CACHE_TAG) on success", async () => {
+    const result = await removeFileFromProject("test-project-id", FILE_1);
+    expect((result as { error?: unknown }).error).toBeUndefined();
+    expect(updateTag).toHaveBeenCalledWith("idle-browse");
   });
 });
