@@ -2162,8 +2162,12 @@ def session_delete(session_id: str, request: Request) -> dict:
     return {"ok": True}
 
 
+# Sync `def` on purpose, same as the session endpoints above (see the
+# comment at their definition): FastAPI runs a sync path op on the
+# threadpool, so the blocking `out.get(timeout=...)` poll loop below doesn't
+# stall the event loop (and /health) the way it did as `async def` (CAD-10).
 @app.post("/run")
-async def run(req: RunRequest, request: Request) -> dict:
+def run(req: RunRequest, request: Request) -> dict:
     _check_auth(request)
     t0 = time.monotonic()
 
@@ -2211,7 +2215,11 @@ async def run(req: RunRequest, request: Request) -> dict:
         proc.join(5)
         if proc.is_alive():
             proc.kill()
-    proc.join()
+    # Bounded, per the comment above: a bare join() can hang the worker
+    # forever if the child wedges past SIGKILL (CAD-10). By this point the
+    # process is either already dead (this returns immediately) or was just
+    # killed, so 5s is only ever a safety margin, not the expected wait.
+    proc.join(5)
 
     ms = int((time.monotonic() - t0) * 1000)
     if payload is not None:
