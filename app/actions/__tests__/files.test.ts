@@ -704,4 +704,37 @@ describe("deleteFileListing", () => {
       expect.objectContaining({ key: "uploads/u1/a1/model.stl" })
     );
   });
+
+  // NOTE on this harness's limits: the mock db's .where(...) is a no-op
+  // that returns a canned array regardless of the real inArray(status, ...)
+  // filter drizzle would generate — so a test can't ask "does the code
+  // correctly filter row X out by status", only "given the query already
+  // returned this row, what does deleteFileListing do with it". The
+  // in-flight branch reads as presence-based (any returned printOrders row
+  // means in-flight — line 916 in app/actions/files.ts is `if (inFlight >
+  // 0)`, not a second per-row status comparison), so exercising a couple of
+  // representative ACTIVE_ORDER_STATUSES-shaped rows (not just "blocked",
+  // which MTR-231 already covered) is a real regression guard: it would
+  // catch someone changing that branch to compare against a specific
+  // status string instead of trusting an already-filtered result set. Our
+  // own local list here — not imported from app/actions/files.ts per the
+  // batch's ground rules — is the CHARGED_OR_ABOUT_TO_BE_CHARGED subset of
+  // printOrderStatusEnum as documented on ACTIVE_ORDER_STATUSES.
+  it.each(["cart_created", "auto_approved", "shipped"])(
+    "a single-item print order in status %s blocks the hard-delete (archives instead)",
+    async (status) => {
+      const deleteFileListing = await setupDeleteFileListing({
+        fileAssetIds: [{ id: "asset-1" }],
+        printOrders: [{ id: "order-1", status }],
+      });
+
+      const result = await deleteFileListing("file-1");
+
+      expect(result).toEqual({
+        archived: true,
+        reason: "in-flight",
+        buyerCount: 1,
+      });
+    }
+  );
 });
