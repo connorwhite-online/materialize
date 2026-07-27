@@ -55,7 +55,7 @@ import {
   disputes,
 } from "@/lib/db/schema";
 import { eq, and, gt, inArray, isNull, ne } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { nanoid } from "nanoid";
 import { createListingSchema } from "@/lib/validations/file";
@@ -85,6 +85,18 @@ import {
   type DuplicateFileSummary,
 } from "@/lib/hashing/fingerprint-asset";
 import { after } from "next/server";
+import { ACTIVE_ORDER_STATUSES } from "@/lib/print-statuses";
+
+/**
+ * Cache tag for the idle-browse grid on app/(app)/files/page.tsx
+ * (PERF-16). Must match IDLE_BROWSE_CACHE_TAG there exactly — kept as
+ * a separate literal rather than a shared export because that file is
+ * a page.tsx (next build rejects non-reserved named exports from page
+ * files) and this one is "use server" (next build rejects non-async-
+ * function exports from "use server" files) — neither side can export
+ * a plain string const for the other to import.
+ */
+const IDLE_BROWSE_CACHE_TAG = "idle-browse";
 
 function duplicateUploadResult(
   claimIntentId: string,
@@ -617,6 +629,10 @@ export async function createFileListing(formData: FormData) {
     }
 
     revalidatePath("/dashboard");
+    // New listings publish immediately (status: "published" above) —
+    // bust the idle-browse cache (PERF-16) so it shows up right away
+    // instead of waiting out the TTL.
+    updateTag(IDLE_BROWSE_CACHE_TAG);
     redirect(
       attachedProjectSlug
         ? `/projects/${attachedProjectSlug}`
@@ -737,6 +753,7 @@ export async function publishFileListing(fileId: string) {
 
     revalidatePath("/dashboard/uploads");
     revalidatePath("/files");
+    updateTag(IDLE_BROWSE_CACHE_TAG);
   } catch (error) {
     logError("publishFileListing", error);
   }
@@ -757,6 +774,7 @@ export async function archiveFileListing(fileId: string) {
 
     revalidatePath("/dashboard/uploads");
     revalidatePath("/files");
+    updateTag(IDLE_BROWSE_CACHE_TAG);
   } catch (error) {
     logError("archiveFileListing", error);
   }
@@ -774,37 +792,19 @@ export async function archiveFileListing(fileId: string) {
  * Caller is expected to confirm intent twice — this action does no
  * additional confirmation of its own.
  */
-/** Print order statuses where the order is still mid-flow — paid or
- * about to be paid, but not yet received/refunded/cancelled. A file
- * referenced by an active row in either of these states must not be
- * hard-deleted: cascading the fileAsset away would silently drop the
- * line item from a Stripe session, the buyer's library, or a
- * production-side order at CraftCloud.
- *
- * Keep this set in sync with the status machine in AGENTS.md
- * (CON-153). Any new status that represents a charged-or-about-to-be-
- * charged order must be added here.
- *
- * Includes charged-before-fulfillment statuses (CON-164):
- *   - awaiting_agent_approval: agent order created, policy eval in flight
- *   - auto_approved: off-session PI already charged; CraftCloud placement pending
- *   - awaiting_production_payment: two-step fee hold active; deleting
- *     the file would break resumption and refund context */
-const ACTIVE_ORDER_STATUSES = [
-  "cart_created",
-  "awaiting_agent_approval",
-  "auto_approved",
-  "awaiting_production_payment",
-  "ordered",
-  "in_production",
-  "shipped",
-  // Factory-rejected but PAID and the primary self-service refund
-  // state (print.ts requestOrderRefund treats blocked as "refund is
-  // straightforward"). Deleting the file while an order sits blocked
-  // would cascade-destroy the buyer's refund path and order history
-  // while the Stripe charge stands (MTR-231).
-  "blocked",
-] as const;
+// Print order statuses where the order is still mid-flow — paid or
+// about to be paid, but not yet received/refunded/cancelled. A file
+// referenced by an active row in either of these states must not be
+// hard-deleted: cascading the fileAsset away would silently drop the
+// line item from a Stripe session, the buyer's library, or a
+// production-side order at CraftCloud.
+//
+// ACTIVE_ORDER_STATUSES lives in lib/print-statuses.ts (not exported
+// from here) because this file has a top-level "use server" directive
+// and Next.js requires every export of such a file to be an async
+// function — a plain const array export fails the build. See that
+// file for the full status-by-status rationale and the CON-153/
+// CON-164/MTR-231 references.
 
 export async function deleteFileListing(
   fileId: string
@@ -855,6 +855,7 @@ export async function deleteFileListing(
       revalidatePath(`/files/${file.slug}`);
       revalidatePath("/files");
       revalidatePath("/dashboard/uploads");
+      updateTag(IDLE_BROWSE_CACHE_TAG);
       return {
         archived: true,
         reason: "has-buyers",
@@ -921,6 +922,7 @@ export async function deleteFileListing(
         revalidatePath(`/files/${file.slug}`);
         revalidatePath("/files");
         revalidatePath("/dashboard/uploads");
+        updateTag(IDLE_BROWSE_CACHE_TAG);
         return {
           archived: true,
           reason: "in-flight",
@@ -975,6 +977,7 @@ export async function deleteFileListing(
     revalidatePath(`/files/${file.slug}`);
     revalidatePath("/files");
     revalidatePath("/dashboard/uploads");
+    updateTag(IDLE_BROWSE_CACHE_TAG);
     return { deleted: true };
   } catch (error) {
     logError("deleteFileListing", error);
@@ -1164,6 +1167,7 @@ export async function toggleFileVisibility(fileId: string) {
 
     revalidatePath("/dashboard/uploads");
     revalidatePath("/files");
+    updateTag(IDLE_BROWSE_CACHE_TAG);
     return { visibility: newVisibility };
   } catch (error) {
     logError("toggleFileVisibility", error);

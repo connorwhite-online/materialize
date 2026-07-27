@@ -17,7 +17,7 @@ import {
   printOrders,
   printOrderItems,
 } from "@/lib/db/schema";
-import { eq, and, asc, desc, inArray } from "drizzle-orm";
+import { eq, and, asc, desc, inArray, count } from "drizzle-orm";
 import { loadFileBySlug } from "./loader";
 import { ownsLoadedFile, userHasUsedFile } from "@/lib/entitlement";
 import { isOrgMember } from "@/lib/authorization";
@@ -51,7 +51,7 @@ import { getCategoryLabel } from "@/lib/categories";
 import { getMaterialById } from "@/lib/materials";
 import { findMaterialConfig, getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
 import { generateDownloadUrl } from "@/lib/storage";
-import { PRINTED_STATUSES } from "@/lib/print-statuses";
+import { PRINTED_STATUSES, ACTIVE_ORDER_STATUSES } from "@/lib/print-statuses";
 import { swallow } from "@/lib/utils/swallow";
 import { fileJsonLd, safeJsonLdScript } from "@/lib/seo/json-ld";
 import { PurchaseButton } from "@/components/purchase/purchase-button";
@@ -236,23 +236,25 @@ export default async function FileDetailPage(props: {
   let ownerBuyerCount = 0;
   if (isOwner) {
     const fileAssetIds = assets.map((a) => a.id);
-    const ACTIVE_ORDER_STATUSES = [
-      "cart_created",
-      "ordered",
-      "in_production",
-      "shipped",
-    ] as const;
 
+    // These only feed a `.length` sum used as a >0 test plus a
+    // displayed integer — swap row-fetches for count() so Postgres
+    // does the counting instead of shipping full row sets to Node.
+    // ACTIVE_ORDER_STATUSES now imported from lib/print-statuses.ts
+    // (the authoritative list, also used by
+    // app/actions/files.ts:deleteFileListing, CON-164/MTR-231) instead
+    // of the stale local duplicate that was missing "blocked" and the
+    // agent-order statuses (BUG-A1).
     const [directBuyers, projectBuyers, cartUses, orderItemUses, orderUses] =
       await Promise.all([
         db
-          .select({ id: purchases.id })
+          .select({ value: count() })
           .from(purchases)
           .where(
             and(eq(purchases.fileId, file.id), eq(purchases.status, "completed"))
           ),
         db
-          .select({ id: purchases.id })
+          .select({ value: count() })
           .from(purchases)
           .innerJoin(projects, eq(purchases.projectId, projects.id))
           .innerJoin(projectFiles, eq(projectFiles.projectId, projects.id))
@@ -264,13 +266,13 @@ export default async function FileDetailPage(props: {
           ),
         fileAssetIds.length > 0
           ? db
-              .select({ id: cartItems.id })
+              .select({ value: count() })
               .from(cartItems)
               .where(inArray(cartItems.fileAssetId, fileAssetIds))
-          : Promise.resolve([]),
+          : Promise.resolve([{ value: 0 }]),
         fileAssetIds.length > 0
           ? db
-              .select({ id: printOrderItems.id })
+              .select({ value: count() })
               .from(printOrderItems)
               .innerJoin(
                 printOrders,
@@ -282,10 +284,10 @@ export default async function FileDetailPage(props: {
                   inArray(printOrders.status, [...ACTIVE_ORDER_STATUSES])
                 )
               )
-          : Promise.resolve([]),
+          : Promise.resolve([{ value: 0 }]),
         fileAssetIds.length > 0
           ? db
-              .select({ id: printOrders.id })
+              .select({ value: count() })
               .from(printOrders)
               .where(
                 and(
@@ -293,14 +295,14 @@ export default async function FileDetailPage(props: {
                   inArray(printOrders.status, [...ACTIVE_ORDER_STATUSES])
                 )
               )
-          : Promise.resolve([]),
+          : Promise.resolve([{ value: 0 }]),
       ]);
     ownerBuyerCount =
-      directBuyers.length +
-      projectBuyers.length +
-      cartUses.length +
-      orderItemUses.length +
-      orderUses.length;
+      (directBuyers[0]?.value ?? 0) +
+      (projectBuyers[0]?.value ?? 0) +
+      (cartUses[0]?.value ?? 0) +
+      (orderItemUses[0]?.value ?? 0) +
+      (orderUses[0]?.value ?? 0);
   }
   // Activity stream — who has printed and who has downloaded this
   // file. Print activity unions legacy single-item printOrders rows
