@@ -114,42 +114,53 @@ export async function GET(request: Request) {
     const evidenceCutoff = new Date(
       Date.now() - 365 * 24 * 60 * 60 * 1000
     );
-    const [assetRows, claimRows, disputeEvidenceRows] = await Promise.all([
-      db.select({ storageKey: fileAssets.storageKey }).from(fileAssets),
-      db
-        .select({ storageKey: ownershipClaimIntents.storageKey })
-        .from(ownershipClaimIntents)
-        .leftJoin(
-          disputes,
-          eq(disputes.claimIntentId, ownershipClaimIntents.id)
-        )
-        .where(
-          or(
-            gt(ownershipClaimIntents.expiresAt, new Date()),
-            and(
-              isNotNull(disputes.id),
-              or(
-                eq(disputes.status, "open"),
-                isNull(disputes.resolvedAt),
-                gt(disputes.resolvedAt, evidenceCutoff)
+    const [assetRows, stepAssetRows, claimRows, disputeEvidenceRows] =
+      await Promise.all([
+        db.select({ storageKey: fileAssets.storageKey }).from(fileAssets),
+        // Studio-generated STEP siblings live under uploads/ too, referenced
+        // only via stepStorageKey (MTR-196) — they must be in the keep-set or
+        // the sweep deletes every generated STEP once it passes the age rail.
+        db
+          .select({ storageKey: fileAssets.stepStorageKey })
+          .from(fileAssets)
+          .where(isNotNull(fileAssets.stepStorageKey)),
+        db
+          .select({ storageKey: ownershipClaimIntents.storageKey })
+          .from(ownershipClaimIntents)
+          .leftJoin(
+            disputes,
+            eq(disputes.claimIntentId, ownershipClaimIntents.id)
+          )
+          .where(
+            or(
+              gt(ownershipClaimIntents.expiresAt, new Date()),
+              and(
+                isNotNull(disputes.id),
+                or(
+                  eq(disputes.status, "open"),
+                  isNull(disputes.resolvedAt),
+                  gt(disputes.resolvedAt, evidenceCutoff)
+                )
               )
             )
-          )
-        ),
-      db
-        .select({ evidencePhotoKeys: disputes.evidencePhotoKeys })
-        .from(disputes)
-        .where(
-          or(
-            eq(disputes.status, "open"),
-            isNull(disputes.resolvedAt),
-            gt(disputes.resolvedAt, evidenceCutoff)
-          )
-        ),
-    ]);
+          ),
+        db
+          .select({ evidencePhotoKeys: disputes.evidencePhotoKeys })
+          .from(disputes)
+          .where(
+            or(
+              eq(disputes.status, "open"),
+              isNull(disputes.resolvedAt),
+              gt(disputes.resolvedAt, evidenceCutoff)
+            )
+          ),
+      ]);
     const referenced = new Set(
       [
         ...assetRows.map((row) => row.storageKey),
+        ...stepAssetRows.flatMap((row) =>
+          row.storageKey ? [row.storageKey] : []
+        ),
         ...claimRows.map((row) => row.storageKey),
         ...disputeEvidenceRows.flatMap((row) => row.evidencePhotoKeys),
       ]
