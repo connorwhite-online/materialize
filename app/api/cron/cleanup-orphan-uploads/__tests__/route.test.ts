@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  */
 
 let fileAssetRows: Array<{ storageKey: string }> = [];
+let stepAssetRows: Array<{ storageKey: string | null }> = [];
 let claimIntentRows: Array<{ storageKey: string }> = [];
 let disputeEvidenceRows: Array<{ evidencePhotoKeys: string[] }> = [];
 let r2Objects: Array<{
@@ -42,7 +43,7 @@ vi.mock("@aws-sdk/client-s3", () => {
 
 vi.mock("@/lib/db", () => ({
   db: {
-    select: () => ({
+    select: (fields?: Record<string, string>) => ({
       from: (table: { _table?: string }) => {
         if (throwOnDb) throw new Error("db error");
         if (table?._table === "ownership_claim_intents") {
@@ -55,6 +56,13 @@ vi.mock("@/lib/db", () => ({
         if (table?._table === "disputes") {
           return {
             where: () => Promise.resolve(disputeEvidenceRows),
+          };
+        }
+        // The stepStorageKey select is the only fileAssets query with a
+        // .where() — dispatch on the selected column.
+        if (fields?.storageKey === "step_storage_key") {
+          return {
+            where: () => Promise.resolve(stepAssetRows),
           };
         }
         return Promise.resolve(fileAssetRows);
@@ -72,7 +80,11 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("@/lib/db/schema", () => ({
-  fileAssets: { _table: "file_assets", storageKey: "storage_key" },
+  fileAssets: {
+    _table: "file_assets",
+    storageKey: "storage_key",
+    stepStorageKey: "step_storage_key",
+  },
   ownershipClaimIntents: {
     _table: "ownership_claim_intents",
     id: "id",
@@ -122,6 +134,7 @@ describe("cron/cleanup-orphan-uploads", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     fileAssetRows = [];
+    stepAssetRows = [];
     claimIntentRows = [];
     disputeEvidenceRows = [];
     r2Objects = [];
@@ -227,6 +240,52 @@ describe("cron/cleanup-orphan-uploads", () => {
       (c) => (c[0] as { _type: string })._type === "DeleteObjectsCommand"
     );
     expect(deleteCalls).toHaveLength(0);
+  });
+
+  it("does NOT delete a studio STEP referenced only by stepStorageKey", async () => {
+    fileAssetRows = [{ storageKey: "uploads/user/gen/model.stl" }];
+    stepAssetRows = [{ storageKey: "uploads/user/gen/model.step" }];
+    r2Objects = [
+      {
+        Key: "uploads/user/gen/model.stl",
+        Size: 5000,
+        LastModified: objectAgedHours(48),
+      },
+      {
+        Key: "uploads/user/gen/model.step",
+        Size: 8000,
+        LastModified: objectAgedHours(48),
+      },
+    ];
+
+    const res = await GET(makeRequest("Bearer test-secret"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.orphans).toBe(0);
+    expect(body.deleted).toBe(0);
+
+    const deleteCalls = mockSend.mock.calls.filter(
+      (c) => (c[0] as { _type: string })._type === "DeleteObjectsCommand"
+    );
+    expect(deleteCalls).toHaveLength(0);
+  });
+
+  it("still deletes a .step no fileAssets row points to", async () => {
+    fileAssetRows = [];
+    stepAssetRows = [];
+    r2Objects = [
+      {
+        Key: "uploads/user/gone/model.step",
+        Size: 8000,
+        LastModified: objectAgedHours(48),
+      },
+    ];
+
+    const res = await GET(makeRequest("Bearer test-secret"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.orphans).toBe(1);
+    expect(body.deleted).toBe(1);
   });
 
   it("does NOT delete an original model retained as ownership evidence", async () => {
