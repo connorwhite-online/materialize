@@ -35,6 +35,11 @@ describe("SYSTEM_PROMPT parts-dict contract (MTR-44)", () => {
     expect(SYSTEM_PROMPT).toMatch(/parts` wins|`parts` wins/i);
   });
 
+  it("bans edge-by-edge fillet loops that time generations out", () => {
+    expect(SYSTEM_PROMPT).toMatch(/CRITICAL PERFORMANCE/i);
+    expect(SYSTEM_PROMPT).toMatch(/one-at-a-time/i);
+  });
+
   it("cadquery variant keeps a single-solid contract (no parts dict path)", () => {
     // Assemblies route through build123d; the cadquery A/B front-end stays
     // single-solid. If that ever changes, this test should be updated
