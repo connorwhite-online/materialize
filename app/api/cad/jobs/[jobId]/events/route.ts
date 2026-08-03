@@ -158,7 +158,10 @@ export async function GET(
             if (row.snapshotStep > sentSnapshotStep) {
               sentSnapshotStep = row.snapshotStep;
               const [snap] = await db
-                .select({ lastSnapshot: cadJobs.lastSnapshot })
+                .select({
+                  lastSnapshot: cadJobs.lastSnapshot,
+                  lastSnapshotPoints: cadJobs.lastSnapshotPoints,
+                })
                 .from(cadJobs)
                 .where(eq(cadJobs.id, jobId))
                 .limit(1);
@@ -167,6 +170,7 @@ export async function GET(
                   type: "snapshot",
                   render: snap.lastSnapshot,
                   step: row.snapshotStep,
+                  points: snap.lastSnapshotPoints ?? undefined,
                 });
               }
             }
@@ -204,6 +208,24 @@ export async function GET(
                     inArray(cadJobs.status, ["queued", "running"])
                   )
                 );
+              // Fail the GENERATION row too (only while still pending —
+              // never clobber a written outcome): a reaped job used to leave
+              // cad_generations at `pending` forever, invisible to history,
+              // the scorecard, and the failure miner (PR #138's finding).
+              await db
+                .update(cadGenerations)
+                .set({
+                  status: "failed",
+                  error: jobError,
+                  updatedAt: new Date(),
+                })
+                .where(
+                  and(
+                    eq(cadGenerations.id, job.generationId),
+                    eq(cadGenerations.status, "pending")
+                  )
+                )
+                .catch(() => undefined); // best-effort — job reap already landed
               status = "failed";
             }
             emitNew();

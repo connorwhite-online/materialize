@@ -69,6 +69,12 @@ const FRAG = /* glsl */ `
 const BLOB_RADIUS = STUDIO_TARGET_SIZE * 0.34;
 const POINT_COUNT = 20000; // dense cloud; one draw call so cost is trivial
 const MORPH_DURATION = 1.2;
+// Live (mid-generation) morphs are snappier than the final handoff morph.
+const LIVE_MORPH_DURATION = 0.9;
+// Wobble once the cloud has formed onto a live intermediate shape: enough to
+// stay alive, small enough that the shape still reads.
+const FORMED_IDLE_AMP = 0.05;
+const FORMED_ACTIVE_AMP = 0.13;
 
 function smoothstep(t: number) {
   const x = Math.min(1, Math.max(0, t));
@@ -104,33 +110,95 @@ function pointGeometry(pos: Float32Array): THREE.BufferGeometry {
   return g;
 }
 
+/** Match arbitrary surface samples to the base points by angular position so
+ *  the cloud flows coherently onto the shape. Handles fewer samples than base
+ *  points (live snapshot payloads) by fanning each sample out to a run of
+ *  neighbors with a little jitter so the cloud doesn't visibly clump. */
+function matchTargets(
+  basePos: THREE.BufferAttribute | THREE.InterleavedBufferAttribute,
+  samples: THREE.Vector3[]
+): Float32Array {
+  const N = basePos.count;
+  const S = samples.length;
+  const baseOrder = [...Array(N).keys()].sort(
+    (i, j) =>
+      angleKey(basePos.getX(i), basePos.getY(i), basePos.getZ(i)) -
+      angleKey(basePos.getX(j), basePos.getY(j), basePos.getZ(j))
+  );
+  const sampleOrder = [...Array(S).keys()].sort(
+    (i, j) =>
+      angleKey(samples[i].x, samples[i].y, samples[i].z) -
+      angleKey(samples[j].x, samples[j].y, samples[j].z)
+  );
+  const jitter = S < N ? STUDIO_TARGET_SIZE * 0.012 : 0;
+  const target = new Float32Array(N * 3);
+  for (let k = 0; k < N; k++) {
+    const s = samples[sampleOrder[Math.min(S - 1, Math.floor((k * S) / N))]];
+    const b = baseOrder[k];
+    target[b * 3] = s.x + (jitter ? (Math.random() - 0.5) * jitter : 0);
+    target[b * 3 + 1] = s.y + (jitter ? (Math.random() - 0.5) * jitter : 0);
+    target[b * 3 + 2] = s.z + (jitter ? (Math.random() - 0.5) * jitter : 0);
+  }
+  return target;
+}
+
 /** Morph targets: framed surface samples of the new model, matched to the base
  *  points by angular position so the cloud flows coherently onto the shape. */
 function computePointTargets(
   basePos: THREE.BufferAttribute | THREE.InterleavedBufferAttribute,
   modelGeom: THREE.BufferGeometry
 ): Float32Array {
-  const N = basePos.count;
-  const samples = frameSamples(modelGeom, N);
-  const baseOrder = [...Array(N).keys()].sort(
-    (i, j) =>
-      angleKey(basePos.getX(i), basePos.getY(i), basePos.getZ(i)) -
-      angleKey(basePos.getX(j), basePos.getY(j), basePos.getZ(j))
-  );
-  const sampleOrder = [...Array(N).keys()].sort(
-    (i, j) =>
-      angleKey(samples[i].x, samples[i].y, samples[i].z) -
-      angleKey(samples[j].x, samples[j].y, samples[j].z)
-  );
-  const target = new Float32Array(N * 3);
-  for (let k = 0; k < N; k++) {
-    const s = samples[sampleOrder[k]];
-    const b = baseOrder[k];
-    target[b * 3] = s.x;
-    target[b * 3 + 1] = s.y;
-    target[b * 3 + 2] = s.z;
+  return matchTargets(basePos, frameSamples(modelGeom, basePos.count));
+}
+
+/** Center + scale raw model-space points into the shared studio frame
+ *  (mirrors studio-frame's fitMetrics, but for a bare point set). */
+function frameLivePoints(points: Float32Array): THREE.Vector3[] {
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (let i = 0; i + 2 < points.length; i += 3) {
+    const x = points[i], y = points[i + 1], z = points[i + 2];
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      continue;
+    }
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (z < minZ) minZ = z;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+    if (z > maxZ) maxZ = z;
   }
-  return target;
+  if (minX > maxX) return [];
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  const cz = (minZ + maxZ) / 2;
+  const longest = Math.max(maxX - minX, maxY - minY, maxZ - minZ) || 1;
+  const scale = STUDIO_TARGET_SIZE / longest;
+  const out: THREE.Vector3[] = [];
+  for (let i = 0; i + 2 < points.length; i += 3) {
+    out.push(
+      new THREE.Vector3(
+        (points[i] - cx) * scale,
+        (points[i + 1] - cy) * scale,
+        (points[i + 2] - cz) * scale
+      )
+    );
+  }
+  return out;
+}
+
+/** Bake the current morph state into `position` so a NEW morph can start from
+ *  what's on screen instead of snapping back to the old base shape. */
+function bakeMorph(geom: THREE.BufferGeometry, morph: number) {
+  if (!(morph > 0)) return;
+  const pos = geom.attributes.position as THREE.BufferAttribute;
+  const tgt = geom.attributes.aTarget as THREE.BufferAttribute | undefined;
+  if (!tgt) return;
+  const pa = pos.array as Float32Array;
+  const ta = tgt.array as Float32Array;
+  const m = Math.min(1, morph);
+  for (let i = 0; i < pa.length; i++) pa[i] += (ta[i] - pa[i]) * m;
+  pos.needsUpdate = true;
 }
 
 function PointCloud({
@@ -141,6 +209,7 @@ function PointCloud({
   freq,
   color = "#8aa0e8",
   morphUrl,
+  livePoints,
   onMorphComplete,
 }: {
   baseGeom: THREE.BufferGeometry;
@@ -150,6 +219,9 @@ function PointCloud({
   freq: number;
   color?: string;
   morphUrl?: string | null;
+  /** Latest in-progress solid's surface points (raw model space) — the cloud
+   *  morphs onto each one as snapshots land, instead of staying a blob. */
+  livePoints?: Float32Array | null;
   onMorphComplete?: () => void;
 }) {
   const matRef = useRef<THREE.ShaderMaterial>(null);
@@ -159,6 +231,14 @@ function PointCloud({
   const morphProgress = useRef(0);
   const morphing = useRef(false);
   const completed = useRef(false);
+  // Whether the in-flight morph is the FINAL handoff (morphUrl) — only that
+  // one freezes at the target and fires onMorphComplete. Live morphs bake +
+  // resume wobbling instead.
+  const isFinalMorph = useRef(false);
+  // The cloud has formed onto a live intermediate shape — wobble gently so the
+  // shape stays readable (mirrors the source-cloud amps).
+  const formed = useRef(false);
+  const morphDuration = useRef(MORPH_DURATION);
   const gl = useThree((s) => s.gl);
   const pixelRatio = gl.getPixelRatio();
 
@@ -196,7 +276,12 @@ function PointCloud({
     morphing.current = false;
     completed.current = false;
     morphProgress.current = 0;
-    if (matRef.current) matRef.current.uniforms.uMorph.value = 0;
+    // A live morph may be mid-flight — bake what's on screen into `position`
+    // first so the final morph starts from the current shape, not a snap-back.
+    if (matRef.current) {
+      bakeMorph(baseGeom, matRef.current.uniforms.uMorph.value as number);
+      matRef.current.uniforms.uMorph.value = 0;
+    }
     const loader = new STLLoader();
     loader.load(
       morphUrl,
@@ -228,6 +313,8 @@ function PointCloud({
           }).attributes;
           if (prevTarget) attrCache?.remove?.(prevTarget);
           morphProgress.current = 0;
+          morphDuration.current = MORPH_DURATION;
+          isFinalMorph.current = true;
           morphing.current = true;
         } catch {
           onMorphCompleteRef.current?.();
@@ -250,10 +337,52 @@ function PointCloud({
     // canvas-stable renderer, so including it never re-runs this.
   }, [morphUrl, baseGeom, gl]);
 
+  // Live retarget: each in-progress snapshot's point set morphs the cloud onto
+  // the actual solid taking shape. Chains freely — a newer target bakes the
+  // current visual state and morphs on from there. The final handoff morph
+  // (morphUrl) always wins: once it's set, live targets are ignored.
+  useEffect(() => {
+    if (!livePoints || livePoints.length < 9 || morphUrl) return;
+    const samples = frameLivePoints(livePoints);
+    if (samples.length === 0) return;
+    if (matRef.current) {
+      bakeMorph(baseGeom, matRef.current.uniforms.uMorph.value as number);
+      matRef.current.uniforms.uMorph.value = 0;
+    }
+    const prevTarget = baseGeom.attributes.aTarget as
+      | THREE.BufferAttribute
+      | undefined;
+    baseGeom.setAttribute(
+      "aTarget",
+      new THREE.BufferAttribute(
+        matchTargets(baseGeom.attributes.position, samples),
+        3
+      )
+    );
+    const attrCache = (gl as unknown as {
+      attributes?: { remove?: (a: THREE.BufferAttribute) => void };
+    }).attributes;
+    if (prevTarget) attrCache?.remove?.(prevTarget);
+    morphProgress.current = 0;
+    morphDuration.current = LIVE_MORPH_DURATION;
+    isFinalMorph.current = false;
+    morphing.current = true;
+    formed.current = true;
+  }, [livePoints, morphUrl, baseGeom, gl]);
+
   useFrame((_, delta) => {
     const k = Math.min(1, delta * 2.5);
     speed.current += ((active ? 1.7 : 0.6) - speed.current) * k;
-    amp.current += ((active ? activeAmp : idleAmp) - amp.current) * k;
+    // Once formed onto a live shape, wobble gently so the shape stays
+    // readable; the abstract blob wobbles at full amplitude.
+    const targetAmp = formed.current
+      ? active
+        ? Math.min(activeAmp, FORMED_ACTIVE_AMP)
+        : Math.min(idleAmp, FORMED_IDLE_AMP)
+      : active
+        ? activeAmp
+        : idleAmp;
+    amp.current += (targetAmp - amp.current) * k;
 
     const m = matRef.current;
     if (m) {
@@ -262,12 +391,24 @@ function PointCloud({
       if (morphing.current) {
         morphProgress.current = Math.min(
           1,
-          morphProgress.current + delta / MORPH_DURATION
+          morphProgress.current + delta / morphDuration.current
         );
         m.uniforms.uMorph.value = smoothstep(morphProgress.current);
-        if (morphProgress.current >= 1 && !completed.current) {
-          completed.current = true;
-          onMorphCompleteRef.current?.();
+        if (morphProgress.current >= 1) {
+          morphing.current = false;
+          if (isFinalMorph.current) {
+            // Final handoff: freeze at the target (pixel-registration with
+            // the crisp model) and report completion exactly once.
+            if (!completed.current) {
+              completed.current = true;
+              onMorphCompleteRef.current?.();
+            }
+          } else {
+            // Live morph: bake the reached shape and resume wobbling from it
+            // (uMorph=1 would otherwise pin the cloud dead-still).
+            bakeMorph(baseGeom, 1);
+            m.uniforms.uMorph.value = 0;
+          }
         }
       }
     }
@@ -301,11 +442,13 @@ export function PointCloudScene({
   sourceUrl,
   active = true,
   morphUrl,
+  livePoints,
   onMorphComplete,
 }: {
   sourceUrl?: string | null;
   active?: boolean;
   morphUrl?: string | null;
+  livePoints?: Float32Array | null;
   onMorphComplete?: () => void;
 }) {
   const blob = useMemo(
@@ -388,6 +531,7 @@ export function PointCloudScene({
           activeAmp={isSource ? 0.14 : 0.32}
           freq={isSource ? 1.6 : 2.1}
           morphUrl={morphUrl}
+          livePoints={livePoints}
           onMorphComplete={onMorphComplete}
         />
       )}
@@ -402,12 +546,16 @@ export function MaterializingBlob({
   active = false,
   sourceUrl,
   morphUrl,
+  livePoints,
   onMorphComplete,
 }: {
   className?: string;
   active?: boolean;
   sourceUrl?: string | null;
   morphUrl?: string | null;
+  /** Latest snapshot's surface points (decodeSnapshotPoints) — morphs the
+   *  forming cloud onto each in-progress solid as generation advances. */
+  livePoints?: Float32Array | null;
   onMorphComplete?: () => void;
 }) {
   return (
@@ -420,6 +568,7 @@ export function MaterializingBlob({
           sourceUrl={sourceUrl}
           active={active}
           morphUrl={morphUrl}
+          livePoints={livePoints}
           onMorphComplete={onMorphComplete}
         />
       </Canvas>

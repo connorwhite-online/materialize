@@ -75,6 +75,7 @@ import { parseFeatures } from "@/lib/cad/features";
 import type { CadBrief } from "@/lib/cad/brief";
 import type { ViewerAnnotation } from "@/components/viewer/model-viewer";
 import { planComposerSubmit } from "@/components/cad/composer-submit";
+import { decodeSnapshotPoints } from "@/components/cad/snapshot-points";
 import {
   isAssemblyOverview,
   resolveEffectiveSelectedPartId,
@@ -388,6 +389,8 @@ export function TextToCadStudio({
   const [snapshot, setSnapshot] = useState<{
     render: string;
     step: number;
+    /** Sampled surface points of the in-progress solid (base64, optional). */
+    points?: string;
   } | null>(null);
   // Reviewable design brief (docs/text-to-cad/06): drafted from the composer
   // prompt, edited in place, and sent with the generate request. Fresh
@@ -1455,8 +1458,9 @@ export function TextToCadStudio({
             } else if (ev.type === "snapshot") {
               // Live build preview: latest frame only — REPLACE, never
               // accumulate (each frame is a whole base64 PNG; the progress
-              // transcript must stay light).
-              setSnapshot({ render: ev.render, step: ev.step });
+              // transcript must stay light). `points` (when present) drives
+              // the point cloud morphing onto the in-progress solid.
+              setSnapshot({ render: ev.render, step: ev.step, points: ev.points });
             } else if (ev.type === "usage") {
               // Live cost meter — replace, never append (synthesized by the
               // events route from the job row, not part of the transcript).
@@ -1599,6 +1603,13 @@ export function TextToCadStudio({
     setBrief(null);
     setSubmittedPrompt(null);
   };
+
+  // Live morph target: the latest snapshot's surface points, decoded once per
+  // snapshot — the forming point cloud morphs onto each in-progress solid.
+  const livePoints = useMemo(
+    () => (snapshot?.points ? decodeSnapshotPoints(snapshot.points) : null),
+    [snapshot?.points]
+  );
 
   // Viewer layering (MTR-214). The transition canvas (deforming loader / morph)
   // OWNS the frame during generating + morph + hold; the crisp ModelViewer is
@@ -1891,6 +1902,7 @@ export function TextToCadStudio({
                           ? `/api/files/preview/${transition.assetId}`
                           : null
                       }
+                      livePoints={livePoints}
                       // Morph done → FREEZE at the final shape ("hold"); the
                       // load-gated effect flips to "reveal" once the solid is
                       // ready, so there's no timer-guessed pop (MTR-214).
@@ -2980,7 +2992,7 @@ function GenerationThread({
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={fade}
-                className="px-3.5 py-2.5"
+                className="px-3.5 py-[7px]"
               >
                 {/* Live preview render lands INSIDE the bubble, above the
                     status line (round 4). The bubble's `layout` springs open to
@@ -2988,18 +3000,23 @@ function GenerationThread({
                 {preview && (
                   <BubblePreview render={preview.render} step={preview.step} />
                 )}
+                {/* One non-wrapping row: loader, stage label, then the live
+                    vitals to its RIGHT (never stacked below). The loader is
+                    sized under the text line-height and the padding trimmed so
+                    the whole bubble never grows taller than the user's prompt
+                    bubble across the gap. */}
                 <div className="flex items-center gap-2.5">
                   <span className="flex shrink-0 text-muted-foreground">
-                    <MetaballLoader size={22} />
+                    <MetaballLoader size={18} />
                   </span>
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium text-foreground">
+                  <span className="flex min-w-0 items-baseline gap-2">
+                    <span className="truncate text-sm font-medium text-foreground">
                       {statusText}
                     </span>
                     {/* Live vitals: stage elapsed + tokens so far. Fixed
                         tabular digits so the ticking seconds don't wiggle. */}
                     {statusDetail && (
-                      <span className="block text-xs tabular-nums text-muted-foreground">
+                      <span className="shrink-0 whitespace-nowrap text-xs tabular-nums text-muted-foreground">
                         {statusDetail}
                       </span>
                     )}

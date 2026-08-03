@@ -51,6 +51,7 @@ import {
   type DimensionTarget,
 } from "./dimension-check";
 import { enrichRepairHint } from "./repair-taxonomy";
+import { sampleStlPoints } from "./stl-points";
 import { getNetworksReport, networksFailure } from "./network-check";
 import {
   BREP_OUTPUT_FORMATS,
@@ -83,6 +84,11 @@ export interface PriorFeedback {
 // repair loop room to cross several hurdles (each repair turn gets a targeted
 // hint). Only failing generations use the extra turns — success exits early.
 const MAX_ATTEMPTS_DEFAULT = 4;
+
+// Floor for starting another repair attempt under a deadline (codegen +
+// sidecar run + judge). Below this, the loop returns what it has instead of
+// getting platform-killed mid-attempt with nothing persisted.
+const MIN_ATTEMPT_MS = 60_000;
 
 export interface HarnessInput {
   prompt: string;
@@ -131,6 +137,17 @@ export interface HarnessInput {
    * question times out.
    */
   onQuestion?: CadQuestionAsker;
+  /**
+   * Wall-clock deadline (epoch ms) the WHOLE generation must finish by —
+   * the platform kills the executor function shortly after (Vercel
+   * maxDuration). Engines treat it as a hard planning input: the scripted
+   * loop won't start an attempt it can't plausibly finish, the agentic loop
+   * trims its own budget under it, and the orchestrator skips the scripted
+   * fallback when too little remains (salvaging instead). Absent on
+   * unbounded callers (eval runner, self-hosted) — everything then behaves
+   * exactly as before.
+   */
+  deadlineAt?: number;
 }
 
 export interface HarnessResult {
@@ -554,6 +571,17 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     if (input.signal?.aborted) break;
+    // Deadline rail: never start an attempt there's no time to finish — a
+    // codegen call + sidecar run + judge comfortably eats a minute. Attempt 1
+    // always runs (a deadline that tight means the caller misconfigured it;
+    // dying mid-try beats returning nothing by fiat).
+    if (
+      attempt > 1 &&
+      input.deadlineAt &&
+      input.deadlineAt - Date.now() < MIN_ATTEMPT_MS
+    ) {
+      break;
+    }
     lastAttempt = attempt;
 
     emit({ type: "phase", phase: "generating", attempt, maxAttempts });
@@ -636,8 +664,17 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
 
     // Live preview: stream the attempt's render so the studio shows the
     // part taking shape instead of a spinner (kept out of the progress log).
+    // Sampled surface points ride along so the forming point cloud can morph
+    // toward the actual solid, not stay a generic blob.
     if (lastRun.renderPng) {
-      emit({ type: "snapshot", render: lastRun.renderPng, step: attempt });
+      emit({
+        type: "snapshot",
+        render: lastRun.renderPng,
+        step: attempt,
+        points: lastRun.files.stl
+          ? sampleStlPoints(lastRun.files.stl) ?? undefined
+          : undefined,
+      });
     }
 
     const grade = gradeRun(lastRun);

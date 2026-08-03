@@ -14,7 +14,10 @@ const sessionsAvailable = vi.fn();
 vi.mock("@/lib/cad/harness", () => ({
   runHarness: (...a: unknown[]) => runHarness(...a),
 }));
-vi.mock("@/lib/cad/agentic", () => ({
+vi.mock("@/lib/cad/agentic", async (importOriginal) => ({
+  // Real CadAgenticError so orchestrate's instanceof salvage check works.
+  CadAgenticError: (await importOriginal<typeof import("@/lib/cad/agentic")>())
+    .CadAgenticError,
   runAgenticHarness: (...a: unknown[]) => runAgenticHarness(...a),
 }));
 vi.mock("@/lib/cad/generative", () => ({
@@ -126,6 +129,59 @@ describe("runCadGeneration routing", () => {
       onProgress: (ev) => events.push(ev as (typeof events)[number]),
     });
     expect(events).toContainEqual({ type: "route", route: "simple" });
+  });
+
+  it("budget-cutoff salvage: too little deadline left -> keeps the best-so-far instead of a doomed scripted rebuild", async () => {
+    const { CadAgenticError } = await import("@/lib/cad/agentic");
+    completeText.mockResolvedValue("COMPLEX");
+    const salvage = { ...RESULT, sourceCode: "salvaged" };
+    runAgenticHarness.mockRejectedValue(
+      new CadAgenticError("budget hit", { salvage })
+    );
+    const events: Array<{ type: string; [k: string]: unknown }> = [];
+    const r = await runCadGeneration({
+      prompt: "a 6-port enclosure",
+      deadlineAt: Date.now() + 30_000, // < MIN_SCRIPTED_FALLBACK_MS
+      onProgress: (ev) => events.push(ev as (typeof events)[number]),
+    });
+    expect(r.sourceCode).toBe("salvaged");
+    expect(r.route).toBe("complex-salvage");
+    expect(runHarness).not.toHaveBeenCalled();
+    expect(events.find((e) => e.type === "fallback")).toMatchObject({
+      from: "agentic",
+      to: "salvage",
+    });
+  });
+
+  it("budget-cutoff salvage: scripted rebuild still preferred when time allows, salvage only on its failure", async () => {
+    const { CadAgenticError } = await import("@/lib/cad/agentic");
+    completeText.mockResolvedValue("COMPLEX");
+    const salvage = { ...RESULT, sourceCode: "salvaged" };
+    runAgenticHarness.mockRejectedValue(
+      new CadAgenticError("budget hit", { salvage })
+    );
+    // Plenty of time: scripted runs and wins when ok...
+    runHarness.mockResolvedValue({ ...RESULT, sourceCode: "harness" });
+    let r = await runCadGeneration({
+      prompt: "x",
+      deadlineAt: Date.now() + 600_000,
+    });
+    expect(r.sourceCode).toBe("harness");
+    expect(r.route).toBe("complex-fallback");
+
+    // ...but its failure degrades to the salvage, not to nothing.
+    runHarness.mockResolvedValue({
+      ok: false,
+      sourceCode: "",
+      attempts: 4,
+      error: "no valid result",
+    });
+    r = await runCadGeneration({
+      prompt: "x",
+      deadlineAt: Date.now() + 600_000,
+    });
+    expect(r.sourceCode).toBe("salvaged");
+    expect(r.route).toBe("complex-salvage");
   });
 
   it("complex propagates aborts instead of falling back", async () => {
