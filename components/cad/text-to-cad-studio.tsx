@@ -1080,7 +1080,11 @@ export function TextToCadStudio({
       const used = new Set<string>();
       await Promise.all(
         viewedParts.map(async (p) => {
-          const res = await fetch(`/api/files/preview/${p.fileAssetId}`);
+          // download=1 → deliberate export: promotes an unsaved studio draft
+          // to the library, same as the single-part Download button.
+          const res = await fetch(
+            `/api/files/preview/${p.fileAssetId}?download=1`
+          );
           if (!res.ok) throw new Error(`part ${p.name} ${res.status}`);
           const buf = new Uint8Array(await res.arrayBuffer());
           const base = safeFileStem(p.name) || "part";
@@ -2219,7 +2223,7 @@ export function TextToCadStudio({
                   variant="outline"
                   render={
                     <a
-                      href={`/api/files/preview/${activeAssetId}`}
+                      href={`/api/files/preview/${activeAssetId}?download=1`}
                       download={`${
                         (viewedParts.length > 1
                           ? viewedParts.find(
