@@ -34,6 +34,7 @@ function makeFile(): File {
 const baseInput: AnonCheckoutInput = {
   file: makeFile(),
   selectedQuote: {
+    priceId: "price-1",
     quoteId: "q-1",
     vendorId: "v-1",
     materialConfigId: "mc-1",
@@ -67,13 +68,51 @@ const baseInput: AnonCheckoutInput = {
   },
 };
 
+// The shared uploadFileToR2 helper (MONEY-3) does the R2 PUT leg via
+// XHR, not fetch — this minimal stub mirrors the one already used in
+// components/upload/__tests__/run-create-listing.test.ts. Fires the
+// progress + load events synchronously on send().
+class FakeXHR {
+  static nextStatus = 200;
+  static nextError: "network" | null = null;
+
+  _uploadListeners = new Map<string, ((ev: ProgressEvent) => void)[]>();
+  upload = {
+    addEventListener: (type: string, cb: (ev: ProgressEvent) => void) => {
+      const list = this._uploadListeners.get(type) ?? [];
+      list.push(cb);
+      this._uploadListeners.set(type, list);
+    },
+  };
+  _listeners = new Map<string, (() => void)[]>();
+  status = 200;
+
+  addEventListener(type: string, cb: () => void) {
+    const list = this._listeners.get(type) ?? [];
+    list.push(cb);
+    this._listeners.set(type, list);
+  }
+  open() {}
+  setRequestHeader() {}
+  send() {
+    queueMicrotask(() => {
+      if (FakeXHR.nextError === "network") {
+        for (const cb of this._listeners.get("error") ?? []) cb();
+        return;
+      }
+      this.status = FakeXHR.nextStatus;
+      for (const cb of this._listeners.get("load") ?? []) cb();
+    });
+  }
+}
+
 function mockPresignAndPut(opts?: {
   presignStatus?: number;
   presignBody?: unknown;
   putStatus?: number;
 }) {
   const presignStatus = opts?.presignStatus ?? 200;
-  const putStatus = opts?.putStatus ?? 200;
+  FakeXHR.nextStatus = opts?.putStatus ?? 200;
   const presignBody = opts?.presignBody ?? {
     uploadUrl: "https://r2.example/upload-url",
     storageKey: "uploads/test-user-id/abc/carabiner.stl",
@@ -88,8 +127,7 @@ function mockPresignAndPut(opts?: {
         headers: { "content-type": "application/json" },
       });
     }
-    // R2 PUT
-    return new Response(null, { status: putStatus });
+    throw new Error(`unexpected fetch in test: ${href}`);
   });
 }
 
@@ -97,6 +135,10 @@ describe("runAnonCheckout", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.restoreAllMocks();
+    FakeXHR.nextStatus = 200;
+    FakeXHR.nextError = null;
+    // @ts-expect-error — stub for test
+    globalThis.XMLHttpRequest = FakeXHR;
     // reset happy-path defaults
     draftImpl = async () => ({ fileAssetId: "asset-1", fileSlug: "slug-1" });
     createOrderImpl = async () => ({ orderId: "order-1", cartId: "cart-1" });
@@ -212,6 +254,7 @@ describe("runAnonCheckout", () => {
     expect(orderSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         fileAssetId: "asset-1",
+        priceId: "price-1",
         quoteId: "q-1",
         vendorId: "v-1",
         materialConfigId: "mc-1",

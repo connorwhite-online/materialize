@@ -109,7 +109,7 @@ function baseMockCart() {
     addLocalItem: () => ({ ok: true }) as const,
     removeItem: async () => {},
     removeLocalItem: () => {},
-    updateQuantity: async () => {},
+    updateQuantity: async () => ({ ok: true }) as const,
     updateLocalItemQuantity: () => {},
     materializeLocalItems: async () => ({ ok: true }),
     refresh: async () => {},

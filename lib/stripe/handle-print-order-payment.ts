@@ -1,7 +1,7 @@
 import "server-only";
 import { db } from "@/lib/db";
-import { printOrders } from "@/lib/db/schema";
-import { and, eq, isNull } from "drizzle-orm";
+import { printOrders, printOrderItems, cartItems } from "@/lib/db/schema";
+import { and, eq, isNull, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { createOrder } from "@/lib/craftcloud/client";
 import { logError } from "@/lib/logger";
@@ -59,6 +59,63 @@ function isClaimSentinel(value: string | null | undefined): boolean {
   return typeof value === "string" && value.startsWith(CLAIM_PREFIX);
 }
 
+/**
+ * MONEY-2: `checkoutVendorGroup` deliberately leaves `cartItems` rows
+ * in place (see its docstring in app/actions/print.ts) so an
+ * abandoned checkout doesn't lose the cart. This is the other half —
+ * once an order has actually placed, clear the cart lines it came
+ * from.
+ *
+ * `printOrderItems` doesn't store the source `cartItems.id` (no
+ * schema change for this fix), so rows are matched back via the same
+ * (fileAssetId, quoteId) pair the cartItems unique index already
+ * keys on — each cart line's quoteId is a fresh CraftCloud quote, so
+ * this can't accidentally sweep up an unrelated item a user added
+ * after abandoning an earlier checkout attempt for the same file.
+ *
+ * Single-file orders from `createPrintOrder` (the non-cart "Print
+ * with X" flow) never write `printOrderItems`, so they no-op here —
+ * nothing to clear.
+ *
+ * Idempotent and best-effort by design: called from every branch that
+ * observes (or just achieved) an "ordered" status, including retries.
+ * Deleting already-deleted rows matches 0 rows and doesn't error. A
+ * failure here is logged, never thrown — the order placement it runs
+ * after must not be rolled back or retried over a cart-cleanup blip.
+ */
+async function clearCartItemsForOrder(
+  printOrderId: string,
+  userId: string
+): Promise<void> {
+  try {
+    const orderItems = await db
+      .select({
+        fileAssetId: printOrderItems.fileAssetId,
+        quoteId: printOrderItems.quoteId,
+      })
+      .from(printOrderItems)
+      .where(eq(printOrderItems.printOrderId, printOrderId));
+
+    if (orderItems.length === 0) return;
+
+    await db.delete(cartItems).where(
+      and(
+        eq(cartItems.userId, userId),
+        or(
+          ...orderItems.map((i) =>
+            and(
+              eq(cartItems.fileAssetId, i.fileAssetId),
+              eq(cartItems.quoteId, i.quoteId)
+            )
+          )
+        )
+      )
+    );
+  } catch (err) {
+    logError("handlePrintOrderPayment.clearCartItems", err);
+  }
+}
+
 export async function handlePrintOrderPayment(
   printOrderId: string,
   opts?: { paymentIntentId?: string }
@@ -106,8 +163,16 @@ export async function handlePrintOrderPayment(
       throw new Error(`Print order not found: ${printOrderId}`);
     }
 
-    // Guard #1 — status advanced. Pure duplicate delivery.
-    if (order.status !== "cart_created") return;
+    // Guard #1 — status advanced. Pure duplicate delivery. If an
+    // earlier delivery placed the order but died before clearing the
+    // cart (MONEY-2), this retry is what finishes the job — idempotent,
+    // so re-running it on a delivery that already cleared is a no-op.
+    if (order.status !== "cart_created") {
+      if (order.status === "ordered") {
+        await clearCartItemsForOrder(printOrderId, order.userId);
+      }
+      return;
+    }
 
     // Another worker holds an active claim. Stay out of their way.
     if (isClaimSentinel(order.craftCloudOrderId)) {
@@ -123,6 +188,7 @@ export async function handlePrintOrderPayment(
         .update(printOrders)
         .set({ status: "ordered" })
         .where(eq(printOrders.id, printOrderId));
+      await clearCartItemsForOrder(printOrderId, order.userId);
     }
     return;
   }
@@ -170,6 +236,22 @@ export async function handlePrintOrderPayment(
     )
     .returning({ id: printOrders.id });
 
+  // MTR-230: a zero-row result here means we placed a PAID vendor
+  // order whose id we never persisted — reconcile can't find it and
+  // cleanup may cancel-and-refund it out from under CraftCloud. The
+  // sibling reentry race above (line ~114) already logs; this closes
+  // the same gap on the write side. No control-flow change — the
+  // notify guard below is untouched.
+  if (placed.length === 0) {
+    logError(
+      "handlePrintOrderPayment.placeWriteLost",
+      new Error(
+        `CraftCloud order created but write lost for order ${printOrderId}`,
+        { cause: { printOrderId, craftCloudOrderId: ccOrderId } }
+      )
+    );
+  }
+
   // Fire creator notifications iff WE were the writer (sentinel still
   // matched). Otherwise a parallel worker already ran or is running
   // through this same path and would notify on its own. Helper
@@ -178,6 +260,13 @@ export async function handlePrintOrderPayment(
   if (placed.length > 0) {
     await notifyPrintOrderPlaced(printOrderId);
   }
+
+  // MONEY-2: clear the cart lines this order came from now that it has
+  // actually placed. Best-effort/idempotent, and deliberately run
+  // whether or not WE were the writer above — if a parallel worker won
+  // the placement race, the cart still needs clearing exactly once,
+  // and clearCartItemsForOrder is a no-op the second time either way.
+  await clearCartItemsForOrder(printOrderId, order.userId);
 }
 
 /**
@@ -207,7 +296,7 @@ async function handleTwoStepFeeAuthorization(
       `handleTwoStepFeeAuthorization: missing paymentIntentId for order ${printOrderId} — cannot advance without a PI to capture`
     );
   }
-  await db
+  const updated = await db
     .update(printOrders)
     .set({
       status: "awaiting_production_payment",
@@ -219,7 +308,31 @@ async function handleTwoStepFeeAuthorization(
         eq(printOrders.id, printOrderId),
         eq(printOrders.status, "cart_created")
       )
-    );
+    )
+    .returning({ id: printOrders.id });
+
+  // MTR-230: zero rows is ambiguous — a benign duplicate Stripe
+  // delivery (the row already advanced past cart_created) or a row
+  // that landed in some OTHER unexpected status, in which case
+  // feePaymentIntentId is never recorded and the manual-capture 3%
+  // fee hold silently expires uncaptured. Re-read to tell them apart;
+  // only the latter is worth paging on — response/return semantics
+  // are unchanged either way.
+  if (updated.length === 0) {
+    const [current] = await db
+      .select({ status: printOrders.status })
+      .from(printOrders)
+      .where(eq(printOrders.id, printOrderId));
+    if (current?.status !== "awaiting_production_payment") {
+      logError(
+        "handlePrintOrderPayment.twoStepFeeNoOp",
+        new Error(
+          `two-step fee authorization write lost for order ${printOrderId}`,
+          { cause: { printOrderId, status: current?.status } }
+        )
+      );
+    }
+  }
 }
 
 async function releaseClaim(

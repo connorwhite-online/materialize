@@ -10,6 +10,7 @@ import {
   collectionItems,
 } from "@/lib/db/schema";
 import { eq, desc, ilike, and, or, sql, inArray, isNotNull, notExists, type SQL } from "drizzle-orm";
+import { unstable_cache } from "next/cache";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { UserAvatar } from "@/components/auth/user-avatar";
@@ -34,6 +35,132 @@ const PER_SECTION = 24;
  * char substring scans are pathologically wide; prefix is cheap.
  */
 const PREFIX_ONLY_LENGTH = 2;
+
+/**
+ * Cache tag for the idle-browse (`!active`) grid below. Bumped by
+ * updateTag() from app/actions/files.ts and app/actions/projects.ts
+ * on any mutation that changes what's eligible for this globally-
+ * shared grid (publish, archive, delete, visibility toggle). Kept as a
+ * plain string constant (not exported) rather than shared from this
+ * file, because `next build` rejects any non-reserved named export
+ * from a page.tsx file — the action files re-declare the same literal
+ * with a comment pointing back here.
+ */
+const IDLE_BROWSE_CACHE_TAG = "idle-browse";
+/**
+ * Modest TTL for the idle-browse grid — it's identical for every
+ * anonymous hit (no viewer-specific data), so caching collapses N
+ * concurrent Neon round trips into one per window. updateTag keeps
+ * publish/unpublish/delete feeling instant despite the TTL.
+ */
+const IDLE_BROWSE_CACHE_TTL_SECONDS = 120;
+
+/**
+ * Files bundled into a project are surfaced under that project, not as
+ * standalone entries in the Files section. Correlated NOT EXISTS so a
+ * file with any project membership drops out. Pure function of the
+ * schema (no request-specific input), so it's safe to call both inside
+ * the cached idle-browse fetch and in the live search/filter path.
+ */
+function fileNotInAnyProjectCondition() {
+  return notExists(
+    db
+      .select({ one: sql`1` })
+      .from(projectFiles)
+      .where(eq(projectFiles.fileId, files.id))
+  );
+}
+
+/**
+ * Idle-browse (`!active`) data: recent projects + files + creators.
+ * Globally identical for every anonymous hit — no query/category/
+ * viewer input — so it's a single cache entry for the whole site
+ * rather than 6 fresh Neon round trips per hit (PERF-16). Mirrors the
+ * unstable_cache shape in app/api/search/route.ts:119, plus
+ * updateTag so publish/archive/delete don't wait out the TTL.
+ */
+const getIdleBrowseData = unstable_cache(
+  async () => {
+    const fileNotInAnyProject = fileNotInAnyProjectCondition();
+    const [recentFiles, recentProjects, recentCreators] = await Promise.all([
+      db
+        .select({
+          id: files.id,
+          name: files.name,
+          slug: files.slug,
+          price: files.price,
+          thumbnailUrl: files.thumbnailUrl,
+          coverPhotoId: files.coverPhotoId,
+          downloadCount: files.downloadCount,
+          username: users.username,
+          displayName: users.displayName,
+          avatarUrl: users.avatarUrl,
+        })
+        .from(files)
+        .innerJoin(users, eq(files.userId, users.id))
+        .where(
+          and(
+            eq(files.status, "published"),
+            eq(files.visibility, "public"),
+            fileNotInAnyProject
+          )
+        )
+        .orderBy(desc(files.downloadCount))
+        .limit(PER_SECTION),
+      db
+        .select({
+          id: projects.id,
+          slug: projects.slug,
+          name: projects.name,
+          thumbnailUrl: projects.thumbnailUrl,
+          coverPhotoId: projects.coverPhotoId,
+          creatorUsername: users.username,
+          creatorDisplayName: users.displayName,
+          creatorAvatarUrl: users.avatarUrl,
+          fileCount: sql<number>`cast(count(${projectFiles.fileId}) as int)`,
+        })
+        .from(projects)
+        .innerJoin(users, eq(projects.userId, users.id))
+        .leftJoin(projectFiles, eq(projectFiles.projectId, projects.id))
+        .where(and(eq(projects.status, "published"), eq(projects.visibility, "public")))
+        .groupBy(projects.id, users.username, users.displayName, users.avatarUrl, projects.createdAt)
+        .orderBy(desc(projects.createdAt))
+        .limit(12),
+      db
+        .selectDistinctOn([users.id], {
+          id: users.id,
+          username: users.username,
+          displayName: users.displayName,
+          avatarUrl: users.avatarUrl,
+        })
+        .from(users)
+        .innerJoin(files, eq(files.userId, users.id))
+        .where(and(eq(files.status, "published"), eq(files.visibility, "public")))
+        .orderBy(users.id, desc(files.createdAt))
+        .limit(12),
+    ]);
+
+    const [photosByFile, photosByProject, thumbnailsByProject] = await Promise.all([
+      fetchAdditionalPhotosByFile(recentFiles),
+      fetchAdditionalPhotosByProject(recentProjects),
+      fetchFileThumbnailsByProject(recentProjects.map((p) => p.id)),
+    ]);
+
+    const recentWithPhotos: FileRow[] = recentFiles.map((f) => ({
+      ...f,
+      additionalPhotoIds: photosByFile.get(f.id) ?? [],
+    }));
+    const projectsWithPhotos: ProjectRow[] = recentProjects.map((p) => ({
+      ...p,
+      additionalPhotoIds: photosByProject.get(p.id) ?? [],
+      fileThumbnails: thumbnailsByProject.get(p.id) ?? [],
+    }));
+
+    return { recentWithPhotos, projectsWithPhotos, recentCreators };
+  },
+  ["idle-browse-grid"],
+  { revalidate: IDLE_BROWSE_CACHE_TTL_SECONDS, tags: [IDLE_BROWSE_CACHE_TAG] }
+);
 const MAX_QUERY_LENGTH = 100;
 
 function escapeLikePattern(input: string): string {
@@ -178,16 +305,6 @@ export default async function BrowsePage(props: {
   // filter. Anything less is the idle recent-content grid.
   const active = !!pattern || !!category;
 
-  // Files bundled into a project are surfaced under that project, not as
-  // standalone entries in the Files section. Correlated NOT EXISTS so a
-  // file with any project membership drops out.
-  const fileNotInAnyProject = notExists(
-    db
-      .select({ one: sql`1` })
-      .from(projectFiles)
-      .where(eq(projectFiles.fileId, files.id))
-  );
-
   // The header (search bar + category chips) is identical across states.
   const header = (
     <>
@@ -201,80 +318,12 @@ export default async function BrowsePage(props: {
   );
 
   // Idle state: recent projects + files + creators grid below the header.
+  // Globally-identical content (no per-viewer data) — cached in
+  // getIdleBrowseData() so an anonymous-hit stampede shares one Neon
+  // round trip per IDLE_BROWSE_CACHE_TTL_SECONDS window (PERF-16).
   if (!active) {
-    const [recentFiles, recentProjects, recentCreators] = await Promise.all([
-      db
-        .select({
-          id: files.id,
-          name: files.name,
-          slug: files.slug,
-          price: files.price,
-          thumbnailUrl: files.thumbnailUrl,
-          coverPhotoId: files.coverPhotoId,
-          downloadCount: files.downloadCount,
-          username: users.username,
-          displayName: users.displayName,
-          avatarUrl: users.avatarUrl,
-        })
-        .from(files)
-        .innerJoin(users, eq(files.userId, users.id))
-        .where(
-          and(
-            eq(files.status, "published"),
-            eq(files.visibility, "public"),
-            fileNotInAnyProject
-          )
-        )
-        .orderBy(desc(files.downloadCount))
-        .limit(PER_SECTION),
-      db
-        .select({
-          id: projects.id,
-          slug: projects.slug,
-          name: projects.name,
-          thumbnailUrl: projects.thumbnailUrl,
-          coverPhotoId: projects.coverPhotoId,
-          creatorUsername: users.username,
-          creatorDisplayName: users.displayName,
-          creatorAvatarUrl: users.avatarUrl,
-          fileCount: sql<number>`cast(count(${projectFiles.fileId}) as int)`,
-        })
-        .from(projects)
-        .innerJoin(users, eq(projects.userId, users.id))
-        .leftJoin(projectFiles, eq(projectFiles.projectId, projects.id))
-        .where(and(eq(projects.status, "published"), eq(projects.visibility, "public")))
-        .groupBy(projects.id, users.username, users.displayName, users.avatarUrl, projects.createdAt)
-        .orderBy(desc(projects.createdAt))
-        .limit(12),
-      db
-        .selectDistinctOn([users.id], {
-          id: users.id,
-          username: users.username,
-          displayName: users.displayName,
-          avatarUrl: users.avatarUrl,
-        })
-        .from(users)
-        .innerJoin(files, eq(files.userId, users.id))
-        .where(and(eq(files.status, "published"), eq(files.visibility, "public")))
-        .orderBy(users.id, desc(files.createdAt))
-        .limit(12),
-    ]);
-
-    const [photosByFile, photosByProject, thumbnailsByProject] = await Promise.all([
-      fetchAdditionalPhotosByFile(recentFiles),
-      fetchAdditionalPhotosByProject(recentProjects),
-      fetchFileThumbnailsByProject(recentProjects.map((p) => p.id)),
-    ]);
-
-    const recentWithPhotos: FileRow[] = recentFiles.map((f) => ({
-      ...f,
-      additionalPhotoIds: photosByFile.get(f.id) ?? [],
-    }));
-    const projectsWithPhotos: ProjectRow[] = recentProjects.map((p) => ({
-      ...p,
-      additionalPhotoIds: photosByProject.get(p.id) ?? [],
-      fileThumbnails: thumbnailsByProject.get(p.id) ?? [],
-    }));
+    const { recentWithPhotos, projectsWithPhotos, recentCreators } =
+      await getIdleBrowseData();
 
     return (
       <div className="mx-auto max-w-7xl px-4 py-6">
@@ -322,6 +371,13 @@ export default async function BrowsePage(props: {
       </div>
     );
   }
+
+  // Files bundled into a project are surfaced under that project, not as
+  // standalone entries in the Files section. Correlated NOT EXISTS so a
+  // file with any project membership drops out. Only needed from here
+  // down (the active search/filter path) — the idle path above builds
+  // its own copy inside the cached getIdleBrowseData().
+  const fileNotInAnyProject = fileNotInAnyProjectCondition();
 
   // Categories whose label / keywords match the text query, so a search
   // for "drone" or "gps" also surfaces everything filed under Hobby &

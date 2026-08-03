@@ -1,14 +1,40 @@
 import Link from "next/link";
 import Image from "next/image";
 import { Card, CardContent } from "@/components/ui/card";
-import type { CatalogMaterial, MaterialGroup } from "@/lib/craftcloud/catalog";
+
+/**
+ * Narrow DTO for the materials browse page (PERF-17). CraftCloud's
+ * full `CatalogMaterial` (lib/craftcloud/catalog.ts) carries ~25
+ * fields — nested finishGroups/materialConfigs, mechanical/thermal
+ * property ranges, tags, etc. — that this card and CatalogBrowser
+ * never read. Sending the full shape from the server page down to
+ * this "use client" component (and its siblings, one per material)
+ * multiplies the RSC wire payload for no UI benefit; only these
+ * fields cross that boundary. The full type stays in use on
+ * /materials/[slug], which needs the whole material.
+ */
+export interface BrowseMaterial {
+  id: string;
+  slug: string;
+  name: string;
+  featuredImage?: string;
+  descriptionShort?: string;
+  sortIndex?: number;
+}
+
+/** Narrow DTO mirror of MaterialGroup — see BrowseMaterial above. */
+export interface BrowseMaterialGroup {
+  id: string;
+  name: string;
+  materials: BrowseMaterial[];
+}
 
 interface CatalogMaterialCardProps {
-  material: CatalogMaterial;
+  material: BrowseMaterial;
   // Group is passed through but no longer rendered on the card —
   // the cards are already organized into group sections above. Kept
   // in the signature in case we want to re-surface it later.
-  group: MaterialGroup;
+  group: BrowseMaterialGroup;
 }
 
 /**

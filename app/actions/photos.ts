@@ -265,11 +265,20 @@ export async function deleteFilePhoto(photoId: string) {
       return { error: "Photo not found" };
     }
 
-    // Delete from storage
-    await deleteObject(photo.storageKey);
-
-    // Delete from DB
+    // Row first: a DB failure here means nothing changed (safe to
+    // retry). Deleting the R2 object first risked the opposite — a
+    // DB failure after a successful storage delete leaves a row
+    // pointing at missing bytes (a broken tile). Storage cleanup is
+    // best-effort below; a failure there just orphans the object
+    // under `photos/…`, which the `uploads/`-prefix sweep doesn't
+    // scan — logged loudly so it's not silently lost.
     await db.delete(filePhotos).where(eq(filePhotos.id, photoId));
+
+    try {
+      await deleteObject(photo.storageKey);
+    } catch (e) {
+      logError("deleteFilePhoto:storage", e);
+    }
 
     revalidatePath(`/files/${photo.fileSlug}`);
     return { success: true };

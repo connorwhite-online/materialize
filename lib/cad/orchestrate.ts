@@ -170,7 +170,12 @@ export async function runCadGeneration(
       : n > 1
         ? runBestOf(input, n)
         : runHarness(input));
-    return { ...result, route: n > 1 ? `legacy-bestof${n}` : "legacy" };
+    // Return the already-computed `route` (CAD-11) — recomputing it here
+    // dropped the "legacy-generative" case entirely, so a generative run
+    // came back labeled plain "legacy" and metering (lib/cad/jobs.ts) +
+    // credit tiering (lib/billing/cad-credits.ts) billed the priciest
+    // backend at the simple tier.
+    return { ...result, route };
   }
 
   const kind = await classifyCadRequest(input.prompt, input.signal);

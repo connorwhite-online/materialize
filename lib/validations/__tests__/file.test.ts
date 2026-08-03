@@ -281,4 +281,20 @@ describe("socialLinksSchema", () => {
     const result = socialLinksSchema.safeParse([]);
     expect(result.success).toBe(true);
   });
+
+  // SEC-B1 — socialLinkSchema.url rendered raw into href= on the
+  // public profile page; a javascript: URI is a stored-XSS primitive.
+  it("rejects a javascript: URL", () => {
+    const result = socialLinksSchema.safeParse([
+      { platform: "twitter", url: "javascript:alert(document.cookie)" },
+    ]);
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts an http:// URL", () => {
+    const result = socialLinksSchema.safeParse([
+      { platform: "site", url: "http://example.com" },
+    ]);
+    expect(result.success).toBe(true);
+  });
 });

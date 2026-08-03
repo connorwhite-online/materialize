@@ -46,6 +46,7 @@ import { sendOrderConfirmationEmail } from "@/lib/mcp/email";
 import { LICENSE_ENUM_VALUES } from "@/lib/licenses";
 import { DESIGN_TAG_OPTIONS } from "@/lib/validations/file";
 import { deriveAppUrl } from "@/lib/utils/request-url";
+import { logError } from "@/lib/logger";
 
 /**
  * Convert any tool result into the MCP shape. We always return a
@@ -156,7 +157,7 @@ const handler = createMcpHandler(
           }
           return jsonResult({ materials: out, total: out.length });
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_list_materials");
         }
       }
     );
@@ -240,7 +241,7 @@ const handler = createMcpHandler(
             })),
           });
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_get_material");
         }
       }
     );
@@ -277,7 +278,7 @@ const handler = createMcpHandler(
           }
           return jsonResult(result);
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_request_upload_url");
         }
       }
     );
@@ -338,7 +339,7 @@ const handler = createMcpHandler(
           }
           return jsonResult(result);
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_register_upload");
         }
       }
     );
@@ -371,7 +372,7 @@ const handler = createMcpHandler(
           }
           return jsonResult(result);
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_update_file");
         }
       }
     );
@@ -391,7 +392,7 @@ const handler = createMcpHandler(
           const files = await listFilesForUser(auth.userId);
           return jsonResult({ files });
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_list_files");
         }
       }
     );
@@ -422,7 +423,7 @@ const handler = createMcpHandler(
           }
           return jsonResult({ deleted: true });
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_delete_file");
         }
       }
     );
@@ -459,7 +460,7 @@ const handler = createMcpHandler(
           }
           return jsonResult(result);
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_request_photo_upload_url");
         }
       }
     );
@@ -494,7 +495,7 @@ const handler = createMcpHandler(
           }
           return jsonResult(result);
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_add_file_photo");
         }
       }
     );
@@ -527,7 +528,7 @@ const handler = createMcpHandler(
           }
           return jsonResult({ ok: true });
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_set_file_cover_photo");
         }
       }
     );
@@ -601,7 +602,7 @@ const handler = createMcpHandler(
           }
           return jsonResult(result);
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_create_project");
         }
       }
     );
@@ -623,7 +624,7 @@ const handler = createMcpHandler(
           const projects = await listProjectsForUser(auth.userId, limit ?? 100);
           return jsonResult({ projects });
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_list_projects");
         }
       }
     );
@@ -652,7 +653,7 @@ const handler = createMcpHandler(
           }
           return jsonResult(result);
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_get_project");
         }
       }
     );
@@ -685,7 +686,7 @@ const handler = createMcpHandler(
           }
           return jsonResult(result);
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_update_project");
         }
       }
     );
@@ -714,7 +715,7 @@ const handler = createMcpHandler(
           }
           return jsonResult({ deleted: true });
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_delete_project");
         }
       }
     );
@@ -757,7 +758,7 @@ const handler = createMcpHandler(
           }
           return jsonResult(result);
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_set_project_bom");
         }
       }
     );
@@ -794,7 +795,7 @@ const handler = createMcpHandler(
           }
           return jsonResult(result);
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_request_circuit_upload_url");
         }
       }
     );
@@ -834,7 +835,7 @@ const handler = createMcpHandler(
           }
           return jsonResult(result);
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_add_project_circuit_image");
         }
       }
     );
@@ -876,7 +877,7 @@ const handler = createMcpHandler(
           }
           return jsonResult(result);
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_add_project_circuit_kicad");
         }
       }
     );
@@ -914,7 +915,7 @@ const handler = createMcpHandler(
           }
           return jsonResult(result);
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_add_project_circuit_wokwi");
         }
       }
     );
@@ -943,7 +944,7 @@ const handler = createMcpHandler(
           }
           return jsonResult({ deleted: true });
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_delete_project_circuit");
         }
       }
     );
@@ -980,7 +981,7 @@ const handler = createMcpHandler(
           }
           return jsonResult(result);
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_add_project_photo");
         }
       }
     );
@@ -1013,7 +1014,7 @@ const handler = createMcpHandler(
           }
           return jsonResult(result);
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_add_project_inline_image");
         }
       }
     );
@@ -1046,7 +1047,7 @@ const handler = createMcpHandler(
           }
           return jsonResult({ ok: true });
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_set_project_cover_photo");
         }
       }
     );
@@ -1099,7 +1100,7 @@ const handler = createMcpHandler(
           }
           return jsonResult(result);
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_get_quote");
         }
       }
     );
@@ -1113,6 +1114,12 @@ const handler = createMcpHandler(
         description:
           "Creates a draft order against the user's account. The user is notified by email and must approve and pay via the returned confirmationUrl before the order is placed with the vendor. USD only. Idempotency is keyed on (user, idempotencyKey).",
         inputSchema: {
+          priceId: z
+            .string()
+            .min(1)
+            .describe(
+              "The priceId returned alongside this quote by materialize_get_quote — required so the server can re-verify the price against CraftCloud before charging."
+            ),
           quoteId: z.string().min(1),
           fileAssetId: z.string().uuid(),
           vendorId: z.string().min(1),
@@ -1153,6 +1160,7 @@ const handler = createMcpHandler(
             agentName: auth.tokenName,
             idempotencyKey: input.idempotencyKey,
             fileAssetId: input.fileAssetId,
+            priceId: input.priceId,
             quoteId: input.quoteId,
             vendorId: input.vendorId,
             vendorName: input.vendorName,
@@ -1221,7 +1229,7 @@ const handler = createMcpHandler(
                 }),
           });
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_create_order");
         }
       }
     );
@@ -1250,7 +1258,7 @@ const handler = createMcpHandler(
           }
           return jsonResult(result);
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_get_order");
         }
       }
     );
@@ -1275,7 +1283,7 @@ const handler = createMcpHandler(
           });
           return jsonResult({ orders });
         } catch (err) {
-          return scopeOrInternal(err);
+          return scopeOrInternal(err, "materialize_list_orders");
         }
       }
     );
@@ -1299,18 +1307,28 @@ const authedHandler = withMcpAuth(handler, verifyMaterializeToken, {
   required: true,
 });
 
-function scopeOrInternal(err: unknown) {
+/**
+ * SEC-6 — the internal branch used to echo `err.message` straight
+ * back to any PAT holder calling the tool. That leaks whatever a
+ * thrown Error happens to say (DB driver text, stack-adjacent
+ * details, etc.) to an external, only-scope-authenticated caller.
+ * Now it returns a fixed, non-identifying message and routes the
+ * real detail through `logError` (tagged per-tool via `context`) so
+ * it's still fully diagnosable server-side. The MissingScopeError
+ * branch is untouched — that message is deliberately actionable
+ * ("this token lacks scope X") and safe to return as-is.
+ */
+function scopeOrInternal(err: unknown, context: string) {
   if (err instanceof MissingScopeError) {
     return errorResult({
       code: "invalid_scope",
       message: err.message,
     });
   }
-  console.error("[mcp] tool error", err);
+  logError(`mcp.tool.${context}`, err);
   return errorResult({
     code: "internal",
-    message:
-      err instanceof Error ? err.message : "Internal error",
+    message: "Internal error",
     retryable: true,
   });
 }

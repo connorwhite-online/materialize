@@ -13,7 +13,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from features import (  # noqa: E402
     _extract_source_params,
     _label,
+    _local,
     _numeric_from_call,
+    _script_lineno,
+    _span_for_line,
+    _statement_spans,
     clear_features,
     finalize_features,
 )
@@ -57,6 +61,57 @@ def test_label():
 def test_finalize_empty_without_log():
     clear_features()
     assert finalize_features(None, None) == []
+
+
+SPAN_SRC = """from build123d import *
+wall = 2.4
+with BuildPart() as p:
+    Box(20, 20, 10)
+    fillet(
+        p.edges().group_by(Axis.Z)[-1],
+        3.5,
+    )
+result = p.part
+"""
+
+
+def test_statement_spans_smallest_enclosing():
+    spans = _statement_spans(SPAN_SRC)
+    # The multiline fillet call (lines 5-8) resolves to itself, not the
+    # enclosing with-block (lines 3-8).
+    assert _span_for_line(spans, 6) == [5, 8]
+    assert _span_for_line(spans, 4) == [4, 4]
+    assert _span_for_line(spans, 2) == [2, 2]
+    assert _span_for_line(spans, 99) is None
+
+
+def test_statement_spans_bad_source_is_empty():
+    assert _statement_spans("def broken(:") == []
+
+
+def test_script_lineno_from_exec_frame():
+    captured = []
+
+    def probe():
+        captured.append(_script_lineno())
+
+    ns = {"probe": probe}
+    exec(compile("x = 1\nprobe()\n", "<generated>", "exec"), ns, ns)  # noqa: S102
+    assert captured == [2]
+
+
+def test_finalize_emits_span_for_logged_line():
+    clear_features()
+    _local.source = SPAN_SRC
+    _local.features = [
+        {"op": "fillet", "params": {"radius": 3.5}, "face_hashes": set(), "line": 6},
+        # No line recorded → no span, still a feature.
+        {"op": "extrude", "params": {"amount": 10}, "face_hashes": set()},
+    ]
+    feats = finalize_features(None, None)
+    assert feats[0]["span"] == [5, 8]
+    assert "span" not in feats[1]
+    clear_features()
 
 
 def main() -> int:

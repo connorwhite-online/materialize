@@ -51,8 +51,35 @@ import {
 import { BREP_OUTPUT_FORMATS, type CadNetworksReport } from "@/lib/cad/types";
 import type { HarnessResult } from "@/lib/cad/harness";
 import { substituteParams, extractParams } from "@/components/cad/param-diff";
-import { parseFeatures } from "@/lib/cad/features";
+import {
+  parseFeatures,
+  bindFeatureParamNames,
+  substituteFeatureParams,
+  spliceStatementSpan,
+} from "@/lib/cad/features";
+import { completeText } from "@/lib/cad/model-client";
+import { extractCode } from "@/lib/cad/prompt";
 import { CAD_EXEMPLARS } from "@/lib/cad/knowledge/exemplars";
+import {
+  checkCadGenerateRateLimit,
+  type CadRateLimitResult,
+} from "@/app/api/cad/generate/rate-limit";
+
+/**
+ * Shared not-ok formatter for the three studio server actions below
+ * (runCadTemplate, rerunCadWithParams, reviseCadFeatureStatement) — mirrors
+ * the 429 text POST /api/cad/generate returns for the same limiter result
+ * (app/api/cad/generate/route.ts), minus the HTTP-specific Retry-After
+ * header (there's no response object here to hang it on).
+ */
+function rateLimitErrorMessage(
+  rate: Extract<CadRateLimitResult, { ok: false }>
+): string {
+  return (
+    `You've started ${rate.count} generations in the last ` +
+    `${rate.windowMinutes} minutes. Give it a moment and try again.`
+  );
+}
 
 // Generation itself lives in the jobs path (app/api/cad/generate ->
 // lib/cad/jobs.ts -> lib/cad/orchestrate.ts). The old inline generateCadModel
@@ -752,6 +779,14 @@ export async function runCadTemplate(input: {
   const user = (await currentUser()) as ClerkUserLike;
   if (!canUseTextToCad(primaryEmail(user))) return { error: "Not found" };
 
+  // Per-user frequency backstop (MTR-169): this action drives a real
+  // billed sidecar exec just like POST /api/cad/generate, so it must be
+  // gated by the same rate limiter — mirrors route.ts's check.
+  const rate = await checkCadGenerateRateLimit(userId);
+  if (!rate.ok) {
+    return { error: rateLimitErrorMessage(rate) };
+  }
+
   const exemplar = CAD_EXEMPLARS.find(
     (e) => e.id === input.exemplarId && e.verified
   );
@@ -836,7 +871,7 @@ export async function runCadTemplate(input: {
       "Template build failed.",
       source,
       1
-    ).catch(() => undefined);
+    ).catch((err) => logError("cad.persistGenerationFailure", err));
     return { error: "Could not build this template. Please try again." };
   }
 }
@@ -867,12 +902,27 @@ export interface RerunCadWithParamsResult {
 export async function rerunCadWithParams(input: {
   generationId: string;
   params: Record<string, number>;
+  /**
+   * When set, `params` are the feature's CONTROL keys (radius, amount, …)
+   * instead of top-level source names: resolution happens server-side
+   * against the stored feature (paramNames binding, or a unique numeric
+   * literal inside the feature's statement span — MTR-225).
+   */
+  featureId?: string;
 }): Promise<RerunCadWithParamsResult | { error: string }> {
   const { userId } = await auth();
   if (!userId) return { error: "Unauthorized" };
 
   const user = (await currentUser()) as ClerkUserLike;
   if (!canUseTextToCad(primaryEmail(user))) return { error: "Not found" };
+
+  // Per-user frequency backstop (MTR-169): this action drives a real
+  // billed sidecar exec just like POST /api/cad/generate, so it must be
+  // gated by the same rate limiter — mirrors route.ts's check.
+  const rate = await checkCadGenerateRateLimit(userId);
+  if (!rate.ok) {
+    return { error: rateLimitErrorMessage(rate) };
+  }
 
   const parentId = input.generationId?.trim();
   if (!parentId) return { error: "Not found" };
@@ -885,6 +935,7 @@ export async function rerunCadWithParams(input: {
       status: cadGenerations.status,
       engine: cadGenerations.engine,
       title: cadGenerations.title,
+      features: cadGenerations.features,
     })
     .from(cadGenerations)
     .where(
@@ -896,33 +947,61 @@ export async function rerunCadWithParams(input: {
     return { error: "Generation not found." };
   }
 
-  // Sanitize: finite numbers only, and only names that are real top-level
-  // params of this source. Unknown keys are dropped.
-  const allowed = extractParams(parent.sourceCode);
-  const params: Record<string, number> = {};
-  for (const [name, value] of Object.entries(input.params ?? {})) {
-    if (
-      name in allowed &&
-      typeof value === "number" &&
-      Number.isFinite(value)
-    ) {
-      params[name] = value;
+  let source: string;
+  let prompt: string;
+  if (input.featureId) {
+    // Feature-scoped edit (MTR-225): re-derive every binding from OUR copy of
+    // source + features — the client's draft can only move numbers that sit
+    // in verified positions (a bound top-level name, or the single matching
+    // literal inside the feature's own statement span).
+    const features = bindFeatureParamNames(
+      parseFeatures(parent.features),
+      parent.sourceCode
+    );
+    const feature = features.find((f) => f.id === input.featureId);
+    if (!feature) return { error: "Feature not found." };
+    const draft: Record<string, number> = {};
+    for (const [key, value] of Object.entries(input.params ?? {})) {
+      if (key in feature.params && typeof value === "number" && Number.isFinite(value)) {
+        draft[key] = value;
+      }
     }
-  }
-  if (Object.keys(params).length === 0) {
-    return { error: "No editable parameters to apply." };
-  }
+    const substituted = substituteFeatureParams(parent.sourceCode, feature, draft);
+    if (!substituted) return { error: "No editable parameters to apply." };
+    source = substituted.source;
+    const changed = substituted.applied
+      .map((key) => `${key} ${feature.params[key]} → ${draft[key]}`)
+      .slice(0, 3);
+    prompt = `Update ${feature.label}: ${changed.join(" · ")}`;
+  } else {
+    // Sanitize: finite numbers only, and only names that are real top-level
+    // params of this source. Unknown keys are dropped.
+    const allowed = extractParams(parent.sourceCode);
+    const params: Record<string, number> = {};
+    for (const [name, value] of Object.entries(input.params ?? {})) {
+      if (
+        name in allowed &&
+        typeof value === "number" &&
+        Number.isFinite(value)
+      ) {
+        params[name] = value;
+      }
+    }
+    if (Object.keys(params).length === 0) {
+      return { error: "No editable parameters to apply." };
+    }
 
-  const source = substituteParams(parent.sourceCode, params);
-  // Diff summary for the revision prompt line shown in history.
-  const changed = Object.entries(params)
-    .filter(([name, v]) => allowed[name] !== v)
-    .map(([name, v]) => `${name} ${allowed[name]} → ${v}`)
-    .slice(0, 3);
-  const prompt =
-    changed.length > 0
-      ? `Update params: ${changed.join(" · ")}`
-      : "Update params";
+    source = substituteParams(parent.sourceCode, params);
+    // Diff summary for the revision prompt line shown in history.
+    const changed = Object.entries(params)
+      .filter(([name, v]) => allowed[name] !== v)
+      .map(([name, v]) => `${name} ${allowed[name]} → ${v}`)
+      .slice(0, 3);
+    prompt =
+      changed.length > 0
+        ? `Update params: ${changed.join(" · ")}`
+        : "Update params";
+  }
 
   // Thread title for the revision's file name (root-row title fallback).
   let nameOverride: string | undefined;
@@ -1010,7 +1089,222 @@ export async function rerunCadWithParams(input: {
       "Param update failed.",
       source,
       1
-    ).catch(() => undefined);
+    ).catch((err) => logError("cad.persistGenerationFailure", err));
     return { error: "Could not apply those parameters. Please try again." };
+  }
+}
+
+/**
+ * Statement-repair contract for stmt-edit (MTR-225). Deliberately NOT the
+ * full SYSTEM_PROMPT: the model is editing ONE statement of a script that
+ * already builds — the FlexCAD/CAD-Editor locate-then-infill pattern. The
+ * splice + sidecar re-run is the correctness gate.
+ */
+const STMT_EDIT_SYSTEM = `You are editing ONE statement of a working build123d Python script.
+Rules:
+- Output ONLY a single Python code block containing the REPLACEMENT for the target statement. No prose.
+- Replace only the target statement; everything else in the script is pinned and will be kept verbatim.
+- Preserve the target's exact indentation so the replacement splices cleanly into its block.
+- Keep the same variable names and selector style (select from the named intermediate that created the geometry, not global part-wide queries).
+- Stay parametric: if the statement reads a top-level parameter, adjust the call — do not inline new magic numbers unless the change requires one.
+- The replacement should stay a small, local edit (a few lines) — if the request cannot be satisfied by editing this statement alone, output the closest local edit that moves toward it.`;
+
+/**
+ * Result of a statement-scoped LLM edit. `fallback: true` tells the studio
+ * the request should be retried as a normal chat revision (whole-script).
+ */
+export type ReviseCadFeatureStatementResult =
+  | RerunCadWithParamsResult
+  | { error: string; fallback?: boolean };
+
+/**
+ * Statement-scoped LLM repair (MTR-225): "make this fillet bigger" addressed
+ * at one feature chip edits ONLY that feature's statement span — the rest of
+ * the script is pinned verbatim. One small model call + one sidecar run; on
+ * any failure the caller falls back to the normal whole-script revision.
+ */
+export async function reviseCadFeatureStatement(input: {
+  generationId: string;
+  featureId: string;
+  instruction: string;
+}): Promise<ReviseCadFeatureStatementResult> {
+  const { userId } = await auth();
+  if (!userId) return { error: "Unauthorized" };
+
+  const user = (await currentUser()) as ClerkUserLike;
+  if (!canUseTextToCad(primaryEmail(user))) return { error: "Not found" };
+
+  // Per-user frequency backstop (MTR-169): this action drives a model
+  // completion + a real billed sidecar exec just like
+  // POST /api/cad/generate, so it must be gated by the same rate limiter —
+  // mirrors route.ts's check.
+  const rate = await checkCadGenerateRateLimit(userId);
+  if (!rate.ok) {
+    return { error: rateLimitErrorMessage(rate) };
+  }
+
+  const parentId = input.generationId?.trim();
+  const instruction = input.instruction?.trim();
+  if (!parentId || !instruction) return { error: "Not found" };
+  if (instruction.length > 500) {
+    return { error: "Keep step instructions under 500 characters." };
+  }
+
+  const [parent] = await db
+    .select({
+      id: cadGenerations.id,
+      sourceCode: cadGenerations.sourceCode,
+      threadId: cadGenerations.threadId,
+      status: cadGenerations.status,
+      engine: cadGenerations.engine,
+      title: cadGenerations.title,
+      features: cadGenerations.features,
+    })
+    .from(cadGenerations)
+    .where(
+      and(eq(cadGenerations.id, parentId), eq(cadGenerations.userId, userId))
+    )
+    .limit(1);
+
+  if (!parent || parent.status !== "succeeded" || !parent.sourceCode) {
+    return { error: "Generation not found." };
+  }
+  const feature = parseFeatures(parent.features).find(
+    (f) => f.id === input.featureId
+  );
+  if (!feature?.span) {
+    // No span recorded (older generation, or resolution failed) — the
+    // statement-scoped path can't run; the studio falls back to chat.
+    return { error: "This step can't be edited in place.", fallback: true };
+  }
+
+  const sourceLines = parent.sourceCode.split("\n");
+  const [start, end] = feature.span;
+  const numbered = sourceLines
+    .map((l, i) => {
+      const n = i + 1;
+      const mark = n >= start && n <= end ? ">>>" : "   ";
+      return `${mark} ${String(n).padStart(4)} | ${l}`;
+    })
+    .join("\n");
+  const editPrompt = [
+    `Script (lines marked >>> are the TARGET statement — step "${feature.label}"):`,
+    "```python",
+    numbered,
+    "```",
+    `Requested change to this step: ${instruction}`,
+    "Output the replacement for the marked statement only.",
+  ].join("\n\n");
+
+  let replacement: string;
+  try {
+    const text = await completeText({
+      system: STMT_EDIT_SYSTEM,
+      prompt: editPrompt,
+      role: "repair",
+    });
+    replacement = extractCode(text);
+  } catch (error) {
+    logError("reviseCadFeatureStatement.model", error);
+    return { error: "Couldn't generate the edit.", fallback: true };
+  }
+  // A statement edit is a few lines; a big blob means the model rewrote the
+  // script — reject and fall back rather than splicing an unknown quantity.
+  const spanLen = end - start + 1;
+  if (!replacement || replacement.split("\n").length > Math.max(spanLen + 8, 12)) {
+    return { error: "Edit came back too large for this step.", fallback: true };
+  }
+
+  const source = spliceStatementSpan(parent.sourceCode, feature.span, replacement);
+  if (!source) return { error: "This step can't be edited in place.", fallback: true };
+
+  const prompt = `Edit ${feature.label}: ${instruction}`;
+  let nameOverride: string | undefined;
+  if (parent.threadId) {
+    const [thread] = await db
+      .select({ title: cadThreads.title })
+      .from(cadThreads)
+      .where(eq(cadThreads.id, parent.threadId))
+      .limit(1);
+    nameOverride = thread?.title ?? parent.title ?? undefined;
+  } else {
+    nameOverride = parent.title ?? undefined;
+  }
+
+  const [row] = await db
+    .insert(cadGenerations)
+    .values({
+      userId,
+      prompt,
+      engine: parent.engine || "build123d",
+      status: "pending",
+      parentGenerationId: parent.id,
+      threadId: parent.threadId ?? null,
+    })
+    .returning({ id: cadGenerations.id });
+  const generationId = row.id;
+
+  try {
+    const run = await runCadCode(source, BREP_OUTPUT_FORMATS, undefined, {
+      engine: parent.engine || "build123d",
+    });
+    if (!run.ok) {
+      await persistGenerationFailure(
+        generationId,
+        run.error || "Step edit failed.",
+        source,
+        1
+      );
+      // The spliced script didn't build — hand the request to the normal
+      // whole-script revision path instead of iterating here.
+      return {
+        error: run.error || "That edit didn't build.",
+        fallback: true,
+      };
+    }
+
+    const result: HarnessResult = {
+      ok: true,
+      sourceCode: source,
+      attempts: 1,
+      run,
+      route: "stmt-edit",
+    };
+    const persisted = await persistGenerationSuccess({
+      userId,
+      generationId,
+      prompt,
+      isRoot: false,
+      nameOverride,
+      result,
+    });
+    if ("error" in persisted) return { error: persisted.error };
+
+    revalidatePath("/prometheus");
+    return {
+      generationId: persisted.generationId,
+      fileAssetId: persisted.fileAssetId,
+      renderUrl: persisted.renderUrl,
+      sourceCode: persisted.sourceCode,
+      parentGenerationId: parent.id,
+      parts: (persisted.parts ?? []).map((p) => ({
+        name: p.name,
+        fileAssetId: p.fileAssetId,
+      })),
+      projectSlug: persisted.projectSlug ?? null,
+      remeshed: persisted.remeshed ?? false,
+      networksReport: persisted.networksReport ?? null,
+      hasStep: persisted.hasStep ?? false,
+      features: parseFeatures(persisted.features),
+    };
+  } catch (error) {
+    logError("reviseCadFeatureStatement", error);
+    await persistGenerationFailure(
+      generationId,
+      "Step edit failed.",
+      source,
+      1
+    ).catch((err) => logError("cad.persistGenerationFailure", err));
+    return { error: "Could not apply that edit.", fallback: true };
   }
 }

@@ -24,7 +24,7 @@ import {
   organizationMembers,
 } from "@/lib/db/schema";
 import { eq, and, or, ne, desc, inArray, sql } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { nanoid } from "nanoid";
 import {
@@ -38,10 +38,20 @@ import { sanitizeRichHtml } from "@/lib/sanitize/sanitize-html";
 import { logError, isRedirectError } from "@/lib/logger";
 import {
   canWriteProject,
+  isProjectCollaborator,
   resolveOwnerForCreate,
   viewerCanAttachAllFiles,
 } from "@/lib/authorization";
 import { notifyCollaboratorAddedToProject } from "@/lib/notifications/notify";
+
+/**
+ * Cache tag for the idle-browse grid on app/(app)/files/page.tsx
+ * (PERF-16). Must match IDLE_BROWSE_CACHE_TAG there exactly — see the
+ * matching constant + comment in app/actions/files.ts for why this
+ * can't just be a shared import (page.tsx and "use server" files both
+ * reject the export shape that would require).
+ */
+const IDLE_BROWSE_CACHE_TAG = "idle-browse";
 
 /**
  * Projects the viewer can attach files to — their personal projects
@@ -143,36 +153,61 @@ export async function createProject(formData: FormData) {
     const visibility: "public" | "private" =
       parsed.data.visibility ?? "public";
 
-    const [project] = await db
-      .insert(projects)
-      .values({
-        userId,
-        organizationId,
-        name: parsed.data.name,
-        description: parsed.data.description,
-        buildGuide: parsed.data.buildGuide,
-        slug,
-        price: parsed.data.price,
-        license: parsed.data.license,
-        visibility,
-        tags: parsed.data.tags,
-        category: parsed.data.category,
-        designTags: parsed.data.designTags,
-        thumbnailUrl: parsed.data.thumbnailUrl,
-        repoUrl: parsed.data.repoUrl,
-        status: "published",
-      })
-      .returning();
+    // Sanitize before persisting so the column is clean for every
+    // consumer (emails, llms.txt, MCP responses), not just the
+    // sanitizing render path. Mirrors updateProjectBuildGuide. The
+    // schema already trims buildGuide down to undefined when empty, so
+    // this only runs sanitizeRichHtml when there's real content — a
+    // sanitized result that collapses to nothing (e.g. a script-only
+    // paste) still resolves to undefined, same as never submitting one.
+    const sanitizedBuildGuide = parsed.data.buildGuide
+      ? (await sanitizeRichHtml(parsed.data.buildGuide)).trim() || undefined
+      : parsed.data.buildGuide;
 
-    await db.insert(projectFiles).values(
-      parsed.data.fileIds.map((fileId, i) => ({
-        projectId: project.id,
-        fileId,
-        position: i,
-      }))
-    );
+    // Both inserts happen atomically — a failure between them (e.g. an
+    // FK violation from a file deleted after the viewerCanAttachAllFiles
+    // check above) must not leave a published, publicly-visible project
+    // with zero files.
+    const project = await db.transaction(async (tx) => {
+      const [p] = await tx
+        .insert(projects)
+        .values({
+          userId,
+          organizationId,
+          name: parsed.data.name,
+          description: parsed.data.description,
+          buildGuide: sanitizedBuildGuide,
+          slug,
+          price: parsed.data.price,
+          license: parsed.data.license,
+          visibility,
+          tags: parsed.data.tags,
+          category: parsed.data.category,
+          designTags: parsed.data.designTags,
+          thumbnailUrl: parsed.data.thumbnailUrl,
+          repoUrl: parsed.data.repoUrl,
+          status: "published",
+        })
+        .returning();
+
+      if (parsed.data.fileIds.length > 0) {
+        await tx.insert(projectFiles).values(
+          parsed.data.fileIds.map((fileId, i) => ({
+            projectId: p.id,
+            fileId,
+            position: i,
+          }))
+        );
+      }
+
+      return p;
+    });
 
     revalidatePath("/dashboard");
+    // New projects publish immediately (status: "published" above) —
+    // bust the idle-browse cache (PERF-16) so it shows up right away
+    // instead of waiting out the TTL.
+    updateTag(IDLE_BROWSE_CACHE_TAG);
     redirect(`/projects/${project.slug}`);
   } catch (error) {
     if (isRedirectError(error)) throw error;
@@ -392,6 +427,7 @@ export async function addFilesToProject(
 
     revalidatePath("/dashboard");
     revalidatePath(`/projects/${project.slug}`);
+    updateTag(IDLE_BROWSE_CACHE_TAG);
     return { success: true };
   } catch (error) {
     logError("addFilesToProject", error);
@@ -422,6 +458,7 @@ export async function removeFileFromProject(
 
     revalidatePath("/dashboard");
     revalidatePath(`/projects/${project.slug}`);
+    updateTag(IDLE_BROWSE_CACHE_TAG);
     return { success: true };
   } catch (error) {
     logError("removeFileFromProject", error);
@@ -497,6 +534,7 @@ export async function publishProject(projectId: string) {
       .where(eq(projects.id, projectId));
 
     revalidatePath("/dashboard");
+    updateTag(IDLE_BROWSE_CACHE_TAG);
   } catch (error) {
     logError("publishProject", error);
   }
@@ -516,6 +554,7 @@ export async function archiveProject(projectId: string) {
       .where(eq(projects.id, projectId));
 
     revalidatePath("/dashboard");
+    updateTag(IDLE_BROWSE_CACHE_TAG);
   } catch (error) {
     logError("archiveProject", error);
   }
@@ -561,6 +600,7 @@ export async function deleteProject(
         .where(eq(projects.id, projectId));
       revalidatePath(`/projects/${project.slug}`);
       revalidatePath("/dashboard");
+      updateTag(IDLE_BROWSE_CACHE_TAG);
       return {
         archived: true,
         reason: "has-buyers",
@@ -572,6 +612,7 @@ export async function deleteProject(
 
     revalidatePath(`/projects/${project.slug}`);
     revalidatePath("/dashboard");
+    updateTag(IDLE_BROWSE_CACHE_TAG);
     return { deleted: true };
   } catch (error) {
     logError("deleteProject", error);
@@ -597,6 +638,7 @@ export async function toggleProjectVisibility(projectId: string) {
       .where(eq(projects.id, projectId));
 
     revalidatePath("/dashboard");
+    updateTag(IDLE_BROWSE_CACHE_TAG);
     return { visibility: newVisibility };
   } catch (error) {
     logError("toggleProjectVisibility", error);
@@ -761,9 +803,16 @@ export async function removeProjectCollaborator(
 
 /**
  * Public reader for the project detail page. Returns the joined user
- * info so the avatar row renders without a follow-up query. Open to
- * anyone who can see the project — the detail page itself gates
- * visibility before calling this.
+ * info so the avatar row renders without a follow-up query.
+ *
+ * This is an independently invokable server action — a caller can hit
+ * it directly with any project id, not just through the detail page —
+ * so it gates visibility itself rather than trusting the caller to
+ * have already checked. Public + published projects stay open to
+ * anyone; everything else requires the viewer to have write access
+ * (owner / org member / collaborator) OR to already be a collaborator
+ * on the row (covers the case where a future role split makes some
+ * collaborators read-only).
  */
 export async function listProjectCollaborators(projectId: string): Promise<
   Array<{
@@ -776,6 +825,33 @@ export async function listProjectCollaborators(projectId: string): Promise<
   }>
 > {
   try {
+    const [projectRow] = await db
+      .select({
+        status: projects.status,
+        visibility: projects.visibility,
+        userId: projects.userId,
+        organizationId: projects.organizationId,
+      })
+      .from(projects)
+      .where(eq(projects.id, projectId))
+      .limit(1);
+    if (!projectRow) return [];
+
+    const isPublic =
+      projectRow.status === "published" && projectRow.visibility === "public";
+    if (!isPublic) {
+      const { userId } = await auth();
+      if (!userId) return [];
+      const access = await canWriteProject(userId, projectId);
+      if (!access.ok) {
+        const { collaborator } = await isProjectCollaborator(
+          userId,
+          projectId
+        );
+        if (!collaborator) return [];
+      }
+    }
+
     const rows = await db
       .select({
         id: users.id,

@@ -3,7 +3,7 @@
 import { useCallback, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createDraftFileForPrint } from "@/app/actions/files";
-import { reportClientError } from "@/lib/observability/report-client-error";
+import { uploadFileToR2 } from "./upload-file-to-r2";
 
 export type PrintFlowPhase = "idle" | "uploading" | "saving";
 
@@ -40,53 +40,14 @@ export function useStartPrintFlow(): StartPrintFlowResult {
           setPhase("uploading");
           setProgress(0);
 
-          const presignRes = await fetch("/api/upload/presign", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              filename: file.name,
-              contentType: "application/octet-stream",
-              fileSize: file.size,
-            }),
+          // Presign + PUT to R2 with progress (shared helper — MONEY-3).
+          const uploaded = await uploadFileToR2({
+            file,
+            kind: "authed-print",
+            onProgress: setProgress,
           });
-          if (!presignRes.ok) {
-            const data = await presignRes.json().catch(() => ({}));
-            throw new Error(
-              data.error || `Presign failed (${presignRes.status})`
-            );
-          }
-          const { uploadUrl, storageKey, format: serverFormat } =
-            (await presignRes.json()) as {
-              uploadUrl: string;
-              storageKey: string;
-              format: typeof format;
-            };
-
-          await new Promise<void>((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhr.upload.addEventListener("progress", (ev) => {
-              if (ev.lengthComputable) {
-                setProgress(Math.round((ev.loaded / ev.total) * 100));
-              }
-            });
-            xhr.addEventListener("load", () => {
-              if (xhr.status >= 200 && xhr.status < 300) resolve();
-              else {
-                reportClientError(
-                  "upload.r2-put-failed",
-                  new Error(`R2 upload failed (${xhr.status})`),
-                  { status: xhr.status, kind: "authed-print", fileSize: file.size }
-                );
-                reject(new Error(`R2 upload failed (${xhr.status})`));
-              }
-            });
-            xhr.addEventListener("error", () =>
-              reject(new Error("Network error uploading to R2."))
-            );
-            xhr.open("PUT", uploadUrl);
-            xhr.setRequestHeader("Content-Type", "application/octet-stream");
-            xhr.send(file);
-          });
+          if ("error" in uploaded) throw new Error(uploaded.error);
+          const { storageKey, format: serverFormat } = uploaded;
 
           setPhase("saving");
           const result = await createDraftFileForPrint({

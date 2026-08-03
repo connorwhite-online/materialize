@@ -89,6 +89,10 @@ async function main() {
   const referencedRows = (await sql`
     SELECT storage_key FROM file_assets
     UNION
+    -- Studio-generated STEP siblings (MTR-196) live under uploads/ and are
+    -- referenced only by step_storage_key.
+    SELECT step_storage_key FROM file_assets WHERE step_storage_key IS NOT NULL
+    UNION
     SELECT i.storage_key
     FROM ownership_claim_intents i
     LEFT JOIN disputes d ON d.claim_intent_id = i.id

@@ -47,12 +47,28 @@ const mockCreateCart = vi.fn((..._args: unknown[]) =>
     >;
   })
 );
+// MTR-130: getPrice(priceId) is the source of truth checkoutVendorGroup
+// reconciles each cart item's materialPrice (and, per MONEY-1, its
+// quantity) against — but only when the item carries a priceId (legacy
+// rows, the makeCartItem() default, don't and are skipped — see the
+// reconciliation tests below). quantity: 1 matches makeCartItem()'s
+// default quantity so tests that don't care about the quantity guard
+// reconcile cleanly.
+const mockGetPrice = vi.fn((..._args: unknown[]) =>
+  Promise.resolve({
+    priceId: "price-1",
+    allComplete: true,
+    quotes: [{ quoteId: "quote-1", price: 10, quantity: 1, currency: "USD" }],
+    shipping: [],
+  })
+);
 
 vi.mock("@/lib/craftcloud/client", () => ({
   createCart: (...args: unknown[]) => mockCreateCart(...args),
   createOrder: vi.fn(),
   createStripeCheckout: vi.fn(),
   getOrderStatus: vi.fn(),
+  getPrice: (...args: unknown[]) => mockGetPrice(...args),
   CraftCloudApiError: MockCraftCloudApiError,
 }));
 
@@ -155,7 +171,7 @@ describe("checkoutVendorGroup", () => {
     expect(mockCreateCart).not.toHaveBeenCalled();
   });
 
-  it("happy path: creates the CraftCloud cart, inserts order + items, deletes cart rows", async () => {
+  it("happy path: creates the CraftCloud cart, inserts order + items, LEAVES cart rows alone (MONEY-2)", async () => {
     cartItemsRows = [makeCartItem()];
 
     const result = await checkoutVendorGroup("vendor-1");
@@ -202,7 +218,99 @@ describe("checkoutVendorGroup", () => {
       }),
     ]);
 
-    expect(deleteWhere).toHaveBeenCalledTimes(1);
+    // MONEY-2: cartItems now survive checkoutVendorGroup — an
+    // abandoned checkout (order created, Stripe session never
+    // completed) must not lose the cart. Clearing is deferred to the
+    // Stripe webhook's successful-placement branch
+    // (lib/stripe/handle-print-order-payment.ts).
+    expect(deleteWhere).not.toHaveBeenCalled();
+  });
+
+  // MTR-130 — cart rows carrying a priceId get their materialPrice
+  // re-derived from CraftCloud (getPrice(priceId)) instead of trusted
+  // as written. Rows without one (the makeCartItem() default, used by
+  // every test above) are legacy/unreconcilable and skipped.
+  it("MTR-130: rejects checkout when a priced cart item's materialPrice was tampered", async () => {
+    cartItemsRows = [
+      makeCartItem({ priceId: "price-1", quoteId: "quote-1", materialPrice: 100 }),
+    ];
+
+    const result = await checkoutVendorGroup("vendor-1");
+
+    if (!("error" in result)) throw new Error("expected error");
+    expect(result.error).toMatch(/pricing has changed|refresh/i);
+    expect(mockCreateCart).not.toHaveBeenCalled();
+  });
+
+  it("MTR-130: a priced cart item matching CraftCloud's quote checks out normally", async () => {
+    cartItemsRows = [
+      makeCartItem({ priceId: "price-1", quoteId: "quote-1", materialPrice: 1000 }),
+    ];
+
+    const result = await checkoutVendorGroup("vendor-1");
+
+    expect(result).toEqual({ orderId: "order-vg-1", cartId: "cart-vg-1" });
+    const itemsInsert = findInsert("printOrderItems");
+    expect(itemsInsert![1]).toEqual([
+      expect.objectContaining({ materialSubtotal: 1000 }),
+    ]);
+  });
+
+  it("MTR-130: a legacy cart item with no priceId is trusted as-is (best-effort, not blocked)", async () => {
+    cartItemsRows = [makeCartItem({ priceId: undefined, materialPrice: 1000 })];
+
+    const result = await checkoutVendorGroup("vendor-1");
+
+    expect(result).toEqual({ orderId: "order-vg-1", cartId: "cart-vg-1" });
+    expect(mockGetPrice).not.toHaveBeenCalled();
+  });
+
+  // MONEY-1: a cart line whose `quantity` column drifted from the
+  // quantity baked into its own `quoteId` (e.g. a fallback quantity
+  // write that didn't also refresh the quote) must hard-block
+  // checkout rather than bill `quantity * price` against a quote that
+  // encodes a different production quantity.
+  it("MONEY-1: rejects checkout when a priced cart item's quantity is out of sync with its quote's baked-in quantity", async () => {
+    mockGetPrice.mockResolvedValueOnce({
+      priceId: "price-1",
+      allComplete: true,
+      // Quote was minted for quantity 1, but the cart row's own
+      // quantity column has since moved to 4 without a fresh quote.
+      quotes: [{ quoteId: "quote-1", price: 10, quantity: 1, currency: "USD" }],
+      shipping: [],
+    });
+    cartItemsRows = [
+      makeCartItem({
+        priceId: "price-1",
+        quoteId: "quote-1",
+        materialPrice: 1000,
+        quantity: 4,
+      }),
+    ];
+
+    const result = await checkoutVendorGroup("vendor-1");
+
+    if (!("error" in result)) throw new Error("expected error");
+    expect(result.error).toMatch(/quantity is out of sync|refresh/i);
+    expect(mockCreateCart).not.toHaveBeenCalled();
+  });
+
+  it("MTR-130: quoteId missing from the priceId's quotes surfaces a re-quote error", async () => {
+    mockGetPrice.mockResolvedValueOnce({
+      priceId: "price-1",
+      allComplete: true,
+      quotes: [{ quoteId: "some-other-quote", price: 10, quantity: 1, currency: "USD" }],
+      shipping: [],
+    });
+    cartItemsRows = [
+      makeCartItem({ priceId: "price-1", quoteId: "quote-1", materialPrice: 1000 }),
+    ];
+
+    const result = await checkoutVendorGroup("vendor-1");
+
+    if (!("error" in result)) throw new Error("expected error");
+    expect(result.error).toMatch(/expired|pick a material/i);
+    expect(mockCreateCart).not.toHaveBeenCalled();
   });
 
   it("dedupes shipping across multiple cart items sharing a shippingId (no double-charge)", async () => {

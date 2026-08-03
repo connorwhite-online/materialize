@@ -39,9 +39,12 @@ export function sessionsAvailable(): boolean {
 function headers(): Record<string, string> {
   return {
     "Content-Type": "application/json",
-    ...(process.env.CAD_RUNNER_SECRET
-      ? { Authorization: `Bearer ${process.env.CAD_RUNNER_SECRET}` }
-      : {}),
+    // SEC-4 — sent unconditionally, not gated on the var being set.
+    // See the matching comment in runner-client.ts: lib/env.ts's boot
+    // validation requires CAD_RUNNER_SECRET whenever CAD_RUNNER_URL is
+    // live, and sessionFetch (the only caller of headers()) already
+    // refuses to run when sessions aren't available.
+    Authorization: `Bearer ${process.env.CAD_RUNNER_SECRET ?? ""}`,
   };
 }
 

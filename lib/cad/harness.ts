@@ -6,7 +6,13 @@ import {
   type PromptImage,
 } from "./model-client";
 import { runCadCode } from "./runner-client";
-import { SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, extractCode, gradeRun } from "./prompt";
+import {
+  buildSystemPrompt,
+  selectSystemPromptSections,
+  PLAN_SYSTEM_PROMPT,
+  extractCode,
+  gradeRun,
+} from "./prompt";
 import { buildKnowledgeBlock, type CadProcess } from "./knowledge";
 import { needsExchangerRecipe } from "./knowledge/exchanger-recipe";
 import {
@@ -76,7 +82,7 @@ export interface PriorFeedback {
  * its final solid to a variable named `result` (a build123d object). We
  * export STL (printable) + STEP (editable) from it.
  *
- * SYSTEM_PROMPT / extractCode / gradeRun live in ./prompt (pure, shared
+ * buildSystemPrompt / extractCode / gradeRun live in ./prompt (pure, shared
  * with the eval runner).
  */
 
@@ -432,6 +438,12 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
   const maxAttempts = input.maxAttempts ?? MAX_ATTEMPTS_DEFAULT;
   const useModel = hasModelCredentials();
 
+  // Router-gated system prompt (MTR-222): selected ONCE from the job's user
+  // prompt and reused for every attempt (fresh generate + every repair turn)
+  // so the assembled prefix stays byte-stable within the job — a sibling PR's
+  // prompt caching depends on that stability.
+  const systemPrompt = buildSystemPrompt(selectSystemPromptSections(input.prompt));
+
   // Swallow listener errors — progress is cosmetic, never load-bearing.
   const emit = (event: CadProgressEvent) => {
     try {
@@ -477,6 +489,15 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
   // The brief (fresh) or the caller's priorBrief (revision) rides the result
   // unchanged — persistence is the caller's job.
   const resultBrief = input.priorSourceCode ? input.priorBrief : (brief ?? undefined);
+  // Design intent for the aesthetic judge (MTR-223): the brief this run is
+  // actually built against — the fresh brief, or the revision's prior brief
+  // when it parses. Best-effort; undefined leaves the judge prompt unchanged.
+  const priorBriefParsed =
+    input.priorSourceCode && input.priorBrief != null
+      ? cadBriefSchema.safeParse(input.priorBrief)
+      : null;
+  const judgeBrief =
+    brief ?? (priorBriefParsed?.success ? priorBriefParsed.data : undefined);
 
   // Off-the-shelf part sourcing (MTR-200): resolve the brief's named components
   // to real envelopes ONCE, up front, and thread the block into every generate
@@ -625,7 +646,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
       ];
       const text = await timed(role, model, () =>
         completeText({
-          system: SYSTEM_PROMPT,
+          system: systemPrompt,
           prompt: conceptImg ? `${userPrompt}\n\n${CONCEPT_IMAGE_NOTE}` : userPrompt,
           model,
           role,
@@ -757,6 +778,10 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
         renderPng: lastRun.renderPng,
         renders: lastRun.renders,
         prompt: input.prompt,
+        // CoT-to-critic (MTR-223): the plan + brief this attempt was built
+        // against — context for intent-vs-outcome judging, never an excuse
+        // for visual defects.
+        intent: { plan, brief: judgeBrief },
         signal: input.signal,
       });
       const aestheticScore = judgement.available

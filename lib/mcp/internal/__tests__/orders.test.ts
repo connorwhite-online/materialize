@@ -106,11 +106,33 @@ vi.mock("@/lib/db", () => {
 });
 
 const createCartMock = vi.fn();
+// MTR-130: getPrice(priceId) is the source of truth
+// createAgentInitiatedOrder reconciles the agent-supplied
+// materialPriceCents against. Defaults to a quote matching baseInput
+// (quoteId "quote-1", $45.00 = 4500 cents) so the existing suite's
+// calls reconcile cleanly without per-test setup.
+const getPriceMock = vi.fn((..._args: unknown[]) =>
+  Promise.resolve({
+    priceId: "price-1",
+    allComplete: true,
+    quotes: [{ quoteId: "quote-1", price: 45, currency: "USD" }],
+    shipping: [],
+  })
+);
 vi.mock("@/lib/craftcloud/client", () => ({
   createCart: (...args: unknown[]) => createCartMock(...args),
+  getPrice: (...args: unknown[]) => getPriceMock(...args),
   CraftCloudApiError: class CraftCloudApiError extends Error {
+    status: number;
+    body: string;
+    constructor(status = 500, body = "") {
+      super(`mock error ${status}`);
+      this.status = status;
+      this.body = body;
+    }
     isQuoteExpired() {
-      return false;
+      if (this.status !== 400 && this.status !== 404) return false;
+      return this.body.toLowerCase().includes("quote");
     }
   },
 }));
@@ -161,6 +183,7 @@ const baseInput = {
   agentName: "Test Agent",
   idempotencyKey: "idempotency-key-1",
   fileAssetId: "asset-1",
+  priceId: "price-1",
   quoteId: "quote-1",
   vendorId: "vendor-1",
   vendorName: "Test Vendor",
@@ -187,6 +210,13 @@ beforeEach(() => {
   createCartMock.mockResolvedValue({
     cartId: "cart-abc",
     minimumProductionPrice: { "vendor-1": { productionFee: 0 } },
+  });
+  getPriceMock.mockReset();
+  getPriceMock.mockResolvedValue({
+    priceId: "price-1",
+    allComplete: true,
+    quotes: [{ quoteId: "quote-1", price: 45, currency: "USD" }],
+    shipping: [],
   });
   evaluateMock.mockReset();
   paymentIntentsCreateMock.mockReset();
@@ -457,5 +487,77 @@ describe("createAgentInitiatedOrder — feature flag on", () => {
     expect(createCartMock).not.toHaveBeenCalled();
     expect(paymentIntentsCreateMock).not.toHaveBeenCalled();
     expect(dbFixture.printOrderInserts).toHaveLength(0);
+  });
+});
+
+// MTR-130 — this is the highest-risk path for a tampered price: an
+// off-session auto-charge with no human present to notice a mismatched
+// total. The agent-supplied materialPriceCents must be re-derived from
+// CraftCloud (getPrice(priceId)) rather than trusted.
+describe("createAgentInitiatedOrder — MTR-130 price reconciliation", () => {
+  it("rejects a tampered (too-low) materialPriceCents instead of trusting the agent's request", async () => {
+    const { createAgentInitiatedOrder } = await import("../orders");
+    const result = await createAgentInitiatedOrder({
+      ...baseInput,
+      materialPriceCents: 100, // authoritative quote is 4500
+    });
+
+    expect("error" in result).toBe(true);
+    if ("error" in result) {
+      expect(result.error).toMatch(/pricing has changed|re-run/i);
+    }
+    // Must bail BEFORE reserving a CraftCloud cart for the tampered order.
+    expect(createCartMock).not.toHaveBeenCalled();
+    expect(dbFixture.printOrderInserts).toHaveLength(0);
+  });
+
+  it("accepts a materialPriceCents that matches CraftCloud's quote and persists the reconciled value", async () => {
+    const { createAgentInitiatedOrder } = await import("../orders");
+    const result = await createAgentInitiatedOrder(baseInput);
+
+    if ("error" in result) throw new Error(result.error);
+    expect(createCartMock).toHaveBeenCalled();
+    expect(dbFixture.printOrderInserts).toHaveLength(1);
+    expect(dbFixture.printOrderInserts[0]).toMatchObject({
+      materialSubtotal: 4500,
+    });
+  });
+
+  it("quoteId absent from CraftCloud's price response surfaces a clear re-quote error", async () => {
+    getPriceMock.mockResolvedValueOnce({
+      priceId: "price-1",
+      allComplete: true,
+      quotes: [{ quoteId: "some-other-quote", price: 45, currency: "USD" }],
+      shipping: [],
+    });
+
+    const { createAgentInitiatedOrder } = await import("../orders");
+    const result = await createAgentInitiatedOrder(baseInput);
+
+    expect("error" in result).toBe(true);
+    if ("error" in result) {
+      expect(result.error).toMatch(/expired|re-run/i);
+    }
+    expect(createCartMock).not.toHaveBeenCalled();
+  });
+
+  it("an expired priceId (CraftCloudApiError) surfaces the same actionable re-quote error", async () => {
+    const { CraftCloudApiError } = (await import(
+      "@/lib/craftcloud/client"
+    )) as unknown as {
+      CraftCloudApiError: new (status: number, body: string) => Error;
+    };
+    getPriceMock.mockRejectedValueOnce(
+      new CraftCloudApiError(404, "Quote not found or expired")
+    );
+
+    const { createAgentInitiatedOrder } = await import("../orders");
+    const result = await createAgentInitiatedOrder(baseInput);
+
+    expect("error" in result).toBe(true);
+    if ("error" in result) {
+      expect(result.error).toMatch(/expired|re-run/i);
+    }
+    expect(createCartMock).not.toHaveBeenCalled();
   });
 });

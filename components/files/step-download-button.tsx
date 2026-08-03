@@ -45,6 +45,7 @@ export function StepDownloadLink({
   size?: "default" | "sm";
 }) {
   const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
 
   // Known-absent: never render, so there's no slot to reflow.
   const known = available !== undefined;
@@ -58,11 +59,12 @@ export function StepDownloadLink({
     let active = true;
     getCadStepDownloadUrl({ fileAssetId })
       .then((res) => {
-        if (active && "url" in res && res.url) setUrl(res.url);
+        if (!active) return;
+        if ("url" in res && res.url) setUrl(res.url);
+        else setFailed(true);
       })
       .catch(() => {
-        // Best-effort: a failed probe simply leaves the button disabled (when
-        // we knew a STEP exists) or hidden (legacy probe path).
+        if (active) setFailed(true);
       });
     return () => {
       active = false;
@@ -74,6 +76,21 @@ export function StepDownloadLink({
   if (!known && !url) return null;
 
   const baseClass = cn(buttonVariants({ variant: "outline", size }), className);
+
+  // Told a STEP exists but the probe came back empty or errored: say so
+  // instead of holding a disabled control that looks like it's still loading.
+  if (failed) {
+    return (
+      <span
+        aria-disabled
+        title="The STEP file for this model couldn't be found."
+        className={cn(baseClass, "cursor-default opacity-60")}
+      >
+        <FileBoxIcon className="size-4 shrink-0" />
+        STEP unavailable
+      </span>
+    );
+  }
 
   // Known-present but the signed URL is still resolving: hold the slot with a
   // disabled button of the exact final width so enabling it causes no shift.

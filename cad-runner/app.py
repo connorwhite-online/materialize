@@ -1579,6 +1579,7 @@ def _render(mesh, elev: float = 22, azim: float = -55, figsize=(6.4, 4.8)) -> Op
     render is load-bearing now: the VLM aesthetic judge and the repair loop
     feed on it, so a real (if simple) Lambert-shaded view matters more
     than photoreal GL. Returns None on any failure — callers tolerate it."""
+    fig = None
     try:
         import numpy as np
         import matplotlib
@@ -1621,10 +1622,16 @@ def _render(mesh, elev: float = 22, azim: float = -55, figsize=(6.4, 4.8)) -> Op
         fig.savefig(
             buf, format="png", bbox_inches="tight", pad_inches=0, transparent=True
         )
-        plt.close(fig)
         return base64.b64encode(buf.getvalue()).decode()
     except Exception:  # noqa: BLE001
         return None
+    finally:
+        # Guarantee the Figure is released even when an exception fires
+        # between creation and the (now-removed) success-path close —
+        # in session mode (_session_worker) a leaked Figure per failed
+        # render accumulates toward the container memory cap.
+        if fig is not None:
+            plt.close(fig)
 
 
 def _render_section(mesh) -> Optional[str]:
@@ -2162,8 +2169,12 @@ def session_delete(session_id: str, request: Request) -> dict:
     return {"ok": True}
 
 
+# Sync `def` on purpose, same as the session endpoints above (see the
+# comment at their definition): FastAPI runs a sync path op on the
+# threadpool, so the blocking `out.get(timeout=...)` poll loop below doesn't
+# stall the event loop (and /health) the way it did as `async def` (CAD-10).
 @app.post("/run")
-async def run(req: RunRequest, request: Request) -> dict:
+def run(req: RunRequest, request: Request) -> dict:
     _check_auth(request)
     t0 = time.monotonic()
 
@@ -2211,7 +2222,11 @@ async def run(req: RunRequest, request: Request) -> dict:
         proc.join(5)
         if proc.is_alive():
             proc.kill()
-    proc.join()
+    # Bounded, per the comment above: a bare join() can hang the worker
+    # forever if the child wedges past SIGKILL (CAD-10). By this point the
+    # process is either already dead (this returns immediately) or was just
+    # killed, so 5s is only ever a safety margin, not the expected wait.
+    proc.join(5)
 
     ms = int((time.monotonic() - t0) * 1000)
     if payload is not None:

@@ -12,9 +12,15 @@ finalize returns [] on anything unexpected.
 
 from __future__ import annotations
 
+import ast
 import re
+import sys
 import threading
 from typing import Any, Callable, Optional
+
+# Filenames the runner compiles untrusted scripts under (app.py exec sites).
+# Stack walking keys on these to find the user-script line for an op call.
+_SCRIPT_FILENAMES = ("<generated>", "<session>")
 
 # Per-thread log so concurrent session children don't cross-contaminate.
 _local = threading.local()
@@ -225,6 +231,24 @@ def _label(op: str, params: dict[str, float]) -> str:
     return f"{pretty} {k}={v:g}"
 
 
+def _script_lineno() -> Optional[int]:
+    """Line in the exec'd user script that (transitively) made this call.
+
+    Walks outward from the current frame to the deepest frame whose filename
+    is one of the runner's script exec names — i.e. the user's own statement,
+    not build123d internals. Best-effort: None when not found.
+    """
+    try:
+        frame = sys._getframe(2)  # noqa: SLF001 — skip wrapped() + this helper
+        while frame is not None:
+            if frame.f_code.co_filename in _SCRIPT_FILENAMES:
+                return int(frame.f_lineno)
+            frame = frame.f_back
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 def _wrap_callable(original: Callable, op: str) -> Callable:
     def wrapped(*args, **kwargs):
         before = _face_hashes(_current_solid())
@@ -241,6 +265,7 @@ def _wrap_callable(original: Callable, op: str) -> Callable:
                 "op": op,
                 "params": params,
                 "face_hashes": new_faces,
+                "line": _script_lineno(),
             }
         )
         return result
@@ -261,7 +286,14 @@ def _wrap_hole_class(cls, op: str = "hole"):
         params = _numeric_from_call(args, kwargs, op)
         # Face hashes aren't meaningful mid-sketch — leave empty; finalize
         # still emits the chip so radius/depth are editable when bound.
-        _log().append({"op": op, "params": params, "face_hashes": set()})
+        _log().append(
+            {
+                "op": op,
+                "params": params,
+                "face_hashes": set(),
+                "line": _script_lineno(),
+            }
+        )
         return orig_init(self, *args, **kwargs)
 
     cls.__init__ = new_init
@@ -311,6 +343,33 @@ def ensure_feature_hooks(engine: str, source: str = "") -> None:
 install_feature_hooks = ensure_feature_hooks
 
 
+def _statement_spans(source: str) -> list[tuple[int, int]]:
+    """(lineno, end_lineno) for every statement node, innermost usable last.
+
+    Sorted by ascending span size so the FIRST hit when scanning for a line is
+    the smallest enclosing statement — the fillet() line inside a `with
+    BuildPart(...)` block, not the whole with-block.
+    """
+    try:
+        tree = ast.parse(source)
+    except Exception:  # noqa: BLE001 — span resolution is best-effort
+        return []
+    spans: list[tuple[int, int]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.stmt):
+            end = getattr(node, "end_lineno", None) or node.lineno
+            spans.append((int(node.lineno), int(end)))
+    spans.sort(key=lambda s: (s[1] - s[0], s[0]))
+    return spans
+
+
+def _span_for_line(spans: list[tuple[int, int]], line: int) -> Optional[list[int]]:
+    for start, end in spans:
+        if start <= line <= end:
+            return [start, end]
+    return None
+
+
 def finalize_features(shape, topo: Optional[dict] = None) -> list[dict]:
     """Resolve recorded ops → CadFeature dicts aligned with topo face ids."""
     raw = list(_log())
@@ -319,6 +378,7 @@ def finalize_features(shape, topo: Optional[dict] = None) -> list[dict]:
     try:
         hash_to_id = _hash_to_face_id(shape)
         source_params = _extract_source_params(_source())
+        stmt_spans = _statement_spans(_source())
         by_value: dict[float, list[str]] = {}
         for name, value in source_params.items():
             by_value.setdefault(value, []).append(name)
@@ -368,6 +428,11 @@ def finalize_features(shape, topo: Optional[dict] = None) -> list[dict]:
             }
             if param_names:
                 feat["paramNames"] = param_names
+            line = entry.get("line")
+            if isinstance(line, int) and line > 0:
+                span = _span_for_line(stmt_spans, line)
+                if span:
+                    feat["span"] = span
             features.append(feat)
         return features
     except Exception:  # noqa: BLE001

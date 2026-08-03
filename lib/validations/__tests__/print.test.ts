@@ -99,6 +99,7 @@ describe("quotesRequestSchema", () => {
 describe("printOrderSchema", () => {
   const validOrder = {
     fileAssetId: "3e8a1e2c-4b1a-4c1a-9f1a-1a1a1a1a1a1a",
+    priceId: "price-1",
     quoteId: "quote-1",
     vendorId: "vendor-1",
     materialConfigId: "mat-config-1",
@@ -169,5 +170,18 @@ describe("printOrderSchema", () => {
       currency: "BRL",
     });
     expect(result.success).toBe(false);
+  });
+
+  // MTR-130: priceId is what lets the server re-derive the
+  // authoritative price via getPrice() — a request without one can't
+  // be reconciled and must be rejected up front.
+  it("rejects a missing or empty priceId", () => {
+    const { priceId: _omit, ...withoutPriceId } = validOrder as typeof validOrder & {
+      priceId?: string;
+    };
+    expect(printOrderSchema.safeParse(withoutPriceId).success).toBe(false);
+    expect(
+      printOrderSchema.safeParse({ ...validOrder, priceId: "" }).success
+    ).toBe(false);
   });
 });

@@ -20,7 +20,8 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 import {
-  SYSTEM_PROMPT,
+  buildSystemPrompt,
+  selectSystemPromptSections,
   SYSTEM_PROMPT_CADQUERY,
   extractCode,
   gradeRun,
@@ -43,12 +44,27 @@ import { CAD_FEEDBACK_TAG_LABELS, type CadFeedbackTag } from "../../lib/cad/feed
 import type { CadRunResult } from "../../lib/cad/types";
 import { EVAL_CASES, type EvalCase, type EvalTier } from "./cases";
 import { gradeTurn, type EvalTurn, type TurnGrade } from "./turns";
+import {
+  caseComposite,
+  formatComposite,
+  isBrepExpectedTier,
+  isEditabilityGated,
+  runDeliveredBrep,
+  type CompositeSignals,
+} from "./composite";
 
 const RUNNER_URL = process.env.CAD_RUNNER_URL;
 // A/B the B-rep front-end: build123d (default) vs cadquery. Point CAD_RUNNER_URL
 // at the matching sidecar (cadquery runs in its own venv on another port).
 const ENGINE = process.env.CAD_EVAL_ENGINE === "cadquery" ? "cadquery" : "build123d";
-const SYSTEM = ENGINE === "cadquery" ? SYSTEM_PROMPT_CADQUERY : SYSTEM_PROMPT;
+// Router-gated system prompt (MTR-222), mirroring the harness: computed ONCE
+// per case (job) from the case's prompt and reused across that case's whole
+// revision chain so the assembled prefix is byte-stable within the job. The
+// cadquery A/B front-end is untouched — no gating, always the full variant.
+function systemPromptFor(prompt: string): string {
+  if (ENGINE === "cadquery") return SYSTEM_PROMPT_CADQUERY;
+  return buildSystemPrompt(selectSystemPromptSections(prompt));
+}
 const GEN_MODEL =
   process.env.CAD_MODEL_IMPLEMENT ||
   process.env.CAD_MODEL_DEFAULT ||
@@ -90,18 +106,23 @@ function buildUserPrompt(prompt: string): string {
 }
 
 /** One generation from a fully-built user prompt (fresh or revision framing). */
-async function generateRaw(userPrompt: string): Promise<string> {
+async function generateRaw(userPrompt: string, system: string): Promise<string> {
   const msg = await client.messages.create({
     model: GEN_MODEL,
     max_tokens: 8192,
-    system: SYSTEM,
+    // Same breakpoint shape as completeText (MTR-221): the gated system prompt
+    // (~1.7-3.2k tokens) is byte-stable across a case's revision chain, so every
+    // call after the first reads it from cache. The judge call sites stay
+    // uncached on purpose — CRITIQUE_RUBRIC (~442 tokens) is below the model's
+    // 1024-token cache minimum, so a marker there would silently no-op.
+    system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
     messages: [{ role: "user", content: userPrompt }],
   });
   return extractCode(textOf(msg));
 }
 
-async function generate(prompt: string): Promise<string> {
-  return generateRaw(buildUserPrompt(prompt));
+async function generate(prompt: string, system: string): Promise<string> {
+  return generateRaw(buildUserPrompt(prompt), system);
 }
 
 /**
@@ -273,20 +294,48 @@ interface CaseResult {
   negResults: NegativeCheckResult[] | null;
   /** MTR-183 per-turn grades for a revision chain; empty for single-shot cases. */
   turnGrades: TurnGrade[];
+  /** MTR-228 editability-gated harmonic composite (0..1). */
+  composite: number;
+  /** True when the composite was zeroed by the editability gate (remeshed / no B-rep). */
+  editabilityGated: boolean;
+}
+
+/**
+ * MTR-228 composite signals for a completed run. Validity is re-derived via
+ * `gradeRun(run)` WITHOUT the legacy expectedDims, so an off-target dimension
+ * degrades the accuracy fraction instead of zeroing the whole geometry axis.
+ */
+function compositeSignals(
+  c: EvalCase,
+  run: CadRunResult,
+  dimResults: DimensionCheckResult[],
+  negResults: NegativeCheckResult[] | null
+): CompositeSignals {
+  const dims = summarizeDimensionChecks(dimResults);
+  return {
+    valid: gradeRun(run).pass,
+    dimsRan: dims.ran,
+    dimsPassed: dims.passed,
+    negTotal: negResults?.length ?? 0,
+    negClean: negResults?.filter((n) => !n.violated).length ?? 0,
+    brepExpected: isBrepExpectedTier(c.tier),
+    brepDelivered: runDeliveredBrep(run),
+  };
 }
 
 /** Run a case's revision chain (MTR-183), grading each turn deterministically. */
 async function runRevisionChain(
   c: EvalCase,
   turn0Code: string,
-  turn0Run: CadRunResult
+  turn0Run: CadRunResult,
+  system: string
 ): Promise<TurnGrade[]> {
   const grades: TurnGrade[] = [];
   let priorCode = turn0Code;
   let priorRun = turn0Run;
   for (const turn of c.turns ?? []) {
     try {
-      const nextCode = await generateRaw(buildRevisePrompt(turn, priorCode));
+      const nextCode = await generateRaw(buildRevisePrompt(turn, priorCode), system);
       const nextRun = await runCode(nextCode);
       grades.push(
         gradeTurn({ prevCode: priorCode, nextCode, prevRun: priorRun, nextRun, assert: turn.assert })
@@ -324,13 +373,23 @@ function turnTag(r: CaseResult): string {
   const chain = passed === r.turnGrades.length ? "✓" : "✗";
   return `  turns ${passed}/${r.turnGrades.length} ${chain}`;
 }
+/** Per-case: MTR-228 composite, flagging an editability-gate zero. */
+function compositeTag(r: CaseResult): string {
+  return (
+    `  composite ${formatComposite(r.composite)}` +
+    (r.editabilityGated ? " (remeshed — no B-rep, gated to 0)" : "")
+  );
+}
 
 async function main() {
   const results: CaseResult[] = [];
   for (const c of EVAL_CASES) {
     process.stdout.write(`• ${c.id} … `);
     try {
-      const code = await generate(c.prompt);
+      // Compute once per case (job) so the whole revision chain shares the
+      // same byte-stable system prompt, mirroring the harness.
+      const system = systemPromptFor(c.prompt);
+      const code = await generate(c.prompt, system);
       const run = await runCode(code);
       const grade = gradeRun(run, c.expectedDims);
       // Dimension contract (MTR-197 machinery — same code path as the harness).
@@ -343,8 +402,18 @@ async function main() {
       // Multi-turn revision chain (MTR-183) — only meaningful once turn 0 is a
       // valid solid to revise; a broken base is a base failure, not a turn one.
       const turnGrades =
-        c.turns?.length && grade.pass ? await runRevisionChain(c, code, run) : [];
-      const cr: CaseResult = { c, grade, aesthetic, dimResults, negResults, turnGrades };
+        c.turns?.length && grade.pass ? await runRevisionChain(c, code, run, system) : [];
+      const signals = compositeSignals(c, run, dimResults, negResults);
+      const cr: CaseResult = {
+        c,
+        grade,
+        aesthetic,
+        dimResults,
+        negResults,
+        turnGrades,
+        composite: caseComposite(signals),
+        editabilityGated: isEditabilityGated(signals),
+      };
       results.push(cr);
       const tag = aesthetic == null ? "" : `  aesthetic ${aesthetic}/100`;
       console.log(
@@ -352,7 +421,8 @@ async function main() {
           tag +
           dimTag(cr) +
           negTag(cr) +
-          turnTag(cr)
+          turnTag(cr) +
+          compositeTag(cr)
       );
     } catch (err) {
       results.push({
@@ -362,6 +432,8 @@ async function main() {
         dimResults: [],
         negResults: null,
         turnGrades: [],
+        composite: 0,
+        editabilityGated: false,
       });
       console.log(`ERROR (${err})`);
     }
@@ -369,7 +441,8 @@ async function main() {
 
   // Scorecard by tier: validity pass-rate + mean design-quality score +
   // dimension accuracy (passed/ran across the tier, honesty-railed) + negative
-  // checks clean (cases with all forbidden properties absent).
+  // checks clean (cases with all forbidden properties absent) + the MTR-228
+  // editability-gated harmonic composite (see scripts/evals/composite.ts).
   const tiers: EvalTier[] = [
     "primitive",
     "bracket",
@@ -397,8 +470,12 @@ async function main() {
     const clean = judged.filter((r) => r.negResults!.every((n) => !n.violated)).length;
     return `${clean}/${judged.length}`;
   };
+  // MTR-228: mean editability-gated harmonic composite. Zeros (invalid, spec
+  // violated, remesh-gated) stay in the mean — that is the point.
+  const meanComposite = (rs: CaseResult[]): string =>
+    formatComposite(rs.reduce((a, r) => a + r.composite, 0) / rs.length);
   console.log(
-    `\n=== Scorecard [engine: ${ENGINE}, model: ${GEN_MODEL}] (validity | aesthetic | dim-acc | neg-clean) ===`
+    `\n=== Scorecard [engine: ${ENGINE}, model: ${GEN_MODEL}] (validity | aesthetic | dim-acc | neg-clean | composite) ===`
   );
   for (const tier of tiers) {
     const inTier = results.filter((r) => r.c.tier === tier);
@@ -408,7 +485,7 @@ async function main() {
       inTier.map((r) => r.aesthetic).filter((x): x is number => x != null)
     );
     console.log(
-      `${tier.padEnd(18)} ${pass}/${inTier.length}    ${(a == null ? "—" : `${a}/100`).padEnd(8)} ${dimAccuracy(inTier).padEnd(8)} ${negClean(inTier)}`
+      `${tier.padEnd(18)} ${pass}/${inTier.length}    ${(a == null ? "—" : `${a}/100`).padEnd(8)} ${dimAccuracy(inTier).padEnd(8)} ${negClean(inTier).padEnd(8)} ${meanComposite(inTier)}`
     );
   }
   const passed = results.filter((r) => r.grade.pass).length;
@@ -416,7 +493,7 @@ async function main() {
     results.map((r) => r.aesthetic).filter((x): x is number => x != null)
   );
   console.log(
-    `${"TOTAL".padEnd(18)} ${passed}/${results.length}    ${(meanA == null ? "—" : `${meanA}/100`).padEnd(8)} ${dimAccuracy(results).padEnd(8)} ${negClean(results)}`
+    `${"TOTAL".padEnd(18)} ${passed}/${results.length}    ${(meanA == null ? "—" : `${meanA}/100`).padEnd(8)} ${dimAccuracy(results).padEnd(8)} ${negClean(results).padEnd(8)} ${meanComposite(results)}`
   );
 
   // Revision scorecard (MTR-183): score the CONVERSATION, not just the first

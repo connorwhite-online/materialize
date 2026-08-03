@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { LICENSE_ENUM_VALUES } from "@/lib/licenses";
 import { CATEGORY_IDS } from "@/lib/categories";
+import { isHttpUrl, HTTP_URL_SCHEME_MESSAGE } from "@/lib/validations/url";
 
 /**
  * Optional curated browse category. Empty string (from a "None"
@@ -120,7 +121,11 @@ export const profileSchema = z.object({
 
 export const socialLinkSchema = z.object({
   platform: z.string(),
-  url: z.string().url("Must be a valid URL"),
+  // SEC-B1 — rendered raw into href= on the public profile
+  // (components/profile/user-profile-view.tsx); a bare z.string().url()
+  // accepts `javascript:` URIs, which is a stored-XSS primitive. Pin
+  // to http(s) only, mirroring bomItemSchema.sourceUrl.
+  url: z.string().url("Must be a valid URL").refine(isHttpUrl, HTTP_URL_SCHEME_MESSAGE),
 });
 
 export const socialLinksSchema = z.array(socialLinkSchema).max(6);

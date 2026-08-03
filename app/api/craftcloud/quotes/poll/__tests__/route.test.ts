@@ -152,6 +152,67 @@ describe("GET /api/craftcloud/quotes/poll", () => {
     expect(json.quotes[0].quoteId).toBe("q1");
   });
 
+  it("escalates via logError when dropped-config ratio exceeds the threshold", async () => {
+    // 3 of 4 quotes reference a materialConfigId not in the cached
+    // catalog — 75% dropped, well past the 25% threshold.
+    mockGetPrice.mockResolvedValue({
+      priceId: "price-1",
+      allComplete: true,
+      quotes: [
+        ONE_QUOTE,
+        { ...ONE_QUOTE, quoteId: "q2", materialConfigId: "unknown-1" },
+        { ...ONE_QUOTE, quoteId: "q3", materialConfigId: "unknown-2" },
+        { ...ONE_QUOTE, quoteId: "q4", materialConfigId: "unknown-3" },
+      ],
+      shippings: [],
+    });
+
+    const res = await GET(pollRequest("?priceId=price-1"));
+    expect(res.status).toBe(200);
+
+    expect(mockLogError).toHaveBeenCalledOnce();
+    expect(mockLogError.mock.calls[0][0]).toBe("quotes.poll.droppedConfigs");
+    const loggedError = mockLogError.mock.calls[0][1] as Error;
+    expect(loggedError).toBeInstanceOf(Error);
+    expect(loggedError.message).toContain("3/4");
+    expect((loggedError.cause as Record<string, unknown>).priceId).toBe(
+      "price-1"
+    );
+  });
+
+  it("does not escalate a low, ordinary drop ratio", async () => {
+    // 1 of 5 dropped — 20%, under the 25% threshold.
+    mockGetPrice.mockResolvedValue({
+      priceId: "price-1",
+      allComplete: true,
+      quotes: [
+        ONE_QUOTE,
+        { ...ONE_QUOTE, quoteId: "q2" },
+        { ...ONE_QUOTE, quoteId: "q3" },
+        { ...ONE_QUOTE, quoteId: "q4" },
+        { ...ONE_QUOTE, quoteId: "q5", materialConfigId: "unknown-1" },
+      ],
+      shippings: [],
+    });
+
+    const res = await GET(pollRequest("?priceId=price-1"));
+    expect(res.status).toBe(200);
+    expect(mockLogError).not.toHaveBeenCalled();
+  });
+
+  it("does not escalate when rawCount is 0 (nothing to drop yet)", async () => {
+    mockGetPrice.mockResolvedValue({
+      priceId: "price-1",
+      allComplete: false,
+      quotes: [],
+      shippings: [],
+    });
+
+    const res = await GET(pollRequest("?priceId=price-1"));
+    expect(res.status).toBe(200);
+    expect(mockLogError).not.toHaveBeenCalled();
+  });
+
   it("rejects a missing priceId with 400 and does not call upstream", async () => {
     const res = await GET(pollRequest(""));
     expect(res.status).toBe(400);

@@ -8,6 +8,57 @@ import { revalidatePath } from "next/cache";
 import { addToCartSchema } from "@/lib/validations/print";
 import { userCanPrintAsset } from "@/lib/entitlement";
 import { logError } from "@/lib/logger";
+import { getPrice, CraftCloudApiError } from "@/lib/craftcloud/client";
+
+const QUOTE_EXPIRED_ERROR =
+  "This quote has expired. Please pick a material again — prices may have changed.";
+
+// Rounding-only tolerance — see the identical constant + rationale in
+// app/actions/print.ts (duplicated rather than extracted into a shared
+// helper; MTR-162 tracks that extraction as a deliberate follow-up
+// AFTER this money-critical change lands). MTR-130.
+const PRICE_RECONCILE_TOLERANCE_CENTS = 1;
+
+/**
+ * Re-derive the authoritative per-unit material price for a quote
+ * from CraftCloud instead of trusting the client-supplied
+ * materialPrice. See app/actions/print.ts's twin for the full
+ * rationale — kept in sync there.
+ */
+async function reconcileMaterialPrice(params: {
+  priceId: string;
+  quoteId: string;
+  claimedPriceCents: number;
+}): Promise<{ ok: true; priceCents: number } | { ok: false; error: string }> {
+  let snapshot;
+  try {
+    snapshot = await getPrice(params.priceId);
+  } catch (error) {
+    if (error instanceof CraftCloudApiError && error.isQuoteExpired()) {
+      return { ok: false, error: QUOTE_EXPIRED_ERROR };
+    }
+    throw error;
+  }
+
+  const quote = snapshot.quotes?.find((q) => q.quoteId === params.quoteId);
+  if (!quote) {
+    return { ok: false, error: QUOTE_EXPIRED_ERROR };
+  }
+
+  const authoritativeCents = Math.round(quote.price * 100);
+  if (
+    Math.abs(authoritativeCents - params.claimedPriceCents) >
+    PRICE_RECONCILE_TOLERANCE_CENTS
+  ) {
+    return {
+      ok: false,
+      error:
+        "Pricing has changed since you selected this option. Please refresh and try again.",
+    };
+  }
+
+  return { ok: true, priceCents: authoritativeCents };
+}
 
 export type CartItemWithMeta = {
   id: string;
@@ -30,6 +81,7 @@ export type CartItemWithMeta = {
 
 export async function addToCart(params: {
   fileAssetId: string;
+  priceId: string;
   quoteId: string;
   vendorId: string;
   vendorName?: string;
@@ -56,6 +108,17 @@ export async function addToCart(params: {
     if (!(await userCanPrintAsset(userId, data.fileAssetId))) {
       return { error: "File not found" };
     }
+
+    // Re-derive the authoritative per-unit price from CraftCloud
+    // instead of trusting the client-supplied materialPrice — a
+    // tampered add-to-cart write must not persist into the cart row
+    // that checkoutVendorGroup later sums into the charge (MTR-130).
+    const reconciled = await reconcileMaterialPrice({
+      priceId: data.priceId,
+      quoteId: data.quoteId,
+      claimedPriceCents: Math.round(data.materialPrice * 100),
+    });
+    if (!reconciled.ok) return { error: reconciled.error };
 
     // Reject cart lines in a different currency than what's already
     // in the cart. CraftCloud quotes are currency-scoped and
@@ -116,13 +179,14 @@ export async function addToCart(params: {
       .values({
         userId,
         fileAssetId: data.fileAssetId,
+        priceId: data.priceId,
         quoteId: data.quoteId,
         vendorId: data.vendorId,
         vendorName: data.vendorName ?? null,
         materialConfigId: data.materialConfigId,
         shippingId: shippingIdToUse,
         quantity: data.quantity,
-        materialPrice: Math.round(data.materialPrice * 100),
+        materialPrice: reconciled.priceCents,
         shippingPrice: shippingPriceCents,
         currency: data.currency,
         countryCode: data.countryCode,
@@ -252,6 +316,16 @@ export async function repriceCartItem(params: {
       .set({
         quantity: params.quantity,
         quoteId: params.quoteId,
+        // The caller re-quotes at the new quantity but doesn't hand
+        // back the priceId that quote came from — null it out rather
+        // than leaving the OLD priceId paired with the NEW quoteId.
+        // checkoutVendorGroup's reconciliation (MTR-130) looks up
+        // quoteId inside getPrice(priceId)'s response; a stale
+        // priceId would never contain the new quoteId and would
+        // false-reject checkout. A null priceId instead falls into
+        // the same best-effort "can't reconcile, trust as written"
+        // bucket as any other legacy row.
+        priceId: null,
         materialPrice: Math.round(params.materialPrice * 100),
         updatedAt: new Date(),
       })

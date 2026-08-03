@@ -135,7 +135,6 @@ function CartPanelInner({ checkoutModel }: { checkoutModel: CheckoutModel }) {
     close,
     removeItem,
     removeLocalItem,
-    updateQuantity,
     updateLocalItemQuantity,
     materializeLocalItems,
     materializing,
@@ -221,7 +220,6 @@ function CartPanelInner({ checkoutModel }: { checkoutModel: CheckoutModel }) {
             hasLocalItems={localItems.length > 0}
             removeItem={removeItem}
             removeLocalItem={removeLocalItem}
-            updateQuantity={updateQuantity}
             updateLocalItemQuantity={updateLocalItemQuantity}
             materializeLocalItems={materializeLocalItems}
             materializing={materializing}
@@ -239,7 +237,6 @@ function CartItemsList({
   hasLocalItems,
   removeItem,
   removeLocalItem,
-  updateQuantity,
   updateLocalItemQuantity,
   materializeLocalItems,
   materializing,
@@ -250,7 +247,6 @@ function CartItemsList({
   hasLocalItems: boolean;
   removeItem: (id: string) => Promise<void>;
   removeLocalItem: (localId: string) => void;
-  updateQuantity: (id: string, qty: number) => Promise<void>;
   updateLocalItemQuantity: (localId: string, qty: number) => void;
   materializeLocalItems: () => Promise<{ ok: boolean; error?: string }>;
   materializing: boolean;
@@ -291,9 +287,12 @@ function CartItemsList({
     else removeItem(item.id);
   };
 
-  const handleUpdateQty = (item: DisplayItem, qty: number) => {
-    if (item.isLocal) updateLocalItemQuantity(item.id, qty);
-    else updateQuantity(item.id, qty);
+  // Only local items are handled here (pure client state, no server
+  // round-trip). DB cart items go through VendorGroup's own handler
+  // below, which owns the `error` banner state a rejected re-quote
+  // needs to surface (MONEY-1).
+  const handleUpdateLocalQty = (item: DisplayItem, qty: number) => {
+    updateLocalItemQuantity(item.id, qty);
   };
 
   return (
@@ -303,7 +302,7 @@ function CartItemsList({
           key={group.vendorId}
           group={group}
           onRemove={handleRemove}
-          onUpdateQty={handleUpdateQty}
+          onUpdateLocalQty={handleUpdateLocalQty}
           isSignedIn={!!isSignedIn}
           openAuth={openAuth}
           hasLocalItems={hasLocalItems}
@@ -322,7 +321,7 @@ function CartItemsList({
 function VendorGroup({
   group,
   onRemove,
-  onUpdateQty,
+  onUpdateLocalQty,
   isSignedIn,
   openAuth,
   hasLocalItems,
@@ -335,7 +334,7 @@ function VendorGroup({
 }: {
   group: { vendorId: string; vendorName: string | null; items: DisplayItem[] };
   onRemove: (item: DisplayItem) => void;
-  onUpdateQty: (item: DisplayItem, qty: number) => void;
+  onUpdateLocalQty: (item: DisplayItem, qty: number) => void;
   isSignedIn: boolean;
   openAuth: (mode: "sign-in" | "sign-up") => void;
   hasLocalItems: boolean;
@@ -402,6 +401,22 @@ function VendorGroup({
     }
   };
 
+  // DB cart items re-quote server-side on a quantity change; a failed
+  // re-quote is REJECTED (not silently committed with a stale quote —
+  // MONEY-1), so surface it in the same error banner checkout errors
+  // use. Local (anon, pre-materialize) items are plain client state
+  // and never hit this path.
+  const handleUpdateQty = async (item: DisplayItem, qty: number) => {
+    if (item.isLocal) {
+      onUpdateLocalQty(item, qty);
+      return;
+    }
+    const result = await cart?.updateQuantity(item.id, qty);
+    if (result && !result.ok) {
+      setError(result.error);
+    }
+  };
+
   return (
     <div>
       <p className="text-xs font-medium text-muted-foreground mb-2 mt-2">
@@ -414,7 +429,7 @@ function VendorGroup({
             key={item.id}
             item={item}
             onRemove={() => onRemove(item)}
-            onUpdateQty={(qty) => onUpdateQty(item, qty)}
+            onUpdateQty={(qty) => handleUpdateQty(item, qty)}
           />
         ))}
       </div>

@@ -171,4 +171,50 @@ describe("GET /api/thumbnails/projects/[projectId]", () => {
 
     fetchSpy.mockRestore();
   });
+
+  it("SEC-1: downgrades a non-allowlisted stored content-type to a forced download, and always sets nosniff", async () => {
+    // Mirrors the same fix in /api/thumbnails/[fileId] — the stored
+    // Content-Type comes from whatever the uploader set at presign
+    // time, so it must never be echoed verbatim to the browser.
+    setMockUserId(null);
+    projectRow = draftProject({ status: "published", visibility: "public" });
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<script>alert(1)</script>", {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+      })
+    );
+
+    const { req, context } = makeRequest(PROJECT_ID);
+    const res = await GET(req, context);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("application/octet-stream");
+    expect(res.headers.get("Content-Disposition")).toBe("attachment");
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+
+    fetchSpy.mockRestore();
+  });
+
+  it("always sets X-Content-Type-Options: nosniff for an allowlisted image type too", async () => {
+    setMockUserId(null);
+    projectRow = draftProject({ status: "published", visibility: "public" });
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("FAKE_WEBP_BYTES", {
+        status: 200,
+        headers: { "Content-Type": "image/webp" },
+      })
+    );
+
+    const { req, context } = makeRequest(PROJECT_ID);
+    const res = await GET(req, context);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(res.headers.get("Content-Disposition")).toBeNull();
+
+    fetchSpy.mockRestore();
+  });
 });

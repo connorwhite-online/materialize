@@ -25,6 +25,14 @@ vi.mock("@clerk/nextjs/server", () => ({
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
   revalidateTag: vi.fn(),
+  // updateTag (this Next.js version's Server-Action-only, immediate-
+  // invalidation sibling of revalidateTag — see
+  // node_modules/next/dist/docs/01-app/03-api-reference/04-functions/updateTag.md)
+  // was missing from this mock, so any action calling it (e.g. the
+  // PERF-16 idle-browse cache bust in app/actions/files.ts /
+  // app/actions/projects.ts) threw "updateTag is not a function" under
+  // test, silently turning a real success path into a caught error.
+  updateTag: vi.fn(),
   unstable_cache: vi.fn((fn: unknown) => fn),
 }));
 

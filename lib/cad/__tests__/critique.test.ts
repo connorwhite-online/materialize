@@ -1,8 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   parseJudgement,
   judgeAesthetics,
   aestheticJudgeEnabled,
+  buildJudgePrompt,
   PASS_THRESHOLD,
   CRITIQUE_RUBRIC,
 } from "@/lib/cad/critique";
@@ -101,6 +102,89 @@ describe("rubric honesty rails (MTR-199)", () => {
     // Keeps the rubric honest about the coverage it actually receives.
     expect(CRITIQUE_RUBRIC).toMatch(/opposed isometric/i);
     expect(CRITIQUE_RUBRIC).toMatch(/section/i);
+  });
+});
+
+describe("buildJudgePrompt (MTR-223 CoT-to-critic)", () => {
+  const FRAMING =
+    "Design intent (from the generator) — use this to understand what was attempted. Judge ONLY the rendered result against the user's request; intent explains choices, it never excuses visual defects.";
+
+  it("is byte-identical to the legacy prompt without intent", () => {
+    expect(buildJudgePrompt("a box")).toBe("Requested object: a box");
+    expect(buildJudgePrompt("a box", {})).toBe("Requested object: a box");
+    expect(buildJudgePrompt("a box", { plan: "" })).toBe(
+      "Requested object: a box"
+    );
+  });
+
+  it("includes the framing + plan when a plan is given", () => {
+    const p = buildJudgePrompt("a box", { plan: "1. base\n2. fillets" });
+    expect(p.startsWith("Requested object: a box")).toBe(true);
+    expect(p).toContain(FRAMING);
+    expect(p).toContain("Plan:\n1. base\n2. fillets");
+  });
+
+  it("includes the brief JSON when a brief is given", () => {
+    const brief = { v: 1 as const, part: "a box", components: [], interfaces: [], keepOut: [] };
+    const p = buildJudgePrompt("a box", { brief });
+    expect(p).toContain(FRAMING);
+    expect(p).toContain(`Brief: ${JSON.stringify(brief)}`);
+  });
+
+  it("guards against sycophancy: intent never excuses defects", () => {
+    const p = buildJudgePrompt("a box", { plan: "anything" });
+    expect(p).toMatch(/Judge ONLY the rendered result/);
+    expect(p).toMatch(/never excuses visual defects/);
+  });
+});
+
+describe("judgeAesthetics intent threading (MTR-223)", () => {
+  async function judgeWithMockedModel(
+    opts: Parameters<typeof judgeAesthetics>[0]
+  ) {
+    vi.resetModules();
+    const completeText = vi.fn().mockResolvedValue(
+      judgeJson({
+        recognizability: 5,
+        proportion: 5,
+        cohesion: 5,
+        surfacing: 5,
+        refinement: 5,
+      })
+    );
+    vi.doMock("@/lib/cad/model-client", () => ({
+      completeText,
+      hasModelCredentials: () => true,
+    }));
+    try {
+      const mod = await import("@/lib/cad/critique");
+      const res = await mod.judgeAesthetics(opts);
+      return { res, completeText };
+    } finally {
+      vi.doUnmock("@/lib/cad/model-client");
+      vi.resetModules();
+    }
+  }
+
+  it("sends the intent-framed prompt to the vision model", async () => {
+    const { res, completeText } = await judgeWithMockedModel({
+      renderPng: "abc",
+      prompt: "a box",
+      intent: { plan: "1. base form" },
+    });
+    expect(res.available).toBe(true);
+    const sent = completeText.mock.calls[0][0] as { prompt: string };
+    expect(sent.prompt).toContain("Design intent (from the generator)");
+    expect(sent.prompt).toContain("1. base form");
+  });
+
+  it("without intent the prompt is identical to before", async () => {
+    const { completeText } = await judgeWithMockedModel({
+      renderPng: "abc",
+      prompt: "a box",
+    });
+    const sent = completeText.mock.calls[0][0] as { prompt: string };
+    expect(sent.prompt).toBe("Requested object: a box");
   });
 });
 

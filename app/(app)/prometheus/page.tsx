@@ -34,6 +34,17 @@ export const metadata: Metadata = {
 
 const THREAD_LIMIT = 60;
 const LEGACY_ROW_LIMIT = 100;
+// Generations across the user's THREAD_LIMIT most-recently-updated
+// threads had no cap at all — a power user with a long history could
+// pull thousands of rows (each carrying the sourceCode blob) into a
+// single request. Mirrors the sibling LEGACY_ROW_LIMIT bound below,
+// sized larger since this bucket spans up to 60 threads rather than
+// one flat legacy pile. Same accepted characteristic as the legacy
+// cap: ordered by createdAt desc, so in the rare case a user exceeds
+// this many generations across their recent threads, their oldest
+// touched thread in THREAD_LIMIT could end up with zero fetched turns
+// and silently drop from the list (existing precedent, not new).
+const THREAD_GEN_LIMIT = 1000;
 
 /** StudioThread plus thread metadata the studio may adopt later. */
 type StudioThreadWithMeta = StudioThread & {
@@ -102,6 +113,7 @@ export default async function TextToCadPage() {
               )
             )
             .orderBy(desc(cadGenerations.createdAt))
+            .limit(THREAD_GEN_LIMIT)
         )
       : Promise.resolve([]),
     // Legacy fallback: rows with no threadId yet. Pre-migration builds land
@@ -127,6 +139,10 @@ export default async function TextToCadPage() {
 
   const rows = [...threadGenRows, ...legacyRows];
 
+  // The next three lookups each depend only on `rows` (via the id sets
+  // below), not on each other's results — batch them into one
+  // Promise.all instead of three sequential round trips.
+  //
   // Live builds survive navigation: for every still-pending generation, find
   // its non-terminal job so the studio can REATTACH to the events stream on
   // load. The DB is the source of truth here — the old sessionStorage-only
@@ -136,31 +152,6 @@ export default async function TextToCadPage() {
   const pendingGenIds = rows
     .filter((r) => r.status === "pending")
     .map((r) => r.id);
-  const activeJobByGen = new Map<string, string>();
-  if (pendingGenIds.length > 0) {
-    const activeJobs = await withDbRetry(() =>
-      db
-        .select({
-          id: cadJobs.id,
-          generationId: cadJobs.generationId,
-          createdAt: cadJobs.createdAt,
-        })
-        .from(cadJobs)
-        .where(
-          and(
-            inArray(cadJobs.generationId, pendingGenIds),
-            inArray(cadJobs.status, ["queued", "running", "awaiting_input"])
-          )
-        )
-        .orderBy(desc(cadJobs.createdAt))
-    );
-    for (const j of activeJobs) {
-      // Newest job wins per generation (rows arrive newest-first).
-      if (!activeJobByGen.has(j.generationId)) {
-        activeJobByGen.set(j.generationId, j.id);
-      }
-    }
-  }
 
   // Reconstruct multi-part assemblies: each assembly generation links to a
   // Project bundling its part files, so an assembly survives reload/navigation
@@ -168,48 +159,6 @@ export default async function TextToCadPage() {
   const projectIds = [
     ...new Set(rows.map((r) => r.projectId).filter((p): p is string => !!p)),
   ];
-  const partsByProject = new Map<
-    string,
-    {
-      slug: string;
-      parts: { name: string; fileAssetId: string; hasStep: boolean }[];
-    }
-  >();
-  if (projectIds.length > 0) {
-    const partRows = await withDbRetry(() =>
-      db
-        .select({
-          projectId: projectFiles.projectId,
-          slug: projects.slug,
-          name: files.name,
-          fileAssetId: fileAssets.id,
-          // STEP presence per part so the studio's action row is stable at
-          // first paint for assemblies too (MTR-215).
-          stepStorageKey: fileAssets.stepStorageKey,
-        })
-        .from(projectFiles)
-        .innerJoin(projects, eq(projects.id, projectFiles.projectId))
-        .innerJoin(files, eq(files.id, projectFiles.fileId))
-        .innerJoin(fileAssets, eq(fileAssets.fileId, files.id))
-        .where(inArray(projectFiles.projectId, projectIds))
-        .orderBy(projectFiles.position)
-    );
-    for (const pr of partRows) {
-      const entry =
-        partsByProject.get(pr.projectId) ?? { slug: pr.slug, parts: [] };
-      // Part files are named "<assembly> — <part>"; show just the part.
-      const name =
-        pr.name && pr.name.includes(" — ")
-          ? pr.name.split(" — ").slice(1).join(" — ")
-          : pr.name ?? "part";
-      entry.parts.push({
-        name,
-        fileAssetId: pr.fileAssetId,
-        hasStep: !!pr.stepStorageKey,
-      });
-      partsByProject.set(pr.projectId, entry);
-    }
-  }
 
   // STEP presence for each turn's primary asset — batched so the studio can
   // render the "Download STEP" action at first paint without a per-button probe
@@ -220,16 +169,89 @@ export default async function TextToCadPage() {
       rows.map((r) => r.fileAssetId).filter((id): id is string => !!id)
     ),
   ];
-  const assetsWithStep = new Set<string>();
-  if (primaryAssetIds.length > 0) {
-    const stepRows = await withDbRetry(() =>
-      db
-        .select({ id: fileAssets.id, stepStorageKey: fileAssets.stepStorageKey })
-        .from(fileAssets)
-        .where(inArray(fileAssets.id, primaryAssetIds))
-    );
-    for (const s of stepRows) if (s.stepStorageKey) assetsWithStep.add(s.id);
+
+  const [activeJobs, partRows, stepRows] = await Promise.all([
+    pendingGenIds.length > 0
+      ? withDbRetry(() =>
+          db
+            .select({
+              id: cadJobs.id,
+              generationId: cadJobs.generationId,
+              createdAt: cadJobs.createdAt,
+            })
+            .from(cadJobs)
+            .where(
+              and(
+                inArray(cadJobs.generationId, pendingGenIds),
+                inArray(cadJobs.status, ["queued", "running", "awaiting_input"])
+              )
+            )
+            .orderBy(desc(cadJobs.createdAt))
+        )
+      : Promise.resolve([]),
+    projectIds.length > 0
+      ? withDbRetry(() =>
+          db
+            .select({
+              projectId: projectFiles.projectId,
+              slug: projects.slug,
+              name: files.name,
+              fileAssetId: fileAssets.id,
+              // STEP presence per part so the studio's action row is stable at
+              // first paint for assemblies too (MTR-215).
+              stepStorageKey: fileAssets.stepStorageKey,
+            })
+            .from(projectFiles)
+            .innerJoin(projects, eq(projects.id, projectFiles.projectId))
+            .innerJoin(files, eq(files.id, projectFiles.fileId))
+            .innerJoin(fileAssets, eq(fileAssets.fileId, files.id))
+            .where(inArray(projectFiles.projectId, projectIds))
+            .orderBy(projectFiles.position)
+        )
+      : Promise.resolve([]),
+    primaryAssetIds.length > 0
+      ? withDbRetry(() =>
+          db
+            .select({ id: fileAssets.id, stepStorageKey: fileAssets.stepStorageKey })
+            .from(fileAssets)
+            .where(inArray(fileAssets.id, primaryAssetIds))
+        )
+      : Promise.resolve([]),
+  ]);
+
+  const activeJobByGen = new Map<string, string>();
+  for (const j of activeJobs) {
+    // Newest job wins per generation (rows arrive newest-first).
+    if (!activeJobByGen.has(j.generationId)) {
+      activeJobByGen.set(j.generationId, j.id);
+    }
   }
+
+  const partsByProject = new Map<
+    string,
+    {
+      slug: string;
+      parts: { name: string; fileAssetId: string; hasStep: boolean }[];
+    }
+  >();
+  for (const pr of partRows) {
+    const entry =
+      partsByProject.get(pr.projectId) ?? { slug: pr.slug, parts: [] };
+    // Part files are named "<assembly> — <part>"; show just the part.
+    const name =
+      pr.name && pr.name.includes(" — ")
+        ? pr.name.split(" — ").slice(1).join(" — ")
+        : pr.name ?? "part";
+    entry.parts.push({
+      name,
+      fileAssetId: pr.fileAssetId,
+      hasStep: !!pr.stepStorageKey,
+    });
+    partsByProject.set(pr.projectId, entry);
+  }
+
+  const assetsWithStep = new Set<string>();
+  for (const s of stepRows) if (s.stepStorageKey) assetsWithStep.add(s.id);
 
   // Mint a short-lived URL per render (local signing, no network round-trip).
   const turns: (StudioTurn & {

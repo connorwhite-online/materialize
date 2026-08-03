@@ -89,8 +89,9 @@ vi.mock("drizzle-orm", () => ({
   eq: (a: unknown, b: unknown) => ({ eq: [a, b] }),
 }));
 
+const mockLogError = vi.fn();
 vi.mock("@/lib/logger", () => ({
-  logError: vi.fn(),
+  logError: (...a: unknown[]) => mockLogError(...a),
 }));
 
 import { POST } from "../route";
@@ -413,6 +414,118 @@ describe("POST /api/webhooks/stripe", () => {
     expect(res.status).toBe(500);
     // Failed handlers are not marked processed, so the retry re-runs them.
     expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+});
+
+// -----------------------------------------------------------------------
+// (4) billing_setup — TEST-25 (2026-07-25 audit). This is the only
+// success-path writer of users.defaultPaymentMethod, which the agent
+// off-session charge path (lib/mcp/internal/orders.ts) depends on to
+// place auto-approved orders. mockSetupIntentsRetrieve was declared in
+// this suite from the start but never exercised.
+// -----------------------------------------------------------------------
+describe("POST /api/webhooks/stripe — billing_setup", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSignature = "sig_valid";
+    signatureValid = true;
+    nextEvent = null;
+    dedupExisting = [];
+    process.env.STRIPE_WEBHOOK_SECRET = "whsec_test";
+  });
+
+  function billingSetupEvent(overrides: {
+    setup_intent?: unknown;
+    userId?: string | undefined;
+  }) {
+    return event({
+      type: "checkout.session.completed",
+      id: "evt_billing_setup",
+      data: {
+        object: {
+          mode: "setup",
+          metadata: {
+            type: "billing_setup",
+            ...(overrides.userId !== undefined
+              ? { userId: overrides.userId }
+              : { userId: "user_1" }),
+          },
+          setup_intent: overrides.setup_intent,
+        },
+      },
+    });
+  }
+
+  it("string setup_intent: writes defaultPaymentMethod and records the event", async () => {
+    nextEvent = billingSetupEvent({ setup_intent: "seti_123" });
+    mockSetupIntentsRetrieve.mockResolvedValue({
+      payment_method: "pm_abc",
+    });
+
+    const res = await POST(makeRequest());
+
+    expect(res.status).toBe(200);
+    expect(mockSetupIntentsRetrieve).toHaveBeenCalledWith("seti_123");
+    expect(mockDbUpdateSet).toHaveBeenCalledWith({
+      defaultPaymentMethod: "pm_abc",
+    });
+    expect(mockDbInsert).toHaveBeenCalledWith({
+      id: "evt_billing_setup",
+      eventType: "checkout.session.completed",
+    });
+  });
+
+  it("expanded setup_intent object: normalizes to its id before retrieving", async () => {
+    nextEvent = billingSetupEvent({ setup_intent: { id: "seti_expanded" } });
+    mockSetupIntentsRetrieve.mockResolvedValue({
+      payment_method: { id: "pm_expanded" },
+    });
+
+    const res = await POST(makeRequest());
+
+    expect(res.status).toBe(200);
+    expect(mockSetupIntentsRetrieve).toHaveBeenCalledWith("seti_expanded");
+    // payment_method itself may also arrive expanded — normalized the
+    // same way as the top-level setup_intent id.
+    expect(mockDbUpdateSet).toHaveBeenCalledWith({
+      defaultPaymentMethod: "pm_expanded",
+    });
+  });
+
+  it("SetupIntent with null payment_method: no write, still 200, event still recorded", async () => {
+    nextEvent = billingSetupEvent({ setup_intent: "seti_no_pm" });
+    mockSetupIntentsRetrieve.mockResolvedValue({ payment_method: null });
+
+    const res = await POST(makeRequest());
+
+    expect(res.status).toBe(200);
+    expect(mockDbUpdateSet).not.toHaveBeenCalled();
+    expect(mockDbInsert).toHaveBeenCalledWith({
+      id: "evt_billing_setup",
+      eventType: "checkout.session.completed",
+    });
+  });
+
+  it("setupIntents.retrieve throwing does not 500 — logs and lets the user retry from the dashboard (no-retry contract)", async () => {
+    nextEvent = billingSetupEvent({ setup_intent: "seti_boom" });
+    mockSetupIntentsRetrieve.mockRejectedValue(new Error("stripe down"));
+
+    const res = await POST(makeRequest());
+
+    expect(res.status).toBe(200);
+    expect(mockDbUpdateSet).not.toHaveBeenCalled();
+    expect(mockLogError).toHaveBeenCalled();
+    const [tag] = mockLogError.mock.calls[0];
+    expect(tag).toBe("stripe-webhook-billing-setup");
+    // The webhook route swallows this error rather than returning 500, so
+    // Stripe will NOT retry delivery — the event is still marked
+    // processed even though the save failed. This is the deliberate
+    // "don't retry forever over a failed card save" contract described
+    // in route.ts's billing_setup catch block.
+    expect(mockDbInsert).toHaveBeenCalledWith({
+      id: "evt_billing_setup",
+      eventType: "checkout.session.completed",
+    });
   });
 });
 

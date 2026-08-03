@@ -51,14 +51,17 @@ import {
   recordCadFeedback,
   renameCadGeneration,
   rerunCadWithParams,
+  reviseCadFeatureStatement,
   saveCadFileToProfile,
   setActiveCadVersion,
 } from "@/app/actions/cad-generation";
 import { StepDownloadLink } from "@/components/files/step-download-button";
 import { diffParams, extractParams } from "@/components/cad/param-diff";
 import { FeatureChips } from "@/components/cad/feature-chips";
+import { featureIdsForFaceIds } from "@/components/cad/feature-timeline";
 import type {
   CadStreamEvent,
+  CadJobProgressEntry,
   CadProgressEvent,
   CadQuestionOption,
   CadFeature,
@@ -833,73 +836,123 @@ export function TextToCadStudio({
     activeFeature && activeFeature.faceIds.length > 0
       ? activeFeature.faceIds
       : undefined;
+  // Reverse highlight (MTR-224): faces the user annotated in the viewer →
+  // the owning timeline chips. Only exact-topo face pins participate (mesh
+  // flood-fill picks carry no face id, so they can't resolve to a feature).
+  const annotatedFeatureIds = featureIdsForFaceIds(
+    viewedFeatures,
+    annotations.flatMap((a) =>
+      a.kind === "face" && a.topo ? [a.topo.faceId] : []
+    )
+  );
 
   // Drop the open feature chip when the viewed turn changes.
   useEffect(() => {
     setActiveFeatureId(null);
   }, [viewedTurn?.id]);
 
+  /** Adopt a feature-revision result (param rerun or stmt edit) as a turn. */
+  function adoptFeatureRevision(
+    res: Extract<
+      Awaited<ReturnType<typeof rerunCadWithParams>>,
+      { generationId: string }
+    >,
+    promptLabel: string
+  ) {
+    const newTurn: StudioTurn = {
+      id: res.generationId,
+      prompt: promptLabel,
+      status: "succeeded",
+      renderUrl: res.renderUrl,
+      fileAssetId: res.fileAssetId,
+      sourceCode: res.sourceCode,
+      features: res.features,
+      error: null,
+      rating: null,
+      feedbackTags: [],
+      feedbackNote: null,
+      parts: res.parts,
+      projectSlug: res.projectSlug,
+      remeshed: res.remeshed,
+      networksReport: res.networksReport ?? null,
+      hasStep: res.hasStep,
+      parentGenerationId: res.parentGenerationId,
+    };
+
+    const rootId = activeRootIdRef.current;
+    setThreads((prev) =>
+      prev.map((t) => {
+        if (t.rootId !== rootId) return t;
+        if (t.turns.some((x) => x.id === newTurn.id)) return t;
+        return {
+          ...t,
+          lastActivity: Date.now(),
+          activeGenerationId: newTurn.id,
+          turns: [...t.turns, newTurn],
+        };
+      })
+    );
+    setViewTurnId(newTurn.id);
+    setActiveFeatureId(null);
+    // Fresh topo for the new revision — clear any cached miss.
+    setTopoUrls((u) => {
+      const next = { ...u };
+      delete next[newTurn.id];
+      return next;
+    });
+  }
+
   async function applyFeatureUpdate(
-    _feature: CadFeature,
-    sourceParams: Record<string, number>
+    feature: CadFeature,
+    draft: Record<string, number>
   ): Promise<{ error?: string } | void> {
     if (!viewedTurn) return { error: "No generation selected." };
     setFeatureUpdating(true);
     try {
+      // Control-key draft; the server re-derives every binding (top-level
+      // name or span literal, MTR-225) from its own copy of the source.
       const res = await rerunCadWithParams({
         generationId: viewedTurn.id,
-        params: sourceParams,
+        featureId: feature.id,
+        params: draft,
       });
       if ("error" in res) return { error: res.error };
-
-      const newTurn: StudioTurn = {
-        id: res.generationId,
-        prompt:
-          Object.entries(sourceParams)
-            .map(([n, v]) => `${n} → ${v}`)
-            .slice(0, 3)
-            .join(" · ") || "Update params",
-        status: "succeeded",
-        renderUrl: res.renderUrl,
-        fileAssetId: res.fileAssetId,
-        sourceCode: res.sourceCode,
-        features: res.features,
-        error: null,
-        rating: null,
-        feedbackTags: [],
-        feedbackNote: null,
-        parts: res.parts,
-        projectSlug: res.projectSlug,
-        remeshed: res.remeshed,
-        networksReport: res.networksReport ?? null,
-        hasStep: res.hasStep,
-        parentGenerationId: res.parentGenerationId,
-      };
-
-      const rootId = activeRootIdRef.current;
-      setThreads((prev) =>
-        prev.map((t) => {
-          if (t.rootId !== rootId) return t;
-          if (t.turns.some((x) => x.id === newTurn.id)) return t;
-          return {
-            ...t,
-            lastActivity: Date.now(),
-            activeGenerationId: newTurn.id,
-            turns: [...t.turns, newTurn],
-          };
-        })
+      adoptFeatureRevision(
+        res,
+        Object.entries(draft)
+          .filter(([k, v]) => feature.params[k] !== v)
+          .map(([k, v]) => `${k} → ${v}`)
+          .slice(0, 3)
+          .join(" · ") || "Update params"
       );
-      setViewTurnId(newTurn.id);
-      setActiveFeatureId(null);
-      // Fresh topo for the new revision — clear any cached miss.
-      setTopoUrls((u) => {
-        const next = { ...u };
-        delete next[newTurn.id];
-        return next;
-      });
     } catch (err) {
       return {
         error: err instanceof Error ? err.message : "Update failed.",
+      };
+    } finally {
+      setFeatureUpdating(false);
+    }
+  }
+
+  /** Statement-scoped LLM edit for one chip (MTR-225, route stmt-edit). */
+  async function applyFeatureStatementEdit(
+    feature: CadFeature,
+    instruction: string
+  ): Promise<{ error?: string; fallback?: boolean } | void> {
+    if (!viewedTurn) return { error: "No generation selected." };
+    setFeatureUpdating(true);
+    try {
+      const res = await reviseCadFeatureStatement({
+        generationId: viewedTurn.id,
+        featureId: feature.id,
+        instruction,
+      });
+      if ("error" in res) return res;
+      adoptFeatureRevision(res, `Edit ${feature.label}: ${instruction}`);
+    } catch (err) {
+      return {
+        error: err instanceof Error ? err.message : "Edit failed.",
+        fallback: true,
       };
     } finally {
       setFeatureUpdating(false);
@@ -1405,12 +1458,20 @@ export function TextToCadStudio({
     parentId: string | undefined
   ): Promise<boolean> {
     const MAX_RETRIES = 3;
+    // Resumable-replay cursor (CAD-8): the highest persisted-entry `seq`
+    // (CAD-7) applied so far. Scoped OUTSIDE the retry loop so it survives
+    // across reconnect attempts for this same job — a dropped connection
+    // (proxy timeout, the route's own ~290s ceiling) resumes from here
+    // instead of re-streaming the whole transcript from the start. -1 means
+    // "nothing applied yet", matching the route's cold-start default.
+    let lastSeq = -1;
     for (let attempt = 0; ; attempt++) {
       let sawTerminal = false;
       try {
-        const res = await fetch(`/api/cad/jobs/${jobId}/events`, {
-          signal: controller.signal,
-        });
+        const res = await fetch(
+          `/api/cad/jobs/${jobId}/events?from=${lastSeq}`,
+          { signal: controller.signal }
+        );
         if (!res.ok || !res.body) throw new Error(`events ${res.status}`);
 
         const reader = res.body.getReader();
@@ -1429,11 +1490,19 @@ export function TextToCadStudio({
               .split("\n")
               .find((l) => l.startsWith("data:"));
             if (!dataLine) continue;
-            let ev: CadStreamEvent;
+            let ev: CadJobProgressEntry;
             try {
               ev = JSON.parse(dataLine.slice(5).trim());
             } catch {
               continue;
+            }
+            // Advance the replay cursor (CAD-8) for every persisted-log
+            // entry that carries one — synthesized frames (snapshot, usage)
+            // aren't part of cadJobs.progress and never carry `seq`, so they
+            // leave the cursor untouched, which is correct: reconnecting
+            // only needs to skip what the route can actually replay.
+            if (typeof ev.seq === "number" && ev.seq > lastSeq) {
+              lastSeq = ev.seq;
             }
             if (ev.type === "done") {
               sawTerminal = true;
@@ -2429,10 +2498,13 @@ export function TextToCadStudio({
                   </div>
                   <FeatureChips
                     features={viewedFeatures}
+                    sourceCode={viewedTurn.sourceCode}
                     activeId={activeFeatureId}
                     onActiveChange={setActiveFeatureId}
                     onUpdate={applyFeatureUpdate}
+                    onEditStatement={applyFeatureStatementEdit}
                     disabled={featureUpdating}
+                    markedIds={annotatedFeatureIds}
                   />
                 </div>
               )}

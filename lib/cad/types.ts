@@ -45,6 +45,12 @@ export interface CadFeature {
   paramNames?: Record<string, string>;
   /** Indices into `topo.faces` for highlight. */
   faceIds: number[];
+  /**
+   * 1-based inclusive source-line range of the statement that executed this
+   * op (MTR-225). Enables span-literal param edits and statement-scoped
+   * repair; absent when the sidecar couldn't resolve it.
+   */
+  span?: [number, number];
 }
 
 /** Geometry stats the sidecar measures off the produced solid. */
@@ -463,8 +469,16 @@ export type CadStreamEvent =
  * added by the executor at emit time). The stamp is what makes stage timing
  * honest across reloads — a replayed transcript arrives in one burst, so
  * arrival time carries no duration signal; `t` does.
+ *
+ * `seq` (MTR-175 follow-up, CAD-7/CAD-8) is a monotonic per-job counter
+ * stamped by `appendJobProgress` at write time. It survives the
+ * MAX_PROGRESS_EVENTS drop-the-middle cap (each surviving entry keeps its
+ * original seq, so the events route's cursor never desyncs from a pinned
+ * array length) and doubles as the resumable-replay cursor for reconnects
+ * (`?from=<seq>`). Entries written before this field existed lack it —
+ * consumers must treat a missing `seq` as equal to the entry's array index.
  */
-export type CadJobProgressEntry = CadStreamEvent & { t?: number };
+export type CadJobProgressEntry = CadStreamEvent & { t?: number; seq?: number };
 
 // --- Generation cost metering (MTR-181) ------------------------------------
 //

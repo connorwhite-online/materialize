@@ -43,6 +43,46 @@ export function thumbnailPlaceholderResponse(): Response {
       // placeholder within a minute, rather than being cached for the
       // full published-thumbnail lifetime.
       "Cache-Control": "public, max-age=60",
+      // Belt-and-suspenders — this branch always serves our own known
+      // PNG bytes, but every response out of the thumbnail proxies
+      // carries nosniff so none of them can be coerced into a
+      // browser-guessed content type. See resolveSafeImageContentType
+      // below for the branches that actually stream uploader bytes.
+      "X-Content-Type-Options": "nosniff",
     },
   });
+}
+
+/**
+ * SEC-1 — the thumbnail proxies stream R2 bytes back to the browser
+ * same-origin. R2 stores whatever Content-Type the *uploader* set at
+ * presign time; echoing that string verbatim lets a malicious upload
+ * (e.g. `text/html`, `image/svg+xml`) get served same-origin with a
+ * browser-sniffable type, which is a stored-XSS vector. Only echo a
+ * content-type from a fixed raster-image allowlist; anything else
+ * downgrades to a forced download (`application/octet-stream` +
+ * `Content-Disposition: attachment`) so the browser never renders it
+ * inline. Every response — including this fallback — also carries
+ * `X-Content-Type-Options: nosniff` so a legacy/misbehaving browser
+ * can't sniff its way around the allowlist.
+ */
+const ALLOWED_IMAGE_CONTENT_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
+
+export function resolveSafeImageContentType(
+  upstreamContentType: string | null,
+  /** True when the storage key itself is a known-safe auto-captured `.webp` path. */
+  defaultToWebp: boolean
+): { contentType: string; isAttachment: boolean } {
+  const ct = (upstreamContentType ?? "").toLowerCase().split(";")[0].trim();
+  if (ALLOWED_IMAGE_CONTENT_TYPES.has(ct)) {
+    return { contentType: ct, isAttachment: false };
+  }
+  if (!ct && defaultToWebp) {
+    return { contentType: "image/webp", isAttachment: false };
+  }
+  return { contentType: "application/octet-stream", isAttachment: true };
 }

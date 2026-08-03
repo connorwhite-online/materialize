@@ -39,6 +39,56 @@ export type Row = {
   createdAt: Date;
 };
 
+// `notifications.type` is free-form text by design (new event types
+// don't need a migration — see AGENTS.md "Notifications"), and
+// `payload` is an untyped jsonb column. Both the type cast and the
+// payload cast below are lies to the type system that hold only if
+// every writer stays in sync. This guard is the runtime check that
+// makes that promise safe: it's the one thing every renderer actually
+// depends on (`actor.displayName` etc., unguarded) rather than
+// requiring the full `Payload` shape, which is intentionally more
+// permissive per-type (e.g. `listing` is handled separately below via
+// `getListing` since even known types can carry a stale/malformed one).
+// Exported for unit testing the row-drop guard in isolation (see
+// __tests__/notifications-tab.test.ts) — not used outside this
+// module otherwise.
+export function hasUsableActor(payload: unknown): payload is Payload {
+  if (!payload || typeof payload !== "object") return false;
+  const actor = (payload as { actor?: unknown }).actor;
+  if (!actor || typeof actor !== "object") return false;
+  // `id` is the seed `UserAvatar` falls back to when `username` is
+  // absent (`seed={actor.username || actor.id}`); a non-string seed
+  // throws inside `getAvatarGradient` (`str.length` on `undefined`).
+  // Require it explicitly rather than just "actor is an object".
+  return typeof (actor as { id?: unknown }).id === "string";
+}
+
+type SafeListing = { kind: "file" | "project"; name: string; slug: string };
+
+/**
+ * Safely extracts `listing` from a row's payload. Every known payload
+ * interface declares `listing` as required, but a malformed or
+ * partial row (bad writer, manual insert, future type) can still omit
+ * it or ship a non-object — returns null rather than throwing so a
+ * single bad row degrades gracefully instead of taking down the tab.
+ */
+function getListing(n: Row): SafeListing | null {
+  const listing = (n.payload as { listing?: unknown } | null | undefined)
+    ?.listing as { kind?: unknown; name?: unknown; slug?: unknown } | undefined;
+  if (
+    listing &&
+    typeof listing === "object" &&
+    (listing.kind === "file" || listing.kind === "project") &&
+    typeof listing.name === "string" &&
+    typeof listing.slug === "string"
+  ) {
+    return listing as SafeListing;
+  }
+  return null;
+}
+
+const NOTIFICATIONS_FALLBACK_HREF = "/dashboard";
+
 /**
  * Owner-only Notifications tab. Replaces the prior "Comments" inbox —
  * those events surface here too, alongside replies, photos posted on
@@ -64,13 +114,19 @@ export async function NotificationsTab({ userId }: { userId: string }) {
       .limit(INBOX_LIMIT)
   );
 
-  const items: Row[] = rows.map((r) => ({
-    id: r.id,
-    type: r.type as NotificationType,
-    payload: r.payload as Payload,
-    readAt: r.readAt,
-    createdAt: r.createdAt,
-  }));
+  // A bad row (payload not an object, or no usable `actor`) is data,
+  // not an incident — drop it silently rather than letting an
+  // unguarded `actor.displayName` read throw and take down the whole
+  // tab's server render.
+  const items: Row[] = rows
+    .filter((r) => hasUsableActor(r.payload))
+    .map((r) => ({
+      id: r.id,
+      type: r.type as NotificationType,
+      payload: r.payload as Payload,
+      readAt: r.readAt,
+      createdAt: r.createdAt,
+    }));
 
   const unreadCount = items.filter((r) => !r.readAt).length;
 
@@ -107,7 +163,8 @@ export async function NotificationsTab({ userId }: { userId: string }) {
 }
 
 function NotificationRow({ row }: { row: Row }) {
-  const { actor, listing } = row.payload;
+  const { actor } = row.payload;
+  const listing = getListing(row);
   const href = buildHref(row);
   const message = buildMessage(row);
   const snippet = pickSnippet(row);
@@ -135,9 +192,11 @@ function NotificationRow({ row }: { row: Row }) {
             {timeAgo(row.createdAt)}
           </span>
         </div>
-        <div className="text-xs text-muted-foreground">
-          on <span className="font-medium">{listing.name}</span>
-        </div>
+        {listing && (
+          <div className="text-xs text-muted-foreground">
+            on <span className="font-medium">{listing.name}</span>
+          </div>
+        )}
         {snippet && (
           <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
             {snippet}
@@ -158,22 +217,32 @@ function NotificationRow({ row }: { row: Row }) {
 // (see __tests__/notifications-tab.test.ts) — not used outside this
 // module otherwise.
 export function buildHref(n: Row): string {
-  const { listing } = n.payload;
-  const base =
-    listing.kind === "file"
-      ? `/files/${listing.slug}`
-      : `/projects/${listing.slug}`;
-  if (n.type === "build_on_file") {
-    return `${base}#build-${(n.payload as BuildOnFilePayload).buildId}`;
-  }
   if (n.type === "print_on_file") {
-    return `/dashboard/orders/${(n.payload as PrintOnFilePayload).printOrderId}`;
+    const printOrderId = (n.payload as Partial<PrintOnFilePayload>)
+      .printOrderId;
+    return typeof printOrderId === "string"
+      ? `/dashboard/orders/${printOrderId}`
+      : NOTIFICATIONS_FALLBACK_HREF;
   }
   if (n.type === "purchase_on_listing" || n.type === "refund_on_listing") {
     // Sales activity (including refunds) rolls up on the earnings
     // tab — point there rather than back at the listing page the
     // creator already knows.
     return `/dashboard/earnings`;
+  }
+
+  // Every other known type links off the listing — guard it once here
+  // rather than per-branch. A row with no usable listing (malformed
+  // payload) lands on the dashboard instead of throwing.
+  const listing = getListing(n);
+  if (!listing) return NOTIFICATIONS_FALLBACK_HREF;
+  const base =
+    listing.kind === "file"
+      ? `/files/${listing.slug}`
+      : `/projects/${listing.slug}`;
+
+  if (n.type === "build_on_file") {
+    return `${base}#build-${(n.payload as BuildOnFilePayload).buildId}`;
   }
   if (n.type === "collaborator_added_to_project") {
     // No commentId on this payload (see CollaboratorAddedToProjectPayload)
@@ -182,14 +251,24 @@ export function buildHref(n: Row): string {
     // commentId and produce "#comment-undefined".
     return base;
   }
-  const commentId =
-    n.type === "comment_on_listing"
-      ? (n.payload as CommentOnListingPayload).commentId
-      : (n.payload as ReplyToCommentPayload).commentId;
-  return `${base}#comment-${commentId}`;
+  if (n.type === "comment_on_listing" || n.type === "reply_to_comment") {
+    const commentId =
+      n.type === "comment_on_listing"
+        ? (n.payload as CommentOnListingPayload).commentId
+        : (n.payload as ReplyToCommentPayload).commentId;
+    return `${base}#comment-${commentId}`;
+  }
+  // Unknown type — `notifications.type` is free-form text, so a future
+  // writer can ship a type this component has never seen. Land on the
+  // listing itself instead of falling through to the old catch-all
+  // comment-anchor branch, which read a nonexistent commentId and
+  // produced "#comment-undefined".
+  return base;
 }
 
-function buildMessage(n: Row): string {
+// Exported for unit testing (see __tests__/notifications-tab.test.ts)
+// — not used outside this module otherwise.
+export function buildMessage(n: Row): string {
   switch (n.type) {
     case "comment_on_listing":
       return "commented";
@@ -205,6 +284,10 @@ function buildMessage(n: Row): string {
       return "was refunded for";
     case "collaborator_added_to_project":
       return "added you as a collaborator on";
+    default:
+      // Unknown type — see buildHref for why this is reachable at
+      // runtime despite the exhaustive-looking switch.
+      return "sent you a notification";
   }
 }
 

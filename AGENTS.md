@@ -115,7 +115,7 @@ Key gotchas:
 12-state `printOrderStatusEnum`. Transitions are enforced only by scattered code — this is the canonical map.
 
 **Entry points:**
-- ∅ → `cart_created`: user checkout (`lib/print/print.ts:211` / `:357`)
+- ∅ → `cart_created`: user checkout (`app/actions/print.ts:283` / `:461`)
 - ∅ → `awaiting_agent_approval`: MCP order (`lib/mcp/internal/orders.ts:259`)
 
 **Transitions:**
@@ -131,9 +131,9 @@ cart_created            → ordered                (webhook claim-place, handle-
 awaiting_production_payment → ordered            (hourly reconcile capture, reconcile-production-payments.ts:167 / heal :132)
                             → cancelled          (PI canceled or >72h, :116 / :209)
 ordered                 → in_production|shipped|received|blocked|cancelled
-                                                 (checkOrderStatus, print.ts:255-277 —
+                                                 (checkOrderStatus, app/actions/print.ts:317-367 —
                                                   ZERO production callers; see CON-107)
-blocked|ordered         → refunded               (print.ts:1389)
+blocked|ordered         → refunded               (app/actions/print.ts:1587)
 ```
 
 **Truths every consumer must know:**
@@ -177,27 +177,27 @@ There are **two** material sources and they do NOT share ids:
 
 ### files vs fileAssets
 
-`fileAssets.fileId → files.id` (cascade, **nullable until linked**, `lib/db/schema.ts:448`). They are not the same thing:
+`fileAssets.fileId → files.id` (cascade, **nullable until linked**, `lib/db/schema.ts` § `fileAssets.fileId`, line 508). They are not the same thing:
 
 - `files` — owns listing metadata: name, slug, status, price, license, category, `recommendedMaterialId` (editorial slug), `recommendedCcMaterialId` (CraftCloud UUID).
 - `fileAssets` — owns the artifact: `storageKey`, `format`, `geometryData`, `craftCloudModelId`, hashes.
 
 ### printOrders.material stores a CraftCloud config UUID
 
-`printOrders.material` (`lib/db/schema.ts:591`) stores the **CraftCloud config UUID**, not a slug. There is **no** `materialConfigId` column on `printOrders`. The real `materialConfigId` columns live on `printOrderItems` (`:722`) and `cartItems` (`:750`). The slug/UUID duality for display-catalog recommendations lives on `files`: `recommendedMaterialId` (editorial slug) vs `recommendedCcMaterialId` (CraftCloud UUID) (`:269-270`).
+`printOrders.material` (`lib/db/schema.ts` § `printOrders.material`, line 702) stores the **CraftCloud config UUID**, not a slug. There is **no** `materialConfigId` column on `printOrders`. The real `materialConfigId` columns live on `printOrderItems` (§ `printOrderItems.materialConfigId`, line 833) and `cartItems` (§ `cartItems.materialConfigId`, line 867). The slug/UUID duality for display-catalog recommendations lives on `files`: `recommendedMaterialId` (editorial slug) vs `recommendedCcMaterialId` (CraftCloud UUID) (§ `files.recommendedMaterialId`/`recommendedCcMaterialId`, lines 290-291).
 
 ### Three-tier cart
 
 `components/print/cart-context.tsx` manages three tiers:
 1. **`localItems`** — anon in-memory raw `File`s, materialized via `materializeLocalItems()` (`:298-392`: presign → R2 → draft file → addToCart, per-item dequeue).
 2. **DB `cartItems`** — a Materialize cart row; this is what "Add to Cart" writes.
-3. **CraftCloud cart** — created only at checkout, per vendor group (`createCart()` in `lib/print/print.ts:171`, called from `checkoutVendorGroup` → `orders.ts:173`).
+3. **CraftCloud cart** — created only at checkout, per vendor group (`createCart()` in `lib/craftcloud/client.ts:254`, called from `checkoutVendorGroup` in `app/actions/print.ts:377` (cart created at `:417`)).
 
 Never call the DB cart a "CraftCloud cart." They are distinct: the DB cart is a pre-checkout staging area; the CraftCloud cart is ephemeral and created during checkout.
 
 ### Notifications
 
-`notifications.type` is free-form text (`lib/db/schema.ts:951`) — not a Postgres enum, so new types don't need a migration. Known types are in `lib/notifications/types.ts`. Master email switch: `users.emailNotificationsEnabled`; per-type opt-out: `users.emailNotificationPrefs` (jsonb, `:221-227`). `purchase_on_listing` and `refund_on_listing` are not opt-out-able. Reader: `lib/notifications/email-prefs.ts:31`.
+`notifications.type` is free-form text (`lib/db/schema.ts` § `notifications.type`, line 1079) — not a Postgres enum, so new types don't need a migration. Known types are in `lib/notifications/types.ts`. Master email switch: `users.emailNotificationsEnabled`; per-type opt-out: `users.emailNotificationPrefs` (jsonb, `:221-227`). `purchase_on_listing` and `refund_on_listing` are not opt-out-able. Reader: `lib/notifications/email-prefs.ts:31`.
 
 ## Implicit contracts — CON-165
 

@@ -13,7 +13,7 @@ import {
   tokenSpendingLedger,
   users,
 } from "@/lib/db/schema";
-import { createCart, CraftCloudApiError } from "@/lib/craftcloud/client";
+import { createCart, getPrice, CraftCloudApiError } from "@/lib/craftcloud/client";
 import { findMaterialConfig, findProvider } from "@/lib/craftcloud/catalog";
 import { evaluateSpendingPolicy } from "@/lib/billing/policy";
 import { getStripe } from "@/lib/stripe";
@@ -22,6 +22,58 @@ import type { Currency } from "@/lib/craftcloud/types";
 import { calcServiceFee } from "@/lib/fees";
 
 const CONFIRMATION_TTL_MS = 24 * 60 * 60 * 1000;
+
+const QUOTE_EXPIRED_ERROR =
+  "This quote has expired. Re-run materialize_get_quote and try again.";
+
+// Rounding-only tolerance — see the identical constant + rationale in
+// app/actions/print.ts (duplicated rather than extracted into a
+// shared helper; MTR-162 tracks that extraction as a deliberate
+// follow-up AFTER this money-critical change lands). MTR-130.
+const PRICE_RECONCILE_TOLERANCE_CENTS = 1;
+
+/**
+ * Re-derive the authoritative per-unit material price for a quote
+ * from CraftCloud instead of trusting the agent-supplied
+ * materialPriceCents. Worst-case exposure on this path: an
+ * off-session auto-charge with nobody present to notice a tampered
+ * total, so this is not optional. See app/actions/print.ts's twin for
+ * the full rationale — kept in sync there.
+ */
+async function reconcileMaterialPrice(params: {
+  priceId: string;
+  quoteId: string;
+  claimedPriceCents: number;
+}): Promise<{ ok: true; priceCents: number } | { ok: false; error: string }> {
+  let snapshot;
+  try {
+    snapshot = await getPrice(params.priceId);
+  } catch (error) {
+    if (error instanceof CraftCloudApiError && error.isQuoteExpired()) {
+      return { ok: false, error: QUOTE_EXPIRED_ERROR };
+    }
+    throw error;
+  }
+
+  const quote = snapshot.quotes?.find((q) => q.quoteId === params.quoteId);
+  if (!quote) {
+    return { ok: false, error: QUOTE_EXPIRED_ERROR };
+  }
+
+  const authoritativeCents = Math.round(quote.price * 100);
+  if (
+    Math.abs(authoritativeCents - params.claimedPriceCents) >
+    PRICE_RECONCILE_TOLERANCE_CENTS
+  ) {
+    return {
+      ok: false,
+      error:
+        "Pricing has changed since this quote was generated. Re-run materialize_get_quote and try again.",
+    };
+  }
+
+  return { ok: true, priceCents: authoritativeCents };
+}
 
 /**
  * Kill switch for the auto-approve flow. Default-off so deploying
@@ -39,6 +91,12 @@ export interface CreateAgentOrderInput {
   agentName: string;
   idempotencyKey: string;
   fileAssetId: string;
+  // CraftCloud priceId the quoteId was resolved from (returned
+  // alongside every quote by getQuoteForUser / materialize_get_quote)
+  // — lets the server re-derive the authoritative per-unit price via
+  // getPrice() instead of trusting the agent-supplied
+  // materialPriceCents (MTR-130).
+  priceId: string;
   quoteId: string;
   vendorId: string;
   vendorName?: string;
@@ -167,6 +225,19 @@ export async function createAgentInitiatedOrder(
     return { error: "Forbidden: file does not belong to this user" };
   }
 
+  // Re-derive the authoritative per-unit price from CraftCloud instead
+  // of trusting the agent-supplied materialPriceCents — this is the
+  // highest-risk path for tampering (uncapped revenue leakage on the
+  // auto-approved off-session charge, with no human present to notice
+  // a mismatched total). MTR-130.
+  const materialReconciled = await reconcileMaterialPrice({
+    priceId: input.priceId,
+    quoteId: input.quoteId,
+    claimedPriceCents: input.materialPriceCents,
+  });
+  if (!materialReconciled.ok) return { error: materialReconciled.error };
+  const materialPriceCents = materialReconciled.priceCents;
+
   let cartId: string;
   let productionFeeCents = 0;
   try {
@@ -187,7 +258,7 @@ export async function createAgentInitiatedOrder(
   }
 
   const preShippingTotal =
-    input.materialPriceCents * input.quantity + productionFeeCents;
+    materialPriceCents * input.quantity + productionFeeCents;
   const totalPrice = preShippingTotal + input.shippingPriceCents;
   const serviceFee = calcServiceFee(preShippingTotal);
   // What the user will actually be charged — service fee on top of
@@ -250,7 +321,7 @@ export async function createAgentInitiatedOrder(
         craftCloudCartId: cartId,
         totalPrice,
         serviceFee,
-        materialSubtotal: input.materialPriceCents,
+        materialSubtotal: materialPriceCents,
         shippingSubtotal: input.shippingPriceCents,
         quantity: input.quantity,
         material: input.materialConfigId,

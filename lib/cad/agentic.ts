@@ -4,7 +4,11 @@ import Anthropic from "@anthropic-ai/sdk";
 
 import { clientForCredentials, hasModelCredentials } from "./model-client";
 import { activeCadContext, meterModelUsage } from "./metering";
-import { SYSTEM_PROMPT, gradeRun } from "./prompt";
+import {
+  buildSystemPrompt as buildCoreSystemPrompt,
+  selectSystemPromptSections,
+  gradeRun,
+} from "./prompt";
 import { buildKnowledgeBlock } from "./knowledge";
 import { needsExchangerRecipe } from "./knowledge/exchanger-recipe";
 import { selectExemplars, formatExemplars } from "./knowledge/exemplars";
@@ -23,7 +27,7 @@ import {
   networksInconclusive,
   networksSummary,
 } from "./network-check";
-import { cadBriefSchema } from "./brief";
+import { cadBriefSchema, type CadBrief } from "./brief";
 import { enrichRepairHint } from "./repair-taxonomy";
 import { sampleStlPoints } from "./stl-points";
 import { modelForRole } from "./models";
@@ -139,9 +143,31 @@ async function completeWithTools(opts: {
     {
       model: opts.model || DEFAULT_MODEL,
       max_tokens: MAX_TOKENS,
-      system: opts.system,
-      messages: opts.messages,
-      tools: opts.tools,
+      // Prompt caching (MTR-221) — 3 of the max 4 breakpoints per request:
+      //   1. last tool definition (tools render before system, so this pins
+      //      the tool schemas as their own cached span),
+      //   2. final system block (system + knowledge + exemplars are
+      //      byte-stable within a job, so together with #1 the whole
+      //      invariant prefix caches),
+      //   3. a moving breakpoint on the newest tool_result turn
+      //      (withMovingCacheBreakpoint) so the growing conversation caches
+      //      incrementally turn-over-turn.
+      // All three go on non-mutating copies — the caller's messages/TOOLS
+      // arrays never carry markers, so breakpoints move instead of
+      // accumulating past the 4-per-request budget.
+      system: [
+        {
+          type: "text",
+          text: opts.system,
+          cache_control: { type: "ephemeral" },
+        },
+      ],
+      messages: withMovingCacheBreakpoint(opts.messages),
+      tools: opts.tools.map((tool, i) =>
+        i === opts.tools.length - 1
+          ? { ...tool, cache_control: { type: "ephemeral" as const } }
+          : tool
+      ),
     },
     { signal: opts.signal }
   );
@@ -157,6 +183,36 @@ async function completeWithTools(opts: {
     ms: Date.now() - started,
   });
   return message;
+}
+
+/**
+ * Copy of `messages` with cache_control on the final content block of the
+ * newest tool_result user turn — the standard agentic incremental-caching
+ * breakpoint: each request then re-reads the entire prior conversation from
+ * cache and only pays full price for the newest turn. Non-mutating so the
+ * caller's history never accumulates markers across turns (the breakpoint
+ * moves). No-op until the first tool_result turn exists.
+ */
+function withMovingCacheBreakpoint(
+  messages: Anthropic.MessageParam[]
+): Anthropic.MessageParam[] {
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== "user" || !Array.isArray(last.content)) {
+    return messages;
+  }
+  const blocks = last.content;
+  const final = blocks[blocks.length - 1];
+  if (final?.type !== "tool_result") return messages;
+  return [
+    ...messages.slice(0, -1),
+    {
+      ...last,
+      content: [
+        ...blocks.slice(0, -1),
+        { ...final, cache_control: { type: "ephemeral" } },
+      ],
+    },
+  ];
 }
 
 const NO_INPUT = {
@@ -291,12 +347,15 @@ Off-the-shelf parts (MTR-200): for any real named component the design must FIT 
 Interactive specification (MTR-191): when a SINGLE genuine choice would materially change the part and neither the prompt nor the brief settles it (board variant, lid style, mount vs. clip, overall silhouette), call ask_user ONCE early — before you've built the geometry that choice governs — rather than guessing. Budget is 1 question per build; spend it on the highest-leverage fork only. Never ask about anything you can look up, measure, or safely default; a revisable guess beats stalling on a trivial question.`;
 
 function buildSystemPrompt(input: HarnessInput): string {
+  // Router-gated core (MTR-222): selected once per job from the user prompt,
+  // same gating style as buildKnowledgeBlock below.
+  const core = buildCoreSystemPrompt(selectSystemPromptSections(input.prompt));
   const knowledge = buildKnowledgeBlock({
     prompt: input.prompt,
     process: input.process,
   });
   const exemplars = formatExemplars(selectExemplars(input.prompt));
-  return [SYSTEM_PROMPT, knowledge, exemplars, LOOP_GUIDANCE]
+  return [core, knowledge, exemplars, LOOP_GUIDANCE]
     .filter(Boolean)
     .join("\n\n");
 }
@@ -409,6 +468,12 @@ export async function runAgenticHarness(
   const dimensionTargets = extractAgenticDimensionTargets(input);
   let dimensionChecks: DimensionCheckResult[] = [];
 
+  // Design intent for the aesthetic judge (MTR-223): the caller-threaded brief
+  // (the loop builds no brief of its own) plus the agent's opening plan text,
+  // captured from its first substantive text output below.
+  const intentBrief = parseAgenticIntentBrief(input);
+  let agentPlan: string | undefined;
+
   const emit = (event: CadProgressEvent) => {
     try {
       input.onProgress?.(event);
@@ -520,6 +585,16 @@ export async function runAgenticHarness(
       }
 
       messages.push({ role: "assistant", content: message.content });
+      // First substantive text output = the agent's stated plan (MTR-223),
+      // threaded to the aesthetic judge as design intent.
+      if (!agentPlan) {
+        const text = message.content
+          .filter((b): b is Anthropic.TextBlock => b.type === "text")
+          .map((b) => b.text.trim())
+          .filter(Boolean)
+          .join("\n\n");
+        if (text) agentPlan = text;
+      }
       const toolUses = message.content.filter(
         (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
       );
@@ -612,6 +687,7 @@ export async function runAgenticHarness(
       renderPng: bestRun.renderPng,
       renders: bestRun.renders,
       prompt: input.prompt,
+      intent: { plan: agentPlan, brief: intentBrief },
       signal: input.signal,
     });
   }
@@ -758,6 +834,9 @@ export async function runAgenticHarness(
           renderPng: lastRun.renderPng,
           renders: lastRun.renders,
           prompt: input.prompt,
+          // CoT-to-critic (MTR-223): the agent's own stated plan + the
+          // caller-threaded brief, as intent context for the judge.
+          intent: { plan: agentPlan, brief: intentBrief },
           signal: input.signal,
         });
         if (lastRun === bestRun) judgedBest = true;
@@ -982,4 +1061,16 @@ function extractAgenticDimensionTargets(input: HarnessInput): DimensionTarget[] 
   const parsed = cadBriefSchema.safeParse(source);
   if (!parsed.success) return [];
   return (parsed.data.dimensionTargets as DimensionTarget[] | undefined) ?? [];
+}
+
+/**
+ * The caller-threaded brief as judge intent (MTR-223) — same source and
+ * best-effort parse as the dimension targets above; undefined when absent or
+ * malformed so the judge prompt stays unchanged.
+ */
+function parseAgenticIntentBrief(input: HarnessInput): CadBrief | undefined {
+  const source = input.providedBrief ?? input.priorBrief;
+  if (source == null) return undefined;
+  const parsed = cadBriefSchema.safeParse(source);
+  return parsed.success ? parsed.data : undefined;
 }

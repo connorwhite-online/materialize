@@ -174,6 +174,13 @@ export function QuoteConfigurator({
   );
   const [error, setError] = useState<string | null>(null);
   const [quotes, setQuotes] = useState<Quote[]>([]);
+  // CraftCloud priceId the current `quotes` snapshot was polled from
+  // — the server re-derives the authoritative per-unit price from
+  // this via getPrice() instead of trusting the client-supplied
+  // materialPrice on add-to-cart/checkout (MTR-130). Reset whenever
+  // fetchQuotes starts a new price request (region/quantity/material
+  // change) since the previous priceId's quotes are no longer valid.
+  const [priceId, setPriceId] = useState<string | null>(null);
   // Optimistic material list — populated from the catalog manifest as
   // soon as it arrives (in parallel with quote polling), filtered by
   // the model's bounding box. Drives the skeleton-priced cards that
@@ -363,6 +370,18 @@ export function QuoteConfigurator({
   // orders and two charges. Set at the top of the chain and
   // cleared on error so the user can retry.
   const checkoutInFlightRef = useRef(false);
+  // Mirrors the checkoutInFlightRef pattern above, for "Proceed to
+  // checkout" itself (handleCheckout). Without this, a double-tap
+  // (mobile especially) creates two printOrders rows + two real
+  // CraftCloud carts, and in the vendor-group branch two concurrent
+  // cart.addItem calls hit the upsert's LEAST(100, quantity +
+  // EXCLUDED.quantity) and silently double the quantity (MTR-232).
+  // The ref is the synchronous reentry guard (state updates aren't
+  // visible until the next render, same reason cart-context.tsx's
+  // materializingRef exists); isCheckingOut is the state PriceDisplay
+  // reads to disable the button and show "Processing...".
+  const checkoutButtonInFlightRef = useRef(false);
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
   // Whether this checkout began while signed out. Captured at
   // handleCheckout time because, by the time the OTP sign-up completes
   // and handleAddressSubmit runs, `isAnon` has flipped to false — we
@@ -514,6 +533,10 @@ export function QuoteConfigurator({
 
   const handleAddToCart = useCallback(async () => {
     if (!selectedQuote || !selectedShipping || !cart) return;
+    if (!priceId) {
+      setCheckoutError("Quotes are still loading. Please try again in a moment.");
+      return;
+    }
     setIsAddingToCart(true);
     setCheckoutError(null);
     try {
@@ -522,6 +545,7 @@ export function QuoteConfigurator({
           file: draftMode.file,
           modelId: draftMode.modelId,
           originalFilename: filename,
+          priceId,
           quoteId: selectedQuote.quoteId,
           vendorId: selectedQuote.vendorId,
           vendorName: selectedQuote.vendorName,
@@ -541,6 +565,7 @@ export function QuoteConfigurator({
       } else if (fileAssetId) {
         const result = await cart.addItem({
           fileAssetId,
+          priceId,
           quoteId: selectedQuote.quoteId,
           vendorId: selectedQuote.vendorId,
           vendorName: selectedQuote.vendorName,
@@ -561,7 +586,7 @@ export function QuoteConfigurator({
     } finally {
       setIsAddingToCart(false);
     }
-  }, [selectedQuote, selectedShipping, fileAssetId, draftMode, cart, quantity, region.code, filename, onAddedToCart]);
+  }, [selectedQuote, selectedShipping, priceId, fileAssetId, draftMode, cart, quantity, region.code, filename, onAddedToCart]);
 
   // Active material scope for the CraftCloud price request. Starts
   // as the preselectMaterialId (from /materials/[slug] → Print with
@@ -594,6 +619,7 @@ export function QuoteConfigurator({
     // quoteId is no longer valid against the new quote set.
     setSelectedQuote(null);
     setSelectedShipping(null);
+    setPriceId(null);
     // Don't wipe the existing cards — they'll repopulate as new
     // poll snapshots come in, and keeping them avoids a flash of
     // empty state during a region change.
@@ -621,7 +647,10 @@ export function QuoteConfigurator({
         });
         throw startError;
       }
-      const { priceId } = (await startRes.json()) as { priceId: string };
+      const { priceId: newPriceId } = (await startRes.json()) as {
+        priceId: string;
+      };
+      setPriceId(newPriceId);
 
       // 2. Hand off to the shared poll loop. See
       // components/print/poll-quotes.ts for the termination
@@ -629,7 +658,7 @@ export function QuoteConfigurator({
       // drops straight into React state.
       let latestQuoteCount = 0;
       const reason = await pollQuotes({
-        priceId,
+        priceId: newPriceId,
         signal,
         onSnapshot: (snapshot) => {
           latestQuoteCount = snapshot.quotes?.length ?? 0;
@@ -646,7 +675,7 @@ export function QuoteConfigurator({
         // instead of the silent "Done" state.
         if (reason === "timeout") {
           reportClientError("quote.poll-timeout", new Error(reason), {
-            priceId,
+            priceId: newPriceId,
             quoteCount: latestQuoteCount,
           });
         }
@@ -773,37 +802,83 @@ export function QuoteConfigurator({
 
   const handleCheckout = async () => {
     if (!selectedQuote || !selectedShipping) return;
+    // Synchronous reentry guard — a double-tap (mobile especially)
+    // fires two overlapping invocations before the isCheckingOut
+    // state update from the first is even visible to React, so the
+    // state alone can't prevent it (same reason cart-context.tsx's
+    // materializingRef exists). See the ref's declaration for the
+    // full rationale (MTR-232).
+    if (checkoutButtonInFlightRef.current) return;
+    checkoutButtonInFlightRef.current = true;
+    setIsCheckingOut(true);
     setCheckoutError(null);
     checkoutStartedAnonRef.current = isAnon;
 
-    // Defer order creation to after the address step whenever we can't
-    // create an order here:
-    //   - draftMode: the model is an in-memory file with no DB row yet;
-    //     runAnonCheckout uploads it after sign-up.
-    //   - isAnon: createPrintOrder requires auth — the OTP sign-up runs
-    //     inside the address form first (this is the published-file anon
-    //     case that previously 401'd as "Unauthorized").
-    //   - !fileAssetId: nothing to order against (defensive).
-    // The heavy chain runs in handleAddressSubmit once the session is
-    // live.
-    if (draftMode || !fileAssetId || isAnon) {
-      setStep("address");
-      return;
-    }
+    try {
+      // Defer order creation to after the address step whenever we can't
+      // create an order here:
+      //   - draftMode: the model is an in-memory file with no DB row yet;
+      //     runAnonCheckout uploads it after sign-up.
+      //   - isAnon: createPrintOrder requires auth — the OTP sign-up runs
+      //     inside the address form first (this is the published-file anon
+      //     case that previously 401'd as "Unauthorized").
+      //   - !fileAssetId: nothing to order against (defensive).
+      // The heavy chain runs in handleAddressSubmit once the session is
+      // live.
+      if (draftMode || !fileAssetId || isAnon) {
+        setStep("address");
+        return;
+      }
 
-    // If this vendor already has items in the cart, "Proceed to
-    // checkout" should pay for the whole vendor group, not just the
-    // item being configured — otherwise the user silently leaves the
-    // rest of that manufacturer's cart behind. Fold the current item
-    // in (addItem inherits the group's shipping, see addToCart) and
-    // check out the group. With no existing items we keep the leaner
-    // single-item createPrintOrder path.
-    const hasExistingVendorItems =
-      !!cart && cart.items.some((i) => i.vendorId === selectedQuote.vendorId);
+      if (!priceId) {
+        setCheckoutError("Quotes are still loading. Please try again in a moment.");
+        return;
+      }
 
-    if (hasExistingVendorItems && cart) {
-      const added = await cart.addItem({
+      // If this vendor already has items in the cart, "Proceed to
+      // checkout" should pay for the whole vendor group, not just the
+      // item being configured — otherwise the user silently leaves the
+      // rest of that manufacturer's cart behind. Fold the current item
+      // in (addItem inherits the group's shipping, see addToCart) and
+      // check out the group. With no existing items we keep the leaner
+      // single-item createPrintOrder path.
+      const hasExistingVendorItems =
+        !!cart && cart.items.some((i) => i.vendorId === selectedQuote.vendorId);
+
+      if (hasExistingVendorItems && cart) {
+        const added = await cart.addItem({
+          fileAssetId,
+          priceId,
+          quoteId: selectedQuote.quoteId,
+          vendorId: selectedQuote.vendorId,
+          vendorName: selectedQuote.vendorName,
+          materialConfigId: selectedQuote.materialConfigId,
+          shippingId: selectedShipping.shippingId,
+          quantity,
+          materialPrice: selectedQuote.price,
+          shippingPrice: selectedShipping.price,
+          currency: selectedQuote.currency,
+          countryCode: region.code,
+        });
+        if ("error" in added) {
+          setCheckoutError(added.error);
+          return;
+        }
+
+        const grouped = await checkoutVendorGroup(selectedQuote.vendorId);
+        if ("error" in grouped) {
+          setCheckoutError(grouped.error);
+          return;
+        }
+        await cart.refresh();
+        setPrintOrderId(grouped.orderId);
+        setStep("address");
+        return;
+      }
+
+      const result = await createPrintOrder({
         fileAssetId,
+        priceId,
         quoteId: selectedQuote.quoteId,
         vendorId: selectedQuote.vendorId,
         vendorName: selectedQuote.vendorName,
@@ -812,45 +887,28 @@ export function QuoteConfigurator({
         quantity,
         materialPrice: selectedQuote.price,
         shippingPrice: selectedShipping.price,
-        currency: selectedQuote.currency,
-        countryCode: region.code,
+        currency: selectedQuote.currency as "USD",
       });
-      if ("error" in added) {
-        setCheckoutError(added.error);
+
+      if ("error" in result) {
+        setCheckoutError(result.error);
         return;
       }
 
-      const grouped = await checkoutVendorGroup(selectedQuote.vendorId);
-      if ("error" in grouped) {
-        setCheckoutError(grouped.error);
-        return;
-      }
-      await cart.refresh();
-      setPrintOrderId(grouped.orderId);
+      setPrintOrderId(result.orderId);
       setStep("address");
-      return;
+    } finally {
+      // Covers every exit path above — the early-return branches
+      // (draft/anon handoff, vendor-group checkout, single-order
+      // checkout, every error) as well as the two success paths.
+      // Success here moves to the address step within this same
+      // component (unlike handleAddressSubmit's Stripe redirect,
+      // nothing unmounts us), so the button must be re-enabled either
+      // way or a user who backs up to "configure" would find it
+      // stuck disabled.
+      checkoutButtonInFlightRef.current = false;
+      setIsCheckingOut(false);
     }
-
-    const result = await createPrintOrder({
-      fileAssetId,
-      quoteId: selectedQuote.quoteId,
-      vendorId: selectedQuote.vendorId,
-      vendorName: selectedQuote.vendorName,
-      materialConfigId: selectedQuote.materialConfigId,
-      shippingId: selectedShipping.shippingId,
-      quantity,
-      materialPrice: selectedQuote.price,
-      shippingPrice: selectedShipping.price,
-      currency: selectedQuote.currency as "USD",
-    });
-
-    if ("error" in result) {
-      setCheckoutError(result.error);
-      return;
-    }
-
-    setPrintOrderId(result.orderId);
-    setStep("address");
   };
 
   const handleAddressSubmit = async (addressData: {
@@ -896,7 +954,7 @@ export function QuoteConfigurator({
     // sign-up so the session is hot. Run the shared checkout
     // chain and redirect to Stripe on success.
     if (draftMode) {
-      if (!selectedQuote || !selectedShipping) {
+      if (!selectedQuote || !selectedShipping || !priceId) {
         setCheckoutError("Please pick a material and a shipping option.");
         setStep("address");
         checkoutInFlightRef.current = false;
@@ -906,6 +964,7 @@ export function QuoteConfigurator({
       const result = await runAnonCheckout({
         file: draftMode.file,
         selectedQuote: {
+          priceId,
           quoteId: selectedQuote.quoteId,
           vendorId: selectedQuote.vendorId,
           vendorName: selectedQuote.vendorName,
@@ -939,7 +998,7 @@ export function QuoteConfigurator({
     // onSubmit), so create it here before building the Stripe session.
     let orderId = printOrderId;
     if (!orderId) {
-      if (!fileAssetId || !selectedQuote || !selectedShipping) {
+      if (!fileAssetId || !selectedQuote || !selectedShipping || !priceId) {
         setCheckoutError("Please pick a material and a shipping option.");
         setStep("address");
         checkoutInFlightRef.current = false;
@@ -947,6 +1006,7 @@ export function QuoteConfigurator({
       }
       const created = await createPrintOrder({
         fileAssetId,
+        priceId,
         quoteId: selectedQuote.quoteId,
         vendorId: selectedQuote.vendorId,
         vendorName: selectedQuote.vendorName,
@@ -1298,7 +1358,7 @@ export function QuoteConfigurator({
             onSelectShipping={setSelectedShipping}
             quantity={quantity}
             onCheckout={handleCheckout}
-            isCheckingOut={false}
+            isCheckingOut={isCheckingOut}
             checkoutError={checkoutError}
             onAddToCart={
               // Add to Cart needs a cart it can actually write to: the

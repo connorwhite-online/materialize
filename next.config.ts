@@ -59,6 +59,47 @@ const nextConfig: NextConfig = {
     ],
   },
   serverExternalPackages: ["@neondatabase/serverless"],
+  /**
+   * SEC-2 — baseline security response headers. Applied to every
+   * route (`source: "/(.*)"`).
+   *
+   * - X-Content-Type-Options: nosniff — stops the browser from
+   *   sniffing a response's content type; complements the per-route
+   *   nosniff already set on the thumbnail proxies (SEC-1).
+   * - Referrer-Policy: strict-origin-when-cross-origin — trims the
+   *   referrer sent cross-origin to just the origin.
+   * - X-Frame-Options: DENY — this app never needs to be embedded in
+   *   someone else's frame. Checked for conflicts first: the only
+   *   `<iframe>` in the codebase is outbound (Wokwi circuit sim
+   *   embedded IN our page, components/circuits/circuit-lightbox.tsx)
+   *   and KiCanvasViewer renders same-origin — neither is affected by
+   *   this app's own X-Frame-Options, which only governs whether WE
+   *   can be framed by someone else.
+   * - Content-Security-Policy-Report-Only — intentionally permissive
+   *   (report-only, no report-uri) so it observes without breaking
+   *   anything; a future pass can tighten it to enforcing once the
+   *   report data is reviewed.
+   */
+  async headers() {
+    return [
+      {
+        source: "/(.*)",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          {
+            key: "Referrer-Policy",
+            value: "strict-origin-when-cross-origin",
+          },
+          { key: "X-Frame-Options", value: "DENY" },
+          {
+            key: "Content-Security-Policy-Report-Only",
+            value:
+              "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; frame-src https:; worker-src 'self' blob:; frame-ancestors 'none'",
+          },
+        ],
+      },
+    ];
+  },
 };
 
 /**

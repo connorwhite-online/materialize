@@ -127,7 +127,17 @@ export async function completeText(opts: CompleteTextOptions): Promise<string> {
     {
       model: opts.model || DEFAULT_MODEL,
       max_tokens: MAX_TOKENS,
-      system: opts.system,
+      // Prompt caching (MTR-221): the system prompt (base prompt + knowledge
+      // blocks + exemplars) is byte-identical across every repair attempt of a
+      // job — a breakpoint on its final block lets attempt 2+ read it from
+      // cache instead of re-paying full input price.
+      system: [
+        {
+          type: "text",
+          text: opts.system,
+          cache_control: { type: "ephemeral" },
+        },
+      ],
       messages: [{ role: "user", content }],
     },
     { signal: opts.signal }
