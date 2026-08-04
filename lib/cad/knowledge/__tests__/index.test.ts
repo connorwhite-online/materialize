@@ -1,7 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { buildKnowledgeBlock } from "@/lib/cad/knowledge";
 import { fastenersInPrompt } from "@/lib/cad/knowledge/fasteners";
-import { needsStandardParts } from "@/lib/cad/knowledge/bd-warehouse";
+import {
+  needsStandardParts,
+  usesInternalThreadRecipe,
+} from "@/lib/cad/knowledge/bd-warehouse";
 import { needsErgonomics } from "@/lib/cad/knowledge/ergonomics";
 import { needsEnclosureRecipe } from "@/lib/cad/knowledge/enclosure-recipe";
 
@@ -103,6 +106,36 @@ describe("needsStandardParts", () => {
     expect(needsStandardParts("bolt-on bracket")).toBe(true); // bolt-on implies bolts
     expect(needsStandardParts("insert a hole in the lid")).toBe(false);
     expect(needsStandardParts("a decorative coaster")).toBe(false);
+  });
+
+  it("triggers on functional-thread prompts (the df06cce4 failure class)", () => {
+    expect(
+      needsStandardParts("a rounded cube with big chunky threads through it")
+    ).toBe(true);
+    expect(needsStandardParts("threaded hole through the center")).toBe(true);
+    expect(needsStandardParts("a spool of thread for sewing")).toBe(true); // acceptable over-trigger
+  });
+});
+
+describe("usesInternalThreadRecipe", () => {
+  it("detects internal bd_warehouse threads and nothing else", () => {
+    expect(
+      usesInternalThreadRecipe(
+        "from bd_warehouse.thread import IsoThread\nt = IsoThread(major_diameter=20, pitch=2.5, length=40, external=False)"
+      )
+    ).toBe(true);
+    // External threads fuse clean — no remesh needed.
+    expect(
+      usesInternalThreadRecipe(
+        "from bd_warehouse.thread import TrapezoidalThread\nt = TrapezoidalThread(diameter=24, pitch=4, thread_angle=30, length=30, external=True)"
+      )
+    ).toBe(false);
+    // Fasteners import from bd_warehouse.fastener, not .thread.
+    expect(
+      usesInternalThreadRecipe(
+        "from bd_warehouse.fastener import HexNut\nn = HexNut(size='M3-0.5', fastener_type='iso4032')"
+      )
+    ).toBe(false);
   });
 });
 
