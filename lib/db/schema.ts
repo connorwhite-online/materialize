@@ -311,6 +311,17 @@ export const files = pgTable("files", {
   flaggedReason: text("flagged_reason"),
   flaggedAt: timestamp("flagged_at", { withTimezone: true }),
   flaggedAgainstFileId: uuid("flagged_against_file_id"),
+  /**
+   * Provenance edge (docs/text-to-cad/10): the file this one was derived
+   * from — a remix, a studio edit seeded from an existing file, or any
+   * future derivation entry point. FACTUAL and immutable by convention:
+   * attribution is provenance, not ownership, so it never changes hands
+   * with licensing decisions and survives the source going private
+   * (SET NULL only on actual deletion; FK in the migration). No writers
+   * yet — recorded from day one so the remix graph exists before the
+   * remix feature does.
+   */
+  derivedFromFileId: uuid("derived_from_file_id"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -1505,6 +1516,15 @@ export const cadGenerations = pgTable(
     // Set on an "edit existing" generation — points at the generation
     // whose sourceCode seeded this one. Self-FK declared below.
     parentGenerationId: uuid("parent_generation_id"),
+    /**
+     * Provenance edge (docs/text-to-cad/10): the OTHER-thread generation
+     * this one was seeded from — a cross-thread/cross-user remix, vs.
+     * parentGenerationId which encodes revision structure WITHIN a thread.
+     * Immutable by convention (factual attribution, not ownership). FK
+     * declared in the migration with ON DELETE SET NULL. No writers yet —
+     * the column exists so the remix graph is recordable from day one.
+     */
+    remixOfGenerationId: uuid("remix_of_generation_id"),
     // The thread this generation belongs to (docs/text-to-cad/05 §A).
     // Root generations create the thread; revisions carry it from the
     // parent. parentGenerationId still encodes the branch structure

@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { fileAssets, files } from "@/lib/db/schema";
@@ -5,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
 import { logError } from "@/lib/logger";
 import { isOrgMember } from "@/lib/authorization";
+import { promoteStudioDraftsForAssets } from "@/lib/studio-drafts";
 
 /**
  * Same-origin streaming proxy for the asset's bytes.
@@ -65,6 +67,24 @@ export async function GET(
     const isPublished = assetRow.fileStatus === "published";
     if (!canView && !isPublished) {
       return new Response("Forbidden", { status: 403 });
+    }
+
+    // `?download=1` marks a deliberate file download (the studio's Download
+    // button / assembly zip), as opposed to a viewer/loader fetch of the same
+    // URL. A download means the artifact left the studio — for the OWNER's
+    // own unsaved studio draft that is a promotion event, same as a print
+    // order ("a download is a save", docs/text-to-cad/10). Best-effort and
+    // after the response starts; a promotion hiccup must never break the
+    // download itself. No-op for anything that isn't an unsaved studio draft.
+    const isDownload =
+      new URL(request.url).searchParams.get("download") === "1";
+    if (isDownload && userId && assetRow.fileUserId === userId) {
+      after(() =>
+        promoteStudioDraftsForAssets({
+          userId,
+          fileAssetIds: [fileAssetId],
+        })
+      );
     }
 
     const downloadUrl = await generateDownloadUrl(assetRow.storageKey, 300);
