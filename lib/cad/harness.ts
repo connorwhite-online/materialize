@@ -57,6 +57,7 @@ import {
   type DimensionTarget,
 } from "./dimension-check";
 import { enrichRepairHint } from "./repair-taxonomy";
+import { usesInternalThreadRecipe } from "./knowledge/bd-warehouse";
 import { sampleStlPoints } from "./stl-points";
 import { getNetworksReport, networksFailure } from "./network-check";
 import {
@@ -663,6 +664,12 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
     emit({ type: "phase", phase: "executing", attempt, maxAttempts });
     lastRun = await runCadCode(lastCode, BREP_OUTPUT_FORMATS, input.signal, {
       checks: runChecks,
+      // Internal-thread compound recipe: watertight ONLY via the mesh
+      // pipeline (kernel-verified — booleans shatter or silently drop the
+      // thread), so remesh is allowed from the FIRST run instead of burning
+      // repair attempts on a correct program. Every other program keeps
+      // remesh off here so the model fixes its own geometry.
+      allowRemesh: usesInternalThreadRecipe(lastCode),
     });
 
     // Last attempt, and the ONLY defect is an open/non-manifold surface:
