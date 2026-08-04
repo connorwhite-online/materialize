@@ -1694,6 +1694,13 @@ export const cadJobs = pgTable(
     lastSnapshot: text("last_snapshot"),
     snapshotStep: integer("snapshot_step").notNull().default(0),
     /**
+     * Sampled surface points of the last snapshot's solid (base64 LE Float32
+     * xyz triples, ~32 KB — lib/cad/stl-points.ts). Rides beside lastSnapshot
+     * so the events route can re-emit the live point-cloud morph target on
+     * reconnect. Null when the run produced no parsable STL.
+     */
+    lastSnapshotPoints: text("last_snapshot_points"),
+    /**
      * Cost metering (MTR-181, docs/text-to-cad/08): RAW per-job usage —
      * model tokens per (role, model), sidecar wall time, fal invocations,
      * router verdict — written once at job termination. Raw on purpose:

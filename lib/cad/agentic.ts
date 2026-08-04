@@ -29,6 +29,7 @@ import {
 } from "./network-check";
 import { cadBriefSchema, type CadBrief } from "./brief";
 import { enrichRepairHint } from "./repair-taxonomy";
+import { sampleStlPoints } from "./stl-points";
 import { modelForRole } from "./models";
 import {
   sourcePart,
@@ -89,6 +90,10 @@ const MAX_TOOL_TURNS = 16;
 // on Vercel the generate route's maxDuration must cover this (or trim it
 // back via CAD_AGENTIC_MAX_MS) — see app/api/cad/generate/route.ts.
 const DEFAULT_MAX_MS = 600_000;
+// Deadline trimming floor + the slice reserved for a scripted fallback run
+// (brief + plan + one attempt + judge) after an agentic cutoff.
+const MIN_AGENTIC_MS = 120_000;
+const FALLBACK_RESERVE_MS = 240_000;
 // Same default + headroom rationale as model-client.
 const DEFAULT_MODEL = "claude-sonnet-4-6";
 const MAX_TOKENS = 8192;
@@ -97,9 +102,21 @@ const STDOUT_CAP = 2_000;
 
 /** Infrastructure failure in the agentic loop — the orchestrator's cue to fall back. */
 export class CadAgenticError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
+  /**
+   * Best-so-far result salvaged at a budget cutoff (structurally valid run +
+   * its source). NOT shipped as "done" directly — the quality rail stands (it
+   * may be an unfinished exploration shape) — but the orchestrator uses it as
+   * the LAST resort when the scripted fallback can't run (deadline) or fails,
+   * so a 10-minute build degrades to *something printable*, never to nothing.
+   */
+  readonly salvage?: HarnessResult;
+  constructor(
+    message: string,
+    options?: { cause?: unknown; salvage?: HarnessResult }
+  ) {
+    super(message, { cause: options?.cause });
     this.name = "CadAgenticError";
+    this.salvage = options?.salvage;
   }
 }
 
@@ -430,7 +447,18 @@ function runSummary(run: CadRunResult, extra?: Record<string, unknown>): string 
 export async function runAgenticHarness(
   input: HarnessInput
 ): Promise<HarnessResult> {
-  const maxMs = Number(process.env.CAD_AGENTIC_MAX_MS) || DEFAULT_MAX_MS;
+  const envMaxMs = Number(process.env.CAD_AGENTIC_MAX_MS) || DEFAULT_MAX_MS;
+  // Under a platform deadline (input.deadlineAt), trim the wall budget so a
+  // scripted fallback still FITS after a cutoff — an agentic loop that eats
+  // the whole window leaves the fallback to be platform-killed mid-run, which
+  // is how a build dies holding geometry and persists nothing. Unbounded
+  // callers (no deadline) keep the env/default budget exactly as before.
+  const maxMs = input.deadlineAt
+    ? Math.max(
+        MIN_AGENTIC_MS,
+        Math.min(envMaxMs, input.deadlineAt - Date.now() - FALLBACK_RESERVE_MS)
+      )
+    : envMaxMs;
   const model = modelForRole("implement");
   const startedAt = Date.now();
 
@@ -626,10 +654,29 @@ export async function runAgenticHarness(
   // that returned a solid block for a manifolded dual-fluid exchanger. Never
   // ship that silently as "done"; fall back to the scripted harness, which
   // builds single-shot with its own repair loop instead of running out of
-  // an incremental-build budget mid-assembly.
+  // an incremental-build budget mid-assembly. The best-so-far ride along as
+  // `salvage` so the orchestrator can still persist SOMETHING when the
+  // fallback can't run or fails (deadline pressure) — an unfinished shape
+  // the user can revise beats a 10-minute build that leaves nothing.
   if (budgetCutoff && bestRun) {
     throw new CadAgenticError(
-      "agentic harness hit its turn/time budget mid-build (finish() was never called) — the best-so-far result may be an unfinished exploration snapshot, not the intended part"
+      "agentic harness hit its turn/time budget mid-build (finish() was never called) — the best-so-far result may be an unfinished exploration snapshot, not the intended part",
+      {
+        salvage: {
+          ok: true,
+          sourceCode: bestCode || assembled(),
+          attempts: execCount,
+          run: bestRun,
+          aestheticScore: null,
+          aestheticDims: null,
+          brief: input.priorBrief,
+          dimensionChecks,
+          telemetry,
+          ...(partSourcing.sourced.length > 0 || partSourcing.misses.length > 0
+            ? { partSourcing }
+            : {}),
+        },
+      }
     );
   }
 
@@ -722,9 +769,18 @@ export async function runAgenticHarness(
             })
           ),
         ];
-        // Live preview for the studio: latest solid, per exec.
+        // Live preview for the studio: latest solid, per exec. Sampled
+        // surface points ride along so the forming point cloud can morph
+        // toward the actual solid, not stay a generic blob.
         if (res.renderPng) {
-          emit({ type: "snapshot", render: res.renderPng, step: execCount });
+          emit({
+            type: "snapshot",
+            render: res.renderPng,
+            step: execCount,
+            points: res.files.stl
+              ? sampleStlPoints(res.files.stl) ?? undefined
+              : undefined,
+          });
         }
         // Auto-attach the render whenever the exec changed the solid (doc 03
         // open question 4's default) so the agent can't build blind.

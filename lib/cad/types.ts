@@ -245,6 +245,13 @@ export type CadProgressEvent =
       render: string;
       /** Monotonic step counter for cheap change detection. */
       step: number;
+      /**
+       * Sampled surface points of the in-progress solid (base64 LE Float32
+       * xyz triples, model space — see lib/cad/stl-points.ts). Optional and
+       * fail-open: absent when the STL wasn't parsable or the run predates
+       * this field. Drives the studio's live point-cloud morph.
+       */
+      points?: string;
     }
   | {
       type: "phase";

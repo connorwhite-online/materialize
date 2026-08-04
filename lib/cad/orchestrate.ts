@@ -3,7 +3,7 @@ import "server-only";
 import { completeText, hasModelCredentials } from "./model-client";
 import { modelForRole } from "./models";
 import { runHarness, type HarnessInput, type HarnessResult } from "./harness";
-import { runAgenticHarness } from "./agentic";
+import { runAgenticHarness, CadAgenticError } from "./agentic";
 import {
   generativeEnabled,
   shouldUseGenerative,
@@ -113,6 +113,12 @@ async function runBestOf(
   return winner;
 }
 
+// Under a deadline, a scripted rebuild needs at least brief + plan + one
+// codegen attempt + a sidecar run (~4 min realistic). With less than this
+// remaining, starting it guarantees a platform kill mid-run — prefer the
+// salvaged agentic result when one exists.
+const MIN_SCRIPTED_FALLBACK_MS = 240_000;
+
 function agenticEnabled(): boolean {
   return (
     hasModelCredentials() &&
@@ -185,13 +191,52 @@ export async function runCadGeneration(
       // Abort = the caller hung up, not an agentic failure — propagate.
       if ((err as Error)?.name === "AbortError") throw err;
       logError("runCadGeneration:agentic-fallback", err);
-      note({
-        type: "fallback",
-        from: "agentic",
-        to: "scripted",
-        reason: (err as Error)?.message ?? String(err),
-      });
-      return { ...(await runHarness(input)), route: "complex-fallback" };
+      const reason = (err as Error)?.message ?? String(err);
+      // Budget-cutoff salvage (see CadAgenticError.salvage): the structurally
+      // valid best-so-far, used ONLY when the scripted fallback can't run or
+      // fails — the quality rail (don't ship an unfinished exploration as if
+      // it were the finished part) still prefers a full scripted rebuild.
+      const salvage =
+        err instanceof CadAgenticError ? err.salvage : undefined;
+      const remainingMs = input.deadlineAt
+        ? input.deadlineAt - Date.now()
+        : Infinity;
+      if (salvage && remainingMs < MIN_SCRIPTED_FALLBACK_MS) {
+        note({
+          type: "fallback",
+          from: "agentic",
+          to: "salvage",
+          reason: `${reason} — too little time left for a scripted rebuild; keeping the best-so-far solid`,
+        });
+        return { ...salvage, route: "complex-salvage" };
+      }
+      note({ type: "fallback", from: "agentic", to: "scripted", reason });
+      if (!salvage) {
+        return { ...(await runHarness(input)), route: "complex-fallback" };
+      }
+      try {
+        const scripted = await runHarness(input);
+        if (scripted.ok) return { ...scripted, route: "complex-fallback" };
+        note({
+          type: "fallback",
+          from: "scripted",
+          to: "salvage",
+          reason:
+            scripted.error ??
+            "scripted rebuild produced no valid result — keeping the agentic best-so-far solid",
+        });
+        return { ...salvage, route: "complex-salvage" };
+      } catch (err2) {
+        if ((err2 as Error)?.name === "AbortError") throw err2;
+        logError("runCadGeneration:scripted-salvage", err2);
+        note({
+          type: "fallback",
+          from: "scripted",
+          to: "salvage",
+          reason: (err2 as Error)?.message ?? String(err2),
+        });
+        return { ...salvage, route: "complex-salvage" };
+      }
     }
   }
   const n = !input.priorSourceCode ? bestOfN() : 1;

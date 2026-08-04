@@ -184,7 +184,10 @@ export async function GET(
             if (row.snapshotStep > sentSnapshotStep) {
               sentSnapshotStep = row.snapshotStep;
               const [snap] = await db
-                .select({ lastSnapshot: cadJobs.lastSnapshot })
+                .select({
+                  lastSnapshot: cadJobs.lastSnapshot,
+                  lastSnapshotPoints: cadJobs.lastSnapshotPoints,
+                })
                 .from(cadJobs)
                 .where(eq(cadJobs.id, jobId))
                 .limit(1);
@@ -193,6 +196,7 @@ export async function GET(
                   type: "snapshot",
                   render: snap.lastSnapshot,
                   step: row.snapshotStep,
+                  points: snap.lastSnapshotPoints ?? undefined,
                 });
               }
             }

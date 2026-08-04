@@ -393,6 +393,13 @@
       "when": 1786001600000,
       "tag": "0055_cart_items_price_id",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1786001700000,
+      "tag": "0056_cad_job_snapshot_points",
+      "breakpoints": true
     }
   ]
 }

@@ -70,6 +70,24 @@ export function maxQuestionsPerJob(): number {
   return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 1;
 }
 
+/**
+ * Wall budget one job may spend GENERATING, as a deadline threaded through
+ * the harness input. Must fit inside the platform window that hosts the
+ * executor (Vercel: the generate route's maxDuration, currently 800s) with
+ * room left for persist (R2 uploads + title) and terminal writes — a job
+ * that outlives the window is killed mid-run and leaves a zombie "running"
+ * row for the stale reaper. Env-tunable for self-hosted/queue workers:
+ * CAD_JOB_BUDGET_MS=0 disables the deadline entirely (unbounded).
+ */
+const DEFAULT_JOB_BUDGET_MS = 740_000;
+function jobDeadlineAt(): number | undefined {
+  const raw = process.env.CAD_JOB_BUDGET_MS;
+  if (raw !== undefined && Number(raw) === 0) return undefined;
+  const n = Number(raw);
+  const budget = Number.isFinite(n) && n > 0 ? n : DEFAULT_JOB_BUDGET_MS;
+  return Date.now() + budget;
+}
+
 /** Insert a queued job row for a generation and return its id. */
 export async function createCadJob(
   generationId: string
@@ -200,11 +218,18 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
   // Live previews bypass the append-only progress log (SSE cursor + size):
   // latest render only, in a dedicated column the events route polls.
   let snapshotChain: Promise<void> = Promise.resolve();
-  const writeSnapshot = (render: string, step: number) => {
+  const writeSnapshot = (render: string, step: number, points?: string) => {
     snapshotChain = snapshotChain.then(() =>
       db
         .update(cadJobs)
-        .set({ lastSnapshot: render, snapshotStep: step, updatedAt: new Date() })
+        .set({
+          lastSnapshot: render,
+          snapshotStep: step,
+          // Overwrite (not coalesce) so a shape-less snapshot can't pair a
+          // stale point cloud with a newer render.
+          lastSnapshotPoints: points ?? null,
+          updatedAt: new Date(),
+        })
         .where(eq(cadJobs.id, jobId))
         .then(
           () => undefined,
@@ -215,7 +240,7 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
 
   const onProgress = (event: CadJobProgressEntry) => {
     if (event.type === "snapshot") {
-      writeSnapshot(event.render, event.step);
+      writeSnapshot(event.render, event.step, event.points);
       return;
     }
     // Stamp emit time: replayed transcripts arrive in one burst, so the
@@ -485,6 +510,7 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
         signal: controller.signal,
         onProgress,
         onQuestion,
+        deadlineAt: jobDeadlineAt(),
       })
     );
     meteredRoute = result.route;
