@@ -64,6 +64,17 @@ vi.mock("@/lib/logger", () => ({
   logError: vi.fn(),
 }));
 
+// after() runs its callback post-response in prod; run it inline so the
+// promotion call is observable synchronously in tests.
+vi.mock("next/server", () => ({
+  after: (fn: () => unknown) => fn(),
+}));
+
+const mockPromote = vi.fn().mockResolvedValue(undefined);
+vi.mock("@/lib/studio-drafts", () => ({
+  promoteStudioDraftsForAssets: (...args: unknown[]) => mockPromote(...args),
+}));
+
 // Mock global fetch for the upstream R2 proxy
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
@@ -115,6 +126,7 @@ beforeEach(() => {
   mockFetch.mockReset();
   mockIsOrgMember.mockReset();
   mockIsOrgMember.mockResolvedValue({ member: false, role: null });
+  mockPromote.mockClear();
 });
 
 describe("preview/[fileAssetId] GET", () => {
@@ -191,6 +203,45 @@ describe("preview/[fileAssetId] GET", () => {
     const res = await GET(makeRequest(), makeProps("asset-1"));
     expect(res.status).toBe(403);
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("?download=1 by the owner promotes the studio draft (a download is a save)", async () => {
+    mockUserId = "owner-1";
+    assetRow = asset({ fileStatus: "draft", fileUserId: "owner-1" });
+    upstreamOk();
+
+    const res = await GET(
+      makeRequest("http://localhost/api/files/preview/asset-1?download=1"),
+      makeProps("asset-1")
+    );
+    expect(res.status).toBe(200);
+    expect(mockPromote).toHaveBeenCalledWith({
+      userId: "owner-1",
+      fileAssetIds: ["asset-1"],
+    });
+  });
+
+  it("?download=1 by a non-owner never promotes", async () => {
+    mockUserId = "other-user";
+    assetRow = asset({ fileStatus: "published", fileUserId: "owner-1" });
+    upstreamOk();
+
+    const res = await GET(
+      makeRequest("http://localhost/api/files/preview/asset-1?download=1"),
+      makeProps("asset-1")
+    );
+    expect(res.status).toBe(200);
+    expect(mockPromote).not.toHaveBeenCalled();
+  });
+
+  it("a plain viewer fetch (no download flag) never promotes", async () => {
+    mockUserId = "owner-1";
+    assetRow = asset({ fileStatus: "draft", fileUserId: "owner-1" });
+    upstreamOk();
+
+    const res = await GET(makeRequest(), makeProps("asset-1"));
+    expect(res.status).toBe(200);
+    expect(mockPromote).not.toHaveBeenCalled();
   });
 
   it("missing row gets 404", async () => {
