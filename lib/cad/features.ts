@@ -288,6 +288,74 @@ export function substituteFeatureParams(
 }
 
 /**
+ * Derive the rewritten source for a no-LLM param rerun/preview — the ONE
+ * shared implementation behind both the commit path (rerunCadWithParams)
+ * and the live-preview route, so a previewed change and its committed
+ * revision can never diverge. Pure: re-derives every binding from the
+ * server's copy of source + features; a stale/hostile client can only move
+ * numbers in verified positions, never inject text.
+ *
+ * With `featureId`, `params` are the feature's CONTROL keys (radius,
+ * amount, …); without it they are top-level source names filtered against
+ * `extractParams`.
+ */
+export function deriveParamRerunSource(opts: {
+  sourceCode: string;
+  /** cadGenerations.features, raw (parse happens here). */
+  featuresRaw: unknown;
+  featureId?: string;
+  params: Record<string, number>;
+}): { source: string; summary: string } | { error: string } {
+  if (opts.featureId) {
+    const features = bindFeatureParamNames(
+      parseFeatures(opts.featuresRaw),
+      opts.sourceCode
+    );
+    const feature = features.find((f) => f.id === opts.featureId);
+    if (!feature) return { error: "Feature not found." };
+    const draft: Record<string, number> = {};
+    for (const [key, value] of Object.entries(opts.params ?? {})) {
+      if (
+        key in feature.params &&
+        typeof value === "number" &&
+        Number.isFinite(value)
+      ) {
+        draft[key] = value;
+      }
+    }
+    const substituted = substituteFeatureParams(opts.sourceCode, feature, draft);
+    if (!substituted) return { error: "No editable parameters to apply." };
+    const changed = substituted.applied
+      .map((key) => `${key} ${feature.params[key]} → ${draft[key]}`)
+      .slice(0, 3);
+    return {
+      source: substituted.source,
+      summary: `Update ${feature.label}: ${changed.join(" · ")}`,
+    };
+  }
+
+  const allowed = extractParams(opts.sourceCode);
+  const params: Record<string, number> = {};
+  for (const [name, value] of Object.entries(opts.params ?? {})) {
+    if (name in allowed && typeof value === "number" && Number.isFinite(value)) {
+      params[name] = value;
+    }
+  }
+  if (Object.keys(params).length === 0) {
+    return { error: "No editable parameters to apply." };
+  }
+  const changed = Object.entries(params)
+    .filter(([name, v]) => allowed[name] !== v)
+    .map(([name, v]) => `${name} ${allowed[name]} → ${v}`)
+    .slice(0, 3);
+  return {
+    source: substituteParams(opts.sourceCode, params),
+    summary:
+      changed.length > 0 ? `Update params: ${changed.join(" · ")}` : "Update params",
+  };
+}
+
+/**
  * Splice replacement lines over a feature's statement span, preserving the
  * original first line's indentation when the replacement arrives unindented
  * (models often return dedented snippets). Used by the stmt-edit repair

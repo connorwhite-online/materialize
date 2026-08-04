@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   bindFeatureParamNames,
+  deriveParamRerunSource,
   featureParamsToSourceParams,
   parseFeatures,
   positionsForTriangleRanges,
@@ -278,5 +279,60 @@ describe("spliceStatementSpan", () => {
   it("rejects empty replacements and bad spans", () => {
     expect(spliceStatementSpan(SPAN_SOURCE, [5, 5], "   \n")).toBeNull();
     expect(spliceStatementSpan(SPAN_SOURCE, [0, 5], "x = 1")).toBeNull();
+  });
+});
+
+describe("deriveParamRerunSource (shared by commit + live preview)", () => {
+  it("feature-scoped: rewrites the span literal and summarizes the change", () => {
+    const out = deriveParamRerunSource({
+      sourceCode: SPAN_SOURCE,
+      featuresRaw: [{ ...spanFeature }],
+      featureId: "fillet-0",
+      params: { radius: 5 },
+    });
+    if ("error" in out) throw new Error(out.error);
+    expect(out.source).toContain("fillet(p.edges().group_by(Axis.Z)[-1], 5)");
+    expect(out.summary).toBe("Update Fillet r=3.5: radius 3.5 → 5");
+  });
+
+  it("feature-scoped: unknown feature / no applicable keys error out", () => {
+    expect(
+      deriveParamRerunSource({
+        sourceCode: SPAN_SOURCE,
+        featuresRaw: [{ ...spanFeature }],
+        featureId: "nope",
+        params: { radius: 5 },
+      })
+    ).toEqual({ error: "Feature not found." });
+    expect(
+      deriveParamRerunSource({
+        sourceCode: SPAN_SOURCE,
+        featuresRaw: [{ ...spanFeature }],
+        featureId: "fillet-0",
+        params: { bogus: 5, radius: Number.NaN },
+      })
+    ).toEqual({ error: "No editable parameters to apply." });
+  });
+
+  it("top-level: rewrites only real named params and drops unknown keys", () => {
+    const out = deriveParamRerunSource({
+      sourceCode: SPAN_SOURCE,
+      featuresRaw: null,
+      params: { wall: 3.2, injected: 99 },
+    });
+    if ("error" in out) throw new Error(out.error);
+    expect(out.source).toContain("wall = 3.2");
+    expect(out.source).not.toContain("injected");
+    expect(out.summary).toBe("Update params: wall 2.4 → 3.2");
+  });
+
+  it("top-level: nothing valid to apply errors out", () => {
+    expect(
+      deriveParamRerunSource({
+        sourceCode: SPAN_SOURCE,
+        featuresRaw: null,
+        params: { injected: 99 },
+      })
+    ).toEqual({ error: "No editable parameters to apply." });
   });
 });

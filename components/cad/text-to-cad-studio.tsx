@@ -470,6 +470,16 @@ export function TextToCadStudio({
   // highlight of that op's faceIds).
   const [activeFeatureId, setActiveFeatureId] = useState<string | null>(null);
   const [featureUpdating, setFeatureUpdating] = useState(false);
+  // Live param preview (docs/text-to-cad/10): transient STL object URL the
+  // viewer shows while a chip's values are being dialed — nothing persisted
+  // until the popover's ✓ commits through rerunCadWithParams.
+  const [paramPreviewUrl, setParamPreviewUrl] = useState<string | null>(null);
+  const [paramPreviewPending, setParamPreviewPending] = useState(false);
+  const [paramPreviewError, setParamPreviewError] = useState<string | null>(
+    null
+  );
+  const paramPreviewAbortRef = useRef<AbortController | null>(null);
+  const paramPreviewUrlRef = useRef<string | null>(null);
   // The submitted prompt, held for the life of a generation so it can ride in
   // the RIGHT-aligned "sent" bubble of the morphing generation thread (MTR-209)
   // while the composer empties. Restored into the composer on error so a failed
@@ -900,6 +910,80 @@ export function TextToCadStudio({
       delete next[newTurn.id];
       return next;
     });
+  }
+
+  /** Drop the transient preview and return the viewer to the real asset. */
+  const clearParamPreview = useCallback(() => {
+    paramPreviewAbortRef.current?.abort();
+    paramPreviewAbortRef.current = null;
+    if (paramPreviewUrlRef.current) {
+      URL.revokeObjectURL(paramPreviewUrlRef.current);
+      paramPreviewUrlRef.current = null;
+    }
+    setParamPreviewUrl(null);
+    setParamPreviewPending(false);
+    setParamPreviewError(null);
+  }, []);
+
+  // Any turn/asset switch invalidates an in-flight or shown preview.
+  useEffect(() => clearParamPreview, [activeAssetId, clearParamPreview]);
+
+  /**
+   * Live preview for a chip's dialed values: deterministic sidecar re-run of
+   * the rewritten source (NO LLM, nothing persisted) → transient STL object
+   * URL the viewer swaps to. `draft: null` reverts. Single-solid only — the
+   * caller gates assemblies/compare off via `previewEnabled`.
+   */
+  async function previewFeatureDraft(
+    feature: CadFeature,
+    draft: Record<string, number> | null
+  ) {
+    if (!draft) {
+      clearParamPreview();
+      return;
+    }
+    if (!viewedTurn) return;
+    paramPreviewAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    paramPreviewAbortRef.current = ctrl;
+    setParamPreviewPending(true);
+    setParamPreviewError(null);
+    try {
+      const res = await fetch("/api/cad/feature-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          generationId: viewedTurn.id,
+          featureId: feature.id,
+          params: draft,
+        }),
+        signal: ctrl.signal,
+      });
+      if (ctrl.signal.aborted) return;
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        setParamPreviewError(body?.error ?? "Preview failed.");
+        return;
+      }
+      const blob = await res.blob();
+      if (ctrl.signal.aborted) return;
+      const url = URL.createObjectURL(blob);
+      if (paramPreviewUrlRef.current) {
+        URL.revokeObjectURL(paramPreviewUrlRef.current);
+      }
+      paramPreviewUrlRef.current = url;
+      setParamPreviewUrl(url);
+    } catch (err) {
+      if ((err as Error)?.name !== "AbortError") {
+        setParamPreviewError("Preview failed.");
+      }
+    } finally {
+      if (paramPreviewAbortRef.current === ctrl) {
+        setParamPreviewPending(false);
+      }
+    }
   }
 
   async function applyFeatureUpdate(
@@ -1913,9 +1997,17 @@ export function TextToCadStudio({
                           }))
                         : undefined
                     }
-                    modelUrl={`/api/files/preview/${
-                      compareBaseAssetId ?? activeAssetId
-                    }`}
+                    modelUrl={
+                      // Live param preview: transient geometry while a chip's
+                      // values are dialed. Never during compare (ghost pair
+                      // must stay coherent) or assembly overview (assemblyParts
+                      // takes precedence anyway).
+                      paramPreviewUrl && !compareBaseAssetId
+                        ? paramPreviewUrl
+                        : `/api/files/preview/${
+                            compareBaseAssetId ?? activeAssetId
+                          }`
+                    }
                     topoUrl={viewerTopoUrl}
                     highlightFaceIds={highlightFaceIds}
                     ghostUrl={
@@ -2503,6 +2595,14 @@ export function TextToCadStudio({
                     onActiveChange={setActiveFeatureId}
                     onUpdate={applyFeatureUpdate}
                     onEditStatement={applyFeatureStatementEdit}
+                    onPreview={previewFeatureDraft}
+                    // Single-solid viewer only: assemblies render via
+                    // assemblyParts and compare mode pins a ghost pair.
+                    previewEnabled={
+                      viewedParts.length <= 1 && !compareBaseAssetId
+                    }
+                    previewPending={paramPreviewPending}
+                    previewError={paramPreviewError}
                     disabled={featureUpdating}
                     markedIds={annotatedFeatureIds}
                   />
