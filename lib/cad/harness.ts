@@ -62,6 +62,7 @@ import { sampleStlPoints } from "./stl-points";
 import { getNetworksReport, networksFailure } from "./network-check";
 import {
   BREP_OUTPUT_FORMATS,
+  CUSTOM_ANSWER_PREFIX,
   type CadProgressEvent,
   type CadQuestionAsker,
   type CadRunResult,
@@ -486,6 +487,48 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
         signal: input.signal,
       })
     );
+  }
+  // Ask-before-build now lives INSIDE the job (walk-away UX): the brief's
+  // open questions surface through the executor's suspend/resume question
+  // machinery — present users get the choice cards, absent users get the
+  // defaults after the timeout — instead of the old client-side quick-check
+  // card that gated the build on a phone that might be locked in a pocket.
+  // Budget/timeout policy is entirely the asker's (jobs.ts maxQuestionsPerJob:
+  // beyond-budget questions resolve to their default without suspending).
+  if (brief?.questions?.length && input.onQuestion) {
+    const decisions = [...(brief.decisions ?? [])];
+    const decided = new Set(decisions.map((d) => d.q));
+    for (const [qi, q] of brief.questions.entries()) {
+      if (decided.has(q.question) || q.options.length === 0) continue;
+      const options = q.options.map((o, oi) => ({
+        id: `opt-${oi + 1}`,
+        label: o.label,
+        detail: o.detail,
+      }));
+      const defaultOptionId =
+        options.find((o) => o.label === q.default)?.id ?? options[0].id;
+      try {
+        const answer = await input.onQuestion({
+          id: `brief-${qi + 1}`,
+          text: q.question,
+          options,
+          defaultOptionId,
+        });
+        // Free-text replies (MTR-216) carry the user's own words; preset
+        // picks map back to the option label the brief prompt understands.
+        const custom = answer.startsWith(CUSTOM_ANSWER_PREFIX)
+          ? answer.slice(CUSTOM_ANSWER_PREFIX.length).trim()
+          : null;
+        const label = custom || options.find((o) => o.id === answer)?.label;
+        if (label) decisions.push({ q: q.question, a: label });
+      } catch {
+        // Asking is best-effort — an asker failure falls through to the
+        // question's default at prompt-format time (formatBrief).
+      }
+    }
+    if (decisions.length > (brief.decisions?.length ?? 0)) {
+      brief = { ...brief, decisions };
+    }
   }
   // The brief (fresh) or the caller's priorBrief (revision) rides the result
   // unchanged — persistence is the caller's job.
