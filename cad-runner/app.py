@@ -2271,4 +2271,14 @@ def run(req: RunRequest, request: Request) -> dict:
 
 @app.get("/health")
 async def health() -> dict:
-    return {"ok": True}
+    # Deploy-drift detector: Railway stamps the built commit into the env, so
+    # /health names the code actually running. "unknown" outside Railway.
+    # (2026-08-05 lesson: a "redeploy" that restarts the old image is
+    # indistinguishable from a rebuild without this — the prod sidecar sat on
+    # a pre-feature-instrumentation image while everyone assumed it was
+    # current.)
+    return {
+        "ok": True,
+        "rev": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "unknown")[:12],
+        "features_instrumentation": True,
+    }
