@@ -88,6 +88,13 @@ function buildHeadline(
   type: NotificationType,
   payload: AnyEmailPayload
 ): string {
+  // Self-notification, no external actor to name (walk-away UX).
+  if (type === "cad_build_finished") {
+    const ok = (payload as { ok?: boolean }).ok;
+    return ok
+      ? `Your build "${payload.listing.name}" is ready`
+      : `Your build "${payload.listing.name}" didn't finish`;
+  }
   const actor =
     payload.actor.displayName || payload.actor.username || "Someone";
   const listing = payload.listing.name;
@@ -114,6 +121,9 @@ function buildHref(
   type: NotificationType,
   payload: AnyEmailPayload
 ): string {
+  // Studio builds deep-link to the studio itself (reattach/history shows
+  // the finished part) — there is no listing page yet for an unsaved draft.
+  if (type === "cad_build_finished") return `${APP_URL}/prometheus`;
   const base =
     payload.listing.kind === "file"
       ? `${APP_URL}/files/${payload.listing.slug}`

@@ -23,6 +23,8 @@ import type {
   CadQuestion,
 } from "@/lib/cad/types";
 import { resolveStoredAnswer } from "@/lib/cad/types";
+import { notifyCadBuildFinished } from "@/lib/notifications/notify";
+import { makeSnippet } from "@/lib/notifications/types";
 
 /**
  * Background-job execution for text-to-CAD generation (MTR-175,
@@ -50,6 +52,8 @@ import { resolveStoredAnswer } from "@/lib/cad/types";
 export const MAX_PROGRESS_EVENTS = 200;
 /** How often executeCadJob checks cancelRequestedAt. */
 const CANCEL_POLL_MS = 3_000;
+/** Builds shorter than this notify in-app only — no email (desk iteration). */
+const NOTIFY_EMAIL_MIN_BUILD_MS = 180_000;
 /** Progress writes are batched; flush at most this often (terminal always flushes). */
 const FLUSH_INTERVAL_MS = 750;
 /** How often the awaiting_input wait polls cadJobs.answers for a pick (MTR-191). */
@@ -384,6 +388,12 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
   // is success-only. `route` is stamped once the router verdict is known.
   const meter = new CadMeter();
   let meteredRoute: string | undefined;
+  // Walk-away notification timing: email only when the build ran long
+  // enough that the user plausibly left (quick desk iterations stay
+  // in-app-only, no inbox spam). The in-app row always lands.
+  const execStartMs = Date.now();
+  const emailEligible = () =>
+    Date.now() - execStartMs >= NOTIFY_EMAIL_MIN_BUILD_MS;
   const usagePatch = () => {
     const usage = meter.summarize(meteredRoute);
     return { usage, costCents: computeCostCents(usage) };
@@ -409,6 +419,16 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
   };
   const finishFailed = async (message: string, detail?: unknown) => {
     await flushTerminal({ type: "error", error: message, generationId });
+    // Best-effort walk-away ping (deliberate self-notification; cancels
+    // skip it — the user was present to cancel).
+    void notifyCadBuildFinished({
+      userId,
+      ok: false,
+      generationId,
+      buildTitle: makeSnippet(prompt, 60) || "your model",
+      promptSnippet: makeSnippet(prompt),
+      emailEligible: emailEligible(),
+    }).catch(() => undefined);
     // errorDetail carries the REAL exception (message + stack) for
     // debugging; `error` stays the user-facing copy. Truncated so a
     // pathological error can't bloat the row.
@@ -571,6 +591,17 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
     };
     await flushTerminal(done);
     await markJob({ status: "done", finishedAt: new Date(), ...usagePatch() });
+
+    // Walk-away ping: the build finished — tell the user even (especially)
+    // if their phone spent the whole run locked in a pocket.
+    void notifyCadBuildFinished({
+      userId,
+      ok: true,
+      generationId: persisted.generationId,
+      buildTitle: persisted.title ?? (makeSnippet(prompt, 60) || "your model"),
+      promptSnippet: makeSnippet(prompt),
+      emailEligible: emailEligible(),
+    }).catch(() => undefined);
 
     // Credit debit (MTR-181): success-only, flag-gated (CAD_CREDITS_ENABLED,
     // default off → hard no-op), priced per route tier (CAD_CREDIT_COST_*,
