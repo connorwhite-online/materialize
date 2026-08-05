@@ -50,11 +50,10 @@ import {
 } from "@/lib/cad/persist";
 import { BREP_OUTPUT_FORMATS, type CadNetworksReport } from "@/lib/cad/types";
 import type { HarnessResult } from "@/lib/cad/harness";
-import { substituteParams, extractParams } from "@/components/cad/param-diff";
+import { substituteParams } from "@/components/cad/param-diff";
 import {
   parseFeatures,
-  bindFeatureParamNames,
-  substituteFeatureParams,
+  deriveParamRerunSource,
   spliceStatementSpan,
 } from "@/lib/cad/features";
 import { completeText } from "@/lib/cad/model-client";
@@ -951,61 +950,19 @@ export async function rerunCadWithParams(input: {
     return { error: "Generation not found." };
   }
 
-  let source: string;
-  let prompt: string;
-  if (input.featureId) {
-    // Feature-scoped edit (MTR-225): re-derive every binding from OUR copy of
-    // source + features — the client's draft can only move numbers that sit
-    // in verified positions (a bound top-level name, or the single matching
-    // literal inside the feature's own statement span).
-    const features = bindFeatureParamNames(
-      parseFeatures(parent.features),
-      parent.sourceCode
-    );
-    const feature = features.find((f) => f.id === input.featureId);
-    if (!feature) return { error: "Feature not found." };
-    const draft: Record<string, number> = {};
-    for (const [key, value] of Object.entries(input.params ?? {})) {
-      if (key in feature.params && typeof value === "number" && Number.isFinite(value)) {
-        draft[key] = value;
-      }
-    }
-    const substituted = substituteFeatureParams(parent.sourceCode, feature, draft);
-    if (!substituted) return { error: "No editable parameters to apply." };
-    source = substituted.source;
-    const changed = substituted.applied
-      .map((key) => `${key} ${feature.params[key]} → ${draft[key]}`)
-      .slice(0, 3);
-    prompt = `Update ${feature.label}: ${changed.join(" · ")}`;
-  } else {
-    // Sanitize: finite numbers only, and only names that are real top-level
-    // params of this source. Unknown keys are dropped.
-    const allowed = extractParams(parent.sourceCode);
-    const params: Record<string, number> = {};
-    for (const [name, value] of Object.entries(input.params ?? {})) {
-      if (
-        name in allowed &&
-        typeof value === "number" &&
-        Number.isFinite(value)
-      ) {
-        params[name] = value;
-      }
-    }
-    if (Object.keys(params).length === 0) {
-      return { error: "No editable parameters to apply." };
-    }
-
-    source = substituteParams(parent.sourceCode, params);
-    // Diff summary for the revision prompt line shown in history.
-    const changed = Object.entries(params)
-      .filter(([name, v]) => allowed[name] !== v)
-      .map(([name, v]) => `${name} ${allowed[name]} → ${v}`)
-      .slice(0, 3);
-    prompt =
-      changed.length > 0
-        ? `Update params: ${changed.join(" · ")}`
-        : "Update params";
-  }
+  // Shared with the live-preview route (deriveParamRerunSource) so a
+  // previewed change and its committed revision can never diverge. All
+  // binding re-derivation happens server-side against OUR copy of the
+  // source + features (MTR-225).
+  const derived = deriveParamRerunSource({
+    sourceCode: parent.sourceCode,
+    featuresRaw: parent.features,
+    featureId: input.featureId,
+    params: input.params,
+  });
+  if ("error" in derived) return derived;
+  const source = derived.source;
+  const prompt = derived.summary;
 
   // Thread title for the revision's file name (root-row title fallback).
   let nameOverride: string | undefined;

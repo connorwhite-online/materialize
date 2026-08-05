@@ -11,6 +11,7 @@ import {
 } from "./prompt";
 import { buildKnowledgeBlock } from "./knowledge";
 import { needsExchangerRecipe } from "./knowledge/exchanger-recipe";
+import { usesInternalThreadRecipe } from "./knowledge/bd-warehouse";
 import { selectExemplars, formatExemplars } from "./knowledge/exemplars";
 import { judgeAesthetics, type AestheticJudgement } from "./critique";
 import { CAD_FEEDBACK_TAG_LABELS, type CadFeedbackTag } from "./feedback";
@@ -633,10 +634,20 @@ export async function runAgenticHarness(
     }
   } catch (err) {
     if ((err as Error)?.name === "AbortError") throw err;
-    if (err instanceof CadAgenticError) throw err;
+    // Infrastructure death mid-build (session 410, API failure): same
+    // salvage rail as the budget cutoff — when a structurally-valid run
+    // exists, carry it so the orchestrator can still ship SOMETHING if the
+    // scripted fallback can't run or fails (the 2026-08-04 rounded-cube
+    // job lost 15 turns of geometry to a session crash with no salvage).
+    const salvage = bestRun ? salvageResult() : undefined;
+    if (err instanceof CadAgenticError) {
+      throw salvage && !err.salvage
+        ? new CadAgenticError(err.message, { cause: err.cause ?? err, salvage })
+        : err;
+    }
     throw new CadAgenticError(
       `agentic harness failed: ${(err as Error)?.message ?? err}`,
-      { cause: err }
+      { cause: err, salvage }
     );
   } finally {
     if (sessionId) {
@@ -661,22 +672,7 @@ export async function runAgenticHarness(
   if (budgetCutoff && bestRun) {
     throw new CadAgenticError(
       "agentic harness hit its turn/time budget mid-build (finish() was never called) — the best-so-far result may be an unfinished exploration snapshot, not the intended part",
-      {
-        salvage: {
-          ok: true,
-          sourceCode: bestCode || assembled(),
-          attempts: execCount,
-          run: bestRun,
-          aestheticScore: null,
-          aestheticDims: null,
-          brief: input.priorBrief,
-          dimensionChecks,
-          telemetry,
-          ...(partSourcing.sourced.length > 0 || partSourcing.misses.length > 0
-            ? { partSourcing }
-            : {}),
-        },
-      }
+      { salvage: salvageResult() }
     );
   }
 
@@ -714,6 +710,25 @@ export async function runAgenticHarness(
         : "the agent produced no runnable result",
   };
 
+  /** Best-so-far as a shippable result (budget cutoff + infra-death salvage).
+   *  Judge deliberately skipped — salvage must not spend more model time. */
+  function salvageResult(): HarnessResult {
+    return {
+      ok: true,
+      sourceCode: bestCode || assembled(),
+      attempts: execCount,
+      run: bestRun,
+      aestheticScore: null,
+      aestheticDims: null,
+      brief: input.priorBrief,
+      dimensionChecks,
+      telemetry,
+      ...(partSourcing.sourced.length > 0 || partSourcing.misses.length > 0
+        ? { partSourcing }
+        : {}),
+    };
+  }
+
   /** Dispatch one tool call; returns the tool_result content blocks. */
   async function runTool(
     use: Anthropic.ToolUseBlock
@@ -731,6 +746,10 @@ export async function runAgenticHarness(
         execCount++;
         const res = await execInSession(sessionId!, code, {
           formats: BREP_OUTPUT_FORMATS,
+          // Internal-thread compound recipe finalizes through the mesh
+          // pipeline by design (see knowledge/bd-warehouse.ts) — allow it
+          // per-exec so a correct program isn't graded as broken.
+          allowRemesh: usesInternalThreadRecipe(code),
           signal: input.signal,
         });
         steps.push(`# ---- step ${execCount} ----\n${code}`);

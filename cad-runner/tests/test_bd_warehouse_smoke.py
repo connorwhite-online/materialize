@@ -56,6 +56,23 @@ MANIFEST = [
     ("bd_warehouse.bearing", "SingleRowCappedDeepGrooveBallBearing",
      {"size": "M8-22-7", "bearing_type": "SKT"},
      "608zz / 608-2RS bearing"),
+    # FUNCTIONAL THREADS (knowledge/bd-warehouse.ts) — kernel-verified
+    # 2026-08-04: external ridges fuse clean onto their core; internal
+    # threads ship as Part(children=[body, thread]) and finalize through
+    # the voxel-remesh mesh pipeline (booleans shatter or silently drop
+    # the thread — never fuse/cut internal threads).
+    ("bd_warehouse.thread", "IsoThread",
+     {"major_diameter": 20.0, "pitch": 2.5, "length": 20,
+      "external": False, "end_finishes": ("fade", "fade")},
+     "internal thread (compound-children + remesh recipe)"),
+    ("bd_warehouse.thread", "IsoThread",
+     {"major_diameter": 20.0, "pitch": 2.5, "length": 20,
+      "external": True, "end_finishes": ("fade", "square")},
+     "external ISO thread (fuses clean onto its core)"),
+    ("bd_warehouse.thread", "TrapezoidalThread",
+     {"diameter": 24.0, "pitch": 4.0, "thread_angle": 30, "length": 20,
+      "external": True, "end_finishes": ("fade", "fade")},
+     "chunky external trapezoidal thread"),
 ]
 
 

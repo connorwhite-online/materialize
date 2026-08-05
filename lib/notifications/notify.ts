@@ -5,8 +5,11 @@ import { notifications } from "@/lib/db/schema";
 import { logError } from "@/lib/logger";
 import { sendNotificationEmail } from "./email";
 import { shouldSendEmail } from "./email-prefs";
+import { eq } from "drizzle-orm";
+import { users } from "@/lib/db/schema";
 import type {
   BuildOnFilePayload,
+  CadBuildFinishedPayload,
   CollaboratorAddedToProjectPayload,
   CommentOnListingPayload,
   NotificationType,
@@ -67,6 +70,57 @@ async function insert(
     }
   } catch (error) {
     logError(`notify(${type}) email-pref-lookup`, error);
+  }
+}
+
+/**
+ * Text-to-CAD build finished/failed (walk-away UX): the ONE deliberate
+ * self-notification — the whole point is reaching a user whose phone was
+ * locked while the job ran, so the insert() self-event skip doesn't apply.
+ * `emailEligible` lets the caller gate email on build duration (quick
+ * desk iterations shouldn't spam an inbox); the in-app row always lands.
+ * Best-effort throughout — a notification hiccup never fails the job.
+ */
+export async function notifyCadBuildFinished(opts: {
+  userId: string;
+  ok: boolean;
+  generationId: string;
+  buildTitle: string;
+  promptSnippet: string | null;
+  emailEligible: boolean;
+}) {
+  try {
+    const [u] = await db
+      .select({
+        username: users.username,
+        displayName: users.displayName,
+        avatarUrl: users.avatarUrl,
+      })
+      .from(users)
+      .where(eq(users.id, opts.userId))
+      .limit(1);
+    const payload: CadBuildFinishedPayload = {
+      actor: {
+        id: opts.userId,
+        username: u?.username ?? null,
+        displayName: u?.displayName ?? null,
+        avatarUrl: u?.avatarUrl ?? null,
+      },
+      listing: { kind: "file", name: opts.buildTitle, slug: "" },
+      ok: opts.ok,
+      generationId: opts.generationId,
+      snippet: opts.promptSnippet,
+    };
+    await db.insert(notifications).values({
+      userId: opts.userId,
+      type: "cad_build_finished",
+      payload,
+    });
+    if (opts.emailEligible && (await shouldSendEmail(opts.userId, "cad_build_finished"))) {
+      void sendNotificationEmail(opts.userId, "cad_build_finished", payload);
+    }
+  } catch (error) {
+    logError("notify(cad_build_finished)", error);
   }
 }
 

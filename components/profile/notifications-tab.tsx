@@ -217,6 +217,11 @@ function NotificationRow({ row }: { row: Row }) {
 // (see __tests__/notifications-tab.test.ts) — not used outside this
 // module otherwise.
 export function buildHref(n: Row): string {
+  if (n.type === "cad_build_finished") {
+    // Studio builds live in the studio — an unsaved draft has no listing
+    // page; reattach/history there shows the finished (or failed) part.
+    return "/prometheus";
+  }
   if (n.type === "print_on_file") {
     const printOrderId = (n.payload as Partial<PrintOnFilePayload>)
       .printOrderId;
@@ -284,6 +289,12 @@ export function buildMessage(n: Row): string {
       return "was refunded for";
     case "collaborator_added_to_project":
       return "added you as a collaborator on";
+    case "cad_build_finished":
+      // Self-notification (your own build) — reads "<You> finished building
+      // <title>" / "couldn't finish building <title>".
+      return (n.payload as { ok?: boolean }).ok
+        ? "finished building"
+        : "couldn't finish building";
     default:
       // Unknown type — see buildHref for why this is reachable at
       // runtime despite the exhaustive-looking switch.

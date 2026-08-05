@@ -75,7 +75,6 @@ import {
 } from "@/lib/cad/network-check";
 import { parseFeatures } from "@/lib/cad/features";
 // Type-only: lib/cad/brief is server-only at runtime; the type is erased.
-import type { CadBrief } from "@/lib/cad/brief";
 import type { ViewerAnnotation } from "@/components/viewer/model-viewer";
 import { planComposerSubmit } from "@/components/cad/composer-submit";
 import { decodeSnapshotPoints } from "@/components/cad/snapshot-points";
@@ -395,11 +394,6 @@ export function TextToCadStudio({
     /** Sampled surface points of the in-progress solid (base64, optional). */
     points?: string;
   } | null>(null);
-  // Reviewable design brief (docs/text-to-cad/06): drafted from the composer
-  // prompt, edited in place, and sent with the generate request. Fresh
-  // builds only — revisions inherit the parent's brief server-side.
-  const [brief, setBrief] = useState<CadBrief | null>(null);
-  const [briefLoading, setBriefLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   // Mid-cycle interactive question (MTR-191): set when the running job emits a
   // `question` event and the job is suspended (awaiting_input); cleared when
@@ -470,6 +464,16 @@ export function TextToCadStudio({
   // highlight of that op's faceIds).
   const [activeFeatureId, setActiveFeatureId] = useState<string | null>(null);
   const [featureUpdating, setFeatureUpdating] = useState(false);
+  // Live param preview (docs/text-to-cad/10): transient STL object URL the
+  // viewer shows while a chip's values are being dialed — nothing persisted
+  // until the popover's ✓ commits through rerunCadWithParams.
+  const [paramPreviewUrl, setParamPreviewUrl] = useState<string | null>(null);
+  const [paramPreviewPending, setParamPreviewPending] = useState(false);
+  const [paramPreviewError, setParamPreviewError] = useState<string | null>(
+    null
+  );
+  const paramPreviewAbortRef = useRef<AbortController | null>(null);
+  const paramPreviewUrlRef = useRef<string | null>(null);
   // The submitted prompt, held for the life of a generation so it can ride in
   // the RIGHT-aligned "sent" bubble of the morphing generation thread (MTR-209)
   // while the composer empties. Restored into the composer on error so a failed
@@ -486,13 +490,15 @@ export function TextToCadStudio({
   const composerFixedRef = useRef<HTMLDivElement>(null);
   useKeyboardStickyBottom(composerFixedRef, 0);
   const abortRef = useRef<AbortController | null>(null);
-  // In-flight silent spec-check (fetchBrief) — aborted on thread switch /
-  // new-build so a slow check can't pop a stale quick-check card.
-  const briefAbortRef = useRef<AbortController | null>(null);
   // The in-flight background job (persisted to the resume slot). Only
   // cleared when the job reaches a terminal event or the user explicitly
   // abandons it — NOT on unmount, so a reload/return can reattach.
   const jobRef = useRef<StoredJob | null>(null);
+  // True while an SSE tail is actively streaming (set/cleared inside
+  // streamJobEvents). The wake handler below reattaches a job whose tail
+  // died while the tab was backgrounded (phone lock kills the socket and
+  // the reconnect budget expires before the tab wakes).
+  const streamingRef = useRef(false);
 
   // Close an open events stream if the studio unmounts. The background job
   // keeps running server-side; the resume slot reattaches on return.
@@ -596,6 +602,43 @@ export function TextToCadStudio({
       })
       .finally(() => setGenerating(false));
     // Mount-only by design: reattach exactly once per studio mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Wake reattach (walk-away UX): when the tab becomes visible again with a
+  // tracked job but NO live tail — the mobile-lock case where iOS killed the
+  // SSE and the 3×2s reconnect budget expired while backgrounded — restart
+  // the tail. Replay-from-cursor makes this idempotent; a finished job
+  // resolves instantly from the persisted transcript.
+  useEffect(() => {
+    const onWake = () => {
+      if (document.visibilityState !== "visible") return;
+      const saved = jobRef.current;
+      if (!saved || streamingRef.current) return;
+      const controller = new AbortController();
+      abortRef.current?.abort();
+      abortRef.current = controller;
+      setError(null);
+      setGenerating(true);
+      void streamJobEvents(
+        saved.jobId,
+        controller,
+        saved.prompt,
+        saved.parentId ?? undefined
+      )
+        .then((terminal) => {
+          if (terminal) {
+            jobRef.current = null;
+            persistResume();
+          }
+        })
+        .finally(() => setGenerating(false));
+    };
+    document.addEventListener("visibilitychange", onWake);
+    return () => document.removeEventListener("visibilitychange", onWake);
+    // Handler reads only refs + stable setters; streamJobEvents' identity is
+    // per-render but closes over the same refs/setters, so first-render's is
+    // safe to keep.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -902,6 +945,80 @@ export function TextToCadStudio({
     });
   }
 
+  /** Drop the transient preview and return the viewer to the real asset. */
+  const clearParamPreview = useCallback(() => {
+    paramPreviewAbortRef.current?.abort();
+    paramPreviewAbortRef.current = null;
+    if (paramPreviewUrlRef.current) {
+      URL.revokeObjectURL(paramPreviewUrlRef.current);
+      paramPreviewUrlRef.current = null;
+    }
+    setParamPreviewUrl(null);
+    setParamPreviewPending(false);
+    setParamPreviewError(null);
+  }, []);
+
+  // Any turn/asset switch invalidates an in-flight or shown preview.
+  useEffect(() => clearParamPreview, [activeAssetId, clearParamPreview]);
+
+  /**
+   * Live preview for a chip's dialed values: deterministic sidecar re-run of
+   * the rewritten source (NO LLM, nothing persisted) → transient STL object
+   * URL the viewer swaps to. `draft: null` reverts. Single-solid only — the
+   * caller gates assemblies/compare off via `previewEnabled`.
+   */
+  async function previewFeatureDraft(
+    feature: CadFeature,
+    draft: Record<string, number> | null
+  ) {
+    if (!draft) {
+      clearParamPreview();
+      return;
+    }
+    if (!viewedTurn) return;
+    paramPreviewAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    paramPreviewAbortRef.current = ctrl;
+    setParamPreviewPending(true);
+    setParamPreviewError(null);
+    try {
+      const res = await fetch("/api/cad/feature-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          generationId: viewedTurn.id,
+          featureId: feature.id,
+          params: draft,
+        }),
+        signal: ctrl.signal,
+      });
+      if (ctrl.signal.aborted) return;
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        setParamPreviewError(body?.error ?? "Preview failed.");
+        return;
+      }
+      const blob = await res.blob();
+      if (ctrl.signal.aborted) return;
+      const url = URL.createObjectURL(blob);
+      if (paramPreviewUrlRef.current) {
+        URL.revokeObjectURL(paramPreviewUrlRef.current);
+      }
+      paramPreviewUrlRef.current = url;
+      setParamPreviewUrl(url);
+    } catch (err) {
+      if ((err as Error)?.name !== "AbortError") {
+        setParamPreviewError("Preview failed.");
+      }
+    } finally {
+      if (paramPreviewAbortRef.current === ctrl) {
+        setParamPreviewPending(false);
+      }
+    }
+  }
+
   async function applyFeatureUpdate(
     feature: CadFeature,
     draft: Record<string, number>
@@ -971,7 +1088,6 @@ export function TextToCadStudio({
       jobRef.current = null;
     }
     abortRef.current?.abort();
-    briefAbortRef.current?.abort();
     setGenerating(false);
     setTransition(null);
     setSourceAssetId(null);
@@ -981,8 +1097,6 @@ export function TextToCadStudio({
     setLiveUsage(null);
     setPendingQuestion(null);
     setSnapshot(null);
-    setBrief(null);
-    setBriefLoading(false);
     setError(null);
     setPrompt("");
     setSubmittedPrompt(null);
@@ -995,7 +1109,6 @@ export function TextToCadStudio({
 
   function openThread(t: StudioThread) {
     if (generating) return;
-    briefAbortRef.current?.abort();
     setTransition(null);
     setSourceAssetId(null);
     setActiveRootId(t.rootId);
@@ -1006,10 +1119,6 @@ export function TextToCadStudio({
     setProgress([]);
     setLiveUsage(null);
     setSnapshot(null);
-    setBrief(null);
-    setBriefLoading(false);
-    // Switching builds at the quick-check stage (in flight but not yet
-    // generating) must drop the sent bubble so the resting composer returns.
     setSubmittedPrompt(null);
     setError(null);
     setSelectedPartId(null);
@@ -1080,7 +1189,11 @@ export function TextToCadStudio({
       const used = new Set<string>();
       await Promise.all(
         viewedParts.map(async (p) => {
-          const res = await fetch(`/api/files/preview/${p.fileAssetId}`);
+          // download=1 → deliberate export: promotes an unsaved studio draft
+          // to the library, same as the single-part Download button.
+          const res = await fetch(
+            `/api/files/preview/${p.fileAssetId}?download=1`
+          );
           if (!res.ok) throw new Error(`part ${p.name} ${res.status}`);
           const buf = new Uint8Array(await res.arrayBuffer());
           const base = safeFileStem(p.name) || "part";
@@ -1194,10 +1307,8 @@ export function TextToCadStudio({
     setTransition(ev.fileAssetId ? { assetId: ev.fileAssetId, phase: "morph" } : null);
     // Clear the composer only now that the turn landed — on an error the
     // user's typed instruction (and any attached refs) stay put to retry.
-    // The brief card clears with it (same lifecycle: kept around to retry).
     setPrompt("");
     setImages([]);
-    setBrief(null);
   }
 
   async function addFiles(files: FileList | File[] | null | undefined) {
@@ -1234,52 +1345,17 @@ export function TextToCadStudio({
     setImages((prev) => prev.filter((i) => i.id !== id));
   }
 
-  /**
-   * The brief is MACHINERY, not UI (MTR-194 pattern revision): it still
-   * grounds dimensions and feeds the generate prompt, but the user never
-   * reviews a form. This fetches it silently before a fresh build; the ONLY
-   * thing that ever surfaces is `questions` — a genuine fork the prompt
-   * didn't settle, asked as tappable choices. Null on any failure: a brief
-   * must never block or degrade a generation.
-   */
-  async function fetchBrief(text: string): Promise<CadBrief | null> {
-    const controller = new AbortController();
-    briefAbortRef.current?.abort();
-    briefAbortRef.current = controller;
-    setBriefLoading(true);
-    try {
-      const res = await fetch("/api/cad/brief", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: text,
-          images: images.length
-            ? images.map((i) => ({ data: i.data, mediaType: i.mediaType }))
-            : undefined,
-        }),
-        signal: controller.signal,
-      });
-      if (!res.ok) return null;
-      const { brief: drafted } = (await res.json()) as {
-        brief: CadBrief | null;
-      };
-      return drafted;
-    } catch {
-      return null;
-    } finally {
-      if (briefAbortRef.current === controller) setBriefLoading(false);
-    }
-  }
-
   async function submit() {
-    const text = prompt.trim();
+    // Original typed value, restored on any error path below so a failed
+    // build doesn't swallow what the user wrote.
+    const typed = prompt;
     // A pin with no typed text is a valid revision on its own (MTR-217) — the
     // annotations carry the instruction. Otherwise require a few characters.
     const { canSubmit, annotationOnly, instruction } = planComposerSubmit(
       prompt,
       annotations.length
     );
-    if (!canSubmit || generating || briefLoading) return;
+    if (!canSubmit || generating) return;
 
     const parentId = latestTurn?.id; // revise the latest turn when in a thread
     // Annotation-only sends need a model to annotate (always a revision).
@@ -1293,20 +1369,12 @@ export function TextToCadStudio({
     // it's just no longer shown (the composer is unmounted while in flight).
     setSubmittedPrompt(instruction);
 
-    // Ask-before-build (MTR-191 ask-site a): fresh builds run the silent
-    // brief step first. Questions pause the flow ONCE with choice cards;
-    // no questions (or no brief) goes straight to generation. A brief
-    // already in state means the user answered/skipped — build with it.
-    let briefToSend = !parentId ? brief : null;
-    if (!parentId && !brief) {
-      const drafted = await fetchBrief(text);
-      if (drafted?.questions?.length) {
-        setBrief(drafted); // renders the quick-check card; user resumes
-        return;
-      }
-      briefToSend = drafted;
-      if (drafted) setBrief(drafted);
-    }
+    // Walk-away contract: NOTHING between here and the generate POST may
+    // depend on this client staying alive. The brief is drafted INSIDE the
+    // job (harness brief step), and its open questions surface through the
+    // job's suspend/resume machinery with timeouts + defaults — the old
+    // client-held spec-check (a 30-60s fetch before the job even existed)
+    // was why locking your phone mid-"Checking the spec" killed builds.
 
     // Fold pinned annotations into the instruction sent to the agent, as
     // structured spatial feedback (the displayed turn keeps the clean text).
@@ -1382,10 +1450,6 @@ export function TextToCadStudio({
           images: images.length
             ? images.map((i) => ({ data: i.data, mediaType: i.mediaType }))
             : undefined,
-          // The silently-drafted brief (with any answered questions folded
-          // into `decisions`). Fresh builds only — the server ignores it on
-          // revisions anyway.
-          brief: briefToSend ?? undefined,
           // Target-process threading (MTR-171) stays supported by the route but
           // is no longer asked up-front in the composer (MTR-208): the signal
           // will later be auto-derived from a material/print selection.
@@ -1397,7 +1461,7 @@ export function TextToCadStudio({
         setError((await res.text()) || "Generation failed.");
         // Restore the composer so the user can retry (the thread unwinds); bring
         // the pins back too so an annotation revision isn't silently lost.
-        setPrompt(text);
+        setPrompt(typed);
         setSubmittedPrompt(null);
         setAnnotations(sentAnnotations);
         return;
@@ -1435,7 +1499,7 @@ export function TextToCadStudio({
     } catch (err) {
       if ((err as Error)?.name !== "AbortError") {
         setError("Generation failed. Please try again.");
-        setPrompt(text);
+        setPrompt(typed);
         setSubmittedPrompt(null);
         setAnnotations(sentAnnotations);
       }
@@ -1457,6 +1521,12 @@ export function TextToCadStudio({
     submittedPrompt: string,
     parentId: string | undefined
   ): Promise<boolean> {
+    // Wake-reattach signal: true while THIS tail is live, cleared on every
+    // exit path via the finally below. The visibilitychange handler uses it
+    // to know a running job has no active tail (mobile lock killed the SSE
+    // and the reconnect budget ran out while backgrounded).
+    streamingRef.current = true;
+    try {
     const MAX_RETRIES = 3;
     // Resumable-replay cursor (CAD-8): the highest persisted-entry `seq`
     // (CAD-7) applied so far. Scoped OUTSIDE the retry loop so it survives
@@ -1576,6 +1646,9 @@ export function TextToCadStudio({
       }
       await new Promise((r) => setTimeout(r, 2000));
     }
+    } finally {
+      streamingRef.current = false;
+    }
   }
 
   /**
@@ -1622,18 +1695,12 @@ export function TextToCadStudio({
   // composer is UNMOUNTED (round 2 note #3). `submittedPrompt` is the single
   // "conversation active" signal — set on submit, cleared on done/error.
   const inFlight = submittedPrompt !== null;
-  // The pre-build quick-check is live (a genuine choice surfaced) but the build
-  // hasn't started — the system bubble shows the questionnaire, not status.
-  const briefActive =
-    !!brief && (brief.questions?.length ?? 0) > 0 && !generating;
-  // One-line status for the system bubble: "Checking the spec" during the
-  // silent brief step, then the harness's current phase (round 1 dropped the
-  // second line).
-  const statusText = briefLoading
-    ? "Checking the spec"
-    : progress.length
-      ? describeEvent(progress[progress.length - 1]).text
-      : "Getting started";
+  // One-line status for the system bubble: the harness's current phase.
+  // (Brief questions now arrive as job `question` events, same as every
+  // other mid-build ask — there is no client-held spec-check stage.)
+  const statusText = progress.length
+    ? describeEvent(progress[progress.length - 1]).text
+    : "Getting started";
   // Stage-elapsed timer: the current stage began at the FIRST event of the
   // trailing run whose display text matches the latest one. Uses the entry's
   // own emit stamp (`t`, persisted server-side) so a reattached/replayed
@@ -1666,13 +1733,6 @@ export function TextToCadStudio({
     ]
       .filter(Boolean)
       .join(" · ") || null;
-  // Cancel the quick-check → back to the resting composer with the prompt kept
-  // so it can be edited (round 2 note #4 escape hatch).
-  const cancelBrief = () => {
-    setBrief(null);
-    setSubmittedPrompt(null);
-  };
-
   // Live morph target: the latest snapshot's surface points, decoded once per
   // snapshot — the forming point cloud morphs onto each in-progress solid.
   const livePoints = useMemo(
@@ -1913,9 +1973,17 @@ export function TextToCadStudio({
                           }))
                         : undefined
                     }
-                    modelUrl={`/api/files/preview/${
-                      compareBaseAssetId ?? activeAssetId
-                    }`}
+                    modelUrl={
+                      // Live param preview: transient geometry while a chip's
+                      // values are dialed. Never during compare (ghost pair
+                      // must stay coherent) or assembly overview (assemblyParts
+                      // takes precedence anyway).
+                      paramPreviewUrl && !compareBaseAssetId
+                        ? paramPreviewUrl
+                        : `/api/files/preview/${
+                            compareBaseAssetId ?? activeAssetId
+                          }`
+                    }
                     topoUrl={viewerTopoUrl}
                     highlightFaceIds={highlightFaceIds}
                     ghostUrl={
@@ -2219,7 +2287,7 @@ export function TextToCadStudio({
                   variant="outline"
                   render={
                     <a
-                      href={`/api/files/preview/${activeAssetId}`}
+                      href={`/api/files/preview/${activeAssetId}?download=1`}
                       download={`${
                         (viewedParts.length > 1
                           ? viewedParts.find(
@@ -2503,6 +2571,14 @@ export function TextToCadStudio({
                     onActiveChange={setActiveFeatureId}
                     onUpdate={applyFeatureUpdate}
                     onEditStatement={applyFeatureStatementEdit}
+                    onPreview={previewFeatureDraft}
+                    // Single-solid viewer only: assemblies render via
+                    // assemblyParts and compare mode pins a ghost pair.
+                    previewEnabled={
+                      viewedParts.length <= 1 && !compareBaseAssetId
+                    }
+                    previewPending={paramPreviewPending}
+                    previewError={paramPreviewError}
                     disabled={featureUpdating}
                     markedIds={annotatedFeatureIds}
                   />
@@ -2593,9 +2669,8 @@ export function TextToCadStudio({
               in-flight window (submit → done), across BOTH entry paths (chip
               or typed): the composer "sends" the prompt into a right-aligned
               bubble and UNMOUNTS (below), while this left-aligned system bubble
-              carries "Checking the spec" → the quick-check / mid-cycle
-              questionnaire → the live status, morphing its own size between
-              each. Exits (morphs back to the empty composer) on completion. */}
+              carries the mid-cycle questionnaire and the live status, morphing
+              its own size between each. Exits on completion. */}
           <AnimatePresence>
             {inFlight && (
               <GenerationThread
@@ -2606,12 +2681,6 @@ export function TextToCadStudio({
                 preview={snapshot}
                 pendingQuestion={pendingQuestion}
                 onAnswer={answerQuestion}
-                brief={brief}
-                briefActive={briefActive}
-                onBriefChange={setBrief}
-                onBuild={submit}
-                onCancelBrief={cancelBrief}
-                canBuild={prompt.trim().length >= 3}
                 reduce={!!reduceMotion}
               />
             )}
@@ -2931,8 +3000,8 @@ function BubblePreview({ render, step }: { render: string; step: number }) {
  *   • a LEFT-aligned "received" system bubble that is the single evolving
  *     container — it shows a one-line status loader (with a live preview
  *     thumbnail above it once a render lands, round 4), and *physically morphs*
- *     into a full-width questionnaire (a pre-build quick-check OR a mid-cycle
- *     question) when one fires, then morphs back.
+ *     into a full-width questionnaire when a mid-cycle question (incl. the
+ *     job-side brief quick-check) fires, then morphs back.
  *
  * Alignment discipline (rounds 1–3): user/sent = right, black; collapsed
  * system = left, light; an OPEN spec/questionnaire panel = full width.
@@ -2954,12 +3023,6 @@ function GenerationThread({
   preview,
   pendingQuestion,
   onAnswer,
-  brief,
-  briefActive,
-  onBriefChange,
-  onBuild,
-  onCancelBrief,
-  canBuild,
   reduce,
 }: {
   promptText: string;
@@ -2975,12 +3038,6 @@ function GenerationThread({
     answering: boolean;
   } | null;
   onAnswer: (pick: { optionId?: string; text?: string }) => void;
-  brief: CadBrief | null;
-  briefActive: boolean;
-  onBriefChange: (b: CadBrief) => void;
-  onBuild: () => void;
-  onCancelBrief: () => void;
-  canBuild: boolean;
   reduce: boolean;
 }) {
   const spring = reduce
@@ -2990,9 +3047,9 @@ function GenerationThread({
     ? { duration: 0 }
     : ({ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] } as const);
 
-  // An open spec/questionnaire panel expands the system bubble to full width;
+  // An open questionnaire panel expands the system bubble to full width;
   // the collapsed status stays a narrow left bubble (round 3 note #3).
-  const panelOpen = !!pendingQuestion || (briefActive && !!brief);
+  const panelOpen = !!pendingQuestion;
 
   return (
     <motion.div
@@ -3037,24 +3094,6 @@ function GenerationThread({
                 className="p-3.5"
               >
                 <Questionnaire question={pendingQuestion} onAnswer={onAnswer} />
-              </motion.div>
-            ) : briefActive && brief ? (
-              <motion.div
-                key="brief"
-                layout={!reduce}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={fade}
-                className="p-3.5"
-              >
-                <BriefQuestionnaire
-                  brief={brief}
-                  onChange={onBriefChange}
-                  onBuild={onBuild}
-                  onCancel={onCancelBrief}
-                  canBuild={canBuild}
-                />
               </motion.div>
             ) : (
               <motion.div
@@ -3287,96 +3326,6 @@ export function Questionnaire({
   );
 }
 
-/**
- * Pre-build quick check (MTR-191 ask-site a / MTR-194): the ONLY user-facing
- * surface of the silent brief step, styled as the round-3 questionnaire and
- * rendered INSIDE the system bubble (round 2 note #2 — it morphs out of the
- * status container, no longer a detached card). Each choice is a full-width
- * card with the recommendation pre-selected; a PROMINENT full-width Build CTA
- * commits the spec, and Cancel returns to the composer to edit the prompt.
- */
-function BriefQuestionnaire({
-  brief,
-  onChange,
-  onBuild,
-  onCancel,
-  canBuild,
-}: {
-  brief: CadBrief;
-  onChange: (b: CadBrief) => void;
-  onBuild: () => void;
-  onCancel: () => void;
-  canBuild: boolean;
-}) {
-  const questions = brief.questions ?? [];
-
-  const chosenFor = (q: NonNullable<CadBrief["questions"]>[number]) =>
-    brief.decisions?.find((d) => d.q === q.question)?.a ?? q.default ?? null;
-
-  function choose(
-    q: NonNullable<CadBrief["questions"]>[number],
-    label: string
-  ) {
-    const rest = (brief.decisions ?? []).filter((d) => d.q !== q.question);
-    onChange({ ...brief, decisions: [...rest, { q: q.question, a: label }] });
-  }
-
-  return (
-    <div>
-      <div className="flex items-start gap-2">
-        <ClipboardListIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-        <div className="min-w-0 flex-1">
-          <span className="block text-sm font-medium text-foreground">
-            Quick check
-          </span>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {questions.length === 1
-              ? "One choice before building — the recommended option is selected."
-              : "A couple of choices before building — recommended options are selected."}
-          </p>
-        </div>
-      </div>
-
-      {questions.map((q) => {
-        const chosen = chosenFor(q);
-        return (
-          <div key={q.id} className="mt-3">
-            <p className="text-sm text-foreground">{q.question}</p>
-            <div className="mt-2 flex flex-col gap-2">
-              {q.options.map((o) => (
-                <OptionCard
-                  key={o.label}
-                  label={o.label}
-                  detail={o.detail}
-                  recommended={o.label === q.default}
-                  selected={chosen === o.label}
-                  onSelect={() => choose(q, o.label)}
-                />
-              ))}
-            </div>
-          </div>
-        );
-      })}
-
-      <button
-        type="button"
-        onClick={onBuild}
-        disabled={!canBuild}
-        className="mt-3 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-foreground px-3 py-2.5 text-sm font-medium text-background disabled:opacity-40"
-      >
-        Build
-        <ArrowUpIcon className="size-3.5" strokeWidth={2.5} />
-      </button>
-      <button
-        type="button"
-        onClick={onCancel}
-        className="mt-2 w-full cursor-pointer text-center text-[11px] text-muted-foreground hover:text-foreground"
-      >
-        Cancel and edit prompt
-      </button>
-    </div>
-  );
-}
 
 function ViewerSkeleton({ label }: { label: string }) {
   return (

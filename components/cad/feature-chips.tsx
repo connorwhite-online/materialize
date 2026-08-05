@@ -27,6 +27,7 @@ import {
 } from "react";
 import {
   BoxIcon,
+  CheckIcon,
   CircleDotIcon,
   CombineIcon,
   CylinderIcon,
@@ -88,6 +89,24 @@ export interface FeatureChipsProps {
     feature: CadFeature,
     instruction: string
   ) => Promise<{ error?: string; fallback?: boolean } | void>;
+  /**
+   * Live preview (docs/text-to-cad/10 interaction model): called with the
+   * DEBOUNCED dirty draft while the user dials values — the parent re-runs
+   * the parametric source and swaps the viewer to transient geometry — and
+   * with `null` when the draft returns to clean / the popover closes, to
+   * revert the viewer. Absent (or `previewEnabled` false) = the popover
+   * behaves exactly as before: change values, ✓ to commit.
+   */
+  onPreview?: (
+    feature: CadFeature,
+    draft: Record<string, number> | null
+  ) => void;
+  /** Gate for live preview (parent turns it off for assemblies/compare). */
+  previewEnabled?: boolean;
+  /** A preview run is in flight — shows the dot spinner in the popover. */
+  previewPending?: boolean;
+  /** Last preview failure ("that radius can't be built") — inline, non-fatal. */
+  previewError?: string | null;
   disabled?: boolean;
   /**
    * Feature ids to mark as "referenced" — chips owning a face the user
@@ -103,6 +122,10 @@ export function FeatureChips({
   onActiveChange,
   onUpdate,
   onEditStatement,
+  onPreview,
+  previewEnabled,
+  previewPending,
+  previewError,
   disabled,
   markedIds,
 }: FeatureChipsProps) {
@@ -236,12 +259,19 @@ export function FeatureChips({
           onClose={() => onActiveChange(null)}
           onUpdate={onUpdate}
           onEditStatement={onEditStatement}
+          onPreview={onPreview}
+          previewEnabled={previewEnabled}
+          previewPending={previewPending}
+          previewError={previewError}
           disabled={disabled}
         />
       )}
     </div>
   );
 }
+
+/** Debounce for live preview re-runs while a value is being dialed. */
+const PREVIEW_DEBOUNCE_MS = 600;
 
 function FeatureParamsPopover({
   panelId,
@@ -251,6 +281,10 @@ function FeatureParamsPopover({
   onClose,
   onUpdate,
   onEditStatement,
+  onPreview,
+  previewEnabled,
+  previewPending,
+  previewError,
   disabled,
 }: {
   panelId: string;
@@ -260,6 +294,10 @@ function FeatureParamsPopover({
   onClose: () => void;
   onUpdate: FeatureChipsProps["onUpdate"];
   onEditStatement?: FeatureChipsProps["onEditStatement"];
+  onPreview?: FeatureChipsProps["onPreview"];
+  previewEnabled?: boolean;
+  previewPending?: boolean;
+  previewError?: string | null;
   disabled?: boolean;
 }) {
   const originals = feature.params;
@@ -275,6 +313,46 @@ function FeatureParamsPopover({
   const hasBindings = paramKeys.some((k) => editable.has(k));
   const canEditStatement = !!onEditStatement && !!feature.span;
   const dirty = paramKeys.some((k) => draft[k] !== originals[k]);
+
+  // Live preview: debounce the dirty draft out to the parent, and always
+  // send a final `null` (revert) when the popover unmounts or the draft
+  // returns to clean. Refs keep the effect off the callback identity.
+  const canPreview = !!onPreview && previewEnabled !== false && hasBindings;
+  const onPreviewRef = useRef(onPreview);
+  onPreviewRef.current = onPreview;
+  const previewedRef = useRef(false);
+  useEffect(() => {
+    if (!canPreview) return;
+    const changed: Record<string, number> = {};
+    for (const key of paramKeys) {
+      if (editable.has(key) && draft[key] !== originals[key]) {
+        changed[key] = draft[key];
+      }
+    }
+    if (Object.keys(changed).length === 0) {
+      if (previewedRef.current) {
+        previewedRef.current = false;
+        onPreviewRef.current?.(feature, null);
+      }
+      return;
+    }
+    const timer = setTimeout(() => {
+      previewedRef.current = true;
+      onPreviewRef.current?.(feature, changed);
+    }, PREVIEW_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+    // paramKeys/editable derive from feature+sourceCode (stable per mount —
+    // the popover remounts per feature via `key`); draft is the trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft, canPreview, feature]);
+  // Unmount (close/feature switch): revert the viewer if we previewed.
+  useEffect(
+    () => () => {
+      if (previewedRef.current) onPreviewRef.current?.(feature, null);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
 
   const handleReset = () => {
     setDraft(originals);
@@ -379,6 +457,27 @@ function FeatureParamsPopover({
 
       {error && <p className="mt-2 text-[11px] text-destructive">{error}</p>}
 
+      {/* Live-preview status: the viewer is already showing the dialed
+          values (or trying to); ✓ below makes them a real revision. */}
+      {canPreview && (previewPending || previewError || dirty) && (
+        <p
+          className={cn(
+            "mt-2 flex items-center gap-1 text-[11px]",
+            previewError ? "text-destructive" : "text-muted-foreground"
+          )}
+          aria-live="polite"
+        >
+          {previewPending ? (
+            <>
+              <Loader2Icon className="size-3 shrink-0 animate-spin" />
+              Building preview…
+            </>
+          ) : (
+            (previewError ?? "Previewing — ✓ saves it as a revision.")
+          )}
+        </p>
+      )}
+
       <div className="mt-3 flex items-center justify-end gap-1.5">
         <Button
           type="button"
@@ -394,12 +493,17 @@ function FeatureParamsPopover({
         <Button
           type="button"
           size="sm"
+          aria-label="Save these values as a revision"
           disabled={!hasBindings || !dirty || pending || disabled}
           onClick={handleUpdate}
           className="h-7 gap-1 px-2 text-xs"
         >
-          {pending ? <Loader2Icon className="size-3 animate-spin" /> : null}
-          Update
+          {pending ? (
+            <Loader2Icon className="size-3 animate-spin" />
+          ) : (
+            <CheckIcon className="size-3" />
+          )}
+          Save
         </Button>
       </div>
 

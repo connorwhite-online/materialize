@@ -19,7 +19,8 @@ export type NotificationType =
   | "print_on_file"
   | "purchase_on_listing"
   | "refund_on_listing"
-  | "collaborator_added_to_project";
+  | "collaborator_added_to_project"
+  | "cad_build_finished";
 
 interface ActorSnapshot {
   /** User id of whoever triggered the event. */
@@ -100,6 +101,20 @@ export interface CollaboratorAddedToProjectPayload {
   listing: ListingRef;
 }
 
+export interface CadBuildFinishedPayload {
+  /** The build's owner — the one deliberate self-notification type
+   *  (walk-away UX: you locked your phone; the finished build pings you). */
+  actor: ActorSnapshot;
+  /** name = build title at finish time. slug is unused — both href
+   *  builders special-case this type straight to the studio. */
+  listing: ListingRef;
+  /** Whether the generation succeeded. */
+  ok: boolean;
+  generationId: string;
+  /** Prompt snippet for the inbox preview. */
+  snippet: string | null;
+}
+
 export type NotificationPayload =
   | (CommentOnListingPayload & { type: "comment_on_listing" })
   | (ReplyToCommentPayload & { type: "reply_to_comment" })
@@ -107,7 +122,8 @@ export type NotificationPayload =
   | (PrintOnFilePayload & { type: "print_on_file" })
   | (PurchaseOnListingPayload & { type: "purchase_on_listing" })
   | (RefundOnListingPayload & { type: "refund_on_listing" })
-  | (CollaboratorAddedToProjectPayload & { type: "collaborator_added_to_project" });
+  | (CollaboratorAddedToProjectPayload & { type: "collaborator_added_to_project" })
+  | (CadBuildFinishedPayload & { type: "cad_build_finished" });
 
 /**
  * Trim a comment body or caption to a short preview safe for the
