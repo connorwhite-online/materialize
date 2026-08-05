@@ -381,9 +381,10 @@ export async function persistGenerationSuccess(opts: {
   /** True for a thread's first turn — only then do we generate a title. */
   isRoot: boolean;
   /**
-   * Name to give a revision's file (the thread's existing title, supplied by
-   * the caller). Ignored for root turns, which name the file from the freshly
-   * generated title.
+   * Name to give the file: a revision's existing thread title, or — on a
+   * ROOT turn — a caller-known name (template builds) that both titles the
+   * thread and skips the title-model call. Roots without it get an
+   * agent-written title as before.
    */
   nameOverride?: string;
   /** Target process this generation built for (MTR-171), stamped on the fingerprint. */
@@ -425,7 +426,14 @@ export async function persistGenerationSuccess(opts: {
   // R2 write. createDraftFileForPrint needs the title (for the name) and the
   // upload (for the key), so we await both before it.
   const [title] = await Promise.all([
-    isRoot ? generateThreadTitle(prompt) : Promise.resolve(null),
+    // Root turns get an agent-written title UNLESS the caller already has
+    // the right name (template instantiation: the exemplar's own title) —
+    // a caller-specified name beats a model guess and skips the call.
+    isRoot
+      ? opts.nameOverride
+        ? Promise.resolve(opts.nameOverride)
+        : generateThreadTitle(prompt)
+      : Promise.resolve(null),
     putObject(storageKey, bytes, "model/stl"),
   ]);
 

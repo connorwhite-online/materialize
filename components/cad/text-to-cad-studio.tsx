@@ -79,6 +79,7 @@ import type { CadBrief } from "@/lib/cad/brief";
 import type { ViewerAnnotation } from "@/components/viewer/model-viewer";
 import { planComposerSubmit } from "@/components/cad/composer-submit";
 import { decodeSnapshotPoints } from "@/components/cad/snapshot-points";
+import { RESUME_STORAGE_KEY } from "@/components/cad/studio-resume";
 import {
   isAssemblyOverview,
   resolveEffectiveSelectedPartId,
@@ -278,7 +279,6 @@ function paramDiffSummary(
 // you were just here and bounced away, coming back within this window restores
 // the build you were on. The timestamp is refreshed on every selection change
 // and when you leave (SPA nav / tab hide / reload), so it measures time-away.
-const RESUME_STORAGE_KEY = "prometheus:last-session";
 const RESUME_GRACE_MS = 2 * 60_000;
 
 type ResumeState = {

@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { CheckCircle2Icon, CircleDashedIcon, Loader2Icon } from "lucide-react";
 
 import { runCadTemplate } from "@/app/actions/cad-generation";
+import { stashStudioResume } from "@/components/cad/studio-resume";
 import { cn } from "@/lib/utils";
 
 /** One read-only parameter (top-level numeric assignment) of an exemplar. */
@@ -32,7 +33,12 @@ type BuildState =
   | { status: "idle" }
   | { status: "building" }
   | { status: "error"; message: string }
-  | { status: "built"; renderUrl: string | null; fileAssetId: string };
+  | {
+      status: "built";
+      renderUrl: string | null;
+      fileAssetId: string;
+      generationId: string;
+    };
 
 /**
  * Owner-only exemplar debug gallery (MTR-208). Lists every exemplar with its
@@ -47,9 +53,20 @@ export function ExemplarsDebug({
 }: {
   exemplars: ExemplarDescriptor[];
 }) {
+  const router = useRouter();
   const [builds, setBuilds] = useState<Record<string, BuildState>>({});
 
-  async function build(ex: ExemplarDescriptor) {
+  /** Land in the studio ON this build's thread (template builds are real
+   *  root threads now) — the resume slot + navigation the studio reads. */
+  function openInStudio(generationId: string) {
+    stashStudioResume(generationId);
+    router.push("/prometheus");
+  }
+
+  async function build(
+    ex: ExemplarDescriptor,
+    opts: { open?: boolean } = {}
+  ) {
     if (!ex.verified) return;
     setBuilds((prev) => ({ ...prev, [ex.id]: { status: "building" } }));
     try {
@@ -71,8 +88,10 @@ export function ExemplarsDebug({
           status: "built",
           renderUrl: res.renderUrl,
           fileAssetId: res.fileAssetId,
+          generationId: res.generationId,
         },
       }));
+      if (opts.open) openInStudio(res.generationId);
     } catch {
       setBuilds((prev) => ({
         ...prev,
@@ -125,11 +144,14 @@ export function ExemplarsDebug({
               <p className="mt-2 text-xs text-muted-foreground">{ex.lesson}</p>
 
               {/* Render thumbnail — only exists after a build (the exemplar
-                  source carries no pre-render). */}
+                  source carries no pre-render). Clicking it opens the build's
+                  studio thread, where it's revisable like any generation. */}
               {state.status === "built" && state.renderUrl && (
-                <Link
-                  href={`/print/${state.fileAssetId}`}
-                  className="mt-3 block overflow-hidden rounded-lg border border-foreground/10 bg-muted/30"
+                <button
+                  type="button"
+                  onClick={() => openInStudio(state.generationId)}
+                  title="Open in studio"
+                  className="mt-3 block w-full cursor-pointer overflow-hidden rounded-lg border border-foreground/10 bg-muted/30 hover:border-foreground/30"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
@@ -137,7 +159,7 @@ export function ExemplarsDebug({
                     alt={`${ex.title} render`}
                     className="mx-auto max-h-40 w-auto object-contain"
                   />
-                </Link>
+                </button>
               )}
 
               {/* Read-only params. */}
@@ -162,21 +184,29 @@ export function ExemplarsDebug({
                     {state.message}
                   </p>
                 )}
-                <button
-                  type="button"
-                  onClick={() => build(ex)}
-                  disabled={!ex.verified || state.status === "building"}
-                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-foreground/15 px-3 py-1.5 text-xs font-medium hover:bg-foreground/5 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {state.status === "building" && (
-                    <Loader2Icon className="size-3.5 animate-spin" />
-                  )}
-                  {state.status === "built"
-                    ? "Rebuild"
-                    : state.status === "building"
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => build(ex, { open: true })}
+                    disabled={!ex.verified || state.status === "building"}
+                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-foreground/15 px-3 py-1.5 text-xs font-medium hover:bg-foreground/5 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {state.status === "building" && (
+                      <Loader2Icon className="size-3.5 animate-spin" />
+                    )}
+                    {state.status === "building"
                       ? "Building…"
-                      : "Build this"}
-                </button>
+                      : "Build in studio"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => build(ex)}
+                    disabled={!ex.verified || state.status === "building"}
+                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {state.status === "built" ? "Rebuild here" : "Build here"}
+                  </button>
+                </div>
               </div>
             </li>
           );

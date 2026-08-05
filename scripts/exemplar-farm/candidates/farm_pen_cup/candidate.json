@@ -1,0 +1,24 @@
+{
+  "id": "farm_pen_cup",
+  "title": "Weighted hex pen cup",
+  "keywords": [
+    "pen",
+    "cup",
+    "holder",
+    "desk",
+    "pencil",
+    "organizer"
+  ],
+  "prompt": "A hexagonal pen cup, 80 mm across flats, 100 mm tall, 2.4 mm walls, slightly tapered outward at the top, ring of drainage/dust holes in the floor.",
+  "lesson": "Weighted hex pen cup — farmed pattern for \"pen\"-class prompts. Judge 86/100.",
+  "code": "from build123d import *\n\n# --- Parameters ---\nacross_flats_bottom = 80.0      # mm across flats at base\ntop_extra = 8.0                 # extra across-flats at top (outward taper)\nacross_flats_top = across_flats_bottom + top_extra\nheight = 100.0                  # mm tall\nwall = 2.4                      # wall thickness\nfloor_thick = 3.0               # floor thickness\n\n# hex \"across flats\" -> circumradius (vertex distance)\ndef flats_to_circum(af):\n    return (af / 2.0) / (3.0 ** 0.5 / 2.0)\n\nr_bottom = flats_to_circum(across_flats_bottom)\nr_top = flats_to_circum(across_flats_top)\n\n# drainage holes\nhole_d = 5.0\nhole_count = 6\nhole_ring_af = across_flats_bottom - 2 * wall - 12.0   # ring diameter across flats\nhole_ring_r = hole_ring_af / 2.0\n\nbase_chamfer = 0.8\nrim_chamfer = 1.0\n\nwith BuildPart() as part:\n    # outer hex body, tapered outward toward top via loft\n    with BuildSketch(Plane.XY):\n        RegularPolygon(radius=r_bottom, side_count=6)\n    with BuildSketch(Plane.XY.offset(height)):\n        RegularPolygon(radius=r_top, side_count=6)\n    loft()\n\n    # hollow it out, open top\n    top_face = part.faces().sort_by(Axis.Z)[-1]\n    offset(amount=-wall, openings=top_face)\n\n    # raise the floor to floor_thick by filling bottom interior\n    # (offset shells full height; cut a cavity floor instead)\n    # Add floor slab: subtract nothing; instead cut drainage holes through the base.\n\n    # Ring of drainage holes through the floor\n    with BuildSketch(Plane.XY.offset(-1.0)):\n        with PolarLocations(hole_ring_r, hole_count):\n            Circle(hole_d / 2.0)\n    extrude(amount=floor_thick + 2.0, mode=Mode.SUBTRACT)\n\n    # Base reveal: small chamfer on bottom perimeter\n    bottom_edges = part.edges().group_by(Axis.Z)[0]\n    chamfer(bottom_edges, base_chamfer)\n\n    # Rim chamfer (outer top edge)\n    top_edges = part.edges().group_by(Axis.Z)[-1]\n    chamfer(top_edges, rim_chamfer)\n\nresult = part.part",
+  "score": 86,
+  "perDimension": {
+    "recognizability": 5,
+    "proportion": 4,
+    "cohesion": 5,
+    "surfacing": 3,
+    "refinement": 4
+  },
+  "farmedAt": "2026-08-05T07:54:53.399Z"
+}
