@@ -1,0 +1,22 @@
+{
+  "id": "farm_coaster_set",
+  "title": "Stackable drink coaster",
+  "keywords": [
+    "coaster",
+    "drink",
+    "cup",
+    "stackable"
+  ],
+  "prompt": "A 95 mm round drink coaster with a raised 3 mm rim to catch condensation, subtle concentric surface texture for grip, stacking registration lip underneath.",
+  "lesson": "Stackable drink coaster — farmed pattern for \"coaster\"-class prompts. Judge 89/100.",
+  "code": "from build123d import *\n\n# ---- Key parameters (mm) ----\ndia = 95.0                # coaster outer diameter\nbase_thk = 3.0            # floor thickness of the tray\nrim_h = 3.0               # raised rim above floor to catch condensation\nrim_w = 4.0               # rim wall thickness\nwell_floor_z = base_thk   # top of the base floor\n\n# stacking registration lip underneath\nlip_w = 3.0               # lip radial thickness\nlip_h = 2.0               # lip protrusion below base\nlip_clear = 0.4           # clearance so coasters nest\n\n# concentric grip texture\nn_rings = 6\nring_depth = 0.5\nring_w = 1.2\n\nr_out = dia / 2.0\n\nwith BuildPart() as part:\n    # --- Base solid: full disc including rim height ---\n    Cylinder(r_out, base_thk + rim_h, align=(Align.CENTER, Align.CENTER, Align.MIN))\n\n    # --- Hollow out the central well, leaving the raised rim ---\n    with BuildSketch(part.faces().sort_by(Axis.Z)[-1]):\n        Circle(r_out - rim_w)\n    extrude(amount=-rim_h, mode=Mode.SUBTRACT)\n\n    # --- Concentric grip texture grooves in the well floor ---\n    well_r = r_out - rim_w\n    spacing = (well_r - 6) / n_rings\n    for i in range(n_rings):\n        rr = 6 + spacing * (i + 0.5)\n        with BuildSketch(Plane.XY.offset(well_floor_z)):\n            Circle(rr + ring_w / 2)\n            Circle(rr - ring_w / 2, mode=Mode.SUBTRACT)\n        extrude(amount=-ring_depth, mode=Mode.SUBTRACT)\n\n    # --- Stacking registration lip underneath ---\n    # A downward ring near the outer edge that nests into another coaster's well.\n    lip_outer = well_r - lip_clear\n    lip_inner = lip_outer - lip_w\n    with BuildSketch(Plane.XY):  # bottom face is at z=0\n        Circle(lip_outer)\n        Circle(lip_inner, mode=Mode.SUBTRACT)\n    extrude(amount=-lip_h, mode=Mode.SUBTRACT)  # subtract? no -> add\n\n# The above lip extrude with SUBTRACT would cut air; rebuild lip as addition:\nwith BuildPart() as lip:\n    with BuildSketch(Plane.XY):\n        Circle(well_r - lip_clear)\n        Circle(well_r - lip_clear - lip_w, mode=Mode.SUBTRACT)\n    extrude(amount=-lip_h)\n\nbody = part.part + lip.part\n\n# --- Edge treatment (fillets/chamfers) applied last ---\nwith BuildPart() as final:\n    add(body)\n    # Soften the top outer rim edge (primary visible)\n    top_out = final.edges().filter_by(GeomType.CIRCLE).group_by(Axis.Z)[-1]\n    fillet(top_out, 1.0)\n    # Soften inner rim top edge\n    # Base perimeter chamfer to kill elephant-foot / sharp bottom edge\n    bottom_out = final.edges().filter_by(GeomType.CIRCLE).group_by(Axis.Z)[0]\n    chamfer(bottom_out, 0.8)\n\nresult = final.part",
+  "score": 89,
+  "perDimension": {
+    "recognizability": 5,
+    "proportion": 4,
+    "cohesion": 5,
+    "surfacing": 4,
+    "refinement": 4
+  },
+  "farmedAt": "2026-08-05T16:21:58.351Z"
+}

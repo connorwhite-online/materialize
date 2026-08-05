@@ -1,0 +1,24 @@
+{
+  "id": "farm_cable_clip",
+  "title": "Snap-in desk cable clip",
+  "keywords": [
+    "cable",
+    "clip",
+    "organizer",
+    "wire",
+    "management",
+    "clamp"
+  ],
+  "prompt": "A desk-edge cable clip for three 4 mm cables: C-clamp that grips a 25 mm desk edge without screws, three rounded cable channels on top, printable flat.",
+  "lesson": "Snap-in desk cable clip — farmed pattern for \"cable\"-class prompts. Judge 80/100.",
+  "code": "from build123d import *\n\n# ---------------- Parameters ----------------\ndesk_th      = 25.0          # desk edge thickness to grip\ngrip_clear   = 0.5           # clearance so it slips over the desk\ngap          = desk_th + grip_clear   # jaw opening\n\nwall         = 4.0           # clamp wall / arm thickness (load-bearing)\nback_h       = 40.0          # vertical spine height (spans the desk edge)\ntop_len      = 30.0          # top arm reach (over the desk top)\nbot_len      = 22.0          # bottom arm reach (under the desk)\n\nbody_w       = 44.0          # width of the clip (holds 3 channels)\n\ncable_d      = 4.0           # cable diameter\ncable_clear  = 0.6           # channel a touch larger than the cable\nchan_r       = (cable_d + cable_clear) / 2\nn_chan       = 3\nchan_pitch   = 12.0          # centre-to-centre of channels\nchan_open    = 3.2           # mouth opening width (< cable_d, snap retention)\n\nfil_big      = 3.0\nfil_med      = 2.0\nfil_small    = 1.0\ncham_base    = 0.8\n\n# ---------------- Sanity checks ----------------\nassert chan_r > cable_d / 2, \"channel must clear the cable\"\nassert (n_chan - 1) * chan_pitch + 2 * chan_r + 2 * wall < body_w + 8, \"channels fit on top arm\"\nassert wall >= 3.0, \"arms must be thick enough not to snap\"\nassert chan_open < cable_d, \"channel mouth must retain the cable\"\n\n# ---------------- C-clamp body (side profile in XZ, extruded in Y) ----------------\n# Build the C profile: vertical spine + top arm + bottom arm around the gap.\nwith BuildPart() as clamp:\n    with BuildSketch(Plane.XZ) as prof:\n        with BuildLine() as ln:\n            # start at back-bottom, go up the spine, out the top, down front,\n            # into the jaw, and back to close.\n            pts = [\n                (0, 0),\n                (0, back_h),\n                (top_len, back_h),\n                (top_len, back_h - wall),\n                (wall, back_h - wall),\n                (wall, wall),                       # inner spine\n                (bot_len, wall),\n                (bot_len, 0),\n                (0, 0),\n            ]\n            Polyline(*pts)\n        make_face()\n    extrude(amount=body_w / 2, both=True)\n\n    # ---- rounded cable channels on the TOP surface of the top arm ----\n    top_face_z = back_h\n    xs = [(i - (n_chan - 1) / 2) * chan_pitch for i in range(n_chan)]\n    # channels run along X (the reach direction) so cables route off the desk edge\n    with BuildSketch(Plane.XY.offset(top_face_z)) as chans:\n        with Locations(*[(top_len * 0.45, y) for y in xs]):\n            pass\n    # cut channels: cylinders along X at each Y position, sitting in the top surface\n    for y in xs:\n        with Locations((top_len * 0.5, y, top_face_z)):\n            Cylinder(chan_r, top_len, rotation=(0, 90, 0), mode=Mode.SUBTRACT)\n        # narrow slot mouth so the cable snaps in and is retained\n        with Locations((top_len * 0.5, y, top_face_z + chan_r * 0.4)):\n            Box(top_len, chan_open, chan_r * 1.2, mode=Mode.SUBTRACT)\n\n    # ---- edge treatment ----\n    # Outer vertical corners of the body (along Y) - primary visible form\n    fillet(clamp.edges().filter_by(Axis.Y).group_by(Axis.Z)[-1], fil_med)\n\n    # Round the exposed side edges of the C profile (front/back long edges)\n    # Base build-plate chamfer (bottom of bottom arm)\n    base_edges = clamp.edges().group_by(Axis.Z)[0]\n    chamfer(base_edges, cham_base)\n\n    # Soften the tip of the top and bottom arms\n    tip_edges = clamp.edges().filter_by(Axis.Y).filter_by(\n        lambda e: e.center().X > top_len - 0.5)\n    try:\n        fillet(tip_edges, fil_small)\n    except Exception:\n        pass\n\nresult = clamp.part",
+  "score": 80,
+  "perDimension": {
+    "recognizability": 5,
+    "proportion": 4,
+    "cohesion": 4,
+    "surfacing": 3,
+    "refinement": 4
+  },
+  "farmedAt": "2026-08-05T16:19:06.155Z"
+}

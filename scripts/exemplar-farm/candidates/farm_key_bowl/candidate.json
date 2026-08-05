@@ -1,0 +1,24 @@
+{
+  "id": "farm_key_bowl",
+  "title": "Entry key bowl",
+  "keywords": [
+    "bowl",
+    "key",
+    "tray",
+    "entry",
+    "catch-all",
+    "dish"
+  ],
+  "prompt": "A shallow entryway key bowl, 140 mm diameter, smooth lofted profile from a 90 mm flat base, 2.8 mm walls, interior fillets so contents slide to center.",
+  "lesson": "Entry key bowl — farmed pattern for \"bowl\"-class prompts. Judge 89/100.",
+  "code": "from build123d import *\n\n# ---- Shallow entryway key bowl ----\nouter_d = 140.0          # rim outer diameter\nbase_d = 90.0            # flat base diameter\nwall = 2.8               # wall thickness\nbowl_h = 34.0            # overall height\nbase_chamfer = 1.0       # build-plate edge break\nrim_r = wall * 0.4       # rim edge softening\ninterior_r = wall * 0.9  # interior corner fillet (contents slide to center)\nreveal = 1.5             # recessed base reveal\n\nouter_top_r = outer_d / 2\nbase_top_r = base_d / 2\n\n# base is inset for a recessed reveal foot\nfoot_r = base_top_r\ninner_base_r = base_d / 2 - wall\n\n# ---- outer lofted shell profile ----\nwith BuildPart() as bowl:\n    # footprint plinth (small reveal ring)\n    with BuildSketch(Plane.XY.offset(0)):\n        Circle(foot_r)\n    # lofted bowl body: narrow flat base flaring to wide rim\n    with BuildSketch(Plane.XY.offset(reveal)):\n        Circle(base_top_r + 3)\n    with BuildSketch(Plane.XY.offset(bowl_h)):\n        Circle(outer_top_r)\n    loft()\n\n    # hollow interior via loft cut ---------------------\n    with BuildSketch(Plane.XY.offset(reveal + wall)):\n        Circle(inner_base_r)\n    with BuildSketch(Plane.XY.offset(bowl_h + 1)):\n        Circle(outer_top_r - wall)\n    loft(mode=Mode.SUBTRACT)\n\n    # rim edge softening (top exposed edges)\n    top_edges = bowl.edges().filter_by(GeomType.CIRCLE).group_by(Axis.Z)[-1]\n    fillet(top_edges, rim_r)\n\n    # base edge break (build-plate)\n    bottom_edges = bowl.edges().filter_by(GeomType.CIRCLE).group_by(Axis.Z)[0]\n    chamfer(bottom_edges, base_chamfer)\n\n    # interior floor fillet so contents slide to center\n    floor_face = bowl.faces().filter_by(Plane.XY).sort_by(Axis.Z)\n    inner_floor_edges = (\n        bowl.edges()\n        .filter_by(GeomType.CIRCLE)\n        .group_by(Axis.Z)[1]\n    )\n    fillet(inner_floor_edges, interior_r)\n\nresult = bowl.part",
+  "score": 89,
+  "perDimension": {
+    "recognizability": 5,
+    "proportion": 4,
+    "cohesion": 5,
+    "surfacing": 4,
+    "refinement": 4
+  },
+  "farmedAt": "2026-08-05T16:25:39.805Z"
+}
