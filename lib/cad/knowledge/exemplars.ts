@@ -15,6 +15,8 @@
  * teach the model from code we haven't proven correct.
  */
 
+import { FARMED_EXEMPLARS } from "./exemplars-farmed";
+
 export interface CadExemplar {
   id: string;
   title: string;
@@ -28,7 +30,7 @@ export interface CadExemplar {
   verified: boolean;
 }
 
-export const CAD_EXEMPLARS: CadExemplar[] = [
+const AUTHORED_EXEMPLARS: CadExemplar[] = [
   {
     id: "rounded_enclosure",
     title: "Rounded shelled enclosure",
@@ -1248,6 +1250,17 @@ export const CAD_EXEMPLARS: CadExemplar[] = [
     ].join("\n"),
     verified: true,
   },
+];
+
+/**
+ * The live pool: hand-authored entries + farm-promoted entries
+ * (lib/cad/knowledge/exemplars-farmed.ts, human-approved via
+ * scripts/exemplar-farm/promote.ts). A farmed id never shadows an authored
+ * one — promote.ts refuses collisions with the authored set.
+ */
+export const CAD_EXEMPLARS: CadExemplar[] = [
+  ...AUTHORED_EXEMPLARS,
+  ...FARMED_EXEMPLARS,
 ];
 
 /** Score an exemplar against a prompt by keyword hits. */

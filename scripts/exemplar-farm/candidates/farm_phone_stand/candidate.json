@@ -1,0 +1,23 @@
+{
+  "id": "farm_phone_stand",
+  "title": "Adjustable-angle phone stand",
+  "keywords": [
+    "phone",
+    "stand",
+    "dock",
+    "cradle",
+    "tablet"
+  ],
+  "prompt": "A desk phone stand holding a phone at 60°: 80 mm wide cradle with a 12 mm lip, cable slot in the base, weighted footprint so it doesn't tip when tapped.",
+  "lesson": "Adjustable-angle phone stand — farmed pattern for \"phone\"-class prompts. Judge 80/100.",
+  "code": "from build123d import *\nfrom math import sin, cos, radians\n\n# ---- Desk phone stand @ 60 deg ----\ncradle_w = 80.0            # phone cradle width\nangle = 60.0              # phone lean from horizontal\nbackrest_t = 6.0          # thickness of the leaning back plate\nbackrest_h = 90.0         # length of the back plate along lean\nlip_h = 12.0              # front lip that stops the phone sliding\nlip_t = 6.0\nphone_gap = 12.0          # clearance between lip and backrest (phone thickness slot)\n\nbase_l = 95.0            # base footprint depth (front-to-back)\nbase_w = cradle_w + 16   # base width\nbase_h = 16.0            # base height (weighted plinth)\nwall = 3.0\n\ncable_slot_w = 16.0\ncable_slot_h = 9.0\n\nfillet_big = 6.0\nfillet_med = 2.0\nedge_break = 1.0\nbase_chamfer = 1.0\n\na = radians(angle)\n\nwith BuildPart() as stand:\n    # ---- weighted base plinth ----\n    b = Box(base_w, base_l, base_h, align=(Align.CENTER, Align.CENTER, Align.MIN))\n    fillet(stand.edges().filter_by(Axis.Z), fillet_big)\n\n    # ---- back rest that leans at 60 deg ----\n    # foot sits toward the back of the base\n    foot_y = -base_l / 2 + backrest_t + 6\n    with BuildSketch(Plane.YZ):\n        # profile in Y-Z, then extrude across width\n        with Locations((foot_y, base_h - 2)):\n            Rectangle(backrest_t, backrest_h, align=(Align.CENTER, Align.MIN),\n                      rotation=-(90 - angle))\n    back = extrude(amount=cradle_w / 2, both=True)\n\n    # ---- front lip to catch the phone ----\n    # place lip a phone-gap in front of the backrest foot, measured along base\n    lip_y = foot_y + phone_gap + backrest_t / 2\n    with Locations((0, lip_y, base_h)):\n        lip = Box(cradle_w, lip_t, lip_h, align=(Align.CENTER, Align.CENTER, Align.MIN))\n\n    # ---- cradle floor between lip and backrest (support ledge) ----\n    ledge_y = (foot_y + lip_y) / 2\n    with Locations((0, ledge_y, base_h)):\n        Box(cradle_w, phone_gap + backrest_t, wall,\n            align=(Align.CENTER, Align.CENTER, Align.MIN))\n\n    # ---- cable slot through the cradle floor + front of base ----\n    with Locations((0, lip_y - lip_t / 2 - 3, base_h - cable_slot_h / 2 + 4)):\n        Box(cable_slot_w, base_l, cable_slot_h, mode=Mode.SUBTRACT)\n\n    # ---- edge treatment ----\n    # base plate build edge chamfer (anti elephant-foot)\n    chamfer(stand.edges().group_by(Axis.Z)[0], base_chamfer)\n    # break top exposed base edges\n    top_edges = stand.faces().sort_by(Axis.Z)[-1].edges()\n    # soften lip top edges\n    fillet(lip.edges().group_by(Axis.Z)[-1], fillet_med)\n    # soften backrest free-end edges\n    fillet(back.edges().filter_by(Axis.X).group_by(Axis.Z)[-1], edge_break)\n\nresult = stand.part",
+  "score": 80,
+  "perDimension": {
+    "recognizability": 5,
+    "proportion": 4,
+    "cohesion": 4,
+    "surfacing": 3,
+    "refinement": 4
+  },
+  "farmedAt": "2026-08-05T16:12:39.902Z"
+}

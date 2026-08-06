@@ -842,7 +842,11 @@ export async function runCadTemplate(input: {
       userId,
       generationId,
       prompt,
-      isRoot: false,
+      // Root: a template instantiation starts a REAL studio thread (named
+      // after the exemplar, no title-model call) so the build opens in the
+      // studio and is revisable like any other turn — previously
+      // isRoot:false with no parent left it threadless and invisible there.
+      isRoot: true,
       nameOverride: exemplar.title,
       result,
     });
