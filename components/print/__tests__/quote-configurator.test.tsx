@@ -132,6 +132,11 @@ vi.mock("@/lib/craftcloud/upload-client", () => ({
   uploadToCraftCloud: (...args: unknown[]) => uploadToCraftCloudMock(...args),
 }));
 
+const reportClientErrorMock = vi.fn();
+vi.mock("@/lib/observability/report-client-error", () => ({
+  reportClientError: (...args: unknown[]) => reportClientErrorMock(...args),
+}));
+
 vi.mock("@/app/actions/print", () => ({
   createPrintOrder: vi.fn(),
   completePrintOrder: vi.fn(),
@@ -387,6 +392,144 @@ describe("QuoteConfigurator wiring (CON-38)", () => {
     expect(vi.mocked(completePrintOrder).mock.calls[0][0]).toMatchObject({
       isAnonFlow: true,
     });
+  });
+
+  // Prod incident (Aug 2026): CraftCloud's POST /v5/model 404'd, so no
+  // modelId was ever cached — and the Retry button only re-ran
+  // fetchQuotes, which POSTs /api/craftcloud/quotes with fileAssetId
+  // and 409s ("File not yet uploaded for printing") on every click,
+  // forever. Retry must re-run the upload when it never completed, and
+  // quote start must use the freshly uploaded modelId directly instead
+  // of depending on the cache-model DB round-trip.
+  it("Retry after a failed upload re-attempts the upload, then quotes with the fresh modelId", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes("/download-url")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            downloadUrl: "/api/files/preview/asset-1",
+            filename: "part.stl",
+            fileUnit: "mm",
+          }),
+        } as unknown as Response;
+      }
+      if (url.includes("/api/craftcloud/quotes")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ priceId: "price-1" }),
+        } as unknown as Response;
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({}),
+      } as unknown as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    uploadToCraftCloudMock
+      .mockRejectedValueOnce(new Error("CraftCloud upload failed: 404"))
+      .mockResolvedValueOnce({
+        modelId: "fresh-model",
+        dimensions: null,
+        volume: null,
+        triangleCount: null,
+      });
+
+    render(
+      <QuoteConfigurator
+        fileAssetId="asset-1"
+        filename="part.stl"
+        format="stl"
+        hasCachedModel={false}
+        geometryData={null}
+      />
+    );
+
+    // First mount: upload 404s, the error alert renders — and no
+    // quote-start request has fired.
+    await screen.findByText("CraftCloud upload failed: 404");
+    expect(
+      fetchMock.mock.calls.some((c) =>
+        String(c[0]).includes("/api/craftcloud/quotes")
+      )
+    ).toBe(false);
+
+    fireEvent.click(screen.getByText("Retry"));
+
+    await screen.findByText("select quote");
+    expect(uploadToCraftCloudMock).toHaveBeenCalledTimes(2);
+
+    // Quote start used the just-uploaded modelId, not the fileAssetId →
+    // DB lookup that would 409 when cache-model hadn't landed.
+    const quotesCall = fetchMock.mock.calls.find((c) =>
+      String(c[0]).includes("/api/craftcloud/quotes")
+    );
+    const body = JSON.parse(String(quotesCall![1]?.body));
+    expect(body.modelId).toBe("fresh-model");
+    expect(body.fileAssetId).toBeUndefined();
+  });
+
+  it("a failed cache-model write is reported but does not block quoting", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes("/download-url")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            downloadUrl: "/api/files/preview/asset-1",
+            filename: "part.stl",
+            fileUnit: "mm",
+          }),
+        } as unknown as Response;
+      }
+      if (url.includes("/cache-model")) {
+        return {
+          ok: false,
+          status: 403,
+          json: async () => ({ error: "Forbidden" }),
+        } as unknown as Response;
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ priceId: "price-1" }),
+      } as unknown as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    uploadToCraftCloudMock.mockResolvedValue({
+      modelId: "fresh-model",
+      dimensions: null,
+      volume: null,
+      triangleCount: null,
+    });
+
+    render(
+      <QuoteConfigurator
+        fileAssetId="asset-1"
+        filename="part.stl"
+        format="stl"
+        hasCachedModel={false}
+        geometryData={null}
+      />
+    );
+
+    // Quoting still reaches the picker despite the 403 cache write.
+    await screen.findByText("select quote");
+    expect(reportClientErrorMock).toHaveBeenCalledWith(
+      "craftcloud.cache-model-failed",
+      expect.any(Error),
+      { fileAssetId: "asset-1", status: 403 }
+    );
+
+    const quotesCall = fetchMock.mock.calls.find((c) =>
+      String(c[0]).includes("/api/craftcloud/quotes")
+    );
+    const body = JSON.parse(String(quotesCall![1]?.body));
+    expect(body.modelId).toBe("fresh-model");
   });
 
   // MTR-232 — "Proceed to checkout" had no in-flight guard at all

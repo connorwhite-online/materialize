@@ -288,6 +288,14 @@ export function QuoteConfigurator({
   const previewableFormat =
     format === "stl" || format === "obj" || format === "3mf";
 
+  // The modelId from an upload done in THIS session. Quote start
+  // prefers it over the fileAssetId → DB lookup: the cache-model
+  // write below is best-effort (it can legitimately no-op or fail —
+  // non-owner first-capture guard, transient 500), and depending on
+  // the DB round-trip turned any cache miss into a 409 "File not yet
+  // uploaded for printing" from /api/craftcloud/quotes.
+  const uploadedModelIdRef = useRef<string | null>(null);
+
   const ensureModelUploaded = useCallback(async () => {
     // Draft mode — the model was already uploaded client-side and we
     // have a modelId in hand. Nothing to do.
@@ -320,6 +328,7 @@ export function QuoteConfigurator({
     // coordinates — defaulting to mm for old rows that predate the
     // file_assets.file_unit column.
     const model = await uploadToCraftCloud(downloadUrl, fname, fileUnit ?? "mm");
+    uploadedModelIdRef.current = model.modelId;
 
     // Surface the dimensions we just got back BEFORE persisting them
     // server-side — the bounding box overlay, the dimensions-text
@@ -340,8 +349,11 @@ export function QuoteConfigurator({
       }));
     }
 
-    // Cache the modelId on our server
-    await fetch("/api/craftcloud/cache-model", {
+    // Cache the modelId on our server. Non-fatal: quoting proceeds on
+    // uploadedModelIdRef this session either way — but a failed cache
+    // means the next visit re-uploads, so surface it in Sentry rather
+    // than swallowing the response.
+    const cacheRes = await fetch("/api/craftcloud/cache-model", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -355,6 +367,13 @@ export function QuoteConfigurator({
           : undefined,
       }),
     });
+    if (!cacheRes.ok) {
+      reportClientError(
+        "craftcloud.cache-model-failed",
+        new Error(`cache-model failed: ${cacheRes.status}`),
+        { fileAssetId, status: cacheRes.status }
+      );
+    }
   }, [fileAssetId, hasCachedModel, draftMode]);
 
   // Each fetchQuotes invocation owns an AbortController stored in
@@ -630,7 +649,11 @@ export function QuoteConfigurator({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...(draftMode ? { modelId: draftMode.modelId } : { fileAssetId }),
+          ...(draftMode
+            ? { modelId: draftMode.modelId }
+            : uploadedModelIdRef.current
+              ? { modelId: uploadedModelIdRef.current }
+              : { fileAssetId }),
           currency: region.currency,
           countryCode: region.code,
           quantity,
@@ -1078,8 +1101,19 @@ export function QuoteConfigurator({
           type="button"
           onClick={() => {
             setError(null);
-            setLoadingPhase(isDraft ? "quoting" : "uploading");
-            fetchQuotes().catch((err) => {
+            // A failed CraftCloud upload leaves no modelId anywhere —
+            // retrying fetchQuotes alone would 409 ("File not yet
+            // uploaded for printing") on every click, forever. Re-run
+            // the upload first when it never completed.
+            const needsUpload = !isDraft && !modelUploadedRef.current;
+            setLoadingPhase(needsUpload ? "uploading" : "quoting");
+            (async () => {
+              if (needsUpload) {
+                await ensureModelUploaded();
+                modelUploadedRef.current = true;
+              }
+              await fetchQuotes();
+            })().catch((err) => {
               setError(err instanceof Error ? err.message : "Something went wrong");
               setLoadingPhase("done");
             });
