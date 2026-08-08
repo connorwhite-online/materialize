@@ -24,7 +24,6 @@ import {
 } from "@/app/actions/print";
 import { useCart } from "./cart-context";
 import { useUser } from "@clerk/nextjs";
-import { uploadToCraftCloud } from "@/lib/craftcloud/upload-client";
 import { checkGeometry } from "@/lib/geometry-checks";
 import { REGIONS, DEFAULT_REGION } from "@/lib/craftcloud/regions";
 import { MaterialPreview } from "@/components/viewer/material-preview";
@@ -288,12 +287,10 @@ export function QuoteConfigurator({
   const previewableFormat =
     format === "stl" || format === "obj" || format === "3mf";
 
-  // The modelId from an upload done in THIS session. Quote start
-  // prefers it over the fileAssetId → DB lookup: the cache-model
-  // write below is best-effort (it can legitimately no-op or fail —
-  // non-owner first-capture guard, transient 500), and depending on
-  // the DB round-trip turned any cache miss into a 409 "File not yet
-  // uploaded for printing" from /api/craftcloud/quotes.
+  // The modelId from the upload done in THIS session. Quote start
+  // prefers it over the fileAssetId → DB lookup so a persistence
+  // hiccup can't turn into a 409 "File not yet uploaded for printing"
+  // loop from /api/craftcloud/quotes.
   const uploadedModelIdRef = useRef<string | null>(null);
 
   const ensureModelUploaded = useCallback(async () => {
@@ -305,74 +302,55 @@ export function QuoteConfigurator({
 
     setLoadingPhase("uploading");
 
-    // Get download URL from our server
-    const urlRes = await fetch("/api/craftcloud/download-url", {
+    // The upload runs SERVER-side (R2 → our route → CraftCloud).
+    // CraftCloud's replacement upload endpoints only allow
+    // https://craftcloud3d.com as an origin, so the browser cannot
+    // call them — confirmed in prod as
+    // craftcloud.model-upload-unreachable at the initiate leg. The
+    // route also persists the modelId, replacing the separate
+    // download-url + cache-model round trips this used to make.
+    const res = await fetch("/api/craftcloud/upload-model", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fileAssetId }),
     });
 
-    if (!urlRes.ok) throw new Error("Failed to get download URL");
-    const {
-      downloadUrl,
-      filename: fname,
-      fileUnit,
-    } = (await urlRes.json()) as {
-      downloadUrl: string;
-      filename: string;
-      fileUnit?: "mm" | "cm" | "in";
-    };
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        step?: string;
+      };
+      const error = new Error(data.error || "Failed to upload model");
+      reportClientError("craftcloud.model-upload-failed", error, {
+        fileAssetId,
+        status: res.status,
+        step: data.step,
+      });
+      throw error;
+    }
 
-    // Upload directly from browser → CraftCloud (no server middleman).
-    // The unit tells CraftCloud how to interpret the model's native
-    // coordinates — defaulting to mm for old rows that predate the
-    // file_assets.file_unit column.
-    const model = await uploadToCraftCloud(downloadUrl, fname, fileUnit ?? "mm");
+    const model = (await res.json()) as {
+      modelId: string;
+      dimensions: { x: number; y: number; z: number } | null;
+      volume: number | null;
+    };
     uploadedModelIdRef.current = model.modelId;
 
-    // Surface the dimensions we just got back BEFORE persisting them
-    // server-side — the bounding box overlay, the dimensions-text
-    // line, and the optimistic material filter all key off this
-    // state and the user would otherwise see them blank until a
-    // hard refresh. The follow-up POST below caches the same data
-    // for next time.
+    // Surface the dimensions we just got back — the bounding box
+    // overlay, the dimensions-text line, and the optimistic material
+    // filter all key off this state and the user would otherwise see
+    // them blank until a hard refresh.
     const dims = model.dimensions;
     const vol = model.volume;
     if (dims) {
-      // Hoist into locals so the narrowing survives into the
-      // setState updater closure — `model.dimensions` would widen
-      // back to {x,y,z} | null inside the nested function.
+      // Hoist into locals so the narrowing survives into the setState
+      // updater closure — model.dimensions would widen back to
+      // {x,y,z} | null inside the nested function.
       setGeometryData((prev) => ({
         ...(prev ?? {}),
         dimensions: dims,
         volume: vol ?? prev?.volume,
       }));
-    }
-
-    // Cache the modelId on our server. Non-fatal: quoting proceeds on
-    // uploadedModelIdRef this session either way — but a failed cache
-    // means the next visit re-uploads, so surface it in Sentry rather
-    // than swallowing the response.
-    const cacheRes = await fetch("/api/craftcloud/cache-model", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        fileAssetId,
-        modelId: model.modelId,
-        geometry: model.dimensions
-          ? {
-              dimensions: model.dimensions,
-              volume: model.volume,
-            }
-          : undefined,
-      }),
-    });
-    if (!cacheRes.ok) {
-      reportClientError(
-        "craftcloud.cache-model-failed",
-        new Error(`cache-model failed: ${cacheRes.status}`),
-        { fileAssetId, status: cacheRes.status }
-      );
     }
   }, [fileAssetId, hasCachedModel, draftMode]);
 
