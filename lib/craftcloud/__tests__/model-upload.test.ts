@@ -156,12 +156,57 @@ describe("uploadModelToCraftCloud", () => {
     expect(err.step).toBe("confirm");
   });
 
-  it("does not swallow a network-level rejection", async () => {
+  it("wraps a network rejection as a step-tagged error with status 0", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => {
       throw new TypeError("Failed to fetch");
     }));
-    await expect(uploadModelToCraftCloud(file(), "Caribiner.stl")).rejects.toThrow(
-      "Failed to fetch"
-    );
+
+    const err = await uploadModelToCraftCloud(file(), "Caribiner.stl").catch((e) => e);
+
+    expect(err).toBeInstanceOf(CraftCloudUploadError);
+    expect(err.step).toBe("initiate");
+    expect(err.status).toBe(0);
+    // The browser's own wording is preserved in the extras...
+    expect(err.responseBody).toBe("Failed to fetch");
+    // ...but must NOT appear in the message: instrumentation-client's
+    // `ignoreErrors` matches /Failed to fetch/ as a substring against
+    // the exception value and would drop the event entirely.
+    expect(err.message).toBe("CraftCloud upload blocked or unreachable (initiate)");
+    for (const muted of [
+      "Failed to fetch",
+      "Load failed",
+      "NetworkError when attempting to fetch",
+      "AbortError",
+    ]) {
+      expect(err.message).not.toContain(muted);
+    }
+  });
+
+  it("tags a network rejection on a later leg with that leg", async () => {
+    let call = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL) => {
+      call++;
+      if (String(url).endsWith("/model/upload/initiate")) {
+        return json({ uploadId: UPLOAD_ID, uploadUrl: UPLOAD_URL });
+      }
+      throw new TypeError("Failed to fetch");
+    }));
+
+    const err = await uploadModelToCraftCloud(file(), "Caribiner.stl").catch((e) => e);
+    expect(err.step).toBe("transfer");
+    expect(call).toBe(2);
+  });
+
+  it("lets an AbortError through untouched (navigation, not a CraftCloud failure)", async () => {
+    const abort = Object.assign(new Error("The user aborted a request"), {
+      name: "AbortError",
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw abort;
+    }));
+
+    const err = await uploadModelToCraftCloud(file(), "Caribiner.stl").catch((e) => e);
+    expect(err).toBe(abort);
+    expect(err).not.toBeInstanceOf(CraftCloudUploadError);
   });
 });
