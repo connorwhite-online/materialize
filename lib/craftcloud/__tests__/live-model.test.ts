@@ -45,35 +45,94 @@ function textResponse(body: string, status: number): Response {
   return new Response(body, { status });
 }
 
+// Server-side upload now runs the same initiate → PUT → confirm chain
+// as the browser (model-upload.ts) — /v5/model was removed by
+// CraftCloud. This path is what MCP agent uploads go through
+// (lib/mcp/internal/files.ts), so it is the one that must keep
+// producing a CraftCloudModel with the legacy field names.
 describe("realUploadModel (live mode)", () => {
   beforeEach(() => {
     fetchMock.mockReset();
   });
 
-  it("returns models[0] on a successful upload", async () => {
-    const mockModel = { id: "model-123", filename: "part.stl", fileUnit: "mm" };
-    fetchMock.mockResolvedValueOnce(jsonResponse([mockModel]));
+  function stubHappyChain() {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({ uploadId: "upload-1", uploadUrl: "https://s3.test/upload-1" }, 201)
+      )
+      .mockResolvedValueOnce(new Response("", { status: 200 }))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          [
+            {
+              modelId: "model-123",
+              dimensions: { x: 25, y: 10, z: 55 },
+              volume: 1863,
+              area: 2715,
+              isParsing: false,
+            },
+          ],
+          201
+        )
+      );
+  }
+
+  it("maps the confirm payload onto CraftCloudModel", async () => {
+    stubHappyChain();
 
     const result = await uploadModel(new Uint8Array([1, 2, 3]), "part.stl", "mm");
 
-    expect(result).toEqual(mockModel);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      id: "model-123",
+      filename: "part.stl",
+      fileUnit: "mm",
+      geometry: {
+        dimensions: { x: 25, y: 10, z: 55 },
+        volume: 1863,
+        surfaceArea: 2715,
+        // confirm carries no triangle count.
+        triangleCount: 0,
+      },
+      status: "ready",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it("throws when CraftCloud returns an empty array", async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse([]));
+  it("reports status 'parsing' when CraftCloud is still meshing", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({ uploadId: "upload-1", uploadUrl: "https://s3.test/upload-1" }, 201)
+      )
+      .mockResolvedValueOnce(new Response("", { status: 200 }))
+      .mockResolvedValueOnce(
+        jsonResponse([{ modelId: "model-123", isParsing: true }], 201)
+      );
+
+    const result = await uploadModel(new Uint8Array([1, 2, 3]), "part.stl", "mm");
+    expect(result.status).toBe("parsing");
+    expect(result.geometry).toBeNull();
+  });
+
+  it("throws when confirm returns an empty array", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({ uploadId: "upload-1", uploadUrl: "https://s3.test/upload-1" }, 201)
+      )
+      .mockResolvedValueOnce(new Response("", { status: 200 }))
+      .mockResolvedValueOnce(jsonResponse([], 201));
 
     await expect(
       uploadModel(new Uint8Array([1, 2, 3]), "part.stl", "mm")
-    ).rejects.toThrow(/no models/i);
+    ).rejects.toThrow(/upload failed/i);
   });
 
-  it("throws on a non-2xx upload response", async () => {
+  it("throws on a non-2xx initiate response, without attempting the transfer", async () => {
     fetchMock.mockResolvedValueOnce(textResponse("bad request", 400));
 
     await expect(
       uploadModel(new Uint8Array([1, 2, 3]), "part.stl", "mm")
-    ).rejects.toThrow(/Upload failed/i);
+    ).rejects.toThrow(/upload failed: 400/i);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 
