@@ -37,6 +37,9 @@ export const CRAFTCLOUD_CUSTOMER_API_BASE =
 /** Which leg of the chain failed — carried into telemetry. */
 export type UploadStep = "initiate" | "transfer" | "confirm";
 
+/** Sentinel `status` for a rejection that never produced a response. */
+export const NETWORK_FAILURE_STATUS = 0;
+
 export class CraftCloudUploadError extends Error {
   readonly step: UploadStep;
   readonly status: number;
@@ -45,11 +48,52 @@ export class CraftCloudUploadError extends Error {
   constructor(step: UploadStep, status: number, responseBody: string) {
     // Message stays terse because it surfaces directly in the print
     // page's error alert ("We couldn't load quotes for this file").
-    super(`CraftCloud upload failed: ${status}`);
+    //
+    // The network-failure wording deliberately avoids the phrases in
+    // instrumentation-client.ts's `ignoreErrors` list ("Failed to
+    // fetch", "Load failed", "NetworkError when attempting to
+    // fetch"). Sentry matches those as substrings against the
+    // exception value, so echoing the browser's own message here
+    // would get the event dropped by the noise floor — the exact
+    // silence this whole chain of fixes exists to remove.
+    super(
+      status === NETWORK_FAILURE_STATUS
+        ? `CraftCloud upload blocked or unreachable (${step})`
+        : `CraftCloud upload failed: ${status}`
+    );
     this.name = "CraftCloudUploadError";
     this.step = step;
     this.status = status;
     this.responseBody = responseBody;
+  }
+}
+
+/**
+ * `fetch` for one leg of the chain, with network rejections converted
+ * into a step-tagged CraftCloudUploadError.
+ *
+ * A browser CORS refusal surfaces as a bare `TypeError` with no
+ * response, and the new upload endpoints answer with
+ * `Access-Control-Allow-Origin: https://craftcloud3d.com` rather than
+ * `*` — so "our origin is not allowed" is a live possibility for this
+ * chain, and it is the single most diagnostic failure we could get.
+ * Left as a raw TypeError it would be muted by the client noise floor
+ * and we would be blind again.
+ *
+ * Aborts still pass through untouched: a navigation mid-upload is not
+ * a CraftCloud failure.
+ */
+async function fetchLeg(
+  step: UploadStep,
+  input: string,
+  init?: RequestInit
+): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch (cause) {
+    if ((cause as { name?: string })?.name === "AbortError") throw cause;
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    throw new CraftCloudUploadError(step, NETWORK_FAILURE_STATUS, detail);
   }
 }
 
@@ -88,15 +132,16 @@ async function bodyText(res: Response): Promise<string> {
  * Throws `CraftCloudUploadError` on any non-OK response so callers can
  * report `step` / `status` / `responseBody` to their own telemetry
  * (browser: `reportClientError`; server: `logError`). Network-level
- * fetch rejections propagate as-is — the client noise floor in
- * `instrumentation-client.ts` deliberately mutes those.
+ * rejections are also wrapped, tagged with the leg that failed and
+ * `status: 0` — see `fetchLeg`. Aborts alone pass through raw.
  */
 export async function uploadModelToCraftCloud(
   body: Blob | Uint8Array,
   fileName: string,
   fileUnit: FileUnit = "mm"
 ): Promise<UploadedModel> {
-  const initiateRes = await fetch(
+  const initiateRes = await fetchLeg(
+    "initiate",
     `${CRAFTCLOUD_CUSTOMER_API_BASE}/model/upload/initiate`,
     {
       method: "POST",
@@ -124,7 +169,7 @@ export async function uploadModelToCraftCloud(
   // Presigned S3 PUT. No headers on purpose — the presigned signature
   // covers whatever CraftCloud signed, and volunteering a Content-Type
   // it didn't sign gets the request rejected.
-  const transferRes = await fetch(uploadUrl, {
+  const transferRes = await fetchLeg("transfer", uploadUrl, {
     method: "PUT",
     body: body as BodyInit,
   });
@@ -136,7 +181,8 @@ export async function uploadModelToCraftCloud(
     );
   }
 
-  const confirmRes = await fetch(
+  const confirmRes = await fetchLeg(
+    "confirm",
     `${CRAFTCLOUD_CUSTOMER_API_BASE}/model/upload/confirm`,
     {
       method: "POST",

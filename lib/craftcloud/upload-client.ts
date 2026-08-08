@@ -13,6 +13,7 @@
 import { reportClientError } from "@/lib/observability/report-client-error";
 import {
   CraftCloudUploadError,
+  NETWORK_FAILURE_STATUS,
   uploadModelToCraftCloud,
   type UploadedModel,
 } from "./model-upload";
@@ -27,11 +28,21 @@ async function uploadAndReport(
   try {
     return await uploadModelToCraftCloud(body, filename, unit);
   } catch (error) {
-    // Only definitive HTTP failures are reported. A bare network
-    // rejection (TypeError) falls through unreported, matching the
-    // `Failed to fetch` noise floor in instrumentation-client.ts.
+    // Aborts (navigation mid-upload) arrive here untouched and stay
+    // unreported — those are the noise the client floor exists for.
     if (error instanceof CraftCloudUploadError) {
-      reportClientError("craftcloud.model-upload-failed", error, {
+      // A network-level rejection gets its own context rather than
+      // being dropped. On this chain that is most likely a CORS
+      // refusal from customer-api (which answers with an explicit
+      // origin, not `*`), i.e. a total outage of the upload path —
+      // precisely the failure that must not be silent. Split from
+      // the HTTP-status context so it can be muted independently if
+      // it turns out to be dominated by offline users.
+      const context =
+        error.status === NETWORK_FAILURE_STATUS
+          ? "craftcloud.model-upload-unreachable"
+          : "craftcloud.model-upload-failed";
+      reportClientError(context, error, {
         step: error.step,
         status: error.status,
         filename,

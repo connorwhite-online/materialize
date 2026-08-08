@@ -100,13 +100,40 @@ describe("uploadFileToCraftCloud", () => {
     expect(extras.responseBody).toHaveLength(500);
   });
 
-  it("does NOT report a network-level rejection (noise-floor policy)", async () => {
+  // A CORS refusal from customer-api arrives as a status-0
+  // CraftCloudUploadError. It gets its own context so a total outage
+  // of the upload path is never silent — the failure mode this whole
+  // series of fixes exists to eliminate.
+  it("reports craftcloud.model-upload-unreachable for a status-0 (network/CORS) failure", async () => {
     uploadModelToCraftCloudMock.mockRejectedValue(
-      new TypeError("Failed to fetch")
+      new CraftCloudUploadError("initiate", 0, "Failed to fetch")
+    );
+
+    await expect(uploadFileToCraftCloud(makeFile(), "mm")).rejects.toThrow(
+      "CraftCloud upload blocked or unreachable (initiate)"
+    );
+    expect(reportClientErrorImpl).toHaveBeenCalledWith(
+      "craftcloud.model-upload-unreachable",
+      expect.any(CraftCloudUploadError),
+      {
+        step: "initiate",
+        status: 0,
+        filename: "carabiner.stl",
+        unit: "mm",
+        responseBody: "Failed to fetch",
+      }
+    );
+  });
+
+  it("does NOT report a bare abort (navigation mid-upload)", async () => {
+    uploadModelToCraftCloudMock.mockRejectedValue(
+      Object.assign(new Error("The user aborted a request"), {
+        name: "AbortError",
+      })
     );
 
     await expect(uploadFileToCraftCloud(makeFile())).rejects.toThrow(
-      "Failed to fetch"
+      "The user aborted a request"
     );
     expect(reportClientErrorImpl).not.toHaveBeenCalled();
   });
