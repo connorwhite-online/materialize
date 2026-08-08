@@ -20,6 +20,10 @@ let r2Objects: Array<{
 let throwOnDb = false;
 
 const mockSend = vi.fn();
+// Observability for the anon_upload_grants sweep.
+const deleteCalls: string[] = [];
+let deletedGrantRows: Array<{ id: string }> = [];
+let throwOnGrantDelete = false;
 
 // Mock @aws-sdk/client-s3 so S3Client instances use mockSend.
 vi.mock("@aws-sdk/client-s3", () => {
@@ -73,13 +77,28 @@ vi.mock("@/lib/db", () => ({
         where: () => Promise.resolve(),
       }),
     }),
-    delete: () => ({
-      where: () => Promise.resolve(),
+    delete: (table?: { _table?: string }) => ({
+      where: () => {
+        const rows =
+          table?._table === "anon_upload_grants" ? deletedGrantRows : [];
+        return Object.assign(Promise.resolve(rows), {
+          returning: () => {
+            deleteCalls.push(table?._table ?? "unknown");
+            if (throwOnGrantDelete) return Promise.reject(new Error("db down"));
+            return Promise.resolve(rows);
+          },
+        });
+      },
     }),
   },
 }));
 
 vi.mock("@/lib/db/schema", () => ({
+  anonUploadGrants: {
+    _table: "anon_upload_grants",
+    id: "id",
+    createdAt: "created_at",
+  },
   fileAssets: {
     _table: "file_assets",
     storageKey: "storage_key",
@@ -145,14 +164,19 @@ describe("cron/cleanup-orphan-uploads", () => {
     process.env.R2_ACCESS_KEY_ID = "test-key";
     process.env.R2_SECRET_ACCESS_KEY = "test-secret-key";
     process.env.R2_BUCKET_NAME = "test-bucket";
+    deleteCalls.length = 0;
+    deletedGrantRows = [];
+    throwOnGrantDelete = false;
 
     // Default mockSend: ListObjectsV2 returns r2Objects in one page;
     // DeleteObjects reflects back the requested keys as Deleted.
     mockSend.mockImplementation(
       (cmd: { _type: string; input: unknown }) => {
         if (cmd._type === "ListObjectsV2Command") {
+          const prefix =
+            (cmd.input as { Prefix?: string })?.Prefix ?? "";
           return Promise.resolve({
-            Contents: r2Objects,
+            Contents: r2Objects.filter((o) => o.Key?.startsWith(prefix)),
             IsTruncated: false,
             NextContinuationToken: undefined,
           });
@@ -217,6 +241,72 @@ describe("cron/cleanup-orphan-uploads", () => {
     expect(body.orphans).toBe(0);
     expect(body.deleted).toBe(0);
     expect(body.reclaimedBytes).toBe(0);
+  });
+
+  // Anon print-flow staging (lib/uploads/anon-grants.ts). Nothing ever
+  // links these to a fileAssets row, so they are all orphans once aged
+  // out — and this prefix would grow without bound if the sweep only
+  // covered uploads/. It is also the one prefix unauthenticated callers
+  // can write to, which makes this the backstop on that surface.
+  it("sweeps aged-out anon-uploads/ objects", async () => {
+    const old = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    r2Objects = [
+      { Key: "anon-uploads/abc/part.stl", LastModified: old, Size: 100 },
+      { Key: "anon-uploads/def/other.stl", LastModified: old, Size: 200 },
+    ];
+
+    const res = await GET(makeRequest("Bearer test-secret"));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.orphans).toBe(2);
+    expect(body.deleted).toBe(2);
+  });
+
+  it("leaves young anon-uploads/ objects alone — a quote may still be in flight", async () => {
+    r2Objects = [
+      {
+        Key: "anon-uploads/abc/part.stl",
+        LastModified: new Date(),
+        Size: 100,
+      },
+    ];
+
+    const body = await (await GET(makeRequest("Bearer test-secret"))).json();
+    expect(body.orphans).toBe(0);
+  });
+
+  it("scans both prefixes without double-counting", async () => {
+    const old = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    r2Objects = [
+      { Key: "uploads/u1/a.stl", LastModified: old, Size: 1 },
+      { Key: "anon-uploads/b/b.stl", LastModified: old, Size: 1 },
+    ];
+
+    const body = await (await GET(makeRequest("Bearer test-secret"))).json();
+
+    // One list call per prefix, each returning only its own keys.
+    expect(body.scanned).toBe(2);
+    expect(body.deleted).toBe(2);
+  });
+
+  it("retires aged-out grant rows and reports the count", async () => {
+    deletedGrantRows = [{ id: "g1" }, { id: "g2" }];
+
+    const body = await (await GET(makeRequest("Bearer test-secret"))).json();
+
+    expect(deleteCalls).toContain("anon_upload_grants");
+    expect(body.grantsDeleted).toBe(2);
+  });
+
+  it("still reports success when the grant sweep fails", async () => {
+    throwOnGrantDelete = true;
+
+    const res = await GET(makeRequest("Bearer test-secret"));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.grantsDeleted).toBe(0);
   });
 
   it("does NOT delete referenced keys even when older than 24h", async () => {

@@ -3,13 +3,16 @@ import {
   ListObjectsV2Command,
   DeleteObjectsCommand,
   type _Object,
+  type ListObjectsV2CommandOutput,
 } from "@aws-sdk/client-s3";
 import { db } from "@/lib/db";
 import {
+  anonUploadGrants,
   disputes,
   fileAssets,
   ownershipClaimIntents,
 } from "@/lib/db/schema";
+import { ANON_UPLOAD_PREFIX } from "@/lib/uploads/anon-grants";
 import {
   and,
   eq,
@@ -52,6 +55,16 @@ import { constantTimeEqual } from "@/lib/auth/constant-time-equal";
 export const dynamic = "force-dynamic";
 
 const UPLOAD_PREFIX = "uploads/";
+/**
+ * Anon print-flow staging objects (lib/uploads/anon-grants.ts). Every
+ * key here is transient by construction — nothing ever links one to a
+ * fileAssets row, because the real upload happens again at checkout
+ * under the new owner's key. So they are ALL orphans once past the age
+ * threshold, and this prefix would grow without bound if the sweep
+ * didn't cover it. Also the one prefix unauthenticated callers can
+ * write to, which makes sweeping it the backstop on that surface.
+ */
+const SWEEP_PREFIXES = [UPLOAD_PREFIX, ANON_UPLOAD_PREFIX];
 const ORPHAN_MIN_AGE_HOURS = 24;
 const DELETE_BATCH_SIZE = 100;
 
@@ -175,37 +188,55 @@ export async function GET(request: Request) {
     let scanned = 0;
     const orphans: _Object[] = [];
 
-    do {
-      const res = await s3.send(
-        new ListObjectsV2Command({
-          Bucket: bucket,
-          Prefix: UPLOAD_PREFIX,
-          ContinuationToken: continuationToken,
-        })
-      );
-      const contents = res.Contents ?? [];
-      scanned += contents.length;
+    for (const prefix of SWEEP_PREFIXES) {
+      continuationToken = undefined;
+      do {
+        const listRes: ListObjectsV2CommandOutput = await s3.send(
+          new ListObjectsV2Command({
+            Bucket: bucket,
+            Prefix: prefix,
+            ContinuationToken: continuationToken,
+          })
+        );
+        const contents = listRes.Contents ?? [];
+        scanned += contents.length;
 
-      for (const obj of contents) {
-        if (!obj.Key) continue;
-        // Safety: never sweep outside the uploads/ prefix.
-        if (!obj.Key.startsWith(UPLOAD_PREFIX)) continue;
-        // Known-good — referenced by a fileAssets row.
-        if (referenced.has(obj.Key)) continue;
-        // Too young — may still be mid-workflow.
-        if (
-          obj.LastModified &&
-          now - obj.LastModified.getTime() < minAgeMs
-        ) {
-          continue;
+        for (const obj of contents) {
+          if (!obj.Key) continue;
+          // Safety: never sweep outside the prefixes we own.
+          if (!SWEEP_PREFIXES.some((p) => obj.Key!.startsWith(p))) continue;
+          // Known-good — referenced by a fileAssets row.
+          if (referenced.has(obj.Key)) continue;
+          // Too young — may still be mid-workflow.
+          if (
+            obj.LastModified &&
+            now - obj.LastModified.getTime() < minAgeMs
+          ) {
+            continue;
+          }
+          orphans.push(obj);
         }
-        orphans.push(obj);
-      }
 
-      continuationToken = res.IsTruncated
-        ? res.NextContinuationToken
-        : undefined;
-    } while (continuationToken);
+        continuationToken = listRes.IsTruncated
+          ? listRes.NextContinuationToken
+          : undefined;
+      } while (continuationToken);
+    }
+
+    // Retire the grant rows alongside their objects. They are only
+    // useful while the key is redeemable (GRANT_TTL_MS, well under the
+    // age threshold above) and as a rate-limit tally over the trailing
+    // window; past that they are dead weight.
+    let grantsDeleted = 0;
+    try {
+      const removed = await db
+        .delete(anonUploadGrants)
+        .where(lt(anonUploadGrants.createdAt, new Date(now - minAgeMs)))
+        .returning({ id: anonUploadGrants.id });
+      grantsDeleted = removed.length;
+    } catch (error) {
+      logError("cron/cleanup-orphan-uploads.grants", error);
+    }
 
     let deleted = 0;
     let reclaimedBytes = 0;
@@ -271,7 +302,13 @@ export async function GET(request: Request) {
         )
       );
 
-    const result = { scanned, orphans: orphans.length, deleted, reclaimedBytes };
+    const result = {
+      scanned,
+      orphans: orphans.length,
+      deleted,
+      reclaimedBytes,
+      grantsDeleted,
+    };
     console.log("[cron/cleanup-orphan-uploads] swept", result);
     return Response.json(result);
   } catch (error) {

@@ -1808,3 +1808,63 @@ export const cadCreditLedger = pgTable(
       .where(sql`reason = 'print_through_refund'`),
   ]
 );
+
+/**
+ * Presigned-upload grants issued to UNAUTHENTICATED visitors on the
+ * anon print flow.
+ *
+ * CraftCloud's model-upload endpoints only accept
+ * `https://craftcloud3d.com` as an origin, so the browser can no
+ * longer upload directly and the bytes must pass through R2 + our
+ * server. Signed-in users already have that path; anon visitors had
+ * no way to write to storage at all (`/api/upload/presign` is
+ * authed-only, and its key is derived from the Clerk userId).
+ *
+ * This table is what makes issuing an unauthenticated presigned PUT
+ * safe. It does two jobs:
+ *
+ *   1. Rate limiting. `ipHash` + `createdAt` is counted over a
+ *      trailing window before a new grant is issued. It has to be
+ *      persistent rather than in-memory: the route runs on serverless
+ *      instances that don't share memory and cold-start freely, so an
+ *      in-memory counter would reset constantly and under-count. Same
+ *      reasoning as the CAD generate throttle.
+ *   2. Authorization. `/api/craftcloud/upload-model` will only read an
+ *      anon `anon-uploads/` key that appears here, so a caller cannot
+ *      point it at an arbitrary object in the bucket. Prefix-matching
+ *      alone would not give us that.
+ *
+ * `ipHash` is a salted SHA-256, never the raw address — this row
+ * exists for abuse control, and storing visitor IPs in plaintext to
+ * achieve it would be a poor trade.
+ *
+ * Rows are disposable. The daily orphan-cleanup cron sweeps both the
+ * R2 objects and these rows once they age out.
+ */
+export const anonUploadGrants = pgTable(
+  "anon_upload_grants",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Salted SHA-256 of the client IP. Never the raw address. */
+    ipHash: text("ip_hash").notNull(),
+    /** The exact R2 key this grant authorises, under `anon-uploads/`. */
+    storageKey: text("storage_key").notNull(),
+    originalFilename: text("original_filename").notNull(),
+    fileSize: bigint("file_size", { mode: "number" }).notNull(),
+    /** Set once the key has been consumed, so a grant is single-use. */
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    // Drives the sliding-window count in the presign route.
+    index("anon_upload_grants_ip_created_idx").on(
+      table.ipHash,
+      table.createdAt
+    ),
+    // Drives the authorization lookup in upload-model, and stops the
+    // same key ever being granted twice.
+    uniqueIndex("anon_upload_grants_storage_key_uq").on(table.storageKey),
+  ]
+);
