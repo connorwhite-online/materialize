@@ -17,6 +17,18 @@ export interface UploadFileToR2Params {
    */
   kind: "anon-print" | "authed-print" | "create-listing" | "cart-materialize";
   /**
+   * Presign as an UNAUTHENTICATED visitor via
+   * `/api/upload/anon-presign` instead of the authed
+   * `/api/upload/presign`, which 401s without a Clerk session.
+   *
+   * Only the anon print flow needs this: its model has to transit R2
+   * on the way to CraftCloud (whose upload endpoints refuse our
+   * origin) and the visitor has not signed up yet. The anon endpoint
+   * is per-IP rate limited and writes to a separate, sweepable
+   * `anon-uploads/` prefix — see lib/uploads/anon-grants.ts.
+   */
+  anonymous?: boolean;
+  /**
    * 0-100, fired as the R2 PUT progresses. XHR-only signal — `fetch`
    * doesn't expose upload progress on the client, which is exactly
    * why this helper uses XHR for the PUT leg even for callers that
@@ -49,12 +61,15 @@ export type UploadFileToR2Result =
 export async function uploadFileToR2(
   params: UploadFileToR2Params
 ): Promise<UploadFileToR2Result> {
-  const { file, kind, onProgress } = params;
+  const { file, kind, onProgress, anonymous } = params;
   const filename = params.filename ?? file.name;
+  const presignEndpoint = anonymous
+    ? "/api/upload/anon-presign"
+    : "/api/upload/presign";
 
   let presignRes: Response;
   try {
-    presignRes = await fetch("/api/upload/presign", {
+    presignRes = await fetch(presignEndpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

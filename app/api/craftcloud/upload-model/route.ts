@@ -8,6 +8,7 @@ import {
   CraftCloudUploadError,
   uploadModelToCraftCloud,
 } from "@/lib/craftcloud/model-upload";
+import { consumeAnonUploadGrant } from "@/lib/uploads/anon-grants";
 
 /**
  * Server-side CraftCloud model upload for a stored file asset.
@@ -35,11 +36,48 @@ export async function POST(request: Request) {
   try {
     const { userId } = await auth();
 
-    const { fileAssetId } = (await request.json()) as {
+    const { fileAssetId, storageKey, fileUnit } = (await request.json()) as {
       fileAssetId?: string;
+      storageKey?: string;
+      fileUnit?: "mm" | "cm" | "in";
     };
+
+    // Anon draft mode: the visitor has no fileAssets row — their model
+    // was staged in R2 via /api/upload/anon-presign. Authorization is
+    // the grant itself: consumeAnonUploadGrant only returns a key we
+    // issued, unconsumed and unexpired, and marks it consumed in the
+    // same statement. A key that isn't ours is indistinguishable from
+    // one that doesn't exist, so this can't be used to read arbitrary
+    // objects out of the bucket.
+    if (storageKey) {
+      const grant = await consumeAnonUploadGrant(storageKey);
+      if (!grant) {
+        return Response.json({ error: "Forbidden" }, { status: 403 });
+      }
+
+      const anonBytes = await getObjectBytes(storageKey);
+      const anonModel = await uploadModelToCraftCloud(
+        anonBytes,
+        grant.originalFilename,
+        fileUnit ?? "mm"
+      );
+
+      // Nothing to persist: there is no fileAssets row yet. The client
+      // holds the modelId for the quote, and the real upload happens
+      // at checkout under the new owner's key.
+      return Response.json({
+        modelId: anonModel.modelId,
+        dimensions: anonModel.dimensions,
+        volume: anonModel.volume,
+        isParsing: anonModel.isParsing,
+      });
+    }
+
     if (!fileAssetId) {
-      return Response.json({ error: "Missing fileAssetId" }, { status: 400 });
+      return Response.json(
+        { error: "Missing fileAssetId or storageKey" },
+        { status: 400 }
+      );
     }
 
     const [assetRow] = await db

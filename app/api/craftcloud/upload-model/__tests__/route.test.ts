@@ -68,6 +68,12 @@ vi.mock("@/lib/storage", () => ({
   getObjectBytes: (...args: unknown[]) => getObjectBytesMock(...args),
 }));
 
+const consumeAnonUploadGrantMock = vi.fn();
+vi.mock("@/lib/uploads/anon-grants", () => ({
+  consumeAnonUploadGrant: (...a: unknown[]) =>
+    consumeAnonUploadGrantMock(...a),
+}));
+
 const logErrorMock = vi.fn();
 vi.mock("@/lib/logger", () => ({
   logError: (...args: unknown[]) => logErrorMock(...args),
@@ -125,6 +131,9 @@ describe("POST /api/craftcloud/upload-model", () => {
     updateShouldThrow = false;
     getObjectBytesMock.mockResolvedValue(new Uint8Array([1, 2, 3]));
     uploadModelToCraftCloudMock.mockResolvedValue(MODEL);
+    consumeAnonUploadGrantMock.mockResolvedValue({
+      originalFilename: "part.stl",
+    });
   });
 
   it("uploads from R2 with the asset's filename + unit and returns the model", async () => {
@@ -206,10 +215,81 @@ describe("POST /api/craftcloud/upload-model", () => {
     expect(await res.json()).toEqual({ error: "Failed to upload model" });
   });
 
-  it("400s without a fileAssetId", async () => {
+  it("400s without a fileAssetId or storageKey", async () => {
     const res = await POST(req({}));
     expect(res.status).toBe(400);
     expect(uploadModelToCraftCloudMock).not.toHaveBeenCalled();
+  });
+
+  // Anon draft mode: no fileAssets row exists. The grant IS the
+  // authorization — see lib/uploads/anon-grants.ts.
+  describe("anon storageKey mode", () => {
+    const anonKey = "anon-uploads/abc123/part.stl";
+
+    it("redeems the grant and uploads the staged object", async () => {
+      const res = await POST(req({ storageKey: anonKey, fileUnit: "in" }));
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        modelId: "model-123",
+        dimensions: { x: 25, y: 10, z: 55 },
+        volume: 1863,
+        isParsing: false,
+      });
+      expect(consumeAnonUploadGrantMock).toHaveBeenCalledWith(anonKey);
+      expect(getObjectBytesMock).toHaveBeenCalledWith(anonKey);
+      // Filename comes from the GRANT, not from caller-supplied input.
+      expect(uploadModelToCraftCloudMock).toHaveBeenCalledWith(
+        expect.any(Uint8Array),
+        "part.stl",
+        "in"
+      );
+    });
+
+    it("defaults the unit to mm", async () => {
+      await POST(req({ storageKey: anonKey }));
+      expect(uploadModelToCraftCloudMock).toHaveBeenCalledWith(
+        expect.any(Uint8Array),
+        "part.stl",
+        "mm"
+      );
+    });
+
+    // Consumed, expired, or never issued — all indistinguishable, and
+    // none of them may reach R2.
+    it("403s and never reads storage when the grant is not redeemable", async () => {
+      consumeAnonUploadGrantMock.mockResolvedValue(null);
+
+      const res = await POST(req({ storageKey: anonKey }));
+
+      expect(res.status).toBe(403);
+      expect(getObjectBytesMock).not.toHaveBeenCalled();
+      expect(uploadModelToCraftCloudMock).not.toHaveBeenCalled();
+    });
+
+    // The guard that stops this becoming an arbitrary-object reader:
+    // an un-granted key is refused no matter what it points at.
+    it("403s on a key outside the anon prefix", async () => {
+      consumeAnonUploadGrantMock.mockResolvedValue(null);
+
+      const res = await POST(req({ storageKey: "uploads/u1/secret/part.stl" }));
+
+      expect(res.status).toBe(403);
+      expect(getObjectBytesMock).not.toHaveBeenCalled();
+    });
+
+    it("writes nothing to the DB — there is no fileAssets row yet", async () => {
+      await POST(req({ storageKey: anonKey }));
+      expect(updateSetSpy).not.toHaveBeenCalled();
+    });
+
+    it("takes precedence over a fileAssetId sent alongside it", async () => {
+      await POST(req({ storageKey: anonKey, fileAssetId: "asset-1" }));
+      expect(getObjectBytesMock).toHaveBeenCalledWith(anonKey);
+      expect(getObjectBytesMock).not.toHaveBeenCalledWith(
+        "uploads/u1/abc/part.stl"
+      );
+    });
   });
 
   it("404s when the asset row is missing", async () => {

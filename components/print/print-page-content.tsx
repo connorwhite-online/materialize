@@ -6,7 +6,8 @@ import { useUser } from "@clerk/nextjs";
 import { XIcon } from "lucide-react";
 import { useStartPrintFlow } from "@/components/upload/use-start-print-flow";
 import { usePendingPrintFile } from "@/components/upload/pending-print-file";
-import { uploadFileToCraftCloud } from "@/lib/craftcloud/upload-client";
+import { uploadFileToR2 } from "@/components/upload/upload-file-to-r2";
+import { reportClientError } from "@/lib/observability/report-client-error";
 import { QuoteConfigurator } from "@/components/print/quote-configurator";
 import type { CheckoutModel } from "@/lib/env";
 import { WhatNextPane } from "@/components/print/what-next-pane";
@@ -223,7 +224,48 @@ export function PrintPageContent({
       const gen = ++uploadGenRef.current;
       setDraft({ status: "uploading", file: pickedFile, unit: nextUnit });
       try {
-        const model = await uploadFileToCraftCloud(pickedFile.file, nextUnit);
+        // Two hops instead of one browser-direct upload: CraftCloud's
+        // replacement upload endpoints only accept
+        // https://craftcloud3d.com as an origin, so the bytes stage in
+        // R2 first and our server relays them. The R2 object is
+        // transient — the real upload still happens at checkout under
+        // the new owner's key once they sign up.
+        const staged = await uploadFileToR2({
+          file: pickedFile.file,
+          kind: "anon-print",
+          anonymous: true,
+        });
+        if (gen !== uploadGenRef.current) return;
+        if ("error" in staged) throw new Error(staged.error);
+
+        const res = await fetch("/api/craftcloud/upload-model", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            storageKey: staged.storageKey,
+            fileUnit: nextUnit,
+          }),
+        });
+        if (gen !== uploadGenRef.current) return;
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as {
+            error?: string;
+            step?: string;
+          };
+          const error = new Error(data.error || "Failed to upload model");
+          reportClientError("craftcloud.model-upload-failed", error, {
+            status: res.status,
+            step: data.step,
+            kind: "anon-print",
+          });
+          throw error;
+        }
+
+        const model = (await res.json()) as {
+          modelId: string;
+          dimensions: { x: number; y: number; z: number } | null;
+          volume: number | null;
+        };
         if (gen !== uploadGenRef.current) return;
         setDraft({
           status: "ready",
