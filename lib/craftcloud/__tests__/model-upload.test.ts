@@ -156,6 +156,106 @@ describe("uploadModelToCraftCloud", () => {
     expect(err.step).toBe("confirm");
   });
 
+  it("rejects a confirm payload with no modelId rather than coercing it", async () => {
+    // An empty id would sail into the quote request and fail somewhere
+    // far less legible than here.
+    stubChain({ confirm: json([{ dimensions: { x: 1, y: 2, z: 3 } }]) });
+
+    const err = await uploadModelToCraftCloud(file(), "Caribiner.stl").catch((e) => e);
+
+    expect(err).toBeInstanceOf(CraftCloudUploadError);
+    expect(err.step).toBe("confirm");
+    expect(err.responseBody).toContain("no modelId");
+  });
+
+  describe("transient-failure retries", () => {
+    it("retries initiate on a 503 and succeeds", async () => {
+      let initiateCalls = 0;
+      vi.stubGlobal("fetch", vi.fn(async (url: string | URL) => {
+        const href = String(url);
+        if (href.endsWith("/model/upload/initiate")) {
+          initiateCalls++;
+          if (initiateCalls === 1) return new Response("busy", { status: 503 });
+          return json({ uploadId: UPLOAD_ID, uploadUrl: UPLOAD_URL });
+        }
+        if (href.endsWith("/model/upload/confirm")) return json(CONFIRM_BODY);
+        return new Response("", { status: 200 });
+      }));
+
+      const model = await uploadModelToCraftCloud(file(), "Caribiner.stl");
+
+      expect(initiateCalls).toBe(2);
+      expect(model.modelId).toBe("df1011b498f6865ba2710d1dee5ae9f5c210b6e6");
+    });
+
+    it("retries the S3 transfer on a network blip", async () => {
+      let transferCalls = 0;
+      vi.stubGlobal("fetch", vi.fn(async (url: string | URL) => {
+        const href = String(url);
+        if (href.endsWith("/model/upload/initiate")) {
+          return json({ uploadId: UPLOAD_ID, uploadUrl: UPLOAD_URL });
+        }
+        if (href.endsWith("/model/upload/confirm")) return json(CONFIRM_BODY);
+        transferCalls++;
+        if (transferCalls === 1) throw new TypeError("Failed to fetch");
+        return new Response("", { status: 200 });
+      }));
+
+      await uploadModelToCraftCloud(file(), "Caribiner.stl");
+      expect(transferCalls).toBe(2);
+    });
+
+    it("gives up after the attempt budget and reports the last failure", async () => {
+      let initiateCalls = 0;
+      vi.stubGlobal("fetch", vi.fn(async () => {
+        initiateCalls++;
+        return new Response("still busy", { status: 502 });
+      }));
+
+      const err = await uploadModelToCraftCloud(file(), "Caribiner.stl").catch((e) => e);
+
+      expect(initiateCalls).toBe(3);
+      expect(err.step).toBe("initiate");
+      expect(err.status).toBe(502);
+      expect(err.responseBody).toBe("still busy");
+    });
+
+    it("does NOT retry a non-transient status", async () => {
+      let calls = 0;
+      vi.stubGlobal("fetch", vi.fn(async () => {
+        calls++;
+        return new Response("gone", { status: 404 });
+      }));
+
+      await uploadModelToCraftCloud(file(), "Caribiner.stl").catch(() => {});
+      expect(calls).toBe(1);
+    });
+
+    // confirm is deliberately single-shot: we have no evidence from
+    // CraftCloud that confirming an uploadId twice is idempotent, and
+    // guessing wrong could mint duplicate models.
+    it("does NOT retry confirm, even on a transient status", async () => {
+      let confirmCalls = 0;
+      vi.stubGlobal("fetch", vi.fn(async (url: string | URL) => {
+        const href = String(url);
+        if (href.endsWith("/model/upload/initiate")) {
+          return json({ uploadId: UPLOAD_ID, uploadUrl: UPLOAD_URL });
+        }
+        if (href.endsWith("/model/upload/confirm")) {
+          confirmCalls++;
+          return new Response("busy", { status: 503 });
+        }
+        return new Response("", { status: 200 });
+      }));
+
+      const err = await uploadModelToCraftCloud(file(), "Caribiner.stl").catch((e) => e);
+
+      expect(confirmCalls).toBe(1);
+      expect(err.step).toBe("confirm");
+      expect(err.status).toBe(503);
+    });
+  });
+
   it("wraps a network rejection as a step-tagged error with status 0", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => {
       throw new TypeError("Failed to fetch");
@@ -194,7 +294,9 @@ describe("uploadModelToCraftCloud", () => {
 
     const err = await uploadModelToCraftCloud(file(), "Caribiner.stl").catch((e) => e);
     expect(err.step).toBe("transfer");
-    expect(call).toBe(2);
+    // 1 initiate + 3 transfer attempts: transfer is retryable, so the
+    // budget is spent before the step-tagged error surfaces.
+    expect(call).toBe(4);
   });
 
   it("lets an AbortError through untouched (navigation, not a CraftCloud failure)", async () => {

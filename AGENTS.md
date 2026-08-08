@@ -212,6 +212,24 @@ Never call the DB cart a "CraftCloud cart." They are distinct: the DB cart is a 
 - **Body** — system font stack (`-apple-system, SF Pro, …`), set in `app/globals.css` via `--font-sans`. No webfont download.
 - **Hero display** — local OTFs in `public/`: `PPFuji-Bold.otf` as `--font-display` and `PPPlayground-Light.otf` as `--font-script`. Loaded via `next/font/local` in `app/layout.tsx`. Applied via inline `fontFamily: "var(--font-display)…"` on the home hero `<h1>` ("Materialize" display + "Anything" script) and the nav brand link. The hero heading is real selectable text, not an SVG — it must stay an `<h1>` so the home page (the URL every backlink points at) ships a crawlable heading.
 
+## Database migrations
+
+`lib/db/migrations/` + `meta/_journal.json`, applied by the neon-http migrator (`npm run db:migrate`, which `npm run build` runs first).
+
+**Migrations are hand-written and idempotent** — the 0039+ convention. Each statement must be safe to re-apply (`IF NOT EXISTS`, `DROP CONSTRAINT IF EXISTS` before `ADD CONSTRAINT`), because the neon-http migrator runs them over HTTP with **no wrapping transaction**: a file that fails halfway leaves the earlier statements applied. Write the `.sql`, then append an entry to `meta/_journal.json` (`idx`, `tag`, and a `when` past the previous one).
+
+`npm run db:generate` (`drizzle-kit generate`) is only a **scaffold**: read its output, don't ship it unread. The generated SQL is not idempotent, and it silently omits data backfills. It also can't run against a DB, so it never sees what's actually applied — it diffs your schema against `meta/<last>_snapshot.json` alone. If that snapshot drifts from reality, the diff is nonsense: in Aug 2026 the snapshots had stopped at 0038 while the journal was at 0057, and `generate` emitted ~20 migrations of already-applied DDL, including `CREATE TABLE` for existing tables. Repaired by keeping the snapshot generate produces and discarding its SQL. **If you add a migration by hand, refresh the snapshot too** or the drift returns:
+
+```
+npx drizzle-kit generate --name snapshot_refresh   # writes bogus SQL + a CORRECT snapshot
+rm lib/db/migrations/<n>_snapshot_refresh.sql      # discard the SQL
+git checkout lib/db/migrations/meta/_journal.json  # discard its journal entry
+mv lib/db/migrations/meta/<n>_snapshot.json \
+   lib/db/migrations/meta/<your-migration-idx>_snapshot.json
+```
+
+Verify with a second `npx drizzle-kit generate` — a healthy tree reports "No schema changes, nothing to migrate".
+
 ## Testing
 
 - `vitest` with the setup at `vitest.setup.ts` that pre-mocks `@clerk/nextjs/server`, `next/cache`, `next/navigation`, and `server-only`. New tests don't need to re-mock these.

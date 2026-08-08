@@ -68,9 +68,34 @@ export class CraftCloudUploadError extends Error {
   }
 }
 
+/** Mirrors client.ts's apiRequest: transient statuses worth retrying. */
+const TRANSIENT_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+const RETRY_ATTEMPTS = 3;
+const RETRY_BASE_MS = 200;
+
+/**
+ * Which legs may be re-sent after a transient failure.
+ *
+ *   initiate — safe. A duplicate only strands an unused uploadId on
+ *              CraftCloud's side; nothing of ours references it yet.
+ *   transfer — safe. A presigned S3 PUT of the same bytes to the same
+ *              key is idempotent by construction.
+ *   confirm  — NOT retried. This chain is reverse-engineered from
+ *              CraftCloud's frontend, and we have no evidence that
+ *              confirming one uploadId twice is idempotent. Assuming
+ *              it is could mint duplicate models; a failed confirm
+ *              surfaces to the user, who can retry deliberately.
+ */
+const RETRYABLE_STEPS: ReadonlySet<UploadStep> = new Set(["initiate", "transfer"]);
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * `fetch` for one leg of the chain, with network rejections converted
- * into a step-tagged CraftCloudUploadError.
+ * into a step-tagged CraftCloudUploadError, and transient failures
+ * retried with exponential backoff on the legs where that is safe.
  *
  * A browser CORS refusal surfaces as a bare `TypeError` with no
  * response, and the new upload endpoints answer with
@@ -88,13 +113,38 @@ async function fetchLeg(
   input: string,
   init?: RequestInit
 ): Promise<Response> {
-  try {
-    return await fetch(input, init);
-  } catch (cause) {
-    if ((cause as { name?: string })?.name === "AbortError") throw cause;
-    const detail = cause instanceof Error ? cause.message : String(cause);
-    throw new CraftCloudUploadError(step, NETWORK_FAILURE_STATUS, detail);
+  const attempts = RETRYABLE_STEPS.has(step) ? RETRY_ATTEMPTS : 1;
+  let lastError: CraftCloudUploadError | undefined;
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const res = await fetch(input, init);
+      if (res.ok || !TRANSIENT_STATUSES.has(res.status)) return res;
+      // Transient status on a retryable leg: fall through to backoff.
+      // The body is consumed here so the caller isn't handed a used
+      // Response if this turns out to be the final attempt.
+      lastError = new CraftCloudUploadError(
+        step,
+        res.status,
+        await res.text().catch(() => "")
+      );
+    } catch (cause) {
+      if ((cause as { name?: string })?.name === "AbortError") throw cause;
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      lastError = new CraftCloudUploadError(
+        step,
+        NETWORK_FAILURE_STATUS,
+        detail
+      );
+    }
+
+    if (attempt < attempts - 1) {
+      // 200ms, 800ms — same shape as client.ts's apiRequest.
+      await sleep(RETRY_BASE_MS * Math.pow(4, attempt));
+    }
   }
+
+  throw lastError!;
 }
 
 export interface UploadedModel {
@@ -209,9 +259,20 @@ export async function uploadModelToCraftCloud(
   }
 
   const model = models[0];
+  // A confirm payload without a modelId is a contract change, not a
+  // usable model. Coercing it to "" would send an empty id into the
+  // quote request and fail somewhere far less legible.
+  if (typeof model.modelId !== "string" || model.modelId.length === 0) {
+    throw new CraftCloudUploadError(
+      "confirm",
+      confirmRes.status,
+      `confirm returned no modelId: ${JSON.stringify(model).slice(0, 200)}`
+    );
+  }
+
   const dimensions = model.dimensions as UploadedModel["dimensions"];
   return {
-    modelId: String(model.modelId ?? ""),
+    modelId: model.modelId,
     dimensions: dimensions ?? null,
     volume: typeof model.volume === "number" ? model.volume : null,
     surfaceArea: typeof model.area === "number" ? model.area : null,
