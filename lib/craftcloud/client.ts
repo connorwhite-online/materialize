@@ -4,7 +4,9 @@ import "server-only";
  * Thin wrapper over CraftCloud's v5 API. Exports the functions we
  * actually use from server actions / routes:
  *
- *   uploadModel / getModel            — /v5/model
+ *   uploadModel                       — initiate/PUT/confirm chain
+ *                                       (see model-upload.ts; /v5/model
+ *                                       was removed by CraftCloud)
  *   createPriceRequest / getPrice     — /v5/price  (progressive)
  *   createCart                        — /v5/cart
  *   createOrder / getOrderStatus      — /v5/order
@@ -35,6 +37,7 @@ import type {
   StripeCheckoutResponse,
   FileUnit,
 } from "./types";
+import { uploadModelToCraftCloud } from "./model-upload";
 
 const BASE_URL = process.env.CRAFTCLOUD_API_BASE_URL || "https://api.craftcloud3d.com";
 const USE_MOCK = process.env.CRAFTCLOUD_USE_MOCK !== "false";
@@ -162,26 +165,36 @@ async function realUploadModel(
   filename: string,
   unit: FileUnit = "mm"
 ): Promise<CraftCloudModel> {
-  const formData = new FormData();
-  formData.append("file", new Blob([fileBuffer.buffer as ArrayBuffer]), filename);
-  formData.append("unit", unit);
-
-  const res = await fetch(`${BASE_URL}/v5/model`, {
-    method: "POST",
-    body: formData,
-  });
-
-  if (!res.ok) {
-    throw new Error(`Upload failed: ${res.status}`);
-  }
-
-  const models = await res.json();
-  if (!Array.isArray(models) || models.length === 0) {
-    throw new Error("CraftCloud returned no models after upload");
-  }
-  return models[0];
+  // Runs the same initiate → S3 PUT → confirm chain as the browser
+  // path; see model-upload.ts for why /v5/model no longer exists.
+  const model = await uploadModelToCraftCloud(fileBuffer, filename, unit);
+  return {
+    id: model.modelId,
+    filename,
+    fileUnit: unit,
+    geometry: model.dimensions
+      ? {
+          dimensions: model.dimensions,
+          volume: model.volume ?? 0,
+          surfaceArea: model.surfaceArea ?? 0,
+          // The confirm response carries no triangle count — the old
+          // /v5/model payload did. Nothing branches on it today; it is
+          // only persisted into fileAssets.geometryData.
+          triangleCount: 0,
+        }
+      : null,
+    status: model.isParsing ? "parsing" : "ready",
+  };
 }
 
+/**
+ * DEAD as of Aug 2026 — `/v5/model/{modelId}` was removed alongside
+ * `POST /v5/model` and there is no documented replacement for
+ * fetching a model by id. Left in place because it has no production
+ * callers (tests only); any live call will 404. If a caller ever
+ * needs this again, the `isParsing` flag on the upload confirm
+ * response is the nearest equivalent signal.
+ */
 async function realGetModel(modelId: string): Promise<CraftCloudModel & { parsing: boolean }> {
   const path = `/v5/model/${modelId}`;
   const res = await fetch(`${BASE_URL}${path}`);
