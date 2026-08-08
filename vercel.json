@@ -23,6 +23,10 @@
     {
       "path": "/api/cron/cleanup-studio-artifacts",
       "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/cron/craftcloud-upload-canary",
+      "schedule": "17 * * * *"
     }
   ]
 }
