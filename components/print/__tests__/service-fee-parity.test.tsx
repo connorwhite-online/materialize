@@ -3,7 +3,7 @@
 /**
  * MTR-134: price-display.tsx, cart-panel.tsx, and cart-slot-stack.tsx
  * used to hardcode a local `SERVICE_FEE_RATE = 0.03` and compute
- * `base * 0.03` directly, ignoring the two_step $0.50 minimum clamp
+ * `base * 0.03` directly, ignoring the two_step floor/cap clamp
  * that lib/fees.ts's calcServiceFee applies (and that the server
  * actually charges). These tests render each component at a
  * sub-$16.67 pre-shipping base — the exact band where a flat 3%
@@ -18,8 +18,8 @@ import { calcServiceFee } from "@/lib/fees";
 
 // Sub-$16.67 base used by every case below: 1000 cents ($10.00) of
 // material. calcServiceFee(1000, "single") = 30 (flat 3%);
-// calcServiceFee(1000, "two_step") = 50 (clamped — flat 3% would
-// have been 30, which is what the old hardcoded math produced).
+// calcServiceFee(1000, "two_step") = 99 (floor-clamped — flat 3%
+// would have been 30, which is what the old hardcoded math produced).
 const BASE_CENTS = 1000;
 
 describe("PriceDisplay — service fee matches calcServiceFee (MTR-134)", () => {

@@ -105,10 +105,10 @@ export function PriceDisplay({
   // Service fee is 3% of material + production fee, NOT shipping —
   // freight shouldn't inflate our platform cut. Shipping sits in
   // its own line below and flows into total. calcServiceFee expects
-  // integer cents and applies the two_step $0.50 minimum clamp the
-  // server actually charges — single-sourced from lib/fees.ts rather
-  // than a locally hardcoded rate so this display can't drift from
-  // what Stripe authorizes.
+  // integer cents and applies the two_step floor/cap the server
+  // actually charges — single-sourced from lib/fees.ts rather than a
+  // locally hardcoded rate so this display can't drift from what
+  // Stripe authorizes.
   const preShipping = materialCost + minimumFee;
   const serviceFee =
     calcServiceFee(Math.round(preShipping * 100), checkoutModel) / 100;
@@ -235,9 +235,9 @@ export function PriceDisplay({
 
         {checkoutModel === "two_step" && (
           <p className="mt-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-            You&apos;ll see two charges: a hold for the 3% service fee (only
-            charged once your order is placed) and CraftCloud&apos;s charge for
-            production + shipping.
+            You&apos;ll see two charges: a hold for the Materialize service
+            fee shown above (only charged once your order is placed) and
+            CraftCloud&apos;s charge for production + shipping.
           </p>
         )}
 

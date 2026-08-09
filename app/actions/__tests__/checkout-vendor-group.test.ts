@@ -423,7 +423,7 @@ describe("checkoutVendorGroup", () => {
     });
   });
 
-  it("getCheckoutModel() === 'two_step' stamps the order two_step and clamps the fee to Stripe's 50-cent minimum", async () => {
+  it("getCheckoutModel() === 'two_step' stamps the order two_step and clamps the fee to the 99-cent floor", async () => {
     mockGetCheckoutModel.mockReturnValue("two_step");
     cartItemsRows = [
       makeCartItem({ materialPrice: 1, quantity: 1, shippingPrice: 0 }),
@@ -434,7 +434,7 @@ describe("checkoutVendorGroup", () => {
     const orderInsert = findInsert("printOrders");
     expect(orderInsert![1]).toMatchObject({
       checkoutModel: "two_step",
-      serviceFee: 50, // clamped — round(1 * 0.03) = 0, below the min
+      serviceFee: 99, // clamped — round(1 * 0.03) = 0, below the floor
     });
   });
 

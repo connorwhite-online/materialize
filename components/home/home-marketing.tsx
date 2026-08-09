@@ -63,7 +63,7 @@ const BENEFITS = [
   {
     icon: ImagePlus,
     title: "Fair to creators",
-    body: "A flat 3% service fee on print orders. No listing fees, no markup on your downloads.",
+    body: "A 3% service fee on print orders — 99\u00a2 minimum, never more than $5. No listing fees, no markup on your downloads.",
   },
   {
     icon: Code,
