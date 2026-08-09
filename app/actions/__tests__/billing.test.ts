@@ -44,7 +44,20 @@ vi.mock("@/lib/db", () => ({
     update: () => ({
       set: (s: Record<string, unknown>) => {
         updateSetMock(s);
-        return { where: () => Promise.resolve() };
+        return {
+          where: () => {
+            // getOrCreateStripeCustomer chains .returning() on its
+            // conditional fill-if-null write; removePaymentMethod
+            // awaits the bare where() — support both shapes.
+            const promise: Promise<void> & {
+              returning: () => Array<{ stripeCustomerId: string }>;
+            } = Promise.resolve() as Promise<void> & {
+              returning: () => Array<{ stripeCustomerId: string }>;
+            };
+            promise.returning = () => [{ stripeCustomerId: "cus_new" }];
+            return promise;
+          },
+        };
       },
     }),
   },

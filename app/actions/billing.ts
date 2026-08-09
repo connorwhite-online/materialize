@@ -7,6 +7,7 @@ import { currentUser } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { getStripe } from "@/lib/stripe";
+import { getOrCreateStripeCustomer } from "@/lib/stripe/customers";
 import { logError } from "@/lib/logger";
 import { deriveAppUrl } from "@/lib/utils/request-url";
 
@@ -40,33 +41,15 @@ export async function createBillingSetupSession(): Promise<
   try {
     const stripe = getStripe();
 
-    const [user] = await db
-      .select({
-        stripeCustomerId: users.stripeCustomerId,
-      })
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
-
-    let customerId = user?.stripeCustomerId ?? null;
-    if (!customerId) {
-      const clerkUser = await currentUser();
-      const email = clerkUser?.primaryEmailAddress?.emailAddress;
-      const name = [clerkUser?.firstName, clerkUser?.lastName]
-        .filter(Boolean)
-        .join(" ")
-        .trim();
-      const customer = await stripe.customers.create({
-        email: email ?? undefined,
-        name: name.length > 0 ? name : undefined,
-        metadata: { materialize_user_id: userId },
-      });
-      customerId = customer.id;
-      await db
-        .update(users)
-        .set({ stripeCustomerId: customerId })
-        .where(eq(users.id, userId));
-    }
+    const clerkUser = await currentUser();
+    const name = [clerkUser?.firstName, clerkUser?.lastName]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    const customerId = await getOrCreateStripeCustomer(userId, {
+      email: clerkUser?.primaryEmailAddress?.emailAddress,
+      name: name.length > 0 ? name : undefined,
+    });
 
     const baseUrl = await deriveAppUrl();
     const successUrl = `${baseUrl}/dashboard/settings/billing?status=success&session_id={CHECKOUT_SESSION_ID}`;

@@ -32,7 +32,7 @@
 
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-import { printOrders, printOrderItems, cartItems, fileAssets, files } from "@/lib/db/schema";
+import { printOrders, printOrderItems, cartItems, fileAssets, files, users } from "@/lib/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
@@ -56,6 +56,7 @@ import { promoteStudioDraftsForAssets } from "@/lib/studio-drafts";
 import { dedupeShippingByShipId } from "@/lib/pricing/shipping";
 import type { Address, Currency } from "@/lib/craftcloud/types";
 import { calcServiceFee } from "@/lib/fees";
+import { getOrCreateStripeCustomer } from "@/lib/stripe/customers";
 
 const QUOTE_EXPIRED_ERROR =
   "This quote has expired. Please pick a material again — prices may have changed.";
@@ -835,10 +836,29 @@ async function createStripeSessionForOrder(
     quantity: 1,
   });
 
+  // Two-step: attach the user's Stripe Customer and save the card
+  // during this first fee payment (setup_future_usage). Returning
+  // buyers then get a one-tap fee authorization in completePrintOrder
+  // instead of a Checkout redirect. Same customer agent billing
+  // charges — a card split across two Stripe customers would be
+  // unusable off-session. Best-effort: if customer resolution fails
+  // we fall back to a plain email session (checkout still works, the
+  // card just isn't saved).
+  let customerId: string | null = null;
+  if (isTwoStep) {
+    try {
+      customerId = await getOrCreateStripeCustomer(order.userId, {
+        email: opts.email,
+      });
+    } catch (err) {
+      logError("createStripeSessionForOrder.customer", err);
+    }
+  }
+
   const stripe = getStripe();
   const session = await stripe.checkout.sessions.create({
     mode: "payment",
-    customer_email: opts.email,
+    ...(customerId ? { customer: customerId } : { customer_email: opts.email }),
     line_items: lineItems,
     payment_intent_data: {
       // Two-step: hold the fee, don't charge it. The reconciliation
@@ -847,6 +867,9 @@ async function createStripeSessionForOrder(
       // payment_status "unpaid" — the webhook router special-cases
       // this via metadata.checkoutModel below.
       ...(isTwoStep ? { capture_method: "manual" as const } : {}),
+      // Save the card for future one-tap fee authorizations. Checkout
+      // renders the required consent language when this is set.
+      ...(customerId ? { setup_future_usage: "off_session" as const } : {}),
       metadata: { printOrderId: order.id },
     },
     metadata: {
@@ -1054,6 +1077,28 @@ export async function completePrintOrder(params: {
         await releaseSessionClaim(params.orderId, sentinel);
         return { error: prep.error };
       }
+
+      // One-tap fee authorization for returning buyers: if a card is
+      // on file (saved during a previous fee checkout, or via billing
+      // settings), authorize the fee directly and skip the Stripe
+      // redirect — the customer goes straight to CraftCloud's payment
+      // page. Any failure (decline, 3DS challenge, missing card)
+      // falls through to the hosted Checkout session below; the
+      // session claim sentinel is still held either way.
+      const oneTap = await tryAuthorizeFeeWithSavedCard(
+        order,
+        sentinel,
+        {
+          email: params.email,
+          shipping: params.shipping,
+          billing: params.billing,
+        },
+        prep.bridgeSessionUrl
+      );
+      if (oneTap) {
+        revalidatePath("/dashboard/orders");
+        return { checkoutUrl: oneTap.redirectUrl };
+      }
     }
 
     let sessionResult: Awaited<ReturnType<typeof createStripeSessionForOrder>>;
@@ -1142,6 +1187,135 @@ async function releaseSessionClaim(orderId: string, sentinel: string) {
   } catch (err) {
     logError("completePrintOrder.releaseSessionClaim", err);
   }
+}
+
+/**
+ * Authorize the two_step service fee against the user's saved card,
+ * skipping the hosted Checkout redirect entirely.
+ *
+ * Customer-initiated (the buyer just clicked "Proceed to checkout"),
+ * so `off_session: false`: Stripe may respond requires_action for
+ * SCA cards, which we treat as "fall back to hosted Checkout" rather
+ * than attempting an on-page 3DS flow. Manual capture, mirroring the
+ * hosted fee session — the hold is captured by the reconcile cron
+ * once CraftCloud confirms production payment, per the two_step
+ * money invariant.
+ *
+ * On success this performs the SAME state advancement the webhook's
+ * handleTwoStepFeeAuthorization does for hosted sessions (status →
+ * awaiting_production_payment + feePaymentIntentId), because no
+ * checkout.session.completed event will ever fire for this order.
+ * The PI id also lands in stripeSessionId via the sentinel swap —
+ * consistent with the agent auto-approve path, and classifyPaymentRef
+ * already handles `pi_…` values there.
+ *
+ * Returns null on ANY failure so the caller falls through to the
+ * hosted session. The claim sentinel is left in place for that path.
+ */
+async function tryAuthorizeFeeWithSavedCard(
+  order: typeof printOrders.$inferSelect,
+  sentinel: string,
+  contact: {
+    email: string;
+    shipping: Address;
+    billing: Address & { isCompany: boolean; vatId?: string };
+  },
+  bridgeSessionUrl: string
+): Promise<{ redirectUrl: string } | null> {
+  const [billingRow] = await db
+    .select({
+      stripeCustomerId: users.stripeCustomerId,
+      defaultPaymentMethod: users.defaultPaymentMethod,
+    })
+    .from(users)
+    .where(eq(users.id, order.userId))
+    .limit(1);
+
+  if (!billingRow?.stripeCustomerId || !billingRow.defaultPaymentMethod) {
+    return null;
+  }
+
+  const stripe = getStripe();
+  let intent: Awaited<ReturnType<typeof stripe.paymentIntents.create>>;
+  try {
+    intent = await stripe.paymentIntents.create(
+      {
+        amount: order.serviceFee,
+        currency: "usd",
+        customer: billingRow.stripeCustomerId,
+        payment_method: billingRow.defaultPaymentMethod,
+        confirm: true,
+        off_session: false,
+        capture_method: "manual",
+        // No return_url + no redirect-based methods: a saved card
+        // either authorizes synchronously or we fall back to hosted
+        // Checkout, where redirects are Stripe's problem.
+        automatic_payment_methods: {
+          enabled: true,
+          allow_redirects: "never",
+        },
+        metadata: {
+          printOrderId: order.id,
+          type: "print_order",
+          checkoutModel: "two_step",
+          source: "saved_card_fee_auth",
+        },
+      },
+      // Retries of completePrintOrder for the same order reuse the
+      // same PI instead of stacking multiple holds on the card.
+      { idempotencyKey: `fee-auth:${order.id}` }
+    );
+  } catch (err) {
+    // Declined / requires 3DS / detached card — all legitimate
+    // fall-back-to-Checkout cases, but log so a systemic failure
+    // (e.g. every saved card suddenly declining) is visible.
+    logError("completePrintOrder.savedCardFeeAuth", err);
+    return null;
+  }
+
+  // Manual-capture success is requires_capture — the hold exists.
+  // Anything else (requires_action, processing, …) → hosted fallback.
+  if (intent.status !== "requires_capture") {
+    return null;
+  }
+
+  // Same advancement the webhook performs for hosted fee sessions.
+  // Conditional on cart_created so a duplicate call can't regress
+  // an order that already moved on.
+  const advanced = await db
+    .update(printOrders)
+    .set({
+      status: "awaiting_production_payment",
+      feePaymentIntentId: intent.id,
+      feeAuthorizedAt: new Date(),
+      stripeSessionId: intent.id,
+      shippingAddress: {
+        email: contact.email,
+        shipping: contact.shipping,
+        billing: contact.billing,
+      },
+    })
+    .where(
+      and(
+        eq(printOrders.id, order.id),
+        eq(printOrders.status, "cart_created"),
+        eq(printOrders.stripeSessionId, sentinel)
+      )
+    )
+    .returning({ id: printOrders.id });
+
+  if (advanced.length === 0) {
+    // Lost the sentinel or the status moved — cancel our hold so it
+    // can't sit uncaptured on the card, and let the caller fall back.
+    try {
+      await stripe.paymentIntents.cancel(intent.id);
+    } catch (err) {
+      logError("completePrintOrder.savedCardFeeAuth.cancel", err);
+    }
+    return null;
+  }
+
+  return { redirectUrl: bridgeSessionUrl };
 }
 
 /**

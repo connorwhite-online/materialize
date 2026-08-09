@@ -1,9 +1,10 @@
 import "server-only";
 import { db } from "@/lib/db";
-import { printOrders, printOrderItems, cartItems } from "@/lib/db/schema";
+import { printOrders, printOrderItems, cartItems, users } from "@/lib/db/schema";
 import { and, eq, isNull, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { createOrder } from "@/lib/craftcloud/client";
+import { getStripe } from "@/lib/stripe";
 import { logError } from "@/lib/logger";
 import { notifyPrintOrderPlaced } from "@/lib/notifications/print-order";
 
@@ -309,7 +310,18 @@ async function handleTwoStepFeeAuthorization(
         eq(printOrders.status, "cart_created")
       )
     )
-    .returning({ id: printOrders.id });
+    .returning({ id: printOrders.id, userId: printOrders.userId });
+
+  // Card-on-file: the fee session was created with the user's Stripe
+  // Customer and `setup_future_usage: "off_session"`, so the card the
+  // user just entered is now attached to that customer. Remember it so
+  // the NEXT two-step checkout can authorize the fee with one tap
+  // instead of a full Checkout redirect (tryAuthorizeFeeWithSavedCard
+  // in app/actions/print.ts). Best-effort — a failure here loses the
+  // one-tap upgrade, never the order.
+  if (updated.length > 0) {
+    await persistSavedFeeCard(updated[0].userId, paymentIntentId);
+  }
 
   // MTR-230: zero rows is ambiguous — a benign duplicate Stripe
   // delivery (the row already advanced past cart_created) or a row
@@ -332,6 +344,74 @@ async function handleTwoStepFeeAuthorization(
         )
       );
     }
+  }
+}
+
+/**
+ * Persist the card behind a completed two-step fee authorization as
+ * the user's saved payment method.
+ *
+ * Fill-if-null on BOTH columns, on purpose:
+ *   - `users.defaultPaymentMethod` is also written by the explicit
+ *     billing-setup flow (dashboard "save a card"). A card the user
+ *     deliberately saved there must not be silently replaced by
+ *     whatever card they happened to use at a print checkout.
+ *   - `users.stripeCustomerId` is normally already set (the session's
+ *     customer came from getOrCreateStripeCustomer), so this is just
+ *     healing for older rows.
+ *
+ * Skips entirely when the PI carries no customer (the
+ * customer_email fallback path in createStripeSessionForOrder — no
+ * customer means Stripe attached nothing, there is no card to save)
+ * or when the PI's customer differs from the user's stored one (a
+ * payment method pointer is only chargeable against the customer it
+ * is attached to; persisting a mismatched pair would make the
+ * one-tap path fail on every future order).
+ *
+ * Best-effort: called after the order row has already advanced, and
+ * a failure here must not make the webhook 500 — Stripe would retry
+ * a delivery whose real work is done.
+ */
+async function persistSavedFeeCard(
+  userId: string,
+  paymentIntentId: string
+): Promise<void> {
+  try {
+    const stripe = getStripe();
+    const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+    const customerId =
+      typeof pi.customer === "string" ? pi.customer : pi.customer?.id;
+    const paymentMethodId =
+      typeof pi.payment_method === "string"
+        ? pi.payment_method
+        : pi.payment_method?.id;
+    if (!customerId || !paymentMethodId) return;
+
+    const [user] = await db
+      .select({
+        stripeCustomerId: users.stripeCustomerId,
+        defaultPaymentMethod: users.defaultPaymentMethod,
+      })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (!user) return;
+    if (user.stripeCustomerId && user.stripeCustomerId !== customerId) {
+      return;
+    }
+
+    const set: {
+      stripeCustomerId?: string;
+      defaultPaymentMethod?: string;
+    } = {};
+    if (!user.stripeCustomerId) set.stripeCustomerId = customerId;
+    if (!user.defaultPaymentMethod) set.defaultPaymentMethod = paymentMethodId;
+    if (Object.keys(set).length === 0) return;
+
+    await db.update(users).set(set).where(eq(users.id, userId));
+  } catch (err) {
+    logError("handlePrintOrderPayment.persistSavedFeeCard", err);
   }
 }
 
