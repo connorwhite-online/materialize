@@ -7,32 +7,52 @@
  *
  * All amounts are in integer cents.
  *
- * ## Two-step checkout minimum
+ * ## Two-step fee floor and cap (Aug 2026 pricing decision)
  * Under `checkoutModel = "two_step"` our Stripe session covers ONLY
- * the service fee — there are no other line items to pad the total.
- * Stripe requires a minimum charge of $0.50 (50 cents). We clamp the
- * two-step fee to that minimum so cheap single-part prints don't cause
- * `checkout.sessions.create` to throw.
+ * the service fee, so the fee's economics stand alone:
  *
- * Single-checkout sessions carry the full production + shipping line
- * items alongside the fee, so the session total is always well above
- * $0.50 regardless of the fee amount — no clamp needed there.
+ *  - FLOOR ($0.99): Stripe takes 2.9% + $0.30 per charge, so an
+ *    unclamped 3% fee nets negative on small orders (a 30¢ fee costs
+ *    31¢ to collect). 99¢ nets ~66¢ and stays invisible next to any
+ *    physical print's price. It also satisfies Stripe's hard 50¢
+ *    minimum charge, which is why the floor must NEVER go below 50.
+ *  - CAP ($5.00): two_step is the rare model where the customer sees
+ *    our fee as its own separate charge, so a large percentage fee on
+ *    a big cart invites scrutiny a bundled fee never gets. The cap
+ *    binds above a $167 pre-shipping subtotal.
  *
- * Flagged for review: the 50-cent minimum is disclosed to the user in
- * price-display.tsx (two_step path). If the real CraftCloud reseller
- * deal lands and CHECKOUT_MODEL reverts to "single", this clamp
- * becomes a no-op via the checkoutModel parameter (CON-116).
+ * These are CONSTANTS, not env vars, on purpose: this function runs in
+ * client components (price-display, cart-panel, cart-slot-stack) to
+ * render the fee AND in server actions to charge it. A server-only env
+ * override would silently diverge the displayed fee from the charged
+ * fee. Tuning the numbers is a one-line PR; a display/charge mismatch
+ * is a customer-facing bug.
+ *
+ * The clamp is two_step-ONLY. Single-model print orders and digital
+ * listing purchases (app/actions/checkout.ts — where the fee comes out
+ * of the CREATOR's payout) keep the pure 3%: applying a 99¢ floor to a
+ * $5 file sale would quietly turn 3% into 20% at the creator's
+ * expense, which is not the decision that was made.
  */
 
 export const SERVICE_FEE_RATE = 0.03;
 
 /**
+ * Two-step fee floor, cents. Must stay >= 50: Stripe rejects charges
+ * below $0.50, and the fee is the only line item on a two_step session.
+ */
+export const TWO_STEP_FEE_MIN_CENTS = 99;
+
+/** Two-step fee cap, cents. Binds above a ~$167 pre-shipping subtotal. */
+export const TWO_STEP_FEE_MAX_CENTS = 500;
+
+/**
  * Calculate the service fee in cents.
  *
  * @param preShippingCents - Pre-shipping subtotal in integer cents
- * @param checkoutModel - When "two_step", clamps the fee to Stripe's
- *   minimum charge amount (50 cents) so the fee-only session doesn't
- *   throw. Defaults to "single" (no clamp).
+ * @param checkoutModel - When "two_step", the fee is clamped to
+ *   [TWO_STEP_FEE_MIN_CENTS, TWO_STEP_FEE_MAX_CENTS] — see the header
+ *   for why. Defaults to "single" (pure 3%, no clamp).
  */
 export function calcServiceFee(
   preShippingCents: number,
@@ -40,11 +60,10 @@ export function calcServiceFee(
 ): number {
   const fee = Math.round(preShippingCents * SERVICE_FEE_RATE);
   if (checkoutModel === "two_step") {
-    // Stripe minimum charge is 50 cents. A fee-only session below this
-    // throws at session creation time. The clamp is two_step-specific
-    // because single-checkout sessions include production + shipping
-    // line items and will always exceed the minimum regardless of fee.
-    return Math.max(fee, 50);
+    return Math.min(
+      Math.max(fee, TWO_STEP_FEE_MIN_CENTS),
+      TWO_STEP_FEE_MAX_CENTS
+    );
   }
   return fee;
 }

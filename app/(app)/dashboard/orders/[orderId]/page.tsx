@@ -226,7 +226,7 @@ export default async function OrderDetailPage(props: {
           </p>
           <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
             Service fee authorized — finish paying CraftCloud for production.
-            Your card hold for the 3% service fee is only charged once your
+            Your card hold for the Materialize service fee is only charged once your
             order is confirmed.
           </p>
           <Button
