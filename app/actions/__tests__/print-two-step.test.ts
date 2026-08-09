@@ -9,6 +9,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 //     persists share it ([{id}] = the write landed).
 let selectedOrder: Record<string, unknown> | null = null;
 let claimReturns: Array<{ id: string }> = [];
+// What db.select().from(users).where().limit() returns — the saved-card
+// read in tryAuthorizeFeeWithSavedCard. Defaults to [] (no card on
+// file) so every pre-existing hosted-session test is untouched.
+let billingRows: Array<{
+  stripeCustomerId: string | null;
+  defaultPaymentMethod: string | null;
+}> = [];
+// When set, UPDATE().returning() calls consume from this queue in
+// order instead of the shared claimReturns — lets one test give the
+// session claim and the one-tap advance write different results.
+// Falls back to claimReturns once exhausted (or when unset).
+let returningQueue: Array<Array<{ id: string }>> | null = null;
 const updateSet = vi.fn();
 const updateWhere = vi.fn();
 
@@ -27,6 +39,10 @@ vi.mock("@/lib/db", () => ({
             }),
           };
         }
+        if (table?.__name === "users") {
+          // The saved-card read is the only select here chaining .limit().
+          return { where: () => ({ limit: () => billingRows }) };
+        }
         return {
           where: () => (selectedOrder ? [selectedOrder] : []),
         };
@@ -43,7 +59,12 @@ vi.mock("@/lib/db", () => ({
             } = Promise.resolve() as Promise<void> & {
               returning: () => Array<{ id: string }>;
             };
-            promise.returning = () => claimReturns;
+            promise.returning = () => {
+              if (returningQueue && returningQueue.length > 0) {
+                return returningQueue.shift()!;
+              }
+              return claimReturns;
+            };
             return promise;
           },
         };
@@ -66,6 +87,12 @@ vi.mock("@/lib/db/schema", () => ({
   cartItems: { __name: "cartItems" },
   fileAssets: { __name: "fileAssets", id: "id", fileId: "file_id" },
   files: { __name: "files", id: "id", name: "name" },
+  users: {
+    __name: "users",
+    id: "id",
+    stripeCustomerId: "stripe_customer_id",
+    defaultPaymentMethod: "default_payment_method",
+  },
 }));
 
 vi.mock("@/lib/craftcloud/catalog", () => ({
@@ -80,6 +107,8 @@ vi.mock("@/lib/craftcloud/catalog", () => ({
 const stripeCreate = vi.fn();
 const stripeRetrieve = vi.fn();
 const stripeRetrievePI = vi.fn();
+const stripeCreatePI = vi.fn();
+const stripeCancelPI = vi.fn();
 vi.mock("@/lib/stripe", () => ({
   getStripe: () => ({
     checkout: {
@@ -90,8 +119,20 @@ vi.mock("@/lib/stripe", () => ({
     },
     paymentIntents: {
       retrieve: (...args: unknown[]) => stripeRetrievePI(...args),
+      create: (...args: unknown[]) => stripeCreatePI(...args),
+      cancel: (...args: unknown[]) => stripeCancelPI(...args),
     },
   }),
+}));
+
+// createStripeSessionForOrder resolves the user's Stripe Customer for
+// two_step sessions via this helper (own unit tests in
+// lib/stripe/__tests__/customers.test.ts) — stubbed here so these
+// tests don't need customers.create/users-write scaffolding.
+const getOrCreateStripeCustomerMock = vi.fn();
+vi.mock("@/lib/stripe/customers", () => ({
+  getOrCreateStripeCustomer: (...args: unknown[]) =>
+    getOrCreateStripeCustomerMock(...args),
 }));
 
 const ccCreateOrder = vi.fn();
@@ -120,6 +161,7 @@ vi.mock("@/lib/logger", () => ({
 vi.mock("nanoid", () => ({ nanoid: () => "fixed-id" }));
 
 import { completePrintOrder, resumePrintOrder } from "../print";
+import { logError } from "@/lib/logger";
 
 const baseOrder = {
   id: "order-1",
@@ -176,13 +218,15 @@ const callArgs = {
 };
 
 type SessionCreateArgs = {
+  customer?: string;
+  customer_email?: string;
   line_items: Array<{
     price_data: {
       unit_amount: number;
       product_data: { name: string; description?: string };
     };
   }>;
-  payment_intent_data: { capture_method?: string };
+  payment_intent_data: { capture_method?: string; setup_future_usage?: string };
   metadata: Record<string, string>;
   success_url: string;
   cancel_url: string;
@@ -193,6 +237,9 @@ describe("completePrintOrder (two_step)", () => {
     vi.clearAllMocks();
     selectedOrder = { ...baseOrder };
     claimReturns = [{ id: "order-1" }];
+    billingRows = []; // default: no card on file → hosted Checkout
+    returningQueue = null;
+    getOrCreateStripeCustomerMock.mockResolvedValue("cus_test");
     ccCreateOrder.mockResolvedValue({ orderId: "cc-123", status: "ordered" });
     ccCreateStripeCheckout.mockResolvedValue({
       sessionId: "bridge-sess-1",
@@ -276,6 +323,33 @@ describe("completePrintOrder (two_step)", () => {
     );
   });
 
+  it("attaches the user's Stripe Customer and saves the card for future one-tap fees", async () => {
+    await completePrintOrder(callArgs);
+
+    expect(getOrCreateStripeCustomerMock).toHaveBeenCalledWith(
+      "test-user-id",
+      { email: baseAddress.email }
+    );
+    const args = stripeCreate.mock.calls[0][0] as SessionCreateArgs;
+    expect(args.customer).toBe("cus_test");
+    // customer and customer_email are mutually exclusive on a Stripe
+    // session — with a customer attached the email must NOT be sent.
+    expect(args.customer_email).toBeUndefined();
+    expect(args.payment_intent_data.setup_future_usage).toBe("off_session");
+  });
+
+  it("falls back to a plain email session when customer resolution fails — checkout still works, card just isn't saved", async () => {
+    getOrCreateStripeCustomerMock.mockRejectedValueOnce(new Error("db blip"));
+
+    const result = await completePrintOrder(callArgs);
+
+    expect(result).toEqual({ checkoutUrl: "https://stripe.test/fee" });
+    const args = stripeCreate.mock.calls[0][0] as SessionCreateArgs;
+    expect(args.customer).toBeUndefined();
+    expect(args.customer_email).toBe(baseAddress.email);
+    expect(args.payment_intent_data.setup_future_usage).toBeUndefined();
+  });
+
   it("reuses an existing craftCloudOrderId on retry instead of re-placing", async () => {
     selectedOrder = { ...baseOrder, craftCloudOrderId: "cc-existing" };
 
@@ -329,7 +403,13 @@ describe("completePrintOrder (two_step)", () => {
 
     expect(ccCreateOrder).not.toHaveBeenCalled();
     expect(ccCreateStripeCheckout).not.toHaveBeenCalled();
+    // Card-on-file is a two_step feature: no customer resolution, no
+    // saved-card attempt, plain email session.
+    expect(getOrCreateStripeCustomerMock).not.toHaveBeenCalled();
+    expect(stripeCreatePI).not.toHaveBeenCalled();
     const args = stripeCreate.mock.calls[0][0] as SessionCreateArgs;
+    expect(args.customer_email).toBe(baseAddress.email);
+    expect(args.payment_intent_data.setup_future_usage).toBeUndefined();
     // Print + shipping + fee lines — not fee-only.
     expect(args.line_items.length).toBeGreaterThan(1);
     expect(args.payment_intent_data.capture_method).toBeUndefined();
@@ -340,6 +420,140 @@ describe("completePrintOrder (two_step)", () => {
       checkoutModel: "single",
     });
     expect(args.success_url).toContain("payment=success&orderId=order-1");
+    expect(result).toEqual({ checkoutUrl: "https://stripe.test/fee" });
+  });
+});
+
+describe("completePrintOrder (two_step, one-tap saved card)", () => {
+  const savedCard = { stripeCustomerId: "cus_1", defaultPaymentMethod: "pm_1" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    selectedOrder = { ...baseOrder };
+    claimReturns = [{ id: "order-1" }];
+    billingRows = [savedCard];
+    returningQueue = null;
+    getOrCreateStripeCustomerMock.mockResolvedValue("cus_1");
+    ccCreateOrder.mockResolvedValue({ orderId: "cc-123", status: "ordered" });
+    ccCreateStripeCheckout.mockResolvedValue({
+      sessionId: "bridge-sess-1",
+      sessionUrl: "https://bridge.test/pay",
+    });
+    stripeCreate.mockResolvedValue({
+      id: "sess_fee",
+      url: "https://stripe.test/fee",
+    });
+    stripeCreatePI.mockResolvedValue({
+      id: "pi_onetap",
+      status: "requires_capture",
+    });
+  });
+
+  it("authorizes the fee on the saved card and returns the bridge URL — no Checkout redirect", async () => {
+    const result = await completePrintOrder(callArgs);
+
+    expect(result).toEqual({ checkoutUrl: "https://bridge.test/pay" });
+    expect(stripeCreate).not.toHaveBeenCalled();
+
+    expect(stripeCreatePI).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: 150,
+        currency: "usd",
+        customer: "cus_1",
+        payment_method: "pm_1",
+        confirm: true,
+        // Customer-initiated: the buyer just clicked "Proceed to
+        // checkout" — this is NOT an off-session merchant charge.
+        off_session: false,
+        // Hold only — the reconcile cron captures after CraftCloud
+        // confirms production payment (two_step money invariant).
+        capture_method: "manual",
+        automatic_payment_methods: {
+          enabled: true,
+          allow_redirects: "never",
+        },
+        metadata: expect.objectContaining({
+          printOrderId: "order-1",
+          type: "print_order",
+          checkoutModel: "two_step",
+          source: "saved_card_fee_auth",
+        }),
+      }),
+      { idempotencyKey: "fee-auth:order-1" }
+    );
+
+    // Same advancement the webhook performs for hosted sessions, plus
+    // the PI id lands in stripeSessionId (overloaded column — the
+    // pi_ prefix is what classifyPaymentRef keys on).
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "awaiting_production_payment",
+        feePaymentIntentId: "pi_onetap",
+        feeAuthorizedAt: expect.any(Date),
+        stripeSessionId: "pi_onetap",
+        shippingAddress: expect.objectContaining({ email: baseAddress.email }),
+      })
+    );
+  });
+
+  it("still places the CraftCloud order + bridge session before authorizing", async () => {
+    await completePrintOrder(callArgs);
+
+    expect(ccCreateOrder).toHaveBeenCalledTimes(1);
+    expect(ccCreateStripeCheckout).toHaveBeenCalledTimes(1);
+    expect(ccCreateOrder.mock.invocationCallOrder[0]).toBeLessThan(
+      stripeCreatePI.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("falls back to hosted Checkout when the saved card declines, and logs", async () => {
+    stripeCreatePI.mockRejectedValueOnce(new Error("card_declined"));
+
+    const result = await completePrintOrder(callArgs);
+
+    expect(result).toEqual({ checkoutUrl: "https://stripe.test/fee" });
+    expect(logError).toHaveBeenCalledWith(
+      "completePrintOrder.savedCardFeeAuth",
+      expect.any(Error)
+    );
+  });
+
+  it("falls back to hosted Checkout when the card needs 3DS (requires_action)", async () => {
+    stripeCreatePI.mockResolvedValueOnce({
+      id: "pi_onetap",
+      status: "requires_action",
+    });
+
+    const result = await completePrintOrder(callArgs);
+
+    expect(result).toEqual({ checkoutUrl: "https://stripe.test/fee" });
+    // An unactioned intent isn't a hold — nothing to cancel.
+    expect(stripeCancelPI).not.toHaveBeenCalled();
+  });
+
+  it("cancels the hold and falls back when the advance write loses the row", async () => {
+    // Retry-style order: CraftCloud id + bridge already persisted, so
+    // the only .returning() calls are the session claim (wins) and the
+    // one-tap advance (loses).
+    selectedOrder = {
+      ...baseOrder,
+      craftCloudOrderId: "cc-existing",
+      bridgeSessionUrl: "https://bridge.test/pay",
+    };
+    returningQueue = [[{ id: "order-1" }], []];
+
+    const result = await completePrintOrder(callArgs);
+
+    expect(stripeCancelPI).toHaveBeenCalledWith("pi_onetap");
+    expect(result).toEqual({ checkoutUrl: "https://stripe.test/fee" });
+  });
+
+  it("never attempts a PaymentIntent when no card is on file", async () => {
+    billingRows = [{ stripeCustomerId: "cus_1", defaultPaymentMethod: null }];
+
+    const result = await completePrintOrder(callArgs);
+
+    expect(stripeCreatePI).not.toHaveBeenCalled();
     expect(result).toEqual({ checkoutUrl: "https://stripe.test/fee" });
   });
 });
@@ -360,6 +574,8 @@ describe("resumePrintOrder (two_step, awaiting_production_payment)", () => {
     vi.clearAllMocks();
     selectedOrder = { ...awaitingOrder };
     claimReturns = [{ id: "order-1" }];
+    billingRows = [];
+    returningQueue = null;
   });
 
   it("returns the bridge session URL while the fee hold is still capturable", async () => {

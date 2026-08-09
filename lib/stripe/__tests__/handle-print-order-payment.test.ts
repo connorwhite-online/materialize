@@ -13,7 +13,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 //     ([] = claim failed, [{id}] = claim succeeded)
 let dbOrder: Record<string, unknown> | null = null;
 let printOrderItemRows: Array<{ fileAssetId: string; quoteId: string }> = [];
-let claimReturns: Array<{ id: string }> = [];
+// What db.select().from(users).where().limit() returns —
+// persistSavedFeeCard reads this to decide whether to remember the
+// fee card. Defaults to [] (no users row → nothing persisted), which
+// keeps every pre-existing test below unchanged.
+let userRows: Array<{
+  stripeCustomerId: string | null;
+  defaultPaymentMethod: string | null;
+}> = [];
+let claimReturns: Array<{ id: string; userId?: string }> = [];
 // When set, `.returning()` calls consume from this queue in order
 // (one entry per UPDATE...returning() call within a single
 // handlePrintOrderPayment invocation) instead of the shared
@@ -34,14 +42,20 @@ let deleteShouldThrow: Error | null = null;
 vi.mock("@/lib/db", () => ({
   db: {
     select: () => ({
-      from: (table: { __name?: string }) => ({
-        where: () =>
-          table?.__name === "printOrderItems"
-            ? printOrderItemRows
-            : dbOrder
-              ? [dbOrder]
-              : [],
-      }),
+      from: (table: { __name?: string }) => {
+        if (table?.__name === "users") {
+          // The users read is the only select here that chains .limit().
+          return { where: () => ({ limit: () => userRows }) };
+        }
+        return {
+          where: () =>
+            table?.__name === "printOrderItems"
+              ? printOrderItemRows
+              : dbOrder
+                ? [dbOrder]
+                : [],
+        };
+      },
     }),
     update: () => ({
       set: (values: unknown) => {
@@ -95,6 +109,12 @@ vi.mock("@/lib/db/schema", () => ({
     fileAssetId: "file_asset_id",
     quoteId: "quote_id",
   },
+  users: {
+    __name: "users",
+    id: "id",
+    stripeCustomerId: "stripe_customer_id",
+    defaultPaymentMethod: "default_payment_method",
+  },
 }));
 
 vi.mock("drizzle-orm", () => ({
@@ -107,6 +127,17 @@ vi.mock("drizzle-orm", () => ({
 const mockCreateOrder = vi.fn();
 vi.mock("@/lib/craftcloud/client", () => ({
   createOrder: (...args: unknown[]) => mockCreateOrder(...args),
+}));
+
+// persistSavedFeeCard retrieves the fee PI to learn which customer +
+// payment method Stripe attached the saved card to.
+const mockPIRetrieve = vi.fn();
+vi.mock("@/lib/stripe", () => ({
+  getStripe: () => ({
+    paymentIntents: {
+      retrieve: (...args: unknown[]) => mockPIRetrieve(...args),
+    },
+  }),
 }));
 
 const mockNotify = vi.fn();
@@ -154,9 +185,13 @@ describe("handlePrintOrderPayment", () => {
     vi.clearAllMocks();
     dbOrder = null;
     printOrderItemRows = [];
+    userRows = [];
     claimReturns = [];
     returningQueue = null;
     deleteShouldThrow = null;
+    // Default: PI carries no customer (the customer_email fallback
+    // session shape) so persistSavedFeeCard is a silent no-op.
+    mockPIRetrieve.mockResolvedValue({ customer: null, payment_method: null });
   });
 
   it("happy path: claim wins, places order, writes real id", async () => {
@@ -508,9 +543,11 @@ describe("handlePrintOrderPayment (two_step)", () => {
     vi.clearAllMocks();
     dbOrder = null;
     printOrderItemRows = [];
+    userRows = [];
     claimReturns = [];
     returningQueue = null;
     deleteShouldThrow = null;
+    mockPIRetrieve.mockResolvedValue({ customer: null, payment_method: null });
   });
 
   it("advances cart_created → awaiting_production_payment with PI id + timestamp", async () => {
@@ -618,6 +655,110 @@ describe("handlePrintOrderPayment (two_step)", () => {
       status: "awaiting_production_payment",
       feePaymentIntentId: "pi_fee_1",
       feeAuthorizedAt: expect.any(Date),
+    });
+  });
+
+  // Card-on-file: the fee session was minted with setup_future_usage,
+  // so after the authorization lands we remember the card for the
+  // one-tap path (tryAuthorizeFeeWithSavedCard).
+  describe("persistSavedFeeCard", () => {
+    beforeEach(() => {
+      dbOrder = { ...twoStepOrder };
+      claimReturns = [{ id: "order-2", userId: "user-9" }];
+      mockPIRetrieve.mockResolvedValue({
+        customer: "cus_9",
+        payment_method: "pm_9",
+      });
+    });
+
+    it("persists customer + payment method when both users columns are empty", async () => {
+      userRows = [{ stripeCustomerId: null, defaultPaymentMethod: null }];
+
+      await handlePrintOrderPayment("order-2", { paymentIntentId: "pi_fee_1" });
+
+      expect(mockPIRetrieve).toHaveBeenCalledWith("pi_fee_1");
+      expect(mockUpdateSet).toHaveBeenCalledWith({
+        stripeCustomerId: "cus_9",
+        defaultPaymentMethod: "pm_9",
+      });
+    });
+
+    it("handles Stripe's expanded-object shapes for customer and payment_method", async () => {
+      userRows = [{ stripeCustomerId: null, defaultPaymentMethod: null }];
+      mockPIRetrieve.mockResolvedValue({
+        customer: { id: "cus_9" },
+        payment_method: { id: "pm_9" },
+      });
+
+      await handlePrintOrderPayment("order-2", { paymentIntentId: "pi_fee_1" });
+
+      expect(mockUpdateSet).toHaveBeenCalledWith({
+        stripeCustomerId: "cus_9",
+        defaultPaymentMethod: "pm_9",
+      });
+    });
+
+    it("fills only the null column — a deliberately saved billing-setup card is never clobbered", async () => {
+      userRows = [
+        { stripeCustomerId: "cus_9", defaultPaymentMethod: "pm_existing" },
+      ];
+
+      await handlePrintOrderPayment("order-2", { paymentIntentId: "pi_fee_1" });
+
+      // Only the order-advance UPDATE fired — no users write at all.
+      expect(mockUpdateSet).toHaveBeenCalledTimes(1);
+      expect(mockUpdateSet).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "awaiting_production_payment" })
+      );
+    });
+
+    it("skips when the PI's customer differs from the user's stored one — a mismatched PM pointer would break every future one-tap", async () => {
+      userRows = [
+        { stripeCustomerId: "cus_OTHER", defaultPaymentMethod: null },
+      ];
+
+      await handlePrintOrderPayment("order-2", { paymentIntentId: "pi_fee_1" });
+
+      expect(mockUpdateSet).toHaveBeenCalledTimes(1);
+    });
+
+    it("skips when the PI carries no customer (customer_email fallback session — no card was saved)", async () => {
+      userRows = [{ stripeCustomerId: null, defaultPaymentMethod: null }];
+      mockPIRetrieve.mockResolvedValue({
+        customer: null,
+        payment_method: "pm_9",
+      });
+
+      await handlePrintOrderPayment("order-2", { paymentIntentId: "pi_fee_1" });
+
+      expect(mockUpdateSet).toHaveBeenCalledTimes(1);
+    });
+
+    it("is best-effort: a Stripe retrieve failure logs and resolves — the advanced order must not make the webhook 500", async () => {
+      userRows = [{ stripeCustomerId: null, defaultPaymentMethod: null }];
+      mockPIRetrieve.mockRejectedValue(new Error("stripe down"));
+
+      await expect(
+        handlePrintOrderPayment("order-2", { paymentIntentId: "pi_fee_1" })
+      ).resolves.toBeUndefined();
+
+      expect(logError).toHaveBeenCalledWith(
+        "handlePrintOrderPayment.persistSavedFeeCard",
+        expect.any(Error)
+      );
+      // The order still advanced.
+      expect(mockUpdateSet).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "awaiting_production_payment" })
+      );
+    });
+
+    it("does not run on a duplicate delivery whose advance UPDATE matched zero rows", async () => {
+      dbOrder = { ...twoStepOrder, status: "awaiting_production_payment" };
+      claimReturns = [];
+
+      await handlePrintOrderPayment("order-2", { paymentIntentId: "pi_fee_1" });
+
+      expect(mockPIRetrieve).not.toHaveBeenCalled();
     });
   });
 });
