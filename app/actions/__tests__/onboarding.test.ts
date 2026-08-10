@@ -50,12 +50,18 @@ vi.mock("@/lib/logger", () => ({
 // vitest.setup.ts so we also get a clerkClient export.
 let clerkUpdateImpl: (userId: string, data: unknown) => Promise<unknown> =
   async () => ({});
+// Every username value actually sent to Clerk, in order. Lets a test
+// assert we didn't spend a round trip on a value Clerk was always
+// going to reject.
+let clerkUpdateCalls: unknown[] = [];
 vi.mock("@clerk/nextjs/server", () => ({
   auth: vi.fn(async () => ({ userId: "test-user-id" })),
   clerkClient: vi.fn(async () => ({
     users: {
-      updateUser: (userId: string, data: unknown) =>
-        clerkUpdateImpl(userId, data),
+      updateUser: (userId: string, data: unknown) => {
+        clerkUpdateCalls.push(data);
+        return clerkUpdateImpl(userId, data);
+      },
     },
   })),
 }));
@@ -73,14 +79,28 @@ describe("setUsernameFromEmail", () => {
     vi.clearAllMocks();
     dbSelectWhere = () => [];
     clerkUpdateImpl = async () => ({});
+    clerkUpdateCalls = [];
   });
 
   it("allocates the email local-part on the happy path", async () => {
-    const result = await setUsernameFromEmail("ada@example.com");
-    expect(result).toEqual({ success: true, username: "ada" });
+    const result = await setUsernameFromEmail("lovelace@example.com");
+    expect(result).toEqual({ success: true, username: "lovelace" });
     expect(mockInsertValues).toHaveBeenCalledWith(
-      expect.objectContaining({ username: "ada" })
+      expect.objectContaining({ username: "lovelace" })
     );
+  });
+
+  // Regression: MIN_USERNAME_LENGTH must track Clerk's own username
+  // minimum. A 3-char prefix used to be sent to Clerk as-is and came
+  // back 422 — recoverable here (the loop retries with a suffix) but
+  // fatal in setUsername, which surfaced it as a dead-end error
+  // during the production-instance migration.
+  it("suffixes a 3-char prefix rather than sending Clerk a value it rejects", async () => {
+    const result = await setUsernameFromEmail("ada@example.com");
+    if (!("success" in result)) throw new Error("expected success");
+    expect(result.username).toMatch(/^ada-[a-z0-9_-]{4}$/);
+    // One Clerk call, not a wasted 422 followed by a retry.
+    expect(clerkUpdateCalls).toHaveLength(1);
   });
 
   it("sanitizes disallowed characters from the prefix", async () => {
@@ -92,8 +112,8 @@ describe("setUsernameFromEmail", () => {
 
   it("falls back to 'user' when the prefix is fully empty after sanitizing", async () => {
     // "." is stripped entirely (not in [a-z0-9_-]), so base === ""
-    // and the fallback "user" kicks in. 4 chars >= min-3 so the
-    // first attempt uses "user" as-is, no suffix.
+    // and the fallback "user" kicks in. At exactly 4 chars it meets
+    // MIN_USERNAME_LENGTH, so the first attempt uses it as-is.
     const result = await setUsernameFromEmail(".@x.com");
     if (!("success" in result)) throw new Error("expected success");
     expect(result.username).toBe("user");
@@ -102,7 +122,7 @@ describe("setUsernameFromEmail", () => {
   it("suffixes with a short random tag when the prefix is too short", async () => {
     const result = await setUsernameFromEmail("jo@x.com");
     if (!("success" in result)) throw new Error("expected success");
-    // "jo" is 2 chars, below the min-3, so it must get a suffix.
+    // "jo" is 2 chars, below MIN_USERNAME_LENGTH, so it needs a suffix.
     expect(result.username).toMatch(/^jo-[a-z0-9_-]{4}$/);
   });
 
