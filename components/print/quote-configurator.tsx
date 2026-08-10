@@ -15,6 +15,10 @@ import type { Currency } from "@/lib/craftcloud/types";
 import { ShippingAddressForm } from "./shipping-address-form";
 import { pollQuotes } from "./poll-quotes";
 import { runAnonCheckout } from "./run-anon-checkout";
+import {
+  FeePaymentSheet,
+  type FeeSheetPayload,
+} from "./fee-payment-sheet";
 import { reportClientError } from "@/lib/observability/report-client-error";
 import {
   createPrintOrder,
@@ -247,6 +251,9 @@ export function QuoteConfigurator({
   const [step, setStep] = useState<CheckoutStep>("configure");
   const [printOrderId, setPrintOrderId] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  // Two-step embedded fee sheet payload — set when completePrintOrder
+  // wants the fee confirmed in-page instead of via a Stripe redirect.
+  const [feeSheet, setFeeSheet] = useState<FeeSheetPayload | null>(null);
 
   // The checkout error should only reflect the most recent attempt.
   // Any change to the quote, shipping, quantity, or region makes the
@@ -988,6 +995,15 @@ export function QuoteConfigurator({
         return;
       }
 
+      if ("feeSheet" in result) {
+        // In-page fee sheet: the flow pauses for user input, so the
+        // double-fire guard must release — closing the sheet returns
+        // to the address step for another attempt.
+        setFeeSheet(result.feeSheet);
+        checkoutInFlightRef.current = false;
+        return;
+      }
+
       window.location.href = result.checkoutUrl;
       return;
     }
@@ -1041,6 +1057,12 @@ export function QuoteConfigurator({
     if ("error" in result) {
       setCheckoutError(result.error);
       setStep("address");
+      checkoutInFlightRef.current = false;
+      return;
+    }
+
+    if ("feeSheet" in result) {
+      setFeeSheet(result.feeSheet);
       checkoutInFlightRef.current = false;
       return;
     }
@@ -1137,6 +1159,15 @@ export function QuoteConfigurator({
           onBack={() => setStep("configure")}
           isSubmitting={step === "processing"}
           anonMode={isAnon}
+        />
+        <FeePaymentSheet
+          sheet={feeSheet}
+          onClose={() => {
+            // Dismissed without paying — back to the address step so
+            // resubmitting reopens the sheet (same PI via idempotency).
+            setFeeSheet(null);
+            setStep("address");
+          }}
         />
       </div>
     );

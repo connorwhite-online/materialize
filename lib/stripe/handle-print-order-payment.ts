@@ -371,8 +371,14 @@ async function handleTwoStepFeeAuthorization(
  * Best-effort: called after the order row has already advanced, and
  * a failure here must not make the webhook 500 — Stripe would retry
  * a delivery whose real work is done.
+ *
+ * Exported for the embedded fee sheet's finalize action
+ * (app/actions/print.ts), which advances the order synchronously on
+ * the happy path — when it wins the advance, the webhook backstop's
+ * conditional UPDATE loses and would skip persistence, so the winner
+ * has to do it.
  */
-async function persistSavedFeeCard(
+export async function persistSavedFeeCard(
   userId: string,
   paymentIntentId: string
 ): Promise<void> {

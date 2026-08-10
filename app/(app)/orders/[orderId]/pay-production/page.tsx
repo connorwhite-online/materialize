@@ -4,6 +4,7 @@ import { auth } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { printOrders } from "@/lib/db/schema";
+import { verifyPayProductionToken } from "@/lib/orders/pay-production-token";
 
 /**
  * Two-step checkout interstitial (CON-118). The fee Checkout's
@@ -12,11 +13,26 @@ import { printOrders } from "@/lib/db/schema";
  * customer still owes CraftCloud the production + shipping payment at
  * CraftCloud's hosted Stripe session (`bridgeSessionUrl`). This page
  * explains the split and hands them off to that session.
+ *
+ * Two ways in, because Stripe's redirect can land in a browser context
+ * with no Clerk session (iOS PWA in-app overlay — isolated cookie jar):
+ *
+ *   1. Signed link token (`?t=`, minted into the success_url) — proves
+ *      the visitor holds this order's own checkout link. Renders with
+ *      no session. The token does NOT prove payment (it's minted at
+ *      session creation), so payment-dependent branches still key off
+ *      the order STATUS, and a tokened visitor whose webhook hasn't
+ *      landed yet gets a self-refreshing waiting state — never a
+ *      redirect into a protected page they can't load.
+ *   2. Signed-in owner — the normal path (dashboard links, resume).
+ *
+ * The route is public at the middleware layer (see proxy.ts); this
+ * page IS the gate.
  */
 
 interface PageProps {
   params: Promise<{ orderId: string }>;
-  searchParams: Promise<{ fee?: string }>;
+  searchParams: Promise<{ fee?: string; t?: string }>;
 }
 
 export default async function PayProductionPage({
@@ -24,12 +40,24 @@ export default async function PayProductionPage({
   searchParams,
 }: PageProps) {
   const { orderId } = await params;
-  const { fee } = await searchParams;
+  const { fee, t } = await searchParams;
 
-  const { userId } = await auth();
-  if (!userId) {
-    const next = encodeURIComponent(`/orders/${orderId}/pay-production`);
-    redirect(`/sign-in?redirect_url=${next}`);
+  const hasLinkToken = verifyPayProductionToken(orderId, t);
+
+  if (!hasLinkToken) {
+    const { userId } = await auth();
+    if (!userId) {
+      const next = encodeURIComponent(`/orders/${orderId}/pay-production`);
+      redirect(`/sign-in?redirect_url=${next}`);
+    }
+
+    const [owned] = await db
+      .select({ userId: printOrders.userId })
+      .from(printOrders)
+      .where(eq(printOrders.id, orderId))
+      .limit(1);
+    if (!owned) notFound();
+    if (owned.userId !== userId) notFound();
   }
 
   const [order] = await db
@@ -39,13 +67,32 @@ export default async function PayProductionPage({
     .limit(1);
 
   if (!order) notFound();
-  if (order.userId !== userId) notFound();
 
   // This page only makes sense for the two-step model.
-  if (order.checkoutModel !== "two_step") redirect("/dashboard/orders");
+  if (order.checkoutModel !== "two_step") {
+    if (hasLinkToken) notFound();
+    redirect("/dashboard/orders");
+  }
 
-  // Fee not yet authorized — the carts UI owns the resume flow.
-  if (order.status === "cart_created") redirect("/dashboard/orders");
+  // Fee not yet recorded. For a signed-in visitor the carts UI owns
+  // the resume flow. For a tokened visitor this is almost always the
+  // Stripe-redirect-vs-webhook race (they JUST paid); show a waiting
+  // state that reloads itself instead of bouncing them to a protected
+  // page their session-less context can't open.
+  if (order.status === "cart_created") {
+    if (hasLinkToken) {
+      return (
+        <WaitingCard
+          title="Confirming your payment…"
+          body="Your service fee authorization is being recorded. This
+            usually takes a few seconds — this page will refresh on its
+            own."
+          reload
+        />
+      );
+    }
+    redirect("/dashboard/orders");
+  }
 
   if (order.status === "cancelled") {
     return (
@@ -72,11 +119,32 @@ export default async function PayProductionPage({
   if (order.status !== "awaiting_production_payment") {
     // ordered / in_production / shipped / … — production payment
     // already went through; nothing left to do here.
+    if (hasLinkToken) {
+      return (
+        <WaitingCard
+          title="You're all set"
+          body="Production payment is complete and your order has been
+            placed. You can follow its progress from your orders page."
+        />
+      );
+    }
     redirect(`/dashboard/orders?payment=success&orderId=${order.id}`);
   }
 
   // Defensive: awaiting payment but no bridge session to send them to.
-  if (!order.bridgeSessionUrl) redirect("/dashboard/orders");
+  if (!order.bridgeSessionUrl) {
+    if (hasLinkToken) {
+      return (
+        <WaitingCard
+          title="Almost there"
+          body="We couldn't find the production payment link for this
+            order. Open your orders page and use the Complete payment
+            button there."
+        />
+      );
+    }
+    redirect("/dashboard/orders");
+  }
 
   // totalPrice already excludes the service fee — createPrintOrder stores
   // material × qty + vendor minimum + shipping there, with serviceFee in
@@ -145,6 +213,47 @@ export default async function PayProductionPage({
         </Link>
         .
       </p>
+    </div>
+  );
+}
+
+/**
+ * Terminal/waiting states for tokened (session-less) visitors. Never
+ * links into /dashboard directly as the primary action — that's a
+ * protected route the visitor's context may not be able to open; the
+ * copy points them back at the app instead.
+ */
+function WaitingCard({
+  title,
+  body,
+  reload,
+}: {
+  title: string;
+  body: string;
+  reload?: boolean;
+}) {
+  return (
+    <div className="mx-auto max-w-xl px-4 py-12 space-y-6">
+      {reload && (
+        <script
+          // Plain reload loop — the page is a server component, so a
+          // meta-refresh-style reload keeps the waiting state simple
+          // and JS-light. Stops mattering the moment the webhook
+          // advances the order and the reload renders the real step.
+          dangerouslySetInnerHTML={{
+            __html: "setTimeout(function(){location.reload()},4000);",
+          }}
+        />
+      )}
+      <div>
+        <p className="text-xs uppercase tracking-wide text-muted-foreground">
+          Print order
+        </p>
+        <h1 className="mt-1 text-2xl font-bold">{title}</h1>
+      </div>
+      <div className="rounded-lg border border-border bg-muted/30 p-4 text-sm">
+        {body}
+      </div>
     </div>
   );
 }

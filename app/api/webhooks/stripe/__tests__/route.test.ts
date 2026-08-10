@@ -529,6 +529,98 @@ describe("POST /api/webhooks/stripe — billing_setup", () => {
   });
 });
 
+// (5) payment_intent.amount_capturable_updated — the webhook backstop
+// for two-step fee holds confirmed OUTSIDE hosted Checkout (embedded
+// fee sheet + one-tap saved-card). No checkout.session.completed ever
+// fires for those, so this event is the only server-push signal that
+// the hold exists.
+describe("POST /api/webhooks/stripe — fee hold capturable", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSignature = "sig_valid";
+    signatureValid = true;
+    nextEvent = null;
+    dedupExisting = [];
+    process.env.STRIPE_WEBHOOK_SECRET = "whsec_test";
+  });
+
+  function feeHoldEvent(metadata: Record<string, string>) {
+    return event({
+      id: "evt_fee_hold",
+      type: "payment_intent.amount_capturable_updated",
+      data: {
+        object: {
+          id: "pi_sheet_1",
+          metadata,
+        },
+      },
+    });
+  }
+
+  it("routes a two_step print-order PI to handlePrintOrderPayment with the PI id", async () => {
+    nextEvent = feeHoldEvent({
+      type: "print_order",
+      checkoutModel: "two_step",
+      printOrderId: "po_9",
+      source: "embedded_fee_sheet",
+    });
+
+    const res = await POST(makeRequest());
+
+    expect(res.status).toBe(200);
+    expect(mockHandlePrintOrderPayment).toHaveBeenCalledWith("po_9", {
+      paymentIntentId: "pi_sheet_1",
+    });
+    expect(mockDbInsert).toHaveBeenCalledWith({
+      id: "evt_fee_hold",
+      eventType: "payment_intent.amount_capturable_updated",
+    });
+  });
+
+  it("ignores capturable PIs without two_step print-order metadata (e.g. unrelated manual-capture charges)", async () => {
+    nextEvent = feeHoldEvent({ printOrderId: "po_9" });
+
+    const res = await POST(makeRequest());
+
+    expect(res.status).toBe(200);
+    expect(mockHandlePrintOrderPayment).not.toHaveBeenCalled();
+    // Not a handled shape — must NOT be recorded as processed.
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("500s so Stripe retries when the advance fails — this may be the only signal for a dead client", async () => {
+    nextEvent = feeHoldEvent({
+      type: "print_order",
+      checkoutModel: "two_step",
+      printOrderId: "po_9",
+    });
+    mockHandlePrintOrderPayment.mockRejectedValueOnce(new Error("db down"));
+
+    const res = await POST(makeRequest());
+
+    expect(res.status).toBe(500);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+    expect(mockLogError).toHaveBeenCalledWith(
+      "stripe-webhook-fee-hold",
+      expect.anything()
+    );
+  });
+
+  it("duplicate delivery no-ops via the dedup table", async () => {
+    nextEvent = feeHoldEvent({
+      type: "print_order",
+      checkoutModel: "two_step",
+      printOrderId: "po_9",
+    });
+    dedupExisting = [{ id: "evt_fee_hold" }];
+
+    const res = await POST(makeRequest());
+
+    expect(res.status).toBe(200);
+    expect(mockHandlePrintOrderPayment).not.toHaveBeenCalled();
+  });
+});
+
 // Restore env after the suite.
 afterAll(() => {
   process.env.STRIPE_WEBHOOK_SECRET = OLD_ENV;

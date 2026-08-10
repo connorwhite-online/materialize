@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Two-step checkout model coverage for completePrintOrder /
 // resumePrintOrder. Mock scaffolding mirrors
@@ -8,6 +8,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 //     session claim AND the conditional craftCloudOrderId / bridge
 //     persists share it ([{id}] = the write landed).
 let selectedOrder: Record<string, unknown> | null = null;
+// When set, printOrders SELECTs consume from this queue in order
+// instead of returning selectedOrder — lets a test give the initial
+// order fetch and a later re-read (e.g. advanceFeeAuthorizedOrder's
+// freshness check) different rows. Falls back to selectedOrder once
+// exhausted.
+let selectQueue: Array<Array<Record<string, unknown>>> | null = null;
 let claimReturns: Array<{ id: string }> = [];
 // What db.select().from(users).where().limit() returns — the saved-card
 // read in tryAuthorizeFeeWithSavedCard. Defaults to [] (no card on
@@ -44,7 +50,18 @@ vi.mock("@/lib/db", () => ({
           return { where: () => ({ limit: () => billingRows }) };
         }
         return {
-          where: () => (selectedOrder ? [selectedOrder] : []),
+          where: () => {
+            const rows =
+              selectQueue && selectQueue.length > 0
+                ? selectQueue.shift()!
+                : selectedOrder
+                  ? [selectedOrder]
+                  : [];
+            // Some call sites chain .limit(1); drizzle results are
+            // awaitable either way, so hand back an array that also
+            // answers .limit().
+            return Object.assign(rows, { limit: () => rows });
+          },
         };
       },
     }),
@@ -135,6 +152,12 @@ vi.mock("@/lib/stripe/customers", () => ({
     getOrCreateStripeCustomerMock(...args),
 }));
 
+// Real minting needs STRIPE_SECRET_KEY (absent in this suite); the
+// token's own crypto is covered in lib/orders/__tests__/.
+vi.mock("@/lib/orders/pay-production-token", () => ({
+  mintPayProductionToken: (orderId: string) => `tok-${orderId}`,
+}));
+
 const ccCreateOrder = vi.fn();
 const ccCreateStripeCheckout = vi.fn();
 vi.mock("@/lib/craftcloud/client", () => ({
@@ -160,7 +183,11 @@ vi.mock("@/lib/logger", () => ({
 
 vi.mock("nanoid", () => ({ nanoid: () => "fixed-id" }));
 
-import { completePrintOrder, resumePrintOrder } from "../print";
+import {
+  completePrintOrder,
+  finalizeFeeAuthorization,
+  resumePrintOrder,
+} from "../print";
 import { logError } from "@/lib/logger";
 
 const baseOrder = {
@@ -236,9 +263,13 @@ describe("completePrintOrder (two_step)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     selectedOrder = { ...baseOrder };
+    selectQueue = null;
     claimReturns = [{ id: "order-1" }];
     billingRows = []; // default: no card on file → hosted Checkout
     returningQueue = null;
+    // No publishable key → the embedded fee sheet is never offered,
+    // so these tests exercise the hosted-Checkout path unchanged.
+    delete process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
     getOrCreateStripeCustomerMock.mockResolvedValue("cus_test");
     ccCreateOrder.mockResolvedValue({ orderId: "cc-123", status: "ordered" });
     ccCreateStripeCheckout.mockResolvedValue({
@@ -318,8 +349,11 @@ describe("completePrintOrder (two_step)", () => {
       type: "print_order",
       checkoutModel: "two_step",
     });
+    // Session-less landing: the success URL must carry the signed
+    // link token so the page renders in cookie-isolated contexts
+    // (iOS PWA in-app browser) where the Clerk session is absent.
     expect(args.success_url).toContain(
-      "/orders/order-1/pay-production?fee=authorized"
+      "/orders/order-1/pay-production?fee=authorized&t=tok-order-1"
     );
   });
 
@@ -430,9 +464,11 @@ describe("completePrintOrder (two_step, one-tap saved card)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     selectedOrder = { ...baseOrder };
+    selectQueue = null;
     claimReturns = [{ id: "order-1" }];
     billingRows = [savedCard];
     returningQueue = null;
+    delete process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
     getOrCreateStripeCustomerMock.mockResolvedValue("cus_1");
     ccCreateOrder.mockResolvedValue({ orderId: "cc-123", status: "ordered" });
     ccCreateStripeCheckout.mockResolvedValue({
@@ -558,6 +594,336 @@ describe("completePrintOrder (two_step, one-tap saved card)", () => {
   });
 });
 
+describe("completePrintOrder (two_step, embedded fee sheet)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    selectedOrder = { ...baseOrder };
+    selectQueue = null;
+    claimReturns = [{ id: "order-1" }];
+    billingRows = []; // no saved card → one-tap skipped, sheet offered
+    returningQueue = null;
+    process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = "pk_test_sheet";
+    getOrCreateStripeCustomerMock.mockResolvedValue("cus_1");
+    ccCreateOrder.mockResolvedValue({ orderId: "cc-123", status: "ordered" });
+    ccCreateStripeCheckout.mockResolvedValue({
+      sessionId: "bridge-sess-1",
+      sessionUrl: "https://bridge.test/pay",
+    });
+    stripeCreate.mockResolvedValue({
+      id: "sess_fee",
+      url: "https://stripe.test/fee",
+    });
+    stripeCreatePI.mockResolvedValue({
+      id: "pi_sheet_1",
+      status: "requires_payment_method",
+      client_secret: "cs_secret_1",
+    });
+  });
+
+  afterEach(() => {
+    delete process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+  });
+
+  it("returns the sheet payload instead of a redirect for first-time buyers", async () => {
+    const result = await completePrintOrder(callArgs);
+
+    expect(result).toEqual({
+      feeSheet: {
+        clientSecret: "cs_secret_1",
+        orderId: "order-1",
+        amountCents: 150,
+      },
+    });
+    // No hosted session was minted — the sheet replaces the redirect.
+    expect(stripeCreate).not.toHaveBeenCalled();
+
+    expect(stripeCreatePI).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: 150,
+        currency: "usd",
+        customer: "cus_1",
+        capture_method: "manual",
+        // Card gets saved on confirm → next order is one-tap.
+        setup_future_usage: "off_session",
+        automatic_payment_methods: {
+          enabled: true,
+          allow_redirects: "never",
+        },
+        metadata: expect.objectContaining({
+          printOrderId: "order-1",
+          type: "print_order",
+          checkoutModel: "two_step",
+          source: "embedded_fee_sheet",
+        }),
+      }),
+      { idempotencyKey: "fee-sheet:order-1" }
+    );
+
+    // Sentinel swapped for the PI id + address persisted — but the
+    // order does NOT advance: it stays cart_created until the client
+    // confirms and finalize (or the webhook backstop) runs.
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stripeSessionId: "pi_sheet_1",
+        shippingAddress: expect.objectContaining({ email: baseAddress.email }),
+      })
+    );
+    const advanceWrites = updateSet.mock.calls.filter(
+      (c) =>
+        (c[0] as { status?: string }).status === "awaiting_production_payment"
+    );
+    expect(advanceWrites).toHaveLength(0);
+  });
+
+  it("still runs CraftCloud prep before offering the sheet", async () => {
+    await completePrintOrder(callArgs);
+
+    expect(ccCreateOrder).toHaveBeenCalledTimes(1);
+    expect(ccCreateStripeCheckout).toHaveBeenCalledTimes(1);
+    expect(ccCreateOrder.mock.invocationCallOrder[0]).toBeLessThan(
+      stripeCreatePI.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("falls back to hosted Checkout when the publishable key isn't deployed", async () => {
+    delete process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+
+    const result = await completePrintOrder(callArgs);
+
+    expect(stripeCreatePI).not.toHaveBeenCalled();
+    expect(result).toEqual({ checkoutUrl: "https://stripe.test/fee" });
+  });
+
+  it("falls back to hosted Checkout when PI creation fails, and logs", async () => {
+    stripeCreatePI.mockRejectedValueOnce(new Error("stripe down"));
+
+    const result = await completePrintOrder(callArgs);
+
+    expect(result).toEqual({ checkoutUrl: "https://stripe.test/fee" });
+    expect(logError).toHaveBeenCalledWith(
+      "completePrintOrder.feeSheet.createIntent",
+      expect.any(Error)
+    );
+  });
+
+  it("falls back to hosted Checkout when customer resolution fails", async () => {
+    getOrCreateStripeCustomerMock.mockRejectedValueOnce(new Error("db blip"));
+
+    const result = await completePrintOrder(callArgs);
+
+    expect(stripeCreatePI).not.toHaveBeenCalled();
+    expect(result).toEqual({ checkoutUrl: "https://stripe.test/fee" });
+  });
+
+  it("a saved card still wins: one-tap fires and the sheet is never offered", async () => {
+    billingRows = [
+      { stripeCustomerId: "cus_1", defaultPaymentMethod: "pm_1" },
+    ];
+    stripeCreatePI.mockResolvedValueOnce({
+      id: "pi_onetap",
+      status: "requires_capture",
+    });
+
+    const result = await completePrintOrder(callArgs);
+
+    expect(result).toEqual({ checkoutUrl: "https://bridge.test/pay" });
+    expect(stripeCreatePI).toHaveBeenCalledTimes(1);
+    expect(stripeCreatePI).toHaveBeenCalledWith(expect.anything(), {
+      idempotencyKey: "fee-auth:order-1",
+    });
+  });
+
+  describe("re-entry with an existing sheet PI (abandoned sheet, second tab)", () => {
+    beforeEach(() => {
+      selectedOrder = { ...baseOrder, stripeSessionId: "pi_sheet_1" };
+    });
+
+    it("reopens the sheet with the same clientSecret while the PI is confirmable", async () => {
+      stripeRetrievePI.mockResolvedValueOnce({
+        id: "pi_sheet_1",
+        status: "requires_payment_method",
+        client_secret: "cs_secret_1",
+        metadata: { source: "embedded_fee_sheet", printOrderId: "order-1" },
+      });
+
+      const result = await completePrintOrder(callArgs);
+
+      expect(result).toEqual({
+        feeSheet: {
+          clientSecret: "cs_secret_1",
+          orderId: "order-1",
+          amountCents: 150,
+        },
+      });
+      // No new PI, no new CraftCloud calls — pure reuse.
+      expect(stripeCreatePI).not.toHaveBeenCalled();
+      expect(ccCreateOrder).not.toHaveBeenCalled();
+    });
+
+    it("advances and goes straight to CraftCloud when the hold already exists (finalize died)", async () => {
+      stripeRetrievePI.mockResolvedValue({
+        id: "pi_sheet_1",
+        status: "requires_capture",
+        client_secret: "cs_secret_1",
+        metadata: { source: "embedded_fee_sheet", printOrderId: "order-1" },
+      });
+      // Initial fetch: cart_created with the PI ref; the advance's
+      // freshness re-read sees the advanced row.
+      selectQueue = [
+        [{ ...baseOrder, stripeSessionId: "pi_sheet_1" }],
+        [
+          {
+            status: "awaiting_production_payment",
+            bridgeSessionUrl: "https://bridge.test/pay",
+          },
+        ],
+      ];
+
+      const result = await completePrintOrder(callArgs);
+
+      expect(result).toEqual({ checkoutUrl: "https://bridge.test/pay" });
+      expect(updateSet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "awaiting_production_payment",
+          feePaymentIntentId: "pi_sheet_1",
+        })
+      );
+    });
+
+    it("keeps the agent-charge message for PIs that aren't sheet PIs", async () => {
+      stripeRetrievePI.mockResolvedValueOnce({
+        id: "pi_agent",
+        status: "requires_capture",
+        metadata: { printOrderId: "order-1" }, // no source
+      });
+
+      const result = await completePrintOrder(callArgs);
+
+      expect(result).toEqual({
+        error:
+          "Your order is being placed — it will appear under Orders shortly.",
+      });
+    });
+
+    it("clears a canceled sheet PI and mints a fresh checkout", async () => {
+      stripeRetrievePI.mockResolvedValueOnce({
+        id: "pi_sheet_1",
+        status: "canceled",
+        metadata: { source: "embedded_fee_sheet", printOrderId: "order-1" },
+      });
+      // A fresh sheet PI gets created after the dead ref clears.
+      const result = await completePrintOrder(callArgs);
+
+      // Ref cleared conditionally on the dead PI id.
+      expect(updateSet).toHaveBeenCalledWith({ stripeSessionId: null });
+      expect(result).toEqual({
+        feeSheet: {
+          clientSecret: "cs_secret_1",
+          orderId: "order-1",
+          amountCents: 150,
+        },
+      });
+    });
+  });
+});
+
+describe("finalizeFeeAuthorization", () => {
+  const sheetPI = {
+    id: "pi_sheet_1",
+    status: "requires_capture",
+    client_secret: "cs_secret_1",
+    metadata: { source: "embedded_fee_sheet", printOrderId: "order-1" },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    selectedOrder = { ...baseOrder, stripeSessionId: "pi_sheet_1" };
+    selectQueue = null;
+    claimReturns = [{ id: "order-1" }];
+    billingRows = [];
+    returningQueue = null;
+    stripeRetrievePI.mockResolvedValue({ ...sheetPI });
+  });
+
+  it("verifies the hold on Stripe, advances the order, and returns the CraftCloud URL", async () => {
+    selectQueue = [
+      [{ ...baseOrder, stripeSessionId: "pi_sheet_1" }],
+      [
+        {
+          status: "awaiting_production_payment",
+          bridgeSessionUrl: "https://bridge.test/pay",
+        },
+      ],
+    ];
+
+    const result = await finalizeFeeAuthorization("order-1");
+
+    expect(result).toEqual({
+      productionPaymentUrl: "https://bridge.test/pay",
+    });
+    expect(stripeRetrievePI).toHaveBeenCalledWith("pi_sheet_1");
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "awaiting_production_payment",
+        feePaymentIntentId: "pi_sheet_1",
+        feeAuthorizedAt: expect.any(Date),
+      })
+    );
+  });
+
+  it("is idempotent: an already-advanced order returns the URL without touching Stripe", async () => {
+    selectedOrder = {
+      ...baseOrder,
+      status: "awaiting_production_payment",
+      stripeSessionId: "pi_sheet_1",
+      bridgeSessionUrl: "https://bridge.test/pay",
+    };
+
+    const result = await finalizeFeeAuthorization("order-1");
+
+    expect(result).toEqual({
+      productionPaymentUrl: "https://bridge.test/pay",
+    });
+    expect(stripeRetrievePI).not.toHaveBeenCalled();
+    expect(updateSet).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the PI belongs to a different order (metadata mismatch)", async () => {
+    stripeRetrievePI.mockResolvedValue({
+      ...sheetPI,
+      metadata: { source: "embedded_fee_sheet", printOrderId: "order-OTHER" },
+    });
+
+    const result = await finalizeFeeAuthorization("order-1");
+
+    expect(result).toEqual({ error: "No payment is pending for this order" });
+    expect(updateSet).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the hold doesn't exist yet (client lied or confirm still pending)", async () => {
+    stripeRetrievePI.mockResolvedValue({
+      ...sheetPI,
+      status: "requires_payment_method",
+    });
+
+    const result = await finalizeFeeAuthorization("order-1");
+
+    expect(result).toEqual({
+      error: "Your payment hasn't completed yet. Please try again.",
+    });
+    expect(updateSet).not.toHaveBeenCalled();
+  });
+
+  it("rejects when no PaymentIntent is attached to the order", async () => {
+    selectedOrder = { ...baseOrder, stripeSessionId: null };
+
+    const result = await finalizeFeeAuthorization("order-1");
+
+    expect(result).toEqual({ error: "No payment is pending for this order" });
+    expect(stripeRetrievePI).not.toHaveBeenCalled();
+  });
+});
+
 describe("resumePrintOrder (two_step, awaiting_production_payment)", () => {
   const awaitingOrder = {
     ...baseOrder,
@@ -573,9 +939,11 @@ describe("resumePrintOrder (two_step, awaiting_production_payment)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     selectedOrder = { ...awaitingOrder };
+    selectQueue = null;
     claimReturns = [{ id: "order-1" }];
     billingRows = [];
     returningQueue = null;
+    delete process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
   });
 
   it("returns the bridge session URL while the fee hold is still capturable", async () => {

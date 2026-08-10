@@ -72,6 +72,12 @@ export interface AnonCheckoutInput {
 
 export type AnonCheckoutResult =
   | { ok: true; checkoutUrl: string }
+  // Two-step first-timer: no redirect — the caller opens the embedded
+  // fee sheet with this payload instead.
+  | {
+      ok: true;
+      feeSheet: { clientSecret: string; orderId: string; amountCents: number };
+    }
   | { ok: false; error: string };
 
 export async function runAnonCheckout(
@@ -123,6 +129,9 @@ export async function runAnonCheckout(
     if ("error" in completeResult)
       return { ok: false, error: completeResult.error };
 
+    if ("feeSheet" in completeResult) {
+      return { ok: true, feeSheet: completeResult.feeSheet };
+    }
     return { ok: true, checkoutUrl: completeResult.checkoutUrl };
   } catch (err) {
     return {

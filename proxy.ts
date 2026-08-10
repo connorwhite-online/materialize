@@ -18,6 +18,15 @@ const isPublicRoute = createRouteMatcher([
   // (and any future sub-routes), which would otherwise hit auth.protect()
   // and redirect to sign-in — revealing the route instead of 404ing.
   "/text-to-cad(.*)",
+  // Two-step checkout's post-payment landing. Public at the middleware
+  // layer because Stripe's success redirect can arrive in a browser
+  // context with no Clerk session (iOS PWA in-app overlay has an
+  // isolated cookie jar) — auth.protect() there triggers Clerk's
+  // redirect handshake, which fails inside the webview. The page does
+  // its own gate: a signed per-order token (minted into the success
+  // URL) or the normal signed-in ownership check. Other /orders/[id]/*
+  // pages (confirm, cancel) stay protected.
+  "/orders/:orderId/pay-production",
   "/u/(.*)",
   "/api/webhooks(.*)",
   "/api/craftcloud/(.*)",
