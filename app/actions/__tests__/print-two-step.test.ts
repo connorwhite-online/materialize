@@ -135,6 +135,12 @@ vi.mock("@/lib/stripe/customers", () => ({
     getOrCreateStripeCustomerMock(...args),
 }));
 
+// Real minting needs STRIPE_SECRET_KEY (absent in this suite); the
+// token's own crypto is covered in lib/orders/__tests__/.
+vi.mock("@/lib/orders/pay-production-token", () => ({
+  mintPayProductionToken: (orderId: string) => `tok-${orderId}`,
+}));
+
 const ccCreateOrder = vi.fn();
 const ccCreateStripeCheckout = vi.fn();
 vi.mock("@/lib/craftcloud/client", () => ({
@@ -318,8 +324,11 @@ describe("completePrintOrder (two_step)", () => {
       type: "print_order",
       checkoutModel: "two_step",
     });
+    // Session-less landing: the success URL must carry the signed
+    // link token so the page renders in cookie-isolated contexts
+    // (iOS PWA in-app browser) where the Clerk session is absent.
     expect(args.success_url).toContain(
-      "/orders/order-1/pay-production?fee=authorized"
+      "/orders/order-1/pay-production?fee=authorized&t=tok-order-1"
     );
   });
 

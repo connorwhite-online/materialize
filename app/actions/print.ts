@@ -57,6 +57,7 @@ import { dedupeShippingByShipId } from "@/lib/pricing/shipping";
 import type { Address, Currency } from "@/lib/craftcloud/types";
 import { calcServiceFee } from "@/lib/fees";
 import { getOrCreateStripeCustomer } from "@/lib/stripe/customers";
+import { mintPayProductionToken } from "@/lib/orders/pay-production-token";
 
 const QUOTE_EXPIRED_ERROR =
   "This quote has expired. Please pick a material again — prices may have changed.";
@@ -882,8 +883,11 @@ async function createStripeSessionForOrder(
     },
     success_url: isTwoStep
       ? // Fee authorized — next stop is CraftCloud's hosted production
-        // payment, surfaced on the pay-production page.
-        `${appUrl}/orders/${order.id}/pay-production?fee=authorized`
+        // payment, surfaced on the pay-production page. The signed
+        // token lets that page render WITHOUT a Clerk session: Stripe's
+        // redirect can land in a cookie-isolated context (iOS PWA
+        // in-app browser) where the user is effectively signed out.
+        `${appUrl}/orders/${order.id}/pay-production?fee=authorized&t=${mintPayProductionToken(order.id)}`
       : `${appUrl}/dashboard/orders?${opts.isAnonFlow ? "welcome=1&" : ""}payment=success&orderId=${order.id}`,
     cancel_url: `${appUrl}/dashboard/orders?payment=cancelled&orderId=${order.id}`,
   });
