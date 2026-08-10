@@ -83,6 +83,20 @@ export type AnonCheckoutResult =
         email?: string;
       };
     }
+  // Existing-account sign-in pivot with a saved card: the caller
+  // shows the confirmation sheet, then calls completePrintOrder
+  // directly with the payload's orderId + a feePayment choice (the
+  // order already exists — re-running this whole chain would
+  // duplicate it).
+  | {
+      ok: true;
+      savedCardConfirm: {
+        orderId: string;
+        amountCents: number;
+        brand: string;
+        last4: string | null;
+      };
+    }
   | { ok: false; error: string };
 
 export async function runAnonCheckout(
@@ -136,6 +150,9 @@ export async function runAnonCheckout(
 
     if ("feeSheet" in completeResult) {
       return { ok: true, feeSheet: completeResult.feeSheet };
+    }
+    if ("savedCardConfirm" in completeResult) {
+      return { ok: true, savedCardConfirm: completeResult.savedCardConfirm };
     }
     return { ok: true, checkoutUrl: completeResult.checkoutUrl };
   } catch (err) {
