@@ -9,11 +9,16 @@ import { z } from "zod";
 import { nanoid } from "nanoid";
 import { logError } from "@/lib/logger";
 import { validateHandle } from "@/lib/handles/validate";
+import { clerkErrorMessage } from "@/lib/clerk/error-message";
+import {
+  MAX_USERNAME_LENGTH,
+  MIN_USERNAME_LENGTH,
+} from "@/lib/handles/limits";
 
 const usernameSchema = z
   .string()
-  .min(3, "At least 3 characters")
-  .max(30, "Max 30 characters")
+  .min(MIN_USERNAME_LENGTH, `At least ${MIN_USERNAME_LENGTH} characters`)
+  .max(MAX_USERNAME_LENGTH, `Max ${MAX_USERNAME_LENGTH} characters`)
   .regex(/^[a-zA-Z0-9_-]+$/, "Letters, numbers, underscores, hyphens only");
 
 export async function setUsername(
@@ -59,7 +64,11 @@ export async function setUsername(
     return { success: true };
   } catch (error) {
     logError("setUsername", error);
-    return { error: "Failed to set username" };
+    // Clerk validation failures (422) carry a user-facing reason —
+    // surface it rather than a dead-end "Failed to set username" the
+    // user can't act on. Non-Clerk errors fall back to the generic
+    // copy so internals never leak.
+    return { error: clerkErrorMessage(error) ?? "Failed to set username" };
   }
 }
 
@@ -87,10 +96,12 @@ export async function setUsernameFromEmail(
     const clerk = await clerkClient();
 
     for (let attempt = 0; attempt < 5; attempt++) {
-      // First attempt uses the raw prefix (if long enough to pass
-      // the min-3 requirement). Subsequent attempts append a short
-      // nanoid so "jo" becomes "jo-a4f2".
-      const needsSuffix = attempt > 0 || base.length < 3;
+      // First attempt uses the raw prefix (if long enough to clear
+      // MIN_USERNAME_LENGTH). Subsequent attempts append a short
+      // nanoid so "jo" becomes "jo-a4f2". Keeping this in step with
+      // the constant matters: a too-short candidate isn't rejected
+      // locally, it burns a retry on a guaranteed Clerk 422.
+      const needsSuffix = attempt > 0 || base.length < MIN_USERNAME_LENGTH;
       const candidate = needsSuffix
         ? `${base}-${nanoid(4).toLowerCase()}`
         : base;

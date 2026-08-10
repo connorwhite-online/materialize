@@ -14,6 +14,10 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { SocialButtons } from "./social-buttons";
 import { setUsername } from "@/app/actions/onboarding";
+import {
+  MAX_USERNAME_LENGTH,
+  MIN_USERNAME_LENGTH,
+} from "@/lib/handles/limits";
 
 type Method = "email" | "phone";
 type Step = "identifier" | "code" | "username";
@@ -138,8 +142,8 @@ export function SignUpForm({
             }
             placeholder="yourname"
             required
-            minLength={3}
-            maxLength={30}
+            minLength={MIN_USERNAME_LENGTH}
+            maxLength={MAX_USERNAME_LENGTH}
             autoFocus
           />
           <p className="mt-2 text-xs text-muted-foreground">
@@ -153,7 +157,7 @@ export function SignUpForm({
           type="submit"
           size="xl"
           className="w-full"
-          disabled={loading || username.length < 3}
+          disabled={loading || username.length < MIN_USERNAME_LENGTH}
         >
           {loading ? "Finishing up..." : "Complete sign-up"}
         </Button>

@@ -7,6 +7,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { setUsername } from "@/app/actions/onboarding";
+import {
+  MAX_USERNAME_LENGTH,
+  MIN_USERNAME_LENGTH,
+} from "@/lib/handles/limits";
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -56,8 +60,8 @@ export default function OnboardingPage() {
                 }
                 placeholder="yourname"
                 required
-                minLength={3}
-                maxLength={30}
+                minLength={MIN_USERNAME_LENGTH}
+                maxLength={MAX_USERNAME_LENGTH}
                 autoFocus
               />
               <p className="mt-2 text-xs text-muted-foreground">
@@ -70,7 +74,7 @@ export default function OnboardingPage() {
             <Button
               type="submit"
               className="w-full"
-              disabled={loading || username.length < 3}
+              disabled={loading || username.length < MIN_USERNAME_LENGTH}
             >
               {loading ? "Setting up..." : "Continue to dashboard"}
             </Button>
