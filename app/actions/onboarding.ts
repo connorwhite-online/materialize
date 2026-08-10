@@ -10,24 +10,15 @@ import { nanoid } from "nanoid";
 import { logError } from "@/lib/logger";
 import { validateHandle } from "@/lib/handles/validate";
 import { clerkErrorMessage } from "@/lib/clerk/error-message";
-
-/**
- * Minimum handle length. MUST match the username minimum configured
- * on the Clerk instance (Clerk's own default is 4): Clerk is the
- * source of truth for the username attribute, so anything this schema
- * accepts but Clerk rejects becomes a 422 at `updateUser` — i.e. a
- * generic failure at the very last step of onboarding, after the user
- * has already been told their handle is available.
- *
- * To allow shorter handles, lower Clerk's minimum in the dashboard
- * FIRST (User & Authentication → Username), then this constant.
- */
-const MIN_USERNAME_LENGTH = 4;
+import {
+  MAX_USERNAME_LENGTH,
+  MIN_USERNAME_LENGTH,
+} from "@/lib/handles/limits";
 
 const usernameSchema = z
   .string()
   .min(MIN_USERNAME_LENGTH, `At least ${MIN_USERNAME_LENGTH} characters`)
-  .max(30, "Max 30 characters")
+  .max(MAX_USERNAME_LENGTH, `Max ${MAX_USERNAME_LENGTH} characters`)
   .regex(/^[a-zA-Z0-9_-]+$/, "Letters, numbers, underscores, hyphens only");
 
 export async function setUsername(
