@@ -74,7 +74,7 @@ export default function OnboardingPage() {
             <Button
               type="submit"
               className="w-full"
-              disabled={loading || username.length < 3}
+              disabled={loading || username.length < MIN_USERNAME_LENGTH}
             >
               {loading ? "Setting up..." : "Continue to dashboard"}
             </Button>

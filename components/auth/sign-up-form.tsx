@@ -157,7 +157,7 @@ export function SignUpForm({
           type="submit"
           size="xl"
           className="w-full"
-          disabled={loading || username.length < 3}
+          disabled={loading || username.length < MIN_USERNAME_LENGTH}
         >
           {loading ? "Finishing up..." : "Complete sign-up"}
         </Button>
