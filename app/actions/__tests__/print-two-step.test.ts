@@ -126,6 +126,7 @@ const stripeRetrieve = vi.fn();
 const stripeRetrievePI = vi.fn();
 const stripeCreatePI = vi.fn();
 const stripeCancelPI = vi.fn();
+const stripeUpdatePI = vi.fn();
 vi.mock("@/lib/stripe", () => ({
   getStripe: () => ({
     checkout: {
@@ -138,6 +139,7 @@ vi.mock("@/lib/stripe", () => ({
       retrieve: (...args: unknown[]) => stripeRetrievePI(...args),
       create: (...args: unknown[]) => stripeCreatePI(...args),
       cancel: (...args: unknown[]) => stripeCancelPI(...args),
+      update: (...args: unknown[]) => stripeUpdatePI(...args),
     },
   }),
 }));
@@ -657,7 +659,7 @@ describe("completePrintOrder (two_step, embedded fee sheet)", () => {
           source: "embedded_fee_sheet",
         }),
       }),
-      { idempotencyKey: "fee-sheet:order-1" }
+      { idempotencyKey: "fee-sheet:v2:order-1" }
     );
 
     // Sentinel swapped for the PI id + address persisted — but the
@@ -744,6 +746,7 @@ describe("completePrintOrder (two_step, embedded fee sheet)", () => {
         id: "pi_sheet_1",
         status: "requires_payment_method",
         client_secret: "cs_secret_1",
+        payment_method_types: ["card", "link"],
         metadata: { source: "embedded_fee_sheet", printOrderId: "order-1" },
       });
 
@@ -756,9 +759,70 @@ describe("completePrintOrder (two_step, embedded fee sheet)", () => {
           amountCents: 150,
         },
       });
-      // No new PI, no new CraftCloud calls — pure reuse.
+      // No new PI, no new CraftCloud calls, no pin rewrite — pure reuse.
       expect(stripeCreatePI).not.toHaveBeenCalled();
       expect(ccCreateOrder).not.toHaveBeenCalled();
+      expect(stripeUpdatePI).not.toHaveBeenCalled();
+    });
+
+    it("pins the method list in place when reopening a pre-pin PI", async () => {
+      stripeRetrievePI.mockResolvedValueOnce({
+        id: "pi_sheet_1",
+        status: "requires_payment_method",
+        client_secret: "cs_secret_1",
+        // Minted under automatic_payment_methods — carries every
+        // non-redirect dashboard method.
+        payment_method_types: ["card", "link", "us_bank_account"],
+        metadata: { source: "embedded_fee_sheet", printOrderId: "order-1" },
+      });
+      stripeUpdatePI.mockResolvedValueOnce({ id: "pi_sheet_1" });
+
+      const result = await completePrintOrder(callArgs);
+
+      expect(stripeUpdatePI).toHaveBeenCalledWith("pi_sheet_1", {
+        payment_method_types: ["card", "link"],
+      });
+      expect(result).toEqual({
+        feeSheet: {
+          clientSecret: "cs_secret_1",
+          orderId: "order-1",
+          amountCents: 150,
+        },
+      });
+      expect(stripeCreatePI).not.toHaveBeenCalled();
+    });
+
+    it("cancels the pre-pin PI and remints when the pin update is refused", async () => {
+      stripeRetrievePI.mockResolvedValueOnce({
+        id: "pi_sheet_1",
+        status: "requires_payment_method",
+        client_secret: "cs_secret_1",
+        payment_method_types: ["card", "link", "us_bank_account"],
+        metadata: { source: "embedded_fee_sheet", printOrderId: "order-1" },
+      });
+      stripeUpdatePI.mockRejectedValueOnce(
+        new Error("automatic_payment_methods PIs cannot pin types")
+      );
+
+      const result = await completePrintOrder(callArgs);
+
+      // Old PI canceled, ref cleared, fresh pinned PI minted.
+      expect(stripeCancelPI).toHaveBeenCalledWith("pi_sheet_1");
+      expect(updateSet).toHaveBeenCalledWith({ stripeSessionId: null });
+      expect(stripeCreatePI).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payment_method_types: ["card", "link"],
+        }),
+        { idempotencyKey: "fee-sheet:v2:order-1" }
+      );
+      expect(result).toEqual({
+        feeSheet: {
+          clientSecret: "cs_secret_1",
+          orderId: "order-1",
+          amountCents: 150,
+          email: baseAddress.email,
+        },
+      });
     });
 
     it("advances and goes straight to CraftCloud when the hold already exists (finalize died)", async () => {
