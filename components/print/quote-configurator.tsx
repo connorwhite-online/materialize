@@ -17,7 +17,9 @@ import { pollQuotes } from "./poll-quotes";
 import { runAnonCheckout } from "./run-anon-checkout";
 import {
   FeePaymentSheet,
+  SavedCardFeeSheet,
   type FeeSheetPayload,
+  type SavedCardConfirmPayload,
 } from "./fee-payment-sheet";
 import { reportClientError } from "@/lib/observability/report-client-error";
 import {
@@ -43,6 +45,38 @@ import {
 } from "@/components/ui/select";
 
 type Quote = EnrichedQuote;
+
+/** Address payload the shipping form submits — also stashed for the
+ * saved-card confirmation re-call. */
+type CheckoutAddressData = {
+  email: string;
+  shipping: {
+    firstName: string;
+    lastName: string;
+    address: string;
+    addressLine2?: string;
+    city: string;
+    zipCode: string;
+    stateCode?: string;
+    countryCode: string;
+    companyName?: string;
+    phoneNumber?: string;
+  };
+  billing: {
+    firstName: string;
+    lastName: string;
+    address: string;
+    addressLine2?: string;
+    city: string;
+    zipCode: string;
+    stateCode?: string;
+    countryCode: string;
+    companyName?: string;
+    phoneNumber?: string;
+    isCompany: boolean;
+    vatId?: string;
+  };
+};
 
 interface ShippingOption {
   shippingId: string;
@@ -254,6 +288,46 @@ export function QuoteConfigurator({
   // Two-step embedded fee sheet payload — set when completePrintOrder
   // wants the fee confirmed in-page instead of via a Stripe redirect.
   const [feeSheet, setFeeSheet] = useState<FeeSheetPayload | null>(null);
+  // Saved-card confirmation: completePrintOrder stops before any
+  // charge when a saved method exists, and the re-call (with the
+  // user's feePayment choice) needs the same address payload the
+  // form submitted — stash both together.
+  const [savedCardConfirm, setSavedCardConfirm] = useState<{
+    payload: SavedCardConfirmPayload;
+    address: CheckoutAddressData;
+  } | null>(null);
+
+  // Re-call checkout with the user's explicit fee-payment choice.
+  // Returns { error } to keep the confirm sheet open with a message;
+  // on success either navigates (saved card authorized) or swaps in
+  // the Payment Element sheet (different card / one-tap declined).
+  const resumeWithFeePayment = async (
+    feePayment: "saved_card" | "new_card"
+  ): Promise<{ error: string } | void> => {
+    if (!savedCardConfirm) return { error: "Nothing to confirm." };
+    const { payload, address } = savedCardConfirm;
+    const result = await completePrintOrder({
+      orderId: payload.orderId,
+      email: address.email,
+      shipping: address.shipping,
+      billing: address.billing,
+      isAnonFlow: checkoutStartedAnonRef.current,
+      feePayment,
+    });
+    if ("error" in result) return { error: result.error };
+    if ("feeSheet" in result) {
+      setFeeSheet(result.feeSheet);
+      setSavedCardConfirm(null);
+      return;
+    }
+    if ("checkoutUrl" in result) {
+      window.location.href = result.checkoutUrl;
+      return;
+    }
+    // savedCardConfirm again — shouldn't happen once feePayment is
+    // set; treat as retryable.
+    return { error: "Something went wrong. Please try again." };
+  };
 
   // The checkout error should only reflect the most recent attempt.
   // Any change to the quote, shipping, quantity, or region makes the
@@ -919,35 +993,7 @@ export function QuoteConfigurator({
     }
   };
 
-  const handleAddressSubmit = async (addressData: {
-    email: string;
-    shipping: {
-      firstName: string;
-      lastName: string;
-      address: string;
-      addressLine2?: string;
-      city: string;
-      zipCode: string;
-      stateCode?: string;
-      countryCode: string;
-      companyName?: string;
-      phoneNumber?: string;
-    };
-    billing: {
-      firstName: string;
-      lastName: string;
-      address: string;
-      addressLine2?: string;
-      city: string;
-      zipCode: string;
-      stateCode?: string;
-      countryCode: string;
-      companyName?: string;
-      phoneNumber?: string;
-      isCompany: boolean;
-      vatId?: string;
-    };
-  }) => {
+  const handleAddressSubmit = async (addressData: CheckoutAddressData) => {
     // Bail immediately if a previous handleAddressSubmit is still
     // in flight (double-click, mobile tap repeat). Without this
     // guard, the anon chain below would fire the entire R2 →
@@ -1000,6 +1046,18 @@ export function QuoteConfigurator({
         // double-fire guard must release — closing the sheet returns
         // to the address step for another attempt.
         setFeeSheet(result.feeSheet);
+        checkoutInFlightRef.current = false;
+        return;
+      }
+
+      if ("savedCardConfirm" in result) {
+        // Existing account with a saved card (sign-in pivot):
+        // confirm before charging. Same pause-for-input release as
+        // the fee sheet.
+        setSavedCardConfirm({
+          payload: result.savedCardConfirm,
+          address: addressData,
+        });
         checkoutInFlightRef.current = false;
         return;
       }
@@ -1063,6 +1121,15 @@ export function QuoteConfigurator({
 
     if ("feeSheet" in result) {
       setFeeSheet(result.feeSheet);
+      checkoutInFlightRef.current = false;
+      return;
+    }
+
+    if ("savedCardConfirm" in result) {
+      setSavedCardConfirm({
+        payload: result.savedCardConfirm,
+        address: addressData,
+      });
       checkoutInFlightRef.current = false;
       return;
     }
@@ -1166,6 +1233,15 @@ export function QuoteConfigurator({
             // Dismissed without paying — back to the address step so
             // resubmitting reopens the sheet (same PI via idempotency).
             setFeeSheet(null);
+            setStep("address");
+          }}
+        />
+        <SavedCardFeeSheet
+          confirm={savedCardConfirm?.payload ?? null}
+          onAuthorize={() => resumeWithFeePayment("saved_card")}
+          onUseDifferentCard={() => resumeWithFeePayment("new_card")}
+          onClose={() => {
+            setSavedCardConfirm(null);
             setStep("address");
           }}
         />

@@ -8,9 +8,43 @@ import { Alert } from "@/components/ui/alert";
 import { ShippingAddressForm } from "@/components/print/shipping-address-form";
 import {
   FeePaymentSheet,
+  SavedCardFeeSheet,
   type FeeSheetPayload,
+  type SavedCardConfirmPayload,
 } from "@/components/print/fee-payment-sheet";
 import { completePrintOrder } from "@/app/actions/print";
+
+/** Address payload the shipping form submits — also stashed for the
+ * saved-card confirmation re-call. */
+type CheckoutAddressData = {
+  email: string;
+  shipping: {
+    firstName: string;
+    lastName: string;
+    address: string;
+    addressLine2?: string;
+    city: string;
+    zipCode: string;
+    stateCode?: string;
+    countryCode: string;
+    companyName?: string;
+    phoneNumber?: string;
+  };
+  billing: {
+    firstName: string;
+    lastName: string;
+    address: string;
+    addressLine2?: string;
+    city: string;
+    zipCode: string;
+    stateCode?: string;
+    countryCode: string;
+    companyName?: string;
+    phoneNumber?: string;
+    isCompany: boolean;
+    vatId?: string;
+  };
+};
 
 export interface CheckoutItem {
   fileName: string | null;
@@ -49,41 +83,44 @@ export function CheckoutForm({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [feeSheet, setFeeSheet] = useState<FeeSheetPayload | null>(null);
+  // Saved-card confirmation — the server stops before charging when
+  // a saved method exists; the re-call needs the submitted address.
+  const [savedCardConfirm, setSavedCardConfirm] = useState<{
+    payload: SavedCardConfirmPayload;
+    address: CheckoutAddressData;
+  } | null>(null);
   // Synchronous guard — parent's `submitting` state only flips on
   // next render, so a rapid double-click could call
   // completePrintOrder twice and mint two Stripe sessions for the
   // same order.
   const submittingRef = useRef(false);
 
-  const handleSubmit = async (data: {
-    email: string;
-    shipping: {
-      firstName: string;
-      lastName: string;
-      address: string;
-      addressLine2?: string;
-      city: string;
-      zipCode: string;
-      stateCode?: string;
-      countryCode: string;
-      companyName?: string;
-      phoneNumber?: string;
-    };
-    billing: {
-      firstName: string;
-      lastName: string;
-      address: string;
-      addressLine2?: string;
-      city: string;
-      zipCode: string;
-      stateCode?: string;
-      countryCode: string;
-      companyName?: string;
-      phoneNumber?: string;
-      isCompany: boolean;
-      vatId?: string;
-    };
-  }) => {
+  const resumeWithFeePayment = async (
+    feePayment: "saved_card" | "new_card"
+  ): Promise<{ error: string } | void> => {
+    if (!savedCardConfirm) return { error: "Nothing to confirm." };
+    const { payload, address } = savedCardConfirm;
+    const result = await completePrintOrder({
+      orderId: payload.orderId,
+      email: address.email,
+      shipping: address.shipping,
+      billing: address.billing,
+      feePayment,
+    });
+    if ("error" in result) return { error: result.error };
+    if ("feeSheet" in result) {
+      setFeeSheet(result.feeSheet);
+      setSavedCardConfirm(null);
+      return;
+    }
+    if ("checkoutUrl" in result) {
+      window.location.href = result.checkoutUrl;
+      return;
+    }
+    return { error: "Something went wrong. Please try again." };
+  };
+
+  const handleSubmit = async (data: CheckoutAddressData) => {
     if (submittingRef.current) return;
     submittingRef.current = true;
     setSubmitting(true);
@@ -114,6 +151,18 @@ export function CheckoutForm({
         return;
       }
 
+      // Saved card on file — pause for explicit confirmation, same
+      // release semantics as the fee sheet.
+      if ("savedCardConfirm" in result) {
+        setSavedCardConfirm({
+          payload: result.savedCardConfirm,
+          address: data,
+        });
+        setSubmitting(false);
+        submittingRef.current = false;
+        return;
+      }
+
       // Successful redirect — leave the ref set so a stray late
       // click can't re-enter before navigation happens.
       window.location.href = result.checkoutUrl;
@@ -127,6 +176,12 @@ export function CheckoutForm({
   return (
     <div className="grid items-start gap-6 lg:grid-cols-5">
       <FeePaymentSheet sheet={feeSheet} onClose={() => setFeeSheet(null)} />
+      <SavedCardFeeSheet
+        confirm={savedCardConfirm?.payload ?? null}
+        onAuthorize={() => resumeWithFeePayment("saved_card")}
+        onUseDifferentCard={() => resumeWithFeePayment("new_card")}
+        onClose={() => setSavedCardConfirm(null)}
+      />
       <div className="lg:col-span-3">
         {error && (
           <Alert variant="destructive" className="mb-4">

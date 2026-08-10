@@ -73,6 +73,11 @@ const QUOTE_EXPIRED_ERROR =
  *    first-timers): a manual-capture PaymentIntent is waiting to be
  *    confirmed client-side via the Payment Element, after which the
  *    client calls finalizeFeeAuthorization.
+ *  - `savedCardConfirm` — the user has a saved payment method and
+ *    hasn't yet said which way to pay: show the confirmation sheet
+ *    and call back with `feePayment` set. Returned BEFORE any
+ *    CraftCloud or Stripe work happens — a saved card must never be
+ *    charged without the user explicitly confirming it this session.
  */
 export type CompletePrintOrderResult =
   | { checkoutUrl: string }
@@ -83,6 +88,16 @@ export type CompletePrintOrderResult =
         amountCents: number;
         /** Buyer email, used to prefill Link in the Payment Element. */
         email?: string;
+      };
+    }
+  | {
+      savedCardConfirm: {
+        orderId: string;
+        amountCents: number;
+        /** Card brand ("visa", "mastercard", …) or PM type ("link"). */
+        brand: string;
+        /** Last four digits; null for non-card methods (Link). */
+        last4: string | null;
       };
     }
   | { error: string };
@@ -963,6 +978,15 @@ export async function completePrintOrder(params: {
    * orders live, instead of a deep-link into a single order page.
    */
   isAnonFlow?: boolean;
+  /**
+   * How the two_step service fee should be paid. Omitted on the
+   * first call — when a saved payment method exists the action
+   * answers with `savedCardConfirm` instead of charging, and the
+   * client calls again with the user's explicit choice:
+   * "saved_card" runs the one-tap authorization, "new_card" goes
+   * straight to the embedded Payment Element sheet.
+   */
+  feePayment?: "saved_card" | "new_card";
 }): Promise<CompletePrintOrderResult> {
   try {
     const { userId } = await auth();
@@ -1066,6 +1090,25 @@ export async function completePrintOrder(params: {
       }
     }
 
+    // Two-step + saved payment method + no explicit choice yet →
+    // stop for confirmation BEFORE claiming, placing the CraftCloud
+    // order, or touching Stripe. The one-tap path only ever runs
+    // after the user answers this sheet, so a saved card can never
+    // be charged silently.
+    if (order.checkoutModel === "two_step" && !params.feePayment) {
+      const savedCard = await getSavedFeeCardSummary(order.userId);
+      if (savedCard) {
+        return {
+          savedCardConfirm: {
+            orderId: order.id,
+            amountCents: order.serviceFee,
+            brand: savedCard.brand,
+            last4: savedCard.last4,
+          },
+        };
+      }
+    }
+
     // Atomic claim: only one tab/device can mint a new session.
     // The conditional WHERE makes this race-safe across replicas.
     const sentinel = `${SESSION_CLAIM_PREFIX}${nanoid()}`;
@@ -1132,23 +1175,25 @@ export async function completePrintOrder(params: {
         return { error: prep.error };
       }
 
-      // One-tap fee authorization for returning buyers: if a card is
-      // on file (saved during a previous fee checkout, or via billing
-      // settings), authorize the fee directly and skip the Stripe
-      // redirect — the customer goes straight to CraftCloud's payment
-      // page. Any failure (decline, 3DS challenge, missing card)
-      // falls through to the hosted Checkout session below; the
-      // session claim sentinel is still held either way.
-      const oneTap = await tryAuthorizeFeeWithSavedCard(
-        order,
-        sentinel,
-        {
-          email: params.email,
-          shipping: params.shipping,
-          billing: params.billing,
-        },
-        prep.bridgeSessionUrl
-      );
+      // One-tap fee authorization — ONLY after the user explicitly
+      // confirmed their saved card on the savedCardConfirm sheet
+      // (feePayment: "saved_card"). Any failure (decline, 3DS
+      // challenge, detached card) falls through to the embedded
+      // sheet / hosted Checkout below; the session claim sentinel is
+      // still held either way.
+      const oneTap =
+        params.feePayment === "saved_card"
+          ? await tryAuthorizeFeeWithSavedCard(
+              order,
+              sentinel,
+              {
+                email: params.email,
+                shipping: params.shipping,
+                billing: params.billing,
+              },
+              prep.bridgeSessionUrl
+            )
+          : null;
       if (oneTap) {
         revalidatePath("/dashboard/orders");
         return { checkoutUrl: oneTap.redirectUrl };
@@ -1387,6 +1432,40 @@ async function tryAuthorizeFeeWithSavedCard(
   }
 
   return { redirectUrl: bridgeSessionUrl };
+}
+
+/**
+ * Describe the user's saved payment method for the pre-checkout
+ * confirmation sheet. Null when nothing is saved, or when Stripe
+ * can't describe it (detached card, API error) — the caller then
+ * skips one-tap entirely and offers the Payment Element sheet, so a
+ * lookup failure can never turn into a silent charge.
+ */
+async function getSavedFeeCardSummary(
+  userId: string
+): Promise<{ brand: string; last4: string | null } | null> {
+  const [row] = await db
+    .select({
+      stripeCustomerId: users.stripeCustomerId,
+      defaultPaymentMethod: users.defaultPaymentMethod,
+    })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!row?.stripeCustomerId || !row.defaultPaymentMethod) return null;
+
+  try {
+    const pm = await getStripe().paymentMethods.retrieve(
+      row.defaultPaymentMethod
+    );
+    if (pm.card) return { brand: pm.card.brand, last4: pm.card.last4 };
+    // Link (and any future non-card method) has no last4 — the sheet
+    // renders the method name alone.
+    return { brand: pm.type, last4: null };
+  } catch (err) {
+    logError("completePrintOrder.savedCardSummary", err);
+    return null;
+  }
 }
 
 const EMBEDDED_FEE_SHEET_SOURCE = "embedded_fee_sheet";

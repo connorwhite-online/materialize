@@ -273,3 +273,143 @@ function fmt(cents: number): string {
     currency: "USD",
   }).format(cents / 100);
 }
+
+/**
+ * Confirmation sheet for the one-tap saved-card path: shows the
+ * saved method and asks before anything is charged. The server
+ * refuses to run the one-tap authorization without feePayment:
+ * "saved_card", so this sheet is the only way a saved card gets
+ * used. "Use a different card" re-calls checkout with feePayment:
+ * "new_card" and the parent swaps in the Payment Element sheet.
+ */
+export interface SavedCardConfirmPayload {
+  orderId: string;
+  amountCents: number;
+  /** Card brand ("visa", "mastercard", …) or PM type ("link"). */
+  brand: string;
+  /** Last four digits; null for non-card methods (Link). */
+  last4: string | null;
+}
+
+interface SavedCardFeeSheetProps {
+  confirm: SavedCardConfirmPayload | null;
+  /**
+   * Authorize the fee on the saved method. On success the parent
+   * redirects (never resolves in practice) or swaps sheets; resolve
+   * with { error } to surface a message and unlock the buttons.
+   */
+  onAuthorize: () => Promise<{ error: string } | void>;
+  /** Switch to the Payment Element sheet (parent swaps payloads). */
+  onUseDifferentCard: () => Promise<{ error: string } | void>;
+  /** Called after the sheet fully dismisses without a choice. */
+  onClose: () => void;
+}
+
+export function SavedCardFeeSheet({
+  confirm,
+  onAuthorize,
+  onUseDifferentCard,
+  onClose,
+}: SavedCardFeeSheetProps) {
+  const [open, setOpen] = useState(false);
+  const [phase, setPhase] = useState<"idle" | "authorizing" | "switching">(
+    "idle"
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setOpen(Boolean(confirm));
+    setPhase("idle");
+    setError(null);
+  }, [confirm]);
+
+  const dismiss = () => {
+    if (phase !== "idle") return;
+    setOpen(false);
+    setTimeout(onClose, EXIT_ANIMATION_MS);
+  };
+
+  if (!confirm) return null;
+
+  const run = async (action: "authorize" | "switch") => {
+    if (phase !== "idle") return;
+    setError(null);
+    setPhase(action === "authorize" ? "authorizing" : "switching");
+    const result =
+      action === "authorize" ? await onAuthorize() : await onUseDifferentCard();
+    if (result && "error" in result) {
+      setError(result.error);
+      setPhase("idle");
+    }
+    // On success the parent navigates or unmounts this sheet — keep
+    // the phase locked so a stray tap can't double-fire meanwhile.
+  };
+
+  return (
+    <NativeSheet
+      open={open}
+      onClose={dismiss}
+      dismissible={phase === "idle"}
+      ariaLabel="Confirm service fee"
+    >
+      <div className="px-6 pt-1">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Service fee
+        </p>
+        <p className="mt-0.5 text-3xl font-bold tabular-nums">
+          {fmt(confirm.amountCents)}
+        </p>
+        <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+          Held now, charged only when your order is placed. Production and
+          shipping are paid to CraftCloud in the next step.
+        </p>
+
+        <div className="mt-4 flex items-center justify-between rounded-2xl border border-border/60 px-4 py-3.5">
+          <span className="text-[15px] font-medium">
+            {savedMethodLabel(confirm)}
+          </span>
+          <span className="text-xs text-muted-foreground">Saved</span>
+        </div>
+
+        <div className="mt-4 space-y-3">
+          {error && (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
+
+          <button
+            type="button"
+            onClick={() => run("authorize")}
+            disabled={phase !== "idle"}
+            className="w-full rounded-2xl bg-primary px-4 py-3.5 text-center text-[15px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            {phase === "authorizing"
+              ? "Authorizing…"
+              : `Authorize ${fmt(confirm.amountCents)}`}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => run("switch")}
+            disabled={phase !== "idle"}
+            className="w-full rounded-2xl px-4 py-2.5 text-center text-sm font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+          >
+            {phase === "switching" ? "One moment…" : "Use a different card"}
+          </button>
+        </div>
+      </div>
+    </NativeSheet>
+  );
+}
+
+function savedMethodLabel({
+  brand,
+  last4,
+}: Pick<SavedCardConfirmPayload, "brand" | "last4">): string {
+  const name =
+    brand === "link"
+      ? "Link"
+      : brand.charAt(0).toUpperCase() + brand.slice(1);
+  return last4 ? `${name} •••• ${last4}` : name;
+}

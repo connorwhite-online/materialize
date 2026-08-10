@@ -127,6 +127,7 @@ const stripeRetrievePI = vi.fn();
 const stripeCreatePI = vi.fn();
 const stripeCancelPI = vi.fn();
 const stripeUpdatePI = vi.fn();
+const stripeRetrievePM = vi.fn();
 vi.mock("@/lib/stripe", () => ({
   getStripe: () => ({
     checkout: {
@@ -140,6 +141,9 @@ vi.mock("@/lib/stripe", () => ({
       create: (...args: unknown[]) => stripeCreatePI(...args),
       cancel: (...args: unknown[]) => stripeCancelPI(...args),
       update: (...args: unknown[]) => stripeUpdatePI(...args),
+    },
+    paymentMethods: {
+      retrieve: (...args: unknown[]) => stripeRetrievePM(...args),
     },
   }),
 }));
@@ -462,6 +466,9 @@ describe("completePrintOrder (two_step)", () => {
 
 describe("completePrintOrder (two_step, one-tap saved card)", () => {
   const savedCard = { stripeCustomerId: "cus_1", defaultPaymentMethod: "pm_1" };
+  // One-tap only runs after the user answered the confirmation
+  // sheet — these tests exercise the post-confirm leg.
+  const oneTapArgs = { ...callArgs, feePayment: "saved_card" as const };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -488,7 +495,7 @@ describe("completePrintOrder (two_step, one-tap saved card)", () => {
   });
 
   it("authorizes the fee on the saved card and returns the bridge URL — no Checkout redirect", async () => {
-    const result = await completePrintOrder(callArgs);
+    const result = await completePrintOrder(oneTapArgs);
 
     expect(result).toEqual({ checkoutUrl: "https://bridge.test/pay" });
     expect(stripeCreate).not.toHaveBeenCalled();
@@ -535,7 +542,7 @@ describe("completePrintOrder (two_step, one-tap saved card)", () => {
   });
 
   it("still places the CraftCloud order + bridge session before authorizing", async () => {
-    await completePrintOrder(callArgs);
+    await completePrintOrder(oneTapArgs);
 
     expect(ccCreateOrder).toHaveBeenCalledTimes(1);
     expect(ccCreateStripeCheckout).toHaveBeenCalledTimes(1);
@@ -547,7 +554,7 @@ describe("completePrintOrder (two_step, one-tap saved card)", () => {
   it("falls back to hosted Checkout when the saved card declines, and logs", async () => {
     stripeCreatePI.mockRejectedValueOnce(new Error("card_declined"));
 
-    const result = await completePrintOrder(callArgs);
+    const result = await completePrintOrder(oneTapArgs);
 
     expect(result).toEqual({ checkoutUrl: "https://stripe.test/fee" });
     expect(logError).toHaveBeenCalledWith(
@@ -562,7 +569,7 @@ describe("completePrintOrder (two_step, one-tap saved card)", () => {
       status: "requires_action",
     });
 
-    const result = await completePrintOrder(callArgs);
+    const result = await completePrintOrder(oneTapArgs);
 
     expect(result).toEqual({ checkoutUrl: "https://stripe.test/fee" });
     // An unactioned intent isn't a hold — nothing to cancel.
@@ -580,7 +587,7 @@ describe("completePrintOrder (two_step, one-tap saved card)", () => {
     };
     returningQueue = [[{ id: "order-1" }], []];
 
-    const result = await completePrintOrder(callArgs);
+    const result = await completePrintOrder(oneTapArgs);
 
     expect(stripeCancelPI).toHaveBeenCalledWith("pi_onetap");
     expect(result).toEqual({ checkoutUrl: "https://stripe.test/fee" });
@@ -591,6 +598,71 @@ describe("completePrintOrder (two_step, one-tap saved card)", () => {
 
     const result = await completePrintOrder(callArgs);
 
+    expect(stripeCreatePI).not.toHaveBeenCalled();
+    expect(result).toEqual({ checkoutUrl: "https://stripe.test/fee" });
+  });
+
+  it("stops for confirmation before ANY charge or CraftCloud work when no feePayment is given", async () => {
+    stripeRetrievePM.mockResolvedValueOnce({
+      type: "card",
+      card: { brand: "visa", last4: "4242" },
+    });
+
+    const result = await completePrintOrder(callArgs);
+
+    expect(result).toEqual({
+      savedCardConfirm: {
+        orderId: "order-1",
+        amountCents: 150,
+        brand: "visa",
+        last4: "4242",
+      },
+    });
+    // Nothing touched: no claim, no CraftCloud order, no Stripe
+    // charge — the confirmation must be free to abandon.
+    expect(updateSet).not.toHaveBeenCalled();
+    expect(ccCreateOrder).not.toHaveBeenCalled();
+    expect(ccCreateStripeCheckout).not.toHaveBeenCalled();
+    expect(stripeCreatePI).not.toHaveBeenCalled();
+    expect(stripeCreate).not.toHaveBeenCalled();
+  });
+
+  it("describes a saved Link method without last4", async () => {
+    stripeRetrievePM.mockResolvedValueOnce({ type: "link" });
+
+    const result = await completePrintOrder(callArgs);
+
+    expect(result).toEqual({
+      savedCardConfirm: {
+        orderId: "order-1",
+        amountCents: 150,
+        brand: "link",
+        last4: null,
+      },
+    });
+  });
+
+  it("falls through WITHOUT charging when the saved method can't be described", async () => {
+    stripeRetrievePM.mockRejectedValueOnce(new Error("no such payment_method"));
+
+    const result = await completePrintOrder(callArgs);
+
+    // Summary failed → skip confirm AND skip one-tap (a lookup
+    // failure must never become a silent charge); no publishable key
+    // in this describe → hosted Checkout fallback.
+    expect(stripeCreatePI).not.toHaveBeenCalled();
+    expect(result).toEqual({ checkoutUrl: "https://stripe.test/fee" });
+  });
+
+  it("feePayment: \"new_card\" skips one-tap even with a card on file", async () => {
+    const result = await completePrintOrder({
+      ...callArgs,
+      feePayment: "new_card" as const,
+    });
+
+    // No confirmation detour, no saved-card PI — straight past
+    // one-tap to the fallback (hosted here: no publishable key).
+    expect(stripeRetrievePM).not.toHaveBeenCalled();
     expect(stripeCreatePI).not.toHaveBeenCalled();
     expect(result).toEqual({ checkoutUrl: "https://stripe.test/fee" });
   });
@@ -718,22 +790,70 @@ describe("completePrintOrder (two_step, embedded fee sheet)", () => {
     expect(result).toEqual({ checkoutUrl: "https://stripe.test/fee" });
   });
 
-  it("a saved card still wins: one-tap fires and the sheet is never offered", async () => {
+  it("a saved card stops for confirmation; confirming runs one-tap and never offers the sheet", async () => {
     billingRows = [
       { stripeCustomerId: "cus_1", defaultPaymentMethod: "pm_1" },
     ];
+    stripeRetrievePM.mockResolvedValueOnce({
+      type: "card",
+      card: { brand: "visa", last4: "4242" },
+    });
+
+    // First call (no feePayment): confirmation, no charge.
+    const first = await completePrintOrder(callArgs);
+    expect(first).toEqual({
+      savedCardConfirm: {
+        orderId: "order-1",
+        amountCents: 150,
+        brand: "visa",
+        last4: "4242",
+      },
+    });
+    expect(stripeCreatePI).not.toHaveBeenCalled();
+
+    // Confirmed re-call: one-tap fires, sheet PI never minted.
     stripeCreatePI.mockResolvedValueOnce({
       id: "pi_onetap",
       status: "requires_capture",
     });
-
-    const result = await completePrintOrder(callArgs);
+    const result = await completePrintOrder({
+      ...callArgs,
+      feePayment: "saved_card" as const,
+    });
 
     expect(result).toEqual({ checkoutUrl: "https://bridge.test/pay" });
     expect(stripeCreatePI).toHaveBeenCalledTimes(1);
     expect(stripeCreatePI).toHaveBeenCalledWith(expect.anything(), {
       idempotencyKey: "fee-auth:order-1",
     });
+  });
+
+  it("feePayment: \"new_card\" with a saved card mints the sheet, not the one-tap PI", async () => {
+    billingRows = [
+      { stripeCustomerId: "cus_1", defaultPaymentMethod: "pm_1" },
+    ];
+
+    const result = await completePrintOrder({
+      ...callArgs,
+      feePayment: "new_card" as const,
+    });
+
+    expect(result).toEqual({
+      feeSheet: {
+        clientSecret: "cs_secret_1",
+        orderId: "order-1",
+        amountCents: 150,
+        email: baseAddress.email,
+      },
+    });
+    // Exactly one PI — the embedded-sheet one, not saved_card_fee_auth.
+    expect(stripeCreatePI).toHaveBeenCalledTimes(1);
+    expect(stripeCreatePI).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ source: "embedded_fee_sheet" }),
+      }),
+      { idempotencyKey: "fee-sheet:v2:order-1" }
+    );
   });
 
   describe("re-entry with an existing sheet PI (abandoned sheet, second tab)", () => {
