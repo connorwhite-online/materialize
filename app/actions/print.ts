@@ -57,10 +57,33 @@ import { dedupeShippingByShipId } from "@/lib/pricing/shipping";
 import type { Address, Currency } from "@/lib/craftcloud/types";
 import { calcServiceFee } from "@/lib/fees";
 import { getOrCreateStripeCustomer } from "@/lib/stripe/customers";
+import { persistSavedFeeCard } from "@/lib/stripe/handle-print-order-payment";
 import { mintPayProductionToken } from "@/lib/orders/pay-production-token";
 
 const QUOTE_EXPIRED_ERROR =
   "This quote has expired. Please pick a material again — prices may have changed.";
+
+/**
+ * What completePrintOrder hands back:
+ *
+ *  - `checkoutUrl` — redirect the browser (hosted Stripe Checkout, or
+ *    straight to CraftCloud's payment page when the one-tap saved-card
+ *    authorization succeeded).
+ *  - `feeSheet` — render the in-page embedded fee sheet (two_step
+ *    first-timers): a manual-capture PaymentIntent is waiting to be
+ *    confirmed client-side via the Payment Element, after which the
+ *    client calls finalizeFeeAuthorization.
+ */
+export type CompletePrintOrderResult =
+  | { checkoutUrl: string }
+  | {
+      feeSheet: {
+        clientSecret: string;
+        orderId: string;
+        amountCents: number;
+      };
+    }
+  | { error: string };
 
 // Rounding-only tolerance: getPrice() returns dollars as a float;
 // converting to cents can introduce a fractional-cent difference
@@ -938,7 +961,7 @@ export async function completePrintOrder(params: {
    * orders live, instead of a deep-link into a single order page.
    */
   isAnonFlow?: boolean;
-}): Promise<{ checkoutUrl: string } | { error: string }> {
+}): Promise<CompletePrintOrderResult> {
   try {
     const { userId } = await auth();
     if (!userId) return { error: "Unauthorized" };
@@ -978,7 +1001,31 @@ export async function completePrintOrder(params: {
     // sessions.retrieve throw (MTR-233).
     const existingRefKind = classifyPaymentRef(order.stripeSessionId);
     if (existingRefKind === "payment_intent") {
-      return { error: AGENT_CHARGED_ORDER_ERROR };
+      // Could be an abandoned embedded fee sheet (reopen it) or an
+      // agent off-session charge (keep the existing message) —
+      // resolveEmbeddedFeePI tells them apart via PI metadata.
+      const resolved = await resolveEmbeddedFeePI(order);
+      if (resolved.kind === "sheet") {
+        return {
+          feeSheet: {
+            clientSecret: resolved.clientSecret,
+            orderId: order.id,
+            amountCents: order.serviceFee,
+          },
+        };
+      }
+      if (resolved.kind === "authorized") {
+        revalidatePath("/dashboard/orders");
+        return { checkoutUrl: resolved.productionPaymentUrl };
+      }
+      if (resolved.kind === "error") {
+        return { error: resolved.message };
+      }
+      if (resolved.kind === "not_sheet") {
+        return { error: AGENT_CHARGED_ORDER_ERROR };
+      }
+      // "cleared" — dead PI ref nulled; fall through to the normal
+      // claim flow, which mints a fresh checkout.
     }
     if (existingRefKind === "session") {
       const existingSessionId = order.stripeSessionId!;
@@ -1102,6 +1149,23 @@ export async function completePrintOrder(params: {
       if (oneTap) {
         revalidatePath("/dashboard/orders");
         return { checkoutUrl: oneTap.redirectUrl };
+      }
+
+      // No saved card — try the in-page embedded fee sheet (Payment
+      // Element) before falling back to hosted Checkout. Keeps the
+      // buyer on our page for the fee so the only redirect in the
+      // whole flow is CraftCloud's own payment page. Returns null on
+      // any miss (no publishable key deployed, customer resolution or
+      // PI creation failure, lost sentinel), and the hosted-session
+      // path below takes over unchanged.
+      const sheet = await prepareEmbeddedFeeSheet(order, sentinel, {
+        email: params.email,
+        shipping: params.shipping,
+        billing: params.billing,
+      });
+      if (sheet) {
+        revalidatePath("/dashboard/orders");
+        return { feeSheet: sheet };
       }
     }
 
@@ -1322,6 +1386,350 @@ async function tryAuthorizeFeeWithSavedCard(
   return { redirectUrl: bridgeSessionUrl };
 }
 
+const EMBEDDED_FEE_SHEET_SOURCE = "embedded_fee_sheet";
+
+/**
+ * Set up the in-page embedded fee sheet: a manual-capture
+ * PaymentIntent the client confirms with the Payment Element, so
+ * first-time two_step buyers never leave our page for the fee — the
+ * only redirect left in the flow is CraftCloud's own payment page.
+ *
+ * Runs under the session-claim sentinel, after prepareTwoStepOrder
+ * (CraftCloud order + bridge session already persisted) and after the
+ * one-tap saved-card attempt returned null. On success the sentinel
+ * is swapped for the PI id and the shipping address is persisted —
+ * the order stays `cart_created` until the client confirms and
+ * finalizeFeeAuthorization (or the webhook backstop) advances it.
+ *
+ * Returns null on ANY miss so the caller falls through to hosted
+ * Checkout:
+ *  - NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY not deployed — the Payment
+ *    Element could never render client-side, so offering the sheet
+ *    would hard-break checkout. This makes deploying the code before
+ *    the env var a safe no-op.
+ *  - customer resolution or PI creation failure (logged).
+ *  - lost sentinel (another actor moved the order along).
+ *
+ * Idempotency: `fee-sheet:<orderId>` — a retried completePrintOrder
+ * gets the SAME PaymentIntent back from Stripe instead of minting a
+ * parallel one.
+ */
+async function prepareEmbeddedFeeSheet(
+  order: typeof printOrders.$inferSelect,
+  sentinel: string,
+  contact: {
+    email: string;
+    shipping: Address;
+    billing: Address & { isCompany: boolean; vatId?: string };
+  }
+): Promise<{
+  clientSecret: string;
+  orderId: string;
+  amountCents: number;
+} | null> {
+  if (!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY) return null;
+
+  let customerId: string;
+  try {
+    customerId = await getOrCreateStripeCustomer(order.userId, {
+      email: contact.email,
+    });
+  } catch (err) {
+    logError("completePrintOrder.feeSheet.customer", err);
+    return null;
+  }
+
+  const stripe = getStripe();
+  let intent: Awaited<ReturnType<typeof stripe.paymentIntents.create>>;
+  try {
+    intent = await stripe.paymentIntents.create(
+      {
+        amount: order.serviceFee,
+        currency: "usd",
+        customer: customerId,
+        capture_method: "manual",
+        // Save the confirmed card for future one-tap fee
+        // authorizations — same consent surface the Payment Element
+        // renders for hosted Checkout's setup_future_usage.
+        setup_future_usage: "off_session",
+        // No redirect-based methods: the sheet lives inside the print
+        // page; a method that needs to bounce through a bank page
+        // belongs on hosted Checkout, not here.
+        automatic_payment_methods: {
+          enabled: true,
+          allow_redirects: "never",
+        },
+        metadata: {
+          printOrderId: order.id,
+          type: "print_order",
+          checkoutModel: "two_step",
+          source: EMBEDDED_FEE_SHEET_SOURCE,
+        },
+      },
+      { idempotencyKey: `fee-sheet:${order.id}` }
+    );
+  } catch (err) {
+    logError("completePrintOrder.feeSheet.createIntent", err);
+    return null;
+  }
+  if (!intent.client_secret) return null;
+
+  // Swap sentinel → PI id (the overloaded stripeSessionId column, same
+  // convention as one-tap and agent charges) and persist the address
+  // now — the confirm happens client-side, so this is the last moment
+  // this server action holds the full contact payload.
+  const swapped = await db
+    .update(printOrders)
+    .set({
+      stripeSessionId: intent.id,
+      shippingAddress: {
+        email: contact.email,
+        shipping: contact.shipping,
+        billing: contact.billing,
+      },
+    })
+    .where(
+      and(
+        eq(printOrders.id, order.id),
+        eq(printOrders.status, "cart_created"),
+        eq(printOrders.stripeSessionId, sentinel)
+      )
+    )
+    .returning({ id: printOrders.id });
+
+  if (swapped.length === 0) return null;
+
+  return {
+    clientSecret: intent.client_secret,
+    orderId: order.id,
+    amountCents: order.serviceFee,
+  };
+}
+
+/**
+ * Re-entry handling for an order that already carries an embedded
+ * fee-sheet PaymentIntent (user closed the sheet and clicked checkout
+ * again, second tab, Resume from the dashboard). Distinguished from
+ * agent off-session charges — which also park `pi_…` ids in
+ * stripeSessionId at cart_created — by the PI's metadata.source, so
+ * agent orders keep their existing "being placed" message.
+ *
+ * Outcomes:
+ *  - "sheet"      — PI still confirmable → hand the same clientSecret
+ *    back and reopen the sheet.
+ *  - "authorized" — PI holds funds (requires_capture) but the row
+ *    never advanced (finalize died / webhook lagging) → advance it
+ *    now and go straight to CraftCloud.
+ *  - "cleared"    — PI canceled → ref nulled, caller continues to
+ *    mint a fresh checkout.
+ *  - "not_sheet"  — not ours (agent charge) → caller keeps its
+ *    existing behavior.
+ *  - "error"      — terminal weirdness with a user-facing message.
+ */
+async function resolveEmbeddedFeePI(
+  order: typeof printOrders.$inferSelect
+): Promise<
+  | { kind: "sheet"; clientSecret: string }
+  | { kind: "authorized"; productionPaymentUrl: string }
+  | { kind: "cleared" }
+  | { kind: "not_sheet" }
+  | { kind: "error"; message: string }
+> {
+  if (order.checkoutModel !== "two_step") return { kind: "not_sheet" };
+
+  const stripe = getStripe();
+  let intent: Awaited<ReturnType<typeof stripe.paymentIntents.retrieve>>;
+  try {
+    intent = await stripe.paymentIntents.retrieve(order.stripeSessionId!);
+  } catch (err) {
+    logError("resolveEmbeddedFeePI.retrieve", err);
+    return {
+      kind: "error",
+      message: "Could not check your payment. Please try again.",
+    };
+  }
+
+  if (intent.metadata?.source !== EMBEDDED_FEE_SHEET_SOURCE) {
+    return { kind: "not_sheet" };
+  }
+
+  switch (intent.status) {
+    case "requires_payment_method":
+    case "requires_confirmation":
+    case "requires_action":
+      return intent.client_secret
+        ? { kind: "sheet", clientSecret: intent.client_secret }
+        : { kind: "cleared" };
+
+    case "requires_capture": {
+      const advanced = await advanceFeeAuthorizedOrder(order.id, intent.id);
+      if (!advanced.ok) return { kind: "error", message: advanced.error };
+      return { kind: "authorized", productionPaymentUrl: advanced.url };
+    }
+
+    case "canceled":
+      // Clear the dead ref (conditionally — only if it's still this
+      // PI) so the normal claim flow can mint a fresh checkout.
+      await db
+        .update(printOrders)
+        .set({ stripeSessionId: null })
+        .where(
+          and(
+            eq(printOrders.id, order.id),
+            eq(printOrders.stripeSessionId, intent.id)
+          )
+        );
+      return { kind: "cleared" };
+
+    default:
+      // processing / succeeded — shouldn't occur for a manual-capture
+      // fee hold; don't touch anything.
+      return {
+        kind: "error",
+        message:
+          "This order is already being processed — check your orders in a moment.",
+      };
+  }
+}
+
+/**
+ * Shared advancement for a fee hold that exists on Stripe
+ * (requires_capture) but whose row is still cart_created: the same
+ * transition handleTwoStepFeeAuthorization performs for hosted
+ * sessions. Conditional on the ref so a webhook race can't
+ * double-apply; either winner leaves the row at
+ * awaiting_production_payment.
+ */
+async function advanceFeeAuthorizedOrder(
+  orderId: string,
+  paymentIntentId: string
+): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  const advanced = await db
+    .update(printOrders)
+    .set({
+      status: "awaiting_production_payment",
+      feePaymentIntentId: paymentIntentId,
+      feeAuthorizedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(printOrders.id, orderId),
+        eq(printOrders.status, "cart_created"),
+        eq(printOrders.stripeSessionId, paymentIntentId)
+      )
+    )
+    .returning({ id: printOrders.id, userId: printOrders.userId });
+
+  if (advanced.length > 0) {
+    // Winner persists the saved card (fill-if-null) — the webhook
+    // backstop's conditional UPDATE will lose and skip it.
+    await persistSavedFeeCard(advanced[0].userId, paymentIntentId);
+  }
+
+  const [fresh] = await db
+    .select({
+      status: printOrders.status,
+      bridgeSessionUrl: printOrders.bridgeSessionUrl,
+    })
+    .from(printOrders)
+    .where(eq(printOrders.id, orderId))
+    .limit(1);
+
+  if (fresh?.status !== "awaiting_production_payment") {
+    logError(
+      "advanceFeeAuthorizedOrder.writeLost",
+      new Error(`fee-authorized advance lost for order ${orderId}`, {
+        cause: { orderId, paymentIntentId, status: fresh?.status },
+      })
+    );
+    return {
+      ok: false,
+      error:
+        "This order is already being processed — check your orders in a moment.",
+    };
+  }
+  if (!fresh.bridgeSessionUrl) {
+    return {
+      ok: false,
+      error:
+        "Your fee is authorized, but the production payment link is missing. Open your orders page and use Complete payment.",
+    };
+  }
+  return { ok: true, url: fresh.bridgeSessionUrl };
+}
+
+/**
+ * Called by the embedded fee sheet after the client-side
+ * confirmPayment resolves: verify the hold actually exists on Stripe
+ * (never trust the client), advance the order, and hand back
+ * CraftCloud's payment URL. The `payment_intent.amount_capturable_updated`
+ * webhook performs the same advancement as a backstop for clients
+ * that die between confirm and this call — whichever runs first wins,
+ * the other no-ops.
+ */
+export async function finalizeFeeAuthorization(
+  orderId: string
+): Promise<{ productionPaymentUrl: string } | { error: string }> {
+  try {
+    const { userId } = await auth();
+    if (!userId) return { error: "Unauthorized" };
+
+    const [order] = await db
+      .select()
+      .from(printOrders)
+      .where(and(eq(printOrders.id, orderId), eq(printOrders.userId, userId)));
+
+    if (!order) return { error: "Order not found" };
+    if (order.checkoutModel !== "two_step") {
+      return { error: "Order not found" };
+    }
+
+    // Webhook (or a sibling call) already advanced it — idempotent.
+    if (order.status === "awaiting_production_payment") {
+      if (!order.bridgeSessionUrl) {
+        return {
+          error:
+            "Your fee is authorized, but the production payment link is missing. Open your orders page and use Complete payment.",
+        };
+      }
+      revalidatePath("/dashboard/orders");
+      return { productionPaymentUrl: order.bridgeSessionUrl };
+    }
+    if (order.status !== "cart_created") {
+      return { error: "Order already processed" };
+    }
+
+    if (classifyPaymentRef(order.stripeSessionId) !== "payment_intent") {
+      return { error: "No payment is pending for this order" };
+    }
+
+    const stripe = getStripe();
+    const intent = await stripe.paymentIntents.retrieve(
+      order.stripeSessionId!
+    );
+    if (
+      intent.metadata?.printOrderId !== order.id ||
+      intent.metadata?.source !== EMBEDDED_FEE_SHEET_SOURCE
+    ) {
+      return { error: "No payment is pending for this order" };
+    }
+    if (intent.status !== "requires_capture") {
+      return {
+        error: "Your payment hasn't completed yet. Please try again.",
+      };
+    }
+
+    const advanced = await advanceFeeAuthorizedOrder(order.id, intent.id);
+    if (!advanced.ok) return { error: advanced.error };
+
+    revalidatePath("/dashboard/orders");
+    return { productionPaymentUrl: advanced.url };
+  } catch (error) {
+    logError("finalizeFeeAuthorization", error);
+    return { error: "Failed to confirm your payment. Please try again." };
+  }
+}
+
 /**
  * Two-step checkout prep — runs under the session-claim sentinel in
  * completePrintOrder, BEFORE the fee-only Stripe session is minted:
@@ -1512,7 +1920,38 @@ export async function resumePrintOrder(
     // sessions.retrieve throw (MTR-233).
     const resumeRefKind = classifyPaymentRef(order.stripeSessionId);
     if (resumeRefKind === "payment_intent") {
-      return { error: AGENT_CHARGED_ORDER_ERROR };
+      const resolved = await resolveEmbeddedFeePI(order);
+      if (resolved.kind === "authorized") {
+        return { checkoutUrl: resolved.productionPaymentUrl };
+      }
+      if (resolved.kind === "error") {
+        return { error: resolved.message };
+      }
+      if (resolved.kind === "not_sheet") {
+        return { error: AGENT_CHARGED_ORDER_ERROR };
+      }
+      if (resolved.kind === "sheet") {
+        // Resume speaks URLs (the dashboard Resume button redirects),
+        // not in-page sheets — cancel the unconfirmed sheet PI and
+        // fall through to mint a hosted session from the stored
+        // address. No hold exists yet, so cancellation is free.
+        try {
+          await stripe.paymentIntents.cancel(order.stripeSessionId!);
+        } catch (err) {
+          logError("resumePrintOrder.cancelSheetIntent", err);
+        }
+        await db
+          .update(printOrders)
+          .set({ stripeSessionId: null })
+          .where(
+            and(
+              eq(printOrders.id, orderId),
+              eq(printOrders.stripeSessionId, order.stripeSessionId!)
+            )
+          );
+      }
+      // "cleared" (and post-cancel "sheet") fall through to the
+      // normal claim flow below.
     }
     if (resumeRefKind === "session") {
       const resumeSessionId = order.stripeSessionId!;

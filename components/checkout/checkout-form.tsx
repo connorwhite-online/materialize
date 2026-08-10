@@ -6,6 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Alert } from "@/components/ui/alert";
 import { ShippingAddressForm } from "@/components/print/shipping-address-form";
+import {
+  FeePaymentSheet,
+  type FeeSheetPayload,
+} from "@/components/print/fee-payment-sheet";
 import { completePrintOrder } from "@/app/actions/print";
 
 export interface CheckoutItem {
@@ -44,6 +48,7 @@ export function CheckoutForm({
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [feeSheet, setFeeSheet] = useState<FeeSheetPayload | null>(null);
   // Synchronous guard — parent's `submitting` state only flips on
   // next render, so a rapid double-click could call
   // completePrintOrder twice and mint two Stripe sessions for the
@@ -99,6 +104,16 @@ export function CheckoutForm({
         return;
       }
 
+      // Two-step embedded fee sheet — the flow pauses for user
+      // input, so release the guards; closing the sheet re-enables
+      // the form (resubmitting reopens the same PI idempotently).
+      if ("feeSheet" in result) {
+        setFeeSheet(result.feeSheet);
+        setSubmitting(false);
+        submittingRef.current = false;
+        return;
+      }
+
       // Successful redirect — leave the ref set so a stray late
       // click can't re-enter before navigation happens.
       window.location.href = result.checkoutUrl;
@@ -111,6 +126,7 @@ export function CheckoutForm({
 
   return (
     <div className="grid items-start gap-6 lg:grid-cols-5">
+      <FeePaymentSheet sheet={feeSheet} onClose={() => setFeeSheet(null)} />
       <div className="lg:col-span-3">
         {error && (
           <Alert variant="destructive" className="mb-4">

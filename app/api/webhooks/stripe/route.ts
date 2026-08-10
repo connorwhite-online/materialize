@@ -109,13 +109,27 @@ export async function POST(request: Request) {
   // We route every `charge.refunded` here unconditionally so the
   // dedup table records the event id either way.
   const isChargeRefunded = event.type === "charge.refunded";
+  // Two-step fee holds confirmed OUTSIDE hosted Checkout — the
+  // embedded fee sheet and the one-tap saved-card path both create a
+  // manual-capture PI directly, so no checkout.session.completed ever
+  // fires for them. `amount_capturable_updated` is the "hold now
+  // exists" signal; the inner handler is the same idempotent
+  // conditional advance, so for one-tap/finalize (which advance
+  // synchronously) this is a pure backstop that no-ops.
+  const isFeeHoldCapturable =
+    event.type === "payment_intent.amount_capturable_updated" &&
+    (event.data.object as Stripe.PaymentIntent).metadata?.type ===
+      "print_order" &&
+    (event.data.object as Stripe.PaymentIntent).metadata?.checkoutModel ===
+      "two_step";
   const isHandled =
     isPaidCheckout ||
     isAsyncSuccess ||
     isTwoStepFeeAuth ||
     isBillingSetup ||
     isAccountUpdated ||
-    isChargeRefunded;
+    isChargeRefunded ||
+    isFeeHoldCapturable;
 
   // Defense-in-depth dedup — the inner handlePrintOrderPayment also
   // claims atomically against the printOrders row, but recording the
@@ -226,6 +240,34 @@ export async function POST(request: Request) {
           // saving a card. Returning 500 makes Stripe retry forever.
           // We log and let the user try again from the dashboard.
         }
+      }
+    }
+  }
+
+  if (isFeeHoldCapturable) {
+    const intent = event.data.object as Stripe.PaymentIntent;
+    const printOrderId = intent.metadata?.printOrderId;
+    if (printOrderId) {
+      try {
+        // Routes into handleTwoStepFeeAuthorization via the persisted
+        // checkoutModel — the conditional cart_created → awaiting
+        // advance. Already-advanced orders (one-tap, finalize, or the
+        // hosted-session event that also fires for hosted fee holds)
+        // no-op silently.
+        await handlePrintOrderPayment(printOrderId, {
+          paymentIntentId: intent.id,
+        });
+      } catch (error) {
+        logError(
+          "stripe-webhook-fee-hold",
+          withEventContext(error, event, { printOrderId })
+        );
+        // 500 so Stripe retries — this may be the only signal that
+        // advances the order if the client died mid-finalize.
+        return Response.json(
+          { error: "Failed to record fee authorization" },
+          { status: 500 }
+        );
       }
     }
   }
