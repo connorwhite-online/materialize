@@ -76,7 +76,12 @@ export type AnonCheckoutResult =
   // fee sheet with this payload instead.
   | {
       ok: true;
-      feeSheet: { clientSecret: string; orderId: string; amountCents: number };
+      feeSheet: {
+        clientSecret: string;
+        orderId: string;
+        amountCents: number;
+        email?: string;
+      };
     }
   | { ok: false; error: string };
 

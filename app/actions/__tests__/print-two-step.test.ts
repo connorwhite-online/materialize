@@ -632,6 +632,7 @@ describe("completePrintOrder (two_step, embedded fee sheet)", () => {
         clientSecret: "cs_secret_1",
         orderId: "order-1",
         amountCents: 150,
+        email: baseAddress.email,
       },
     });
     // No hosted session was minted — the sheet replaces the redirect.
@@ -645,10 +646,10 @@ describe("completePrintOrder (two_step, embedded fee sheet)", () => {
         capture_method: "manual",
         // Card gets saved on confirm → next order is one-tap.
         setup_future_usage: "off_session",
-        automatic_payment_methods: {
-          enabled: true,
-          allow_redirects: "never",
-        },
+        // Pinned: automatic_payment_methods would surface every
+        // dashboard-enabled non-redirect method (e.g. us_bank_account)
+        // in the sheet.
+        payment_method_types: ["card", "link"],
         metadata: expect.objectContaining({
           printOrderId: "order-1",
           type: "print_order",
@@ -821,6 +822,7 @@ describe("completePrintOrder (two_step, embedded fee sheet)", () => {
           clientSecret: "cs_secret_1",
           orderId: "order-1",
           amountCents: 150,
+          email: baseAddress.email,
         },
       });
     });

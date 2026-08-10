@@ -34,6 +34,8 @@ export interface FeeSheetPayload {
   clientSecret: string;
   orderId: string;
   amountCents: number;
+  /** Buyer email — prefloads Link so its signup section stays collapsed. */
+  email?: string;
 }
 
 interface FeePaymentSheetProps {
@@ -121,6 +123,7 @@ export function FeePaymentSheet({ sheet, onClose }: FeePaymentSheetProps) {
           <FeeForm
             orderId={sheet.orderId}
             amountCents={sheet.amountCents}
+            email={sheet.email}
             onLockChange={setLocked}
           />
         </Elements>
@@ -132,10 +135,12 @@ export function FeePaymentSheet({ sheet, onClose }: FeePaymentSheetProps) {
 function FeeForm({
   orderId,
   amountCents,
+  email,
   onLockChange,
 }: {
   orderId: string;
   amountCents: number;
+  email?: string;
   onLockChange: (locked: boolean) => void;
 }) {
   const stripe = useStripe();
@@ -183,8 +188,8 @@ function FeeForm({
     const { error: confirmError, paymentIntent } = await stripe.confirmPayment(
       {
         elements,
-        // No redirect-based methods are offered (the PI was created
-        // with allow_redirects: "never"), so this never navigates —
+        // No redirect-based methods are offered (the PI is pinned to
+        // card + Link), so this never navigates —
         // the return_url is a Stripe API requirement, satisfied with
         // the tokenless landing as a safety net.
         redirect: "if_required",
@@ -218,7 +223,19 @@ function FeeForm({
     <div className="mt-4 space-y-4">
       <PaymentElement
         onReady={() => setElementReady(true)}
-        options={{ layout: "accordion" }}
+        options={{
+          layout: "accordion",
+          // Prefill Link with the email from the shipping form so its
+          // save-my-info section arrives collapsed instead of asking
+          // for the email a second time.
+          defaultValues: email
+            ? { billingDetails: { email } }
+            : undefined,
+          // Suppress Stripe's injected "you allow Materialize to
+          // charge your card…" legalese — the one-line disclosure
+          // below the button covers it and keeps the sheet short.
+          terms: { card: "never" },
+        }}
       />
 
       {error && (

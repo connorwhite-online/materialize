@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import {
   AnimatePresence,
   motion,
+  useDragControls,
   useReducedMotion,
   type PanInfo,
 } from "motion/react";
@@ -50,6 +51,12 @@ export function NativeSheet({
   className,
 }: NativeSheetProps) {
   const reducedMotion = useReducedMotion();
+  // Drag starts only from the grabber (dragListener={false} below):
+  // the content area may scroll, and a sheet-wide drag listener would
+  // capture vertical touch moves before the scroll container sees
+  // them — tall content (e.g. the Payment Element) would be
+  // unscrollable on touch.
+  const dragControls = useDragControls();
 
   // Latest-value refs so the document-level listeners below don't
   // rebind on every render.
@@ -109,7 +116,10 @@ export function NativeSheet({
           />
           <motion.div
             className={cn(
-              "relative w-full sm:max-w-md",
+              "relative flex w-full flex-col sm:max-w-md",
+              // Never taller than the viewport — content past the cap
+              // scrolls inside the sheet instead of running off-screen.
+              "max-h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-4rem)]",
               "bg-card text-card-foreground shadow-2xl",
               "rounded-t-4xl sm:rounded-4xl",
               "border border-border/60",
@@ -127,18 +137,25 @@ export function NativeSheet({
                 : { type: "spring", damping: 30, stiffness: 320, mass: 0.8 }
             }
             drag={dismissible && !reducedMotion ? "y" : false}
+            dragControls={dragControls}
+            dragListener={false}
             dragConstraints={{ top: 0, bottom: 0 }}
             dragElastic={{ top: 0, bottom: 0.6 }}
             onDragEnd={onDragEnd}
           >
             {dismissible ? (
-              <div className="flex justify-center pt-3 pb-1">
+              <div
+                className="flex shrink-0 cursor-grab touch-none justify-center pt-3 pb-1 active:cursor-grabbing"
+                onPointerDown={(e) => dragControls.start(e)}
+              >
                 <div className="h-1.5 w-10 rounded-full bg-foreground/15" />
               </div>
             ) : (
-              <div className="pt-4" />
+              <div className="shrink-0 pt-4" />
             )}
-            {children}
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+              {children}
+            </div>
           </motion.div>
         </div>
       )}
