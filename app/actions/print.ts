@@ -81,6 +81,8 @@ export type CompletePrintOrderResult =
         clientSecret: string;
         orderId: string;
         amountCents: number;
+        /** Buyer email, used to prefill Link in the Payment Element. */
+        email?: string;
       };
     }
   | { error: string };
@@ -1011,6 +1013,7 @@ export async function completePrintOrder(params: {
             clientSecret: resolved.clientSecret,
             orderId: order.id,
             amountCents: order.serviceFee,
+            email: order.shippingAddress?.email,
           },
         };
       }
@@ -1426,6 +1429,7 @@ async function prepareEmbeddedFeeSheet(
   clientSecret: string;
   orderId: string;
   amountCents: number;
+  email: string;
 } | null> {
   if (!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY) return null;
 
@@ -1452,13 +1456,14 @@ async function prepareEmbeddedFeeSheet(
         // authorizations — same consent surface the Payment Element
         // renders for hosted Checkout's setup_future_usage.
         setup_future_usage: "off_session",
-        // No redirect-based methods: the sheet lives inside the print
-        // page; a method that needs to bounce through a bank page
-        // belongs on hosted Checkout, not here.
-        automatic_payment_methods: {
-          enabled: true,
-          allow_redirects: "never",
-        },
+        // Pinned to card + Link (Apple Pay / Google Pay ride on
+        // "card" inside the Payment Element). automatic_payment_methods
+        // with allow_redirects: "never" is NOT enough here — it still
+        // lets every non-redirect method the dashboard has enabled
+        // through, e.g. us_bank_account's "search for your bank" UI,
+        // which is exactly the slow, form-heavy surface this sheet
+        // exists to avoid.
+        payment_method_types: ["card", "link"],
         metadata: {
           printOrderId: order.id,
           type: "print_order",
@@ -1503,6 +1508,7 @@ async function prepareEmbeddedFeeSheet(
     clientSecret: intent.client_secret,
     orderId: order.id,
     amountCents: order.serviceFee,
+    email: contact.email,
   };
 }
 
