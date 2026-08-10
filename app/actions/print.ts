@@ -1391,6 +1391,12 @@ async function tryAuthorizeFeeWithSavedCard(
 
 const EMBEDDED_FEE_SHEET_SOURCE = "embedded_fee_sheet";
 
+// The only methods the embedded sheet offers. Wallets (Apple Pay /
+// Google Pay) ride on "card" inside the Payment Element; anything
+// redirect-based (PayPal, banks) belongs on hosted Checkout. Also the
+// pin list resolveEmbeddedFeePI enforces on reused PIs.
+const SHEET_PAYMENT_METHOD_TYPES = ["card", "link"];
+
 /**
  * Set up the in-page embedded fee sheet: a manual-capture
  * PaymentIntent the client confirms with the Payment Element, so
@@ -1456,14 +1462,13 @@ async function prepareEmbeddedFeeSheet(
         // authorizations — same consent surface the Payment Element
         // renders for hosted Checkout's setup_future_usage.
         setup_future_usage: "off_session",
-        // Pinned to card + Link (Apple Pay / Google Pay ride on
-        // "card" inside the Payment Element). automatic_payment_methods
-        // with allow_redirects: "never" is NOT enough here — it still
-        // lets every non-redirect method the dashboard has enabled
-        // through, e.g. us_bank_account's "search for your bank" UI,
-        // which is exactly the slow, form-heavy surface this sheet
-        // exists to avoid.
-        payment_method_types: ["card", "link"],
+        // Pinned to card + Link. automatic_payment_methods with
+        // allow_redirects: "never" is NOT enough here — it still lets
+        // every non-redirect method the dashboard has enabled through,
+        // e.g. us_bank_account's "search for your bank" UI, which is
+        // exactly the slow, form-heavy surface this sheet exists to
+        // avoid.
+        payment_method_types: [...SHEET_PAYMENT_METHOD_TYPES],
         metadata: {
           printOrderId: order.id,
           type: "print_order",
@@ -1471,7 +1476,11 @@ async function prepareEmbeddedFeeSheet(
           source: EMBEDDED_FEE_SHEET_SOURCE,
         },
       },
-      { idempotencyKey: `fee-sheet:${order.id}` }
+      // v2: the key changed when the method list was pinned — a
+      // remint after resolveEmbeddedFeePI cancels a pre-pin PI must
+      // not collide with the old key's params inside Stripe's 24h
+      // idempotency window.
+      { idempotencyKey: `fee-sheet:v2:${order.id}` }
     );
   } catch (err) {
     logError("completePrintOrder.feeSheet.createIntent", err);
@@ -1562,10 +1571,46 @@ async function resolveEmbeddedFeePI(
   switch (intent.status) {
     case "requires_payment_method":
     case "requires_confirmation":
-    case "requires_action":
-      return intent.client_secret
-        ? { kind: "sheet", clientSecret: intent.client_secret }
-        : { kind: "cleared" };
+    case "requires_action": {
+      if (!intent.client_secret) return { kind: "cleared" };
+      // Heal PIs minted before the method list was pinned: a reused
+      // PI renders whatever payment_method_types it was created with,
+      // so a pre-pin PI would resurrect the us_bank_account picker on
+      // every resume. Try to pin in place; PIs created under
+      // automatic_payment_methods may refuse the update — cancel
+      // those and clear the ref so the claim flow mints a fresh,
+      // correctly-pinned PI instead.
+      const currentTypes = intent.payment_method_types ?? [];
+      const stale =
+        currentTypes.some((t) => !SHEET_PAYMENT_METHOD_TYPES.includes(t)) ||
+        SHEET_PAYMENT_METHOD_TYPES.some((t) => !currentTypes.includes(t));
+      if (stale) {
+        try {
+          await stripe.paymentIntents.update(intent.id, {
+            payment_method_types: [...SHEET_PAYMENT_METHOD_TYPES],
+          });
+        } catch (err) {
+          logError("resolveEmbeddedFeePI.pinMethods", err);
+          try {
+            await stripe.paymentIntents.cancel(intent.id);
+          } catch (cancelErr) {
+            logError("resolveEmbeddedFeePI.pinMethods.cancel", cancelErr);
+            return { kind: "sheet", clientSecret: intent.client_secret };
+          }
+          await db
+            .update(printOrders)
+            .set({ stripeSessionId: null })
+            .where(
+              and(
+                eq(printOrders.id, order.id),
+                eq(printOrders.stripeSessionId, intent.id)
+              )
+            );
+          return { kind: "cleared" };
+        }
+      }
+      return { kind: "sheet", clientSecret: intent.client_secret };
+    }
 
     case "requires_capture": {
       const advanced = await advanceFeeAuthorizedOrder(order.id, intent.id);
