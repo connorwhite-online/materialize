@@ -1471,20 +1471,24 @@ async function getSavedFeeCardSummary(
 
 const EMBEDDED_FEE_SHEET_SOURCE = "embedded_fee_sheet";
 
-// The only methods the embedded sheet offers. Wallets (Apple Pay /
-// Google Pay) ride on "card" inside the Payment Element; anything
-// redirect-based (PayPal, banks) belongs on hosted Checkout. Also the
-// pin list resolveEmbeddedFeePI enforces on reused PIs.
+// The only methods the embedded sheet offers. Anything redirect-based
+// (PayPal, banks) belongs on hosted Checkout. Also the pin list
+// resolveEmbeddedFeePI enforces on reused PIs.
 //
-// "link" was dropped from this list: Link brings its own Instant Bank
-// Payments surface — a "Bank" accordion with the Financial
-// Connections institution picker — which is exactly the slow,
-// form-heavy UI the pin exists to exclude (it shows test institutions
-// in sandbox and real banks in live). There is no API or Payment
-// Element option to keep Link-the-wallet while suppressing its bank
-// rails, so the sheet is card-only; saved-card one-tap still works via
-// setup_future_usage on the customer.
-const SHEET_PAYMENT_METHOD_TYPES = ["card"];
+// "link" is required for the Link button in the sheet's Express
+// Checkout Element (one-tap row alongside Apple Pay / Google Pay,
+// which ride on "card"). The Payment Element itself renders card-only
+// — its wallets option suppresses link/applePay/googlePay so the
+// accordion stays a clean card form (see fee-payment-sheet.tsx).
+//
+// ⚠️ Merchant-level prerequisite: "Instant Bank Payments" must stay
+// OFF in the Stripe Dashboard's Link settings. With it on, link in
+// this list resurrects a "Bank" accordion row (Financial Connections
+// institution picker — test tiles in sandbox, real banks in live),
+// which is exactly the slow, form-heavy UI this sheet exists to
+// avoid, and there is no API or Payment Element option to suppress it
+// per-request.
+const SHEET_PAYMENT_METHOD_TYPES = ["card", "link"];
 
 /**
  * Set up the in-page embedded fee sheet: a manual-capture
@@ -1551,12 +1555,12 @@ async function prepareEmbeddedFeeSheet(
         // authorizations — same consent surface the Payment Element
         // renders for hosted Checkout's setup_future_usage.
         setup_future_usage: "off_session",
-        // Pinned to card only. automatic_payment_methods with
+        // Pinned to card + Link. automatic_payment_methods with
         // allow_redirects: "never" is NOT enough here — it still lets
         // every non-redirect method the dashboard has enabled through,
         // e.g. us_bank_account's "search for your bank" UI, which is
         // exactly the slow, form-heavy surface this sheet exists to
-        // avoid. (Link is excluded too — see SHEET_PAYMENT_METHOD_TYPES.)
+        // avoid. (See SHEET_PAYMENT_METHOD_TYPES for the Link caveats.)
         payment_method_types: [...SHEET_PAYMENT_METHOD_TYPES],
         metadata: {
           printOrderId: order.id,
@@ -1565,11 +1569,12 @@ async function prepareEmbeddedFeeSheet(
           source: EMBEDDED_FEE_SHEET_SOURCE,
         },
       },
-      // v3: the key changes every time the pinned method list does —
+      // v4: the key changes every time the pinned method list does —
       // a remint after resolveEmbeddedFeePI cancels a stale PI must
       // not collide with the old key's params inside Stripe's 24h
-      // idempotency window. (v2 = card+link, v3 = card only.)
-      { idempotencyKey: `fee-sheet:v3:${order.id}` }
+      // idempotency window. (v2 = card+link, v3 = card only, v4 =
+      // card+link again for the Express Checkout Link button.)
+      { idempotencyKey: `fee-sheet:v4:${order.id}` }
     );
   } catch (err) {
     logError("completePrintOrder.feeSheet.createIntent", err);
