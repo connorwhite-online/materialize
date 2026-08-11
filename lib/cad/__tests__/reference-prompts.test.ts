@@ -160,6 +160,52 @@ describe("reference images in harness prompts", () => {
     const call = completeText.mock.calls[0][0] as unknown as { prompt: string };
     expect(call.prompt).not.toContain("How this build has unfolded");
   });
+
+  it("concept picker: three candidates via onQuestion thumbnails, pick honored, conceptPng returned", async () => {
+    conceptImage
+      .mockResolvedValueOnce({ data: "QQ==", mediaType: "image/png" })
+      .mockResolvedValueOnce({ data: "Qg==", mediaType: "image/png" })
+      .mockResolvedValueOnce({ data: "Qw==", mediaType: "image/png" });
+    const onQuestion = vi.fn(async (..._args: unknown[]) => "opt-2");
+
+    const result = await runHarness({
+      prompt: "a phone stand",
+      maxAttempts: 1,
+      onQuestion,
+    });
+
+    expect(conceptImage).toHaveBeenCalledTimes(3);
+    expect(onQuestion).toHaveBeenCalledTimes(1);
+    const q = onQuestion.mock.calls[0][0] as unknown as {
+      id: string;
+      options: { id: string; thumbnail?: string }[];
+    };
+    expect(q.id).toBe("concept-pick");
+    expect(q.options.map((o) => o.thumbnail)).toEqual(["QQ==", "Qg==", "Qw=="]);
+    // The picked concept rides the generate images AND the result.
+    expect(result.conceptPng).toBe("Qg==");
+    const gen = completeText.mock.calls[0][0] as unknown as {
+      images?: PromptImage[];
+    };
+    expect(gen.images?.some((i) => i.data === "Qg==")).toBe(true);
+    expect(gen.images?.some((i) => i.data === "QQ==")).toBe(false);
+  });
+
+  it("concept picker: an asker failure falls back to the first candidate", async () => {
+    conceptImage
+      .mockResolvedValueOnce({ data: "QQ==", mediaType: "image/png" })
+      .mockResolvedValueOnce({ data: "Qg==", mediaType: "image/png" })
+      .mockResolvedValueOnce(null);
+    const onQuestion = vi.fn(async (..._args: unknown[]): Promise<string> => {
+      throw new Error("asker died");
+    });
+    const result = await runHarness({
+      prompt: "a phone stand",
+      maxAttempts: 1,
+      onQuestion,
+    });
+    expect(result.conceptPng).toBe("QQ==");
+  });
 });
 
 describe("labelUserReferences", () => {

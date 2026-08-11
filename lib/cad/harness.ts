@@ -228,6 +228,13 @@ export interface HarnessResult {
    * (no column yet).
    */
   partSourcing?: import("./step-parts").BriefSourcing;
+  /**
+   * The concept render this build aimed toward (base64 PNG) — the user's
+   * pick when the concept picker ran, the auto-generated one otherwise.
+   * The caller persists it as a thread reference so revisions keep building
+   * toward the same target. Absent on revisions / concept-less runs.
+   */
+  conceptPng?: string;
   error?: string;
 }
 
@@ -632,15 +639,73 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
   // functional reality (envelope, form language) — and CONDITIONED ON the
   // user's references when they attached any, so the concept interprets what
   // they showed instead of inventing a competitor to it.
-  const conceptImg =
-    useModel && !input.priorSourceCode
-      ? await conceptImage(
-          input.prompt,
-          input.signal,
-          brief ? formatBriefForConcept(brief) : undefined,
-          userRefs
+  //
+  // Concept PICKER: with an asker available (background-job builds) and the
+  // picker enabled, generate three style-varied candidates in parallel and
+  // let the user choose the direction — the pick then rides the generate
+  // prompts AND the judge, so "build toward the chosen concept" is enforced,
+  // not aspirational. Walk-away safe: the question machinery auto-resolves
+  // to the first candidate on timeout / question-budget exhaustion.
+  let conceptImg: PromptImage | null = null;
+  if (useModel && !input.priorSourceCode) {
+    const briefDesc = brief ? formatBriefForConcept(brief) : undefined;
+    const askPick =
+      input.onQuestion && process.env.CAD_CONCEPT_PICKER !== "false";
+    if (askPick) {
+      const styles: Array<{ label: string; detail: string }> = [
+        { label: "Soft minimal", detail: "gentle uniform radii, calm restrained surfaces" },
+        { label: "Rugged industrial", detail: "chamfered edges, purposeful sturdy massing" },
+        { label: "Sculptural", detail: "flowing blended masses, organic stance" },
+      ];
+      const candidates = (
+        await Promise.all(
+          styles.map(async (s) => ({
+            style: s,
+            img: await conceptImage(
+              input.prompt,
+              input.signal,
+              [briefDesc, `style direction: ${s.label} — ${s.detail}`]
+                .filter(Boolean)
+                .join(" -- "),
+              userRefs
+            ),
+          }))
         )
-      : null;
+      ).filter((c): c is { style: (typeof styles)[number]; img: PromptImage } =>
+        Boolean(c.img)
+      );
+      if (candidates.length >= 2) {
+        const options = candidates.map((c, i) => ({
+          id: `opt-${i + 1}`,
+          label: c.style.label,
+          detail: c.style.detail,
+          thumbnail: c.img.data,
+        }));
+        try {
+          const answer = await input.onQuestion!({
+            id: "concept-pick",
+            text: "Which direction should this build aim for?",
+            options,
+            defaultOptionId: options[0].id,
+          });
+          const idx = options.findIndex((o) => o.id === answer);
+          conceptImg = (idx >= 0 ? candidates[idx] : candidates[0]).img;
+        } catch {
+          // Asker failure = walk-away: first candidate, keep building.
+          conceptImg = candidates[0].img;
+        }
+      } else if (candidates.length === 1) {
+        conceptImg = candidates[0].img;
+      }
+    } else {
+      conceptImg = await conceptImage(
+        input.prompt,
+        input.signal,
+        briefDesc,
+        userRefs
+      );
+    }
+  }
   const withConcept = (base?: PromptImage[] | null): PromptImage[] | undefined => {
     const imgs = [...(base ?? []), ...(conceptImg ? [conceptImg] : [])];
     return imgs.length ? imgs : undefined;
@@ -942,6 +1007,9 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
         aestheticScore,
         aestheticDims,
         brief: resultBrief,
+        // The concept this build aimed toward — the caller persists it as a
+        // thread reference so revisions keep building toward the same target.
+        ...(conceptImg ? { conceptPng: conceptImg.data } : {}),
         // TODO(MTR-197): persist on a cad_generations.dimension_checks jsonb
         // column (the cad-artifacts PR owns migrations); until then this rides
         // the in-memory result for the studio chip + eval reuse only.

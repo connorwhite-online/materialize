@@ -33,11 +33,17 @@ const HISTORY_CAP = 8;
 /** Per-turn prompt budget in the history block. */
 const HISTORY_PROMPT_CHARS = 240;
 
-/** What cadGenerations.referenceImages stores: R2 key + media type. */
+/** What cadGenerations.referenceImages stores: R2 key + media type, plus
+ *  the caption the image carried when first stored — so an inherited
+ *  repo-fetched image or chosen concept keeps its framing on later turns
+ *  instead of being re-captioned as user-attached. Older rows lack it. */
 export interface StoredReferenceImage {
   key: string;
   mediaType: string;
+  label?: string;
 }
+
+const MAX_STORED_LABEL_CHARS = 300;
 
 const MEDIA_EXT: Record<PromptImage["mediaType"], string> = {
   "image/png": "png",
@@ -100,7 +106,13 @@ export async function resolveReferenceImages(opts: {
           new Uint8Array(Buffer.from(img.data, "base64")),
           img.mediaType
         );
-        return { key, mediaType: img.mediaType };
+        return {
+          key,
+          mediaType: img.mediaType,
+          ...(img.label
+            ? { label: img.label.slice(0, MAX_STORED_LABEL_CHARS) }
+            : {}),
+        };
       } catch (err) {
         logError("resolveReferenceImages.upload", err);
         return null;
@@ -140,6 +152,9 @@ export async function resolveReferenceImages(opts: {
         return {
           data: Buffer.from(bytes).toString("base64"),
           mediaType: ref.mediaType,
+          // Keep the stored framing (repo-fetched / concept) — an absent
+          // label falls back to the default user-reference caption later.
+          ...(ref.label ? { label: ref.label } : {}),
         };
       } catch (err) {
         logError("resolveReferenceImages.load", err);
@@ -196,4 +211,52 @@ export async function buildThreadHistory(
     cursor = row.parentGenerationId;
   }
   return chain.reverse();
+}
+
+/**
+ * Persist the concept render a finished build aimed toward as a thread
+ * reference on its generation row, so revisions inherit the SAME aesthetic
+ * target (the whole point of letting the user pick one). Appended AFTER the
+ * user's own references and only when a slot is free — user refs always
+ * outrank the concept. Best-effort: never throws.
+ */
+export async function appendConceptReference(opts: {
+  generationId: string;
+  userId: string;
+  png: string;
+}): Promise<void> {
+  try {
+    const [row] = await db
+      .select({ referenceImages: cadGenerations.referenceImages })
+      .from(cadGenerations)
+      .where(eq(cadGenerations.id, opts.generationId))
+      .limit(1);
+    const existing = (row?.referenceImages ?? []).filter(
+      (r): r is StoredReferenceImage => !!r && typeof r.key === "string"
+    );
+    if (existing.length >= MAX_REFERENCE_IMAGES) return;
+    const key = `cad-refs/${opts.userId}/${nanoid()}.png`;
+    await putObject(
+      key,
+      new Uint8Array(Buffer.from(opts.png, "base64")),
+      "image/png"
+    );
+    await db
+      .update(cadGenerations)
+      .set({
+        referenceImages: [
+          ...existing,
+          {
+            key,
+            mediaType: "image/png",
+            label:
+              "Concept render this thread is building toward — the chosen aesthetic target, NOT something the user provided.",
+          },
+        ],
+        updatedAt: new Date(),
+      })
+      .where(eq(cadGenerations.id, opts.generationId));
+  } catch (err) {
+    logError("appendConceptReference", err);
+  }
 }

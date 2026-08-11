@@ -17,6 +17,7 @@ import { CadMeter, runWithCadContext } from "@/lib/cad/metering";
 import { runCadGeneration } from "@/lib/cad/orchestrate";
 import type { PromptImage } from "@/lib/cad/model-client";
 import {
+  appendConceptReference,
   buildThreadHistory,
   resolveReferenceImages,
 } from "@/lib/cad/reference-images";
@@ -543,7 +544,7 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
     try {
       const fetched = await runWithCadContext(
         { meter, credentials, recorder },
-        () => fetchRepoContext(prompt, controller.signal)
+        () => fetchRepoContext(prompt, controller.signal, { userId })
       );
       if (fetched) {
         fetchedFacts = fetched.facts || undefined;
@@ -652,6 +653,17 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
     if ("error" in persisted) {
       await finishFailed(persisted.error);
       return;
+    }
+
+    // Persist the concept this build aimed toward as a thread reference
+    // (user refs always outrank it; skipped when the slots are full), so
+    // revisions keep building toward the SAME chosen target. Best-effort.
+    if (result.conceptPng) {
+      await appendConceptReference({
+        generationId,
+        userId,
+        png: result.conceptPng,
+      });
     }
 
     // Terminal record INTO progress — the same CadDoneEvent shape the old

@@ -1772,6 +1772,31 @@ export const cadJobs = pgTable(
   ]
 );
 
+// Fetched-facts cache (lib/cad/repo-fetch.ts): the distilled mechanical
+// fact sheet for a set of URLs a prompt linked (GitHub repo and/or
+// datasheet PDFs), cached per user so re-generating against the same
+// project skips the trees API, the board-file download, and the distill
+// model call. `sourceUrl` is the canonical cache key (sorted URLs joined
+// with a space). Rows are re-read for 7 days (app-layer TTL), then
+// re-fetched and replaced; stale rows are harmless and tiny (text only).
+export const cadFetchedFacts = pgTable(
+  "cad_fetched_facts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sourceUrl: text("source_url").notNull(),
+    facts: text("facts").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("cad_fetched_facts_user_url_idx").on(table.userId, table.sourceUrl),
+  ]
+);
+
 // Studio credit ledger (MTR-181, docs/text-to-cad/08): one signed row per
 // credit movement; a user's balance is SUM(delta) — no denormalized balance
 // column to drift. Append-only by convention (corrections are new `admin`
