@@ -723,11 +723,12 @@ describe("completePrintOrder (two_step, embedded fee sheet)", () => {
         capture_method: "manual",
         // Card gets saved on confirm → next order is one-tap.
         setup_future_usage: "off_session",
-        // Pinned to card alone: automatic_payment_methods would
-        // surface every dashboard-enabled non-redirect method (e.g.
-        // us_bank_account), and "link" drags in Link's Instant Bank
-        // Payments picker.
-        payment_method_types: ["card"],
+        // Pinned to card + Link ("link" powers the express row's
+        // Link button; Instant Bank Payments stays off at the
+        // merchant level): automatic_payment_methods would surface
+        // every dashboard-enabled non-redirect method (e.g.
+        // us_bank_account).
+        payment_method_types: ["card", "link"],
         metadata: expect.objectContaining({
           printOrderId: "order-1",
           type: "print_order",
@@ -735,7 +736,7 @@ describe("completePrintOrder (two_step, embedded fee sheet)", () => {
           source: "embedded_fee_sheet",
         }),
       }),
-      { idempotencyKey: "fee-sheet:v3:order-1" }
+      { idempotencyKey: "fee-sheet:v4:order-1" }
     );
 
     // Sentinel swapped for the PI id + address persisted — but the
@@ -856,7 +857,7 @@ describe("completePrintOrder (two_step, embedded fee sheet)", () => {
       expect.objectContaining({
         metadata: expect.objectContaining({ source: "embedded_fee_sheet" }),
       }),
-      { idempotencyKey: "fee-sheet:v3:order-1" }
+      { idempotencyKey: "fee-sheet:v4:order-1" }
     );
   });
 
@@ -870,7 +871,7 @@ describe("completePrintOrder (two_step, embedded fee sheet)", () => {
         id: "pi_sheet_1",
         status: "requires_payment_method",
         client_secret: "cs_secret_1",
-        payment_method_types: ["card"],
+        payment_method_types: ["card", "link"],
         metadata: { source: "embedded_fee_sheet", printOrderId: "order-1" },
       });
 
@@ -894,9 +895,9 @@ describe("completePrintOrder (two_step, embedded fee sheet)", () => {
         id: "pi_sheet_1",
         status: "requires_payment_method",
         client_secret: "cs_secret_1",
-        // Minted under an earlier pin (v2 carried "link"), or under
-        // automatic_payment_methods with every non-redirect method.
-        payment_method_types: ["card", "link"],
+        // Minted under an earlier pin (v3 was card-only), or under
+        // automatic_payment_methods with a different method set.
+        payment_method_types: ["card"],
         metadata: { source: "embedded_fee_sheet", printOrderId: "order-1" },
       });
       stripeUpdatePI.mockResolvedValueOnce({ id: "pi_sheet_1" });
@@ -904,7 +905,7 @@ describe("completePrintOrder (two_step, embedded fee sheet)", () => {
       const result = await completePrintOrder(callArgs);
 
       expect(stripeUpdatePI).toHaveBeenCalledWith("pi_sheet_1", {
-        payment_method_types: ["card"],
+        payment_method_types: ["card", "link"],
       });
       expect(result).toEqual({
         feeSheet: {
@@ -935,9 +936,9 @@ describe("completePrintOrder (two_step, embedded fee sheet)", () => {
       expect(updateSet).toHaveBeenCalledWith({ stripeSessionId: null });
       expect(stripeCreatePI).toHaveBeenCalledWith(
         expect.objectContaining({
-          payment_method_types: ["card"],
+          payment_method_types: ["card", "link"],
         }),
-        { idempotencyKey: "fee-sheet:v3:order-1" }
+        { idempotencyKey: "fee-sheet:v4:order-1" }
       );
       expect(result).toEqual({
         feeSheet: {

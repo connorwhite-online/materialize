@@ -4,11 +4,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { BadgeCheckIcon, CreditCardIcon } from "lucide-react";
 import {
   Elements,
+  ExpressCheckoutElement,
   PaymentElement,
   useElements,
   useStripe,
 } from "@stripe/react-stripe-js";
-import type { Appearance } from "@stripe/stripe-js";
+import type {
+  Appearance,
+  StripeExpressCheckoutElementReadyEvent,
+} from "@stripe/stripe-js";
 import { useTheme } from "next-themes";
 import { NativeSheet } from "@/components/ui/native-sheet";
 import { getStripeBrowser } from "@/lib/stripe/browser";
@@ -22,11 +26,18 @@ import { finalizeFeeAuthorization } from "@/app/actions/print";
  * the fee no longer costs a redirect — the only external page left
  * in two-step checkout is CraftCloud's own.
  *
- * State machine: idle → confirming (Stripe.js, card/Apple Pay)
- * → finalizing (server verifies the hold + advances the order)
- * → redirecting. If confirm succeeded but finalize failed, we retry
- * ONLY the finalize on the next tap — re-confirming an authorized PI
- * would error. The webhook backstop
+ * Layout: an Express Checkout row (Link / Apple Pay / Google Pay
+ * one-tap buttons — each hides itself when ineligible, and Apple Pay
+ * additionally needs the domain registered under Stripe's payment
+ * method domains) above an "or pay with card" divider and a card-ONLY
+ * Payment Element (wallets/link suppressed there so the accordion
+ * stays a clean card form; the express row owns the one-tap paths).
+ *
+ * State machine: idle → confirming (Stripe.js — card form or an
+ * express button) → finalizing (server verifies the hold + advances
+ * the order) → redirecting. If confirm succeeded but finalize failed,
+ * we retry ONLY the finalize on the next tap — re-confirming an
+ * authorized PI would error. The webhook backstop
  * (payment_intent.amount_capturable_updated) advances the order
  * anyway if the buyer closes the tab mid-finalize.
  */
@@ -35,7 +46,11 @@ export interface FeeSheetPayload {
   clientSecret: string;
   orderId: string;
   amountCents: number;
-  /** Buyer email — prefills the Payment Element's billing details. */
+  /**
+   * Buyer email — prefills the Payment Element's billing details so
+   * the sheet never asks for it a second time (also lets Link
+   * recognize a returning buyer faster).
+   */
   email?: string;
 }
 
@@ -161,6 +176,12 @@ function FeeForm({
   >("idle");
   const [error, setError] = useState<string | null>(null);
   const [elementReady, setElementReady] = useState(false);
+  // True once the Express Checkout Element reports at least one
+  // eligible one-tap method (Link / Apple Pay / Google Pay) — until
+  // then the express row and its divider stay hidden so ineligible
+  // contexts (unregistered domain, non-Safari, no wallet) see just
+  // the card form.
+  const [expressReady, setExpressReady] = useState(false);
   // Set once confirmPayment succeeds: from then on, taps retry only
   // the server finalize — the hold already exists on the card.
   const confirmedRef = useRef(false);
@@ -184,23 +205,15 @@ function FeeForm({
     window.location.href = result.productionPaymentUrl;
   };
 
-  const submit = async () => {
-    if (busy) return;
-    setError(null);
-
-    if (confirmedRef.current) {
-      await finalize();
-      return;
-    }
-
-    if (!stripe || !elements) return;
-    setPhaseLocked("confirming");
-
-    const { error: confirmError, paymentIntent } = await stripe.confirmPayment(
+  // Shared confirm → finalize chain for both entry points (the card
+  // form's Authorize button and an express-button tap). The caller
+  // has already locked the phase to "confirming".
+  const confirmAndFinalize = async () => {
+    const { error: confirmError, paymentIntent } = await stripe!.confirmPayment(
       {
-        elements,
-        // No redirect-based methods are offered (the PI is pinned to
-        // card only), so this never navigates —
+        elements: elements!,
+        // No redirect-based methods are offered (card + Link, wallets
+        // on card), so this never navigates —
         // the return_url is a Stripe API requirement, satisfied with
         // the tokenless landing as a safety net.
         redirect: "if_required",
@@ -230,12 +243,71 @@ function FeeForm({
     await finalize();
   };
 
+  const submit = async () => {
+    if (busy) return;
+    setError(null);
+
+    if (confirmedRef.current) {
+      await finalize();
+      return;
+    }
+
+    if (!stripe || !elements) return;
+    setPhaseLocked("confirming");
+    await confirmAndFinalize();
+  };
+
+  // Express-button path: Stripe fires onConfirm after the buyer
+  // approves the wallet/Link sheet — the payment method is already
+  // collected, so we go straight to confirmPayment.
+  const expressConfirm = async () => {
+    if (busy) return;
+    setError(null);
+
+    if (confirmedRef.current) {
+      await finalize();
+      return;
+    }
+
+    if (!stripe || !elements) return;
+    setPhaseLocked("confirming");
+    await confirmAndFinalize();
+  };
+
   return (
     <div className="mt-4 space-y-4">
+      {/* One-tap row. The wrapper collapses until Stripe reports at
+          least one eligible button, so the divider never renders over
+          an empty element. */}
+      <div className={expressReady ? "space-y-3" : "hidden"}>
+        <ExpressCheckoutElement
+          onReady={(event: StripeExpressCheckoutElementReadyEvent) =>
+            setExpressReady(Boolean(event.availablePaymentMethods))
+          }
+          onConfirm={expressConfirm}
+          options={{ buttonHeight: 48 }}
+        />
+        <div className="flex items-center gap-3">
+          <div aria-hidden="true" className="h-px flex-1 bg-border" />
+          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            or pay with card
+          </span>
+          <div aria-hidden="true" className="h-px flex-1 bg-border" />
+        </div>
+      </div>
+
       <PaymentElement
         onReady={() => setElementReady(true)}
         options={{
           layout: "accordion",
+          // The accordion is card-ONLY: the express row above owns
+          // Link / Apple Pay / Google Pay, so their in-element
+          // renderings are suppressed here to keep this a clean card
+          // form. (The bank picker is kept out at the merchant level —
+          // Instant Bank Payments off in the Dashboard's Link
+          // settings; see SHEET_PAYMENT_METHOD_TYPES in
+          // app/actions/print.ts.)
+          wallets: { applePay: "never", googlePay: "never", link: "never" },
           // Prefill billing details with the email from the shipping
           // form so nothing in the sheet asks for it a second time.
           defaultValues: email
