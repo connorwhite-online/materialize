@@ -534,6 +534,16 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
     } catch (err) {
       logError("executeCadJob.referenceImages", err);
     }
+    // Flight-recorder breadcrumb: how many references this build actually
+    // ran with (and how many came from the thread), so a "did it see my
+    // images?" question is answered by the job trail, not guesswork.
+    if (images?.length) {
+      onProgress({
+        type: "references",
+        count: images.length,
+        inherited: images.length - (input.images?.length ?? 0),
+      });
+    }
     let threadHistory: ThreadHistoryEntry[] | undefined;
     if (input.parentGenerationId) {
       try {

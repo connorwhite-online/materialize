@@ -326,6 +326,20 @@ export type CadProgressEvent =
     }
   | {
       /**
+       * Observability: how many reference images this build actually ran
+       * with, split new-this-turn vs inherited from the thread. Emitted once
+       * after resolution (lib/cad/reference-images.ts) and persisted in the
+       * progress trail, so "did the build see my images?" is answerable from
+       * the job record instead of guesswork. Emitted only when count > 0.
+       */
+      type: "references";
+      /** Total references the engines received this run. */
+      count: number;
+      /** How many of those were inherited from the parent chain. */
+      inherited: number;
+    }
+  | {
+      /**
        * Live cost meter: cumulative usage so far, synthesized by the events
        * route from cadJobs.usage (periodically flushed mid-run) — NEVER
        * persisted into the progress log (it would spam the append-only
