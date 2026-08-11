@@ -1,6 +1,11 @@
 import "server-only";
 
-import { completeText, hasModelCredentials } from "./model-client";
+import {
+  completeText,
+  hasModelCredentials,
+  type PromptImage,
+} from "./model-client";
+import { labelUserReferences } from "./types";
 import { modelForRole } from "./models";
 import { runHarness, type HarnessInput, type HarnessResult } from "./harness";
 import { runAgenticHarness, CadAgenticError } from "./agentic";
@@ -37,20 +42,24 @@ export type CadRequestClass = "simple" | "complex" | "organic";
  */
 export async function classifyCadRequest(
   prompt: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  images?: PromptImage[] | null
 ): Promise<CadRequestClass> {
   try {
+    const refs = labelUserReferences(images);
     const verdict = await completeText({
       system:
         "You route a 3D-model request to the right engine. Reply with ONE word:\n" +
         "SIMPLE — a straightforward part a short parametric script gets right in one or two tries (primitive-based shapes, plates, trays, knobs, simple brackets/enclosures, anything under ~5 distinct features).\n" +
         "COMPLEX — a functional/mechanical part needing MANY coordinated features or steps (multi-feature enclosures with several ports/bosses/vents, assemblies, interlocking or multi-constraint geometry) that benefits from being built and validated incrementally.\n" +
         "ORGANIC — a NON-functional sculptural / character / creature / figurine / decorative form with no precise functional features (best made by a generative 3D model).\n" +
+        "Reference images may be attached — classify the requested object from BOTH the text and the images (a terse prompt with a detailed photo is whatever the photo shows).\n" +
         "When in doubt, SIMPLE.\n" +
         "Reply with only the single word.",
       prompt,
       model: modelForRole("plan"),
       role: "route",
+      images: refs.length ? refs : undefined,
       signal,
     });
     if (/\bORGANIC\b/i.test(verdict)) return "organic";
@@ -157,7 +166,7 @@ export async function runCadGeneration(
     // Kill switch / no sessions / no model: today's behavior, unchanged.
     const useGenerative =
       generativeEnabled() &&
-      (await shouldUseGenerative(input.prompt, input.signal));
+      (await shouldUseGenerative(input.prompt, input.signal, input.images));
     const n = !input.priorSourceCode && !useGenerative ? bestOfN() : 1;
     const route = useGenerative
       ? "legacy-generative"
@@ -178,7 +187,7 @@ export async function runCadGeneration(
     return { ...result, route };
   }
 
-  const kind = await classifyCadRequest(input.prompt, input.signal);
+  const kind = await classifyCadRequest(input.prompt, input.signal, input.images);
   if (kind === "organic" && generativeEnabled()) {
     note({ type: "route", route: "organic" });
     return { ...(await generative()), route: "organic" };

@@ -14,6 +14,10 @@ import { CadMeter, runWithCadContext } from "@/lib/cad/metering";
 import { runCadGeneration } from "@/lib/cad/orchestrate";
 import type { PromptImage } from "@/lib/cad/model-client";
 import {
+  buildThreadHistory,
+  resolveReferenceImages,
+} from "@/lib/cad/reference-images";
+import {
   persistGenerationFailure,
   persistGenerationSuccess,
 } from "@/lib/cad/persist";
@@ -21,6 +25,7 @@ import type {
   CadDoneEvent,
   CadJobProgressEntry,
   CadQuestion,
+  ThreadHistoryEntry,
 } from "@/lib/cad/types";
 import { resolveStoredAnswer } from "@/lib/cad/types";
 import { notifyCadBuildFinished } from "@/lib/notifications/notify";
@@ -198,7 +203,7 @@ export interface ExecuteCadJobInput {
 export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
   const { jobId, generationId, userId, prompt } = input;
   const isRoot = !input.parentGenerationId;
-  const images = input.images?.length ? input.images : undefined;
+  let images = input.images?.length ? input.images : undefined;
 
   const controller = new AbortController();
   let cancelRequested = false;
@@ -513,6 +518,42 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
       () => undefined
     );
 
+    // Reference images + conversation graph (lib/cad/reference-images.ts):
+    // persist this turn's attached refs to R2, fold in the parent's stored
+    // ones (revisions), and rebuild the thread's earlier instructions so the
+    // engines see how the flow has unfolded. Both best-effort: any failure
+    // falls back to the request's own images and no history — never a
+    // failed generation.
+    try {
+      images = await resolveReferenceImages({
+        generationId,
+        userId,
+        parentGenerationId: input.parentGenerationId,
+        images: input.images,
+      });
+    } catch (err) {
+      logError("executeCadJob.referenceImages", err);
+    }
+    // Flight-recorder breadcrumb: how many references this build actually
+    // ran with (and how many came from the thread), so a "did it see my
+    // images?" question is answered by the job trail, not guesswork.
+    if (images?.length) {
+      onProgress({
+        type: "references",
+        count: images.length,
+        inherited: images.length - (input.images?.length ?? 0),
+      });
+    }
+    let threadHistory: ThreadHistoryEntry[] | undefined;
+    if (input.parentGenerationId) {
+      try {
+        const history = await buildThreadHistory(input.parentGenerationId);
+        threadHistory = history.length > 0 ? history : undefined;
+      } catch (err) {
+        logError("executeCadJob.threadHistory", err);
+      }
+    }
+
     // Complexity-routed entry (docs/text-to-cad/03 §C): simple prompts keep
     // the scripted loop, complex ones get the agentic session loop, organic
     // ones the generative backend. With CAD_AGENTIC=false / no sessions /
@@ -527,6 +568,7 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
         providedBrief: input.providedBrief,
         process: input.process ?? null,
         images,
+        threadHistory,
         signal: controller.signal,
         onProgress,
         onQuestion,

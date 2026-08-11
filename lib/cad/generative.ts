@@ -2,6 +2,7 @@ import "server-only";
 
 import { fal } from "@fal-ai/client";
 import { completeText, type PromptImage } from "./model-client";
+import { labelUserReferences } from "./types";
 import { meterFalCall } from "./metering";
 import { modelForRole } from "./models";
 import { runCadCode } from "./runner-client";
@@ -74,19 +75,23 @@ function meshUrlOf(data: Record<string, unknown> | undefined): string | null {
  */
 export async function shouldUseGenerative(
   prompt: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  images?: PromptImage[] | null
 ): Promise<boolean> {
   if (!generativeEnabled()) return false;
   try {
+    const refs = labelUserReferences(images);
     const verdict = await completeText({
       system:
         "You route a 3D-model request to the right engine. Reply with ONE word:\n" +
         "ORGANIC — a NON-functional sculptural / character / creature / figurine / decorative / anatomical form with no precise functional features (best made by a generative 3D model).\n" +
         "MECHANICAL — ANY functional/parametric part, INCLUDING ones meant to look organic, sculptural, topology-optimized, or lightweighted (bracket, mount, handle, holder, enclosure, clip, gear, tool, fixture, lattice). These are built with the CAD/SDF toolkit, which can do organic functional form. When in doubt, MECHANICAL.\n" +
+        "Reference images may be attached — classify the requested object from BOTH the text and the images (a terse prompt with a detailed photo is whatever the photo shows).\n" +
         "Reply with only the single word.",
       prompt,
       model: modelForRole("plan"),
       role: "route",
+      images: refs.length ? refs : undefined,
       signal,
     });
     return /\bORGANIC\b/i.test(verdict);
@@ -128,6 +133,9 @@ export async function runGenerative(opts: {
     // (unless a premium direct text-to-3D model is configured).
     let imageUrl: string | null = null;
     if (hasImage) {
+      // Image-to-3D takes ONE conditioning image; the first (newest) ref
+      // wins. Multi-view conditioning needs a different fal model — if that
+      // lands, thread the rest of opts.images here.
       const img = opts.images![0];
       const blob = new Blob([Buffer.from(img.data, "base64")], {
         type: img.mediaType,

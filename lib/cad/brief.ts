@@ -7,6 +7,7 @@ import {
   hasModelCredentials,
   type PromptImage,
 } from "./model-client";
+import { labelUserReferences } from "./types";
 import { modelForRole } from "./models";
 import { formatExemplarCatalog } from "./knowledge/exemplars";
 import { formatComponentCatalog } from "./knowledge/components";
@@ -107,6 +108,12 @@ export const cadBriefSchema = z.looseObject({
 
 export type CadBrief = z.infer<typeof cadBriefSchema>;
 
+// Instruction paired with user-attached reference images: mine them for the
+// brief's qualitative fields. Millimeter numbers stay text-only — an image
+// can't ground an exact dimension, and dimensionTargets are machine-asserted.
+const BRIEF_REFERENCE_NOTE =
+  'User reference image(s) are attached, each captioned "User reference image N". Read the form language, proportions, and visible features/components from them and fold what you see into the brief ("form.language", "summary", "components", "interfaces"). The written prompt wins on any conflict. Never derive exact millimeter "dimensionTargets" from an image — only from the text.';
+
 function briefSystemPrompt(): string {
   return `You are a CAD engineer writing a DESIGN BRIEF for a parametric 3D model — structured data, not prose, not code.
 
@@ -150,12 +157,15 @@ export async function buildBrief(opts: {
 }): Promise<CadBrief | null> {
   if (!hasModelCredentials()) return null;
   try {
+    const refs = labelUserReferences(opts.images);
     const text = await completeText({
       system: briefSystemPrompt(),
-      prompt: `Write the design brief for: ${opts.prompt}`,
+      prompt: refs.length
+        ? `Write the design brief for: ${opts.prompt}\n\n${BRIEF_REFERENCE_NOTE}`
+        : `Write the design brief for: ${opts.prompt}`,
       model: modelForRole("brief"),
       role: "brief",
-      images: opts.images?.length ? opts.images : undefined,
+      images: refs.length ? refs : undefined,
       signal: opts.signal,
     });
     const match = text.match(/\{[\s\S]*\}/);

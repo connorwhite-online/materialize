@@ -200,6 +200,67 @@ const ALLOWED_IMAGE_TYPES: ImageMediaType[] = [
 ];
 const MAX_IMAGES = 4;
 
+// Downscale bounds for attached references. Raw phone photos run 3-12MB —
+// past the model API's per-image limit (the server silently drops those) and
+// far beyond what vision needs. ~1568px is the vision-model sweet spot; JPEG
+// at 0.85 keeps a photo reference in the low hundreds of KB.
+const REF_MAX_DIMENSION = 1568;
+const REF_REENCODE_BYTES = 1_500_000;
+
+/**
+ * Read an attached reference, downscaling/re-encoding when it's large.
+ * Small-enough images of an allowed type pass through untouched (GIF/WebP/
+ * PNG stay what they are); anything oversized — or any non-allowed image
+ * type like iPhone HEIC — is rasterized onto a white canvas (so transparent
+ * sketch PNGs don't go black) and re-encoded as JPEG. On a decode failure,
+ * an allowed type falls back to the raw file read (old behavior); a
+ * non-allowed one THROWS so the caller can tell the user instead of
+ * silently sending a format the model API rejects.
+ */
+async function readReferenceImage(
+  f: File,
+  allowRawFallback: boolean
+): Promise<{ dataUrl: string; mediaType: ImageMediaType }> {
+  const raw = () =>
+    new Promise<{ dataUrl: string; mediaType: ImageMediaType }>(
+      (resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () =>
+          resolve({
+            dataUrl: String(r.result),
+            mediaType: f.type as ImageMediaType,
+          });
+        r.onerror = reject;
+        r.readAsDataURL(f);
+      }
+    );
+  try {
+    const bitmap = await createImageBitmap(f);
+    const { width, height } = bitmap;
+    const scale = Math.min(1, REF_MAX_DIMENSION / Math.max(width, height, 1));
+    if (scale === 1 && allowRawFallback && f.size <= REF_REENCODE_BYTES) {
+      bitmap.close();
+      return await raw();
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("no 2d context");
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    return {
+      dataUrl: canvas.toDataURL("image/jpeg", 0.85),
+      mediaType: "image/jpeg",
+    };
+  } catch (err) {
+    if (allowRawFallback) return raw();
+    throw err;
+  }
+}
+
 interface AttachedImage {
   id: string;
   /** data: URL for the thumbnail. */
@@ -445,6 +506,12 @@ export function TextToCadStudio({
   const [nameDraft, setNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
   const [images, setImages] = useState<AttachedImage[]>([]);
+  // Attachment problems are TOLD, not swallowed — a silently dropped file
+  // reads as "the build lost my images" (seen in the wild with HEIC).
+  const [attachError, setAttachError] = useState<string | null>(null);
+  // In-flight attachment decodes; the send button waits for zero so a fast
+  // submit can't race a still-reading file out of the request.
+  const [attaching, setAttaching] = useState(0);
   const [selectedPartId, setSelectedPartId] = useState<string | null>(null);
   const [savingModel, setSavingModel] = useState(false);
   const [savedAssets, setSavedAssets] = useState<Set<string>>(new Set());
@@ -1101,6 +1168,7 @@ export function TextToCadStudio({
     setPrompt("");
     setSubmittedPrompt(null);
     setImages([]);
+    setAttachError(null);
     setSelectedPartId(null);
     setShowHistory(false);
     setShowBuildsMenu(false);
@@ -1309,35 +1377,59 @@ export function TextToCadStudio({
     // user's typed instruction (and any attached refs) stay put to retry.
     setPrompt("");
     setImages([]);
+    setAttachError(null);
   }
 
   async function addFiles(files: FileList | File[] | null | undefined) {
     if (!files) return;
-    const incoming = Array.from(files).filter((f) =>
-      ALLOWED_IMAGE_TYPES.includes(f.type as ImageMediaType)
-    );
-    for (const f of incoming) {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const r = new FileReader();
-        r.onload = () => resolve(String(r.result));
-        r.onerror = reject;
-        r.readAsDataURL(f);
-      });
-      const comma = dataUrl.indexOf(",");
-      const data = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
-      setImages((prev) =>
-        prev.length >= MAX_IMAGES
-          ? prev
-          : [
-              ...prev,
-              {
-                id: crypto.randomUUID(),
-                dataUrl,
-                data,
-                mediaType: f.type as ImageMediaType,
-              },
-            ]
-      );
+    setAttachError(null);
+    // Local slot counter so multi-select / drag-drop over the cap is TOLD to
+    // the user — the old silent drop read as "the build lost my images".
+    let slots = MAX_IMAGES - images.length;
+    for (const f of Array.from(files)) {
+      const isAllowed = ALLOWED_IMAGE_TYPES.includes(f.type as ImageMediaType);
+      // Other image/* types (iPhone HEIC above all) get a decode attempt —
+      // Safari can rasterize HEIC onto a canvas, which re-encodes to JPEG.
+      // A type we can neither send nor decode is reported, never swallowed.
+      const isConvertible = f.type.startsWith("image/") || f.type === "";
+      if (!isAllowed && !isConvertible) {
+        setAttachError(
+          `Couldn't attach ${f.name} — use a PNG, JPEG, GIF, or WebP image.`
+        );
+        continue;
+      }
+      if (slots <= 0) {
+        setAttachError(
+          `Up to ${MAX_IMAGES} reference images per turn — the rest were not attached.`
+        );
+        break;
+      }
+      setAttaching((n) => n + 1);
+      try {
+        const { dataUrl, mediaType } = await readReferenceImage(f, isAllowed);
+        const comma = dataUrl.indexOf(",");
+        const data = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+        slots--;
+        setImages((prev) =>
+          prev.length >= MAX_IMAGES
+            ? prev
+            : [
+                ...prev,
+                {
+                  id: crypto.randomUUID(),
+                  dataUrl,
+                  data,
+                  mediaType,
+                },
+              ]
+        );
+      } catch {
+        setAttachError(
+          `Couldn't read ${f.name} — try a PNG, JPEG, GIF, or WebP image.`
+        );
+      } finally {
+        setAttaching((n) => n - 1);
+      }
     }
   }
 
@@ -1355,7 +1447,9 @@ export function TextToCadStudio({
       prompt,
       annotations.length
     );
-    if (!canSubmit || generating) return;
+    // attaching > 0 also blocks (Cmd+Enter path): a submit racing an
+    // in-flight file read would silently send without that image.
+    if (!canSubmit || generating || attaching > 0) return;
 
     const parentId = latestTurn?.id; // revise the latest turn when in a thread
     // Annotation-only sends need a model to annotate (always a revision).
@@ -2720,6 +2814,12 @@ export function TextToCadStudio({
               </div>
             )}
 
+            {attachError && (
+              <p className="mb-2 px-1 text-xs text-amber-600 dark:text-amber-500">
+                {attachError}
+              </p>
+            )}
+
             {/* Annotation chips — make it obvious selected faces send with the
                 message. */}
             {annotations.length > 0 && (
@@ -2791,7 +2891,10 @@ export function TextToCadStudio({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/png,image/jpeg,image/gif,image/webp"
+                // HEIC/HEIF included: iPhone camera-roll picks arrive as HEIC
+                // when not auto-converted; addFiles re-encodes them to JPEG
+                // (or reports failure) rather than silently dropping them.
+                accept="image/png,image/jpeg,image/gif,image/webp,image/heic,image/heif"
                 multiple
                 hidden
                 onChange={(e) => {
@@ -2804,6 +2907,7 @@ export function TextToCadStudio({
                 onClick={submit}
                 disabled={
                   generating ||
+                  attaching > 0 ||
                   !planComposerSubmit(prompt, annotations.length).canSubmit
                 }
                 aria-label={composerLabel}
@@ -3408,6 +3512,14 @@ function describeEvent(ev: CadProgressEvent): {
       return { text: "Designing your model", sub: null };
     case "fallback":
       return { text: "Rebuilding with a fresh approach", sub: null };
+    // Confirms the build is working from the attached/inherited references —
+    // the honest answer to "did it actually get my images?".
+    case "references":
+      return {
+        text: "Studying your reference images",
+        sub:
+          ev.count === 1 ? "1 image" : `${ev.count} images`,
+      };
     // Never lands in `progress` (handled as live state) — here only to keep
     // the switch exhaustive.
     case "usage":

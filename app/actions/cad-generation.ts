@@ -679,7 +679,11 @@ export async function getCadStepDownloadUrl(input: {
       return { error: "Not found" };
     }
 
-    const url = await generateDownloadUrl(asset.stepStorageKey);
+    // Signed as an attachment: without a disposition the browser may try to
+    // render model/step in the tab, which reads as a hung download.
+    const url = await generateDownloadUrl(asset.stepStorageKey, 3600, {
+      downloadName: asset.stepStorageKey.split("/").pop() || "model.step",
+    });
     return { url };
   } catch (error) {
     logError("getCadStepDownloadUrl", error);

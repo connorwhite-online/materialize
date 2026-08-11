@@ -1,6 +1,10 @@
 import "server-only";
 
-import { completeText, hasModelCredentials } from "./model-client";
+import {
+  completeText,
+  hasModelCredentials,
+  type PromptImage,
+} from "./model-client";
 import { modelForRole } from "./models";
 import { logError } from "@/lib/logger";
 import {
@@ -55,7 +59,7 @@ export function aestheticJudgeEnabled(): boolean {
  */
 async function runVisionJudge(
   prompt: string,
-  pngs: string[],
+  images: PromptImage[],
   intent?: JudgeIntent,
   signal?: AbortSignal
 ): Promise<string> {
@@ -64,7 +68,7 @@ async function runVisionJudge(
     prompt: buildJudgePrompt(prompt, intent),
     model: process.env.CAD_AESTHETIC_JUDGE_MODEL || modelForRole("critique"),
     role: "critique",
-    images: pngs.map((data) => ({ data, mediaType: "image/png" as const })),
+    images,
     signal,
   });
 }
@@ -84,17 +88,40 @@ export async function judgeAesthetics(opts: {
    * the rendered result. Omitted = judge prompt identical to before.
    */
   intent?: JudgeIntent;
+  /**
+   * User-attached reference images — appended (captioned) after the clay
+   * renders so resemblance to what the user showed us is scoreable. The
+   * judge prompt gains the reference framing only when any are present.
+   */
+  references?: PromptImage[] | null;
   signal?: AbortSignal;
 }): Promise<AestheticJudgement> {
   const views = Object.values(opts.renders ?? {}).filter(
     (v): v is string => typeof v === "string" && v.length > 0
   );
-  const images = views.length > 0 ? views : opts.renderPng ? [opts.renderPng] : [];
-  if (!aestheticJudgeEnabled() || images.length === 0) {
+  const renders = views.length > 0 ? views : opts.renderPng ? [opts.renderPng] : [];
+  if (!aestheticJudgeEnabled() || renders.length === 0) {
     return { available: false };
   }
+  // Judge-specific captions: callers pass raw references (the default
+  // caption below frames them as the goal) — a caller-set label (e.g. the
+  // concept render's "aesthetic target" framing) is kept as-is.
+  const refs = (opts.references ?? []).map((r, i) => ({
+    data: r.data,
+    mediaType: r.mediaType,
+    label:
+      r.label ??
+      `User reference image ${i + 1} — what the user wants the part to resemble.`,
+  }));
+  const images: PromptImage[] = [
+    ...renders.map((data) => ({ data, mediaType: "image/png" as const })),
+    ...refs,
+  ];
+  const intent: JudgeIntent | undefined = refs.length
+    ? { ...opts.intent, referenceCount: refs.length }
+    : opts.intent;
   try {
-    const text = await runVisionJudge(opts.prompt, images, opts.intent, opts.signal);
+    const text = await runVisionJudge(opts.prompt, images, intent, opts.signal);
     const parsed = parseJudgement(text);
     if (!parsed) return { available: false };
     return {

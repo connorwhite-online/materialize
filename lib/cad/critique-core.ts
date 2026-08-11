@@ -58,6 +58,12 @@ export interface JudgeIntent {
   plan?: string;
   /** The design brief the generation was built against. */
   brief?: CadBrief;
+  /**
+   * How many user-attached reference images follow the clay renders in the
+   * judge call (0/absent = none — prompt byte-identical to before). The
+   * references show the GOAL; resemblance to them is scoreable.
+   */
+  referenceCount?: number;
 }
 
 /**
@@ -70,6 +76,14 @@ const INTENT_FRAMING =
   "Design intent (from the generator) — use this to understand what was attempted. Judge ONLY the rendered result against the user's request; intent explains choices, it never excuses visual defects.";
 
 /**
+ * Framing for user-attached reference images. Same sycophancy guard as
+ * intent: the references say what was WANTED, the clay renders say what was
+ * BUILT — only the renders get graded.
+ */
+const REFERENCE_FRAMING =
+  "After the clay renders, reference image(s) are attached (each captioned: the user's own references and/or the concept render this build aimed toward). They show the GOAL: weigh resemblance to them when scoring recognizability and proportion. Grade only the clay renders — the references explain the target, they never excuse defects.";
+
+/**
  * Build the judge's user prompt. Pure and shared (harness judge + tests) so
  * the intent framing can't drift between call sites. Without intent the
  * output is exactly `Requested object: <prompt>` — unchanged from before.
@@ -79,8 +93,10 @@ export function buildJudgePrompt(prompt: string, intent?: JudgeIntent): string {
   const blocks: string[] = [];
   if (intent?.plan) blocks.push(`Plan:\n${intent.plan}`);
   if (intent?.brief) blocks.push(`Brief: ${JSON.stringify(intent.brief)}`);
-  if (blocks.length === 0) return base;
-  return [base, INTENT_FRAMING, ...blocks].join("\n\n");
+  const parts = [base];
+  if (blocks.length > 0) parts.push(INTENT_FRAMING, ...blocks);
+  if (intent?.referenceCount) parts.push(REFERENCE_FRAMING);
+  return parts.join("\n\n");
 }
 
 export interface DimensionScore {

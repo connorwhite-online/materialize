@@ -65,13 +65,23 @@ export async function generateUploadUrl(
 export async function putObject(
   key: string,
   body: Uint8Array,
-  contentType: string
+  contentType: string,
+  options?: {
+    /**
+     * Stored Content-Encoding (e.g. "gzip" for pre-compressed bytes). R2
+     * returns it verbatim on GET — including presigned GETs — so browsers
+     * transparently decode. Use for large TEXT artifacts (STEP) where R2's
+     * un-edge-cached S3 endpoint makes raw transfer the bottleneck.
+     */
+    contentEncoding?: string;
+  }
 ): Promise<void> {
   const command = new PutObjectCommand({
     Bucket: getBucket(),
     Key: key,
     Body: body,
     ContentType: contentType,
+    ContentEncoding: options?.contentEncoding,
   });
   await getS3().send(command);
 }
@@ -93,11 +103,22 @@ export async function getObjectBytes(key: string): Promise<Uint8Array> {
 
 export async function generateDownloadUrl(
   key: string,
-  expiresIn = 3600
+  expiresIn = 3600,
+  options?: {
+    /**
+     * Force a save-as download with this filename (signed
+     * response-content-disposition). Without it the browser may try to
+     * render unknown types in the tab, which reads as a hang.
+     */
+    downloadName?: string;
+  }
 ): Promise<string> {
   const command = new GetObjectCommand({
     Bucket: getBucket(),
     Key: key,
+    ResponseContentDisposition: options?.downloadName
+      ? `attachment; filename="${options.downloadName.replace(/["\\]/g, "")}"`
+      : undefined,
   });
   return getSignedUrl(getS3(), command, { expiresIn });
 }
