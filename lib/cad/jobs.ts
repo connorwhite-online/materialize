@@ -195,6 +195,11 @@ export interface ExecuteCadJobInput {
   priorBrief?: unknown;
   /** User-reviewed brief from the studio's brief card (fresh builds only). */
   providedBrief?: unknown;
+  /**
+   * Concept render the user chose in the composer's pre-build picker
+   * (base64 PNG) — the harness uses it verbatim as the aesthetic target.
+   */
+  providedConcept?: { png: string } | null;
 }
 
 /**
@@ -612,6 +617,7 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
         images,
         threadHistory,
         fetchedFacts,
+        providedConcept: input.providedConcept ?? null,
         signal: controller.signal,
         onProgress,
         onQuestion,

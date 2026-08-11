@@ -1592,7 +1592,7 @@ export const cadGenerations = pgTable(
      * inline — so history queries stay small.
      */
     referenceImages: jsonb("reference_images").$type<
-      { key: string; mediaType: string }[]
+      { key: string; mediaType: string; label?: string }[]
     >(),
     /**
      * Instrumented construction features for the feature-chip UX

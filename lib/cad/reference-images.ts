@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { cadGenerations } from "@/lib/db/schema";
 import { logError } from "@/lib/logger";
 import { getObjectBytes, putObject } from "@/lib/storage";
+import { CONCEPT_THREAD_REF_LABEL } from "./concept";
 import type { PromptImage } from "./model-client";
 import type { ThreadHistoryEntry } from "./types";
 
@@ -216,9 +217,10 @@ export async function buildThreadHistory(
 /**
  * Persist the concept render a finished build aimed toward as a thread
  * reference on its generation row, so revisions inherit the SAME aesthetic
- * target (the whole point of letting the user pick one). Appended AFTER the
- * user's own references and only when a slot is free — user refs always
- * outrank the concept. Best-effort: never throws.
+ * target (the whole point of letting the user pick one). UPSERT semantics:
+ * a thread carries at most ONE concept target — an existing concept entry
+ * is replaced (a refine-turn pick supersedes it), and user refs always
+ * outrank it (skipped when their slots are full). Best-effort: never throws.
  */
 export async function appendConceptReference(opts: {
   generationId: string;
@@ -232,7 +234,10 @@ export async function appendConceptReference(opts: {
       .where(eq(cadGenerations.id, opts.generationId))
       .limit(1);
     const existing = (row?.referenceImages ?? []).filter(
-      (r): r is StoredReferenceImage => !!r && typeof r.key === "string"
+      (r): r is StoredReferenceImage =>
+        !!r &&
+        typeof r.key === "string" &&
+        r.label !== CONCEPT_THREAD_REF_LABEL
     );
     if (existing.length >= MAX_REFERENCE_IMAGES) return;
     const key = `cad-refs/${opts.userId}/${nanoid()}.png`;
@@ -246,12 +251,7 @@ export async function appendConceptReference(opts: {
       .set({
         referenceImages: [
           ...existing,
-          {
-            key,
-            mediaType: "image/png",
-            label:
-              "Concept render this thread is building toward — the chosen aesthetic target, NOT something the user provided.",
-          },
+          { key, mediaType: "image/png", label: CONCEPT_THREAD_REF_LABEL },
         ],
         updatedAt: new Date(),
       })

@@ -110,6 +110,8 @@ export async function POST(request: Request) {
     images?: PromptImage[];
     /** User-reviewed design brief from the studio's brief card. */
     brief?: unknown;
+    /** Concept render chosen in the composer's pre-build picker. */
+    concept?: { png?: unknown };
     /**
      * Optional target CraftCloud process (MTR-171). When one of PROCESS_DFM's
      * keys, the harness injects that process's DFM envelope instead of the
@@ -230,6 +232,14 @@ export async function POST(request: Request) {
       providedBrief:
         body.brief != null && JSON.stringify(body.brief).length <= 20_000
           ? body.brief
+          : undefined,
+      // Pre-build concept pick: a base64 PNG the concepts endpoint minted;
+      // size-capped like the reference images (abuse guard only).
+      providedConcept:
+        typeof body.concept?.png === "string" &&
+        body.concept.png.length > 0 &&
+        body.concept.png.length <= 4_000_000
+          ? { png: body.concept.png }
           : undefined,
     }).catch((error) => logError("api/cad/generate.job", error))
   );
