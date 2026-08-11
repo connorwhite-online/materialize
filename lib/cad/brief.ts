@@ -153,6 +153,12 @@ ${formatExemplarCatalog()}`;
 export async function buildBrief(opts: {
   prompt: string;
   images?: PromptImage[] | null;
+  /**
+   * Fact sheet fetched from a linked repository (lib/cad/repo-fetch.ts).
+   * Measured/documented reality — the brief's dimension rules turn its
+   * explicit numbers into machine-checked targets.
+   */
+  facts?: string | null;
   signal?: AbortSignal;
 }): Promise<CadBrief | null> {
   if (!hasModelCredentials()) return null;
@@ -160,9 +166,13 @@ export async function buildBrief(opts: {
     const refs = labelUserReferences(opts.images);
     const text = await completeText({
       system: briefSystemPrompt(),
-      prompt: refs.length
-        ? `Write the design brief for: ${opts.prompt}\n\n${BRIEF_REFERENCE_NOTE}`
-        : `Write the design brief for: ${opts.prompt}`,
+      prompt: [
+        `Write the design brief for: ${opts.prompt}`,
+        refs.length ? BRIEF_REFERENCE_NOTE : "",
+        opts.facts ?? "",
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
       model: modelForRole("brief"),
       role: "brief",
       images: refs.length ? refs : undefined,
