@@ -1,5 +1,7 @@
 import "server-only";
 
+import { gzipSync } from "node:zlib";
+
 import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 
@@ -74,10 +76,16 @@ async function persistStepForAsset(opts: {
   if (!stepB64) return false;
   try {
     const stepStorageKey = stlStorageKey.replace(/\.stl$/i, ".step");
+    // STEP is verbose ISO 10303-21 TEXT — a filleted assembly runs tens of
+    // MB raw, and R2's S3 endpoint is not edge-cached, so raw transfer was
+    // the "Download STEP hangs forever" bottleneck. Stored gzipped (5-10x
+    // smaller) with Content-Encoding so browsers decode transparently on
+    // the presigned GET; pre-existing uncompressed objects still serve fine.
     await putObject(
       stepStorageKey,
-      new Uint8Array(Buffer.from(stepB64, "base64")),
-      STEP_CONTENT_TYPE
+      new Uint8Array(gzipSync(Buffer.from(stepB64, "base64"))),
+      STEP_CONTENT_TYPE,
+      { contentEncoding: "gzip" }
     );
     await db
       .update(fileAssets)

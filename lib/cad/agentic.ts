@@ -707,7 +707,9 @@ export async function runAgenticHarness(
       renders: bestRun.renders,
       prompt: input.prompt,
       intent: { plan: agentPlan, brief: intentBrief },
-      references: labelUserReferences(input.images),
+      // Raw refs — the judge applies its own goal framing, not the
+      // generate-step "match this" captions.
+      references: input.images,
       signal: input.signal,
     });
   }
@@ -880,7 +882,8 @@ export async function runAgenticHarness(
           // CoT-to-critic (MTR-223): the agent's own stated plan + the
           // caller-threaded brief, as intent context for the judge.
           intent: { plan: agentPlan, brief: intentBrief },
-          references: labelUserReferences(input.images),
+          // Raw refs — the judge applies its own goal framing.
+          references: input.images,
           signal: input.signal,
         });
         if (lastRun === bestRun) judgedBest = true;

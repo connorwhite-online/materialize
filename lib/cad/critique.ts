@@ -103,12 +103,15 @@ export async function judgeAesthetics(opts: {
   if (!aestheticJudgeEnabled() || renders.length === 0) {
     return { available: false };
   }
-  // Judge-specific captions: the generate-step label tells the model to
-  // MATCH the reference; the judge instead compares result to goal.
+  // Judge-specific captions: callers pass raw references (the default
+  // caption below frames them as the goal) — a caller-set label (e.g. the
+  // concept render's "aesthetic target" framing) is kept as-is.
   const refs = (opts.references ?? []).map((r, i) => ({
     data: r.data,
     mediaType: r.mediaType,
-    label: `User reference image ${i + 1} — what the user wants the part to resemble.`,
+    label:
+      r.label ??
+      `User reference image ${i + 1} — what the user wants the part to resemble.`,
   }));
   const images: PromptImage[] = [
     ...renders.map((data) => ({ data, mediaType: "image/png" as const })),

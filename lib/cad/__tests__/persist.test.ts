@@ -446,11 +446,13 @@ describe("STEP + topology + thumbnail persistence (MTR-196 / MTR-50)", () => {
     if ("error" in result) throw new Error("unexpected failure");
     expect(result.hasStep).toBe(true);
 
-    // STEP written to a sibling `.step` key with the B-rep content type.
+    // STEP written to a sibling `.step` key with the B-rep content type,
+    // gzipped at rest (Content-Encoding) so the presigned download is small.
     expect(putObject).toHaveBeenCalledWith(
       expect.stringMatching(/\/model\.step$/),
       expect.any(Uint8Array),
-      "model/step"
+      "model/step",
+      { contentEncoding: "gzip" }
     );
     // ...and stamped onto the asset row.
     expect(mockUpdateSet).toHaveBeenCalledWith(

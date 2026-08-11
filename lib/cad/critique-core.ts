@@ -81,7 +81,7 @@ const INTENT_FRAMING =
  * BUILT — only the renders get graded.
  */
 const REFERENCE_FRAMING =
-  "After the clay renders, the user's own reference image(s) are attached (each captioned). They show the GOAL: weigh resemblance to them when scoring recognizability and proportion. Grade only the clay renders — the references explain the target, they never excuse defects.";
+  "After the clay renders, reference image(s) are attached (each captioned: the user's own references and/or the concept render this build aimed toward). They show the GOAL: weigh resemblance to them when scoring recognizability and proportion. Grade only the clay renders — the references explain the target, they never excuse defects.";
 
 /**
  * Build the judge's user prompt. Pure and shared (harness judge + tests) so

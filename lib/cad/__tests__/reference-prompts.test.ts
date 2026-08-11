@@ -22,11 +22,15 @@ vi.mock("@/lib/cad/runner-client", () => ({
   runCadCode: (...args: Parameters<typeof runCadCode>) => runCadCode(...args),
 }));
 
-const conceptImage = vi.fn(async (): Promise<PromptImage | null> => null);
+const conceptImage = vi.fn(
+  async (..._args: unknown[]): Promise<PromptImage | null> => null
+);
 vi.mock("@/lib/cad/concept", () => ({
   conceptImage: (...args: unknown[]) =>
     conceptImage(...(args as Parameters<typeof conceptImage>)),
   CONCEPT_IMAGE_NOTE: "CONCEPT_NOTE_SENTINEL",
+  CONCEPT_FROM_REFS_NOTE: "CONCEPT_FROM_REFS_SENTINEL",
+  CONCEPT_JUDGE_LABEL: "concept judge label",
 }));
 
 import { runHarness } from "@/lib/cad/harness";
@@ -75,13 +79,30 @@ describe("reference images in harness prompts", () => {
     expect(call.images?.[0].label).toContain("User reference image 1 of 1");
   });
 
-  it("skips the concept render when user references exist (refs are the taste target)", async () => {
+  it("conditions the concept render on user references instead of inventing a competitor", async () => {
     await runHarness({ prompt: "a phone stand", images: [REF], maxAttempts: 1 });
-    expect(conceptImage).not.toHaveBeenCalled();
-
-    conceptImage.mockClear();
-    await runHarness({ prompt: "a phone stand", maxAttempts: 1 });
     expect(conceptImage).toHaveBeenCalledTimes(1);
+    const refsArg = conceptImage.mock.calls[0][3] as PromptImage[];
+    expect(refsArg).toHaveLength(1);
+    expect(refsArg[0].data).toBe(REF.data);
+  });
+
+  it("with refs AND a derived concept, both notes ride the generate prompt", async () => {
+    conceptImage.mockResolvedValue({
+      data: "Q09OQ0VQVA==",
+      mediaType: "image/png",
+      label: "concept label",
+    });
+    await runHarness({ prompt: "a phone stand", images: [REF], maxAttempts: 1 });
+    const call = completeText.mock.calls[0][0] as unknown as {
+      prompt: string;
+      images?: PromptImage[];
+    };
+    expect(call.prompt).toContain("User reference image");
+    expect(call.prompt).toContain("CONCEPT_FROM_REFS_SENTINEL");
+    expect(call.prompt).not.toContain("CONCEPT_NOTE_SENTINEL");
+    // Ref then concept, both captioned.
+    expect(call.images).toHaveLength(2);
   });
 
   it("labels the prior-attempt render on a repair turn so it can't be mistaken for a reference", async () => {

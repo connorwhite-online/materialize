@@ -21,7 +21,12 @@ import {
 } from "./knowledge/enclosure-recipe";
 import { judgeAesthetics } from "./critique";
 import type { DimensionScore } from "./critique-core";
-import { conceptImage, CONCEPT_IMAGE_NOTE } from "./concept";
+import {
+  conceptImage,
+  CONCEPT_IMAGE_NOTE,
+  CONCEPT_FROM_REFS_NOTE,
+  CONCEPT_JUDGE_LABEL,
+} from "./concept";
 import {
   selectExemplars,
   selectExemplarsByIds,
@@ -611,29 +616,31 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
   // generator builds TOWARD — taste injection that hand-authored code exemplars
   // can't provide. Best-effort + gated by FAL_KEY; null when disabled/failed.
   // Built FROM the brief when one exists, so the taste target matches the
-  // functional reality (envelope, form language). SKIPPED when the user
-  // attached reference images: flux never sees those, so its render would be
-  // a competing aesthetic target that outranks what the user actually showed
-  // us — the references ARE the taste target then.
+  // functional reality (envelope, form language) — and CONDITIONED ON the
+  // user's references when they attached any, so the concept interprets what
+  // they showed instead of inventing a competitor to it.
   const conceptImg =
-    useModel && !input.priorSourceCode && userRefs.length === 0
+    useModel && !input.priorSourceCode
       ? await conceptImage(
           input.prompt,
           input.signal,
-          brief ? formatBriefForConcept(brief) : undefined
+          brief ? formatBriefForConcept(brief) : undefined,
+          userRefs
         )
       : null;
   const withConcept = (base?: PromptImage[] | null): PromptImage[] | undefined => {
     const imgs = [...(base ?? []), ...(conceptImg ? [conceptImg] : [])];
     return imgs.length ? imgs : undefined;
   };
-  // The one imagery instruction for plan/generate prompts. Mutually exclusive
-  // by construction: user references suppress the concept render above.
-  const imageryNote = userRefs.length
-    ? REFERENCE_IMAGES_NOTE
-    : conceptImg
-      ? CONCEPT_IMAGE_NOTE
-      : "";
+  // The imagery instruction for plan/generate prompts. With references AND a
+  // (reference-derived) concept, both notes ride together — the derived note
+  // states the references stay authoritative.
+  const imageryNote = [
+    userRefs.length ? REFERENCE_IMAGES_NOTE : "",
+    conceptImg ? (userRefs.length ? CONCEPT_FROM_REFS_NOTE : CONCEPT_IMAGE_NOTE) : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   // Plan-then-code: a short design plan up front (fresh builds only — revisions
   // already have the prior code as their plan). Best-effort: a planning failure
@@ -881,9 +888,17 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
         // against — context for intent-vs-outcome judging, never an excuse
         // for visual defects.
         intent: { plan, brief: judgeBrief },
-        // The user's references, so drift from what they showed us is a
-        // scoreable (and repairable) defect instead of invisible.
-        references: userRefs,
+        // The user's references AND the concept this build aimed toward, so
+        // drift from either is a scoreable (and repairable) defect instead
+        // of invisible — without the concept here, "build toward the
+        // concept" was an instruction nothing ever enforced. Raw refs (no
+        // generate-step labels): the judge applies its own goal framing.
+        references: [
+          ...(input.images ?? []),
+          ...(conceptImg
+            ? [{ ...conceptImg, label: CONCEPT_JUDGE_LABEL }]
+            : []),
+        ],
         signal: input.signal,
       });
       const aestheticScore = judgement.available
