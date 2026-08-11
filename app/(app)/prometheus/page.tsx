@@ -97,6 +97,7 @@ export default async function TextToCadPage() {
     feedbackTags: cadGenerations.feedbackTags,
     feedbackNote: cadGenerations.feedbackNote,
     networksReport: cadGenerations.networksReport,
+    dimensionChecks: cadGenerations.dimensionChecks,
     createdAt: cadGenerations.createdAt,
   };
 
@@ -283,6 +284,9 @@ export default async function TextToCadPage() {
       remeshed: false,
       // Isolation verdict (MTR-179) — persisted, so the badge survives reload.
       networksReport: r.networksReport ?? null,
+      // Dimension-contract verdicts (MTR-197) — persisted, so the annotation
+      // layer + verified chip survive reload.
+      dimensionChecks: r.dimensionChecks ?? [],
       // Non-terminal job for a still-pending generation — the studio
       // reattaches to its events stream on load (live builds survive
       // navigation).
@@ -346,6 +350,7 @@ export default async function TextToCadPage() {
     projectSlug: m.projectSlug,
     remeshed: m.remeshed,
     networksReport: m.networksReport,
+    dimensionChecks: m.dimensionChecks,
     hasStep: m.hasStep,
     parentGenerationId: m.parentGenerationId,
     activeJobId: m.activeJobId,

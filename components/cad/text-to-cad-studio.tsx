@@ -27,6 +27,7 @@ import {
   PencilIcon,
   PinIcon,
   PlusIcon,
+  RulerDimensionLineIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react";
@@ -74,6 +75,10 @@ import {
   networksSummary,
 } from "@/lib/cad/network-check";
 import { parseFeatures } from "@/lib/cad/features";
+import {
+  summarizeDimensionChecks,
+  type DimensionCheckResult,
+} from "@/lib/cad/dimension-check";
 // Type-only: lib/cad/brief is server-only at runtime; the type is erased.
 import type { ViewerAnnotation } from "@/components/viewer/model-viewer";
 import { planComposerSubmit } from "@/components/cad/composer-submit";
@@ -158,6 +163,13 @@ export interface StudioTurn {
    * absent on turns minted before the signal was threaded.
    */
   hasStep?: boolean;
+  /**
+   * Dimension-contract verdicts (MTR-197): the brief's spec callouts checked
+   * deterministically against the built geometry. Drives the viewer's
+   * dimension annotation layer and the "n/m verified" chip. Empty/absent on
+   * turns without targets or minted before the column existed.
+   */
+  dimensionChecks?: DimensionCheckResult[];
   /**
    * The generation this one revised — encodes the branch structure within
    * a thread (a fork when it isn't the immediately preceding turn).
@@ -522,6 +534,9 @@ export function TextToCadStudio({
   const [compareOn, setCompareOn] = useState(false);
   const [annotateMode, setAnnotateMode] = useState(false);
   const [annotations, setAnnotations] = useState<StudioAnnotation[]>([]);
+  // Dimension annotation layer (MTR-197): studio-owned like annotateMode, so
+  // the "n/m verified" chip and the viewer toolbar button share one state.
+  const [dimensionsOn, setDimensionsOn] = useState(false);
   // Per-generation B-rep topology URL for EXACT viewer picking (MTR-174):
   // fetched lazily for the viewed single-solid turn. A stored `null` means
   // "confirmed no topology" (mesh-mode / legacy) so we never refetch and the
@@ -818,6 +833,7 @@ export function TextToCadStudio({
     setAnnotations([]);
     setAnnotateMode(false);
     setCompareOn(false);
+    setDimensionsOn(false);
   }, [activeAssetId]);
 
   // Lazily resolve the viewed build's B-rep topology sidecar so the viewer
@@ -939,6 +955,15 @@ export function TextToCadStudio({
     viewedTurn.id in topoUrls &&
     topoUrls[viewedTurn.id] == null;
 
+  // Dimension-contract verdicts for the viewed turn (MTR-197). Never during
+  // compare or a live param preview — the solid on screen is then a different
+  // geometry than the one these verdicts were measured against.
+  const viewerDimensionChecks =
+    !compareBaseAssetId && !paramPreviewUrl && viewedTurn?.status === "succeeded"
+      ? viewedTurn.dimensionChecks ?? []
+      : [];
+  const dimensionSummary = summarizeDimensionChecks(viewerDimensionChecks);
+
   const viewedFeatures = viewedTurn?.features ?? [];
   const activeFeature =
     viewedFeatures.find((f) => f.id === activeFeatureId) ?? null;
@@ -985,6 +1010,8 @@ export function TextToCadStudio({
       projectSlug: res.projectSlug,
       remeshed: res.remeshed,
       networksReport: res.networksReport ?? null,
+      // Re-verified contract from the rebuilt geometry (MTR-197).
+      dimensionChecks: res.dimensionChecks ?? [],
       hasStep: res.hasStep,
       parentGenerationId: res.parentGenerationId,
     };
@@ -1322,6 +1349,9 @@ export function TextToCadStudio({
       projectSlug: ev.projectSlug ?? null,
       remeshed: ev.remeshed ?? false,
       networksReport: ev.networksReport ?? null,
+      // Dimension-contract verdicts ride the done event so the annotation
+      // layer + verified chip are stable at first paint (MTR-197).
+      dimensionChecks: ev.dimensionChecks ?? [],
       // STEP presence rides the done event so the action row is stable at first
       // paint (MTR-215).
       hasStep: ev.hasStep ?? false,
@@ -2092,6 +2122,9 @@ export function TextToCadStudio({
                     fixedFrame
                     annotateMode={annotateMode}
                     onToggleAnnotate={() => setAnnotateMode((v) => !v)}
+                    dimensionChecks={viewerDimensionChecks}
+                    dimensionsOn={dimensionsOn}
+                    onToggleDimensions={() => setDimensionsOn((v) => !v)}
                     annotations={annotations}
                     onAnnotate={(a) =>
                       setAnnotations((prev) => [
@@ -2314,6 +2347,42 @@ export function TextToCadStudio({
                 Verified: {networksSummary(viewedTurn.networksReport)}
               </p>
             ))}
+
+          {/* Dimension contract (MTR-197): machine-checked spec callouts.
+              Clicking toggles the viewer's annotation layer so "verified"
+              is inspectable on the geometry, not taken on faith. Counts
+              cover only checks that actually RAN (honesty rail); declared-
+              but-unverified targets get the muted state, never a green. */}
+          {!generating && viewerDimensionChecks.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setDimensionsOn((v) => !v)}
+              aria-pressed={dimensionsOn}
+              className={`mt-3 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                dimensionSummary.failed > 0
+                  ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
+                  : dimensionSummary.ran > 0
+                    ? "bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/15 dark:text-emerald-400"
+                    : "bg-muted/60 text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              {dimensionSummary.failed > 0 ? (
+                <AlertTriangleIcon className="size-4 shrink-0" />
+              ) : (
+                <RulerDimensionLineIcon className="size-4 shrink-0" />
+              )}
+              <span className="flex-1">
+                {dimensionSummary.failed > 0
+                  ? `Dimensions: ${dimensionSummary.failed} of ${dimensionSummary.ran} checked out of spec`
+                  : dimensionSummary.ran > 0
+                    ? `Dimensions verified ${dimensionSummary.label} against the built geometry`
+                    : `${dimensionSummary.total} dimension target${dimensionSummary.total === 1 ? "" : "s"} declared — not yet verifiable`}
+              </span>
+              <span className="text-xs opacity-70">
+                {dimensionsOn ? "Hide on model" : "Show on model"}
+              </span>
+            </button>
+          )}
 
           {/* Feedback — the in-the-moment eval signal (feeds /text-to-cad/eval).
               Sits ABOVE the actions; auto-prompts after each generation until

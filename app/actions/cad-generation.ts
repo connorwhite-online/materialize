@@ -49,7 +49,12 @@ import {
   persistGenerationFailure,
 } from "@/lib/cad/persist";
 import { BREP_OUTPUT_FORMATS, type CadNetworksReport } from "@/lib/cad/types";
-import type { HarnessResult } from "@/lib/cad/harness";
+import { extractDimensionTargets, type HarnessResult } from "@/lib/cad/harness";
+import {
+  buildFitChecksFromTargets,
+  checkDimensionTargets,
+  type DimensionCheckResult,
+} from "@/lib/cad/dimension-check";
 import { substituteParams } from "@/components/cad/param-diff";
 import {
   parseFeatures,
@@ -897,6 +902,8 @@ export interface RerunCadWithParamsResult {
   networksReport: CadNetworksReport | null;
   hasStep: boolean;
   features: ReturnType<typeof parseFeatures>;
+  /** Re-verified dimension-contract verdicts (MTR-197) for the new turn. */
+  dimensionChecks: DimensionCheckResult[];
 }
 
 /**
@@ -943,6 +950,7 @@ export async function rerunCadWithParams(input: {
       engine: cadGenerations.engine,
       title: cadGenerations.title,
       features: cadGenerations.features,
+      brief: cadGenerations.brief,
     })
     .from(cadGenerations)
     .where(
@@ -995,8 +1003,14 @@ export async function rerunCadWithParams(input: {
   const generationId = row.id;
 
   try {
+    // Re-verify the parent's dimension contract (MTR-197) against the rebuilt
+    // geometry — a direct edit is exactly when the user needs the checks to
+    // re-run. Fit checks ride the sidecar request like a harness run would.
+    const dimensionTargets = extractDimensionTargets(parent.brief);
+    const fitChecks = buildFitChecksFromTargets(dimensionTargets);
     const run = await runCadCode(source, BREP_OUTPUT_FORMATS, undefined, {
       engine: parent.engine || "build123d",
+      ...(fitChecks ? { checks: { fit: fitChecks } } : {}),
     });
     if (!run.ok) {
       await persistGenerationFailure(
@@ -1017,6 +1031,9 @@ export async function rerunCadWithParams(input: {
       sourceCode: source,
       attempts: 1,
       run,
+      // Brief + contract carry forward so a revision keeps its verdicts.
+      brief: parent.brief ?? undefined,
+      dimensionChecks: checkDimensionTargets(run, dimensionTargets),
       route: "param-rerun",
     };
 
@@ -1046,6 +1063,7 @@ export async function rerunCadWithParams(input: {
       networksReport: persisted.networksReport ?? null,
       hasStep: persisted.hasStep ?? false,
       features: parseFeatures(persisted.features),
+      dimensionChecks: persisted.dimensionChecks ?? [],
     };
   } catch (error) {
     logError("rerunCadWithParams", error);
@@ -1124,6 +1142,7 @@ export async function reviseCadFeatureStatement(input: {
       engine: cadGenerations.engine,
       title: cadGenerations.title,
       features: cadGenerations.features,
+      brief: cadGenerations.brief,
     })
     .from(cadGenerations)
     .where(
@@ -1210,8 +1229,14 @@ export async function reviseCadFeatureStatement(input: {
   const generationId = row.id;
 
   try {
+    // Re-verify the parent's dimension contract (MTR-197) against the rebuilt
+    // geometry — a direct edit is exactly when the user needs the checks to
+    // re-run. Fit checks ride the sidecar request like a harness run would.
+    const dimensionTargets = extractDimensionTargets(parent.brief);
+    const fitChecks = buildFitChecksFromTargets(dimensionTargets);
     const run = await runCadCode(source, BREP_OUTPUT_FORMATS, undefined, {
       engine: parent.engine || "build123d",
+      ...(fitChecks ? { checks: { fit: fitChecks } } : {}),
     });
     if (!run.ok) {
       await persistGenerationFailure(
@@ -1233,6 +1258,9 @@ export async function reviseCadFeatureStatement(input: {
       sourceCode: source,
       attempts: 1,
       run,
+      // Brief + contract carry forward so a revision keeps its verdicts.
+      brief: parent.brief ?? undefined,
+      dimensionChecks: checkDimensionTargets(run, dimensionTargets),
       route: "stmt-edit",
     };
     const persisted = await persistGenerationSuccess({
@@ -1261,6 +1289,7 @@ export async function reviseCadFeatureStatement(input: {
       networksReport: persisted.networksReport ?? null,
       hasStep: persisted.hasStep ?? false,
       features: parseFeatures(persisted.features),
+      dimensionChecks: persisted.dimensionChecks ?? [],
     };
   } catch (error) {
     logError("reviseCadFeatureStatement", error);

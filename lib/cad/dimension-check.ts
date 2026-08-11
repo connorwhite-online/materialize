@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+import { parseTopology } from "@/components/viewer/topology";
+import {
+  captureBandMm,
+  resolveDiameter,
+  resolveDistance,
+} from "./feature-dimensions";
 import type { CadRunResult } from "./types";
 
 /**
@@ -16,11 +22,12 @@ import type { CadRunResult } from "./types";
  * path instead of a parallel expected-dims implementation (MTR-201).
  *
  * HONESTY RAIL (MTR-199 §5): a target is only ever reported as passed/failed
- * when the check actually RAN against real geometry. Kinds we cannot yet
- * evaluate deterministically (diameter/distance need per-face topology, which
- * arrives with MTR-196) are returned `ran: false, ok: null` — never silently
- * counted as passing. No user-visible "dimensions verified" claim may include
- * a check that did not run.
+ * when the check actually RAN against real geometry. `diameter`/`distance`
+ * targets are evaluated against the B-rep topology manifest (`run.topo`,
+ * MTR-174 — see lib/cad/feature-dimensions.ts); when the run carries no
+ * manifest (mesh-mode, old sidecar) they are returned `ran: false, ok: null`
+ * — never silently counted as passing. No user-visible "dimensions verified"
+ * claim may include a check that did not run.
  */
 
 /**
@@ -28,9 +35,11 @@ import type { CadRunResult } from "./types";
  * - `bbox_span`  — overall extent along an axis (from the exported mesh bbox).
  * - `count`      — number of solids/parts (from the sidecar's bodyCount /
  *                  parts breakdown). `of` selects which population.
- * - `diameter` / `distance` — feature-level measures that need per-face
- *                  topology (MTR-196); accepted here but reported as not-run
- *                  until that data lands, so the model still declares them.
+ * - `diameter` / `distance` — feature-level measures, evaluated against the
+ *                  B-rep topology manifest (`run.topo`, MTR-174) by matching
+ *                  cylindrical faces / parallel plane pairs near the spec
+ *                  value (lib/cad/feature-dimensions.ts). Not-run when the
+ *                  run carries no manifest (mesh-mode / old sidecar).
  * - `fit_cavity` / `fit_bosses` / `fit_cutout` — component-fit checks
  *                  (MTR-204), evaluated SIDECAR-side against the built mesh
  *                  (cad-runner/fit.py, requested via `checks.fit`). Auto-
@@ -73,6 +82,13 @@ export interface DimensionTarget {
   /** Half-width of the acceptance band. Absent → a computed default. */
   tolerance?: number;
   /**
+   * The named source parameter responsible for this dimension (the contract's
+   * "every callout becomes a named parameter"), e.g. "overall_height". Emitted
+   * by the brief best-effort; the annotation layer shows it so a dimension on
+   * screen maps back to the knob that controls it.
+   */
+  param?: string;
+  /**
    * Stable id for sidecar-evaluated targets (fit_*): matched against
    * `run.checks.fit.results[].id`. Absent on locally-evaluated kinds.
    */
@@ -104,6 +120,7 @@ export const dimensionTargetSchema = z.looseObject({
   tolerance: z.number().nonnegative().optional(),
   id: z.string().optional(),
   fit: z.unknown().optional(),
+  param: z.string().optional(),
 });
 
 export interface DimensionCheckResult {
@@ -120,6 +137,14 @@ export interface DimensionCheckResult {
   tolerance?: number;
   /** Why the check did not run, or extra context. */
   note?: string;
+  /**
+   * Topology face ids anchoring a feature-level measurement (`diameter`:
+   * every cylindrical face at the matched radius; `distance`: both plane
+   * faces). The viewer's dimension layer maps these onto the mesh via the
+   * persisted topology manifest's `triRange`s to place the callout in 3D.
+   * Absent on bbox/count/fit kinds and on not-run results.
+   */
+  faceIds?: number[];
 }
 
 /**
@@ -151,6 +176,17 @@ export function checkDimensionTargets(
 ): DimensionCheckResult[] {
   if (!targets?.length) return [];
   const dims = run.geometry?.dimensions;
+  // B-rep topology for feature-level (diameter/distance) evaluation. Parsed
+  // once per call, lazily — most runs carry only bbox/count/fit targets.
+  let topoParsed = false;
+  let topo: ReturnType<typeof parseTopology> = null;
+  const getTopo = () => {
+    if (!topoParsed) {
+      topoParsed = true;
+      topo = run.topo != null ? parseTopology(run.topo) : null;
+    }
+    return topo;
+  };
 
   return targets.map((target): DimensionCheckResult => {
     const tolerance = defaultTolerance(target);
@@ -211,13 +247,48 @@ export function checkDimensionTargets(
       return { target, ran: true, ok: delta <= tolerance, got, delta, tolerance };
     }
 
-    // diameter / distance: feature-level topology (MTR-196) not available yet.
+    // diameter / distance: measured against the B-rep topology manifest
+    // (lib/cad/feature-dimensions.ts). Deterministic — the matched faces (and
+    // only real, measured geometry) back both the verdict and the viewer
+    // annotation anchor. No manifest → honesty rail, not-run.
+    const t = getTopo();
+    if (!t) {
+      return {
+        target,
+        ran: false,
+        ok: null,
+        tolerance,
+        note: `${target.kind} checks need the B-rep topology manifest — not present on this run`,
+      };
+    }
+    const match =
+      target.kind === "diameter"
+        ? resolveDiameter(t, target.value)
+        : resolveDistance(t, target.value);
+    if (!match) {
+      // The topology is real and was searched: no feature lands anywhere near
+      // the spec value. That IS the check failing — the geometry the callout
+      // promises does not exist (within the ±capture band).
+      const featureName =
+        target.kind === "diameter" ? "cylindrical feature" : "parallel-face pair";
+      return {
+        target,
+        ran: true,
+        ok: false,
+        tolerance,
+        note: `no ${featureName} found within ±${captureBandMm(target.value).toFixed(1)} mm of ${target.value} mm`,
+      };
+    }
+    const delta = Math.abs(match.measured - target.value);
     return {
       target,
-      ran: false,
-      ok: null,
+      ran: true,
+      ok: delta <= tolerance,
+      got: match.measured,
+      delta,
       tolerance,
-      note: `${target.kind} checks need per-face topology (MTR-196) — not evaluated`,
+      note: match.note,
+      faceIds: match.faceIds,
     };
   });
 }
@@ -276,6 +347,11 @@ export function formatDimensionRepairHints(
       // note IS the actionable hint (which wall, which holes, which opening).
       if (isFitTargetKind(r.target.kind)) {
         return `- ${r.target.label}: FAILED — ${r.note ?? "component does not fit the built geometry"}`;
+      }
+      // Feature-level target with NO candidate geometry near spec (the
+      // topology was searched; nothing matched) — the note says what's missing.
+      if (r.got == null) {
+        return `- ${r.target.label}: FAILED — ${r.note ?? "no matching feature in the built geometry"}. Model the feature the callout promises.`;
       }
       const unit = r.target.kind === "count" ? "" : "mm";
       const tol = r.tolerance ?? defaultTolerance(r.target);
