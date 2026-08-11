@@ -1,6 +1,6 @@
 import "server-only";
 
-import { meterSidecarCall } from "./metering";
+import { activeCadContext, meterSidecarCall } from "./metering";
 import { sidecarDispatcher } from "./sidecar-fetch";
 import type { CadOutputFormat, CadRunResult } from "./types";
 
@@ -96,7 +96,18 @@ export async function runCadCode(
   // record it into the active meter (no-op outside a metered generation).
   const started = Date.now();
   try {
-    return await runCadCodeLive(code, formats, signal, opts);
+    const run = await runCadCodeLive(code, formats, signal, opts);
+    // Flight recorder (lib/cad/transcript.ts): code + verdict + render for
+    // the persisted job transcript. Observation-only, never throws the run.
+    activeCadContext()?.recorder?.recordExec({
+      source: "runner",
+      code,
+      ok: run.ok,
+      error: run.error,
+      validation: run.validation,
+      render: run.renderPng,
+    });
+    return run;
   } finally {
     meterSidecarCall(Date.now() - started);
   }

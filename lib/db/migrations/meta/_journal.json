@@ -421,6 +421,13 @@
       "when": 1786002000000,
       "tag": "0059_cad_reference_images",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1786002100000,
+      "tag": "0060_cad_job_transcript",
+      "breakpoints": true
     }
   ]
 }

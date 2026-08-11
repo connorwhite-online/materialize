@@ -546,10 +546,13 @@ export async function runAgenticHarness(
     }
   };
 
+  // Hoisted above the try so the finally can hand the full message log to
+  // the flight recorder on EVERY exit (finish, budget cutoff, crash).
+  let messages: Anthropic.MessageParam[] = [];
   try {
     sessionId = await createSession({ signal: input.signal });
 
-    const messages: Anthropic.MessageParam[] = [
+    messages = [
       {
         role: "user",
         content: [
@@ -673,6 +676,13 @@ export async function runAgenticHarness(
       { cause: err, salvage }
     );
   } finally {
+    // Flight recorder: the loop's full message log (image payloads
+    // stripped), whatever way the loop ended — this IS the agentic
+    // transcript. The per-exec code/render pairs are recorded separately
+    // at execInSession.
+    if (messages.length > 0) {
+      activeCadContext()?.recorder?.recordAgenticMessages(messages);
+    }
     if (sessionId) {
       // Best-effort, and never with the (possibly aborted) request signal.
       await deleteSession(sessionId).catch(() => undefined);

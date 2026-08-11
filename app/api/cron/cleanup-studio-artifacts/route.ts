@@ -9,6 +9,7 @@ import { and, eq, inArray, isNotNull, lt } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   cadGenerations,
+  cadJobs,
   cadThreads,
   cartItems,
   fileAssets,
@@ -22,13 +23,15 @@ import { constantTimeEqual } from "@/lib/auth/constant-time-equal";
 
 /**
  * Daily cron that closes the text-to-CAD storage leaks
- * (docs/text-to-cad/05 §E). Four sweeps:
+ * (docs/text-to-cad/05 §E). Five sweeps:
  *
  *   1. `cad-renders/` R2 objects no cadGenerations.renderStorageKey
  *      references (deleted builds, failed persists) and older than 24h.
  *   2. `cad-topo/` R2 objects, same rule against topoStorageKey.
  *   2b. `cad-refs/` R2 objects (user reference images), same rule against
  *      the keys inside every referenceImages jsonb list.
+ *   2c. `cad-transcripts/` R2 objects (flight-recorder transcripts), same
+ *      rule against cadJobs.transcriptStorageKey.
  *   3. Stale unsaved studio drafts: files with source='studio' AND
  *      status='draft' older than CAD_DRAFT_RETENTION_DAYS (default 30)
  *      whose thread was never saved and whose assets no print order /
@@ -56,6 +59,7 @@ export const dynamic = "force-dynamic";
 const RENDER_PREFIX = "cad-renders/";
 const TOPO_PREFIX = "cad-topo/";
 const REFS_PREFIX = "cad-refs/";
+const TRANSCRIPTS_PREFIX = "cad-transcripts/";
 const ORPHAN_MIN_AGE_HOURS = 24;
 const DELETE_BATCH_SIZE = 100;
 const MAX_DRAFT_FILES_PER_RUN = 200;
@@ -347,7 +351,7 @@ export async function GET(request: Request) {
     const s3 = getS3Client();
     const bucket = getBucketName();
 
-    const [renderRefs, topoRefs, imageRefs] = await Promise.all([
+    const [renderRefs, topoRefs, imageRefs, transcriptRefs] = await Promise.all([
       db
         .select({ key: cadGenerations.renderStorageKey })
         .from(cadGenerations)
@@ -360,6 +364,10 @@ export async function GET(request: Request) {
         .select({ refs: cadGenerations.referenceImages })
         .from(cadGenerations)
         .where(isNotNull(cadGenerations.referenceImages)),
+      db
+        .select({ key: cadJobs.transcriptStorageKey })
+        .from(cadJobs)
+        .where(isNotNull(cadJobs.transcriptStorageKey)),
     ]);
 
     const renders = await sweepPrefix(
@@ -388,9 +396,19 @@ export async function GET(request: Request) {
           .filter((k): k is string => typeof k === "string" && k.length > 0)
       )
     );
+    // Job transcripts (flight recorder): keyed off cadJobs, deleted with
+    // their job rows (generation cascade), so the sweep rule is identical.
+    const transcripts = await sweepPrefix(
+      s3,
+      bucket,
+      TRANSCRIPTS_PREFIX,
+      new Set(
+        transcriptRefs.map((r) => r.key).filter((k): k is string => !!k)
+      )
+    );
     const drafts = await sweepStaleDrafts(s3, bucket);
 
-    const result = { renders, topo, refImages, drafts };
+    const result = { renders, topo, refImages, transcripts, drafts };
     console.log("[cron/cleanup-studio-artifacts] swept", result);
     return Response.json(result);
   } catch (error) {

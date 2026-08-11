@@ -1,6 +1,6 @@
 import "server-only";
 
-import { meterSidecarCall } from "./metering";
+import { activeCadContext, meterSidecarCall } from "./metering";
 import { sidecarDispatcher } from "./sidecar-fetch";
 import type { CadOutputFormat, CadRunResult } from "./types";
 
@@ -132,15 +132,29 @@ export async function execInSession(
     signal?: AbortSignal;
   }
 ): Promise<SessionExecResult> {
-  return sessionFetch<SessionExecResult>(`/session/${sessionId}/exec`, {
-    method: "POST",
-    body: {
-      code,
-      ...(opts?.formats ? { formats: opts.formats } : {}),
-      allowRemesh: opts?.allowRemesh ?? false,
-    },
-    signal: opts?.signal,
+  const result = await sessionFetch<SessionExecResult>(
+    `/session/${sessionId}/exec`,
+    {
+      method: "POST",
+      body: {
+        code,
+        ...(opts?.formats ? { formats: opts.formats } : {}),
+        allowRemesh: opts?.allowRemesh ?? false,
+      },
+      signal: opts?.signal,
+    }
+  );
+  // Flight recorder (lib/cad/transcript.ts): agentic execs are the attempts
+  // of a complex build — code + verdict + render into the job transcript.
+  activeCadContext()?.recorder?.recordExec({
+    source: "session",
+    code,
+    ok: result.ok,
+    error: execProducedRun(result) ? result.error : undefined,
+    validation: execProducedRun(result) ? result.validation : undefined,
+    render: execProducedRun(result) ? result.renderPng : undefined,
   });
+  return result;
 }
 
 /** Bounding box the sidecar reports for an imported STEP (mm). */

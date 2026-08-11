@@ -156,8 +156,26 @@ export async function completeText(opts: CompleteTextOptions): Promise<string> {
     ms: Date.now() - started,
   });
 
-  return message.content
+  const response = message.content
     .filter((b): b is Anthropic.TextBlock => b.type === "text")
     .map((b) => b.text)
     .join("");
+
+  // Flight recorder (lib/cad/transcript.ts): full prompt/response for the
+  // persisted job transcript. Observation-only; no-op without a recorder.
+  activeCadContext()?.recorder?.recordModelCall({
+    role: opts.role ?? "other",
+    model: message.model || opts.model || DEFAULT_MODEL,
+    system: opts.system,
+    prompt: opts.prompt,
+    imageLabels: (opts.images ?? []).map(
+      (img, i) => img.label ?? `[unlabeled image ${i + 1}]`
+    ),
+    response,
+    ms: Date.now() - started,
+    inputTokens: message.usage?.input_tokens ?? undefined,
+    outputTokens: message.usage?.output_tokens ?? undefined,
+  });
+
+  return response;
 }
