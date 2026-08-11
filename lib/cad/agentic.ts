@@ -385,6 +385,11 @@ function buildTaskPrompt(input: HarnessInput): string {
   } else {
     lines.push(`Create a 3D model: ${input.prompt}`);
   }
+  // Fetched project facts (lib/cad/repo-fetch.ts): measured/documented
+  // reality from the linked repo — beats invented ports and dimensions.
+  if (input.fetchedFacts) {
+    lines.push("", input.fetchedFacts);
+  }
   if (input.images?.length) {
     lines.push(
       "",

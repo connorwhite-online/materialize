@@ -24,6 +24,7 @@ import {
   CadTranscriptRecorder,
   transcriptsEnabled,
 } from "@/lib/cad/transcript";
+import { fetchRepoContext } from "@/lib/cad/repo-fetch";
 import {
   persistGenerationFailure,
   persistGenerationSuccess,
@@ -531,18 +532,40 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
       () => undefined
     );
 
+    // Repo fetching (lib/cad/repo-fetch.ts): when the prompt links a GitHub
+    // repo, READ it — measured board dims + documented ports into a fact
+    // sheet, README images into the reference flow below (so they persist
+    // and inherit like user-attached refs). Runs inside the generation
+    // context so its distill call is metered + recorded. Best-effort: null
+    // on any failure, never a failed generation.
+    let fetchedFacts: string | undefined;
+    let fetchedImages: PromptImage[] = [];
+    try {
+      const fetched = await runWithCadContext(
+        { meter, credentials, recorder },
+        () => fetchRepoContext(prompt, controller.signal)
+      );
+      if (fetched) {
+        fetchedFacts = fetched.facts || undefined;
+        fetchedImages = fetched.images;
+      }
+    } catch (err) {
+      logError("executeCadJob.repoFetch", err);
+    }
+
     // Reference images + conversation graph (lib/cad/reference-images.ts):
     // persist this turn's attached refs to R2, fold in the parent's stored
     // ones (revisions), and rebuild the thread's earlier instructions so the
     // engines see how the flow has unfolded. Both best-effort: any failure
     // falls back to the request's own images and no history — never a
-    // failed generation.
+    // failed generation. User-attached images lead; repo-fetched ones fill
+    // the remaining slots.
     try {
       images = await resolveReferenceImages({
         generationId,
         userId,
         parentGenerationId: input.parentGenerationId,
-        images: input.images,
+        images: [...(input.images ?? []), ...fetchedImages],
       });
     } catch (err) {
       logError("executeCadJob.referenceImages", err);
@@ -554,7 +577,12 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
       onProgress({
         type: "references",
         count: images.length,
-        inherited: images.length - (input.images?.length ?? 0),
+        inherited: Math.max(
+          0,
+          images.length -
+            (input.images?.length ?? 0) -
+            fetchedImages.length
+        ),
       });
     }
     let threadHistory: ThreadHistoryEntry[] | undefined;
@@ -582,6 +610,7 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
         process: input.process ?? null,
         images,
         threadHistory,
+        fetchedFacts,
         signal: controller.signal,
         onProgress,
         onQuestion,

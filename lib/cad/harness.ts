@@ -134,6 +134,12 @@ export interface HarnessInput {
    * instead of only its immediate parent's code.
    */
   threadHistory?: ThreadHistoryEntry[] | null;
+  /**
+   * Fact sheet fetched from a repository the prompt linked
+   * (lib/cad/repo-fetch.ts) — measured board dims, documented ports,
+   * components. Threaded into the brief and both engines' prompts.
+   */
+  fetchedFacts?: string | null;
   maxAttempts?: number;
   signal?: AbortSignal;
   /**
@@ -332,6 +338,12 @@ function buildUserPrompt(
     out += `\n\n${formatThreadHistory(input.threadHistory)}`;
   }
 
+  // Fetched project facts (lib/cad/repo-fetch.ts): what the linked repo
+  // actually documents — measured numbers beat invented ones.
+  if (input.fetchedFacts) {
+    out += `\n\n${input.fetchedFacts}`;
+  }
+
   out += `\n\nDesign guidance to follow:\n\n${knowledge}`;
 
   // Fresh-build brief: structured requirements + real cutout dims so the
@@ -521,6 +533,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
       buildBrief({
         prompt: input.prompt,
         images: userRefs,
+        facts: input.fetchedFacts,
         signal: input.signal,
       })
     );
