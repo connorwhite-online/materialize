@@ -173,30 +173,8 @@ export async function reconcileProductionPayments(): Promise<ReconcileResult> {
       if (isProductionPaymentConfirmed(ccStatus)) {
         // Customer paid CraftCloud — charge our fee and make the
         // order real.
-        await stripe.paymentIntents.capture(order.feePaymentIntentId);
-        const updated = await db
-          .update(printOrders)
-          .set({ status: "ordered", feeCapturedAt: new Date() })
-          .where(
-            and(
-              eq(printOrders.id, order.id),
-              eq(printOrders.status, "awaiting_production_payment")
-            )
-          )
-          .returning({ id: printOrders.id });
+        await captureFeeAndPlaceOrder(order.id, order.feePaymentIntentId);
         result.captured++;
-
-        // Only notify if OUR update advanced the row — if a
-        // concurrent worker won the race it also owns the notify.
-        // Notification failures must never look like a failed
-        // capture (the money already moved), so swallow them here.
-        if (updated.length > 0) {
-          try {
-            await notifyPrintOrderPlaced(order.id);
-          } catch (notifyError) {
-            logError("reconcileProductionPayments:notify", notifyError);
-          }
-        }
         return;
       }
 
@@ -255,6 +233,45 @@ export async function reconcileProductionPayments(): Promise<ReconcileResult> {
   );
 
   return result;
+}
+
+/**
+ * Capture the held service fee and advance the order to `ordered` —
+ * the moment a two-step order becomes real. Shared by the hourly
+ * reconcile sweep (CraftCloud payment confirmed by polling) and the
+ * sandbox craftcloud-pay action (mock checkout's stand-in for that
+ * confirmation).
+ *
+ * The status update is conditional on the row still being
+ * `awaiting_production_payment`, so concurrent callers can't
+ * double-advance; only the caller whose update wins fires the
+ * "order placed" notifications. Notification failures are swallowed
+ * (logged) — the money already moved, so they must never surface as
+ * a failed capture.
+ */
+export async function captureFeeAndPlaceOrder(
+  orderId: string,
+  feePaymentIntentId: string
+): Promise<void> {
+  await getStripe().paymentIntents.capture(feePaymentIntentId);
+  const updated = await db
+    .update(printOrders)
+    .set({ status: "ordered", feeCapturedAt: new Date() })
+    .where(
+      and(
+        eq(printOrders.id, orderId),
+        eq(printOrders.status, "awaiting_production_payment")
+      )
+    )
+    .returning({ id: printOrders.id });
+
+  if (updated.length > 0) {
+    try {
+      await notifyPrintOrderPlaced(orderId);
+    } catch (notifyError) {
+      logError("captureFeeAndPlaceOrder:notify", notifyError);
+    }
+  }
 }
 
 /**

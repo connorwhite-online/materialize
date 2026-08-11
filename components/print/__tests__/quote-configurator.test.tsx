@@ -142,6 +142,7 @@ vi.mock("@/app/actions/print", () => ({
   completePrintOrder: vi.fn(),
   checkCartPricing: vi.fn(async () => ({ error: "skip" })),
   checkoutVendorGroup: vi.fn(),
+  getSavedShippingAddress: vi.fn(async () => null),
 }));
 
 vi.mock("../cart-context", () => ({

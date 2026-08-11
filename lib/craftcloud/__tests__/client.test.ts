@@ -114,21 +114,27 @@ describe("CraftCloud client (mock mode)", () => {
     expect(order.status).toBe("ordered");
   });
 
-  it("getOrderStatus returns vendor statuses", async () => {
+  it("getOrderStatus reports no vendor statuses (payment unconfirmed)", async () => {
+    // Empty = "not paid yet" per isProductionPaymentConfirmed. The
+    // mock must never look paid: sandbox craftcloud-pay advances paid
+    // orders synchronously, and abandoned ones must age out through
+    // the reconcile cron's 72h cancel path instead of auto-confirming.
     const status = await getOrderStatus("order-1");
     expect(status.orderId).toBe("order-1");
-    expect(status.vendorStatuses).toHaveLength(1);
-    expect(status.vendorStatuses[0].status).toBe("in_production");
+    expect(status.vendorStatuses).toHaveLength(0);
   });
 
-  it("createStripeCheckout returns session URL", async () => {
+  it("createStripeCheckout returns the sandbox pay page as session URL", async () => {
     const result = await createStripeCheckout({
       orderId: "order-1",
       returnUrl: "https://example.com/success",
       cancelUrl: "https://example.com/cancel",
     });
     expect(result.sessionId).toContain("mock-session");
-    expect(result.sessionUrl).toBe("https://example.com/success");
+    const url = new URL(result.sessionUrl);
+    expect(url.origin).toBe("https://example.com");
+    expect(url.pathname).toBe("/sandbox/craftcloud-pay");
+    expect(url.searchParams.get("ccOrderId")).toBe("order-1");
   });
 });
 

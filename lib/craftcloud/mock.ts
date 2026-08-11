@@ -156,13 +156,16 @@ export function getMockOrder(): Order {
 }
 
 export function getMockOrderStatus(orderId: string): OrderStatusResponse {
+  // Empty vendor statuses = "payment not yet confirmed" under
+  // isProductionPaymentConfirmed's documented assumption (vendors
+  // only report once payment cleared). This must stay unpaid-looking:
+  // in mock checkout mode the sandbox craftcloud-pay page advances
+  // paid orders synchronously, so the reconcile cron only ever sees
+  // ABANDONED mock orders — which should age out through the 72h
+  // cancel path, not silently auto-confirm the way the old
+  // always-"in_production" response made them.
   return {
     orderId,
-    vendorStatuses: [
-      {
-        vendorId: "vendor-1",
-        status: "in_production",
-      },
-    ],
+    vendorStatuses: [],
   };
 }
