@@ -63,9 +63,12 @@ import { getNetworksReport, networksFailure } from "./network-check";
 import {
   BREP_OUTPUT_FORMATS,
   CUSTOM_ANSWER_PREFIX,
+  formatThreadHistory,
+  labelUserReferences,
   type CadProgressEvent,
   type CadQuestionAsker,
   type CadRunResult,
+  type ThreadHistoryEntry,
 } from "./types";
 
 /** Owner feedback on the version being revised (CON-181). */
@@ -98,6 +101,13 @@ const MAX_ATTEMPTS_DEFAULT = 4;
 // getting platform-killed mid-attempt with nothing persisted.
 const MIN_ATTEMPT_MS = 60_000;
 
+// Instruction paired with user-attached reference images in the plan/generate
+// prompts (each image also carries its own caption block). Counterpart to
+// CONCEPT_IMAGE_NOTE; when references exist the concept render is skipped, so
+// at most one of the two notes appears.
+const REFERENCE_IMAGES_NOTE =
+  'The user attached reference image(s), each captioned "User reference image N". They are the design target: take the form language, proportions, and visible features from them. The written instructions win on any conflict.';
+
 export interface HarnessInput {
   prompt: string;
   /** When editing an existing generation, its source code to revise. */
@@ -107,8 +117,18 @@ export interface HarnessInput {
    * revision corrects known problems (CON-181). No-op on a fresh build.
    */
   priorFeedback?: PriorFeedback | null;
-  /** Reference images the user attached, passed to the generate steps. */
+  /**
+   * Reference images the user attached — this turn's own plus any inherited
+   * from the parent chain (resolved by lib/cad/reference-images.ts). Passed,
+   * captioned, to every model step: brief, plan, generate/repair, judge.
+   */
   images?: PromptImage[] | null;
+  /**
+   * Earlier turns of this thread, oldest first (revisions only) — the
+   * conversation graph, so a revision prompt sees how the flow has unfolded
+   * instead of only its immediate parent's code.
+   */
+  threadHistory?: ThreadHistoryEntry[] | null;
   maxAttempts?: number;
   signal?: AbortSignal;
   /**
@@ -299,7 +319,15 @@ function buildUserPrompt(
     process: input.process,
   });
 
-  let out = `${task}\n\nDesign guidance to follow:\n\n${knowledge}`;
+  let out = task;
+
+  // Conversation graph (revisions): the thread's earlier instructions, so
+  // the model honors the whole trajectory instead of only the parent's code.
+  if (input.priorSourceCode && input.threadHistory?.length) {
+    out += `\n\n${formatThreadHistory(input.threadHistory)}`;
+  }
+
+  out += `\n\nDesign guidance to follow:\n\n${knowledge}`;
 
   // Fresh-build brief: structured requirements + real cutout dims so the
   // numbers stop being lost in prose (docs/text-to-cad/06 part 1).
@@ -455,6 +483,10 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
     }
   };
 
+  // The user's reference images, captioned once here so every step (brief,
+  // plan, generate, repair, judge) sends the same framing.
+  const userRefs = labelUserReferences(input.images);
+
   const telemetry: NonNullable<HarnessResult["telemetry"]> = [];
   const timed = async <T>(
     role: CadRole,
@@ -483,7 +515,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
     brief = await timed("brief", briefModel, () =>
       buildBrief({
         prompt: input.prompt,
-        images: input.images,
+        images: userRefs,
         signal: input.signal,
       })
     );
@@ -579,9 +611,12 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
   // generator builds TOWARD — taste injection that hand-authored code exemplars
   // can't provide. Best-effort + gated by FAL_KEY; null when disabled/failed.
   // Built FROM the brief when one exists, so the taste target matches the
-  // functional reality (envelope, form language).
+  // functional reality (envelope, form language). SKIPPED when the user
+  // attached reference images: flux never sees those, so its render would be
+  // a competing aesthetic target that outranks what the user actually showed
+  // us — the references ARE the taste target then.
   const conceptImg =
-    useModel && !input.priorSourceCode
+    useModel && !input.priorSourceCode && userRefs.length === 0
       ? await conceptImage(
           input.prompt,
           input.signal,
@@ -592,6 +627,13 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
     const imgs = [...(base ?? []), ...(conceptImg ? [conceptImg] : [])];
     return imgs.length ? imgs : undefined;
   };
+  // The one imagery instruction for plan/generate prompts. Mutually exclusive
+  // by construction: user references suppress the concept render above.
+  const imageryNote = userRefs.length
+    ? REFERENCE_IMAGES_NOTE
+    : conceptImg
+      ? CONCEPT_IMAGE_NOTE
+      : "";
 
   // Plan-then-code: a short design plan up front (fresh builds only — revisions
   // already have the prior code as their plan). Best-effort: a planning failure
@@ -606,12 +648,12 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
       const text = await timed("plan", planModel, () =>
         completeText({
           system: PLAN_SYSTEM_PROMPT,
-          prompt: conceptImg
-            ? `${buildPlanPrompt(input)}\n\n${CONCEPT_IMAGE_NOTE}`
+          prompt: imageryNote
+            ? `${buildPlanPrompt(input)}\n\n${imageryNote}`
             : buildPlanPrompt(input),
           model: planModel,
           role: "plan",
-          images: withConcept(input.images),
+          images: withConcept(userRefs),
           signal: input.signal,
         })
       );
@@ -682,16 +724,23 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
             .join("\n")
         : buildUserPrompt(input, plan, { brief, exemplarIds, partSourcing: partSourcingBlock });
       const images: PromptImage[] = [
-        ...(input.images ?? []),
+        ...userRefs,
         ...(conceptImg ? [conceptImg] : []),
         ...(priorRender
-          ? [{ data: priorRender, mediaType: "image/png" as const }]
+          ? [
+              {
+                data: priorRender,
+                mediaType: "image/png" as const,
+                label:
+                  "Render of your previous attempt — the one the failure note describes. NOT a target; fix what it shows.",
+              },
+            ]
           : []),
       ];
       const text = await timed(role, model, () =>
         completeText({
           system: systemPrompt,
-          prompt: conceptImg ? `${userPrompt}\n\n${CONCEPT_IMAGE_NOTE}` : userPrompt,
+          prompt: imageryNote ? `${userPrompt}\n\n${imageryNote}` : userPrompt,
           model,
           role,
           images: images.length ? images : undefined,
@@ -832,6 +881,9 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
         // against — context for intent-vs-outcome judging, never an excuse
         // for visual defects.
         intent: { plan, brief: judgeBrief },
+        // The user's references, so drift from what they showed us is a
+        // scoreable (and repairable) defect instead of invisible.
+        references: userRefs,
         signal: input.signal,
       });
       const aestheticScore = judgement.available

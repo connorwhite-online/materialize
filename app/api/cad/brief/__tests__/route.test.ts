@@ -126,4 +126,18 @@ describe("POST /api/cad/brief", () => {
     const arg = mockBuildBrief.mock.calls[0][0];
     expect(arg.images).toEqual([good(1), good(2), good(3), good(4)]);
   });
+
+  it("drops an oversized image instead of failing the request", async () => {
+    const oversized = {
+      data: "x".repeat(6_500_001),
+      mediaType: "image/png",
+    };
+    const good = { data: "b64", mediaType: "image/jpeg" };
+    const res = await POST(
+      postRequest({ prompt: "a pi case", images: [oversized, good] })
+    );
+    expect(res.status).toBe(200);
+    const arg = mockBuildBrief.mock.calls[0][0];
+    expect(arg.images).toEqual([good]);
+  });
 });

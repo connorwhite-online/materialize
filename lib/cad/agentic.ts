@@ -57,7 +57,11 @@ import type {
   CadQuestionOption,
   CadRunResult,
 } from "./types";
-import { resolveStoredAnswer } from "./types";
+import {
+  resolveStoredAnswer,
+  formatThreadHistory,
+  labelUserReferences,
+} from "./types";
 
 /**
  * Interactive-question budget for the agentic loop (MTR-191). Mirrors the
@@ -373,8 +377,19 @@ function buildTaskPrompt(input: HarnessInput): string {
       input.priorSourceCode,
       "```"
     );
+    // Conversation graph: the thread's earlier instructions, so the agent
+    // honors the whole trajectory instead of only the parent's code.
+    if (input.threadHistory?.length) {
+      lines.push("", formatThreadHistory(input.threadHistory));
+    }
   } else {
     lines.push(`Create a 3D model: ${input.prompt}`);
+  }
+  if (input.images?.length) {
+    lines.push(
+      "",
+      'The user attached reference image(s), each captioned "User reference image N". They are the design target: take the form language, proportions, and visible features from them. The written instructions win on any conflict.'
+    );
   }
   if (input.priorBrief != null) {
     lines.push("", `Design brief from the original build (honor its numbers): ${JSON.stringify(input.priorBrief)}`);
@@ -539,15 +554,23 @@ export async function runAgenticHarness(
         role: "user",
         content: [
           { type: "text", text: buildTaskPrompt(input) },
-          ...(input.images ?? []).map(
-            (img): Anthropic.ContentBlockParam => ({
-              type: "image",
-              source: {
-                type: "base64",
-                media_type: img.mediaType,
-                data: img.data,
+          // Caption-then-image, same as completeText: each reference is
+          // announced by its own text block so it can't be confused with the
+          // tool-result renders that follow in later turns.
+          ...labelUserReferences(input.images).flatMap(
+            (img): Anthropic.ContentBlockParam[] => [
+              ...(img.label
+                ? [{ type: "text" as const, text: img.label }]
+                : []),
+              {
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: img.mediaType,
+                  data: img.data,
+                },
               },
-            })
+            ]
           ),
         ],
       },
@@ -684,6 +707,7 @@ export async function runAgenticHarness(
       renders: bestRun.renders,
       prompt: input.prompt,
       intent: { plan: agentPlan, brief: intentBrief },
+      references: labelUserReferences(input.images),
       signal: input.signal,
     });
   }
@@ -856,6 +880,7 @@ export async function runAgenticHarness(
           // CoT-to-critic (MTR-223): the agent's own stated plan + the
           // caller-threaded brief, as intent context for the judge.
           intent: { plan: agentPlan, brief: intentBrief },
+          references: labelUserReferences(input.images),
           signal: input.signal,
         });
         if (lastRun === bestRun) judgedBest = true;

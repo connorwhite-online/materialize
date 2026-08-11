@@ -22,7 +22,11 @@ export function conceptImageEnabled(): boolean {
 
 /** Instruction paired with the concept image in the generate prompt. */
 export const CONCEPT_IMAGE_NOTE =
-  "A concept render of the TARGET aesthetic is attached. Match its overall form language, proportions, stance, and finish — soft unified radii, clean restrained surfacing, a cohesive single body. It is a STYLE GUIDE, not a literal spec: keep the part functional, watertight, and printable, and ignore any unprintable or purely decorative flourishes.";
+  "The image captioned \"AI-generated concept render\" shows the TARGET aesthetic. Match its overall form language, proportions, stance, and finish — soft unified radii, clean restrained surfacing, a cohesive single body. It is a STYLE GUIDE, not a literal spec: keep the part functional, watertight, and printable, and ignore any unprintable or purely decorative flourishes."
+
+/** Caption block sent immediately before the concept image itself. */
+export const CONCEPT_IMAGE_LABEL =
+  "AI-generated concept render — a machine-imagined style guide for this build, NOT something the user provided.";
 
 /**
  * Generate a concept render for the prompt, or null (disabled / any failure).
@@ -59,7 +63,7 @@ export async function conceptImage(
     const dl = await fetch(url, { signal });
     if (!dl.ok) return null;
     const data = Buffer.from(await dl.arrayBuffer()).toString("base64");
-    return { data, mediaType: "image/png" };
+    return { data, mediaType: "image/png", label: CONCEPT_IMAGE_LABEL };
   } catch (err) {
     logError("conceptImage", err);
     return null;

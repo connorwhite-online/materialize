@@ -521,3 +521,74 @@ export interface CadUsageSummary {
   /** Router verdict for the job (mirrors HarnessResult.route), when known. */
   route?: string;
 }
+
+// --- Thread history (conversation graph) ---------------------------------
+//
+// A revision prompt used to see only its immediate parent's code + feedback;
+// the earlier turns of the thread were invisible, so multi-turn flows felt
+// like the model forgot how the build had unfolded. These entries carry the
+// ancestor chain (oldest first) into the revise prompts.
+
+/** One earlier turn of a build thread, oldest-first in a history list. */
+export interface ThreadHistoryEntry {
+  /** That turn's instruction (truncated for prompt budget). */
+  prompt: string;
+  /** Owner rating on that turn's result ("good"/"bad"), when given. */
+  rating?: string | null;
+  /** Owner's freeform feedback note on that turn's result, when given. */
+  note?: string | null;
+}
+
+/**
+ * Render the thread history as a prompt block. Pure and shared (scripted +
+ * agentic harness) so the framing can't drift between engines. Returns ""
+ * for an empty history.
+ */
+export function formatThreadHistory(history: ThreadHistoryEntry[]): string {
+  if (history.length === 0) return "";
+  const lines = history.map((h, i) => {
+    let line = `${i + 1}. "${h.prompt}"`;
+    if (h.rating === "bad") line += " (user rated the result bad)";
+    else if (h.rating === "good") line += " (user rated the result good)";
+    if (h.note?.trim()) line += ` — user note: "${h.note.trim()}"`;
+    return line;
+  });
+  return [
+    "How this build has unfolded — the earlier instructions in this thread, oldest first:",
+    ...lines,
+    "The instruction you were given is the NEWEST turn. Honor the whole trajectory: keep the changes earlier turns asked for unless the newest instruction explicitly reverses them.",
+  ].join("\n");
+}
+
+// --- Prompt images ---------------------------------------------------------
+
+/** A reference image (base64, no data: prefix) passed alongside a prompt. */
+export interface PromptImage {
+  data: string;
+  mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+  /**
+   * Caption sent as a text block immediately BEFORE the image. Without one an
+   * image rides the turn unexplained, and once a turn carries more than one
+   * (user refs + concept render + prior-attempt render) the model can only
+   * guess which is which — every attached image must say what it is.
+   */
+  label?: string;
+}
+
+/**
+ * Attach the standard user-reference caption to each image that doesn't
+ * already carry a label. Shared by every step that forwards the user's
+ * attached references (brief, plan, generate, routing, judge) so the framing
+ * can't drift between call sites.
+ */
+export function labelUserReferences(
+  images: PromptImage[] | null | undefined
+): PromptImage[] {
+  const list = images ?? [];
+  return list.map((img, i) => ({
+    ...img,
+    label:
+      img.label ??
+      `User reference image ${i + 1} of ${list.length} — attached by the user as the design reference. Match its form language, proportions, and visible features unless the text instructions say otherwise.`,
+  }));
+}

@@ -22,11 +22,13 @@ import { constantTimeEqual } from "@/lib/auth/constant-time-equal";
 
 /**
  * Daily cron that closes the text-to-CAD storage leaks
- * (docs/text-to-cad/05 §E). Three sweeps:
+ * (docs/text-to-cad/05 §E). Four sweeps:
  *
  *   1. `cad-renders/` R2 objects no cadGenerations.renderStorageKey
  *      references (deleted builds, failed persists) and older than 24h.
  *   2. `cad-topo/` R2 objects, same rule against topoStorageKey.
+ *   2b. `cad-refs/` R2 objects (user reference images), same rule against
+ *      the keys inside every referenceImages jsonb list.
  *   3. Stale unsaved studio drafts: files with source='studio' AND
  *      status='draft' older than CAD_DRAFT_RETENTION_DAYS (default 30)
  *      whose thread was never saved and whose assets no print order /
@@ -53,6 +55,7 @@ export const dynamic = "force-dynamic";
 
 const RENDER_PREFIX = "cad-renders/";
 const TOPO_PREFIX = "cad-topo/";
+const REFS_PREFIX = "cad-refs/";
 const ORPHAN_MIN_AGE_HOURS = 24;
 const DELETE_BATCH_SIZE = 100;
 const MAX_DRAFT_FILES_PER_RUN = 200;
@@ -344,7 +347,7 @@ export async function GET(request: Request) {
     const s3 = getS3Client();
     const bucket = getBucketName();
 
-    const [renderRefs, topoRefs] = await Promise.all([
+    const [renderRefs, topoRefs, imageRefs] = await Promise.all([
       db
         .select({ key: cadGenerations.renderStorageKey })
         .from(cadGenerations)
@@ -353,6 +356,10 @@ export async function GET(request: Request) {
         .select({ key: cadGenerations.topoStorageKey })
         .from(cadGenerations)
         .where(isNotNull(cadGenerations.topoStorageKey)),
+      db
+        .select({ refs: cadGenerations.referenceImages })
+        .from(cadGenerations)
+        .where(isNotNull(cadGenerations.referenceImages)),
     ]);
 
     const renders = await sweepPrefix(
@@ -367,9 +374,23 @@ export async function GET(request: Request) {
       TOPO_PREFIX,
       new Set(topoRefs.map((r) => r.key).filter((k): k is string => !!k))
     );
+    // Reference images: a key is live while ANY row lists it — revisions
+    // share their ancestors' keys (lib/cad/reference-images.ts), so the set
+    // is flattened across every row's jsonb list.
+    const refImages = await sweepPrefix(
+      s3,
+      bucket,
+      REFS_PREFIX,
+      new Set(
+        imageRefs
+          .flatMap((r) => r.refs ?? [])
+          .map((r) => r?.key)
+          .filter((k): k is string => typeof k === "string" && k.length > 0)
+      )
+    );
     const drafts = await sweepStaleDrafts(s3, bucket);
 
-    const result = { renders, topo, drafts };
+    const result = { renders, topo, refImages, drafts };
     console.log("[cron/cleanup-studio-artifacts] swept", result);
     return Response.json(result);
   } catch (error) {

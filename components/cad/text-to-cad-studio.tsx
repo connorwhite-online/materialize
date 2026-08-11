@@ -200,6 +200,62 @@ const ALLOWED_IMAGE_TYPES: ImageMediaType[] = [
 ];
 const MAX_IMAGES = 4;
 
+// Downscale bounds for attached references. Raw phone photos run 3-12MB —
+// past the model API's per-image limit (the server silently drops those) and
+// far beyond what vision needs. ~1568px is the vision-model sweet spot; JPEG
+// at 0.85 keeps a photo reference in the low hundreds of KB.
+const REF_MAX_DIMENSION = 1568;
+const REF_REENCODE_BYTES = 1_500_000;
+
+/**
+ * Read an attached reference, downscaling/re-encoding when it's large.
+ * Small-enough images pass through untouched (GIF/WebP/PNG stay what they
+ * are); anything oversized is resized onto a white canvas (so transparent
+ * sketch PNGs don't go black) and re-encoded as JPEG. Any decode failure
+ * falls back to the raw file read — exactly the old behavior.
+ */
+async function readReferenceImage(
+  f: File
+): Promise<{ dataUrl: string; mediaType: ImageMediaType }> {
+  const raw = () =>
+    new Promise<{ dataUrl: string; mediaType: ImageMediaType }>(
+      (resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () =>
+          resolve({
+            dataUrl: String(r.result),
+            mediaType: f.type as ImageMediaType,
+          });
+        r.onerror = reject;
+        r.readAsDataURL(f);
+      }
+    );
+  try {
+    const bitmap = await createImageBitmap(f);
+    const { width, height } = bitmap;
+    const scale = Math.min(1, REF_MAX_DIMENSION / Math.max(width, height, 1));
+    if (scale === 1 && f.size <= REF_REENCODE_BYTES) {
+      bitmap.close();
+      return await raw();
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("no 2d context");
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    return {
+      dataUrl: canvas.toDataURL("image/jpeg", 0.85),
+      mediaType: "image/jpeg",
+    };
+  } catch {
+    return raw();
+  }
+}
+
 interface AttachedImage {
   id: string;
   /** data: URL for the thumbnail. */
@@ -1317,12 +1373,7 @@ export function TextToCadStudio({
       ALLOWED_IMAGE_TYPES.includes(f.type as ImageMediaType)
     );
     for (const f of incoming) {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const r = new FileReader();
-        r.onload = () => resolve(String(r.result));
-        r.onerror = reject;
-        r.readAsDataURL(f);
-      });
+      const { dataUrl, mediaType } = await readReferenceImage(f);
       const comma = dataUrl.indexOf(",");
       const data = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
       setImages((prev) =>
@@ -1334,7 +1385,7 @@ export function TextToCadStudio({
                 id: crypto.randomUUID(),
                 dataUrl,
                 data,
-                mediaType: f.type as ImageMediaType,
+                mediaType,
               },
             ]
       );

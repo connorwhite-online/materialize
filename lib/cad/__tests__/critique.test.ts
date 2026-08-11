@@ -186,6 +186,41 @@ describe("judgeAesthetics intent threading (MTR-223)", () => {
     const sent = completeText.mock.calls[0][0] as { prompt: string };
     expect(sent.prompt).toBe("Requested object: a box");
   });
+
+  it("appends captioned user references after the renders and frames them as the goal", async () => {
+    const { res, completeText } = await judgeWithMockedModel({
+      renderPng: "abc",
+      prompt: "a box",
+      references: [{ data: "cmVm", mediaType: "image/jpeg" }],
+    });
+    expect(res.available).toBe(true);
+    const sent = completeText.mock.calls[0][0] as {
+      prompt: string;
+      images: { data: string; label?: string }[];
+    };
+    expect(sent.prompt).toContain("reference image(s)");
+    expect(sent.prompt).toContain("Grade only the clay renders");
+    // Render first (unlabeled), then the captioned reference.
+    expect(sent.images).toHaveLength(2);
+    expect(sent.images[0].data).toBe("abc");
+    expect(sent.images[0].label).toBeUndefined();
+    expect(sent.images[1].data).toBe("cmVm");
+    expect(sent.images[1].label).toContain("User reference image 1");
+  });
+
+  it("without references the judge prompt and images are unchanged", async () => {
+    const { completeText } = await judgeWithMockedModel({
+      renderPng: "abc",
+      prompt: "a box",
+      references: [],
+    });
+    const sent = completeText.mock.calls[0][0] as {
+      prompt: string;
+      images: unknown[];
+    };
+    expect(sent.prompt).toBe("Requested object: a box");
+    expect(sent.images).toHaveLength(1);
+  });
 });
 
 describe("gating", () => {

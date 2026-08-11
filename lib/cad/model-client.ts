@@ -4,6 +4,7 @@ import Anthropic from "@anthropic-ai/sdk";
 
 import { activeCadContext, meterModelUsage } from "./metering";
 import type { ResolvedModelCredentials } from "./credentials";
+import type { PromptImage } from "./types";
 
 /**
  * Thin wrapper over the Anthropic Messages API for one-shot text completions
@@ -78,11 +79,11 @@ export function clientForCredentials(
   return getClient();
 }
 
-/** A reference image (base64, no data: prefix) passed alongside the prompt. */
-export interface PromptImage {
-  data: string;
-  mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
-}
+// PromptImage (and the caption helper labelUserReferences) live in ./types —
+// pure, client-safe, and NOT test-mocked alongside this module. Re-exported
+// here because every model-call site historically imports the type from the
+// client wrapper.
+export type { PromptImage } from "./types";
 
 export interface CompleteTextOptions {
   system: string;
@@ -115,6 +116,9 @@ export async function completeText(opts: CompleteTextOptions): Promise<string> {
     { type: "text", text: opts.prompt },
   ];
   for (const img of opts.images ?? []) {
+    // Caption-then-image: a labeled image is announced by its own text block
+    // so multi-image turns (refs + concept + prior render) stay unambiguous.
+    if (img.label) content.push({ type: "text", text: img.label });
     content.push({
       type: "image",
       source: { type: "base64", media_type: img.mediaType, data: img.data },

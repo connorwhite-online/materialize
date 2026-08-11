@@ -53,19 +53,25 @@ export async function POST(request: Request) {
     return new Response("Prompt is too long.", { status: 400 });
   }
 
-  // Sanitize reference images: allowed types only, capped count — the same
-  // rules as /api/cad/generate so a brief sees what the build will see.
+  // Sanitize reference images: allowed types only, capped count and size —
+  // the same rules as /api/cad/generate so a brief sees what the build will
+  // see. Oversized images are dropped (not 400'd): the composer downscales
+  // client-side, so an oversized one here is a raw/hostile payload — and one
+  // bad image must not sink the request. The size cap keeps each image under
+  // the model API's per-image limit (~5MB binary ≈ 6.8M base64 chars).
   const ALLOWED_IMAGE_TYPES = [
     "image/png",
     "image/jpeg",
     "image/gif",
     "image/webp",
   ];
+  const MAX_IMAGE_B64_CHARS = 6_500_000;
   const images: PromptImage[] = (body.images ?? [])
     .filter(
       (i) =>
         i &&
         typeof i.data === "string" &&
+        i.data.length <= MAX_IMAGE_B64_CHARS &&
         ALLOWED_IMAGE_TYPES.includes(i.mediaType)
     )
     .slice(0, 4);

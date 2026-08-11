@@ -1583,6 +1583,18 @@ export const cadGenerations = pgTable(
     // inline — so the history query stays small. Null until produced.
     topoStorageKey: text("topo_storage_key"),
     /**
+     * User-attached reference images for this turn: R2 keys (cad-refs/
+     * prefix) + media type, newest first, capped at 4. Revisions copy the
+     * parent's list (plus anything newly attached) so the whole thread keeps
+     * building against the same references (lib/cad/reference-images.ts).
+     * Keys may be shared across rows of a thread — the GC sweep treats a key
+     * as live while ANY row lists it. Object storage like the render — never
+     * inline — so history queries stay small.
+     */
+    referenceImages: jsonb("reference_images").$type<
+      { key: string; mediaType: string }[]
+    >(),
+    /**
      * Instrumented construction features for the feature-chip UX
      * (extrude/fillet/chamfer/… + faceIds into topo). Small jsonb list —
      * kept on the row so the studio can render chips without a second
