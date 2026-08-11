@@ -12,7 +12,10 @@ import type { MaterialsManifestResponse } from "@/app/api/craftcloud/materials-m
 import { PriceDisplay, type MinimumFeeInfo } from "./price-display";
 import type { CheckoutModel } from "@/lib/env";
 import type { Currency } from "@/lib/craftcloud/types";
-import { ShippingAddressForm } from "./shipping-address-form";
+import {
+  ShippingAddressForm,
+  type SavedCheckoutAddress,
+} from "./shipping-address-form";
 import { pollQuotes } from "./poll-quotes";
 import { runAnonCheckout } from "./run-anon-checkout";
 import {
@@ -27,6 +30,7 @@ import {
   completePrintOrder,
   checkCartPricing,
   checkoutVendorGroup,
+  getSavedShippingAddress,
 } from "@/app/actions/print";
 import { useCart } from "./cart-context";
 import { useUser } from "@clerk/nextjs";
@@ -478,6 +482,30 @@ export function QuoteConfigurator({
   const { isSignedIn } = useUser();
   const isAnon = !isSignedIn;
   const [isAddingToCart, setIsAddingToCart] = useState(false);
+
+  // Returning buyers' last-used address, prefetched while they're
+  // still configuring so it's ready the moment the address step
+  // mounts (the form decides saved-vs-blank once, at its mount).
+  const [savedAddress, setSavedAddress] = useState<SavedCheckoutAddress | null>(
+    null
+  );
+  useEffect(() => {
+    if (!isSignedIn) {
+      setSavedAddress(null);
+      return;
+    }
+    let cancelled = false;
+    getSavedShippingAddress()
+      .then((saved) => {
+        if (!cancelled) setSavedAddress(saved);
+      })
+      .catch(() => {
+        // Best-effort prefetch — a miss just means the blank form.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isSignedIn]);
 
   // Shipping is chosen once per vendor cart. When the vendor being
   // configured already has cart items, reuse that cart's shipping
@@ -1226,6 +1254,7 @@ export function QuoteConfigurator({
           onBack={() => setStep("configure")}
           isSubmitting={step === "processing"}
           anonMode={isAnon}
+          savedAddress={isAnon ? null : savedAddress}
         />
         <FeePaymentSheet
           sheet={feeSheet}

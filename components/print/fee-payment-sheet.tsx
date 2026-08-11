@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { BadgeCheckIcon, CreditCardIcon } from "lucide-react";
 import {
   Elements,
   PaymentElement,
@@ -34,7 +35,7 @@ export interface FeeSheetPayload {
   clientSecret: string;
   orderId: string;
   amountCents: number;
-  /** Buyer email — prefloads Link so its signup section stays collapsed. */
+  /** Buyer email — prefills the Payment Element's billing details. */
   email?: string;
 }
 
@@ -104,13 +105,23 @@ export function FeePaymentSheet({ sheet, onClose }: FeePaymentSheetProps) {
       ariaLabel="Pay service fee"
     >
       <div className="px-6 pt-1">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Service fee
-        </p>
-        <p className="mt-0.5 text-3xl font-bold tabular-nums">
-          {fmt(sheet.amountCents)}
-        </p>
-        <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+        <div className="flex items-center gap-3">
+          <div
+            aria-hidden="true"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-100 text-violet-600 dark:bg-violet-950 dark:text-violet-400"
+          >
+            <CreditCardIcon className="h-6 w-6" strokeWidth={2.5} />
+          </div>
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Service fee
+            </p>
+            <p className="text-3xl font-bold tabular-nums">
+              {fmt(sheet.amountCents)}
+            </p>
+          </div>
+        </div>
+        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
           Held now, charged only when your order is placed. Production and
           shipping are paid to CraftCloud in the next step.
         </p>
@@ -189,7 +200,7 @@ function FeeForm({
       {
         elements,
         // No redirect-based methods are offered (the PI is pinned to
-        // card + Link), so this never navigates —
+        // card only), so this never navigates —
         // the return_url is a Stripe API requirement, satisfied with
         // the tokenless landing as a safety net.
         redirect: "if_required",
@@ -225,9 +236,8 @@ function FeeForm({
         onReady={() => setElementReady(true)}
         options={{
           layout: "accordion",
-          // Prefill Link with the email from the shipping form so its
-          // save-my-info section arrives collapsed instead of asking
-          // for the email a second time.
+          // Prefill billing details with the email from the shipping
+          // form so nothing in the sheet asks for it a second time.
           defaultValues: email
             ? { billingDetails: { email } }
             : undefined,
@@ -353,22 +363,37 @@ export function SavedCardFeeSheet({
       ariaLabel="Confirm service fee"
     >
       <div className="px-6 pt-1">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Service fee
-        </p>
-        <p className="mt-0.5 text-3xl font-bold tabular-nums">
-          {fmt(confirm.amountCents)}
-        </p>
-        <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+        <div className="flex items-center gap-3">
+          <div
+            aria-hidden="true"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-100 text-violet-600 dark:bg-violet-950 dark:text-violet-400"
+          >
+            <CreditCardIcon className="h-6 w-6" strokeWidth={2.5} />
+          </div>
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Service fee
+            </p>
+            <p className="text-3xl font-bold tabular-nums">
+              {fmt(confirm.amountCents)}
+            </p>
+          </div>
+        </div>
+        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
           Held now, charged only when your order is placed. Production and
           shipping are paid to CraftCloud in the next step.
         </p>
 
-        <div className="mt-4 flex items-center justify-between rounded-2xl border border-border/60 px-4 py-3.5">
+        <div className="mt-4 flex items-center gap-3 rounded-2xl border border-border/60 px-4 py-3.5">
+          <BadgeCheckIcon
+            aria-hidden="true"
+            className="h-5 w-5 shrink-0 text-green-600 dark:text-green-400"
+            strokeWidth={2.5}
+          />
           <span className="text-[15px] font-medium">
             {savedMethodLabel(confirm)}
           </span>
-          <span className="text-xs text-muted-foreground">Saved</span>
+          <span className="ml-auto text-xs text-muted-foreground">Saved</span>
         </div>
 
         <div className="mt-4 space-y-3">

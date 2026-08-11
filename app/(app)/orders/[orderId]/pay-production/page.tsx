@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
+import { FactoryIcon } from "lucide-react";
 import { auth } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -155,10 +156,18 @@ export default async function PayProductionPage({
   return (
     <div className="mx-auto max-w-xl px-4 py-12 space-y-6">
       <div>
-        <p className="text-xs uppercase tracking-wide text-muted-foreground">
-          Print order
-        </p>
-        <h1 className="mt-1 text-2xl font-bold">
+        <div className="flex items-center gap-3">
+          <div
+            aria-hidden="true"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-orange-100 text-orange-600 dark:bg-orange-950 dark:text-orange-400"
+          >
+            <FactoryIcon className="h-6 w-6" strokeWidth={2.5} />
+          </div>
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">
+            Print order
+          </p>
+        </div>
+        <h1 className="mt-3 text-2xl font-bold">
           One more step — pay for production
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">

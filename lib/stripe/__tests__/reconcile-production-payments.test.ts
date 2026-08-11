@@ -176,7 +176,7 @@ describe("reconcileProductionPayments", () => {
       errors: 0,
     });
     expect(logError).toHaveBeenCalledWith(
-      "reconcileProductionPayments:notify",
+      "captureFeeAndPlaceOrder:notify",
       expect.any(Error)
     );
   });

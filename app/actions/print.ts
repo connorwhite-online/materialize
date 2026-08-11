@@ -33,7 +33,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { printOrders, printOrderItems, cartItems, fileAssets, files, users } from "@/lib/db/schema";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, isNotNull, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
 import { deriveAppUrl } from "@/lib/utils/request-url";
@@ -43,6 +43,7 @@ import {
   createStripeCheckout,
   getOrderStatus,
   getPrice,
+  isMockCheckoutMode,
   CraftCloudApiError,
 } from "@/lib/craftcloud/client";
 import { getCheckoutModel, isSandboxMode } from "@/lib/env";
@@ -1474,7 +1475,16 @@ const EMBEDDED_FEE_SHEET_SOURCE = "embedded_fee_sheet";
 // Google Pay) ride on "card" inside the Payment Element; anything
 // redirect-based (PayPal, banks) belongs on hosted Checkout. Also the
 // pin list resolveEmbeddedFeePI enforces on reused PIs.
-const SHEET_PAYMENT_METHOD_TYPES = ["card", "link"];
+//
+// "link" was dropped from this list: Link brings its own Instant Bank
+// Payments surface — a "Bank" accordion with the Financial
+// Connections institution picker — which is exactly the slow,
+// form-heavy UI the pin exists to exclude (it shows test institutions
+// in sandbox and real banks in live). There is no API or Payment
+// Element option to keep Link-the-wallet while suppressing its bank
+// rails, so the sheet is card-only; saved-card one-tap still works via
+// setup_future_usage on the customer.
+const SHEET_PAYMENT_METHOD_TYPES = ["card"];
 
 /**
  * Set up the in-page embedded fee sheet: a manual-capture
@@ -1541,12 +1551,12 @@ async function prepareEmbeddedFeeSheet(
         // authorizations — same consent surface the Payment Element
         // renders for hosted Checkout's setup_future_usage.
         setup_future_usage: "off_session",
-        // Pinned to card + Link. automatic_payment_methods with
+        // Pinned to card only. automatic_payment_methods with
         // allow_redirects: "never" is NOT enough here — it still lets
         // every non-redirect method the dashboard has enabled through,
         // e.g. us_bank_account's "search for your bank" UI, which is
         // exactly the slow, form-heavy surface this sheet exists to
-        // avoid.
+        // avoid. (Link is excluded too — see SHEET_PAYMENT_METHOD_TYPES.)
         payment_method_types: [...SHEET_PAYMENT_METHOD_TYPES],
         metadata: {
           printOrderId: order.id,
@@ -1555,11 +1565,11 @@ async function prepareEmbeddedFeeSheet(
           source: EMBEDDED_FEE_SHEET_SOURCE,
         },
       },
-      // v2: the key changed when the method list was pinned — a
-      // remint after resolveEmbeddedFeePI cancels a pre-pin PI must
+      // v3: the key changes every time the pinned method list does —
+      // a remint after resolveEmbeddedFeePI cancels a stale PI must
       // not collide with the old key's params inside Stripe's 24h
-      // idempotency window.
-      { idempotencyKey: `fee-sheet:v2:${order.id}` }
+      // idempotency window. (v2 = card+link, v3 = card only.)
+      { idempotencyKey: `fee-sheet:v3:${order.id}` }
     );
   } catch (err) {
     logError("completePrintOrder.feeSheet.createIntent", err);
@@ -1723,6 +1733,48 @@ async function resolveEmbeddedFeePI(
 }
 
 /**
+ * Mock-mode healing for stored bridge session URLs. Before the
+ * sandbox craftcloud-pay page existed, mock createStripeCheckout
+ * persisted the returnUrl itself as bridgeSessionUrl — resuming such
+ * an order would land on the orders tab with the production=paid
+ * banner without any payment step, and the row would never advance.
+ * Re-mint the mock bridge (which now points at the sandbox page) and
+ * persist it. No-op against the live API or for already-healed URLs;
+ * on any failure the stored URL is returned unchanged.
+ */
+async function healMockBridgeUrl(
+  orderId: string,
+  craftCloudOrderId: string | null,
+  bridgeSessionUrl: string
+): Promise<string> {
+  if (!isMockCheckoutMode()) return bridgeSessionUrl;
+  if (bridgeSessionUrl.includes("/sandbox/craftcloud-pay")) {
+    return bridgeSessionUrl;
+  }
+  if (!craftCloudOrderId) return bridgeSessionUrl;
+  try {
+    const appUrl = await deriveAppUrl();
+    const bridge = await createStripeCheckout({
+      orderId: craftCloudOrderId,
+      returnUrl: `${appUrl}/dashboard/orders?production=paid&orderId=${orderId}`,
+      cancelUrl: `${appUrl}/orders/${orderId}/pay-production`,
+      isTestOrder: isSandboxMode(),
+    });
+    await db
+      .update(printOrders)
+      .set({
+        bridgeSessionId: bridge.sessionId,
+        bridgeSessionUrl: bridge.sessionUrl,
+      })
+      .where(eq(printOrders.id, orderId));
+    return bridge.sessionUrl;
+  } catch (err) {
+    logError("healMockBridgeUrl", err);
+    return bridgeSessionUrl;
+  }
+}
+
+/**
  * Shared advancement for a fee hold that exists on Stripe
  * (requires_capture) but whose row is still cart_created: the same
  * transition handleTwoStepFeeAuthorization performs for hosted
@@ -1760,6 +1812,7 @@ async function advanceFeeAuthorizedOrder(
     .select({
       status: printOrders.status,
       bridgeSessionUrl: printOrders.bridgeSessionUrl,
+      craftCloudOrderId: printOrders.craftCloudOrderId,
     })
     .from(printOrders)
     .where(eq(printOrders.id, orderId))
@@ -1785,7 +1838,14 @@ async function advanceFeeAuthorizedOrder(
         "Your fee is authorized, but the production payment link is missing. Open your orders page and use Complete payment.",
     };
   }
-  return { ok: true, url: fresh.bridgeSessionUrl };
+  return {
+    ok: true,
+    url: await healMockBridgeUrl(
+      orderId,
+      fresh.craftCloudOrderId,
+      fresh.bridgeSessionUrl
+    ),
+  };
 }
 
 /**
@@ -1823,7 +1883,13 @@ export async function finalizeFeeAuthorization(
         };
       }
       revalidatePath("/dashboard/orders");
-      return { productionPaymentUrl: order.bridgeSessionUrl };
+      return {
+        productionPaymentUrl: await healMockBridgeUrl(
+          order.id,
+          order.craftCloudOrderId,
+          order.bridgeSessionUrl
+        ),
+      };
     }
     if (order.status !== "cart_created") {
       return { error: "Order already processed" };
@@ -1987,6 +2053,58 @@ async function prepareTwoStepOrder(
   }
 
   return { craftCloudOrderId, bridgeSessionUrl };
+}
+
+/**
+ * The signed-in user's most recently used checkout address, pulled
+ * from their newest print order that persisted one. Powers the
+ * "deliver to your saved address" fast path in ShippingAddressForm —
+ * returning buyers shouldn't retype an address we already shipped to.
+ * No dedicated storage: order history IS the address book, so there's
+ * nothing extra to keep in sync. Null (never an error) when signed
+ * out or no prior order carries an address — the form just renders
+ * blank.
+ */
+export async function getSavedShippingAddress(): Promise<
+  | NonNullable<typeof printOrders.$inferSelect.shippingAddress>
+  | null
+> {
+  try {
+    const { userId } = await auth();
+    if (!userId) return null;
+
+    const [row] = await db
+      .select({ shippingAddress: printOrders.shippingAddress })
+      .from(printOrders)
+      .where(
+        and(
+          eq(printOrders.userId, userId),
+          isNotNull(printOrders.shippingAddress)
+        )
+      )
+      .orderBy(desc(printOrders.createdAt))
+      .limit(1);
+
+    const saved = row?.shippingAddress;
+    // Old rows may predate parts of the payload — only offer a saved
+    // address that could pass the form's own required-field checks.
+    if (
+      !saved?.email ||
+      !saved.shipping?.firstName ||
+      !saved.shipping?.lastName ||
+      !saved.shipping?.address ||
+      !saved.shipping?.city ||
+      !saved.shipping?.zipCode ||
+      !saved.shipping?.countryCode ||
+      !saved.billing
+    ) {
+      return null;
+    }
+    return saved;
+  } catch (error) {
+    logError("getSavedShippingAddress", error);
+    return null;
+  }
 }
 
 /**
@@ -2229,7 +2347,13 @@ async function resumeTwoStepProductionPayment(
   if (intent.status === "requires_capture") {
     // Fee hold is still good — the only missing piece is CraftCloud's
     // production payment. Send them straight back to it.
-    return { checkoutUrl: order.bridgeSessionUrl };
+    return {
+      checkoutUrl: await healMockBridgeUrl(
+        order.id,
+        order.craftCloudOrderId,
+        order.bridgeSessionUrl
+      ),
+    };
   }
   if (intent.status === "canceled") {
     // Manual-capture authorizations expire (Stripe cancels them after

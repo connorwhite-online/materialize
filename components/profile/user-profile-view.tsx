@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { PartyPopperIcon } from "lucide-react";
 import { auth } from "@clerk/nextjs/server";
 import { loadUserByHandle } from "@/app/(app)/[handle]/loader";
 import { Button } from "@/components/ui/button";
@@ -93,7 +94,12 @@ export async function UserProfileView({
   searchParams,
 }: {
   handle: string;
-  searchParams: { tab?: string; welcome?: string; payment?: string };
+  searchParams: {
+    tab?: string;
+    welcome?: string;
+    payment?: string;
+    production?: string;
+  };
 }) {
   // auth() can throw "Clerk: auth() was called but Clerk can't detect
   // usage of clerkMiddleware()" when the proxy context is not set up
@@ -107,6 +113,11 @@ export async function UserProfileView({
   }
   const showWelcome =
     searchParams.welcome === "1" && searchParams.payment === "success";
+  // Two-step checkout: the CraftCloud bridge's returnUrl lands on
+  // /dashboard/orders?production=paid, which forwards here. The order
+  // itself may still read awaiting_production_payment for a beat
+  // (reconciliation), so the banner is the immediate confirmation.
+  const showProductionPaid = searchParams.production === "paid";
 
   const user = await loadUserByHandle(handle);
 
@@ -218,6 +229,23 @@ export async function UserProfileView({
             We created an account for you so you can track this print and any
             future orders. Your email is already set up for status updates.
           </p>
+        </div>
+      )}
+
+      {showProductionPaid && isOwner && (
+        <div className="mb-6 flex items-center gap-3 rounded-xl border border-green-500/30 bg-green-500/5 p-4">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-green-100 text-green-600 dark:bg-green-950 dark:text-green-400">
+            <PartyPopperIcon className="h-6 w-6" strokeWidth={2.5} />
+          </div>
+          <div>
+            <p className="text-sm font-medium">
+              Payment received — your print is on its way to production.
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Production and shipping are paid to CraftCloud, and your service
+              fee is charged now that the order is placed. Track it below.
+            </p>
+          </div>
         </div>
       )}
 

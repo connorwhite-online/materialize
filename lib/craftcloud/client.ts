@@ -295,10 +295,33 @@ export async function createStripeCheckout(
   params: StripeCheckoutRequest
 ): Promise<StripeCheckoutResponse> {
   if (USE_MOCK_CHECKOUT) {
+    // Stand-in for CraftCloud's hosted payment page: an in-app sandbox
+    // checkout (app/sandbox/craftcloud-pay) that renders the
+    // production+shipping bill and, on "Pay", advances the order the
+    // same way the reconcile cron would on a confirmed live payment.
+    // Without this page the mock bridge URL pointed straight at the
+    // returnUrl, so mock two-step checkouts skipped the production
+    // payment step entirely and sat in awaiting_production_payment
+    // until the hourly cron quietly auto-confirmed them.
+    // Only the CraftCloud order id rides along — the page derives its
+    // own return/cancel targets from the order row, so no redirect
+    // URLs pass through the query string.
+    const sandbox = new URL("/sandbox/craftcloud-pay", params.returnUrl);
+    sandbox.searchParams.set("ccOrderId", params.orderId);
     return {
       sessionId: `mock-session-${Date.now()}`,
-      sessionUrl: params.returnUrl,
+      sessionUrl: sandbox.toString(),
     };
   }
   return realCreateStripeCheckout(params);
+}
+
+/**
+ * True when checkout-side CraftCloud calls are mocked (CRAFTCLOUD_USE_MOCK
+ * unset/true, or CRAFTCLOUD_MOCK_CHECKOUT=true). The sandbox
+ * craftcloud-pay page and its pay action gate on this so the mock
+ * payment surface can never touch a live order.
+ */
+export function isMockCheckoutMode(): boolean {
+  return USE_MOCK_CHECKOUT;
 }

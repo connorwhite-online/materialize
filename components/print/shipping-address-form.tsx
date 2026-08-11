@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { MailOpenIcon, MapPinIcon, PackageIcon, TruckIcon } from "lucide-react";
 import { useSignUp, useSignIn } from "@clerk/nextjs/legacy";
 import { setUsernameFromEmail } from "@/app/actions/onboarding";
 import { reportClientError } from "@/lib/observability/report-client-error";
@@ -28,6 +29,19 @@ interface Address {
   phoneNumber?: string;
 }
 
+/**
+ * A previously used checkout address (the newest
+ * printOrders.shippingAddress for the signed-in user — see
+ * getSavedShippingAddress). Rendered as a one-tap "deliver here"
+ * card before the full form; also prefills the form when the user
+ * opts to edit instead.
+ */
+export interface SavedCheckoutAddress {
+  email: string;
+  shipping: Address;
+  billing: Address & { isCompany: boolean; vatId?: string };
+}
+
 interface ShippingAddressFormProps {
   onSubmit: (data: {
     email: string;
@@ -44,6 +58,13 @@ interface ShippingAddressFormProps {
    * just gets a resolved sign-in before its onSubmit fires.
    */
   anonMode?: boolean;
+  /**
+   * Last-used address for returning buyers. When set, the form opens
+   * on a "deliver to this address" card (one tap re-orders to the
+   * same place) with the full form one step away, prefilled. Never
+   * passed in anon mode — there's no history to draw from.
+   */
+  savedAddress?: SavedCheckoutAddress | null;
 }
 
 const COUNTRIES = [
@@ -75,6 +96,7 @@ export function ShippingAddressForm({
   onBack,
   isSubmitting,
   anonMode = false,
+  savedAddress = null,
 }: ShippingAddressFormProps) {
   const {
     isLoaded: signUpLoaded,
@@ -86,11 +108,16 @@ export function ShippingAddressForm({
     signIn,
     setActive: setActiveFromSignIn,
   } = useSignIn();
+  // "saved" → returning buyer: one-tap card for their last address.
   // "form" → the user is filling in shipping details.
   // "code" → we sent an OTP and are waiting for the 6-digit code.
   // After the code verifies we call onSubmit and the parent swaps us
   // out for its processing UI.
-  const [stage, setStage] = useState<"form" | "code">("form");
+  // Initial stage is decided at mount — a savedAddress that resolves
+  // after the user already started typing must not yank the form away.
+  const [stage, setStage] = useState<"saved" | "form" | "code">(() =>
+    savedAddress && !anonMode ? "saved" : "form"
+  );
   // Which Clerk primitive sent the OTP. A brand-new email goes
   // through `signUp`; an existing account pivots to `signIn` with
   // an email-code first factor. Same UX either way.
@@ -107,7 +134,9 @@ export function ShippingAddressForm({
     billing: Address & { isCompany: boolean; vatId?: string };
   } | null>(null);
 
-  const [email, setEmail] = useState("");
+  // Prefill from the saved address so "Use a different address" opens
+  // an edit of the last one instead of a blank slate.
+  const [email, setEmail] = useState(savedAddress?.email ?? "");
   const [shipping, setShipping] = useState<Address>({
     firstName: "",
     lastName: "",
@@ -118,6 +147,7 @@ export function ShippingAddressForm({
     stateCode: "",
     countryCode: "US",
     phoneNumber: "",
+    ...savedAddress?.shipping,
   });
   const [billingSame, setBillingSame] = useState(true);
   const [billing, setBilling] = useState<Address>({
@@ -133,12 +163,13 @@ export function ShippingAddressForm({
   // Ref used to focus the first invalid field on failed submit (CON-149).
   const formRef = useRef<HTMLFormElement>(null);
 
-  // Focus the "Shipping Address" heading on mount so step transitions
-  // land AT users on the new step heading (CON-157).
+  // Focus the step heading on mount AND on stage changes (saved →
+  // form → code) so step transitions land AT users on the new step
+  // heading (CON-157).
   const titleRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     titleRef.current?.focus();
-  }, []);
+  }, [stage]);
 
   const validate = () => {
     const errs: Record<string, string> = {};
@@ -322,11 +353,102 @@ export function ShippingAddressForm({
     }
   };
 
+  // One-tap path for returning buyers: their last-used address as a
+  // chunky card. The payload skips validate() — it already passed the
+  // same checks when it was originally submitted (and
+  // getSavedShippingAddress re-checks the required fields).
+  if (stage === "saved" && savedAddress) {
+    const { shipping: saved } = savedAddress;
+    return (
+      <div>
+        <Card>
+          <CardHeader className="flex flex-row items-center gap-3">
+            <IconTile tone="bg-green-100 text-green-600 dark:bg-green-950 dark:text-green-400">
+              <PackageIcon className="h-6 w-6" strokeWidth={2.5} />
+            </IconTile>
+            <div>
+              <CardTitle ref={titleRef} tabIndex={-1} className="outline-none">
+                Ship it to the usual?
+              </CardTitle>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                We kept your address from last time.
+              </p>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-start gap-3 rounded-2xl border border-border/60 p-4">
+              <IconTile tone="bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-400">
+                <MapPinIcon className="h-5 w-5" strokeWidth={2.5} />
+              </IconTile>
+              <div className="min-w-0 text-sm">
+                <p className="font-medium">
+                  {saved.firstName} {saved.lastName}
+                </p>
+                <p className="text-muted-foreground">
+                  {saved.address}
+                  {saved.addressLine2 ? `, ${saved.addressLine2}` : ""}
+                </p>
+                <p className="text-muted-foreground">
+                  {saved.city}
+                  {saved.stateCode ? `, ${saved.stateCode}` : ""}{" "}
+                  {saved.zipCode} · {saved.countryCode}
+                </p>
+                <p className="mt-1 truncate text-xs text-muted-foreground">
+                  {savedAddress.email}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <Button
+                type="button"
+                className="w-full"
+                disabled={isSubmitting}
+                onClick={() => onSubmit(savedAddress)}
+              >
+                <TruckIcon
+                  className="mr-2 h-4 w-4"
+                  strokeWidth={2.5}
+                  aria-hidden="true"
+                />
+                {isSubmitting ? "Processing..." : "Deliver to this address"}
+              </Button>
+              <button
+                type="button"
+                onClick={() => setStage("form")}
+                disabled={isSubmitting}
+                className="block w-full text-center text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+              >
+                Use a different address
+              </button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="mt-6">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onBack}
+            disabled={isSubmitting}
+          >
+            Back
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   if (stage === "code") {
     return (
       <Card>
-        <CardHeader>
-          <CardTitle>Verify your email</CardTitle>
+        <CardHeader className="flex flex-row items-center gap-3">
+          <IconTile tone="bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400">
+            <MailOpenIcon className="h-6 w-6" strokeWidth={2.5} />
+          </IconTile>
+          <CardTitle ref={titleRef} tabIndex={-1} className="outline-none">
+            Verify your email
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
@@ -394,8 +516,13 @@ export function ShippingAddressForm({
   return (
     <form ref={formRef} onSubmit={handleSubmit}>
       <Card>
-        <CardHeader>
-          <CardTitle ref={titleRef} tabIndex={-1} className="outline-none">Shipping Address</CardTitle>
+        <CardHeader className="flex flex-row items-center gap-3">
+          <IconTile tone="bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-400">
+            <TruckIcon className="h-6 w-6" strokeWidth={2.5} />
+          </IconTile>
+          <CardTitle ref={titleRef} tabIndex={-1} className="outline-none">
+            Shipping Address
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
@@ -580,5 +707,26 @@ export function ShippingAddressForm({
         </Button>
       </div>
     </form>
+  );
+}
+
+/**
+ * Chunky rounded icon tile — the checkout flow's shared visual accent
+ * (also used by the fee sheets and the sandbox CraftCloud page).
+ */
+function IconTile({
+  tone,
+  children,
+}: {
+  tone: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      aria-hidden="true"
+      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${tone}`}
+    >
+      {children}
+    </div>
   );
 }

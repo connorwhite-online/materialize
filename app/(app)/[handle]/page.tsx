@@ -78,7 +78,12 @@ export async function generateMetadata(props: {
 
 export default async function HandlePage(props: {
   params: Promise<{ handle: string }>;
-  searchParams: Promise<{ tab?: string; welcome?: string; payment?: string }>;
+  searchParams: Promise<{
+    tab?: string;
+    welcome?: string;
+    payment?: string;
+    production?: string;
+  }>;
 }) {
   const { handle } = await props.params;
   const searchParams = await props.searchParams;
