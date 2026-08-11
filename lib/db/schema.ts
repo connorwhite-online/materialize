@@ -1747,6 +1747,16 @@ export const cadJobs = pgTable(
      * sensitive. 0 while all CAD_PRICE_* default to 0 (metering-only).
      */
     costCents: integer("cost_cents"),
+    /**
+     * Flight recorder (lib/cad/transcript.ts): R2 key of the job's full
+     * gzipped transcript JSON (cad-transcripts/ prefix) — every model
+     * prompt/response, every sidecar exec + render, the agentic message
+     * log. Object storage like the renders — never inline. Null when
+     * recording is off (CAD_TRANSCRIPT=false), nothing was recorded, or
+     * the upload failed (best-effort). GC: cleanup-studio-artifacts sweeps
+     * cad-transcripts/ against this column.
+     */
+    transcriptStorageKey: text("transcript_storage_key"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

@@ -1,10 +1,13 @@
 import "server-only";
 
+import { gzipSync } from "node:zlib";
+
 import { eq } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { cadJobs } from "@/lib/db/schema";
 import { logError } from "@/lib/logger";
+import { putObject } from "@/lib/storage";
 import { computeCostCents } from "@/lib/billing/cad-pricing";
 import { recordGenerationDebit } from "@/lib/billing/cad-credits";
 import { resolveModelCredentials } from "@/lib/cad/credentials";
@@ -17,6 +20,10 @@ import {
   buildThreadHistory,
   resolveReferenceImages,
 } from "@/lib/cad/reference-images";
+import {
+  CadTranscriptRecorder,
+  transcriptsEnabled,
+} from "@/lib/cad/transcript";
 import {
   persistGenerationFailure,
   persistGenerationSuccess,
@@ -393,6 +400,12 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
   // is success-only. `route` is stamped once the router verdict is known.
   const meter = new CadMeter();
   let meteredRoute: string | undefined;
+  // Flight recorder (lib/cad/transcript.ts): rides the same generation
+  // context as the meter; instrumented call sites (model-client, runner,
+  // session, agentic) record into it. Flushed to R2 in the finally below.
+  const recorder = transcriptsEnabled()
+    ? new CadTranscriptRecorder({ jobId, generationId, prompt })
+    : undefined;
   // Walk-away notification timing: email only when the build ran long
   // enough that the user plausibly left (quick desk iterations stay
   // in-app-only, no inbox spam). The in-app row always lands.
@@ -559,7 +572,7 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
     // ones the generative backend. With CAD_AGENTIC=false / no sessions /
     // no credentials this is byte-identical to the old inline routing.
     // runWithCadContext scopes the cost meter + credentials to this run.
-    const result = await runWithCadContext({ meter, credentials }, () =>
+    const result = await runWithCadContext({ meter, credentials, recorder }, () =>
       runCadGeneration({
         prompt,
         priorSourceCode: input.priorSourceCode ?? null,
@@ -673,5 +686,26 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
   } finally {
     clearInterval(cancelPoll);
     if (flushTimer) clearTimeout(flushTimer);
+    // Flight recorder flush (lib/cad/transcript.ts): gzipped JSON to R2 +
+    // key on the job row, on EVERY outcome (success, failure, cancel) —
+    // failed runs are the transcripts worth reading. Best-effort: a flush
+    // problem is logged, never surfaced as a job problem.
+    if (recorder?.hasEvents()) {
+      try {
+        const key = `cad-transcripts/${userId}/${jobId}.json`;
+        await putObject(
+          key,
+          new Uint8Array(gzipSync(JSON.stringify(recorder.serialize()))),
+          "application/json",
+          { contentEncoding: "gzip" }
+        );
+        await db
+          .update(cadJobs)
+          .set({ transcriptStorageKey: key, updatedAt: new Date() })
+          .where(eq(cadJobs.id, jobId));
+      } catch (err) {
+        logError("executeCadJob.transcript", err);
+      }
+    }
   }
 }
