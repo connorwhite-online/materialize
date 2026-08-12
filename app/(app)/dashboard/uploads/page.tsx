@@ -5,5 +5,5 @@ export default async function UploadsRedirect() {
   const user = await currentUser();
   if (!user) redirect("/");
   if (!user.username) redirect("/onboarding");
-  redirect(`/${user.username}?tab=files`);
+  redirect("/dashboard/library");
 }

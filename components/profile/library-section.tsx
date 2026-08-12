@@ -12,6 +12,8 @@ interface LibrarySectionProps {
   /** Singular/plural noun for the count pill ("File" → "3 Files"). */
   countNoun: string;
   defaultOpen?: boolean;
+  /** Tighter padding for the authed-home column. */
+  compact?: boolean;
   children: React.ReactNode;
 }
 
@@ -26,6 +28,7 @@ export function LibrarySection({
   count,
   countNoun,
   defaultOpen = true,
+  compact = false,
   children,
 }: LibrarySectionProps) {
   const [open, setOpen] = useState(defaultOpen);
@@ -36,7 +39,7 @@ export function LibrarySection({
       : `${count} ${count === 1 ? countNoun : `${countNoun}s`}`;
 
   return (
-    <section className="rounded-2xl bg-muted/50 p-5">
+    <section className={compact ? "rounded-xl bg-muted/50 p-3" : "rounded-2xl bg-muted/50 p-5"}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -50,7 +53,7 @@ export function LibrarySection({
         >
           <ChevronRight size={16} />
         </motion.span>
-        <h2 className="min-w-0 truncate text-lg font-semibold">{name}</h2>
+        <h2 className={compact ? "min-w-0 truncate text-sm font-semibold" : "min-w-0 truncate text-lg font-semibold"}>{name}</h2>
         <Badge variant="outline" className="ml-4 h-6 shrink-0 px-2.5">
           {countLabel}
         </Badge>

@@ -25,6 +25,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { OwnerBar } from "@/components/ui/owner-bar";
 import { ExpandableDescription } from "@/components/ui/expandable-description";
 import { Button } from "@/components/ui/button";
+import { Download } from "@/components/icons/download";
+import { Print } from "@/components/icons/print";
 import {
   PhotosFeed,
   type FeedPhoto,
@@ -793,16 +795,29 @@ export default async function FileDetailPage(props: {
             )}
 
             <div className="flex flex-col gap-2">
-              {canDownload && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full"
-                  render={<a href={`/files/${slug}/download`} />}
-                >
-                  Download
-                </Button>
-              )}
+              <div className="flex gap-2">
+                {canDownload && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="min-w-0 flex-1"
+                    render={<a href={`/files/${slug}/download`} />}
+                  >
+                    <Download size={14} />
+                    Download
+                  </Button>
+                )}
+                {assets[0] && (
+                  <Button
+                    size="sm"
+                    className="min-w-0 flex-1"
+                    render={<Link href={`/print/${assets[0].id}`} />}
+                  >
+                    <Print size={14} />
+                    Print
+                  </Button>
+                )}
+              </div>
               {/* Editable STEP source (MTR-196) — renders only when this asset
                   actually has a persisted STEP (self-hiding for mesh-only /
                   non-CAD files, so no dead button). Same entitlement as the
@@ -813,15 +828,6 @@ export default async function FileDetailPage(props: {
                   size="sm"
                   className="w-full"
                 />
-              )}
-              {assets[0] && (
-                <Button
-                  size="sm"
-                  className="w-full"
-                  render={<Link href={`/print/${assets[0].id}`} />}
-                >
-                  Print this file
-                </Button>
               )}
             </div>
           </div>

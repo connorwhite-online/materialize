@@ -1,7 +1,7 @@
 import type { SVGProps } from "react";
 
 /**
- * Materialize "M" logomark. Used as the sidebar nav brand (replacing the
+ * Materialize "M" logomark. Used as the nav brand (replacing the
  * Frama wordmark) and is the same glyph as the favicon / app icons. Fill
  * inherits currentColor so it follows the surrounding text color in both
  * light and dark themes.

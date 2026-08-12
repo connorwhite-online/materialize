@@ -8,7 +8,8 @@ import { Browse } from "@/components/icons/browse";
 import { Materials } from "@/components/icons/materials";
 import { Print } from "@/components/icons/print";
 import { Galaxy } from "@/components/icons/galaxy";
-import { AvatarWithUnreadDot } from "@/components/auth/avatar-with-unread-dot";
+import { UserAvatar } from "@/components/auth/user-avatar";
+import { NotificationsPopover } from "@/components/nav/notifications-popover";
 import { SandboxBadge } from "@/components/nav/sandbox-badge";
 import { useCart } from "@/components/print/cart-context";
 import { useAuthModal } from "@/components/auth/auth-modal";
@@ -21,9 +22,10 @@ type NavIcon = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>;
 
 /**
  * Primary destinations rendered as icon-only tabs in the floating
- * bottom bar (sub-nav viewports). Mirrors the sidebar's NAV_ITEMS at
- * nav+; Profile is handled separately because it renders the user's
- * avatar (or a sign-in affordance for anon) rather than a glyph.
+ * bottom bar (sub-nav viewports). Mirrors the desktop top bar's
+ * destinations at nav+; Profile is handled separately because it
+ * renders the user's avatar (or a sign-in affordance for anon)
+ * rather than a glyph.
  */
 type TabItem = { href: string; label: string; Icon: NavIcon };
 
@@ -46,9 +48,9 @@ function tabItems(textToCad: boolean): ReadonlyArray<TabItem> {
 }
 
 /**
- * Exact-match active state — same rule as the sidebar. Detail pages
- * like /files/<slug> are NOT the Browse listing, so we don't highlight
- * Browse just because the path starts with /files.
+ * Exact-match active state — same rule as the desktop top bar. Detail
+ * pages like /files/<slug> are NOT the Browse listing, so we don't
+ * highlight Browse just because the path starts with /files.
  */
 function isActive(pathname: string | null, href: string): boolean {
   return pathname === href;
@@ -68,7 +70,7 @@ interface MobileTabBarProps {
 
 /**
  * App-like bottom navigation for sub-nav viewports (hidden at nav+,
- * where the floating sidebar rail takes over). Icon-only tabs sit in
+ * where the desktop top bar takes over). Icon-only tabs sit in
  * a translucent, blurred, rounded pill anchored to the bottom of the
  * screen. There's no separate cart button: carts live inline on the
  * /print page, so a count badge pips the Print tab instead.
@@ -157,37 +159,46 @@ export function MobileTabBar({
             anon. Lives at the end of the pill (matches the app-nav
             convention of profile sitting last/rightmost). */}
         {isSignedIn && user ? (
-          <Link
-            href={ownProfilePath ?? "/"}
-            aria-label="Your profile"
-            aria-current={profileActive ? "page" : undefined}
-            className={cn(
-              TAB_BASE,
-              profileActive
-                ? "bg-background shadow-sm"
-                : "hover:bg-background/60"
-            )}
-          >
-            {/* Inner relative wrapper so the sandbox badge anchors to the
-                avatar's corner, not the (larger) tap-target button. */}
-            <span className="relative inline-flex">
-              <AvatarWithUnreadDot
-                initialUnreadCount={initialUnreadCount}
-                seed={user.username || user.id}
-                imageUrl={user.hasImage ? user.imageUrl : null}
-                displayName={
-                  user.fullName ||
-                  user.username ||
-                  user.primaryEmailAddress?.emailAddress ||
-                  "Profile"
-                }
-                className="h-7 w-7"
-              />
-              {sandbox && (
-                <SandboxBadge className="absolute -right-1.5 -top-1.5 z-10 p-0.5 ring-2 ring-muted dark:ring-input" />
+          <>
+            <NotificationsPopover
+              initialUnreadCount={initialUnreadCount}
+              side="top"
+              align="end"
+              triggerClassName={cn(
+                TAB_BASE,
+                "text-muted-foreground hover:text-foreground"
               )}
-            </span>
-          </Link>
+              dotClassName="absolute right-1 top-1 h-2 w-2 rounded-[999px] bg-primary ring-2 ring-muted dark:ring-input"
+            />
+            <Link
+              href={ownProfilePath ?? "/"}
+              aria-label="Your profile"
+              aria-current={profileActive ? "page" : undefined}
+              className={cn(
+                TAB_BASE,
+                profileActive
+                  ? "bg-background shadow-sm"
+                  : "hover:bg-background/60"
+              )}
+            >
+              <span className="relative inline-flex">
+                <UserAvatar
+                  seed={user.username || user.id}
+                  imageUrl={user.hasImage ? user.imageUrl : null}
+                  displayName={
+                    user.fullName ||
+                    user.username ||
+                    user.primaryEmailAddress?.emailAddress ||
+                    "Profile"
+                  }
+                  className="h-7 w-7"
+                />
+                {sandbox && (
+                  <SandboxBadge className="absolute -right-1.5 -top-1.5 z-10 p-0.5 ring-2 ring-muted dark:ring-input" />
+                )}
+              </span>
+            </Link>
+          </>
         ) : (
           <button
             type="button"

@@ -1,0 +1,28 @@
+import type { SVGProps } from "react";
+
+/**
+ * Notification bell for the desktop top bar.
+ * Fill inherits currentColor.
+ */
+export function Bell({
+  size = 18,
+  ...props
+}: SVGProps<SVGSVGElement> & { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      {...props}
+    >
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M12 2C8.10602 2 4.89608 5.05346 4.70162 8.94258L4.52221 12.5309C4.5153 12.6691 4.47977 12.8044 4.41788 12.9282L3.19098 15.382C3.06539 15.6332 3 15.9101 3 16.191C3 17.1901 3.80992 18 4.80902 18H7.10002C7.56329 20.2822 9.58104 22 12 22C14.419 22 16.4367 20.2822 16.9 18H19.191C20.1901 18 21 17.1901 21 16.191C21 15.9101 20.9346 15.6332 20.809 15.382L19.5821 12.9282C19.5202 12.8044 19.4847 12.6691 19.4778 12.5309L19.2984 8.94258C19.1039 5.05346 15.894 2 12 2ZM12 20C10.6938 20 9.58254 19.1652 9.17071 18H14.8293C14.4175 19.1652 13.3062 20 12 20Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}

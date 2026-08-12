@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import Link from "next/link";
-import { AuthNav } from "@/components/auth/auth-nav";
-import { Logomark } from "@/components/icons/logomark";
-import { HomeBottomBar } from "@/components/home/home-bottom-bar";
+import { TopBar } from "@/components/nav/top-bar";
+import { AppShell } from "@/components/nav/app-shell";
+import { HomeDashboard } from "@/components/home/home-dashboard";
 import { HomeMarketing } from "@/components/home/home-marketing";
+import { isSandboxMode } from "@/lib/env";
+import { resolveTextToCadAccess } from "@/lib/features";
+import { getMyUnreadNotificationCount } from "@/lib/notifications/queries";
 import { HOME_FAQ } from "@/lib/seo/home-faq";
 import {
   faqPageJsonLd,
@@ -66,20 +68,38 @@ export const metadata: Metadata = {
 // The file is still in /public if a future design wants it back.
 
 export default async function HomePage() {
-  // Authed home = the user's own profile. Materialize is mostly a
-  // personal-files tool, and the profile/dashboard is what they
-  // come here to see. Anon visitors keep getting the marketing hero
-  // below. A user without a username is mid-onboarding — punt them
-  // there so we don't render a logged-in shell over an incomplete
-  // account.
+  // Authed home is a jump-off dashboard (upload + pending orders +
+  // recent files). Anon visitors keep the marketing hero below. A user
+  // without a username is mid-onboarding — punt them there so we don't
+  // render a logged-in shell over an incomplete account.
   const { userId } = await auth();
   if (userId) {
     const user = await currentUser();
-    if (user?.username) {
-      redirect(`/${user.username}`);
+    if (!user?.username) {
+      redirect("/onboarding");
     }
-    redirect("/onboarding");
+
+    const [textToCad, sandbox, initialUnreadCount] = await Promise.all([
+      resolveTextToCadAccess(),
+      Promise.resolve(isSandboxMode()),
+      getMyUnreadNotificationCount(),
+    ]);
+
+    return (
+      <AppShell
+        initialUnreadCount={initialUnreadCount}
+        sandbox={sandbox}
+        textToCad={textToCad}
+      >
+        <HomeDashboard userId={userId} />
+      </AppShell>
+    );
   }
+
+  const [textToCad, sandbox] = await Promise.all([
+    resolveTextToCadAccess(),
+    Promise.resolve(isSandboxMode()),
+  ]);
 
   // The page now scrolls: a full-viewport hero followed by
   // server-rendered marketing sections. The outer container is plain
@@ -113,34 +133,22 @@ export default async function HomePage() {
         }}
       />
 
+      <TopBar
+        initialUnreadCount={0}
+        sandbox={sandbox}
+        textToCad={textToCad}
+        alwaysVisible
+      />
+
       {/* Hero — exactly one screen. min-h-dvh (not h-dvh) keeps the
           hero at one mobile viewport while letting HomeMarketing below
           grow the page. dvh, not vh: 100vh on iOS Safari includes the
           URL-bar area, so the hero would come out taller than what's
           actually visible; dvh tracks URL-bar visibility. */}
       <section className="flex min-h-dvh flex-col">
-        {/* Header carries the brand now. The old hero's <h1> WAS the
-            wordmark, so with the heading rewritten to a sentence the
-            page would otherwise render the word "Materialize" nowhere
-            above the fold — bad for a brand whose whole problem is
-            being confused with four similarly-named companies. The
-            logomark is an inline SVG (currentColor, no request). */}
-        <header>
-          <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4">
-            <Link
-              href="/"
-              aria-label="Materialize — home"
-              className="flex items-center text-foreground transition-opacity hover:opacity-70"
-            >
-              <Logomark height={18} />
-            </Link>
-            <AuthNav />
-          </div>
-        </header>
-
-        {/* Bottom padding reserves vertical room for the fixed
-            HomeBottomBar (search + explore + upload). */}
-        <main className="flex flex-1 flex-col pb-44 sm:pb-40">
+        {/* Brand mark lives in TopBar so "Materialize" still appears
+            above the fold. The h1 states what the product does. */}
+        <main className="flex flex-1 flex-col">
           <div className="flex flex-1 items-center justify-center px-4">
             <div className="flex w-full max-w-2xl flex-col items-center gap-4 text-center">
               {/* Real, selectable <h1> — states what the product does
@@ -182,10 +190,6 @@ export default async function HomePage() {
           links so crawlers and agents get real content, not the
           JS-only hero shell. */}
       <HomeMarketing />
-
-      {/* Fixed bottom: Explore materials + search + upload. Stays
-          pinned over the scrolling content as a persistent CTA. */}
-      <HomeBottomBar />
     </div>
   );
 }

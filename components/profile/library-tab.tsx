@@ -29,6 +29,8 @@ import { LibraryEmptyState } from "./library-empty-state";
 interface LibraryTabProps {
   userId: string;
   isOwner: boolean;
+  /** Denser card grid for the authed home, where the column is narrower. */
+  compact?: boolean;
 }
 
 type LibraryItem = LibraryFileCardItem;
@@ -86,7 +88,11 @@ export function resolveCollectionMembership(
   return { itemsInCollection, standaloneOwnedItems };
 }
 
-export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
+export async function LibraryTab({
+  userId,
+  isOwner,
+  compact = false,
+}: LibraryTabProps) {
   // Unsaved text-to-CAD drafts live in the studio, not the library —
   // even for the owner (docs/text-to-cad/05 §B).
   const fileConditions = [eq(files.userId, userId), notUnsavedStudioDraft()];
@@ -580,7 +586,7 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
 
   if (!hasAnyContent) {
     if (isOwner) {
-      return <LibraryEmptyState />;
+      return <LibraryEmptyState compact={compact} />;
     }
     return (
       <div className="rounded-2xl bg-muted/50 py-16 text-center">
@@ -628,9 +634,10 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
             showVisibilityBadge={isOwner}
             isOwner={isOwner}
             fileCount={colFiles.length}
+            compact={compact}
           >
             {colFiles.length > 0 ? (
-              <FileGrid items={colFiles} isOwner={isOwner} />
+              <FileGrid items={colFiles} isOwner={isOwner} compact={compact} />
             ) : (
               <p className="text-sm text-muted-foreground">Empty collection</p>
             )}
@@ -644,8 +651,15 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
           name="Projects"
           count={projectGridItems.length}
           countNoun="Project"
+          compact={compact}
         >
-          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+          <div
+            className={
+              compact
+                ? "grid grid-cols-3 gap-2 sm:grid-cols-4"
+                : "grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
+            }
+          >
             {projectGridItems.map((p) => (
               <LibraryProjectCard key={p.id} item={p} />
             ))}
@@ -659,8 +673,9 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
           name="Files"
           count={mainGridItems.length}
           countNoun="File"
+          compact={compact}
         >
-          <FileGrid items={mainGridItems} isOwner={isOwner} />
+          <FileGrid items={mainGridItems} isOwner={isOwner} compact={compact} />
         </LibrarySection>
       )}
     </div>
@@ -670,12 +685,20 @@ export async function LibraryTab({ userId, isOwner }: LibraryTabProps) {
 function FileGrid({
   items,
   isOwner,
+  compact = false,
 }: {
   items: LibraryItem[];
   isOwner: boolean;
+  compact?: boolean;
 }) {
   return (
-    <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+    <div
+      className={
+        compact
+          ? "grid grid-cols-3 gap-2 sm:grid-cols-4"
+          : "grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
+      }
+    >
       {items.map((item) => (
         <LibraryFileCard key={item.id} item={item} isOwner={isOwner} />
       ))}

@@ -30,8 +30,7 @@ export function AuthNav() {
 
   if (isSignedIn) {
     // Hide the avatar when the user is already on their own profile —
-    // the avatar would just link to the page they're looking at, and
-    // sidebar mode (>=1700) puts a Profile entry in the rail. The
+    // the avatar would just link to the page they're looking at. The
     // user lands here every time `/` redirects an authed visitor to
     // /u/<their-username>, so this is the common case.
     const onOwnProfile =

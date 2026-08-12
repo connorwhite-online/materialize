@@ -148,11 +148,9 @@ export const metadata: Metadata = {
 };
 
 // Tell the browser the soft keyboard should overlay our layout
-// instead of pushing the page up. The fixed bottom search bar
-// then re-positions itself above the keyboard via the
-// VisualViewport API in HomeBottomBar — that way iOS doesn't
-// auto-scroll the document on input focus, and the hero
-// stays put.
+// instead of pushing the page up. Fixed bottom chrome (mobile tab
+// bar, CAD composer) re-positions via the VisualViewport API so iOS
+// doesn't auto-scroll the document on input focus.
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,

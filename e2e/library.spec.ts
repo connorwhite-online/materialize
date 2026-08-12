@@ -12,11 +12,9 @@ import {
 } from "./fixtures";
 
 /**
- * Library-tab regression guard. The authed home redirects to
- * /u/<username>, so the library tab is the first thing every
- * signed-in user sees on every session start — high blast radius
- * for any regression in the parallelized queries on
- * app/(app)/u/[username]/page.tsx or its child LibraryTab.
+ * Library-tab regression guard. The authed home at `/` now hosts the
+ * owner's library below the upload area. High blast radius for any
+ * regression in the parallelized queries on LibraryTab.
  *
  * What this asserts: an owned file appears in the owner's own
  * library when they sign in. Doesn't cover the purchased path
@@ -53,15 +51,13 @@ test.describe("library tab", () => {
       },
     });
 
-    // Authed home redirects to /u/<username>. Navigate explicitly
-    // so we don't race the redirect.
-    await page.goto(`/u/${username}`);
+    // Authed `/` is the library home. Sign-in from `/` already lands
+    // there; reload so we don't race Clerk finishing the session.
+    await page.goto("/");
 
-    // The display name appears in the profile header — confirms
-    // we landed on the right user's page.
-    await expect(page.getByText("E2E Authed Buyer").first()).toBeVisible({
-      timeout: 10_000,
-    });
+    await expect(
+      page.getByRole("heading", { name: "Library" })
+    ).toBeVisible({ timeout: 10_000 });
 
     // The seeded file should appear in the library by its name.
     // We don't pin to a specific card component selector — copy

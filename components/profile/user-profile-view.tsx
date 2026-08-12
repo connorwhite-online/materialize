@@ -1,16 +1,14 @@
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { PartyPopperIcon } from "lucide-react";
 import { auth } from "@clerk/nextjs/server";
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { users } from "@/lib/db/schema";
 import { loadUserByHandle } from "@/app/(app)/[handle]/loader";
-import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/auth/user-avatar";
-import { ProfileTabs } from "@/components/profile/profile-tabs";
 import { LibraryTab } from "@/components/profile/library-tab";
-import { OrdersTab } from "@/components/profile/orders-tab";
-import { EarningsTab } from "@/components/profile/earnings-tab";
-import { NotificationsTab } from "@/components/profile/notifications-tab";
-import { getMyUnreadNotificationCount } from "@/lib/notifications/queries";
+import { OwnerSettingsTabs } from "@/components/profile/owner-settings-tabs";
+import { OwnerProfileHeadline } from "@/components/profile/owner-profile-headline";
+import { GeneralSettings } from "@/components/profile/general-settings";
 import { profilePageJsonLd, safeJsonLdScript } from "@/lib/seo/json-ld";
 
 const PLATFORM_LABELS: Record<string, string> = {
@@ -76,7 +74,14 @@ function PlatformIcon({ platform }: { platform: string }) {
   );
 }
 
-type Tab = "library" | "orders" | "earnings" | "notifications";
+const OWNER_TAB_REDIRECTS: Record<string, string> = {
+  library: "/dashboard/library",
+  files: "/dashboard/library",
+  orders: "/dashboard/orders",
+  earnings: "/dashboard/earnings",
+  notifications: "/dashboard/comments",
+  comments: "/dashboard/comments",
+};
 
 /**
  * Server-rendered user profile body. Extracted from the old
@@ -111,42 +116,67 @@ export async function UserProfileView({
   } catch {
     // proxy context absent — treat as anonymous visitor
   }
-  const showWelcome =
-    searchParams.welcome === "1" && searchParams.payment === "success";
-  // Two-step checkout: the CraftCloud bridge's returnUrl lands on
-  // /dashboard/orders?production=paid, which forwards here. The order
-  // itself may still read awaiting_production_payment for a beat
-  // (reconciliation), so the banner is the immediate confirmation.
-  const showProductionPaid = searchParams.production === "paid";
-
   const user = await loadUserByHandle(handle);
 
   if (!user) notFound();
 
   const isOwner = userId === user.id;
-  // Accept the legacy "comments" key as an alias for "notifications" so
-  // any old bookmarks land on the inbox instead of bouncing to Library.
-  const rawTab = searchParams.tab;
-  const activeTab: Tab =
-    rawTab === "orders" || rawTab === "earnings"
-      ? rawTab
-      : rawTab === "notifications" || rawTab === "comments"
-        ? "notifications"
-        : "library";
 
-  // Guard owner-only tabs
-  if (
-    !isOwner &&
-    (activeTab === "orders" ||
-      activeTab === "earnings" ||
-      activeTab === "notifications")
-  ) {
-    redirect(`/${handle}`);
+  if (isOwner) {
+    const rawTab = searchParams.tab;
+    if (rawTab && rawTab in OWNER_TAB_REDIRECTS) {
+      const dest = OWNER_TAB_REDIRECTS[rawTab];
+      const query = new URLSearchParams();
+      if (searchParams.welcome) query.set("welcome", searchParams.welcome);
+      if (searchParams.payment) query.set("payment", searchParams.payment);
+      if (searchParams.production) query.set("production", searchParams.production);
+      const qs = query.toString();
+      redirect(qs ? `${dest}?${qs}` : dest);
+    }
+
+    const [settings] = await db
+      .select({
+        defaultUploadVisibility: users.defaultUploadVisibility,
+        emailNotificationsEnabled: users.emailNotificationsEnabled,
+        emailNotificationPrefs: users.emailNotificationPrefs,
+      })
+      .from(users)
+      .where(eq(users.id, user.id));
+
+    const generalTab = rawTab === "general";
+
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-8">
+        <OwnerSettingsTabs
+          username={handle}
+          activeTab={generalTab ? "general" : "profile"}
+        />
+        <div className="mt-8">
+          {generalTab ? (
+            <GeneralSettings
+              defaultUploadVisibility={
+                settings?.defaultUploadVisibility ?? "private"
+              }
+              emailNotificationsEnabled={
+                settings?.emailNotificationsEnabled ?? true
+              }
+              emailNotificationPrefs={
+                settings?.emailNotificationPrefs ?? null
+              }
+            />
+          ) : (
+            <OwnerProfileHeadline
+              username={user.username || handle}
+              displayName={user.displayName || ""}
+              bio={user.bio || ""}
+              avatarUrl={user.avatarUrl}
+              socialLinks={user.socialLinks ?? []}
+            />
+          )}
+        </div>
+      </div>
+    );
   }
-
-  const unreadNotifications = isOwner
-    ? await getMyUnreadNotificationCount()
-    : 0;
 
   const jsonLd = profilePageJsonLd({
     username: user.username,
@@ -171,23 +201,12 @@ export async function UserProfileView({
           className="h-20 w-20 text-2xl"
         />
         <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-bold">
-                {user.displayName || user.username}
-              </h1>
-              {user.username && (
-                <p className="text-muted-foreground">@{user.username}</p>
-              )}
-            </div>
-            {isOwner && (
-              <Button
-                variant="outline"
-                size="sm"
-                render={<Link href="/dashboard/settings" />}
-              >
-                Settings
-              </Button>
+          <div>
+            <h1 className="text-2xl font-bold">
+              {user.displayName || user.username}
+            </h1>
+            {user.username && (
+              <p className="text-muted-foreground">@{user.username}</p>
             )}
           </div>
           {user.bio && (
@@ -220,52 +239,7 @@ export async function UserProfileView({
 
       <div className="my-6" />
 
-      {showWelcome && isOwner && (
-        <div className="mb-6 rounded-xl border border-primary/30 bg-primary/5 p-4">
-          <p className="text-sm font-medium">
-            Welcome to Materialize — your order is in.
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            We created an account for you so you can track this print and any
-            future orders. Your email is already set up for status updates.
-          </p>
-        </div>
-      )}
-
-      {showProductionPaid && isOwner && (
-        <div className="mb-6 flex items-center gap-3 rounded-xl border border-green-500/30 bg-green-500/5 p-4">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-green-100 text-green-600 dark:bg-green-950 dark:text-green-400">
-            <PartyPopperIcon className="h-6 w-6" strokeWidth={2.5} />
-          </div>
-          <div>
-            <p className="text-sm font-medium">
-              Payment received — your print is on its way to production.
-            </p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Production and shipping are paid to CraftCloud, and your service
-              fee is charged now that the order is placed. Track it below.
-            </p>
-          </div>
-        </div>
-      )}
-
-      <ProfileTabs
-        username={handle}
-        activeTab={activeTab}
-        isOwner={isOwner}
-        unreadNotifications={unreadNotifications}
-      />
-
-      <div className="mt-6">
-        {activeTab === "library" && (
-          <LibraryTab userId={user.id} isOwner={isOwner} />
-        )}
-        {activeTab === "orders" && isOwner && <OrdersTab userId={user.id} />}
-        {activeTab === "notifications" && isOwner && (
-          <NotificationsTab userId={user.id} />
-        )}
-        {activeTab === "earnings" && isOwner && <EarningsTab userId={user.id} />}
-      </div>
+      <LibraryTab userId={user.id} isOwner={false} />
     </div>
   );
 }
