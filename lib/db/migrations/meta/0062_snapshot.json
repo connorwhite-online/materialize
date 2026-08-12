@@ -1,6 +1,6 @@
 {
-  "id": "1f01614e-263f-4572-84c8-9f2f771dd206",
-  "prevId": "076842e3-1a01-4b30-b63f-def6d92128e7",
+  "id": "401ebe20-32c2-4652-88fb-8061006cee83",
+  "prevId": "1f01614e-263f-4572-84c8-9f2f771dd206",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -523,6 +523,12 @@
         },
         "networks_report": {
           "name": "networks_report",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "dimension_checks": {
+          "name": "dimension_checks",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false

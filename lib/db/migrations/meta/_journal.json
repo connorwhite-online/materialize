@@ -433,7 +433,14 @@
       "idx": 61,
       "version": "7",
       "when": 1786002200000,
-      "tag": "0061_cad_dimension_checks",
+      "tag": "0061_cad_fetched_facts",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1786002300000,
+      "tag": "0062_cad_dimension_checks",
       "breakpoints": true
     }
   ]

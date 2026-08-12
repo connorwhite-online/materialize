@@ -23,6 +23,7 @@ import {
   Loader2Icon,
   MessageSquareTextIcon,
   PackageIcon,
+  PaletteIcon,
   PaperclipIcon,
   PencilIcon,
   PinIcon,
@@ -524,6 +525,17 @@ export function TextToCadStudio({
   // In-flight attachment decodes; the send button waits for zero so a fast
   // submit can't race a still-reading file out of the request.
   const [attaching, setAttaching] = useState(0);
+  // Pre-build concept picker (composer-side diverge step): direction cards
+  // fetched from /api/cad/concepts, chosen with NO time pressure — unlike
+  // the in-job card, which auto-resolves on the serverless clock. The pick
+  // rides the generate request as `concept.png`.
+  const [concepts, setConcepts] = useState<
+    { id: string; label: string; detail?: string; png: string }[] | null
+  >(null);
+  const [conceptsLoading, setConceptsLoading] = useState(false);
+  const [selectedConceptId, setSelectedConceptId] = useState<string | null>(
+    null
+  );
   const [selectedPartId, setSelectedPartId] = useState<string | null>(null);
   const [savingModel, setSavingModel] = useState(false);
   const [savedAssets, setSavedAssets] = useState<Set<string>>(new Set());
@@ -1196,6 +1208,8 @@ export function TextToCadStudio({
     setSubmittedPrompt(null);
     setImages([]);
     setAttachError(null);
+    setConcepts(null);
+    setSelectedConceptId(null);
     setSelectedPartId(null);
     setShowHistory(false);
     setShowBuildsMenu(false);
@@ -1408,6 +1422,8 @@ export function TextToCadStudio({
     setPrompt("");
     setImages([]);
     setAttachError(null);
+    setConcepts(null);
+    setSelectedConceptId(null);
   }
 
   async function addFiles(files: FileList | File[] | null | undefined) {
@@ -1465,6 +1481,53 @@ export function TextToCadStudio({
 
   function removeImage(id: string) {
     setImages((prev) => prev.filter((i) => i.id !== id));
+  }
+
+  // Fetch direction cards for the current prompt (+ attached refs). Errors
+  // land in the attachError line; an empty result means "no picker today —
+  // build anyway" (the in-job picker remains the fallback).
+  async function fetchConcepts() {
+    if (conceptsLoading || generating) return;
+    const p = prompt.trim();
+    if (p.length < 3) {
+      setAttachError(
+        "Describe what you want to make first — directions are generated from your prompt."
+      );
+      return;
+    }
+    setConceptsLoading(true);
+    setAttachError(null);
+    try {
+      const res = await fetch("/api/cad/concepts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: p,
+          images: images.length
+            ? images.map((i) => ({ data: i.data, mediaType: i.mediaType }))
+            : undefined,
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const { concepts: fetched } = (await res.json()) as {
+        concepts: { id: string; label: string; detail?: string; png: string }[];
+      };
+      if (!fetched?.length) {
+        setConcepts(null);
+        setAttachError(
+          "Couldn't generate direction concepts right now — you can build anyway."
+        );
+        return;
+      }
+      setConcepts(fetched);
+      setSelectedConceptId(fetched[0].id);
+    } catch {
+      setAttachError(
+        "Couldn't generate direction concepts right now — you can build anyway."
+      );
+    } finally {
+      setConceptsLoading(false);
+    }
   }
 
   async function submit() {
@@ -1574,6 +1637,12 @@ export function TextToCadStudio({
           images: images.length
             ? images.map((i) => ({ data: i.data, mediaType: i.mediaType }))
             : undefined,
+          // Pre-build concept pick (composer picker): the chosen direction's
+          // render becomes the build's enforced aesthetic target.
+          concept: (() => {
+            const chosen = concepts?.find((c) => c.id === selectedConceptId);
+            return chosen ? { png: chosen.png } : undefined;
+          })(),
           // Target-process threading (MTR-171) stays supported by the route but
           // is no longer asked up-front in the composer (MTR-208): the signal
           // will later be auto-derived from a material/print selection.
@@ -2883,6 +2952,43 @@ export function TextToCadStudio({
               </div>
             )}
 
+            {/* Pre-build direction cards: pick with no time pressure (the
+                in-job card auto-resolves on the serverless clock; this one
+                waits forever). Tap toggles; the pick sends with the build. */}
+            {concepts && (
+              <div className="mb-2 flex gap-2 overflow-x-auto px-1">
+                {concepts.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    aria-pressed={selectedConceptId === c.id}
+                    title={c.detail}
+                    onClick={() =>
+                      setSelectedConceptId((cur) =>
+                        cur === c.id ? null : c.id
+                      )
+                    }
+                    className={cn(
+                      "w-24 shrink-0 overflow-hidden rounded-lg border text-left transition-colors",
+                      selectedConceptId === c.id
+                        ? "border-foreground ring-1 ring-foreground"
+                        : "border-foreground/15 hover:border-foreground/40"
+                    )}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`data:image/png;base64,${c.png}`}
+                      alt={c.label}
+                      className="aspect-square w-full object-cover"
+                    />
+                    <span className="block truncate px-1.5 py-1 text-[10px] font-medium">
+                      {c.label}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+
             {attachError && (
               <p className="mb-2 px-1 text-xs text-amber-600 dark:text-amber-500">
                 {attachError}
@@ -2956,6 +3062,24 @@ export function TextToCadStudio({
                 >
                   <PaperclipIcon className="size-4" />
                 </button>
+                {/* Explore design directions — fresh builds only (revision
+                    turns get the in-job refine card instead). */}
+                {!activeThread && (
+                  <button
+                    type="button"
+                    onClick={fetchConcepts}
+                    disabled={generating || conceptsLoading}
+                    aria-label="Explore design directions"
+                    title="Explore design directions"
+                    className="flex size-8 cursor-pointer items-center justify-center rounded-lg text-muted-foreground hover:bg-foreground/5 hover:text-foreground disabled:opacity-40"
+                  >
+                    {conceptsLoading ? (
+                      <Loader2Icon className="size-4 animate-spin" />
+                    ) : (
+                      <PaletteIcon className="size-4" />
+                    )}
+                  </button>
+                )}
               </div>
               <input
                 ref={fileInputRef}

@@ -25,12 +25,30 @@ vi.mock("@/lib/cad/runner-client", () => ({
 const conceptImage = vi.fn(
   async (..._args: unknown[]): Promise<PromptImage | null> => null
 );
+const CONCEPT_REF_LABEL = "concept thread ref label";
 vi.mock("@/lib/cad/concept", () => ({
   conceptImage: (...args: unknown[]) =>
     conceptImage(...(args as Parameters<typeof conceptImage>)),
   CONCEPT_IMAGE_NOTE: "CONCEPT_NOTE_SENTINEL",
   CONCEPT_FROM_REFS_NOTE: "CONCEPT_FROM_REFS_SENTINEL",
   CONCEPT_JUDGE_LABEL: "concept judge label",
+  CONCEPT_CHOSEN_LABEL: "concept chosen label",
+  CONCEPT_THREAD_REF_LABEL: "concept thread ref label",
+}));
+
+const classifyConceptPhase = vi.fn(async (..._args: unknown[]) => "skip");
+const proposeConceptDirections = vi.fn(async (..._args: unknown[]) => [
+  { label: "Soft minimal", detail: "gentle radii" },
+  { label: "Rugged industrial", detail: "chamfers" },
+  { label: "Sculptural", detail: "organic" },
+]);
+vi.mock("@/lib/cad/concept-directions", () => ({
+  classifyConceptPhase: (...args: unknown[]) =>
+    classifyConceptPhase(...(args as Parameters<typeof classifyConceptPhase>)),
+  proposeConceptDirections: (...args: unknown[]) =>
+    proposeConceptDirections(
+      ...(args as Parameters<typeof proposeConceptDirections>)
+    ),
 }));
 
 import { runHarness } from "@/lib/cad/harness";
@@ -57,6 +75,12 @@ describe("reference images in harness prompts", () => {
     completeText.mockReset().mockResolvedValue("```python\nresult = 1\n```");
     runCadCode.mockReset().mockResolvedValue(solid());
     conceptImage.mockReset().mockResolvedValue(null);
+    classifyConceptPhase.mockReset().mockResolvedValue("skip");
+    proposeConceptDirections.mockReset().mockResolvedValue([
+      { label: "Soft minimal", detail: "gentle radii" },
+      { label: "Rugged industrial", detail: "chamfers" },
+      { label: "Sculptural", detail: "organic" },
+    ]);
     process.env.CAD_PLAN_STEP = "false";
     process.env.CAD_BRIEF_STEP = "false";
     process.env.CAD_CRITIQUE = "false";
@@ -159,6 +183,122 @@ describe("reference images in harness prompts", () => {
     await runHarness({ prompt: "a phone stand", maxAttempts: 1 });
     const call = completeText.mock.calls[0][0] as unknown as { prompt: string };
     expect(call.prompt).not.toContain("How this build has unfolded");
+  });
+
+  it("concept picker: three candidates via onQuestion thumbnails, pick honored, conceptPng returned", async () => {
+    conceptImage
+      .mockResolvedValueOnce({ data: "QQ==", mediaType: "image/png" })
+      .mockResolvedValueOnce({ data: "Qg==", mediaType: "image/png" })
+      .mockResolvedValueOnce({ data: "Qw==", mediaType: "image/png" });
+    const onQuestion = vi.fn(async (..._args: unknown[]) => "opt-2");
+
+    const result = await runHarness({
+      prompt: "a phone stand",
+      maxAttempts: 1,
+      onQuestion,
+    });
+
+    expect(conceptImage).toHaveBeenCalledTimes(3);
+    expect(onQuestion).toHaveBeenCalledTimes(1);
+    const q = onQuestion.mock.calls[0][0] as unknown as {
+      id: string;
+      options: { id: string; thumbnail?: string }[];
+    };
+    expect(q.id).toBe("concept-pick");
+    expect(q.options.map((o) => o.thumbnail)).toEqual(["QQ==", "Qg==", "Qw=="]);
+    // The picked concept rides the generate images AND the result.
+    expect(result.conceptPng).toBe("Qg==");
+    const gen = completeText.mock.calls[0][0] as unknown as {
+      images?: PromptImage[];
+    };
+    expect(gen.images?.some((i) => i.data === "Qg==")).toBe(true);
+    expect(gen.images?.some((i) => i.data === "QQ==")).toBe(false);
+  });
+
+  it("concept picker: an asker failure falls back to the first candidate", async () => {
+    conceptImage
+      .mockResolvedValueOnce({ data: "QQ==", mediaType: "image/png" })
+      .mockResolvedValueOnce({ data: "Qg==", mediaType: "image/png" })
+      .mockResolvedValueOnce(null);
+    const onQuestion = vi.fn(async (..._args: unknown[]): Promise<string> => {
+      throw new Error("asker died");
+    });
+    const result = await runHarness({
+      prompt: "a phone stand",
+      maxAttempts: 1,
+      onQuestion,
+    });
+    expect(result.conceptPng).toBe("QQ==");
+  });
+
+  it("providedConcept (composer pick) is used verbatim — nothing generated, no picker", async () => {
+    const onQuestion = vi.fn(async (..._args: unknown[]) => "opt-1");
+    const result = await runHarness({
+      prompt: "a phone stand",
+      maxAttempts: 1,
+      onQuestion,
+      providedConcept: { png: "UElDS0VE" },
+    });
+    expect(conceptImage).not.toHaveBeenCalled();
+    expect(onQuestion).not.toHaveBeenCalled();
+    expect(result.conceptPng).toBe("UElDS0VE");
+    const gen = completeText.mock.calls[0][0] as unknown as {
+      images?: PromptImage[];
+    };
+    expect(gen.images?.some((i) => i.data === "UElDS0VE")).toBe(true);
+  });
+
+  it("revision detail edits SKIP concepting entirely", async () => {
+    classifyConceptPhase.mockResolvedValue("skip");
+    const onQuestion = vi.fn(async (..._args: unknown[]) => "opt-1");
+    const result = await runHarness({
+      prompt: "make the hole 5mm",
+      priorSourceCode: "result = 1",
+      maxAttempts: 1,
+      onQuestion,
+    });
+    expect(conceptImage).not.toHaveBeenCalled();
+    expect(onQuestion).not.toHaveBeenCalled();
+    expect(result.conceptPng).toBeUndefined();
+  });
+
+  it("revision REFINE: variants condition on the current concept, 'keep' leads and wins by default", async () => {
+    classifyConceptPhase.mockResolvedValue("refine");
+    proposeConceptDirections.mockResolvedValue([
+      { label: "Softer stance", detail: "rounder base" },
+      { label: "Crisper edges", detail: "tighter radii" },
+    ]);
+    conceptImage
+      .mockResolvedValueOnce({ data: "VjE=", mediaType: "image/png" })
+      .mockResolvedValueOnce({ data: "VjI=", mediaType: "image/png" });
+    const onQuestion = vi.fn(async (..._args: unknown[]) => "opt-1");
+
+    const currentConcept: PromptImage = {
+      data: "Q1VSUkVOVA==",
+      mediaType: "image/png",
+      label: CONCEPT_REF_LABEL,
+    };
+    const result = await runHarness({
+      prompt: "make it look sleeker overall",
+      priorSourceCode: "result = 1",
+      images: [currentConcept],
+      maxAttempts: 1,
+      onQuestion,
+    });
+
+    // Variants were conditioned on the current concept, not user refs.
+    const conditioned = conceptImage.mock.calls[0][3] as PromptImage[];
+    expect(conditioned[0].data).toBe("Q1VSUkVOVA==");
+    // "Keep current direction" leads the options and is the default.
+    const q = onQuestion.mock.calls[0][0] as unknown as {
+      options: { label: string; thumbnail?: string }[];
+      defaultOptionId: string;
+    };
+    expect(q.options[0].label).toBe("Keep current direction");
+    expect(q.options[0].thumbnail).toBe("Q1VSUkVOVA==");
+    expect(q.options).toHaveLength(3);
+    // opt-1 = keep → the kept concept is the result target.
+    expect(result.conceptPng).toBe("Q1VSUkVOVA==");
   });
 });
 
