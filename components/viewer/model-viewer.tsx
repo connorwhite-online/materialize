@@ -43,6 +43,7 @@ import {
   MousePointer2Icon,
   MoveHorizontalIcon,
   PlusIcon,
+  RulerDimensionLineIcon,
   RulerIcon,
   ScissorsIcon,
 } from "lucide-react";
@@ -68,6 +69,12 @@ import {
   positionsForTriangleRanges,
   triangleRangesForFaceIds,
 } from "@/lib/cad/features";
+import type { DimensionCheckResult } from "@/lib/cad/dimension-check";
+import {
+  DimensionExtents,
+  DimensionFaceCallouts,
+  DimensionLegend,
+} from "./dimension-layer";
 
 type Vec3 = [number, number, number];
 
@@ -685,6 +692,23 @@ interface ModelViewerProps {
    */
   highlightFaceIds?: number[];
   /**
+   * Dimension-contract verdicts (MTR-197) for the annotation layer: measured
+   * spec callouts drawn on the model (bbox extents in world space, feature
+   * callouts on their matched B-rep faces) plus the legend. The layer only
+   * ever renders MEASURED values from the deterministic checker — not-run
+   * targets show as "not verified", never as passing.
+   */
+  dimensionChecks?: DimensionCheckResult[];
+  /**
+   * Dimension layer visibility — controlled by the studio (like
+   * `annotateMode`) so its "n/m verified" chip and the toolbar button stay
+   * one source of truth. The toolbar button renders only when a toggle
+   * handler is provided AND there are checks to show.
+   */
+  dimensionsOn?: boolean;
+  /** Toggle handler for the dimension-layer toolbar button. */
+  onToggleDimensions?: () => void;
+  /**
    * Fired once the model's geometry has loaded and committed (the Suspense
    * boundary resolved). The studio uses this to gate the particle→solid
    * crossfade on the mesh actually being ready, instead of a fixed timer
@@ -819,6 +843,8 @@ function InspectModel({
   modelUrl,
   topoUrl,
   highlightFaceIds,
+  dimensionChecks,
+  dimensionsOn,
   color,
   planes,
   onBounds,
@@ -835,6 +861,10 @@ function InspectModel({
   topoUrl?: string;
   /** Feature-chip highlight: topo face ids to overlay. */
   highlightFaceIds?: number[];
+  /** Dimension-contract verdicts for feature-level callouts (MTR-197). */
+  dimensionChecks?: DimensionCheckResult[];
+  /** Dimension layer visibility. */
+  dimensionsOn?: boolean;
   color?: string;
   planes: Plane[] | undefined;
   onBounds: (b: InspectBounds) => void;
@@ -992,6 +1022,13 @@ function InspectModel({
       {/* Feature-chip highlight (construction-history UX). */}
       {featureHighlight && (
         <FaceHighlight positions={featureHighlight} color="#0ea5e9" />
+      )}
+
+      {/* Dimension layer: feature-level callouts on their matched B-rep faces
+          (MTR-197). Model-space, like the topo edge guides — the shared frame
+          transform lands them exactly on the geometry. */}
+      {dimensionsOn && topo && geom && dimensionChecks && (
+        <DimensionFaceCallouts geom={geom} topo={topo} checks={dimensionChecks} />
       )}
     </group>
   );
@@ -1216,6 +1253,9 @@ export function ModelViewer({
   assemblyParts,
   topoUrl,
   highlightFaceIds,
+  dimensionChecks,
+  dimensionsOn = false,
+  onToggleDimensions,
   onReady,
   hideLoadingFallback = false,
 }: ModelViewerProps) {
@@ -1293,6 +1333,29 @@ export function ModelViewer({
   // Explode control (MTR-188): 0 = assembled, 1 = fully separated along each
   // part's centroid-outward vector. Assembly-only.
   const [explode, setExplode] = useState(0);
+
+  // Dimension layer (MTR-197): a passive overlay — consumes no clicks, so it
+  // composes freely with annotate/measure/section. Shown only when the caller
+  // supplied verdicts; visibility is caller-controlled (studio chip + toolbar
+  // button share one state).
+  const hasDimensions = !!dimensionChecks && dimensionChecks.length > 0;
+  const showDimensions = inspectable && hasDimensions && dimensionsOn;
+  // World-space box for the bbox extent callouts, from the measured bounds.
+  const dimensionWorldBox = useMemo(() => {
+    if (!bounds) return null;
+    return {
+      min: [
+        bounds.center[0] - bounds.footprint.x / 2,
+        bounds.worldMinY,
+        bounds.center[2] - bounds.footprint.z / 2,
+      ] as [number, number, number],
+      max: [
+        bounds.center[0] + bounds.footprint.x / 2,
+        bounds.worldMaxY,
+        bounds.center[2] + bounds.footprint.z / 2,
+      ] as [number, number, number],
+    };
+  }, [bounds]);
 
   // Annotate and measure both consume model clicks — turning one on turns the
   // other off so a click never does two things.
@@ -1386,6 +1449,8 @@ export function ModelViewer({
                       modelUrl={modelUrl}
                       topoUrl={topoUrl}
                       highlightFaceIds={highlightFaceIds}
+                      dimensionChecks={dimensionChecks}
+                      dimensionsOn={showDimensions}
                       color={materialColor}
                       planes={planes}
                       onBounds={setBounds}
@@ -1420,6 +1485,8 @@ export function ModelViewer({
                       modelUrl={modelUrl}
                       topoUrl={topoUrl}
                       highlightFaceIds={highlightFaceIds}
+                      dimensionChecks={dimensionChecks}
+                      dimensionsOn={showDimensions}
                       color={materialColor}
                       planes={planes}
                       onBounds={setBounds}
@@ -1477,6 +1544,11 @@ export function ModelViewer({
             {/* Measure markers + segment (world space, MTR-40). */}
             {inspectable && measureMode && bounds && (
               <MeasureOverlay points={measurePts} scale={bounds.scale} />
+            )}
+            {/* Dimension layer: bbox extent callouts off the measured world
+                box (MTR-197). World-space, like the grid / section cap. */}
+            {showDimensions && dimensionWorldBox && dimensionChecks && (
+              <DimensionExtents box={dimensionWorldBox} checks={dimensionChecks} />
             )}
           </Suspense>
           <OrbitControls
@@ -1540,6 +1612,23 @@ export function ModelViewer({
             >
               <ScissorsIcon className="size-4" />
             </button>
+            {hasDimensions && onToggleDimensions && (
+              <>
+                <div className="h-4 w-px bg-border/60" />
+                <button
+                  type="button"
+                  onClick={onToggleDimensions}
+                  aria-label="Toggle dimension annotations"
+                  aria-pressed={dimensionsOn}
+                  title="Dimensions — spec callouts measured against the built geometry"
+                  className={`flex h-8 w-8 items-center justify-center transition-colors hover:bg-foreground/5 ${
+                    dimensionsOn ? "text-foreground" : "text-muted-foreground"
+                  }`}
+                >
+                  <RulerDimensionLineIcon className="size-4" />
+                </button>
+              </>
+            )}
             <div className="h-4 w-px bg-border/60" />
             <button
               type="button"
@@ -1612,6 +1701,16 @@ export function ModelViewer({
                 className="w-32 -rotate-90 cursor-pointer accent-foreground"
               />
             </div>
+          )}
+
+          {/* Dimension-contract legend — the complete verdict list, including
+              targets with no natural 3D anchor (count/fit/not-run). Sits below
+              the explode slider on assemblies. */}
+          {showDimensions && dimensionChecks && (
+            <DimensionLegend
+              checks={dimensionChecks}
+              className={`absolute left-3 ${isAssembly ? "top-14" : "top-3"}`}
+            />
           )}
 
           {/* Grid cell-size legend (per-line numeric ticks are a follow-up). */}

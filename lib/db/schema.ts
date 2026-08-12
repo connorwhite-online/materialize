@@ -1627,6 +1627,17 @@ export const cadGenerations = pgTable(
       error?: string;
     }>(),
     /**
+     * Dimension-contract results (MTR-197): each brief dimension target
+     * checked deterministically against the built geometry, with matched
+     * topology face ids for feature-level kinds. Small jsonb list (a handful
+     * of callouts) kept on the row — like `features` — so the studio renders
+     * the dimension annotation layer + verified chip without a second fetch.
+     * Null when the run carried no targets or predates the check.
+     */
+    dimensionChecks: jsonb("dimension_checks").$type<
+      import("@/lib/cad/dimension-check").DimensionCheckResult[]
+    >(),
+    /**
      * Config fingerprint: WHICH harness configuration produced this row
      * (per-role models, flags, router verdict) — the treatment beside the
      * outcome, so quality changes are attributable (lib/cad/fingerprint.ts).

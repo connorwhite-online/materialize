@@ -21,6 +21,7 @@ import { createDraftFileForPrint } from "@/app/actions/files";
 import { generateThreadTitle } from "./title";
 import { harnessConfigFingerprint } from "./fingerprint";
 import type { HarnessResult } from "./harness";
+import type { DimensionCheckResult } from "./dimension-check";
 import { bindFeatureParamNames, parseFeatures } from "./features";
 import type { CadProcess } from "./knowledge/dfm";
 import type { CadFeature, CadNetworksReport, CadPart } from "./types";
@@ -50,6 +51,19 @@ function resultExtras(
     ...(r.aestheticDims !== undefined ? { aestheticDims: r.aestheticDims } : {}),
     ...(r.brief !== undefined ? { brief: r.brief } : {}),
   };
+}
+
+/**
+ * Dimension-contract results for the row (MTR-197 annotation layer): the
+ * harness's deterministic per-target verdicts, persisted verbatim so the
+ * studio renders the dimension layer + verified chip across reloads. Null
+ * when the brief carried no targets — the column then stays untouched.
+ */
+function runDimensionChecks(
+  result: HarnessResult
+): DimensionCheckResult[] | null {
+  const checks = result.dimensionChecks;
+  return checks && checks.length > 0 ? checks : null;
 }
 
 /** IANA type for a STEP (ISO 10303-21) B-rep exchange file. */
@@ -244,6 +258,12 @@ export interface PersistedGeneration {
   hasStep?: boolean;
   /** Construction features for feature chips (empty when none). */
   features?: CadFeature[];
+  /**
+   * Dimension-contract verdicts (MTR-197) for the studio's annotation layer,
+   * threaded so the layer + verified chip render at first paint. Empty when
+   * the brief carried no targets.
+   */
+  dimensionChecks?: DimensionCheckResult[];
 }
 
 export interface PersistError {
@@ -534,6 +554,9 @@ export async function persistGenerationSuccess(opts: {
       // Dual-fluid isolation verdict (MTR-179) when the run declared fluid
       // circuits — drives the studio isolation badge across reloads.
       networksReport: result.run?.checks?.networks ?? null,
+      // Dimension-contract verdicts (MTR-197) — drive the studio's dimension
+      // annotation layer + verified chip across reloads.
+      dimensionChecks: runDimensionChecks(result),
       // Treatment beside the outcome: which harness config ran (attribution),
       // including the target process this build was guided for (MTR-171).
       configFingerprint: harnessConfigFingerprint(result.route, opts.process),
@@ -568,6 +591,7 @@ export async function persistGenerationSuccess(opts: {
     remeshed: result.run?.remeshed ?? false,
     networksReport: result.run?.checks?.networks ?? null,
     features: runFeatures(result) ?? [],
+    dimensionChecks: runDimensionChecks(result) ?? [],
   };
 }
 
@@ -744,6 +768,10 @@ async function persistAssembly(opts: {
       // Isolation verdict rides the compound run (checks run on the whole
       // mesh before any assembly promotion).
       networksReport: result.run?.checks?.networks ?? null,
+      // Dimension-contract verdicts (MTR-197). bbox/count/fit verdicts are
+      // assembly-valid; feature-level face anchors ride the primary solid's
+      // topology (per-part topo isn't shipped), same best-effort as features.
+      dimensionChecks: runDimensionChecks(result),
       configFingerprint: harnessConfigFingerprint(result.route, opts.process),
       ...resultExtras(result),
       // Thread owns the title going forward; root-row title stays as the
@@ -773,5 +801,6 @@ async function persistAssembly(opts: {
     remeshed: result.run?.remeshed ?? false,
     networksReport: result.run?.checks?.networks ?? null,
     features: runFeatures(result) ?? [],
+    dimensionChecks: runDimensionChecks(result) ?? [],
   };
 }

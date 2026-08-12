@@ -77,14 +77,85 @@ describe("checkDimensionTargets — count", () => {
   });
 });
 
-describe("checkDimensionTargets — diameter/distance not yet evaluable", () => {
-  it("reports ran:false with a MTR-196 note (never silently passing)", () => {
+// Raw topology JSON shapes accepted by parseTopology (components/viewer/topology.ts).
+function cylFaceJson(id: number, radius: number, axis: number[] = [0, 0, 1]) {
+  return {
+    id,
+    surface: "cylinder",
+    params: { radius, axis, origin: [0, 0, 0] },
+    triRange: [id, id + 1],
+  };
+}
+
+function planeFaceJson(id: number, normal: number[], origin: number[]) {
+  return { id, surface: "plane", params: { normal, origin }, triRange: [id, id + 1] };
+}
+
+function topoJson(faces: Array<Record<string, unknown>>) {
+  return { faces, edges: [] };
+}
+
+describe("checkDimensionTargets — diameter/distance (MTR-174 topology)", () => {
+  it("does not run without a topology manifest on the run (honesty rail)", () => {
     const res = checkDimensionTargets(run(), [
       { label: "hole dia", kind: "diameter", value: 8 },
       { label: "hole pitch", kind: "distance", value: 35 },
     ]);
     expect(res.every((r) => r.ran === false && r.ok === null)).toBe(true);
-    expect(res[0].note).toMatch(/MTR-196/);
+    expect(res[0].note).toMatch(/manifest/);
+  });
+
+  it("runs and passes a diameter target against a matching cylinder in topo", () => {
+    const topo = topoJson([cylFaceJson(0, 4)]); // diameter 8
+    const res = checkDimensionTargets(run({ topo }), [
+      { label: "hole dia", kind: "diameter", value: 8 },
+    ]);
+    expect(res[0]).toMatchObject({ ran: true, ok: true, got: 8 });
+    expect(res[0].faceIds).toEqual([0]);
+  });
+
+  it("runs and fails a diameter target whose match is outside tolerance but inside the capture band", () => {
+    const topo = topoJson([cylFaceJson(0, 4.45)]); // diameter 8.9, spec 8
+    const res = checkDimensionTargets(run({ topo }), [
+      { label: "hole dia", kind: "diameter", value: 8 },
+    ]);
+    expect(res[0].ran).toBe(true);
+    expect(res[0].ok).toBe(false);
+    expect(res[0].got).toBeCloseTo(8.9);
+    expect(res[0].delta).toBeCloseTo(0.9);
+  });
+
+  it("runs and fails when topo carries no feature anywhere near spec", () => {
+    const topo = topoJson([cylFaceJson(0, 50)]); // diameter 100, spec 8 — outside the capture band
+    const res = checkDimensionTargets(run({ topo }), [
+      { label: "hole dia", kind: "diameter", value: 8 },
+    ]);
+    expect(res[0].ran).toBe(true);
+    expect(res[0].ok).toBe(false);
+    expect(res[0].got).toBeUndefined();
+    expect(res[0].note).toMatch(/no cylindrical feature found/);
+  });
+
+  it("formats a repair hint for the no-match failure that includes the note, not 'measured undefined'", () => {
+    const topo = topoJson([cylFaceJson(0, 50)]);
+    const res = checkDimensionTargets(run({ topo }), [
+      { label: "hole dia", kind: "diameter", value: 8 },
+    ]);
+    const hint = formatDimensionRepairHints(res);
+    expect(hint).toMatch(/no cylindrical feature found/);
+    expect(hint).not.toMatch(/measured undefined/);
+  });
+
+  it("runs a distance target against two parallel planes in topo", () => {
+    const topo = topoJson([
+      planeFaceJson(0, [0, 0, 1], [0, 0, 0]),
+      planeFaceJson(1, [0, 0, -1], [0, 0, 30]),
+    ]);
+    const res = checkDimensionTargets(run({ topo }), [
+      { label: "wall spacing", kind: "distance", value: 30 },
+    ]);
+    expect(res[0]).toMatchObject({ ran: true, ok: true, got: 30 });
+    expect(res[0].faceIds?.slice().sort()).toEqual([0, 1]);
   });
 });
 

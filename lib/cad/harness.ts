@@ -225,7 +225,8 @@ export interface HarnessResult {
    * Deterministic dimension-contract results (MTR-197): each brief dimension
    * target checked against the final geometry. Only checks that RAN are ever
    * counted as verified (honesty rail). Empty when the brief carried no
-   * targets. Persistence is the caller's job (see the TODO below on the column).
+   * targets. Persisted onto `cadGenerations.dimensionChecks` by the persist
+   * layer; drives the studio's dimension annotation layer + verified chip.
    */
   dimensionChecks?: DimensionCheckResult[];
   /** Per-role model usage for routing/telemetry (which model, how long). */
@@ -1146,9 +1147,11 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
  * an untyped persisted priorBrief), plus the auto-emitted component-fit
  * targets (MTR-204) for any known dev board the brief names. Best-effort — a
  * malformed/absent brief just yields no targets, so the dimension pass is a
- * no-op rather than a failure.
+ * no-op rather than a failure. Exported for the no-LLM revision actions
+ * (param rerun / statement edit), which re-verify the parent's contract
+ * against the rebuilt geometry.
  */
-function extractDimensionTargets(brief: unknown): DimensionTarget[] {
+export function extractDimensionTargets(brief: unknown): DimensionTarget[] {
   if (brief == null) return [];
   const parsed = cadBriefSchema.safeParse(brief);
   if (!parsed.success) return [];

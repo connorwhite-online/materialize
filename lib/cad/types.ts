@@ -3,6 +3,8 @@
  * Pure types — safe to import from client or server.
  */
 
+import type { DimensionCheckResult } from "./dimension-check";
+
 /** Output formats the sidecar can export from a build123d script. */
 export type CadOutputFormat = "stl" | "step" | "topo";
 
@@ -463,6 +465,12 @@ export interface CadDoneEvent {
   hasStep?: boolean;
   /** Construction features for the feature-chip strip (empty when none). */
   features?: CadFeature[];
+  /**
+   * Dimension-contract verdicts (MTR-197) for the studio's annotation layer
+   * — threaded so the layer + verified chip render at first paint, mirroring
+   * `features`. Empty when the brief carried no targets.
+   */
+  dimensionChecks?: DimensionCheckResult[];
 }
 
 /** Full event union carried over the SSE stream from /api/cad/generate. */
