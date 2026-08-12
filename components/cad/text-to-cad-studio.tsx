@@ -61,6 +61,7 @@ import { diffParams, extractParams } from "@/components/cad/param-diff";
 import { FeatureChips } from "@/components/cad/feature-chips";
 import {
   TurnFeedbackSheet,
+  TurnFeedbackTrigger,
   hasFeedback,
 } from "@/components/cad/turn-feedback-sheet";
 import { featureIdsForFaceIds } from "@/components/cad/feature-timeline";
@@ -2496,27 +2497,14 @@ export function TextToCadStudio({
             viewedTurn?.status === "succeeded" &&
             (() => {
               const vt = viewedTurn;
-              const rated = hasFeedback(vt);
-              // The trigger always lives in the layout now; the form itself is
-              // a bottom sheet (opened here, or auto-opened once when a build
-              // finishes — see feedbackSheetTurnId).
+              // Only the trigger lives in the layout now; the form itself is a
+              // bottom sheet (opened here, or auto-opened once after a build's
+              // reveal — see pendingFeedbackTurnId).
               return (
-                <button
-                  type="button"
-                  onClick={() => setFeedbackEditing(vt.id)}
-                  className="mt-4 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-                >
-                  <MessageSquareTextIcon className="size-3.5" />
-                  {rated
-                    ? `Feedback ${
-                        vt.rating === "good"
-                          ? "👍"
-                          : vt.rating === "bad"
-                            ? "👎"
-                            : "saved"
-                      } · edit`
-                    : "Add feedback"}
-                </button>
+                <TurnFeedbackTrigger
+                  turn={vt}
+                  onOpen={() => setFeedbackEditing(vt.id)}
+                />
               );
             })()}
 

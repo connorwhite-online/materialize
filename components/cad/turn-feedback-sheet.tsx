@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { CheckIcon } from "lucide-react";
+import { CheckIcon, CircleDashedIcon } from "lucide-react";
+import { ChevronUp } from "@/components/icons/chevron-up";
 import { NativeSheet } from "@/components/ui/native-sheet";
 import { recordCadFeedback } from "@/app/actions/cad-generation";
 import {
@@ -46,6 +47,57 @@ export type TurnFeedbackPatch = {
 export function hasFeedback(turn: TurnFeedbackTarget): boolean {
   return (
     !!turn.rating || turn.feedbackTags.length > 0 || !!turn.feedbackNote
+  );
+}
+
+/**
+ * The row that opens the sheet, sitting where the inline feedback card used
+ * to live. Its leading glyph IS the status: a dotted circle while this
+ * revision is unrated (an open loop — something still to do), a solid filled
+ * check once feedback is saved. The trailing chevron says "this opens a sheet"
+ * rather than "this navigates".
+ *
+ * Lives beside `hasFeedback` on purpose: the saved/unsaved rendering and the
+ * predicate that decides it should never drift into different files.
+ */
+export function TurnFeedbackTrigger({
+  turn,
+  onOpen,
+}: {
+  turn: TurnFeedbackTarget;
+  onOpen: () => void;
+}) {
+  const saved = hasFeedback(turn);
+  const ratingGlyph =
+    turn.rating === "good" ? "👍" : turn.rating === "bad" ? "👎" : null;
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-label={saved ? "Edit feedback for this revision" : "Add feedback for this revision"}
+      className={cn(
+        "mt-4 inline-flex items-center gap-2 rounded-full border py-1.5 pl-2 pr-2.5 text-xs transition-colors",
+        saved
+          ? "border-emerald-600/30 text-foreground hover:bg-emerald-500/10"
+          : "border-border/60 text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+      )}
+    >
+      {saved ? (
+        // A real filled disc: lucide's circle-check is stroke-based, and
+        // filling that svg would flood the check path too — so the disc is
+        // the wrapper and the check sits on top of it.
+        <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-emerald-600">
+          <CheckIcon className="size-2.5 text-white" strokeWidth={3.5} />
+        </span>
+      ) : (
+        <CircleDashedIcon className="size-4 shrink-0" />
+      )}
+      <span>
+        {saved ? "Feedback saved" : "Add feedback"}
+        {ratingGlyph ? ` ${ratingGlyph}` : ""}
+      </span>
+      <ChevronUp size={12} className="shrink-0 opacity-60" />
+    </button>
   );
 }
 

@@ -11,6 +11,7 @@ vi.mock("@/app/actions/cad-generation", () => ({
 
 import {
   TurnFeedbackSheet,
+  TurnFeedbackTrigger,
   hasFeedback,
   type TurnFeedbackTarget,
 } from "@/components/cad/turn-feedback-sheet";
@@ -49,6 +50,59 @@ describe("hasFeedback", () => {
     expect(hasFeedback({ ...TURN, rating: "good" })).toBe(true);
     expect(hasFeedback({ ...TURN, feedbackTags: ["wrong_dimensions"] })).toBe(true);
     expect(hasFeedback({ ...TURN, feedbackNote: "hm" })).toBe(true);
+  });
+});
+
+describe("TurnFeedbackTrigger", () => {
+  it("reads as an unsaved open loop before any feedback exists", () => {
+    const onOpen = vi.fn();
+    render(<TurnFeedbackTrigger turn={TURN} onOpen={onOpen} />);
+    const btn = screen.getByRole("button");
+    expect(btn.textContent).toContain("Add feedback");
+    expect(btn.getAttribute("aria-label")).toMatch(/Add feedback/);
+    // Dotted-circle glyph, not the solid saved disc.
+    expect(btn.querySelector(".bg-emerald-600")).toBeNull();
+    fireEvent.click(btn);
+    expect(onOpen).toHaveBeenCalled();
+  });
+
+  it("switches to the filled check once feedback is saved", () => {
+    render(
+      <TurnFeedbackTrigger
+        turn={{ ...TURN, rating: "good" }}
+        onOpen={vi.fn()}
+      />
+    );
+    const btn = screen.getByRole("button");
+    expect(btn.textContent).toContain("Feedback saved");
+    expect(btn.getAttribute("aria-label")).toMatch(/Edit feedback/);
+    // The disc is a filled wrapper, since a filled lucide circle-check would
+    // flood its check path too.
+    expect(btn.querySelector(".bg-emerald-600")).not.toBeNull();
+  });
+
+  it("counts a note-only or tag-only turn as saved", () => {
+    const { rerender } = render(
+      <TurnFeedbackTrigger
+        turn={{ ...TURN, feedbackNote: "hole was tight" }}
+        onOpen={vi.fn()}
+      />
+    );
+    expect(screen.getByRole("button").textContent).toContain("Feedback saved");
+    rerender(
+      <TurnFeedbackTrigger
+        turn={{ ...TURN, feedbackTags: ["wrong_dimensions"] }}
+        onOpen={vi.fn()}
+      />
+    );
+    expect(screen.getByRole("button").textContent).toContain("Feedback saved");
+  });
+
+  it("shows the rating glyph alongside the saved label", () => {
+    render(
+      <TurnFeedbackTrigger turn={{ ...TURN, rating: "bad" }} onOpen={vi.fn()} />
+    );
+    expect(screen.getByRole("button").textContent).toContain("👎");
   });
 });
 
