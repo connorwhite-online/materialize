@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import localFont from "next/font/local";
+import Link from "next/link";
 import { AuthNav } from "@/components/auth/auth-nav";
-import { HeroShowcase } from "@/components/home/hero-showcase-lazy";
+import { Logomark } from "@/components/icons/logomark";
 import { HomeBottomBar } from "@/components/home/home-bottom-bar";
 import { HomeMarketing } from "@/components/home/home-marketing";
 import { HOME_FAQ } from "@/lib/seo/home-faq";
@@ -59,14 +59,11 @@ export const metadata: Metadata = {
   },
 };
 
-// PP Playground Light — scoped to the home page so the 157KB OTF is
-// only preloaded here, not on every route (CON-166). Applied to the
-// "Anything" word in the hero <h1> via the --font-script CSS variable.
-const playground = localFont({
-  src: "../public/PPPlayground-Light.otf",
-  variable: "--font-script",
-  display: "swap",
-});
+// PP Playground Light (--font-script) used to be declared here for the
+// "Anything" word in the old wordmark hero. The hero is now a sentence
+// in the standard heading face, so nothing referenced the script font
+// any more and the 157KB OTF preload came off the landing page with it.
+// The file is still in /public if a future design wants it back.
 
 export default async function HomePage() {
   // Authed home = the user's own profile. Materialize is mostly a
@@ -89,7 +86,7 @@ export default async function HomePage() {
   // flow (no h-dvh / overflow-hidden) so the content below the fold
   // can extend it.
   return (
-    <div className={`flex flex-col ${playground.variable}`}>
+    <div className="flex flex-col">
       {/* Site-level structured data. Only the home page emits these:
           Organization and WebSite are singletons keyed by `@id`, and
           repeating them on every route gives a crawler N competing
@@ -122,10 +119,21 @@ export default async function HomePage() {
           URL-bar area, so the hero would come out taller than what's
           actually visible; dvh tracks URL-bar visibility. */}
       <section className="flex min-h-dvh flex-col">
-        {/* Minimal header — auth nav only, no border, no brand
-            text. The hero wordmark below serves as the brand. */}
+        {/* Header carries the brand now. The old hero's <h1> WAS the
+            wordmark, so with the heading rewritten to a sentence the
+            page would otherwise render the word "Materialize" nowhere
+            above the fold — bad for a brand whose whole problem is
+            being confused with four similarly-named companies. The
+            logomark is an inline SVG (currentColor, no request). */}
         <header>
-          <div className="mx-auto flex h-14 max-w-7xl items-center justify-end px-4">
+          <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4">
+            <Link
+              href="/"
+              aria-label="Materialize — home"
+              className="flex items-center text-foreground transition-opacity hover:opacity-70"
+            >
+              <Logomark height={18} />
+            </Link>
             <AuthNav />
           </div>
         </header>
@@ -133,37 +141,40 @@ export default async function HomePage() {
         {/* Bottom padding reserves vertical room for the fixed
             HomeBottomBar (search + explore + upload). */}
         <main className="flex flex-1 flex-col pb-44 sm:pb-40">
-          <div className="flex flex-1 items-end justify-center px-4">
-            <div className="w-full max-w-5xl flex flex-col items-center gap-2">
-              {/* Real, selectable <h1> — the visible brand lockup IS
-                  the heading now. It was previously an aria-hidden SVG
-                  wordmark, which left the page heading-less for
-                  crawlers and assistive tech. "Materialize" in the
-                  display face, "Anything" in the script face, using
-                  the same gradient/clip treatment as the nav brand. */}
-              <h1 className="flex flex-col items-center justify-center gap-0 text-center leading-[0.95] sm:flex-row sm:items-baseline sm:gap-3">
-                <span
-                  className="bg-gradient-to-b from-foreground to-muted-foreground bg-clip-text text-6xl tracking-tight text-transparent sm:text-7xl lg:text-8xl"
-                  style={{
-                    fontFamily: "var(--font-display), system-ui, sans-serif",
-                  }}
-                >
-                  Materialize
-                </span>
-                <span
-                  className="bg-gradient-to-b from-primary to-muted-foreground bg-clip-text text-6xl font-light text-transparent sm:text-7xl lg:text-8xl"
-                  style={{ fontFamily: "var(--font-script), cursive" }}
-                >
-                  Anything
-                </span>
+          <div className="flex flex-1 items-center justify-center px-4">
+            <div className="flex w-full max-w-2xl flex-col items-center gap-4 text-center">
+              {/* Real, selectable <h1> — states what the product does
+                  rather than spelling the brand. No inline fontFamily:
+                  globals.css already routes every heading through
+                  --font-heading (PP Frama), so this needs no font of
+                  its own and adds no webfont to the critical path. */}
+              <h1 className="text-balance text-3xl leading-[1.1] tracking-tight sm:text-4xl">
+                Print in any material, and share your ideas
               </h1>
-              <p className="max-w-md text-balance text-center text-base leading-relaxed text-muted-foreground">
-                The marketplace for 3D-print files — browse and buy designs, or
-                get any model printed on demand and shipped to your door.
+              <p className="max-w-lg text-pretty text-base leading-relaxed text-muted-foreground">
+                Upload a model, pick from 60+ materials, and we print and ship
+                it — no printer required. Browse designs from other makers, or
+                publish your own and earn on every print.
               </p>
-              <HeroShowcase />
             </div>
           </div>
+
+          {/* ─── Visual slot ───────────────────────────────────────────
+              The three.js / R3F hero showcase used to mount here and was
+              the single heaviest thing on the anon landing page. It is
+              unmounted, not deleted: components/home/hero-showcase*.tsx,
+              showcase-mesh.tsx, showcase-particles.tsx and
+              material-carousel.tsx are all still in the tree, and
+              re-adding <HeroShowcase /> here restores the old behavior
+              in one line.
+
+              Whatever replaces it should keep the two properties that
+              made the old mount safe: load it through
+              hero-showcase-lazy.tsx's next/dynamic + `ssr: false`
+              wrapper so three.js stays off the critical path, and give
+              the placeholder the same reserved height as the real
+              canvas so its arrival doesn't shift the copy above it.
+              ────────────────────────────────────────────────────────── */}
         </main>
       </section>
 
