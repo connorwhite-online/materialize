@@ -6,6 +6,7 @@ import {
   featureParamsToSourceParams,
   parseFeatures,
   positionsForTriangleRanges,
+  rebaseStepFeatures,
   triangleRangesForFaceIds,
 } from "@/lib/cad/features";
 import type { CadFeature } from "@/lib/cad/types";
@@ -51,6 +52,83 @@ describe("parseFeatures", () => {
         faceIds: [0],
       },
     ]);
+  });
+});
+
+describe("rebaseStepFeatures (agentic chips accumulation)", () => {
+  it("prefixes ids with the step and shifts spans by the banner line", () => {
+    const rebased = rebaseStepFeatures(
+      [
+        {
+          id: "fillet-0",
+          op: "fillet",
+          label: "Fillet r=2",
+          params: { radius: 2 },
+          faceIds: [5],
+          span: [3, 4],
+        },
+      ],
+      2,
+      5
+    );
+    expect(rebased).toEqual([
+      {
+        id: "s2-fillet-0",
+        op: "fillet",
+        label: "Fillet r=2",
+        params: { radius: 2 },
+        faceIds: [5],
+        span: [8, 9],
+      },
+    ]);
+  });
+
+  it("leaves span-less features span-less and does not mutate the input", () => {
+    const input: CadFeature[] = [
+      { id: "hole-0", op: "hole", label: "Hole", params: {}, faceIds: [] },
+    ];
+    const rebased = rebaseStepFeatures(input, 1, 10);
+    expect(rebased[0].span).toBeUndefined();
+    expect(rebased[0].id).toBe("s1-hole-0");
+    expect(input[0].id).toBe("hole-0");
+  });
+
+  it("matches the loop's transcript format: the rebased span line IS the op statement", () => {
+    // Reproduce exactly how agentic.ts assembles steps, then verify a span
+    // rebased with the banner-line formula lands on the original statement.
+    const steps: string[] = [];
+    const codes = [
+      "from build123d import *\nresult = Box(10, 10, 10)",
+      "wall = 2\nresult = fillet(result.edges(), radius=wall)",
+    ];
+    const rebasedAll: CadFeature[] = [];
+    codes.forEach((code, i) => {
+      const bannerLine =
+        steps.reduce((n, s) => n + s.split("\n").length + 1, 0) + 1;
+      steps.push(`# ---- step ${i + 1} ----\n${code}`);
+      rebasedAll.push(
+        ...rebaseStepFeatures(
+          [
+            {
+              id: "op-0",
+              op: "extrude",
+              label: "x",
+              params: {},
+              faceIds: [],
+              // The op sits on the LAST line of each step's code.
+              span: [code.split("\n").length, code.split("\n").length],
+            },
+          ],
+          i + 1,
+          bannerLine
+        )
+      );
+    });
+    const assembled = steps.join("\n\n").split("\n");
+    expect(assembled[rebasedAll[0].span![0] - 1]).toBe("result = Box(10, 10, 10)");
+    expect(assembled[rebasedAll[1].span![0] - 1]).toBe(
+      "result = fillet(result.edges(), radius=wall)"
+    );
   });
 });
 

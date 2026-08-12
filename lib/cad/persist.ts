@@ -756,8 +756,9 @@ async function persistAssembly(opts: {
       projectId,
       renderStorageKey,
       topoStorageKey,
-      // Assemblies: features from the primary solid when the sidecar emitted
-      // them (per-part topo isn't shipped — chips are best-effort here).
+      // Assemblies: chips carry params + spans but no faceIds — per-part topo
+      // isn't shipped, so the sidecar's assembly branch finalizes without a
+      // shape (highlight is best-effort by the chip contract).
       features: runFeatures(result),
       aestheticScore: result.aestheticScore ?? null,
       // An assembly counts as remeshed when the run was, or ANY part's

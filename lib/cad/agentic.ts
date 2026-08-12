@@ -50,9 +50,11 @@ import {
   CadSessionError,
 } from "./session-client";
 import { getObjectBytes } from "@/lib/storage";
+import { parseFeatures, rebaseStepFeatures } from "./features";
 import type { HarnessInput, HarnessResult } from "./harness";
 import { BREP_OUTPUT_FORMATS } from "./types";
 import type {
+  CadFeature,
   CadProgressEvent,
   CadQuestionOption,
   CadRunResult,
@@ -509,6 +511,18 @@ export async function runAgenticHarness(
   // Running source assembly: the exec history, step-marked, so the persisted
   // sourceCode approximates how the part was actually built (flywheel data).
   const steps: string[] = [];
+  // Construction features accumulated across the session (the chips fix):
+  // the sidecar resets its op log per exec, so each exec's payload carries
+  // only that step's ops — the loop rebases every batch onto the assembled
+  // transcript (span offsets + step-prefixed ids) and accumulates here.
+  // `snapshotFeatureMark` mirrors the sidecar's single-slot geometry
+  // checkpoint: a successful rollback discards the ops recorded since the
+  // matching snapshot, exactly like the geometry does.
+  const collectedFeatures: CadFeature[] = [];
+  let snapshotFeatureMark = 0;
+  // Frozen alongside bestCode when a run grades pass — the features that
+  // describe THAT geometry (later execs may mutate the solid further).
+  let bestFeatures: CadFeature[] = [];
   let lastRun: CadRunResult | undefined;
   // Most recent run that graded pass — the result we fall back to on budget
   // exhaustion or a model stop without finish().
@@ -729,7 +743,12 @@ export async function runAgenticHarness(
     });
   }
 
-  const run = bestRun ?? lastRun;
+  // The accumulated construction features ride the accepted run in place of
+  // the sidecar's per-exec log (which only ever holds the LAST exec's ops).
+  const run =
+    bestRun && bestFeatures.length > 0
+      ? { ...bestRun, features: bestFeatures }
+      : (bestRun ?? lastRun);
   const ok = !!bestRun;
   return {
     ok,
@@ -758,7 +777,10 @@ export async function runAgenticHarness(
       ok: true,
       sourceCode: bestCode || assembled(),
       attempts: execCount,
-      run: bestRun,
+      run:
+        bestRun && bestFeatures.length > 0
+          ? { ...bestRun, features: bestFeatures }
+          : bestRun,
       aestheticScore: null,
       aestheticDims: null,
       brief: input.priorBrief,
@@ -793,7 +815,22 @@ export async function runAgenticHarness(
           allowRemesh: usesInternalThreadRecipe(code),
           signal: input.signal,
         });
+        // Line the step's banner will land on in the assembled transcript —
+        // computed BEFORE the push so this exec's feature spans rebase onto
+        // it. Steps only ever append, so the rebased spans stay valid in
+        // every later (longer) assembly.
+        const bannerLine =
+          steps.reduce((n, s) => n + s.split("\n").length + 1, 0) + 1;
         steps.push(`# ---- step ${execCount} ----\n${code}`);
+        // This exec's recorded ops (empty on ops-free steps + old sidecars).
+        // Non-run execs report them too — a `Hole` placed in a sketch-only
+        // setup step is still a feature of the eventual part.
+        const stepFeatures = rebaseStepFeatures(
+          parseFeatures((res as { features?: unknown }).features),
+          execCount,
+          bannerLine
+        );
+        collectedFeatures.push(...stepFeatures);
         const stdout =
           res.stdout.length > STDOUT_CAP
             ? `${res.stdout.slice(0, STDOUT_CAP)}\n…(truncated)`
@@ -810,6 +847,15 @@ export async function runAgenticHarness(
         if (grade.pass) {
           bestRun = res;
           bestCode = assembled();
+          // Freeze the accumulated features describing THIS geometry. Only
+          // the current exec's faceIds resolve against the topo that ships
+          // with bestRun — earlier steps' ids indexed their own exec's
+          // tessellation, so they drop to [] (chips still render + edit;
+          // highlight is best-effort by contract).
+          const prefix = `s${execCount}-`;
+          bestFeatures = collectedFeatures.map((f) =>
+            f.id.startsWith(prefix) ? f : { ...f, faceIds: [] }
+          );
           judgedBest = false;
         }
         // Deterministic stderr->class->fixes enrichment (MTR-198): when the exec
@@ -1013,12 +1059,24 @@ export async function runAgenticHarness(
         ];
       }
       case "snapshot": {
-        await snapshotSession(sessionId!, input.signal);
+        const ok = await snapshotSession(sessionId!, input.signal);
+        if (!ok) {
+          return [textBlock("nothing to snapshot — exec code that assigns `result` first")];
+        }
+        // The feature mark moves with the geometry checkpoint, so a later
+        // rollback discards exactly the ops recorded since this point.
+        snapshotFeatureMark = collectedFeatures.length;
         return [textBlock("snapshot saved")];
       }
       case "rollback": {
-        await rollbackSession(sessionId!, input.signal);
+        const ok = await rollbackSession(sessionId!, input.signal);
+        if (!ok) {
+          return [textBlock("no snapshot to roll back to — call snapshot() first")];
+        }
         steps.push("# ---- rolled back to the last snapshot ----");
+        // The rolled-back ops are no longer in the solid — drop them so a
+        // later pass doesn't ship chips for geometry that isn't there.
+        collectedFeatures.length = snapshotFeatureMark;
         return [textBlock("rolled back to the last snapshot")];
       }
       case "ask_user": {
