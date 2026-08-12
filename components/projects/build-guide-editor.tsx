@@ -245,13 +245,11 @@ export function BuildGuideEditor({
 
       {/* Floating formatting toolbar, centered just above the bottom edge.
           The full-width wrapper is click-through; only the pill itself
-          captures pointer events so it never blocks the page behind it.
-          `nav:pl-56` mirrors the app shell's sidebar gutter so the pill
-          centers over the guide column, not the whole viewport. */}
+          captures pointer events so it never blocks the page behind it. */}
       {editor && (
         <div
           ref={toolbarWrapRef}
-          className="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex justify-center px-4 nav:pl-56"
+          className="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex justify-center px-4"
         >
           <div className="pointer-events-auto max-w-full overflow-x-auto rounded-xl border border-border bg-card p-1.5 shadow-lg">
             <EditorToolbar

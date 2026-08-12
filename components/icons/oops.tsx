@@ -1,10 +1,10 @@
 import type { SVGProps } from "react";
 
 /**
- * Tray + downward-arrow download glyph. 2px round-cap stroke; uses
- * currentColor so callers recolor via text-* classes.
+ * Tiny surprised face — 2px round-cap stroke. Used as the "oops"
+ * mark next to empty search results.
  */
-export function Download({
+export function Oops({
   size = 16,
   ...props
 }: SVGProps<SVGSVGElement> & { size?: number }) {
@@ -17,19 +17,21 @@ export function Download({
       aria-hidden="true"
       {...props}
     >
-      <path
-        d="M12 4v11M8.5 11.5L12 15l3.5-3.5"
+      <circle
+        cx="12"
+        cy="12"
+        r="8.5"
         stroke="currentColor"
         strokeWidth={2}
-        strokeLinecap="round"
-        strokeLinejoin="round"
       />
-      <path
-        d="M6 16.5V19a2 2 0 002 2h8a2 2 0 002-2v-2.5"
+      <circle cx="9.25" cy="10.25" r="1.15" fill="currentColor" />
+      <circle cx="14.75" cy="10.25" r="1.15" fill="currentColor" />
+      <circle
+        cx="12"
+        cy="14.75"
+        r="1.6"
         stroke="currentColor"
         strokeWidth={2}
-        strokeLinecap="round"
-        strokeLinejoin="round"
       />
     </svg>
   );

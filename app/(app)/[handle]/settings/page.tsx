@@ -4,13 +4,11 @@ import { OrganizationProfile } from "@clerk/nextjs";
 import { resolveHandle } from "@/lib/handles/resolve";
 import { isOrgMember } from "@/lib/authorization";
 
-// Settings sub-route under the unified `/[handle]` namespace. Only
-// meaningful for orgs today — `/[username]/settings` 404s back out
-// since user-level account settings live at `/dashboard/settings`.
-//
-// Anything more granular (e.g. per-project settings) lives under
-// `/projects/[slug]/...`; this route is reserved for the org-admin
-// surface that hosts Clerk's <OrganizationProfile />.
+// Settings sub-route under the unified `/[handle]` namespace. User
+// account settings live on the own-profile page (`/${username}` and
+// `?tab=general`); this route 404s for other people's handles and
+// redirects the owner there. For orgs it hosts Clerk's
+// <OrganizationProfile />.
 
 export default async function HandleSettingsPage(props: {
   params: Promise<{ handle: string }>;
@@ -24,7 +22,7 @@ export default async function HandleSettingsPage(props: {
   // dashboard settings if the viewer is the owner, otherwise 404.
   if (!resolution) notFound();
   if (resolution.kind === "user") {
-    if (resolution.userId === userId) redirect("/dashboard/settings");
+    if (resolution.userId === userId) redirect(`/${handle}?tab=general`);
     notFound();
   }
 

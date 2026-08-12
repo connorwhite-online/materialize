@@ -64,7 +64,7 @@ QuoteConfigurator:
 
 **Local Stripe webhook forwarding** — the order only advances from `cart_created` → `ordered` when `/api/webhooks/stripe` runs `handlePrintOrderPayment`. In local dev, Stripe can't reach `localhost:3000` on its own, so run `stripe listen --forward-to localhost:3000/api/webhooks/stripe` in a side terminal during checkout testing. Without it, the order sits in the profile's "Carts" section with a Resume button that just relinks to the same Stripe session — easy to mistake for "payment didn't go through." The `STRIPE_WEBHOOK_SECRET` for local dev is the value the `stripe listen` command prints on startup, not the one from the Stripe dashboard.
 
-**Sandbox indicator** — when Stripe is on test keys (`sk_test_*`) or `CRAFTCLOUD_USE_MOCK !== "false"` (the default), an amber "Sandbox" pill renders in the nav (sidebar at nav+, header at sub-nav). Detection lives in `isSandboxMode()` in `lib/env.ts`. If you add another mock/test gate, OR it into that helper so the badge keeps reflecting reality.
+**Sandbox indicator** — when Stripe is on test keys (`sk_test_*`) or `CRAFTCLOUD_USE_MOCK !== "false"` (the default), an amber "Sandbox" pill renders in the nav (bubbled off the logomark at nav+, profile avatar in the mobile tab bar at sub-nav). Detection lives in `isSandboxMode()` in `lib/env.ts`. If you add another mock/test gate, OR it into that helper so the badge keeps reflecting reality.
 
 **Stripe redirect URL** — `createStripeSessionForOrder` derives the `success_url` / `cancel_url` base from request headers (`x-forwarded-host` + `x-forwarded-proto`), NOT from `NEXT_PUBLIC_APP_URL`. The env var bakes at build time; when unset in production it falls back to `http://localhost:3000` and the hardcoded localhost lands in every customer's post-payment redirect. The `tokens/page.tsx` MCP URL uses the same header-derived pattern for the same reason. Don't reintroduce `NEXT_PUBLIC_APP_URL` for runtime URL construction.
 
@@ -217,7 +217,7 @@ Never call the DB cart a "CraftCloud cart." They are distinct: the DB cart is a 
 
 ## Home landing page
 
-`app/page.tsx` is the anon marketing page (authed users redirect to their profile). It is deliberately cheap: a static hero (heading + copy, no webfont of its own, no client JS beyond `AuthNav`), then the server-rendered `<HomeMarketing />` sections and `<HomeFaq />`, plus the fixed `<HomeBottomBar />`.
+`app/page.tsx` is the anon marketing page. Authed users get a home dashboard on the same URL (pending orders if any, upload dropzone, recent files if any, then the full library) instead of being sent to their profile. It is deliberately cheap for anon visitors: a static hero (heading + copy, no webfont of its own), the shared `<TopBar />` (search / Print / Login), then the server-rendered `<HomeMarketing />` sections and `<HomeFaq />`. The owner's own `/${username}` page is profile/settings (Profile + General tabs), not the old library/orders dashboard.
 
 The three.js / R3F hero showcase **is unmounted, not deleted.** `components/home/hero-showcase.tsx`, `hero-showcase-lazy.tsx`, `showcase-mesh.tsx`, `showcase-particles.tsx` and `material-carousel.tsx` are all still in the tree; `<HeroShowcase />` in the hero's visual slot restores it in one line. Anything that replaces it must (a) load through the `hero-showcase-lazy.tsx` `next/dynamic` + `ssr: false` wrapper so three.js stays off the critical path, and (b) reserve the canvas's height in the placeholder so its arrival doesn't shift the copy above it.
 

@@ -76,9 +76,9 @@ const BENEFITS = [
 export function HomeMarketing() {
   return (
     <div className="border-t border-border bg-muted/20">
-      {/* pb clears the fixed HomeBottomBar so the final CTA is never
-          permanently hidden behind it. */}
-      <div className="mx-auto max-w-6xl px-4 py-16 pb-40 sm:py-24">
+      {/* Bottom padding used to clear the fixed HomeBottomBar; that
+          bar is gone (search lives in the top bar now). */}
+      <div className="mx-auto max-w-6xl px-4 py-16 sm:py-24">
         {/* How it works */}
         <section aria-labelledby="how-it-works" className="space-y-3">
           <h2

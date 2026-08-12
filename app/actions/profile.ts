@@ -45,6 +45,8 @@ export async function updateProfile(formData: FormData) {
       .where(eq(users.id, userId));
 
     revalidatePath("/dashboard/settings");
+    revalidatePath(`/${username}`);
+    return { ok: true as const, username };
   } catch (error) {
     logError("updateProfile", error);
     return { error: { username: ["Failed to save. Please try again."] } };

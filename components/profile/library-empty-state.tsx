@@ -20,12 +20,18 @@ import { NewCollectionDialog } from "./new-collection-dialog";
  * Project links to /projects/new (it needs uploaded files to bundle,
  * which the card's subtext calls out).
  */
-export function LibraryEmptyState() {
+export function LibraryEmptyState({ compact = false }: { compact?: boolean }) {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [collectionOpen, setCollectionOpen] = useState(false);
 
   return (
-    <div className="rounded-2xl bg-muted/50 px-5 py-12 sm:px-8 sm:py-16">
+    <div
+      className={
+        compact
+          ? "rounded-2xl bg-muted/50 px-4 py-8"
+          : "rounded-2xl bg-muted/50 px-5 py-12 sm:px-8 sm:py-16"
+      }
+    >
       <div className="mx-auto max-w-2xl text-center">
         <h2 className="font-heading text-lg font-medium">
           Your library is empty
@@ -36,23 +42,32 @@ export function LibraryEmptyState() {
         </p>
       </div>
 
-      <div className="mx-auto mt-8 grid max-w-3xl gap-3 sm:grid-cols-3">
+      <div
+        className={
+          compact
+            ? "mt-5 grid grid-cols-3 gap-2"
+            : "mx-auto mt-8 grid max-w-3xl gap-3 sm:grid-cols-3"
+        }
+      >
         <EmptyStateCard
-          icon={<BoxIcon className="size-5" />}
+          compact={compact}
+          icon={<BoxIcon className={compact ? "size-4" : "size-5"} />}
           title="File"
           description="A single 3D model — STL, OBJ, 3MF, STEP or AMF. The building block everything else is made from."
           cta="Upload a file"
           onClick={() => setUploadOpen(true)}
         />
         <EmptyStateCard
-          icon={<LayersIcon className="size-5" />}
+          compact={compact}
+          icon={<LayersIcon className={compact ? "size-4" : "size-5"} />}
           title="Project"
           description="Bundle several files into one sellable unit, like a multi-part model. Built from files you've uploaded."
           cta="Start a project"
           href="/projects/new"
         />
         <EmptyStateCard
-          icon={<FolderOpenIcon className="size-5" />}
+          compact={compact}
+          icon={<FolderOpenIcon className={compact ? "size-4" : "size-5"} />}
           title="Collection"
           description="Group related files into a shelf to organize your profile. For browsing, not a product."
           cta="New collection"
@@ -76,6 +91,7 @@ interface EmptyStateCardProps {
   cta: string;
   onClick?: () => void;
   href?: string;
+  compact?: boolean;
 }
 
 function EmptyStateCard({
@@ -85,23 +101,53 @@ function EmptyStateCard({
   cta,
   onClick,
   href,
+  compact = false,
 }: EmptyStateCardProps) {
   const inner = (
     <>
-      <span className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+      <span
+        className={
+          compact
+            ? "flex size-8 items-center justify-center rounded-full bg-primary/10 text-primary"
+            : "flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary"
+        }
+      >
         {icon}
       </span>
-      <span className="mt-3 font-heading text-base font-medium">{title}</span>
-      <span className="mt-1 text-sm text-muted-foreground">{description}</span>
-      <span className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-primary">
+      <span
+        className={
+          compact
+            ? "mt-2 font-heading text-sm font-medium"
+            : "mt-3 font-heading text-base font-medium"
+        }
+      >
+        {title}
+      </span>
+      <span
+        className={
+          compact
+            ? "mt-1 line-clamp-3 text-xs text-muted-foreground"
+            : "mt-1 text-sm text-muted-foreground"
+        }
+      >
+        {description}
+      </span>
+      <span
+        className={
+          compact
+            ? "mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary"
+            : "mt-3 inline-flex items-center gap-1 text-sm font-medium text-primary"
+        }
+      >
         {cta}
         <ArrowRightIcon className="size-3.5 transition-transform group-hover/empty-card:translate-x-0.5" />
       </span>
     </>
   );
 
-  const className =
-    "group/empty-card depth-surface flex h-full flex-col rounded-xl bg-card p-4 text-left ring-1 ring-foreground/10 transition-colors hover:bg-card/80 hover:ring-foreground/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  const className = compact
+    ? "group/empty-card depth-surface flex h-full flex-col rounded-lg bg-card p-3 text-left ring-1 ring-foreground/10 transition-colors hover:bg-card/80 hover:ring-foreground/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    : "group/empty-card depth-surface flex h-full flex-col rounded-xl bg-card p-4 text-left ring-1 ring-foreground/10 transition-colors hover:bg-card/80 hover:ring-foreground/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
   if (href) {
     return (

@@ -2892,17 +2892,16 @@ export function TextToCadStudio({
       </div>
 
       {/* Floating composer */}
-      {/* nav:pl-56 matches the app layout's left sidebar gutter so this
-          viewport-fixed bar lines up with the page's content area; the inner
-          grid then mirrors the page grid so the composer centers under the
-          viewer column and ignores the Builds sidebar (empty 300px track). */}
+      {/* The inner grid mirrors the page grid so the composer centers
+          under the viewer column and ignores the Builds sidebar
+          (empty 300px track). */}
       <div
         ref={composerFixedRef}
-        className="pointer-events-none fixed inset-x-0 bottom-0 z-30 nav:pl-56"
+        className="pointer-events-none fixed inset-x-0 bottom-0 z-30"
       >
         {/* Sub-nav viewports show the floating MobileTabBar pill (bottom-6,
             z-40); lift the composer above it so its controls stay tappable.
-            At nav+ the pill is gone and the sidebar rail takes over. */}
+            At nav+ the pill is gone and the top bar takes over. */}
         <div className="mx-auto grid max-w-6xl gap-8 px-4 pb-28 nav:pb-4 lg:grid-cols-[1fr_300px]">
           <div className="pointer-events-auto mx-auto w-full min-w-0 max-w-2xl">
           {/* Morphing generation thread (MTR-209). Present for the WHOLE
