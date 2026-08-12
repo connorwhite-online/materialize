@@ -347,9 +347,7 @@
      the browser from faux-bolding the font-bold / font-semibold
      utilities these headings carry — so page titles, file/project
      names, section headers, etc. all render in true Frama Regular
-     (the approved look) without per-heading class changes. The home
-     hero <h1> sets its display/script fonts inline on its spans, so it
-     stays PPFuji and is unaffected. */
+     (the approved look) without per-heading class changes. */
   h1,
   h2,
   h3,
@@ -501,3 +499,172 @@
   outline-offset: 2px;
   border-radius: 0.75rem;
 }
+
+/* ---------------------------------------------------------------------------
+   Brand logo — the animated wordmark (<AnimatedWordmark>, components/brand/
+   logo.tsx). All of the motion lives here so it can be retuned without
+   touching a component; the path geometry lives in components/brand/
+   logo-paths.ts.
+
+   The effect: the "M" is always painted, and the remaining ten letters drift
+   in left-to-right — each blurred and lifted, then settling as a bottom-to-top
+   wipe fills it in, like snow blowing across the word and sticking.
+
+   Cost: CSS only. No JS, no rAF, no motion library. The stagger is a delay
+   computed from a per-letter --mz-i, and the only layout-affecting property is
+   the wrapper's own width — one element, sized in px, nothing reflows around
+   it because the wrapper reserves its own box.
+
+   The wrapper CROPS, it does not scale. The SVG inside is always the full
+   wordmark at the requested height; collapsing just narrows the window down to
+   the mark's width. That's why the "M" holds perfectly still across the
+   transition — it is the same painted glyph in both states.
+   ------------------------------------------------------------------------- */
+
+.mz-logo {
+  /* --mz-h is the ONLY size input. The component writes it inline when a
+     `height` prop is passed; otherwise a caller can set it per breakpoint
+     (e.g. `[--mz-h:15px] sm:[--mz-h:20px]`) and the 20px var() fallback
+     covers the unset case. It is a fallback rather than a declaration on
+     purpose: this block is unlayered, so declaring --mz-h here would outrank
+     any Tailwind utility (layered styles always lose to unlayered ones) and
+     silently defeat the responsive override.
+     Keep the fallback in sync with DEFAULT_LOGO_HEIGHT in components/brand/logo.tsx.
+     Both widths are the artwork's aspect ratios: 415/251 and 3479/251. */
+  --mz-w-mark: calc(var(--mz-h, 20px) * 1.65339);
+  --mz-w-full: calc(var(--mz-h, 20px) * 13.86056);
+
+  display: inline-block;
+  height: var(--mz-h, 20px);
+  width: var(--mz-w-full);
+  overflow: hidden;
+  line-height: 0;
+  vertical-align: middle;
+  flex: none;
+}
+.mz-logo > svg {
+  display: block;
+  height: var(--mz-h, 20px);
+  width: var(--mz-w-full);
+}
+/* Collapsed = cropped to the mark. The SVG inside keeps its full width and
+   simply overflows to the right, which is what holds the "M" still. */
+.mz-logo[data-mz-expanded="false"] {
+  width: var(--mz-w-mark);
+}
+
+/* Timing. Letters lead the crop slightly so they animate into space the
+   window has already opened rather than popping out from under its edge. */
+.mz-logo {
+  --mz-ease: cubic-bezier(0.22, 0.9, 0.28, 1);
+  --mz-letter-ms: 520ms;
+  --mz-stagger-in: 38ms;
+  --mz-stagger-out: 24ms;
+  --mz-crop-ms: 700ms;
+  /* Blur is in SVG user units (the artwork is 251 tall), so it scales with
+     the logo — a 20px nav lockup and a 64px hero lockup blur by the same
+     visual proportion. */
+  --mz-blur: 22px;
+  --mz-lift: 14%;
+}
+
+/* --- Controlled mode: `expanded` drives it, transitions run both ways. --- */
+.mz-logo[data-mz-mode="toggle"] {
+  transition: width var(--mz-crop-ms) var(--mz-ease);
+}
+.mz-logo[data-mz-mode="toggle"] .mz-logo-letter {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  opacity: 0;
+  filter: blur(var(--mz-blur));
+  transform: translateY(var(--mz-lift));
+  transition:
+    opacity calc(var(--mz-letter-ms) * 0.7) linear,
+    filter calc(var(--mz-letter-ms) * 0.85) ease-out,
+    transform var(--mz-letter-ms) var(--mz-ease);
+  /* Collapsing peels letters off right → left, back toward the mark. */
+  transition-delay: calc(var(--mz-r) * var(--mz-stagger-out));
+}
+.mz-logo[data-mz-mode="toggle"] .mz-logo-letter-clip {
+  clip-path: inset(100% 0 0 0) fill-box;
+  transition: clip-path var(--mz-letter-ms) var(--mz-ease);
+  transition-delay: calc(var(--mz-r) * var(--mz-stagger-out));
+}
+.mz-logo[data-mz-mode="toggle"][data-mz-expanded="true"] .mz-logo-letter {
+  opacity: 1;
+  filter: blur(0);
+  transform: translateY(0);
+  transition-delay: calc(var(--mz-i) * var(--mz-stagger-in));
+}
+.mz-logo[data-mz-mode="toggle"][data-mz-expanded="true"] .mz-logo-letter-clip {
+  clip-path: inset(0 0 0 0) fill-box;
+  transition-delay: calc(var(--mz-i) * var(--mz-stagger-in));
+}
+
+/* --- Mount mode: plays once on first paint, keyframes only. `both` fill
+       leaves the word fully painted at rest, so the logo still resolves with
+       scripting disabled or if the animation never gets to run. --- */
+@keyframes mz-logo-crop {
+  from {
+    width: var(--mz-w-mark);
+  }
+  to {
+    width: var(--mz-w-full);
+  }
+}
+@keyframes mz-logo-drift {
+  from {
+    opacity: 0;
+    filter: blur(var(--mz-blur));
+    transform: translateY(var(--mz-lift));
+  }
+  60% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+@keyframes mz-logo-stick {
+  from {
+    clip-path: inset(100% 0 0 0) fill-box;
+  }
+  to {
+    clip-path: inset(0 0 0 0) fill-box;
+  }
+}
+.mz-logo[data-mz-mode="mount"] {
+  animation: mz-logo-crop var(--mz-crop-ms) var(--mz-ease) both;
+}
+.mz-logo[data-mz-mode="mount"] .mz-logo-letter {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: mz-logo-drift var(--mz-letter-ms) var(--mz-ease) both;
+  animation-delay: calc(var(--mz-i) * var(--mz-stagger-in));
+}
+.mz-logo[data-mz-mode="mount"] .mz-logo-letter-clip {
+  animation: mz-logo-stick var(--mz-letter-ms) var(--mz-ease) both;
+  animation-delay: calc(var(--mz-i) * var(--mz-stagger-in));
+}
+
+/* Reduced motion: state changes instantly, nothing drifts or blurs. The
+   collapsed crop still applies — it's a state, not an animation. */
+@media (prefers-reduced-motion: reduce) {
+  .mz-logo,
+  .mz-logo .mz-logo-letter,
+  .mz-logo .mz-logo-letter-clip {
+    transition: none !important;
+    animation: none !important;
+  }
+  .mz-logo .mz-logo-letter {
+    opacity: 1 !important;
+    filter: none !important;
+    transform: none !important;
+  }
+  .mz-logo .mz-logo-letter-clip {
+    clip-path: none !important;
+  }
+}
+

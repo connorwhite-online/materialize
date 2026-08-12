@@ -207,6 +207,36 @@ Never call the DB cart a "CraftCloud cart." They are distinct: the DB cart is a 
 
 **Double-fire guards live in the callers** — `checkoutInFlightRef` at `components/print/quote-configurator.tsx:364` (set/cleared `:875-969`) guards the anon checkout chain; `materializingRef` at `components/print/cart-context.tsx:109` guards cart materialization. Moving or extracting the chained functions does NOT move the guards — they must travel with the call site.
 
+## Brand logo
+
+Three components in `components/brand/logo.tsx`, all painting with
+`fill="currentColor"` so they follow the surrounding `text-*` token in both themes:
+
+- **`<Logomark>`** — the "M" alone. Use where there's no horizontal room: the nav
+  rail (12rem wide — the full word needs ~14rem at nav size), the fee-sheet tile.
+- **`<Wordmark>`** — the full word, static.
+- **`<AnimatedWordmark>`** — the same word with a CSS-only reveal: the "M" is
+  always painted and the other ten letters drift in left-to-right, each blurred
+  and lifted, settling as a bottom-to-top wipe fills it in. `animateOnMount`
+  plays it once (keyframes — works with JS disabled); `expanded` makes it a
+  controlled toggle between the word and the bare mark, which reverses the
+  stagger so it peels right-to-left back to the "M". Live on the landing header,
+  the auth modal, `/sign-in`, `/sign-up`, and `/onboarding`.
+
+All geometry lives in `components/brand/logo-paths.ts` — **the only place path
+data is defined**. Updating the logo means replacing the `d` strings there (one
+path per wordmark letter, in reading order, "m" at index 0 — the animation
+depends on that ordering) and re-exporting `app/icon.svg`, the one intentional
+duplicate. A test pins `app/icon.svg` to `MARK_PATH` so the favicon can't drift.
+
+Motion and sizing live in `app/globals.css` (`.mz-logo*`), not in the component,
+so timing can be retuned without touching TSX. Sizing flows from a single
+`--mz-h`; the component writes it inline **only when a `height` prop is passed**,
+because inline styles outrank stylesheet rules and would otherwise defeat the
+responsive `[--mz-h:15px] sm:[--mz-h:20px]` class escape hatch. Nothing animates
+on the main thread — the stagger is `transition-delay`/`animation-delay` off a
+per-letter `--mz-i`, and `prefers-reduced-motion` collapses it to instant.
+
 ## Fonts
 
 - **Body** — system font stack (`-apple-system, SF Pro, …`), set in `app/globals.css` via `--font-sans`. No webfont download.

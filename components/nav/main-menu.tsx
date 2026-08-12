@@ -6,7 +6,7 @@ import { Browse } from "@/components/icons/browse";
 import { Materials } from "@/components/icons/materials";
 import { Print } from "@/components/icons/print";
 import { Galaxy } from "@/components/icons/galaxy";
-import { Logomark } from "@/components/icons/logomark";
+import { Logomark } from "@/components/brand/logo";
 import { SidebarUserBlock } from "@/components/auth/sidebar-user-block";
 import { SandboxBadge } from "@/components/nav/sandbox-badge";
 import { useCart } from "@/components/print/cart-context";
@@ -99,6 +99,8 @@ export function MainMenuSidebar({
           aria-label="Materialize — home"
           className="flex items-center px-1 py-0.5 text-foreground transition-opacity hover:opacity-80"
         >
+          {/* The mark, not the wordmark: the rail is 12rem wide and the full
+              word needs ~14rem at this height. */}
           <Logomark height={20} />
         </Link>
         {sandbox && <SandboxBadge />}

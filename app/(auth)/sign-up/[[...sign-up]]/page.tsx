@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/input-otp";
 import { Separator } from "@/components/ui/separator";
 import { SocialButtons } from "@/components/auth/social-buttons";
+import { AnimatedWordmark } from "@/components/brand/logo";
 
 type Method = "email" | "phone";
 
@@ -95,8 +96,15 @@ export default function SignUpPage() {
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center px-4">
-      <Link href="/" className="mb-8 text-lg font-semibold tracking-tight">
-        Materialize
+      <Link
+        href="/"
+        aria-label="Materialize — home"
+        className="mb-8 text-foreground transition-opacity hover:opacity-80"
+      >
+        <AnimatedWordmark
+          animateOnMount
+          className="[--mz-h:14px] sm:[--mz-h:16px]"
+        />
       </Link>
 
       <Card className="w-full max-w-sm">
