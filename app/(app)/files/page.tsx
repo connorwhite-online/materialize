@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { db } from "@/lib/db";
 import {
   files,
@@ -279,6 +280,71 @@ async function fetchFileThumbnailsByProject(
     grouped.set(row.projectId, arr);
   }
   return grouped;
+}
+
+/**
+ * Browse-page metadata, and the index hygiene that goes with it.
+ *
+ * This page had no metadata at all, so the marketplace — the most
+ * commercially important indexable surface on the site — inherited the
+ * generic site title and was indistinguishable from every other route
+ * in a SERP.
+ *
+ * The three states are treated differently on purpose:
+ *
+ * - **Bare `/files`** — the canonical browse page. Indexable, self-
+ *   canonical.
+ * - **`?category=<slug>`** — a curated facet with a finite, known set
+ *   of values (`lib/categories`). These are genuinely useful landing
+ *   pages for "3d print files for X" queries, so they stay indexable
+ *   with their own title/description and a canonical that keeps the
+ *   category param.
+ * - **`?q=<free text>`** — an internal search-results page over an
+ *   unbounded input space. Google's own guidance is to keep these out
+ *   of the index; left crawlable they generate effectively infinite
+ *   thin, near-duplicate URLs and dilute the crawl budget of a domain
+ *   that has very little to spare. `noindex, follow` — the links on
+ *   the page still pass through to real listings.
+ */
+export async function generateMetadata(props: {
+  searchParams: Promise<{ q?: string; category?: string }>;
+}): Promise<Metadata> {
+  const searchParams = await props.searchParams;
+  const rawQ = (searchParams.q ?? "").trim();
+  const rawCategory = (searchParams.category ?? "").trim();
+  const activeCategory = isCategoryId(rawCategory)
+    ? getCategoryById(rawCategory)
+    : undefined;
+
+  if (rawQ.length > 0) {
+    return {
+      title: "Search 3D print files",
+      description:
+        "Search thousands of 3D-print files from independent creators on Materialize.",
+      robots: { index: false, follow: true },
+    };
+  }
+
+  if (activeCategory) {
+    const title = `${activeCategory.label} 3D Print Files`;
+    const description = `${activeCategory.description} Download or buy ${activeCategory.label.toLowerCase()} 3D models on Materialize, or have any of them printed on demand and shipped to you.`;
+    return {
+      title,
+      description,
+      alternates: { canonical: `/files?category=${activeCategory.id}` },
+      openGraph: { type: "website", title, description },
+    };
+  }
+
+  const title = "Browse 3D Print Files";
+  const description =
+    "Browse and download 3D-print files from independent creators — STL, OBJ, 3MF and STEP models across decor, functional parts, hobby, RC and more. Buy a design or have it printed on demand and shipped.";
+  return {
+    title,
+    description,
+    alternates: { canonical: "/files" },
+    openGraph: { type: "website", title, description },
+  };
 }
 
 export default async function BrowsePage(props: {

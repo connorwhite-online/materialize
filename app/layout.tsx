@@ -54,27 +54,73 @@ const APP_URL =
   process.env.NEXT_PUBLIC_APP_URL ?? "https://materialize.cc";
 
 const SITE_NAME = "Materialize";
+// The fallback title for any route that doesn't set its own. It used to
+// be the bare brand word, which is the single most contested string we
+// could ship — "Materialize" is also Materialise NV / i.materialise (3D
+// printing), a streaming database, and a CSS framework. Naming the
+// category in the default means even an un-metadata'd route says what
+// this site is. Routes that DO set a title get `%s · Materialize` via
+// the template below; app/page.tsx opts out with `title.absolute`.
+const DEFAULT_TITLE =
+  "Materialize — 3D Print Files Marketplace & On-Demand 3D Printing";
 const SITE_DESCRIPTION =
-  "A marketplace for 3D print files with integrated on-demand printing";
+  "A marketplace for 3D-print files with on-demand 3D printing built in — buy and sell STL, OBJ, 3MF and STEP models, or get any model printed in PLA, resin, nylon or metal and shipped to your door.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(APP_URL),
   title: {
-    default: SITE_NAME,
+    default: DEFAULT_TITLE,
     template: `%s · ${SITE_NAME}`,
   },
   description: SITE_DESCRIPTION,
   applicationName: SITE_NAME,
+  /**
+   * Explicit indexing directives. Without these Next emits no `robots`
+   * meta at all, which leaves Google on its conservative defaults:
+   * ~160-character snippets and *thumbnail-sized* image previews.
+   * `max-image-preview: large` is what makes a result eligible for the
+   * big image treatment in mobile SERPs and Discover — for a visual
+   * marketplace that is the difference between a text link and a
+   * picture of the thing someone wants to print.
+   *
+   * Pages that must stay out of the index (dashboards, order flows,
+   * not-found states) set `robots: { index: false }` in their own
+   * generateMetadata, which overrides this.
+   */
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+      "max-video-preview": -1,
+    },
+  },
+  /**
+   * Search Console ownership. Set GOOGLE_SITE_VERIFICATION to the token
+   * from the "HTML tag" verification method and redeploy — no code
+   * change needed. Omitted entirely when unset so we don't emit an
+   * empty meta tag.
+   */
+  ...(process.env.GOOGLE_SITE_VERIFICATION
+    ? {
+        verification: {
+          google: process.env.GOOGLE_SITE_VERIFICATION,
+        },
+      }
+    : {}),
   openGraph: {
     type: "website",
     siteName: SITE_NAME,
-    title: SITE_NAME,
+    title: DEFAULT_TITLE,
     description: SITE_DESCRIPTION,
     url: APP_URL,
   },
   twitter: {
     card: "summary_large_image",
-    title: SITE_NAME,
+    title: DEFAULT_TITLE,
     description: SITE_DESCRIPTION,
   },
   appleWebApp: {

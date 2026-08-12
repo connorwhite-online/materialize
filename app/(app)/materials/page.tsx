@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import {
   getCraftCloudCatalog,
   type MaterialGroup,
@@ -7,10 +8,14 @@ import type { BrowseMaterialGroup } from "@/components/materials/catalog-materia
 import { logError } from "@/lib/logger";
 import { safeJsonLdScript } from "@/lib/seo/json-ld";
 
-export const metadata = {
-  title: "Materials | Materialize",
+// The root layout applies a `%s · Materialize` title template, so this
+// must NOT restate the brand — it previously read "Materials |
+// Materialize" and rendered as "Materials | Materialize · Materialize".
+export const metadata: Metadata = {
+  title: "3D Printing Materials & Finishes",
   description:
-    "Browse 3D printing materials — plastics, metals, resins, composites, and more.",
+    "Browse 60+ 3D printing materials — PLA, PETG, ABS, nylon, resin, stainless steel, aluminium and titanium — with finishes, colors and live per-material pricing from vetted manufacturers.",
+  alternates: { canonical: "/materials" },
 };
 
 // ISR rather than a one-shot static build. The catalog comes from
