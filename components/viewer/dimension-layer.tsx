@@ -34,33 +34,10 @@ import {
   triangleRangesForFaceIds,
 } from "@/lib/cad/features";
 import { type CadTopology } from "./topology";
+import { calloutStatus, statusColor, verdictText } from "./dimension-format";
 import type { BufferGeometry } from "three";
 
 type Vec3 = [number, number, number];
-
-/** Trim to 2 dp and drop trailing zeros: 49.98, 50, 7.5. */
-function fmtMm(n: number): string {
-  return Number(n.toFixed(2)).toString();
-}
-
-/** Pass = emerald, fail = red, not-run = muted. Shared by lines + labels. */
-function statusColor(check: DimensionCheckResult): string {
-  if (!check.ran) return "#9ca3af";
-  return check.ok ? "#059669" : "#dc2626";
-}
-
-/** "spec 50 ±0.5 · 49.98 ✓" — the measured-beside-claimed core of the layer. */
-function verdictText(check: DimensionCheckResult): string {
-  const unit = check.target.kind === "count" ? "" : " mm";
-  const tol =
-    check.tolerance != null && check.tolerance > 0
-      ? ` ±${fmtMm(check.tolerance)}`
-      : "";
-  const spec = `${fmtMm(check.target.value)}${tol}${unit}`;
-  if (!check.ran) return `${spec} · not verified`;
-  if (check.got == null) return `${spec} · not found`;
-  return `${spec} · ${fmtMm(check.got)}${unit} ${check.ok ? "✓" : "✗"}`;
-}
 
 /** Floating annotation pill, anchored at a scene position. */
 function CalloutLabel({
@@ -344,12 +321,13 @@ export function DimensionLegend({
       <ul className="flex flex-col gap-1">
         {checks.map((check, i) => {
           const color = statusColor(check);
+          const status = calloutStatus(check);
           return (
             <li key={i} className="flex items-start gap-1.5 rounded-lg px-1 py-0.5">
               <span className="mt-0.5 shrink-0" style={{ color }}>
-                {!check.ran ? (
+                {status === "not-run" ? (
                   <CircleDashedIcon className="size-3" aria-label="Not verified" />
-                ) : check.ok ? (
+                ) : status === "pass" ? (
                   <CheckIcon className="size-3" aria-label="In spec" />
                 ) : (
                   <XIcon className="size-3" aria-label="Out of spec" />
