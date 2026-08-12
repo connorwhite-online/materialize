@@ -97,11 +97,13 @@ async function sessionFetch<T>(
 /**
  * Exec result: when the code assigned/updated `result` or `parts`, the same
  * payload as /run (CadRunResult) plus stdout + a namespace summary; otherwise
- * just the ok/stdout/namespace triple.
+ * the ok/stdout/namespace triple — which may still carry `features` (ops the
+ * exec recorded without producing a solid yet, e.g. `Hole` in a sketch-only
+ * setup step) on sidecars that emit them. Absent on older sidecars.
  */
 export type SessionExecResult =
   | (CadRunResult & { stdout: string; namespace: string[] })
-  | { ok: true; stdout: string; namespace: string[] };
+  | { ok: true; stdout: string; namespace: string[]; features?: unknown };
 
 /** Narrow an exec result to the "produced/updated a solid" shape. */
 export function execProducedRun(
@@ -191,24 +193,37 @@ export async function importStepIntoSession(
   });
 }
 
+/**
+ * Checkpoint the session's current `result`. Returns the sidecar's verdict:
+ * false when there was nothing to checkpoint (`result` unset) — the caller's
+ * bookkeeping (e.g. the agentic feature-log mark) must not advance on a
+ * snapshot that never happened.
+ */
 export async function snapshotSession(
   sessionId: string,
   signal?: AbortSignal
-): Promise<void> {
-  await sessionFetch<{ ok: boolean }>(`/session/${sessionId}/snapshot`, {
-    method: "POST",
-    signal,
-  });
+): Promise<boolean> {
+  const res = await sessionFetch<{ ok: boolean }>(
+    `/session/${sessionId}/snapshot`,
+    { method: "POST", signal }
+  );
+  return res.ok === true;
 }
 
+/**
+ * Restore the last checkpoint. Returns the sidecar's verdict: false when no
+ * checkpoint exists (geometry unchanged) — callers must not record a
+ * rollback that didn't happen.
+ */
 export async function rollbackSession(
   sessionId: string,
   signal?: AbortSignal
-): Promise<void> {
-  await sessionFetch<{ ok: boolean }>(`/session/${sessionId}/rollback`, {
-    method: "POST",
-    signal,
-  });
+): Promise<boolean> {
+  const res = await sessionFetch<{ ok: boolean }>(
+    `/session/${sessionId}/rollback`,
+    { method: "POST", signal }
+  );
+  return res.ok === true;
 }
 
 export async function deleteSession(

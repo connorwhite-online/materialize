@@ -306,6 +306,13 @@ def ensure_feature_hooks(engine: str, source: str = "") -> None:
 
     Session children call this every exec — only the feature log + source are
     reset after the first install so Hole.__init__ wrappers don't stack.
+
+    The per-exec reset is the PROTOCOL, not an accident: each exec's reply
+    reports only its own ops, with spans relative to its own code, and the
+    Node agentic loop rebases + accumulates them across the session
+    (lib/cad/agentic.ts). Accumulating here instead would double-count every
+    op and break span resolution (lines from earlier execs don't exist in
+    the current `_local.source`).
     """
     _local.features = []
     _local.source = source or ""

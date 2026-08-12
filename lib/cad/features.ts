@@ -84,6 +84,34 @@ export function parseFeatures(raw: unknown): CadFeature[] {
 }
 
 /**
+ * Rebase one session exec's features onto the agentic loop's assembled
+ * transcript (the chips fix): the sidecar resets its op log per exec, so
+ * every exec's payload carries only THAT exec's ops, with `span`s relative
+ * to the exec's own code and ids that restart at `fillet-0`. The loop
+ * appends each exec as `# ---- step N ----\n<code>` (steps joined by a
+ * blank line), so within the transcript the exec's code starts at
+ * `bannerLine + 1` — a span shifts down by exactly `bannerLine`. Ids get a
+ * `s<step>-` prefix so accumulating across execs never collides.
+ *
+ * Pure and append-only-safe: steps are never reordered or removed from the
+ * transcript, so a span rebased at append time stays valid in every later
+ * (longer) assembly of the same steps.
+ */
+export function rebaseStepFeatures(
+  features: CadFeature[],
+  step: number,
+  bannerLine: number
+): CadFeature[] {
+  return features.map((f) => ({
+    ...f,
+    id: `s${step}-${f.id}`,
+    ...(f.span
+      ? { span: [f.span[0] + bannerLine, f.span[1] + bannerLine] as [number, number] }
+      : {}),
+  }));
+}
+
+/**
  * Bind each feature's numeric params to uniquely-matching top-level source
  * assignments (`fillet_r = 2.4`). Ambiguous values (two params share 2.4) are
  * left unbound — Update stays disabled for that control rather than rewriting
