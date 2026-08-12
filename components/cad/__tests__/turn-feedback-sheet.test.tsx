@@ -186,6 +186,23 @@ describe("TurnFeedbackSheet", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it("keeps the note field at >=16px on mobile so iOS doesn't auto-zoom", () => {
+    // iOS Safari zooms the whole page when a focused form control computes
+    // under 16px, and this field regressed once (shipped at text-sm/14px,
+    // which zoomed the sheet to ~1.14x). The studio is auth-gated, so no
+    // browser check can catch it — this is the only guard. `text-base` is
+    // 16px (--text-base: 1rem); any smaller size must be breakpoint-scoped
+    // so it only applies where the zoom behavior doesn't exist.
+    renderSheet();
+    const classes =
+      screen.getByPlaceholderText(/Anything else/).className.split(/\s+/);
+    expect(classes).toContain("text-base");
+    for (const cls of classes) {
+      // Unprefixed small sizes are the bug; `sm:text-sm` etc. are fine.
+      expect(cls).not.toMatch(/^text-(sm|xs)$/);
+    }
+  });
+
   it("closes without saving on 'Not now'", () => {
     const { onClose, onSaved } = renderSheet();
     fireEvent.click(screen.getByRole("button", { name: /Not now/ }));
