@@ -17,11 +17,14 @@ test.describe("anon smoke", () => {
     const response = await page.goto("/");
     expect(response?.status()).toBe(200);
 
-    // HeroShowcase mounts a <canvas> for the 3D viewport — its
-    // presence proves the client component hydrated.
-    await expect(page.locator("canvas").first()).toBeVisible({
-      timeout: 10_000,
-    });
+    // The hero is now static server-rendered markup — no canvas. This
+    // used to assert on HeroShowcase's <canvas> as a hydration proof;
+    // that mount is gone (see the visual slot in app/page.tsx), so the
+    // heading is what proves the hero rendered, and the Sign-in CTA
+    // below proves the client bundle hydrated.
+    await expect(
+      page.getByRole("heading", { level: 1, name: /print in any material/i })
+    ).toBeVisible();
 
     // HomeBottomBar exposes a Sign-in CTA for anon visitors.
     const signIn = page.getByRole("button", { name: /sign in/i });

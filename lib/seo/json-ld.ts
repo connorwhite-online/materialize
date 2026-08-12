@@ -45,6 +45,109 @@ export function safeJsonLdScript(obj: unknown): string {
     .replace(PARAGRAPH_SEPARATOR_RE, "\\u2029");
 }
 
+/**
+ * Site-level entity nodes (Organization + WebSite).
+ *
+ * These exist to solve a specific problem: "Materialize" collides with
+ * at least four established entities that already own the SERP —
+ * Materialise NV / i.materialise (a Belgian 3D-printing company that
+ * also runs a print marketplace, so the collision is topical as well as
+ * lexical), Materialize the streaming database, and the MaterializeCSS
+ * framework. Without an Organization node there is nothing for a search
+ * engine to hang *this* brand on, and every signal we emit gets
+ * absorbed into one of theirs.
+ *
+ * `@id` is a fragment URI on the origin rather than the bare origin, so
+ * page-level nodes can reference the org via `{"@id": …/#organization}`
+ * without colliding with the WebSite node's identity.
+ */
+
+const ORGANIZATION_ID = `${APP_URL}/#organization`;
+const WEBSITE_ID = `${APP_URL}/#website`;
+
+/**
+ * Verified brand profiles. `sameAs` is one of the strongest entity-
+ * reconciliation signals available — it is how a search engine confirms
+ * that the Materialize on this domain is a distinct entity from the
+ * other four. Deliberately empty rather than guessed: a `sameAs`
+ * pointing at a profile we don't control is worse than none. Fill this
+ * in as brand accounts are created.
+ */
+const SAME_AS: string[] = [];
+
+export function organizationJsonLd() {
+  return {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "@id": ORGANIZATION_ID,
+    name: "Materialize",
+    url: APP_URL,
+    logo: {
+      "@type": "ImageObject",
+      url: abs("/icon.svg"),
+    },
+    description:
+      "Materialize is an online marketplace for 3D-print files with on-demand 3D printing built in. Buy and sell STL, OBJ, 3MF and STEP models, or upload any model and have it printed in PLA, resin, nylon or metal and shipped to your door.",
+    // Explicitly tells a search engine how this entity differs from the
+    // similarly-named ones it already knows about.
+    disambiguatingDescription:
+      "A 3D-print file marketplace and on-demand printing service at materialize.cc. Not affiliated with Materialise NV / i.materialise, the Materialize streaming database, or the Materialize CSS framework.",
+    ...(SAME_AS.length > 0 ? { sameAs: SAME_AS } : {}),
+  };
+}
+
+/**
+ * The WebSite node, including the `SearchAction` that makes this site
+ * eligible for a sitelinks search box. The target is the marketplace
+ * browse page, whose `q` search param is the site's real full-text
+ * search (`app/(app)/files/page.tsx` § searchParams.q).
+ */
+export function webSiteJsonLd() {
+  return {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "@id": WEBSITE_ID,
+    name: "Materialize",
+    url: APP_URL,
+    description:
+      "Marketplace for 3D-print files with on-demand printing — browse and buy designs, or get any model printed and shipped.",
+    publisher: { "@id": ORGANIZATION_ID },
+    inLanguage: "en-US",
+    potentialAction: {
+      "@type": "SearchAction",
+      target: {
+        "@type": "EntryPoint",
+        urlTemplate: `${APP_URL}/files?q={search_term_string}`,
+      },
+      "query-input": "required name=search_term_string",
+    },
+  };
+}
+
+export type FaqEntry = { question: string; answer: string };
+
+/**
+ * FAQPage markup. Google requires every marked-up answer to be visibly
+ * present on the page, so callers must build this from the same source
+ * the visible FAQ renders from — see `lib/seo/home-faq.ts`, which is
+ * the single source both consume.
+ */
+export function faqPageJsonLd(entries: readonly FaqEntry[], pageUrl: string) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "@id": `${abs(pageUrl)}#faq`,
+    mainEntity: entries.map((e) => ({
+      "@type": "Question",
+      name: e.question,
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: e.answer,
+      },
+    })),
+  };
+}
+
 type PersonInput = {
   username: string | null;
   displayName: string | null;

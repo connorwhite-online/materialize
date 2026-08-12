@@ -210,7 +210,18 @@ Never call the DB cart a "CraftCloud cart." They are distinct: the DB cart is a 
 ## Fonts
 
 - **Body** — system font stack (`-apple-system, SF Pro, …`), set in `app/globals.css` via `--font-sans`. No webfont download.
-- **Hero display** — local OTFs in `public/`: `PPFuji-Bold.otf` as `--font-display` and `PPPlayground-Light.otf` as `--font-script`. Loaded via `next/font/local` in `app/layout.tsx`. Applied via inline `fontFamily: "var(--font-display)…"` on the home hero `<h1>` ("Materialize" display + "Anything" script) and the nav brand link. The hero heading is real selectable text, not an SVG — it must stay an `<h1>` so the home page (the URL every backlink points at) ships a crawlable heading.
+- **Display** — `PPFuji-Bold.otf` as `--font-display`, loaded via `next/font/local` in `app/layout.tsx` and applied via inline `fontFamily: "var(--font-display)…"` on the nav brand link.
+- **Headings** — every `<h1>`–`<h6>` already routes through `--font-heading` (PP Frama Regular) in `app/globals.css:359`. Headings need no inline `fontFamily`, and adding one is almost always a mistake.
+- **`PPPlayground-Light.otf` (`--font-script`) is currently unused.** It set the "Anything" word in the old wordmark hero; that hero is gone and the 157KB OTF preload went with it. The file is still in `public/` — if you reintroduce it, declare it in the route that uses it (not `app/layout.tsx`) so it doesn't load site-wide.
+- The home hero heading is real selectable text, not an SVG — it must stay an `<h1>` so the home page (the URL every backlink points at) ships a crawlable heading. It states what the product does; the brand mark lives in the header `<Logomark />` instead, so "Materialize" still appears above the fold.
+
+## Home landing page
+
+`app/page.tsx` is the anon marketing page (authed users redirect to their profile). It is deliberately cheap: a static hero (heading + copy, no webfont of its own, no client JS beyond `AuthNav`), then the server-rendered `<HomeMarketing />` sections and `<HomeFaq />`, plus the fixed `<HomeBottomBar />`.
+
+The three.js / R3F hero showcase **is unmounted, not deleted.** `components/home/hero-showcase.tsx`, `hero-showcase-lazy.tsx`, `showcase-mesh.tsx`, `showcase-particles.tsx` and `material-carousel.tsx` are all still in the tree; `<HeroShowcase />` in the hero's visual slot restores it in one line. Anything that replaces it must (a) load through the `hero-showcase-lazy.tsx` `next/dynamic` + `ssr: false` wrapper so three.js stays off the critical path, and (b) reserve the canvas's height in the placeholder so its arrival doesn't shift the copy above it.
+
+The home page also emits the site's only `Organization` / `WebSite` JSON-LD (both are `@id`-keyed singletons — do not repeat them on other routes) and the `FAQPage` node. FAQ copy lives in `lib/seo/home-faq.ts` and is read by both the JSON-LD and `<HomeFaq />`; never inline that copy in the component, because Google requires marked-up answers to appear verbatim on the page and two copies drift.
 
 ## Database migrations
 
