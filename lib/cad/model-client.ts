@@ -97,6 +97,12 @@ export interface CompleteTextOptions {
   role?: string;
   /** Reference images to include in the user turn (multimodal). */
   images?: PromptImage[];
+  /**
+   * PDF documents to include in the user turn (base64, no data: prefix) —
+   * the datasheet-reading path (lib/cad/repo-fetch.ts). The API reads PDFs
+   * natively, including the mechanical-drawing pages vision needs.
+   */
+  documents?: { data: string }[];
   signal?: AbortSignal;
 }
 
@@ -122,6 +128,16 @@ export async function completeText(opts: CompleteTextOptions): Promise<string> {
     content.push({
       type: "image",
       source: { type: "base64", media_type: img.mediaType, data: img.data },
+    });
+  }
+  for (const doc of opts.documents ?? []) {
+    content.push({
+      type: "document",
+      source: {
+        type: "base64",
+        media_type: "application/pdf",
+        data: doc.data,
+      },
     });
   }
 

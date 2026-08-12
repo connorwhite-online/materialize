@@ -61,7 +61,9 @@ vi.mock("nanoid", () => ({ nanoid: () => `nid-${++nanoidCounter}` }));
 import {
   resolveReferenceImages,
   buildThreadHistory,
+  appendConceptReference,
 } from "@/lib/cad/reference-images";
+import { CONCEPT_THREAD_REF_LABEL } from "@/lib/cad/concept";
 
 const img = (data: string): PromptImage => ({ data, mediaType: "image/png" });
 
@@ -235,5 +237,86 @@ describe("buildThreadHistory", () => {
     const history = await buildThreadHistory("rev-1");
     expect(history[0].prompt.length).toBeLessThanOrEqual(241);
     expect(history[0].prompt.endsWith("…")).toBe(true);
+  });
+});
+
+describe("appendConceptReference", () => {
+  beforeEach(() => {
+    selectQueue = [];
+    stored.clear();
+    nanoidCounter = 0;
+    mockUpdateSet.mockClear();
+    putObject.mockClear();
+  });
+
+  it("appends the concept after user refs with its thread label", async () => {
+    selectQueue.push([
+      {
+        referenceImages: [
+          { key: "cad-refs/u/user.png", mediaType: "image/png" },
+        ],
+      },
+    ]);
+    await appendConceptReference({
+      generationId: "gen-1",
+      userId: "u",
+      png: "Q09OQ0VQVA==",
+    });
+    const persisted = mockUpdateSet.mock.calls[0][0] as {
+      referenceImages: { key: string; label?: string }[];
+    };
+    expect(persisted.referenceImages).toHaveLength(2);
+    expect(persisted.referenceImages[0].key).toBe("cad-refs/u/user.png");
+    expect(persisted.referenceImages[1].label).toBe(CONCEPT_THREAD_REF_LABEL);
+  });
+
+  it("UPSERTS: an existing concept entry is replaced, never duplicated", async () => {
+    selectQueue.push([
+      {
+        referenceImages: [
+          { key: "cad-refs/u/user.png", mediaType: "image/png" },
+          {
+            key: "cad-refs/u/old-concept.png",
+            mediaType: "image/png",
+            label: CONCEPT_THREAD_REF_LABEL,
+          },
+        ],
+      },
+    ]);
+    await appendConceptReference({
+      generationId: "gen-1",
+      userId: "u",
+      png: "TkVX",
+    });
+    const persisted = mockUpdateSet.mock.calls[0][0] as {
+      referenceImages: { key: string; label?: string }[];
+    };
+    expect(persisted.referenceImages).toHaveLength(2);
+    expect(
+      persisted.referenceImages.filter(
+        (r) => r.label === CONCEPT_THREAD_REF_LABEL
+      )
+    ).toHaveLength(1);
+    expect(persisted.referenceImages[1].key).not.toBe(
+      "cad-refs/u/old-concept.png"
+    );
+  });
+
+  it("skips when user refs already fill every slot", async () => {
+    selectQueue.push([
+      {
+        referenceImages: [0, 1, 2, 3].map((i) => ({
+          key: `cad-refs/u/${i}.png`,
+          mediaType: "image/png",
+        })),
+      },
+    ]);
+    await appendConceptReference({
+      generationId: "gen-1",
+      userId: "u",
+      png: "TkVX",
+    });
+    expect(putObject).not.toHaveBeenCalled();
+    expect(mockUpdateSet).not.toHaveBeenCalled();
   });
 });

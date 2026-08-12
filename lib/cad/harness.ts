@@ -26,7 +26,14 @@ import {
   CONCEPT_IMAGE_NOTE,
   CONCEPT_FROM_REFS_NOTE,
   CONCEPT_JUDGE_LABEL,
+  CONCEPT_CHOSEN_LABEL,
+  CONCEPT_THREAD_REF_LABEL,
 } from "./concept";
+import {
+  classifyConceptPhase,
+  proposeConceptDirections,
+  type ConceptDirection,
+} from "./concept-directions";
 import {
   selectExemplars,
   selectExemplarsByIds,
@@ -140,6 +147,12 @@ export interface HarnessInput {
    * components. Threaded into the brief and both engines' prompts.
    */
   fetchedFacts?: string | null;
+  /**
+   * A concept render the user already chose in the composer's pre-build
+   * picker (base64 PNG) — used verbatim as the aesthetic target; the
+   * in-job picker and concept generation are skipped entirely.
+   */
+  providedConcept?: { png: string } | null;
   maxAttempts?: number;
   signal?: AbortSignal;
   /**
@@ -228,6 +241,13 @@ export interface HarnessResult {
    * (no column yet).
    */
   partSourcing?: import("./step-parts").BriefSourcing;
+  /**
+   * The concept render this build aimed toward (base64 PNG) — the user's
+   * pick when the concept picker ran, the auto-generated one otherwise.
+   * The caller persists it as a thread reference so revisions keep building
+   * toward the same target. Absent on revisions / concept-less runs.
+   */
+  conceptPng?: string;
   error?: string;
 }
 
@@ -625,22 +645,156 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
   // drive a dimension-specific repair turn.
   let dimensionChecks: DimensionCheckResult[] = [];
 
-  // Per-prompt concept image (fresh builds only): a beautiful product render the
-  // generator builds TOWARD — taste injection that hand-authored code exemplars
-  // can't provide. Best-effort + gated by FAL_KEY; null when disabled/failed.
-  // Built FROM the brief when one exists, so the taste target matches the
-  // functional reality (envelope, form language) — and CONDITIONED ON the
-  // user's references when they attached any, so the concept interprets what
-  // they showed instead of inventing a competitor to it.
-  const conceptImg =
-    useModel && !input.priorSourceCode
-      ? await conceptImage(
-          input.prompt,
-          input.signal,
-          brief ? formatBriefForConcept(brief) : undefined,
-          userRefs
-        )
-      : null;
+  // Concept resolution (diverge/converge, lib/cad/concept-directions.ts):
+  // a render the generator builds TOWARD, enforced by the judge. Three ways
+  // a turn gets one:
+  //   - providedConcept: the user already picked in the composer (no
+  //     timeout pressure) — used verbatim, nothing generated.
+  //   - Fresh build: EXPLORE. Directions proposed for THIS object (presets
+  //     only as fallback), one reference-conditioned render each, picked
+  //     via the question card. Walk-away safe: timeout/budget/asker failure
+  //     auto-takes the first candidate.
+  //   - Revision: a cheap classifier routes REFINE (form-changing turns —
+  //     close variations conditioned on the thread's current concept, with
+  //     "keep current" as the default), EXPLORE (explicit redesign), or
+  //     SKIP (detail edits — no card, no renders; the inherited concept
+  //     reference keeps steering).
+  let conceptImg: PromptImage | null = null;
+  // The thread's persisted concept target, when one is riding the refs.
+  const currentConceptRef =
+    userRefs.find((r) => r.label === CONCEPT_THREAD_REF_LABEL) ?? null;
+  const askPick = !!(
+    input.onQuestion && process.env.CAD_CONCEPT_PICKER !== "false"
+  );
+  /** Render one candidate per direction, conditioned on `condition`. */
+  const renderCandidates = async (
+    directions: ConceptDirection[],
+    briefDesc: string | undefined,
+    condition: PromptImage[]
+  ) =>
+    (
+      await Promise.all(
+        directions.map(async (d) => ({
+          direction: d,
+          img: await conceptImage(
+            input.prompt,
+            input.signal,
+            [briefDesc, `style direction: ${d.label} — ${d.detail}`]
+              .filter(Boolean)
+              .join(" -- "),
+            condition
+          ),
+        }))
+      )
+    ).filter(
+      (c): c is { direction: ConceptDirection; img: PromptImage } =>
+        Boolean(c.img)
+    );
+  /** Ask the picker; extra options (e.g. "keep current") lead. */
+  const askConceptPick = async (
+    text: string,
+    candidates: Array<{ direction: ConceptDirection; img: PromptImage }>,
+    keep: PromptImage | null
+  ): Promise<PromptImage | null> => {
+    const all: Array<{ label: string; detail?: string; img: PromptImage }> = [
+      ...(keep
+        ? [{ label: "Keep current direction", detail: "no change", img: keep }]
+        : []),
+      ...candidates.map((c) => ({
+        label: c.direction.label,
+        detail: c.direction.detail,
+        img: c.img,
+      })),
+    ];
+    if (all.length === 0) return null;
+    if (all.length === 1) return all[0].img;
+    const options = all.map((o, i) => ({
+      id: `opt-${i + 1}`,
+      label: o.label,
+      detail: o.detail,
+      thumbnail: o.img.data,
+    }));
+    try {
+      const answer = await input.onQuestion!({
+        id: "concept-pick",
+        text,
+        options,
+        defaultOptionId: options[0].id,
+      });
+      const idx = options.findIndex((o) => o.id === answer);
+      return (idx >= 0 ? all[idx] : all[0]).img;
+    } catch {
+      // Asker failure = walk-away: first option (keep/first), keep building.
+      return all[0].img;
+    }
+  };
+
+  if (input.providedConcept) {
+    conceptImg = {
+      data: input.providedConcept.png,
+      mediaType: "image/png",
+      label: CONCEPT_CHOSEN_LABEL,
+    };
+  } else if (useModel && !input.priorSourceCode) {
+    const briefDesc = brief ? formatBriefForConcept(brief) : undefined;
+    if (askPick) {
+      const directions = await proposeConceptDirections({
+        prompt: input.prompt,
+        phase: "explore",
+        signal: input.signal,
+      });
+      const candidates = await renderCandidates(directions, briefDesc, userRefs);
+      conceptImg = await askConceptPick(
+        "Which direction should this build aim for?",
+        candidates,
+        null
+      );
+    } else {
+      conceptImg = await conceptImage(
+        input.prompt,
+        input.signal,
+        briefDesc,
+        userRefs
+      );
+    }
+  } else if (useModel && input.priorSourceCode && askPick) {
+    const phase = await classifyConceptPhase({
+      prompt: input.prompt,
+      isRevision: true,
+      signal: input.signal,
+    });
+    if (phase !== "skip") {
+      const directions = await proposeConceptDirections({
+        prompt: input.prompt,
+        phase: phase === "refine" ? "refine" : "explore",
+        signal: input.signal,
+      });
+      if (directions.length > 0) {
+        const candidates = await renderCandidates(
+          directions,
+          undefined,
+          // Refinement orbits the CURRENT target; exploration re-roots on
+          // the user's own refs.
+          phase === "refine" && currentConceptRef
+            ? [currentConceptRef]
+            : userRefs
+        );
+        conceptImg = await askConceptPick(
+          phase === "refine"
+            ? "Keep the current direction, or evolve it?"
+            : "Which new direction should this redesign aim for?",
+          candidates,
+          phase === "refine" ? currentConceptRef : null
+        );
+      }
+    }
+  }
+  // When THIS turn resolved a (new) concept, the previously-inherited one
+  // stops riding the prompts/judge — two competing targets is worse than
+  // either. The persisted upsert (appendConceptReference) replaces it.
+  const promptRefs = conceptImg
+    ? userRefs.filter((r) => r.label !== CONCEPT_THREAD_REF_LABEL)
+    : userRefs;
   const withConcept = (base?: PromptImage[] | null): PromptImage[] | undefined => {
     const imgs = [...(base ?? []), ...(conceptImg ? [conceptImg] : [])];
     return imgs.length ? imgs : undefined;
@@ -649,8 +803,12 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
   // (reference-derived) concept, both notes ride together — the derived note
   // states the references stay authoritative.
   const imageryNote = [
-    userRefs.length ? REFERENCE_IMAGES_NOTE : "",
-    conceptImg ? (userRefs.length ? CONCEPT_FROM_REFS_NOTE : CONCEPT_IMAGE_NOTE) : "",
+    promptRefs.length ? REFERENCE_IMAGES_NOTE : "",
+    conceptImg
+      ? promptRefs.length
+        ? CONCEPT_FROM_REFS_NOTE
+        : CONCEPT_IMAGE_NOTE
+      : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -673,7 +831,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
             : buildPlanPrompt(input),
           model: planModel,
           role: "plan",
-          images: withConcept(userRefs),
+          images: withConcept(promptRefs),
           signal: input.signal,
         })
       );
@@ -744,7 +902,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
             .join("\n")
         : buildUserPrompt(input, plan, { brief, exemplarIds, partSourcing: partSourcingBlock });
       const images: PromptImage[] = [
-        ...userRefs,
+        ...promptRefs,
         ...(conceptImg ? [conceptImg] : []),
         ...(priorRender
           ? [
@@ -907,7 +1065,11 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
         // concept" was an instruction nothing ever enforced. Raw refs (no
         // generate-step labels): the judge applies its own goal framing.
         references: [
-          ...(input.images ?? []),
+          // A newly-resolved concept supersedes the inherited one here too —
+          // the judge must not weigh two competing targets.
+          ...(input.images ?? []).filter(
+            (r) => !(conceptImg && r.label === CONCEPT_THREAD_REF_LABEL)
+          ),
           ...(conceptImg
             ? [{ ...conceptImg, label: CONCEPT_JUDGE_LABEL }]
             : []),
@@ -942,6 +1104,9 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
         aestheticScore,
         aestheticDims,
         brief: resultBrief,
+        // The concept this build aimed toward — the caller persists it as a
+        // thread reference so revisions keep building toward the same target.
+        ...(conceptImg ? { conceptPng: conceptImg.data } : {}),
         // TODO(MTR-197): persist on a cad_generations.dimension_checks jsonb
         // column (the cad-artifacts PR owns migrations); until then this rides
         // the in-memory result for the studio chip + eval reuse only.
