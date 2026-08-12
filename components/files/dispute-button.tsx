@@ -55,7 +55,7 @@ export function DisputeButton({ fileId }: { fileId: string }) {
         maxLength={2000}
         placeholder="Briefly explain why this is your original work."
         aria-label="Dispute reason"
-        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        className="w-full rounded-md border border-input bg-background px-3 py-2 field-text sm:text-sm focus:outline-none focus:ring-2 focus:ring-ring"
       />
       {error && (
         <p role="alert" className="text-xs text-destructive">

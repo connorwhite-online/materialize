@@ -294,6 +294,24 @@
     background-image: var(--gradient-sunken);
     box-shadow: var(--shadow-sunken);
   }
+  /* Type size for ANY text-entry control (input, textarea, contenteditable).
+     iOS Safari zooms the whole page when focusing a field whose font-size is
+     under 16px — it never zooms back out, so the layout is left scrolled and
+     oversized until the user pinches. 1rem is the floor that prevents it.
+
+     Use this instead of writing `text-base` on a field: it names the reason,
+     and `components/ui/__tests__/field-text.test.ts` FAILS the build when a
+     text-entry element is missing it, so the fix can't silently regress the
+     next time someone reaches for `text-sm`.
+
+     Composes with a smaller desktop size — Tailwind utilities win over
+     @layer components, so `class="field-text md:text-sm"` keeps 16px on
+     phones and 14px from `md` up. Matches Tailwind's `text-base` metrics
+     exactly, so swapping one for the other changes nothing visually. */
+  .field-text {
+    font-size: 1rem;
+    line-height: 1.5rem;
+  }
   /* Frosted glass for floating overlay layers (dialogs, select /
      dropdown popovers). Handles ONLY the translucent fill + backdrop
      blur so the page content reads through softly; pair it with the

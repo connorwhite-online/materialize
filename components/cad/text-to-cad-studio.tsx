@@ -2008,7 +2008,7 @@ export function TextToCadStudio({
                         if (e.key === "Enter") saveName();
                         if (e.key === "Escape") setRenaming(false);
                       }}
-                      className="w-56 rounded-md border border-foreground/20 bg-card px-2 py-1 text-sm outline-none focus:border-foreground/40"
+                      className="field-text w-56 rounded-md border border-foreground/20 bg-card px-2 py-1 outline-none focus:border-foreground/40 sm:text-sm"
                     />
                     <button
                       type="button"
@@ -2638,7 +2638,7 @@ export function TextToCadStudio({
                         } — at (${a.point
                           .map((n) => n.toFixed(0))
                           .join(", ")}) mm`}
-                        className="min-w-0 flex-1 rounded-md border border-foreground/15 bg-card px-2 py-1 text-sm outline-none focus:border-foreground/30"
+                        className="field-text min-w-0 flex-1 rounded-md border border-foreground/15 bg-card px-2 py-1 outline-none focus:border-foreground/30 sm:text-sm"
                       />
                       <button
                         type="button"
@@ -3054,7 +3054,7 @@ export function TextToCadStudio({
               }
               // text-base (16px) on mobile prevents iOS Safari from auto-
               // zooming when the field is focused (it zooms any input < 16px).
-              className="max-h-[200px] w-full resize-none border-0 bg-transparent px-2 py-1.5 text-base outline-none disabled:opacity-60 nav:text-sm"
+              className="field-text max-h-[200px] w-full resize-none border-0 bg-transparent px-2 py-1.5 outline-none disabled:opacity-60 nav:text-sm"
             />
             {/* Toolbar below the text: attach + draft-brief (left), send
                 (right). */}
@@ -3604,7 +3604,7 @@ export function Questionnaire({
             placeholder="Or answer in your own words…"
             aria-label="Custom answer"
             // text-base on mobile keeps iOS Safari from auto-zooming the field.
-            className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground/60 disabled:opacity-50 sm:text-sm"
+            className="field-text min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground/60 disabled:opacity-50 sm:text-sm"
           />
           <button
             type="submit"

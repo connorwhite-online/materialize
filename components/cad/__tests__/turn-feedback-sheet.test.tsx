@@ -190,13 +190,16 @@ describe("TurnFeedbackSheet", () => {
     // iOS Safari zooms the whole page when a focused form control computes
     // under 16px, and this field regressed once (shipped at text-sm/14px,
     // which zoomed the sheet to ~1.14x). The studio is auth-gated, so no
-    // browser check can catch it — this is the only guard. `text-base` is
-    // 16px (--text-base: 1rem); any smaller size must be breakpoint-scoped
-    // so it only applies where the zoom behavior doesn't exist.
+    // browser check can catch it. The size now comes from the shared
+    // `.field-text` utility (16px, app/globals.css) — kept as a rendered
+    // assertion alongside the repo-wide source scan in
+    // components/ui/__tests__/field-text.test.ts, because this one proves the
+    // class survives `cn()` onto the real element rather than just appearing
+    // in the source.
     renderSheet();
     const classes =
       screen.getByPlaceholderText(/Anything else/).className.split(/\s+/);
-    expect(classes).toContain("text-base");
+    expect(classes).toContain("field-text");
     for (const cls of classes) {
       // Unprefixed small sizes are the bug; `sm:text-sm` etc. are fine.
       expect(cls).not.toMatch(/^text-(sm|xs)$/);

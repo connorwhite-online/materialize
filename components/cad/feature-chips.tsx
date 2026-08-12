@@ -440,7 +440,7 @@ function FeatureParamsPopover({
                     if (!Number.isFinite(n)) return;
                     setDraft((d) => ({ ...d, [key]: n }));
                   }}
-                  className="min-w-0 flex-1 rounded-md border border-foreground/15 bg-transparent px-2 py-1 text-xs tabular-nums disabled:opacity-50"
+                  className="field-text min-w-0 flex-1 rounded-md border border-foreground/15 bg-transparent px-2 py-1 tabular-nums disabled:opacity-50 sm:text-xs"
                 />
               </li>
             );
@@ -530,7 +530,7 @@ function FeatureParamsPopover({
               placeholder="e.g. make this fillet bigger"
               disabled={pending || disabled}
               onChange={(e) => setInstruction(e.target.value)}
-              className="min-w-0 flex-1 rounded-md border border-foreground/15 bg-transparent px-2 py-1 text-xs disabled:opacity-50"
+              className="field-text min-w-0 flex-1 rounded-md border border-foreground/15 bg-transparent px-2 py-1 disabled:opacity-50 sm:text-xs"
             />
             <Button
               type="submit"
