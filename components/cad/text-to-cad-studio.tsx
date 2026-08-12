@@ -50,7 +50,6 @@ import { Layers } from "@/components/icons/layers";
 import {
   deleteCadBuild,
   getCadTopoUrl,
-  recordCadFeedback,
   renameCadGeneration,
   rerunCadWithParams,
   reviseCadFeatureStatement,
@@ -60,6 +59,11 @@ import {
 import { StepDownloadLink } from "@/components/files/step-download-button";
 import { diffParams, extractParams } from "@/components/cad/param-diff";
 import { FeatureChips } from "@/components/cad/feature-chips";
+import {
+  TurnFeedbackSheet,
+  TurnFeedbackTrigger,
+  hasFeedback,
+} from "@/components/cad/turn-feedback-sheet";
 import { featureIdsForFaceIds } from "@/components/cad/feature-timeline";
 import type {
   CadStreamEvent,
@@ -90,12 +94,7 @@ import {
   resolveEffectiveSelectedPartId,
 } from "@/components/cad/assembly-selection";
 import { useKeyboardStickyBottom } from "@/lib/hooks/use-keyboard-sticky-bottom";
-import {
-  CAD_FEEDBACK_TAGS,
-  CAD_FEEDBACK_TAG_LABELS,
-  type CadFeedbackTag,
-  type CadRating,
-} from "@/lib/cad/feedback";
+import { type CadRating } from "@/lib/cad/feedback";
 import { cn } from "@/lib/utils";
 
 // A few human-written example prompts for the empty state — plain strings that
@@ -509,12 +508,20 @@ export function TextToCadStudio({
   const [showBuildsMenu, setShowBuildsMenu] = useState(false);
   // Which build's three-dot menu is open in the sidebar.
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
-  // Eval feedback: auto-prompt per turn until rated/dismissed, then collapse to
-  // an edit affordance. `feedbackEditing` force-opens the panel for a turn.
-  const [feedbackDismissed, setFeedbackDismissed] = useState<Set<string>>(
-    new Set()
-  );
+  // Eval feedback lives in a bottom sheet (components/cad/turn-feedback-sheet).
+  // `feedbackEditing` holds the generation id the sheet is open for — set by
+  // the layout's trigger button, and once automatically when a build finishes
+  // (`autoPromptedRef` keeps that to a single prompt per generation). It is
+  // deliberately NOT opened just because an unrated turn is on screen: that
+  // condition is true all through thread history, and as a modal it would
+  // throw a sheet in the user's face on every click back.
   const [feedbackEditing, setFeedbackEditing] = useState<string | null>(null);
+  const autoPromptedRef = useRef<Set<string>>(new Set());
+  // A generation that just finished and is waiting for the reveal to end
+  // before we prompt for feedback on it.
+  const [pendingFeedbackTurnId, setPendingFeedbackTurnId] = useState<
+    string | null
+  >(null);
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
@@ -788,6 +795,24 @@ export function TextToCadStudio({
     return () => clearTimeout(t);
   }, [transition]);
 
+  // Auto-prompt for feedback once per finished build — AFTER the reveal, never
+  // during it: the whole point of the morph is watching the part appear, and a
+  // modal over that moment would cover the thing being judged. Waits for the
+  // transition to clear, skips a turn that already carries feedback, and marks
+  // the id so a re-render (or coming back to the turn later) never re-prompts.
+  useEffect(() => {
+    const id = pendingFeedbackTurnId;
+    if (!id || transition || generating) return;
+    setPendingFeedbackTurnId(null);
+    if (autoPromptedRef.current.has(id)) return;
+    autoPromptedRef.current.add(id);
+    const turn = threads
+      .flatMap((t) => t.turns)
+      .find((t) => t.id === id && t.status === "succeeded");
+    if (!turn || hasFeedback(turn)) return;
+    setFeedbackEditing(id);
+  }, [pendingFeedbackTurnId, transition, generating, threads]);
+
   // Auto-grow the composer textarea with its content (capped), and shrink
   // back when it's cleared after a send.
   useEffect(() => {
@@ -966,6 +991,15 @@ export function TextToCadStudio({
     !!viewedTurn &&
     viewedTurn.id in topoUrls &&
     topoUrls[viewedTurn.id] == null;
+
+  // The turn the feedback sheet is editing. Resolved across ALL threads rather
+  // than off `viewedTurn`, so the sheet keeps its target even if the viewed
+  // turn changes underneath it (a background job landing, say) instead of
+  // silently snapping onto a different generation mid-edit.
+  const feedbackTarget =
+    (feedbackEditing
+      ? threads.flatMap((t) => t.turns).find((t) => t.id === feedbackEditing)
+      : null) ?? null;
 
   // Dimension-contract verdicts for the viewed turn (MTR-197). Never during
   // compare or a live param preview — the solid on screen is then a different
@@ -1424,6 +1458,9 @@ export function TextToCadStudio({
     setAttachError(null);
     setConcepts(null);
     setSelectedConceptId(null);
+    // Queue the feedback prompt; the effect above fires it once the reveal
+    // finishes so the sheet never covers the morph.
+    setPendingFeedbackTurnId(ev.generationId);
   }
 
   async function addFiles(files: FileList | File[] | null | undefined) {
@@ -2460,43 +2497,14 @@ export function TextToCadStudio({
             viewedTurn?.status === "succeeded" &&
             (() => {
               const vt = viewedTurn;
-              const rated =
-                !!vt.rating ||
-                vt.feedbackTags.length > 0 ||
-                !!vt.feedbackNote;
-              const open =
-                feedbackEditing === vt.id ||
-                (!rated && !feedbackDismissed.has(vt.id));
-              return open ? (
-                <TurnFeedback
-                  key={vt.id}
+              // Only the trigger lives in the layout now; the form itself is a
+              // bottom sheet (opened here, or auto-opened once after a build's
+              // reveal — see pendingFeedbackTurnId).
+              return (
+                <TurnFeedbackTrigger
                   turn={vt}
-                  onSaved={(patch) => {
-                    applyFeedback(vt.id, patch);
-                    setFeedbackEditing(null);
-                  }}
-                  onDismiss={() => {
-                    setFeedbackDismissed((s) => new Set(s).add(vt.id));
-                    setFeedbackEditing(null);
-                  }}
+                  onOpen={() => setFeedbackEditing(vt.id)}
                 />
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setFeedbackEditing(vt.id)}
-                  className="mt-4 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-                >
-                  <MessageSquareTextIcon className="size-3.5" />
-                  {rated
-                    ? `Feedback ${
-                        vt.rating === "good"
-                          ? "👍"
-                          : vt.rating === "bad"
-                            ? "👎"
-                            : "saved"
-                      } · edit`
-                    : "Add feedback"}
-                </button>
               );
             })()}
 
@@ -3115,6 +3123,20 @@ export function TextToCadStudio({
           </div>
         </div>
       </div>
+
+      {/* Eval feedback (rating + tags + note) as a bottom sheet. Portals to
+          <body>, so its position here is only about ownership of the state,
+          not layout. Opened by the trigger under the model actions, or once
+          automatically after a build's reveal finishes. */}
+      <TurnFeedbackSheet
+        open={!!feedbackTarget}
+        turn={feedbackTarget}
+        onClose={() => setFeedbackEditing(null)}
+        onSaved={(patch) => {
+          if (feedbackTarget) applyFeedback(feedbackTarget.id, patch);
+          setFeedbackEditing(null);
+        }}
+      />
     </div>
   );
 }
@@ -3720,148 +3742,3 @@ function describeEvent(ev: CadProgressEvent): {
   }
 }
 
-/**
- * Per-turn feedback widget — the in-the-moment human eval signal. Seeded
- * from the turn (remounted via `key` when the viewed turn changes), saves
- * through recordCadFeedback, and reports saved values up so the in-memory
- * threads stay in sync. Rolls up on /text-to-cad/eval.
- */
-function TurnFeedback({
-  turn,
-  onSaved,
-  onDismiss,
-}: {
-  turn: StudioTurn;
-  onSaved: (
-    patch: Pick<StudioTurn, "rating" | "feedbackTags" | "feedbackNote">
-  ) => void;
-  onDismiss?: () => void;
-}) {
-  const [rating, setRating] = useState<CadRating | null>(turn.rating);
-  const [tags, setTags] = useState<CadFeedbackTag[]>(
-    turn.feedbackTags.filter((t): t is CadFeedbackTag =>
-      (CAD_FEEDBACK_TAGS as readonly string[]).includes(t)
-    )
-  );
-  const [note, setNote] = useState(turn.feedbackNote ?? "");
-  const [saved, setSaved] = useState(false);
-  const [saving, startSaving] = useTransition();
-
-  function toggleTag(tag: CadFeedbackTag) {
-    setSaved(false);
-    setTags((t) => (t.includes(tag) ? t.filter((x) => x !== tag) : [...t, tag]));
-  }
-
-  function save() {
-    startSaving(async () => {
-      const res = await recordCadFeedback({
-        generationId: turn.id,
-        rating,
-        tags,
-        note,
-      });
-      if ("ok" in res) {
-        setSaved(true);
-        onSaved({
-          rating,
-          feedbackTags: tags,
-          feedbackNote: note.trim() || null,
-        });
-      }
-    });
-  }
-
-  return (
-    <div className="mt-5 rounded-lg border border-foreground/10 p-3">
-      <div className="flex items-center gap-2">
-        <span className="text-xs font-medium text-muted-foreground">
-          How did this turn out?
-        </span>
-        {onDismiss && (
-          <button
-            type="button"
-            onClick={onDismiss}
-            aria-label="Dismiss feedback"
-            className="order-last ml-auto flex size-6 items-center justify-center rounded-md text-muted-foreground/70 hover:bg-foreground/10 hover:text-foreground"
-          >
-            <XIcon className="size-3.5" />
-          </button>
-        )}
-        <button
-          type="button"
-          aria-pressed={rating === "good"}
-          onClick={() => {
-            setSaved(false);
-            setRating((r) => (r === "good" ? null : "good"));
-          }}
-          className={cn(
-            "rounded-md border px-2 py-1 text-sm",
-            rating === "good"
-              ? "border-foreground/40 bg-foreground/5"
-              : "border-foreground/15"
-          )}
-        >
-          👍
-        </button>
-        <button
-          type="button"
-          aria-pressed={rating === "bad"}
-          onClick={() => {
-            setSaved(false);
-            setRating((r) => (r === "bad" ? null : "bad"));
-          }}
-          className={cn(
-            "rounded-md border px-2 py-1 text-sm",
-            rating === "bad"
-              ? "border-foreground/40 bg-foreground/5"
-              : "border-foreground/15"
-          )}
-        >
-          👎
-        </button>
-      </div>
-
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {CAD_FEEDBACK_TAGS.map((tag) => (
-          <button
-            key={tag}
-            type="button"
-            aria-pressed={tags.includes(tag)}
-            onClick={() => toggleTag(tag)}
-            className={cn(
-              "rounded-full border px-2 py-0.5 text-xs",
-              tags.includes(tag)
-                ? "border-foreground/40 bg-foreground/5"
-                : "border-foreground/15 text-muted-foreground"
-            )}
-          >
-            {CAD_FEEDBACK_TAG_LABELS[tag]}
-          </button>
-        ))}
-      </div>
-
-      <input
-        value={note}
-        onChange={(e) => {
-          setSaved(false);
-          setNote(e.target.value);
-        }}
-        maxLength={1000}
-        placeholder="Optional note…"
-        className="mt-2 w-full rounded-md border border-foreground/15 bg-card px-2 py-1 text-xs outline-none focus:border-foreground/30"
-      />
-
-      <div className="mt-2 flex items-center gap-3">
-        <button
-          type="button"
-          onClick={save}
-          disabled={saving}
-          className="rounded-md border border-foreground/15 px-3 py-1 text-xs font-medium disabled:opacity-50"
-        >
-          {saving ? "Saving…" : "Save feedback"}
-        </button>
-        {saved && <span className="text-xs text-muted-foreground">Saved ✓</span>}
-      </div>
-    </div>
-  );
-}
