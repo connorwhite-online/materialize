@@ -207,10 +207,43 @@ Never call the DB cart a "CraftCloud cart." They are distinct: the DB cart is a 
 
 **Double-fire guards live in the callers** — `checkoutInFlightRef` at `components/print/quote-configurator.tsx:364` (set/cleared `:875-969`) guards the anon checkout chain; `materializingRef` at `components/print/cart-context.tsx:109` guards cart materialization. Moving or extracting the chained functions does NOT move the guards — they must travel with the call site.
 
+## Brand logo
+
+Three components in `components/brand/logo.tsx`, all painting with
+`fill="currentColor"` so they follow the surrounding `text-*` token in both themes:
+
+- **`<Logomark>`** — the "M" alone. Use where there's no horizontal room: the top
+  bar's brand link, the mobile nav's collapsed pill on `/`, its Home menu row, the
+  fee-sheet tile. (The full word needs ~14rem at nav size, which none of those have.)
+- **`<Wordmark>`** — the full word, static.
+- **`<AnimatedWordmark>`** — the same word with a CSS-only reveal: the "M" is
+  always painted and the other ten letters drift in left-to-right, each blurred
+  and lifted, settling as a bottom-to-top wipe fills it in. `animateOnMount`
+  plays it once (keyframes — works with JS disabled); `expanded` makes it a
+  controlled toggle between the word and the bare mark, which reverses the
+  stagger so it peels right-to-left back to the "M". Live on the landing header
+  (at `nav+` only — below that the header falls back to `<Logomark>`, because the
+  word would crowd the search pill on a phone), the auth modal, `/sign-in`,
+  `/sign-up`, and `/onboarding`.
+
+All geometry lives in `components/brand/logo-paths.ts` — **the only place path
+data is defined**. Updating the logo means replacing the `d` strings there (one
+path per wordmark letter, in reading order, "m" at index 0 — the animation
+depends on that ordering) and re-exporting `app/icon.svg`, the one intentional
+duplicate. A test pins `app/icon.svg` to `MARK_PATH` so the favicon can't drift.
+
+Motion and sizing live in `app/globals.css` (`.mz-logo*`), not in the component,
+so timing can be retuned without touching TSX. Sizing flows from a single
+`--mz-h`; the component writes it inline **only when a `height` prop is passed**,
+because inline styles outrank stylesheet rules and would otherwise defeat the
+responsive `[--mz-h:15px] sm:[--mz-h:20px]` class escape hatch. Nothing animates
+on the main thread — the stagger is `transition-delay`/`animation-delay` off a
+per-letter `--mz-i`, and `prefers-reduced-motion` collapses it to instant.
+
 ## Fonts
 
 - **Body** — system font stack (`-apple-system, SF Pro, …`), set in `app/globals.css` via `--font-sans`. No webfont download.
-- **Display** — `PPFuji-Bold.otf` as `--font-display`, loaded via `next/font/local` in `app/layout.tsx` and applied via inline `fontFamily: "var(--font-display)…"` on the nav brand link.
+- **Display** — `PPFuji-Bold.otf` (`--font-display`) is **no longer loaded in the browser.** It set the old home-hero wordmark; the brand is an SVG now (§ Brand logo) and nothing consumes the variable, so `app/layout.tsx` doesn't declare it. `lib/og/render-card.tsx` still reads the same OTF off disk for OG cards — server-side, unaffected. The file stays in `public/`.
 - **Headings** — every `<h1>`–`<h6>` already routes through `--font-heading` (PP Frama Regular) in `app/globals.css:359`. Headings need no inline `fontFamily`, and adding one is almost always a mistake.
 - **`PPPlayground-Light.otf` (`--font-script`) is currently unused.** It set the "Anything" word in the old wordmark hero; that hero is gone and the 157KB OTF preload went with it. The file is still in `public/` — if you reintroduce it, declare it in the route that uses it (not `app/layout.tsx`) so it doesn't load site-wide.
 - The home hero heading is real selectable text, not an SVG — it must stay an `<h1>` so the home page (the URL every backlink points at) ships a crawlable heading. It states what the product does; the brand mark lives in the header `<Logomark />` instead, so "Materialize" still appears above the fold.
@@ -219,7 +252,7 @@ Never call the DB cart a "CraftCloud cart." They are distinct: the DB cart is a 
 
 Sub-`nav` viewports (< 67.5rem) get `components/nav/mobile-nav.tsx` instead of the desktop `TopBar` — a single floating surface that morphs:
 
-- **Collapsed** it is a pill: the current page's icon, the page title, a chevron grabber (with the unread pip on it), and the sandbox chip. `/` shows the logomark.
+- **Collapsed** it is a pill: the current page's icon, the page title, a chevron grabber (with the unread pip on it), and the sandbox chip. `/` shows the brand `<Logomark>`.
 - **Tapped** it widens and grows upward into a menu card — Home / Search (`/files`) / Print / Materials / Notifications, plus the owner-only Prometheus entry — with the desktop-style avatar + name/@username container taking over the pill's row at the bottom. Anon visitors get a Sign in row and no inbox.
 
 Two things to keep in mind when touching it:

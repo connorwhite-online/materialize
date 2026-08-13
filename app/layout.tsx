@@ -9,16 +9,14 @@ import { PendingPrintFileProvider } from "@/components/upload/pending-print-file
 import { PageTransitionLoader } from "@/components/nav/page-transition-loader";
 import { Iterate } from "iterate-ui-next/devtools";
 
-// Display face for the hero wordmark — loaded as a local OTF from
-// /public. Body text stays on the system font stack (globals.css).
+// Body text stays on the system font stack (globals.css).
 //
-// PP Fuji Bold — Pangram Pangram's chunky modernist display face,
-// used for "Materialize" and the nav brand logo on app pages.
-const fuji = localFont({
-  src: "../public/PPFuji-Bold.otf",
-  variable: "--font-display",
-  display: "swap",
-});
+// PP Fuji Bold (--font-display) used to load here for the home hero
+// wordmark. That banner is gone and the brand is an SVG now, so nothing
+// consumes the variable and the OTF no longer ships to the browser on any
+// route. lib/og/render-card.tsx still reads the same file off disk for OG
+// cards — that path is server-side and unaffected.
+//
 // PP Frama — the new app typeface (Pangram Pangram). Regular (--font-frama)
 // drives the heading font (--font-heading in globals.css), so the existing
 // `font-heading` utility across the UI (card / dialog / alert / section
@@ -32,9 +30,9 @@ const framaRegular = localFont({
   weight: "400",
   display: "swap",
 });
-// PP Playground Light (--font-script) is only used on the home hero
-// ("Anything"). It is declared in app/page.tsx so the 157KB OTF is
-// only preloaded on that route instead of every page. (CON-166)
+// PP Playground Light (--font-script) was scoped to the home hero
+// ("Anything") in app/page.tsx (CON-166). The hero banner is gone, so it
+// no longer loads anywhere.
 
 // Site-wide defaults. Per-page `generateMetadata` overrides title,
 // description, and og:image; everything else (twitter card type,
@@ -166,7 +164,7 @@ export default function RootLayout({
     <ClerkProvider>
       <html
         lang="en"
-        className={`${fuji.variable} ${framaRegular.variable} h-full antialiased`}
+        className={`${framaRegular.variable} h-full antialiased`}
         suppressHydrationWarning
       >
         <body className="min-h-full flex flex-col">
