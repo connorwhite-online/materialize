@@ -7,7 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Logomark } from "@/components/icons/logomark";
+import { AnimatedWordmark } from "@/components/brand/logo";
 import { SignInForm } from "./sign-in-form";
 import { SignUpForm } from "./sign-up-form";
 
@@ -62,7 +62,11 @@ export function AuthModalProvider({ children }: { children: React.ReactNode }) {
       >
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <Logomark height={24} className="mx-auto text-foreground" />
+            <AnimatedWordmark
+              title="Materialize"
+              animateOnMount
+              className="mx-auto text-foreground [--mz-h:13px] sm:[--mz-h:14px]"
+            />
             <DialogTitle className="text-center">
               {mode === "sign-in" ? "Sign in" : "Create an account"}
             </DialogTitle>

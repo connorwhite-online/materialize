@@ -3,7 +3,7 @@ import { Browse } from "@/components/icons/browse";
 import { Galaxy } from "@/components/icons/galaxy";
 import { Home } from "@/components/icons/home";
 import { Layers } from "@/components/icons/layers";
-import { Logomark } from "@/components/icons/logomark";
+import { Logomark } from "@/components/brand/logo";
 import { Materials } from "@/components/icons/materials";
 import { Print } from "@/components/icons/print";
 

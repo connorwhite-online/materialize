@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useUser } from "@clerk/nextjs";
-import { Logomark } from "@/components/icons/logomark";
+import { AnimatedWordmark, Logomark } from "@/components/brand/logo";
 import { Galaxy } from "@/components/icons/galaxy";
 import { Materials } from "@/components/icons/materials";
 import { TopSearch } from "@/components/nav/top-search";
@@ -75,7 +75,21 @@ export function TopBar({
             aria-label="Materialize — home"
             className="relative flex items-center text-foreground transition-opacity hover:opacity-80"
           >
-            <Logomark height={22} />
+            {alwaysVisible ? (
+              <>
+                {/* Landing page: the full lockup drifts in on first paint,
+                    but only where the header has room for ~14rem of word.
+                    The wrapper does the responsive hiding — `.mz-logo` is
+                    unlayered CSS and would outrank a `hidden` utility put
+                    on the component itself. */}
+                <span className="hidden nav:block">
+                  <AnimatedWordmark animateOnMount height={22} />
+                </span>
+                <Logomark height={22} className="nav:hidden" />
+              </>
+            ) : (
+              <Logomark height={22} />
+            )}
           </Link>
           {textToCad && (
             <Button

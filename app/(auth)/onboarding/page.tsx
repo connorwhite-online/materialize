@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AnimatedWordmark } from "@/components/brand/logo";
 import { setUsername } from "@/app/actions/onboarding";
 import {
   MAX_USERNAME_LENGTH,
@@ -35,9 +36,11 @@ export default function OnboardingPage() {
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center px-4">
-      <div className="mb-8 text-lg font-semibold tracking-tight">
-        Materialize
-      </div>
+      <AnimatedWordmark
+        title="Materialize"
+        animateOnMount
+        className="mb-8 text-foreground [--mz-h:14px] sm:[--mz-h:16px]"
+      />
 
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">

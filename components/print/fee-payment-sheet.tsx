@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BadgeCheckIcon, CreditCardIcon } from "lucide-react";
+import { BadgeCheckIcon } from "lucide-react";
 import {
   Elements,
   ExpressCheckoutElement,
@@ -15,6 +15,7 @@ import type {
 } from "@stripe/stripe-js";
 import { useTheme } from "next-themes";
 import { NativeSheet } from "@/components/ui/native-sheet";
+import { Logomark } from "@/components/brand/logo";
 import { getStripeBrowser } from "@/lib/stripe/browser";
 import { finalizeFeeAuthorization } from "@/app/actions/print";
 
@@ -121,11 +122,13 @@ export function FeePaymentSheet({ sheet, onClose }: FeePaymentSheetProps) {
     >
       <div className="px-6 pt-1">
         <div className="flex items-center gap-3">
+          {/* The mark, not a generic card icon — this sheet is where we
+              actually take money, so it should be unmistakably ours. */}
           <div
             aria-hidden="true"
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-100 text-violet-600 dark:bg-violet-950 dark:text-violet-400"
           >
-            <CreditCardIcon className="h-6 w-6" strokeWidth={2.5} />
+            <Logomark height={18} />
           </div>
           <div>
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -436,11 +439,13 @@ export function SavedCardFeeSheet({
     >
       <div className="px-6 pt-1">
         <div className="flex items-center gap-3">
+          {/* The mark, not a generic card icon — this sheet is where we
+              actually take money, so it should be unmistakably ours. */}
           <div
             aria-hidden="true"
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-100 text-violet-600 dark:bg-violet-950 dark:text-violet-400"
           >
-            <CreditCardIcon className="h-6 w-6" strokeWidth={2.5} />
+            <Logomark height={18} />
           </div>
           <div>
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">

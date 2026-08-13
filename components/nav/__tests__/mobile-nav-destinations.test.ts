@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { Bell } from "@/components/icons/bell";
 import { Browse } from "@/components/icons/browse";
+import { Logomark } from "@/components/brand/logo";
 import { Home } from "@/components/icons/home";
-import { Logomark } from "@/components/icons/logomark";
 import { Print } from "@/components/icons/print";
 import {
   iconSizeProps,
