@@ -257,7 +257,7 @@ export function MobileNav({
                               onClick={close}
                               aria-current={active ? "page" : undefined}
                               className={cn(
-                                "flex items-center gap-3 rounded-[18px] px-3 py-2.5",
+                                "flex items-center gap-3 rounded-[22px] px-3 py-2.5",
                                 "text-[0.9375rem] font-medium transition-colors",
                                 active
                                   ? "bg-muted text-foreground"
@@ -271,7 +271,18 @@ export function MobileNav({
                               <span className="flex-1 truncate">{item.label}</span>
                               {badge > 0 && (
                                 <span
-                                  className="min-w-[1.375rem] rounded-full bg-primary px-2 py-1 text-center text-[0.6875rem] font-semibold leading-none text-primary-foreground"
+                                  className={cn(
+                                    "min-w-[1.375rem] rounded-full px-2 py-1 text-center text-[0.6875rem] font-semibold leading-none",
+                                    // Same red as the collapsed pill's
+                                    // pip — one colour means "unread"
+                                    // wherever you meet it. `text-background`
+                                    // rather than a fixed white: the dark
+                                    // theme's red is light enough that white
+                                    // on it stops being legible.
+                                    item.href === "/notifications"
+                                      ? "bg-destructive text-background"
+                                      : "bg-primary text-primary-foreground"
+                                  )}
                                   aria-label={
                                     item.href === "/print"
                                       ? `${badge} in cart`
@@ -314,7 +325,7 @@ export function MobileNav({
                           aria-current={
                             pathname === ownProfilePath ? "page" : undefined
                           }
-                          className="mx-1.5 flex min-w-0 flex-1 items-center gap-2.5 rounded-[18px] p-1 pr-3 transition-colors active:bg-muted/60"
+                          className="mx-1.5 flex min-w-0 flex-1 items-center gap-2.5 rounded-[22px] p-1 pr-3 transition-colors active:bg-muted/60"
                         >
                           <UserAvatar
                             seed={user.username || user.id}
@@ -340,7 +351,7 @@ export function MobileNav({
                             close();
                             openAuth("sign-in");
                           }}
-                          className="mx-1.5 flex min-w-0 flex-1 items-center gap-3 rounded-[18px] px-3 py-2.5 text-left text-[0.9375rem] font-medium transition-colors active:bg-muted/60"
+                          className="mx-1.5 flex min-w-0 flex-1 items-center gap-3 rounded-[22px] px-3 py-2.5 text-left text-[0.9375rem] font-medium transition-colors active:bg-muted/60"
                         >
                           <UserAvatar
                             seed="anonymous"
@@ -382,7 +393,7 @@ export function MobileNav({
           {!open && unreadCount > 0 && (
             <span
               aria-hidden
-              className="pointer-events-none absolute right-1.5 top-1.5 h-2.5 w-2.5 -translate-y-1/2 translate-x-1/2 rounded-full bg-destructive ring-2 ring-background"
+              className="pointer-events-none absolute right-1.5 top-1.5 h-3 w-3 -translate-y-1/2 translate-x-1/2 rounded-full bg-destructive ring-2 ring-background"
             />
           )}
         </div>
@@ -431,7 +442,7 @@ function TrailingCluster({
   menuId: string;
 }) {
   return (
-    <div className="flex shrink-0 items-center pl-2 pr-2.5">
+    <div className="flex shrink-0 items-center pl-1 pr-1.5">
       <button
         type="button"
         onClick={onToggle}
@@ -439,9 +450,12 @@ function TrailingCluster({
         aria-expanded={open}
         aria-controls={menuId}
         aria-label={open ? "Close navigation menu" : "Open navigation menu"}
-        className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-muted/60"
+        // 44px is the smallest comfortable touch target, and this one
+        // opens and closes the whole nav. The glyph stays optically
+        // small; the padding does the work.
+        className="flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-muted/60"
       >
-        <Grabber size={20} />
+        <Grabber size={24} />
       </button>
     </div>
   );
