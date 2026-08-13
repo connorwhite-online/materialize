@@ -187,193 +187,205 @@ export function MobileNav({
           style={{ height: ROW_HEIGHT }}
         >
           <PageIdentityContent identity={identity} />
-          {/* Same trailing content the collapsed pill renders. The unread
-              pip is absolutely positioned, so it costs no width — but the
-              grabber does, and it has to be inside the measurement. */}
-          <TrailingCluster showPip={false} onToggle={undefined} menuId={menuId} />
+          {/* Same trailing content the collapsed pill renders — the
+              grabber costs width, so it has to be in the measurement.
+              (The pip hangs off the card's edge and costs none.) */}
+          <TrailingCluster onToggle={undefined} menuId={menuId} />
         </div>
 
-        <motion.div
-          initial={false}
-          animate={{ width: open ? expandedWidth : collapsedWidth }}
-          transition={reducedMotion ? { duration: 0 } : open ? SPRING : SPRING_CLOSE}
-          drag={open && !reducedMotion ? "y" : false}
-          dragConstraints={{ top: 0, bottom: 0 }}
-          dragElastic={{ top: 0.02, bottom: 0.4 }}
-          dragMomentum={false}
-          onDragEnd={handleDragEnd}
-          className={cn(
-            "pointer-events-auto overflow-hidden rounded-[28px]",
-            keyboardOpen && "pointer-events-none",
-            "bg-background/85 backdrop-blur-2xl",
-            "ring-1 ring-border/70",
-            "shadow-[0_2px_8px_-2px_oklch(0_0_0/0.14),0_18px_44px_-14px_oklch(0_0_0/0.38)]"
-          )}
-        >
-          <AnimatePresence initial={false}>
-            {open && (
-              <motion.div
-                key="menu"
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={reducedMotion ? { duration: 0 } : SPRING_CLOSE}
-                className="overflow-hidden"
-              >
-                {/* Fixed width so the list never reflows mid-morph while
-                    the card itself is still widening. */}
-                <nav
-                  id={menuId}
-                  aria-label="Primary"
-                  style={{ width: expandedWidth }}
+        {/* `relative` shrink-wrapper around the card. The pip below
+            hangs off the card's edge, and the card clips its own
+            overflow (the height animation needs that), so the pip
+            cannot live inside it. */}
+        <div className="relative">
+          <motion.div
+            initial={false}
+            animate={{ width: open ? expandedWidth : collapsedWidth }}
+            transition={reducedMotion ? { duration: 0 } : open ? SPRING : SPRING_CLOSE}
+            drag={open && !reducedMotion ? "y" : false}
+            dragConstraints={{ top: 0, bottom: 0 }}
+            dragElastic={{ top: 0.02, bottom: 0.4 }}
+            dragMomentum={false}
+            onDragEnd={handleDragEnd}
+            className={cn(
+              "pointer-events-auto overflow-hidden rounded-[28px]",
+              keyboardOpen && "pointer-events-none",
+              "bg-background/85 backdrop-blur-2xl",
+              "ring-1 ring-border/70",
+              "shadow-[0_2px_8px_-2px_oklch(0_0_0/0.14),0_18px_44px_-14px_oklch(0_0_0/0.38)]"
+            )}
+          >
+            <AnimatePresence initial={false}>
+              {open && (
+                <motion.div
+                  key="menu"
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={reducedMotion ? { duration: 0 } : SPRING_CLOSE}
+                  className="overflow-hidden"
                 >
-                  <motion.ul
-                    variants={LIST_VARIANTS}
-                    initial="hidden"
-                    animate="visible"
-                    className="flex flex-col gap-0.5 p-1.5"
+                  {/* Fixed width so the list never reflows mid-morph while
+                      the card itself is still widening. */}
+                  <nav
+                    id={menuId}
+                    aria-label="Primary"
+                    style={{ width: expandedWidth }}
                   >
-                    {destinations.map((item) => {
-                      const active = isDestinationActive(pathname, item.href);
-                      const badge =
-                        item.href === "/print" && cartCount > 0
-                          ? cartCount
-                          : item.href === "/notifications" && unreadCount > 0
-                            ? unreadCount
-                            : 0;
-                      const { Icon } = item;
-                      return (
-                        <motion.li
-                          key={item.href}
-                          variants={reducedMotion ? undefined : ITEM_VARIANTS}
-                        >
-                          <Link
-                            href={item.href}
-                            onClick={close}
-                            aria-current={active ? "page" : undefined}
-                            className={cn(
-                              "flex items-center gap-3 rounded-[18px] px-3 py-2.5",
-                              "text-[0.9375rem] font-medium transition-colors",
-                              active
-                                ? "bg-muted text-foreground"
-                                : "text-muted-foreground active:bg-muted/60"
-                            )}
+                    <motion.ul
+                      variants={LIST_VARIANTS}
+                      initial="hidden"
+                      animate="visible"
+                      className="flex flex-col gap-0.5 p-1.5"
+                    >
+                      {destinations.map((item) => {
+                        const active = isDestinationActive(pathname, item.href);
+                        const badge =
+                          item.href === "/print" && cartCount > 0
+                            ? cartCount
+                            : item.href === "/notifications" && unreadCount > 0
+                              ? unreadCount
+                              : 0;
+                        const { Icon } = item;
+                        return (
+                          <motion.li
+                            key={item.href}
+                            variants={reducedMotion ? undefined : ITEM_VARIANTS}
                           >
-                            <Icon
-                              {...iconSizeProps(Icon, 20)}
-                              className="shrink-0"
-                            />
-                            <span className="flex-1 truncate">{item.label}</span>
-                            {badge > 0 && (
-                              <span
-                                className="min-w-[1.375rem] rounded-full bg-primary px-2 py-1 text-center text-[0.6875rem] font-semibold leading-none text-primary-foreground"
-                                aria-label={
-                                  item.href === "/print"
-                                    ? `${badge} in cart`
-                                    : `${badge} unread`
-                                }
-                              >
-                                {badge > 99 ? "99+" : badge}
+                            <Link
+                              href={item.href}
+                              onClick={close}
+                              aria-current={active ? "page" : undefined}
+                              className={cn(
+                                "flex items-center gap-3 rounded-[18px] px-3 py-2.5",
+                                "text-[0.9375rem] font-medium transition-colors",
+                                active
+                                  ? "bg-muted text-foreground"
+                                  : "text-muted-foreground active:bg-muted/60"
+                              )}
+                            >
+                              <Icon
+                                {...iconSizeProps(Icon, 20)}
+                                className="shrink-0"
+                              />
+                              <span className="flex-1 truncate">{item.label}</span>
+                              {badge > 0 && (
+                                <span
+                                  className="min-w-[1.375rem] rounded-full bg-primary px-2 py-1 text-center text-[0.6875rem] font-semibold leading-none text-primary-foreground"
+                                  aria-label={
+                                    item.href === "/print"
+                                      ? `${badge} in cart`
+                                      : `${badge} unread`
+                                  }
+                                >
+                                  {badge > 99 ? "99+" : badge}
+                                </span>
+                              )}
+                            </Link>
+                          </motion.li>
+                        );
+                      })}
+                    </motion.ul>
+                    <div className="mx-3 h-px bg-border" />
+                  </nav>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Identity row — always present. It is the pill when closed
+                and the user container when open; the chevron persists
+                across both and just rotates. */}
+            <div className="flex items-center" style={{ height: ROW_HEIGHT }}>
+              <div className="relative min-w-0 flex-1 self-stretch">
+                <AnimatePresence initial={false}>
+                  {open ? (
+                    <motion.div
+                      key="user"
+                      initial={reducedMotion ? false : { opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -10 }}
+                      transition={reducedMotion ? { duration: 0 } : SPRING}
+                      className="absolute inset-0 flex items-center"
+                    >
+                      {isSignedIn && user ? (
+                        <Link
+                          href={ownProfilePath ?? "/"}
+                          onClick={close}
+                          aria-current={
+                            pathname === ownProfilePath ? "page" : undefined
+                          }
+                          className="mx-1.5 flex min-w-0 flex-1 items-center gap-2.5 rounded-[18px] p-1 pr-3 transition-colors active:bg-muted/60"
+                        >
+                          <UserAvatar
+                            seed={user.username || user.id}
+                            imageUrl={user.hasImage ? user.imageUrl : null}
+                            displayName={displayName}
+                            className="h-9 w-9 shrink-0"
+                          />
+                          <span className="min-w-0 flex-1 leading-tight">
+                            <span className="block truncate text-sm font-medium">
+                              {displayName}
+                            </span>
+                            {user.username && (
+                              <span className="block truncate text-xs text-muted-foreground">
+                                @{user.username}
                               </span>
                             )}
-                          </Link>
-                        </motion.li>
-                      );
-                    })}
-                  </motion.ul>
-                  <div className="mx-3 h-px bg-border" />
-                </nav>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Identity row — always present. It is the pill when closed
-              and the user container when open; the chevron persists
-              across both and just rotates. */}
-          <div className="flex items-center" style={{ height: ROW_HEIGHT }}>
-            <div className="relative min-w-0 flex-1 self-stretch">
-              <AnimatePresence initial={false}>
-                {open ? (
-                  <motion.div
-                    key="user"
-                    initial={reducedMotion ? false : { opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -10 }}
-                    transition={reducedMotion ? { duration: 0 } : SPRING}
-                    className="absolute inset-0 flex items-center"
-                  >
-                    {isSignedIn && user ? (
-                      <Link
-                        href={ownProfilePath ?? "/"}
-                        onClick={close}
-                        aria-current={
-                          pathname === ownProfilePath ? "page" : undefined
-                        }
-                        className="mx-1.5 flex min-w-0 flex-1 items-center gap-2.5 rounded-[18px] p-1 pr-3 transition-colors active:bg-muted/60"
-                      >
-                        <UserAvatar
-                          seed={user.username || user.id}
-                          imageUrl={user.hasImage ? user.imageUrl : null}
-                          displayName={displayName}
-                          className="h-9 w-9 shrink-0"
-                        />
-                        <span className="min-w-0 flex-1 leading-tight">
-                          <span className="block truncate text-sm font-medium">
-                            {displayName}
                           </span>
-                          {user.username && (
-                            <span className="block truncate text-xs text-muted-foreground">
-                              @{user.username}
-                            </span>
-                          )}
-                        </span>
-                      </Link>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          close();
-                          openAuth("sign-in");
-                        }}
-                        className="mx-1.5 flex min-w-0 flex-1 items-center gap-3 rounded-[18px] px-3 py-2.5 text-left text-[0.9375rem] font-medium transition-colors active:bg-muted/60"
-                      >
-                        <UserAvatar
-                          seed="anonymous"
-                          displayName="Sign in"
-                          className="h-9 w-9 shrink-0 opacity-60"
-                        />
-                        <span className="flex-1 truncate">Sign in</span>
-                      </button>
-                    )}
-                  </motion.div>
-                ) : (
-                  <motion.button
-                    key="page"
-                    type="button"
-                    onClick={() => setOpenPath(pathname)}
-                    aria-expanded={false}
-                    aria-controls={menuId}
-                    aria-label={`${identity.label} — open navigation menu`}
-                    initial={reducedMotion ? false : { opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 10 }}
-                    transition={reducedMotion ? { duration: 0 } : SPRING}
-                    className="absolute inset-0 flex items-center text-left"
-                  >
-                    <PageIdentityContent identity={identity} />
-                  </motion.button>
-                )}
-              </AnimatePresence>
-            </div>
+                        </Link>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            close();
+                            openAuth("sign-in");
+                          }}
+                          className="mx-1.5 flex min-w-0 flex-1 items-center gap-3 rounded-[18px] px-3 py-2.5 text-left text-[0.9375rem] font-medium transition-colors active:bg-muted/60"
+                        >
+                          <UserAvatar
+                            seed="anonymous"
+                            displayName="Sign in"
+                            className="h-9 w-9 shrink-0 opacity-60"
+                          />
+                          <span className="flex-1 truncate">Sign in</span>
+                        </button>
+                      )}
+                    </motion.div>
+                  ) : (
+                    <motion.button
+                      key="page"
+                      type="button"
+                      onClick={() => setOpenPath(pathname)}
+                      aria-expanded={false}
+                      aria-controls={menuId}
+                      aria-label={`${identity.label} — open navigation menu`}
+                      initial={reducedMotion ? false : { opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 10 }}
+                      transition={reducedMotion ? { duration: 0 } : SPRING}
+                      className="absolute inset-0 flex items-center text-left"
+                    >
+                      <PageIdentityContent identity={identity} />
+                    </motion.button>
+                  )}
+                </AnimatePresence>
+              </div>
 
-            <TrailingCluster
-              showPip={!open && unreadCount > 0}
-              open={open}
-              onToggle={toggle}
-              menuId={menuId}
+              <TrailingCluster open={open} onToggle={toggle} menuId={menuId} />
+            </div>
+          </motion.div>
+
+          {/* Unread pip — collapsed only; once open, the inbox is a menu
+              row carrying its own count. It straddles the pill's
+              top-right edge at 45°, so it reads as a badge on the nav
+              itself rather than a mark on the grabber. */}
+          {!open && unreadCount > 0 && (
+            <span
+              aria-hidden
+              className="pointer-events-none absolute right-1.5 top-1.5 h-2.5 w-2.5 -translate-y-1/2 translate-x-1/2 rounded-full bg-destructive ring-2 ring-background"
             />
-          </div>
-        </motion.div>
+          )}
+        </div>
       </div>
     </>
   );
@@ -405,18 +417,14 @@ function PageIdentityContent({ identity }: { identity: PageIdentity }) {
 }
 
 /**
- * Right-hand end of the identity row: the grabber, and the unread pip
- * riding it (collapsed only — once open, the inbox is a menu row
- * carrying its own count). The grabber reads the same open or closed,
- * so unlike a lone chevron it has nothing to rotate.
+ * Right-hand end of the identity row: the grabber. It reads the same
+ * open or closed, so unlike a lone chevron it has nothing to rotate.
  */
 function TrailingCluster({
-  showPip,
   open = false,
   onToggle,
   menuId,
 }: {
-  showPip: boolean;
   open?: boolean;
   /** Omitted by the measuring ghost, which must not be interactive. */
   onToggle?: () => void;
@@ -431,14 +439,8 @@ function TrailingCluster({
         aria-expanded={open}
         aria-controls={menuId}
         aria-label={open ? "Close navigation menu" : "Open navigation menu"}
-        className="relative flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-muted/60"
+        className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-muted/60"
       >
-        {showPip && (
-          <span
-            aria-hidden
-            className="absolute right-0.5 top-0.5 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-background"
-          />
-        )}
         <Grabber size={20} />
       </button>
     </div>
