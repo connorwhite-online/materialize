@@ -1792,7 +1792,7 @@ export function ModelViewer({
                   }
                 }}
                 placeholder="Describe this face…"
-                className="w-56 rounded-lg border border-foreground/20 bg-card px-2.5 py-1.5 text-sm shadow-lg outline-none focus:border-foreground/40"
+                className="field-text w-56 rounded-lg border border-foreground/20 bg-card px-2.5 py-1.5 shadow-lg outline-none focus:border-foreground/40 sm:text-sm"
               />
             </div>
           )}

@@ -234,7 +234,7 @@ export function TurnFeedbackSheet({
           // text-base (16px) on mobile prevents iOS Safari from auto-zooming
           // the page when the field is focused (it zooms any input < 16px) —
           // same convention as the composer / home-bar / quantity inputs.
-          className="mt-4 w-full resize-none rounded-2xl border border-border/60 bg-background px-3 py-2 text-base outline-none focus:border-foreground/30 sm:text-sm"
+          className="mt-4 w-full resize-none rounded-2xl border border-border/60 bg-background px-3 py-2 field-text outline-none focus:border-foreground/30 sm:text-sm"
         />
 
         <div className="mt-4 flex items-center gap-2">

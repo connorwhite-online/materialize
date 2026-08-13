@@ -71,7 +71,7 @@ export function BrowseSearchBar({ defaultValue = "", category }: BrowseSearchBar
           onChange={(e) => setValue(e.target.value)}
           aria-label="Search files, creators, and projects"
           placeholder="Search files, creators, projects..."
-          className="flex-1 bg-transparent px-3 py-1 text-base md:text-sm placeholder:text-muted-foreground/60 focus:outline-none [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
+          className="flex-1 bg-transparent px-3 py-1 field-text md:text-sm placeholder:text-muted-foreground/60 focus:outline-none [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
         />
         {value && (
           <button

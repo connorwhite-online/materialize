@@ -52,6 +52,8 @@ const NumberInput = React.forwardRef<
           "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
           // right-pad to make room for the chevron column
           "pr-7",
+          // 16px on phones so iOS never zoom-jumps on focus (see globals).
+          "field-text sm:text-sm",
           className
         )}
         {...props}
