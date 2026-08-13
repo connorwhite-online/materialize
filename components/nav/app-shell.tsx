@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { CartProvider } from "@/components/print/cart-context";
+import { SandboxProvider } from "@/components/sandbox-context";
 import { CartPanel } from "@/components/print/cart-panel";
 import { TopBar } from "@/components/nav/top-bar";
 import { MobileNav } from "@/components/nav/mobile-nav";
@@ -21,21 +22,23 @@ export function AppShell({
   children: ReactNode;
 }) {
   return (
-    <CartProvider>
-      <div className="flex min-h-screen flex-col">
-        <TopBar
-          initialUnreadCount={initialUnreadCount}
-          sandbox={sandbox}
-          textToCad={textToCad}
-        />
-        <main className="flex-1 pb-28 nav:pb-0 nav:pt-16">{children}</main>
-        <MobileNav
-          initialUnreadCount={initialUnreadCount}
-          textToCad={textToCad}
-          sandbox={sandbox}
-        />
-        <CartPanel />
-      </div>
-    </CartProvider>
+    // `sandbox` no longer badges the nav — the checkout surfaces read it
+    // from this provider and say so at the point of payment instead.
+    <SandboxProvider sandbox={sandbox}>
+      <CartProvider>
+        <div className="flex min-h-screen flex-col">
+          <TopBar
+            initialUnreadCount={initialUnreadCount}
+            textToCad={textToCad}
+          />
+          <main className="flex-1 pb-28 nav:pb-0 nav:pt-16">{children}</main>
+          <MobileNav
+            initialUnreadCount={initialUnreadCount}
+            textToCad={textToCad}
+          />
+          <CartPanel />
+        </div>
+      </CartProvider>
+    </SandboxProvider>
   );
 }

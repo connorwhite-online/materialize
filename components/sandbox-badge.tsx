@@ -6,9 +6,14 @@ interface SandboxBadgeProps {
 
 /**
  * Visible heads-up that Stripe is on test keys and/or CraftCloud is
- * mocked. Sits in the nav so a tester walking the checkout flow can
- * tell at a glance that no card will be charged and no print order
- * will be placed. Detection lives server-side in `isSandboxMode()` —
+ * mocked. Sits on the checkout surfaces — the order summary and the
+ * cart — where a tester about to hit the button needs to know that no
+ * card will be charged and no print order will be placed. It used to
+ * ride the nav on every page; that was a permanent chip for a fact
+ * that only matters at the moment money is supposed to move.
+ *
+ * Detection lives server-side in `isSandboxMode()` and reaches the
+ * client through `SandboxProvider` (components/sandbox-context.tsx) —
  * this component just renders the chip.
  */
 export function SandboxBadge({ className }: SandboxBadgeProps) {

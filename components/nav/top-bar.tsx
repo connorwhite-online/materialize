@@ -5,7 +5,6 @@ import { useUser } from "@clerk/nextjs";
 import { Logomark } from "@/components/icons/logomark";
 import { Galaxy } from "@/components/icons/galaxy";
 import { Materials } from "@/components/icons/materials";
-import { SandboxBadge } from "@/components/nav/sandbox-badge";
 import { TopSearch } from "@/components/nav/top-search";
 import { NotificationsPopover } from "@/components/nav/notifications-popover";
 import { UserAvatar } from "@/components/auth/user-avatar";
@@ -30,8 +29,6 @@ const ICON_BUBBLE = cn(
 interface TopBarProps {
   /** Server-fetched unread notification count for the bell. */
   initialUnreadCount: number;
-  /** True when Stripe is on test keys or CraftCloud is in mock mode. */
-  sandbox?: boolean;
   /** Owner-only: show the experimental Text-to-CAD entry next to the mark. */
   textToCad?: boolean;
   /**
@@ -50,7 +47,6 @@ interface TopBarProps {
  */
 export function TopBar({
   initialUnreadCount,
-  sandbox = false,
   textToCad = false,
   alwaysVisible = false,
 }: TopBarProps) {
@@ -79,9 +75,6 @@ export function TopBar({
             aria-label="Materialize — home"
             className="relative flex items-center text-foreground transition-opacity hover:opacity-80"
           >
-            {sandbox && (
-              <SandboxBadge className="absolute -left-2.5 -top-2.5 z-10 p-0.5 ring-2 ring-background" />
-            )}
             <Logomark height={22} />
           </Link>
           {textToCad && (

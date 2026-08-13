@@ -19,6 +19,8 @@ import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { calcServiceFee } from "@/lib/fees";
 import type { CheckoutModel } from "@/lib/env";
+import { SandboxBadge } from "@/components/sandbox-badge";
+import { useSandbox } from "@/components/sandbox-context";
 
 type DisplayItem = {
   id: string;
@@ -128,6 +130,8 @@ export function CartPanel({ checkoutModel = "single" }: CartPanelProps = {}) {
 
 function CartPanelInner({ checkoutModel }: { checkoutModel: CheckoutModel }) {
   const cart = useCart()!;
+  // The other checkout container (see price-display.tsx) — same reason.
+  const sandbox = useSandbox();
   const {
     items,
     localItems,
@@ -166,8 +170,9 @@ function CartPanelInner({ checkoutModel }: { checkoutModel: CheckoutModel }) {
         {/* Grab-handle affordance — bottom-sheet only. */}
         <div className="mx-auto mt-2.5 h-1 w-10 shrink-0 rounded-full bg-muted-foreground/30 md:hidden" />
         <div className="flex items-center justify-between p-4 pb-2 md:pt-4">
-          <DialogTitle className="text-base font-semibold md:text-sm">
+          <DialogTitle className="flex items-center gap-2 text-base font-semibold md:text-sm">
             Cart
+            {sandbox && <SandboxBadge />}
           </DialogTitle>
           <button
             onClick={close}

@@ -12,15 +12,14 @@ import {
   type Transition,
   type Variants,
 } from "motion/react";
-import { ChevronUp } from "@/components/icons/chevron-up";
+import { Grabber } from "@/components/icons/grabber";
 import { UserAvatar } from "@/components/auth/user-avatar";
-import { SandboxBadge } from "@/components/nav/sandbox-badge";
 import {
   iconSizeProps,
   isDestinationActive,
   navDestinations,
   resolvePageIdentity,
-  type NavIcon,
+  type PageIdentity,
 } from "@/components/nav/mobile-nav-destinations";
 import { useAuthModal } from "@/components/auth/auth-modal";
 import { useCart } from "@/components/print/cart-context";
@@ -32,7 +31,7 @@ import { cn } from "@/lib/utils";
 const MAX_WIDTH = 304;
 /** Horizontal breathing room kept either side of the card. */
 const VIEWPORT_GUTTER = 32;
-/** Floor for the collapsed pill so short titles ("Print") aren't stubby. */
+/** Floor for a titled collapsed pill so short titles ("Print") aren't stubby. */
 const MIN_COLLAPSED_WIDTH = 172;
 /** Height of the always-present identity row (`h-14`). */
 const ROW_HEIGHT = 56;
@@ -59,8 +58,6 @@ interface MobileNavProps {
   initialUnreadCount: number;
   /** Owner-only: append the experimental Text-to-CAD destination. */
   textToCad?: boolean;
-  /** True when Stripe is on test keys or CraftCloud is in mock mode. */
-  sandbox?: boolean;
 }
 
 /**
@@ -83,7 +80,6 @@ interface MobileNavProps {
 export function MobileNav({
   initialUnreadCount,
   textToCad = false,
-  sandbox = false,
 }: MobileNavProps) {
   const pathname = usePathname();
   const { user, isLoaded, isSignedIn } = useUser();
@@ -190,18 +186,11 @@ export function MobileNav({
           className="pointer-events-none invisible absolute left-0 top-0 flex items-center"
           style={{ height: ROW_HEIGHT }}
         >
-          <PageIdentityContent Icon={identity.Icon} label={identity.label} />
-          {/* Same trailing content the collapsed pill renders, so the
-              measured width accounts for the sandbox chip (the unread
-              pip is absolutely positioned and costs no width). */}
-          <TrailingCluster
-            showPip={unreadCount > 0}
-            sandbox={sandbox}
-            open={false}
-            reducedMotion
-            onToggle={undefined}
-            menuId={menuId}
-          />
+          <PageIdentityContent identity={identity} />
+          {/* Same trailing content the collapsed pill renders. The unread
+              pip is absolutely positioned, so it costs no width — but the
+              grabber does, and it has to be inside the measurement. */}
+          <TrailingCluster showPip={false} onToggle={undefined} menuId={menuId} />
         </div>
 
         <motion.div
@@ -277,7 +266,7 @@ export function MobileNav({
                             <span className="flex-1 truncate">{item.label}</span>
                             {badge > 0 && (
                               <span
-                                className="min-w-[1.25rem] rounded-full bg-primary px-1.5 py-0.5 text-center text-[0.6875rem] font-semibold leading-none text-primary-foreground"
+                                className="min-w-[1.375rem] rounded-full bg-primary px-2 py-1 text-center text-[0.6875rem] font-semibold leading-none text-primary-foreground"
                                 aria-label={
                                   item.href === "/print"
                                     ? `${badge} in cart`
@@ -322,17 +311,12 @@ export function MobileNav({
                         }
                         className="mx-1.5 flex min-w-0 flex-1 items-center gap-2.5 rounded-[18px] p-1 pr-3 transition-colors active:bg-muted/60"
                       >
-                        <span className="relative inline-flex shrink-0">
-                          <UserAvatar
-                            seed={user.username || user.id}
-                            imageUrl={user.hasImage ? user.imageUrl : null}
-                            displayName={displayName}
-                            className="h-9 w-9"
-                          />
-                          {sandbox && (
-                            <SandboxBadge className="absolute -right-1.5 -top-1.5 z-10 p-0.5 ring-2 ring-background" />
-                          )}
-                        </span>
+                        <UserAvatar
+                          seed={user.username || user.id}
+                          imageUrl={user.hasImage ? user.imageUrl : null}
+                          displayName={displayName}
+                          className="h-9 w-9 shrink-0"
+                        />
                         <span className="min-w-0 flex-1 leading-tight">
                           <span className="block truncate text-sm font-medium">
                             {displayName}
@@ -353,16 +337,11 @@ export function MobileNav({
                         }}
                         className="mx-1.5 flex min-w-0 flex-1 items-center gap-3 rounded-[18px] px-3 py-2.5 text-left text-[0.9375rem] font-medium transition-colors active:bg-muted/60"
                       >
-                        <span className="relative inline-flex shrink-0">
-                          <UserAvatar
-                            seed="anonymous"
-                            displayName="Sign in"
-                            className="h-9 w-9 opacity-60"
-                          />
-                          {sandbox && (
-                            <SandboxBadge className="absolute -right-1.5 -top-1.5 z-10 p-0.5 ring-2 ring-background" />
-                          )}
-                        </span>
+                        <UserAvatar
+                          seed="anonymous"
+                          displayName="Sign in"
+                          className="h-9 w-9 shrink-0 opacity-60"
+                        />
                         <span className="flex-1 truncate">Sign in</span>
                       </button>
                     )}
@@ -381,10 +360,7 @@ export function MobileNav({
                     transition={reducedMotion ? { duration: 0 } : SPRING}
                     className="absolute inset-0 flex items-center text-left"
                   >
-                    <PageIdentityContent
-                      Icon={identity.Icon}
-                      label={identity.label}
-                    />
+                    <PageIdentityContent identity={identity} />
                   </motion.button>
                 )}
               </AnimatePresence>
@@ -392,9 +368,7 @@ export function MobileNav({
 
             <TrailingCluster
               showPip={!open && unreadCount > 0}
-              sandbox={sandbox && !open}
               open={open}
-              reducedMotion={!!reducedMotion}
               onToggle={toggle}
               menuId={menuId}
             />
@@ -405,14 +379,23 @@ export function MobileNav({
   );
 }
 
-/** Icon + page title. Shared by the real pill and its measuring ghost. */
-function PageIdentityContent({
-  Icon,
-  label,
-}: {
-  Icon: NavIcon;
-  label: string;
-}) {
+/**
+ * Icon + page title. Shared by the real pill and its measuring ghost.
+ *
+ * Home is `markOnly`: the logomark carries the meaning on its own, so
+ * the pill drops the word and sizes the mark up a little to fill the
+ * space the title would have taken. The button around this still names
+ * itself "Home — open navigation menu" for assistive tech.
+ */
+function PageIdentityContent({ identity }: { identity: PageIdentity }) {
+  const { Icon, label, markOnly } = identity;
+  if (markOnly) {
+    return (
+      <span className="flex items-center pl-4 text-foreground">
+        <Icon {...iconSizeProps(Icon, 22)} className="shrink-0" />
+      </span>
+    );
+  }
   return (
     <span className="flex items-center gap-2.5 whitespace-nowrap pl-4 text-[0.9375rem] font-medium text-foreground">
       <Icon {...iconSizeProps(Icon, 20)} className="shrink-0" />
@@ -422,29 +405,25 @@ function PageIdentityContent({
 }
 
 /**
- * Right-hand end of the identity row: the unread pip (collapsed only —
- * the inbox is a menu row when open), the sandbox chip, and the
- * chevron grabber that survives the morph and rotates.
+ * Right-hand end of the identity row: the grabber, and the unread pip
+ * riding it (collapsed only — once open, the inbox is a menu row
+ * carrying its own count). The grabber reads the same open or closed,
+ * so unlike a lone chevron it has nothing to rotate.
  */
 function TrailingCluster({
   showPip,
-  sandbox,
-  open,
-  reducedMotion,
+  open = false,
   onToggle,
   menuId,
 }: {
   showPip: boolean;
-  sandbox: boolean;
-  open: boolean;
-  reducedMotion: boolean;
+  open?: boolean;
   /** Omitted by the measuring ghost, which must not be interactive. */
   onToggle?: () => void;
   menuId: string;
 }) {
   return (
-    <div className="flex shrink-0 items-center gap-1 pl-2 pr-2.5">
-      {sandbox && <SandboxBadge className="p-0.5" />}
+    <div className="flex shrink-0 items-center pl-2 pr-2.5">
       <button
         type="button"
         onClick={onToggle}
@@ -454,21 +433,13 @@ function TrailingCluster({
         aria-label={open ? "Close navigation menu" : "Open navigation menu"}
         className="relative flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-muted/60"
       >
-        {/* Unread pip. Collapsed only — open, the inbox is a menu row
-            carrying its own count. */}
         {showPip && (
           <span
             aria-hidden
-            className="absolute right-1 top-1 h-2 w-2 rounded-full bg-primary ring-2 ring-background"
+            className="absolute right-0.5 top-0.5 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-background"
           />
         )}
-        <motion.span
-          animate={{ rotate: open ? 180 : 0 }}
-          transition={reducedMotion ? { duration: 0 } : SPRING}
-          className="flex"
-        >
-          <ChevronUp size={18} />
-        </motion.span>
+        <Grabber size={20} />
       </button>
     </div>
   );
@@ -493,7 +464,7 @@ const ITEM_VARIANTS: Variants = {
  * viewport) and the collapsed pill (measured off the invisible ghost,
  * re-measured whenever the page title changes).
  */
-function useNavWidths(identity: { label: string; Icon: NavIcon }) {
+function useNavWidths(identity: PageIdentity) {
   const ghostRef = useRef<HTMLDivElement>(null);
   const [expandedWidth, setExpandedWidth] = useState(MAX_WIDTH);
   const [collapsedWidth, setCollapsedWidth] = useState(MIN_COLLAPSED_WIDTH);
@@ -513,16 +484,19 @@ function useNavWidths(identity: { label: string; Icon: NavIcon }) {
   useLayoutEffect(() => {
     const ghost = ghostRef.current;
     if (!ghost) return;
+    // A mark-only pill (Home) skips the floor — padding an icon out to
+    // title width would leave it swimming in empty space.
+    const floor = identity.markOnly ? 0 : MIN_COLLAPSED_WIDTH;
     const measure = () =>
       setCollapsedWidth(
-        Math.max(MIN_COLLAPSED_WIDTH, Math.ceil(ghost.getBoundingClientRect().width))
+        Math.max(floor, Math.ceil(ghost.getBoundingClientRect().width))
       );
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(ghost);
     return () => observer.disconnect();
-  }, [identity.label, identity.Icon]);
+  }, [identity.label, identity.Icon, identity.markOnly]);
 
   return {
     expandedWidth,

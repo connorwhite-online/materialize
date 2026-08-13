@@ -96,10 +96,10 @@ export default async function HomePage() {
     );
   }
 
-  const [textToCad, sandbox] = await Promise.all([
-    resolveTextToCadAccess(),
-    Promise.resolve(isSandboxMode()),
-  ]);
+  // Anon landing: no sandbox flag needed here. The badge lives on the
+  // checkout surfaces now (components/sandbox-context.tsx), and nothing
+  // an anon visitor sees on this page takes payment.
+  const textToCad = await resolveTextToCadAccess();
 
   // The page now scrolls: a full-viewport hero followed by
   // server-rendered marketing sections. The outer container is plain
@@ -133,12 +133,7 @@ export default async function HomePage() {
         }}
       />
 
-      <TopBar
-        initialUnreadCount={0}
-        sandbox={sandbox}
-        textToCad={textToCad}
-        alwaysVisible
-      />
+      <TopBar initialUnreadCount={0} textToCad={textToCad} alwaysVisible />
 
       {/* Hero — exactly one screen. min-h-dvh (not h-dvh) keeps the
           hero at one mobile viewport while letting HomeMarketing below
