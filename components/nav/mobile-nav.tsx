@@ -50,6 +50,28 @@ const SPRING_CLOSE: Transition = {
   damping: 44,
 };
 
+/**
+ * Content leaves before the container moves. Frame-stepping a 60fps
+ * capture of the old close showed the rows sitting at full opacity for
+ * ~8 frames while the card shrank under them — five labels squashing
+ * into each other and colliding with the identity row fading in. The
+ * card's height still springs; the rows are simply gone by the time it
+ * has travelled anywhere.
+ */
+const CONTENT_OUT: Transition = { duration: 0.07, ease: "easeIn" };
+/**
+ * The pill ↔ user-container swap. The incoming row waits out most of
+ * the outgoing one's fade, so the two are never both legible — without
+ * the delay you catch "Search" and "Connor White" printed over each
+ * other mid-collapse.
+ */
+const IDENTITY_IN: Transition = {
+  duration: 0.13,
+  delay: 0.05,
+  ease: [0.32, 0.72, 0, 1],
+};
+const IDENTITY_OUT: Transition = { duration: 0.07, ease: "easeIn" };
+
 const DRAG_CLOSE_OFFSET = 64;
 const DRAG_CLOSE_VELOCITY = 500;
 
@@ -108,7 +130,34 @@ export function MobileNav({
     signedIn: !!isSignedIn,
   });
 
-  const { expandedWidth, collapsedWidth, ghostRef } = useNavWidths(identity);
+  const displayName =
+    user?.fullName ||
+    user?.username ||
+    user?.primaryEmailAddress?.emailAddress ||
+    "Profile";
+
+  /**
+   * On the viewer's own profile the pill wears their face and handle
+   * instead of a glyph and the word "Profile" — the page is *them*, and
+   * an avatar says that faster than an icon can. `identity.label` still
+   * supplies the button's accessible name.
+   */
+  const pillProfile =
+    user && ownProfilePath && pathname === ownProfilePath
+      ? {
+          seed: user.username || user.id,
+          imageUrl: user.hasImage ? user.imageUrl : null,
+          displayName,
+          handle: user.username
+            ? `@${user.username}`
+            : (user.primaryEmailAddress?.emailAddress ?? displayName),
+        }
+      : null;
+
+  const { expandedWidth, collapsedWidth, ghostRef } = useNavWidths(
+    identity,
+    pillProfile?.handle ?? null
+  );
 
   // Also collapses while the keyboard is up — the whole nav is faded
   // out of the way then, and it must not come back mid-typing.
@@ -140,11 +189,7 @@ export function MobileNav({
     }
   };
 
-  const displayName =
-    user?.fullName ||
-    user?.username ||
-    user?.primaryEmailAddress?.emailAddress ||
-    "Profile";
+
 
   return (
     <>
@@ -186,7 +231,7 @@ export function MobileNav({
           className="pointer-events-none invisible absolute left-0 top-0 flex items-center"
           style={{ height: ROW_HEIGHT }}
         >
-          <PageIdentityContent identity={identity} />
+          <PageIdentityContent identity={identity} profile={pillProfile} />
           {/* Same trailing content the collapsed pill renders — the
               grabber costs width, so it has to be in the measurement.
               (The pip hangs off the card's edge and costs none.) */}
@@ -219,9 +264,18 @@ export function MobileNav({
               {open && (
                 <motion.div
                   key="menu"
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: "auto", opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
+                  // Opening, the block only animates height — the rows
+                  // own their own fade, so there is no phase where a
+                  // half-lit card sits on screen waiting for content.
+                  initial={{ height: 0 }}
+                  animate={{ height: "auto" }}
+                  exit={{
+                    height: 0,
+                    opacity: 0,
+                    transition: reducedMotion
+                      ? { duration: 0 }
+                      : { height: SPRING_CLOSE, opacity: CONTENT_OUT },
+                  }}
                   transition={reducedMotion ? { duration: 0 } : SPRING_CLOSE}
                   className="overflow-hidden"
                 >
@@ -257,7 +311,7 @@ export function MobileNav({
                               onClick={close}
                               aria-current={active ? "page" : undefined}
                               className={cn(
-                                "flex items-center gap-3 rounded-[18px] px-3 py-2.5",
+                                "flex items-center gap-3 rounded-[22px] px-3 py-2.5",
                                 "text-[0.9375rem] font-medium transition-colors",
                                 active
                                   ? "bg-muted text-foreground"
@@ -271,7 +325,18 @@ export function MobileNav({
                               <span className="flex-1 truncate">{item.label}</span>
                               {badge > 0 && (
                                 <span
-                                  className="min-w-[1.375rem] rounded-full bg-primary px-2 py-1 text-center text-[0.6875rem] font-semibold leading-none text-primary-foreground"
+                                  className={cn(
+                                    "min-w-[1.375rem] rounded-full px-2 py-1 text-center text-[0.6875rem] font-semibold leading-none",
+                                    // Same red as the collapsed pill's
+                                    // pip — one colour means "unread"
+                                    // wherever you meet it. `text-background`
+                                    // rather than a fixed white: the dark
+                                    // theme's red is light enough that white
+                                    // on it stops being legible.
+                                    item.href === "/notifications"
+                                      ? "bg-destructive text-background"
+                                      : "bg-primary text-primary-foreground"
+                                  )}
                                   aria-label={
                                     item.href === "/print"
                                       ? `${badge} in cart`
@@ -301,10 +366,14 @@ export function MobileNav({
                   {open ? (
                     <motion.div
                       key="user"
-                      initial={reducedMotion ? false : { opacity: 0, y: 10 }}
+                      initial={reducedMotion ? false : { opacity: 0, y: 8 }}
                       animate={{ opacity: 1, y: 0 }}
-                      exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -10 }}
-                      transition={reducedMotion ? { duration: 0 } : SPRING}
+                      exit={
+                        reducedMotion
+                          ? { opacity: 0 }
+                          : { opacity: 0, y: -8, transition: IDENTITY_OUT }
+                      }
+                      transition={reducedMotion ? { duration: 0 } : IDENTITY_IN}
                       className="absolute inset-0 flex items-center"
                     >
                       {isSignedIn && user ? (
@@ -314,7 +383,7 @@ export function MobileNav({
                           aria-current={
                             pathname === ownProfilePath ? "page" : undefined
                           }
-                          className="mx-1.5 flex min-w-0 flex-1 items-center gap-2.5 rounded-[18px] p-1 pr-3 transition-colors active:bg-muted/60"
+                          className="mx-1.5 flex min-w-0 flex-1 items-center gap-2.5 rounded-[22px] p-1 pr-3 transition-colors active:bg-muted/60"
                         >
                           <UserAvatar
                             seed={user.username || user.id}
@@ -340,7 +409,7 @@ export function MobileNav({
                             close();
                             openAuth("sign-in");
                           }}
-                          className="mx-1.5 flex min-w-0 flex-1 items-center gap-3 rounded-[18px] px-3 py-2.5 text-left text-[0.9375rem] font-medium transition-colors active:bg-muted/60"
+                          className="mx-1.5 flex min-w-0 flex-1 items-center gap-3 rounded-[22px] px-3 py-2.5 text-left text-[0.9375rem] font-medium transition-colors active:bg-muted/60"
                         >
                           <UserAvatar
                             seed="anonymous"
@@ -359,13 +428,17 @@ export function MobileNav({
                       aria-expanded={false}
                       aria-controls={menuId}
                       aria-label={`${identity.label} — open navigation menu`}
-                      initial={reducedMotion ? false : { opacity: 0, y: -10 }}
+                      initial={reducedMotion ? false : { opacity: 0, y: -8 }}
                       animate={{ opacity: 1, y: 0 }}
-                      exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 10 }}
-                      transition={reducedMotion ? { duration: 0 } : SPRING}
+                      exit={
+                        reducedMotion
+                          ? { opacity: 0 }
+                          : { opacity: 0, y: 8, transition: IDENTITY_OUT }
+                      }
+                      transition={reducedMotion ? { duration: 0 } : IDENTITY_IN}
                       className="absolute inset-0 flex items-center text-left"
                     >
-                      <PageIdentityContent identity={identity} />
+                      <PageIdentityContent identity={identity} profile={pillProfile} />
                     </motion.button>
                   )}
                 </AnimatePresence>
@@ -382,7 +455,7 @@ export function MobileNav({
           {!open && unreadCount > 0 && (
             <span
               aria-hidden
-              className="pointer-events-none absolute right-1.5 top-1.5 h-2.5 w-2.5 -translate-y-1/2 translate-x-1/2 rounded-full bg-destructive ring-2 ring-background"
+              className="pointer-events-none absolute right-1.5 top-1.5 h-3 w-3 -translate-y-1/2 translate-x-1/2 rounded-full bg-destructive ring-2 ring-background"
             />
           )}
         </div>
@@ -390,6 +463,13 @@ export function MobileNav({
     </>
   );
 }
+
+type PillProfile = {
+  seed: string;
+  imageUrl: string | null;
+  displayName: string;
+  handle: string;
+};
 
 /**
  * Icon + page title. Shared by the real pill and its measuring ghost.
@@ -399,8 +479,32 @@ export function MobileNav({
  * space the title would have taken. The button around this still names
  * itself "Home — open navigation menu" for assistive tech.
  */
-function PageIdentityContent({ identity }: { identity: PageIdentity }) {
+function PageIdentityContent({
+  identity,
+  profile,
+}: {
+  identity: PageIdentity;
+  /** Set only on the viewer's own profile page. */
+  profile?: PillProfile | null;
+}) {
   const { Icon, label, markOnly } = identity;
+  if (profile) {
+    return (
+      <span className="flex items-center gap-2.5 whitespace-nowrap pl-2 text-[0.9375rem] font-medium text-foreground">
+        <UserAvatar
+          seed={profile.seed}
+          imageUrl={profile.imageUrl}
+          displayName={profile.displayName}
+          className="h-8 w-8 shrink-0"
+        />
+        {/* Capped, not wrapped: a long handle — or an email, when there
+            is no username — must not stretch the pill across the
+            viewport. The cap applies to the measuring ghost too, so the
+            pill's width lands on the truncated text. */}
+        <span className="max-w-[8.5rem] truncate">{profile.handle}</span>
+      </span>
+    );
+  }
   if (markOnly) {
     return (
       <span className="flex items-center pl-4 text-foreground">
@@ -431,7 +535,7 @@ function TrailingCluster({
   menuId: string;
 }) {
   return (
-    <div className="flex shrink-0 items-center pl-2 pr-2.5">
+    <div className="flex shrink-0 items-center pl-1 pr-1.5">
       <button
         type="button"
         onClick={onToggle}
@@ -439,9 +543,12 @@ function TrailingCluster({
         aria-expanded={open}
         aria-controls={menuId}
         aria-label={open ? "Close navigation menu" : "Open navigation menu"}
-        className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-muted/60"
+        // 44px is the smallest comfortable touch target, and this one
+        // opens and closes the whole nav. The glyph stays optically
+        // small; the padding does the work.
+        className="flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-muted/60"
       >
-        <Grabber size={20} />
+        <Grabber size={24} />
       </button>
     </div>
   );
@@ -449,16 +556,22 @@ function TrailingCluster({
 
 const LIST_VARIANTS: Variants = {
   hidden: {},
-  // Reveal outward from the pill: the row nearest the bottom edge
-  // (the last child) leads.
+  // Reveal outward from the pill: the row nearest the bottom edge (the
+  // last child) leads. No `delayChildren` and a tight stagger — the rows
+  // have to be arriving while the card is still growing, or the card
+  // reads as an empty box for the first ~100ms.
   visible: {
-    transition: { staggerChildren: 0.035, delayChildren: 0.02, staggerDirection: -1 },
+    transition: { staggerChildren: 0.022, staggerDirection: -1 },
   },
 };
 
 const ITEM_VARIANTS: Variants = {
-  hidden: { opacity: 0, y: 12 },
-  visible: { opacity: 1, y: 0, transition: SPRING },
+  hidden: { opacity: 0, y: 10 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { type: "spring", stiffness: 520, damping: 36, mass: 0.7 },
+  },
 };
 
 /**
@@ -466,7 +579,7 @@ const ITEM_VARIANTS: Variants = {
  * viewport) and the collapsed pill (measured off the invisible ghost,
  * re-measured whenever the page title changes).
  */
-function useNavWidths(identity: PageIdentity) {
+function useNavWidths(identity: PageIdentity, profileHandle: string | null) {
   const ghostRef = useRef<HTMLDivElement>(null);
   const [expandedWidth, setExpandedWidth] = useState(MAX_WIDTH);
   const [collapsedWidth, setCollapsedWidth] = useState(MIN_COLLAPSED_WIDTH);
@@ -498,7 +611,7 @@ function useNavWidths(identity: PageIdentity) {
     const observer = new ResizeObserver(measure);
     observer.observe(ghost);
     return () => observer.disconnect();
-  }, [identity.label, identity.Icon, identity.markOnly]);
+  }, [identity.label, identity.Icon, identity.markOnly, profileHandle]);
 
   return {
     expandedWidth,
