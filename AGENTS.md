@@ -64,7 +64,7 @@ QuoteConfigurator:
 
 **Local Stripe webhook forwarding** — the order only advances from `cart_created` → `ordered` when `/api/webhooks/stripe` runs `handlePrintOrderPayment`. In local dev, Stripe can't reach `localhost:3000` on its own, so run `stripe listen --forward-to localhost:3000/api/webhooks/stripe` in a side terminal during checkout testing. Without it, the order sits in the profile's "Carts" section with a Resume button that just relinks to the same Stripe session — easy to mistake for "payment didn't go through." The `STRIPE_WEBHOOK_SECRET` for local dev is the value the `stripe listen` command prints on startup, not the one from the Stripe dashboard.
 
-**Sandbox indicator** — when Stripe is on test keys (`sk_test_*`) or `CRAFTCLOUD_USE_MOCK !== "false"` (the default), an amber "Sandbox" pill renders in the nav (bubbled off the logomark at nav+, profile avatar in the mobile tab bar at sub-nav). Detection lives in `isSandboxMode()` in `lib/env.ts`. If you add another mock/test gate, OR it into that helper so the badge keeps reflecting reality.
+**Sandbox indicator** — when Stripe is on test keys (`sk_test_*`) or `CRAFTCLOUD_USE_MOCK !== "false"` (the default), an amber "Sandbox" pill renders in the nav (bubbled off the logomark at nav+; in the collapsed mobile pill, and on the avatar in the expanded mobile menu, at sub-nav). Detection lives in `isSandboxMode()` in `lib/env.ts`. If you add another mock/test gate, OR it into that helper so the badge keeps reflecting reality.
 
 **Stripe redirect URL** — `createStripeSessionForOrder` derives the `success_url` / `cancel_url` base from request headers (`x-forwarded-host` + `x-forwarded-proto`), NOT from `NEXT_PUBLIC_APP_URL`. The env var bakes at build time; when unset in production it falls back to `http://localhost:3000` and the hardcoded localhost lands in every customer's post-payment redirect. The `tokens/page.tsx` MCP URL uses the same header-derived pattern for the same reason. Don't reintroduce `NEXT_PUBLIC_APP_URL` for runtime URL construction.
 
@@ -214,6 +214,22 @@ Never call the DB cart a "CraftCloud cart." They are distinct: the DB cart is a 
 - **Headings** — every `<h1>`–`<h6>` already routes through `--font-heading` (PP Frama Regular) in `app/globals.css:359`. Headings need no inline `fontFamily`, and adding one is almost always a mistake.
 - **`PPPlayground-Light.otf` (`--font-script`) is currently unused.** It set the "Anything" word in the old wordmark hero; that hero is gone and the 157KB OTF preload went with it. The file is still in `public/` — if you reintroduce it, declare it in the route that uses it (not `app/layout.tsx`) so it doesn't load site-wide.
 - The home hero heading is real selectable text, not an SVG — it must stay an `<h1>` so the home page (the URL every backlink points at) ships a crawlable heading. It states what the product does; the brand mark lives in the header `<Logomark />` instead, so "Materialize" still appears above the fold.
+
+## Mobile navigation
+
+Sub-`nav` viewports (< 67.5rem) get `components/nav/mobile-nav.tsx` instead of the desktop `TopBar` — a single floating surface that morphs:
+
+- **Collapsed** it is a pill: the current page's icon, the page title, a chevron grabber (with the unread pip on it), and the sandbox chip. `/` shows the logomark.
+- **Tapped** it widens and grows upward into a menu card — Home / Search (`/files`) / Print / Materials / Notifications, plus the owner-only Prometheus entry — with the desktop-style avatar + name/@username container taking over the pill's row at the bottom. Anon visitors get a Sign in row and no inbox.
+
+Two things to keep in mind when touching it:
+
+- **Never put `layout` on the card.** Its width is animated as a number, between the expanded width (viewport-clamped) and a collapsed width measured off an invisible ghost copy of the row (`useNavWidths`). Motion's layout FLIP scale-transforms children across a size change, which visibly stretches the row's text — the same trap already documented on `HomeBottomBar`. Only the menu block animates `height: 0 ↔ auto`; the card's height follows it.
+- **Open state is derived, not an effect.** `openPath` stores the pathname the menu was opened on, so "collapse on navigate" and "collapse when the keyboard is up" fall out of `openPath === pathname && !keyboardOpen` rather than a `setState`-in-effect (which the React compiler lint rejects).
+
+Route/label resolution lives in `components/nav/mobile-nav-destinations.ts` (pure, unit-tested): `navDestinations()` builds the menu, `isDestinationActive()` is exact-match (a `/files/<slug>` detail page is not the Search listing), and `resolvePageIdentity()` resolves the collapsed pill's icon + title, falling back through section prefixes so a detail page still names its section.
+
+The inbox is a real page at `/notifications` (moved from `/dashboard/comments`, which now permanent-redirects) — desktop still reads it through the bell popover in the top bar, mobile navigates to it.
 
 ## Home landing page
 

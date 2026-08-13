@@ -35,7 +35,7 @@ interface TopBarProps {
   /** Owner-only: show the experimental Text-to-CAD entry next to the mark. */
   textToCad?: boolean;
   /**
-   * Show at every viewport. The landing page has no MobileTabBar, so
+   * Show at every viewport. The landing page has no MobileNav, so
    * it passes this; app routes omit it and hide below the `nav`
    * breakpoint where the tab bar takes over.
    */
