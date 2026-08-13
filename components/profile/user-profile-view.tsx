@@ -79,8 +79,8 @@ const OWNER_TAB_REDIRECTS: Record<string, string> = {
   files: "/dashboard/library",
   orders: "/dashboard/orders",
   earnings: "/dashboard/earnings",
-  notifications: "/dashboard/comments",
-  comments: "/dashboard/comments",
+  notifications: "/notifications",
+  comments: "/notifications",
 };
 
 /**

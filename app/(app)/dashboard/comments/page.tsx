@@ -1,17 +1,10 @@
-import { redirect } from "next/navigation";
-import { auth, currentUser } from "@clerk/nextjs/server";
-import { NotificationsTab } from "@/components/profile/notifications-tab";
+import { permanentRedirect } from "next/navigation";
 
-export default async function NotificationsPage() {
-  const { userId } = await auth();
-  if (!userId) redirect("/");
-  const user = await currentUser();
-  if (!user?.username) redirect("/onboarding");
-
-  return (
-    <div className="mx-auto max-w-2xl px-4 py-8">
-      <h1 className="mb-6 text-2xl font-bold">Notifications</h1>
-      <NotificationsTab userId={userId} />
-    </div>
-  );
+/**
+ * The inbox used to live here. It moved to /notifications so the mobile
+ * nav's Notifications destination has a URL that matches its label; this
+ * stays as a redirect for bookmarks and older links.
+ */
+export default function DashboardCommentsPage() {
+  permanentRedirect("/notifications");
 }

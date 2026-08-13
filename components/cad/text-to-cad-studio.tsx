@@ -2899,8 +2899,8 @@ export function TextToCadStudio({
         ref={composerFixedRef}
         className="pointer-events-none fixed inset-x-0 bottom-0 z-30"
       >
-        {/* Sub-nav viewports show the floating MobileTabBar pill (bottom-6,
-            z-40); lift the composer above it so its controls stay tappable.
+        {/* Sub-nav viewports show the floating MobileNav pill (bottom-6,
+            z-50); lift the composer above it so its controls stay tappable.
             At nav+ the pill is gone and the top bar takes over. */}
         <div className="mx-auto grid max-w-6xl gap-8 px-4 pb-28 nav:pb-4 lg:grid-cols-[1fr_300px]">
           <div className="pointer-events-auto mx-auto w-full min-w-0 max-w-2xl">

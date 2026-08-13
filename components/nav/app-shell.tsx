@@ -2,11 +2,11 @@ import type { ReactNode } from "react";
 import { CartProvider } from "@/components/print/cart-context";
 import { CartPanel } from "@/components/print/cart-panel";
 import { TopBar } from "@/components/nav/top-bar";
-import { MobileTabBar } from "@/components/nav/mobile-tab-bar";
+import { MobileNav } from "@/components/nav/mobile-nav";
 
 /**
- * Shared authed chrome: top bar at nav+, floating tab bar below that,
- * cart panel. Used by `app/(app)/layout.tsx` and the authed branch of
+ * Shared authed chrome: top bar at nav+, the morphing mobile nav
+ * pill below that, cart panel. Used by `app/(app)/layout.tsx` and the authed branch of
  * `/` (which lives outside the (app) route group).
  */
 export function AppShell({
@@ -29,7 +29,7 @@ export function AppShell({
           textToCad={textToCad}
         />
         <main className="flex-1 pb-28 nav:pb-0 nav:pt-16">{children}</main>
-        <MobileTabBar
+        <MobileNav
           initialUnreadCount={initialUnreadCount}
           textToCad={textToCad}
           sandbox={sandbox}
