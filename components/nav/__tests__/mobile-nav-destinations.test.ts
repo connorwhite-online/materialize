@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Bell } from "@/components/icons/bell";
 import { Browse } from "@/components/icons/browse";
 import { Logomark } from "@/components/brand/logo";
+import { Home } from "@/components/icons/home";
 import { Print } from "@/components/icons/print";
 import {
   iconSizeProps,
@@ -19,6 +20,15 @@ describe("navDestinations", () => {
   it("gives signed-in users the notifications destination", () => {
     const authed = navDestinations({ signedIn: true }).map((d) => d.href);
     expect(authed).toContain("/notifications");
+  });
+
+  it("labels the Home row with the house glyph, not the brand mark", () => {
+    // Inverse of the collapsed pill: the menu row has a "Home" label, so
+    // it takes a category icon; the logomark only stands alone.
+    const home = navDestinations({ signedIn: true })[0];
+    expect(home.href).toBe("/");
+    expect(home.Icon).toBe(Home);
+    expect(home.Icon).not.toBe(Logomark);
   });
 
   it("appends Prometheus only for the owner-only flag", () => {
@@ -40,10 +50,19 @@ describe("isDestinationActive", () => {
 });
 
 describe("resolvePageIdentity", () => {
-  it("shows the logomark on home", () => {
+  it("shows the logomark alone on home", () => {
     const identity = resolvePageIdentity("/");
+    // The pill drops the title on Home — but keeps `label`, which names
+    // the button for assistive tech.
+    expect(identity.markOnly).toBe(true);
     expect(identity.label).toBe("Home");
     expect(identity.Icon).toBe(Logomark);
+  });
+
+  it("keeps every other page titled", () => {
+    expect(resolvePageIdentity("/files").markOnly).toBeUndefined();
+    expect(resolvePageIdentity("/print").markOnly).toBeUndefined();
+    expect(resolvePageIdentity(null).markOnly).toBeUndefined();
   });
 
   it("names the destination pages", () => {

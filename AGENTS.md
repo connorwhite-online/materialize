@@ -64,7 +64,7 @@ QuoteConfigurator:
 
 **Local Stripe webhook forwarding** — the order only advances from `cart_created` → `ordered` when `/api/webhooks/stripe` runs `handlePrintOrderPayment`. In local dev, Stripe can't reach `localhost:3000` on its own, so run `stripe listen --forward-to localhost:3000/api/webhooks/stripe` in a side terminal during checkout testing. Without it, the order sits in the profile's "Carts" section with a Resume button that just relinks to the same Stripe session — easy to mistake for "payment didn't go through." The `STRIPE_WEBHOOK_SECRET` for local dev is the value the `stripe listen` command prints on startup, not the one from the Stripe dashboard.
 
-**Sandbox indicator** — when Stripe is on test keys (`sk_test_*`) or `CRAFTCLOUD_USE_MOCK !== "false"` (the default), an amber "Sandbox" pill renders in the nav (bubbled off the logomark at nav+; in the collapsed mobile pill, and on the avatar in the expanded mobile menu, at sub-nav). Detection lives in `isSandboxMode()` in `lib/env.ts`. If you add another mock/test gate, OR it into that helper so the badge keeps reflecting reality.
+**Sandbox indicator** — when Stripe is on test keys (`sk_test_*`) or `CRAFTCLOUD_USE_MOCK !== "false"` (the default), an amber "Sandbox" pill renders on the **checkout surfaces only**: beside "Order Summary" in `price-display.tsx` and beside the "Cart" title in `cart-panel.tsx`. It used to sit in the nav on every page; it earns its space at the moment money is supposed to move, not before. Detection still lives in `isSandboxMode()` (`lib/env.ts`, server-only) — `AppShell` reads it once and hands it to the tree through `SandboxProvider`, and client surfaces read it with `useSandbox()` (`components/sandbox-context.tsx`). `useSandbox()` defaults to `false` with no provider, so a surface rendered in isolation degrades to "live" rather than crying sandbox at a real customer. If you add another mock/test gate, OR it into `isSandboxMode()` so the badge keeps reflecting reality; if you add another surface that takes payment, give it the chip.
 
 **Stripe redirect URL** — `createStripeSessionForOrder` derives the `success_url` / `cancel_url` base from request headers (`x-forwarded-host` + `x-forwarded-proto`), NOT from `NEXT_PUBLIC_APP_URL`. The env var bakes at build time; when unset in production it falls back to `http://localhost:3000` and the hardcoded localhost lands in every customer's post-payment redirect. The `tokens/page.tsx` MCP URL uses the same header-derived pattern for the same reason. Don't reintroduce `NEXT_PUBLIC_APP_URL` for runtime URL construction.
 
@@ -213,8 +213,9 @@ Three components in `components/brand/logo.tsx`, all painting with
 `fill="currentColor"` so they follow the surrounding `text-*` token in both themes:
 
 - **`<Logomark>`** — the "M" alone. Use where there's no horizontal room: the top
-  bar's brand link, the mobile nav's collapsed pill on `/`, its Home menu row, the
-  fee-sheet tile. (The full word needs ~14rem at nav size, which none of those have.)
+  bar's brand link, the mobile nav's collapsed pill on `/` (where it stands alone,
+  with no title beside it), the fee-sheet tile. (The full word needs ~14rem at nav
+  size, which none of those have.)
 - **`<Wordmark>`** — the full word, static.
 - **`<AnimatedWordmark>`** — the same word with a CSS-only reveal: the "M" is
   always painted and the other ten letters drift in left-to-right, each blurred
@@ -252,7 +253,8 @@ per-letter `--mz-i`, and `prefers-reduced-motion` collapses it to instant.
 
 Sub-`nav` viewports (< 67.5rem) get `components/nav/mobile-nav.tsx` instead of the desktop `TopBar` — a single floating surface that morphs:
 
-- **Collapsed** it is a pill: the current page's icon, the page title, a chevron grabber (with the unread pip on it), and the sandbox chip. `/` shows the brand `<Logomark>`.
+- **Collapsed** it is a pill: the current page's icon, the page title, and a grabber (two chevrons, open ends facing — `components/icons/grabber.tsx`) with the unread pip riding it. The grabber reads the same open or closed, so unlike a lone chevron it doesn't rotate. No sandbox chip — that moved to the checkout surfaces (§ Print quote pipeline).
+- **`/` is mark-only**: the pill shows the brand `<Logomark>` alone and drops the title (`markOnly` on the resolved identity), and skips the min-width floor so it shrinks to fit. The button still names itself "Home — open navigation menu" for assistive tech. Inversely, the **menu row** for Home is labelled, so it takes the house glyph (`components/icons/home.tsx`) — the logomark only ever stands alone.
 - **Tapped** it widens and grows upward into a menu card — Home / Search (`/files`) / Print / Materials / Notifications, plus the owner-only Prometheus entry — with the desktop-style avatar + name/@username container taking over the pill's row at the bottom. Anon visitors get a Sign in row and no inbox.
 
 Two things to keep in mind when touching it:

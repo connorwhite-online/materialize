@@ -79,6 +79,17 @@ beforeEach(() => {
 });
 
 describe("MobileNav", () => {
+  it("shows the brand mark alone on home — no title in the pill", () => {
+    vi.mocked(usePathname).mockReturnValue("/");
+    render(<MobileNav initialUnreadCount={0} />);
+
+    // Named for assistive tech, but the word isn't painted next to the mark.
+    expect(trigger().getAttribute("aria-label")).toBe(
+      "Home — open navigation menu"
+    );
+    expect(trigger().textContent).toBe("");
+  });
+
   it("collapses to the current page's title and stays closed until tapped", () => {
     vi.mocked(usePathname).mockReturnValue("/materials");
     render(<MobileNav initialUnreadCount={0} />);
@@ -86,6 +97,7 @@ describe("MobileNav", () => {
     expect(
       screen.getByRole("button", { name: "Materials — open navigation menu" })
     ).toBeTruthy();
+    expect(trigger().textContent).toContain("Materials");
     expect(trigger().getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByRole("navigation", { name: "Primary" })).toBeNull();
   });

@@ -1,6 +1,7 @@
 import { Bell } from "@/components/icons/bell";
 import { Browse } from "@/components/icons/browse";
 import { Galaxy } from "@/components/icons/galaxy";
+import { Home } from "@/components/icons/home";
 import { Layers } from "@/components/icons/layers";
 import { Logomark } from "@/components/brand/logo";
 import { Materials } from "@/components/icons/materials";
@@ -31,7 +32,10 @@ export type NavDestination = {
  * real destination here instead.
  */
 export const NAV_DESTINATIONS: ReadonlyArray<NavDestination> = [
-  { href: "/", label: "Home", Icon: Logomark },
+  // The menu row is labelled, so it takes the house glyph; the brand
+  // mark represents Home only on the collapsed pill, where it stands
+  // alone (see resolvePageIdentity).
+  { href: "/", label: "Home", Icon: Home },
   { href: "/files", label: "Search", Icon: Browse },
   { href: "/print", label: "Print", Icon: Print },
   { href: "/materials", label: "Materials", Icon: Materials },
@@ -68,7 +72,17 @@ export function isDestinationActive(
   return pathname === href;
 }
 
-export type PageIdentity = { label: string; Icon: NavIcon };
+export type PageIdentity = {
+  label: string;
+  Icon: NavIcon;
+  /**
+   * Render the icon alone in the collapsed pill and drop the title.
+   * Only Home does this: the logomark already says "Materialize home",
+   * and pairing it with the word is redundant. `label` still names the
+   * pill for assistive tech.
+   */
+  markOnly?: boolean;
+};
 
 /**
  * What the collapsed pill says it is. Unlike `isDestinationActive`,
@@ -85,8 +99,9 @@ const IDENTITY_RULES: ReadonlyArray<{
   kind: "exact" | "section";
   label: string;
   Icon: NavIcon;
+  markOnly?: boolean;
 }> = [
-  { path: "/", kind: "exact", label: "Home", Icon: Logomark },
+  { path: "/", kind: "exact", label: "Home", Icon: Logomark, markOnly: true },
   { path: "/files", kind: "exact", label: "Search", Icon: Browse },
   { path: "/files", kind: "section", label: "File", Icon: Browse },
   { path: "/materials", kind: "exact", label: "Materials", Icon: Materials },
@@ -129,7 +144,12 @@ export function resolvePageIdentity(
       rule.kind === "exact"
         ? pathname === rule.path
         : pathname.startsWith(`${rule.path}/`);
-    if (hit) return { label: rule.label, Icon: rule.Icon };
+    if (hit)
+      return {
+        label: rule.label,
+        Icon: rule.Icon,
+        ...(rule.markOnly ? { markOnly: true } : null),
+      };
   }
   if (ownProfilePath && pathname === ownProfilePath) {
     return { label: "Profile", Icon: Layers };

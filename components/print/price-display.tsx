@@ -7,6 +7,8 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { calcServiceFee } from "@/lib/fees";
+import { SandboxBadge } from "@/components/sandbox-badge";
+import { useSandbox } from "@/components/sandbox-context";
 
 interface Quote {
   quoteId: string;
@@ -83,6 +85,10 @@ export function PriceDisplay({
   shippingLockedNotice,
   checkoutModel = "single",
 }: PriceDisplayProps) {
+  // Sandbox mode is worth exactly one callout, and this is it: the card
+  // with the checkout button on it.
+  const sandbox = useSandbox();
+
   if (!selectedQuote) {
     return (
       <Card>
@@ -117,7 +123,10 @@ export function PriceDisplay({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Order Summary</CardTitle>
+        <CardTitle className="flex items-center gap-2 text-base">
+          Order Summary
+          {sandbox && <SandboxBadge />}
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex justify-between text-sm">
