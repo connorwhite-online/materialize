@@ -36,12 +36,19 @@ const MIN_COLLAPSED_WIDTH = 172;
 /** Height of the always-present identity row (`h-14`). */
 const ROW_HEIGHT = 56;
 
-/** Open/close motion: a touch of overshoot, no wobble. */
+/**
+ * The card's own motion: fast, with a hair of overshoot and no wobble.
+ * Deliberately quicker than the content wave below — filming Linear's
+ * nav at 60fps, its card reaches full size in ~100ms and the rows keep
+ * arriving for another ~200ms. The container landing early is what
+ * makes the cascade read as life rather than lag; when the two finish
+ * together (as ours did) the whole thing feels heavier than it is.
+ */
 const SPRING: Transition = {
   type: "spring",
-  stiffness: 380,
-  damping: 32,
-  mass: 0.9,
+  stiffness: 520,
+  damping: 38,
+  mass: 0.8,
 };
 /** Critically damped — collapsing height must not overshoot past 0. */
 const SPRING_CLOSE: Transition = {
@@ -557,20 +564,28 @@ function TrailingCluster({
 const LIST_VARIANTS: Variants = {
   hidden: {},
   // Reveal outward from the pill: the row nearest the bottom edge (the
-  // last child) leads. No `delayChildren` and a tight stagger — the rows
-  // have to be arriving while the card is still growing, or the card
-  // reads as an empty box for the first ~100ms.
+  // last child) leads, so rows arrive just behind the growing top edge.
+  // No `delayChildren` — the first row starts with the card, or the card
+  // reads as an empty box. 28ms between rows is Linear's spacing; it
+  // keeps the wave running ~150ms past the container's landing.
   visible: {
-    transition: { staggerChildren: 0.022, staggerDirection: -1 },
+    transition: { staggerChildren: 0.028, staggerDirection: -1 },
   },
 };
 
+/**
+ * Rows materialise rather than slide: a short lift plus a blur that
+ * resolves as they land, which is what gives Linear's list its soft
+ * "focus in" quality. The travel is deliberately small — at 8px the
+ * eye reads it as settling, not as sliding in from somewhere.
+ */
 const ITEM_VARIANTS: Variants = {
-  hidden: { opacity: 0, y: 10 },
+  hidden: { opacity: 0, y: 8, filter: "blur(4px)" },
   visible: {
     opacity: 1,
     y: 0,
-    transition: { type: "spring", stiffness: 520, damping: 36, mass: 0.7 },
+    filter: "blur(0px)",
+    transition: { type: "spring", stiffness: 420, damping: 34, mass: 0.8 },
   },
 };
 
