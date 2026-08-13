@@ -90,6 +90,29 @@ describe("MobileNav", () => {
     expect(trigger().textContent).toBe("");
   });
 
+  it("wears the viewer's face and handle on their own profile", () => {
+    vi.mocked(usePathname).mockReturnValue("/connorwhite");
+    render(<MobileNav initialUnreadCount={0} />);
+
+    // The handle replaces the word "Profile" in the pill…
+    expect(trigger().textContent).toContain("@connorwhite");
+    expect(trigger().textContent).not.toContain("Profile");
+    // …but the button is still named for assistive tech.
+    expect(trigger().getAttribute("aria-label")).toBe(
+      "Profile — open navigation menu"
+    );
+  });
+
+  it("falls back to the icon + title on someone else's profile", () => {
+    vi.mocked(usePathname).mockReturnValue("/someone-else");
+    render(<MobileNav initialUnreadCount={0} />);
+
+    expect(trigger().textContent).not.toContain("@connorwhite");
+    expect(trigger().getAttribute("aria-label")).toBe(
+      "Menu — open navigation menu"
+    );
+  });
+
   it("collapses to the current page's title and stays closed until tapped", () => {
     vi.mocked(usePathname).mockReturnValue("/materials");
     render(<MobileNav initialUnreadCount={0} />);
