@@ -24,8 +24,8 @@ export function Grabber({
       aria-hidden="true"
       {...props}
     >
-      <path d="M7.4 10.1 11.3 6.2a1 1 0 0 1 1.4 0l3.9 3.9" />
-      <path d="M7.4 13.9l3.9 3.9a1 1 0 0 0 1.4 0l3.9-3.9" />
+      <path d="M7.4 9.5 11.3 5.6a1 1 0 0 1 1.4 0l3.9 3.9" />
+      <path d="M7.4 14.5l3.9 3.9a1 1 0 0 0 1.4 0l3.9-3.9" />
     </svg>
   );
 }
