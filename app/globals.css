@@ -19,10 +19,11 @@
     sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco,
     Consolas, "Liberation Mono", "Courier New", monospace;
-  /* PP Frama Regular for headings (the `font-heading` utility), with
-     the system stack as the swap fallback. Single Regular cut, so
-     heading/medium weights render as Regular. */
-  --font-heading: var(--font-frama), var(--font-sans);
+  /* Headings currently share the system stack. `--font-heading` stays
+     so existing `font-heading` utilities keep resolving; point it back
+     at a loaded webfont (and restore the layout.tsx localFont) if the
+     accent face returns. */
+  --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -359,33 +360,19 @@
     -webkit-text-size-adjust: 100%;
     overscroll-behavior-x: none;
   }
-  /* Every heading renders in PP Frama (--font-heading). The family
-     ships a single Regular cut, and font-synthesis-weight:none stops
-     the browser from faux-bolding the font-bold / font-semibold
-     utilities these headings carry — so page titles, file/project
-     names, section headers, etc. all render in true Frama Regular
-     (the approved look) without per-heading class changes. */
+  /* Headings inherit the same system stack as body. Keep `text-wrap:
+     balance` so titles still break evenly; sizes and weights stay on
+     the utilities already on each heading. */
   h1,
   h2,
   h3,
   h4,
   h5,
   h6 {
-    font-family: var(--font-heading);
-    font-synthesis-weight: none;
+    font-family: var(--font-sans);
     /* Distribute heading text evenly across lines instead of leaving a
        short orphan on the last line. */
     text-wrap: balance;
-  }
-  /* Frama is a display face — at our small type steps (text-sm 14px /
-     text-xs 12px) it reads awkwardly, so headings at those sizes drop
-     back to the system sans. This makes the "no tiny display type"
-     rule systemic: section labels, card titles, etc. no longer need a
-     per-element `font-sans` patch, and Frama is reserved for headings
-     at text-base and up. An explicit `font-heading` utility still wins
-     if a call site deliberately opts a small heading back in. */
-  :is(h1, h2, h3, h4, h5, h6):is(.text-xs, .text-sm) {
-    font-family: var(--font-sans);
   }
   /* Avoid single-word orphans in body copy. */
   p {

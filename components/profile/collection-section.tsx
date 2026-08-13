@@ -1,8 +1,4 @@
-"use client";
-
-import { useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
-import { ChevronRight } from "@/components/icons/chevron-right";
+import { FolderOpenIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { CollectionSettingsMenu } from "./collection-settings-menu";
 import { cn } from "@/lib/utils";
@@ -15,16 +11,15 @@ interface CollectionSectionProps {
   showVisibilityBadge: boolean;
   isOwner: boolean;
   fileCount: number;
-  defaultOpen?: boolean;
   compact?: boolean;
   children: React.ReactNode;
 }
 
 /**
- * Collapsible wrapper for a collection section in the profile Library view.
- * Header is a button (chevron + name), right-aligned visibility chip.
- * Files outside a collection are rendered in their own non-collapsible
- * grid elsewhere.
+ * Collection shelf in the profile Library view. Header is the
+ * folder glyph + name, with a right-aligned visibility chip and
+ * owner settings. Files outside a collection render in the Files
+ * carousel below.
  */
 export function CollectionSection({
   collectionId,
@@ -34,34 +29,30 @@ export function CollectionSection({
   showVisibilityBadge,
   isOwner,
   fileCount,
-  defaultOpen = true,
   compact = false,
   children,
 }: CollectionSectionProps) {
-  const [open, setOpen] = useState(defaultOpen);
-
   const countLabel =
     fileCount === 0
       ? "Empty"
       : `${fileCount} ${fileCount === 1 ? "File" : "Files"}`;
 
   return (
-    <section className={compact ? "rounded-xl bg-muted/50 p-3" : "rounded-2xl bg-muted/50 p-5"}>
+    <section>
       <div className="flex items-start justify-between gap-3">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="group flex min-w-0 flex-1 items-center gap-2 text-left cursor-pointer"
-          aria-expanded={open}
-        >
-          <motion.span
-            animate={{ rotate: open ? 90 : 0 }}
-            transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
-            className="flex shrink-0 text-muted-foreground transition-colors group-hover:text-foreground"
+        <div className="flex min-w-0 flex-1 items-center gap-2 text-muted-foreground">
+          <span className="flex shrink-0">
+            <FolderOpenIcon className={compact ? "size-4" : "size-5"} />
+          </span>
+          <h2
+            className={
+              compact
+                ? "min-w-0 truncate text-sm font-semibold"
+                : "min-w-0 truncate text-lg font-semibold"
+            }
           >
-            <ChevronRight size={16} />
-          </motion.span>
-          <h2 className={compact ? "min-w-0 truncate text-sm font-semibold" : "min-w-0 truncate text-lg font-semibold"}>{name}</h2>
+            {name}
+          </h2>
           <Badge
             variant="outline"
             className={cn(
@@ -76,7 +67,7 @@ export function CollectionSection({
           >
             {countLabel}
           </Badge>
-        </button>
+        </div>
         <div className="flex shrink-0 items-center gap-2">
           {showVisibilityBadge && (
             <Badge variant="outline" className="h-6 px-2.5 capitalize">
@@ -98,26 +89,12 @@ export function CollectionSection({
         </div>
       </div>
 
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
-            className="overflow-hidden"
-          >
-            <div className="pt-4">
-              {description && (
-                <p className="mb-4 text-xs text-muted-foreground">
-                  {description}
-                </p>
-              )}
-              {children}
-            </div>
-          </motion.div>
+      <div className="pt-4">
+        {description && (
+          <p className="mb-4 text-xs text-muted-foreground">{description}</p>
         )}
-      </AnimatePresence>
+        {children}
+      </div>
     </section>
   );
 }

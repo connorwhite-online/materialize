@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
-import localFont from "next/font/local";
 import "./globals.css";
 import { MotionConfig } from "motion/react";
 import { AuthModalProvider } from "@/components/auth/auth-modal";
@@ -9,7 +8,7 @@ import { PendingPrintFileProvider } from "@/components/upload/pending-print-file
 import { PageTransitionLoader } from "@/components/nav/page-transition-loader";
 import { Iterate } from "iterate-ui-next/devtools";
 
-// Body text stays on the system font stack (globals.css).
+// Body text and headings share the system font stack (globals.css).
 //
 // PP Fuji Bold (--font-display) used to load here for the home hero
 // wordmark. That banner is gone and the brand is an SVG now, so nothing
@@ -17,19 +16,11 @@ import { Iterate } from "iterate-ui-next/devtools";
 // route. lib/og/render-card.tsx still reads the same file off disk for OG
 // cards — that path is server-side and unaffected.
 //
-// PP Frama — the new app typeface (Pangram Pangram). Regular (--font-frama)
-// drives the heading font (--font-heading in globals.css), so the existing
-// `font-heading` utility across the UI (card / dialog / alert / section
-// titles) renders in Frama Regular. A single 400 face means medium/heading
-// weights collapse to Regular — the intended "Regular for headings" look.
-// (The Black cut previously powered the nav wordmark, now replaced by the
-// <Logomark /> SVG, so it's no longer loaded.)
-const framaRegular = localFont({
-  src: "../public/PPFrama-Regular.otf",
-  variable: "--font-frama",
-  weight: "400",
-  display: "swap",
-});
+// PP Frama Regular (--font-heading) used to load here for headings. The
+// app is on a single system stack for now; the OTF stays in public/ but
+// is not declared, so it doesn't download. Re-add a localFont() here if
+// headings go back to Frama.
+//
 // PP Playground Light (--font-script) was scoped to the home hero
 // ("Anything") in app/page.tsx (CON-166). The hero banner is gone, so it
 // no longer loads anywhere.
@@ -164,7 +155,7 @@ export default function RootLayout({
     <ClerkProvider>
       <html
         lang="en"
-        className={`${framaRegular.variable} h-full antialiased`}
+        className="h-full antialiased"
         suppressHydrationWarning
       >
         <body className="min-h-full flex flex-col">

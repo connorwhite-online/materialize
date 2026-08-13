@@ -28,6 +28,7 @@ import { Download } from "@/components/icons/download";
 import { formatCompactCount } from "@/lib/utils/format-count";
 import { getAvatarGradient } from "@/lib/utils/avatar-gradient";
 import { FileTitleTooltip } from "@/components/browse/file-title-tooltip";
+import { BUBBLE_SHADOW } from "@/components/nav/bubble-shadow";
 
 const PER_SECTION = 24;
 /**
@@ -942,7 +943,8 @@ function UserCard({ user }: { user: UserRow }) {
   return (
     <Link
       href={`/${user.username}`}
-      className="group flex items-center gap-2.5 rounded-l-full rounded-r-3xl border border-border bg-card p-1.5 pr-3 transition-colors hover:border-foreground/20 hover:bg-muted/30"
+      className={`group flex items-center gap-2.5 overflow-hidden p-1.5 pr-3 transition-colors ${BUBBLE_SHADOW}`}
+      style={{ borderRadius: "24px 12px 12px 24px" }}
     >
       <UserAvatar
         seed={user.username}

@@ -7,58 +7,43 @@ import type { EmailPrefMap } from "@/lib/notifications/email-prefs";
 
 export function GeneralSettings({
   defaultUploadVisibility,
-}: {
-  defaultUploadVisibility: "public" | "private";
-}) {
-  return (
-    <div className="space-y-8">
-      <ThemeSwitcher />
-      <UploadVisibilitySetting initial={defaultUploadVisibility} />
-      <SignOutButton />
-    </div>
-  );
-}
-
-export function NotificationSettings({
   emailNotificationsEnabled,
   emailNotificationPrefs,
 }: {
+  defaultUploadVisibility: "public" | "private";
   emailNotificationsEnabled: boolean;
   emailNotificationPrefs: EmailPrefMap | null;
 }) {
   return (
-    <EmailNotificationsSetting
-      initial={emailNotificationsEnabled}
-      initialPrefs={emailNotificationPrefs}
-    />
-  );
-}
+    <div className="space-y-8">
+      <ThemeSwitcher />
 
-export function AgentSettings() {
-  return (
-    <div className="space-y-2">
-      <SettingsLink
-        href="/dashboard/settings/tokens"
-        title="Connected agents"
-        description="Personal access tokens for the Materialize MCP server"
-      />
-    </div>
-  );
-}
+      <UploadVisibilitySetting initial={defaultUploadVisibility} />
 
-export function PaymentSettings() {
-  return (
-    <div className="space-y-2">
-      <SettingsLink
-        href="/dashboard/settings/billing"
-        title="Billing"
-        description="Saved card for agent-initiated orders"
+      <EmailNotificationsSetting
+        initial={emailNotificationsEnabled}
+        initialPrefs={emailNotificationPrefs}
       />
-      <SettingsLink
-        href="/dashboard/settings/payouts"
-        title="Payouts"
-        description="Receive payments for paid files and projects"
-      />
+
+      <div className="space-y-2">
+        <SettingsLink
+          href="/dashboard/settings/tokens"
+          title="Connected agents"
+          description="Personal access tokens for the Materialize MCP server"
+        />
+        <SettingsLink
+          href="/dashboard/settings/billing"
+          title="Billing"
+          description="Saved card for agent-initiated orders"
+        />
+        <SettingsLink
+          href="/dashboard/settings/payouts"
+          title="Payouts"
+          description="Receive payments for paid files and projects"
+        />
+      </div>
+
+      <SignOutButton />
     </div>
   );
 }

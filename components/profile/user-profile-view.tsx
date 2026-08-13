@@ -7,8 +7,14 @@ import { loadUserByHandle } from "@/app/(app)/[handle]/loader";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { LibraryTab } from "@/components/profile/library-tab";
 import { OwnerSettingsTabs } from "@/components/profile/owner-settings-tabs";
+import { isOwnerSettingsTab } from "@/lib/profile/owner-settings-tabs";
 import { OwnerProfileHeadline } from "@/components/profile/owner-profile-headline";
-import { GeneralSettings } from "@/components/profile/general-settings";
+import {
+  AgentSettings,
+  GeneralSettings,
+  NotificationSettings,
+  PaymentSettings,
+} from "@/components/profile/general-settings";
 import { profilePageJsonLd, safeJsonLdScript } from "@/lib/seo/json-ld";
 
 const PLATFORM_LABELS: Record<string, string> = {
@@ -79,7 +85,6 @@ const OWNER_TAB_REDIRECTS: Record<string, string> = {
   files: "/dashboard/library",
   orders: "/dashboard/orders",
   earnings: "/dashboard/earnings",
-  notifications: "/notifications",
   comments: "/notifications",
 };
 
@@ -143,36 +148,42 @@ export async function UserProfileView({
       .from(users)
       .where(eq(users.id, user.id));
 
-    const generalTab = rawTab === "general";
+    const activeTab =
+      rawTab && isOwnerSettingsTab(rawTab) ? rawTab : "general";
 
     return (
       <div className="mx-auto max-w-3xl px-4 py-8">
-        <OwnerSettingsTabs
-          username={handle}
-          activeTab={generalTab ? "general" : "profile"}
+        <OwnerProfileHeadline
+          username={user.username || handle}
+          displayName={user.displayName || ""}
+          bio={user.bio || ""}
+          avatarUrl={user.avatarUrl}
+          socialLinks={user.socialLinks ?? []}
         />
-        <div className="mt-8">
-          {generalTab ? (
-            <GeneralSettings
-              defaultUploadVisibility={
-                settings?.defaultUploadVisibility ?? "private"
-              }
-              emailNotificationsEnabled={
-                settings?.emailNotificationsEnabled ?? true
-              }
-              emailNotificationPrefs={
-                settings?.emailNotificationPrefs ?? null
-              }
-            />
-          ) : (
-            <OwnerProfileHeadline
-              username={user.username || handle}
-              displayName={user.displayName || ""}
-              bio={user.bio || ""}
-              avatarUrl={user.avatarUrl}
-              socialLinks={user.socialLinks ?? []}
-            />
-          )}
+        <div className="mt-10">
+          <OwnerSettingsTabs username={handle} activeTab={activeTab} />
+          <div className="mt-8">
+            {activeTab === "notifications" ? (
+              <NotificationSettings
+                emailNotificationsEnabled={
+                  settings?.emailNotificationsEnabled ?? true
+                }
+                emailNotificationPrefs={
+                  settings?.emailNotificationPrefs ?? null
+                }
+              />
+            ) : activeTab === "agents" ? (
+              <AgentSettings />
+            ) : activeTab === "payments" ? (
+              <PaymentSettings />
+            ) : (
+              <GeneralSettings
+                defaultUploadVisibility={
+                  settings?.defaultUploadVisibility ?? "private"
+                }
+              />
+            )}
+          </div>
         </div>
       </div>
     );

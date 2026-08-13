@@ -71,7 +71,7 @@ export function EmailNotificationsSetting({ initial, initialPrefs }: Props) {
   };
 
   return (
-    <div className="border-t border-border pt-6">
+    <div>
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1">
           <div className="text-sm font-medium">Email notifications</div>

@@ -1,14 +1,11 @@
 import type { SVGProps } from "react";
-import { cn } from "@/lib/utils";
 
 /**
- * Dashed ring spinner — 2px round-cap dashes on a circle, spun with
- * Tailwind's linear `animate-spin` (CSS only; respects reduced motion
- * via the global `.animate-spin` override in globals.css).
+ * Chubby circled X — 2px round-cap stroke, X inset from the rim so
+ * it reads as a little close chip rather than a thin glyph.
  */
-export function DottedSpinner({
+export function CircleX({
   size = 16,
-  className,
   ...props
 }: SVGProps<SVGSVGElement> & { size?: number }) {
   return (
@@ -18,7 +15,6 @@ export function DottedSpinner({
       viewBox="0 0 24 24"
       fill="none"
       aria-hidden="true"
-      className={cn("animate-spin", className)}
       {...props}
     >
       <circle
@@ -27,8 +23,12 @@ export function DottedSpinner({
         r="8.5"
         stroke="currentColor"
         strokeWidth={2}
+      />
+      <path
+        d="M9.4 9.4L14.6 14.6M14.6 9.4L9.4 14.6"
+        stroke="currentColor"
+        strokeWidth={2}
         strokeLinecap="round"
-        strokeDasharray="5.5 4"
       />
     </svg>
   );

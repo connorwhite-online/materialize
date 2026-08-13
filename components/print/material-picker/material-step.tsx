@@ -577,10 +577,9 @@ function MaterialStepLoading() {
 }
 
 /**
- * Collapsible material-group section. Mirrors CollectionSection's
- * pattern — chevron on the left, count badge on the right, smooth
- * height animation. Defaults open; user can collapse groups they
- * aren't interested in as they browse.
+ * Collapsible material-group section — chevron on the left, count
+ * badge on the right, smooth height animation. Defaults open; user
+ * can collapse groups they aren't interested in as they browse.
  */
 function GroupSection({
   name,
@@ -623,7 +622,7 @@ function GroupSection({
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
-            className="-mx-4 -mb-4 overflow-hidden px-4 pb-4"
+            className="-mx-4 -mb-10 overflow-hidden px-4 pb-10"
           >
             {children}
           </motion.div>

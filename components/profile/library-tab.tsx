@@ -23,13 +23,15 @@ import {
   LibraryProjectCard,
   type LibraryProjectCardItem,
 } from "./library-project-card";
+import { BoxIcon, LayersIcon } from "lucide-react";
 import { LibraryAddMenu } from "./library-add-menu";
 import { LibraryEmptyState } from "./library-empty-state";
+import { FeatheredCarousel } from "@/components/home/feathered-carousel";
 
 interface LibraryTabProps {
   userId: string;
   isOwner: boolean;
-  /** Denser card grid for the authed home, where the column is narrower. */
+  /** Smaller carousel tiles for the authed home, where the column is narrower. */
   compact?: boolean;
 }
 
@@ -620,7 +622,7 @@ export async function LibraryTab({
         </div>
       )}
 
-      {/* Collections — collapsible */}
+      {/* Collections */}
       {userCollections.map((collection) => {
         const colFiles = itemsInCollection.get(collection.id) || [];
         if (colFiles.length === 0 && !isOwner) return null;
@@ -637,7 +639,7 @@ export async function LibraryTab({
             compact={compact}
           >
             {colFiles.length > 0 ? (
-              <FileGrid items={colFiles} isOwner={isOwner} compact={compact} />
+              <FileCarousel items={colFiles} isOwner={isOwner} compact={compact} />
             ) : (
               <p className="text-sm text-muted-foreground">Empty collection</p>
             )}
@@ -645,44 +647,45 @@ export async function LibraryTab({
         );
       })}
 
-      {/* Projects (owned + purchased bundles) — collapsible */}
+      {/* Projects (owned + purchased bundles) */}
       {projectGridItems.length > 0 && (
         <LibrarySection
           name="Projects"
           count={projectGridItems.length}
           countNoun="Project"
+          icon={<LayersIcon className={compact ? "size-4" : "size-5"} />}
           compact={compact}
         >
-          <div
-            className={
-              compact
-                ? "grid grid-cols-3 gap-2 sm:grid-cols-4"
-                : "grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
-            }
-          >
+          <FeatheredCarousel>
             {projectGridItems.map((p) => (
-              <LibraryProjectCard key={p.id} item={p} />
+              <div
+                key={p.id}
+                className={compact ? "w-28 shrink-0" : "w-40 shrink-0"}
+              >
+                <LibraryProjectCard item={p} />
+              </div>
             ))}
-          </div>
+          </FeatheredCarousel>
         </LibrarySection>
       )}
 
-      {/* Uncollected files — collapsible */}
+      {/* Uncollected files */}
       {mainGridItems.length > 0 && (
         <LibrarySection
           name="Files"
           count={mainGridItems.length}
           countNoun="File"
+          icon={<BoxIcon className={compact ? "size-4" : "size-5"} />}
           compact={compact}
         >
-          <FileGrid items={mainGridItems} isOwner={isOwner} compact={compact} />
+          <FileCarousel items={mainGridItems} isOwner={isOwner} compact={compact} />
         </LibrarySection>
       )}
     </div>
   );
 }
 
-function FileGrid({
+function FileCarousel({
   items,
   isOwner,
   compact = false,
@@ -692,16 +695,15 @@ function FileGrid({
   compact?: boolean;
 }) {
   return (
-    <div
-      className={
-        compact
-          ? "grid grid-cols-3 gap-2 sm:grid-cols-4"
-          : "grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
-      }
-    >
+    <FeatheredCarousel>
       {items.map((item) => (
-        <LibraryFileCard key={item.id} item={item} isOwner={isOwner} />
+        <div
+          key={item.id}
+          className={compact ? "w-28 shrink-0" : "w-40 shrink-0"}
+        >
+          <LibraryFileCard item={item} isOwner={isOwner} />
+        </div>
       ))}
-    </div>
+    </FeatheredCarousel>
   );
 }

@@ -47,7 +47,9 @@ export function FeatheredCarousel({
   return (
     <div
       ref={scrollRef}
-      className="flex gap-3 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      // px/pt: overflow-x-auto forces overflow-y to auto too, which
+      // would clip the 1px ring on cards flush with the scroller edge.
+      className="flex gap-3 overflow-x-auto px-px pt-px pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       style={{
         maskImage: carouselMask,
         WebkitMaskImage: carouselMask,

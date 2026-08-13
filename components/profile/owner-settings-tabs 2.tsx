@@ -10,17 +10,8 @@ import {
 import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
-import {
-  ownerSettingsHref,
-  type OwnerSettingsTab,
-} from "@/lib/profile/owner-settings-tabs";
 
-const TABS: Array<{ key: OwnerSettingsTab; label: string }> = [
-  { key: "general", label: "General" },
-  { key: "notifications", label: "Notifications" },
-  { key: "agents", label: "Agents" },
-  { key: "payments", label: "Payments" },
-];
+export type OwnerSettingsTab = "profile" | "general";
 
 interface OwnerSettingsTabsProps {
   username: string;
@@ -30,6 +21,11 @@ interface OwnerSettingsTabsProps {
 const useIsomorphicLayoutEffect =
   typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
+const TABS: Array<{ key: OwnerSettingsTab; label: string }> = [
+  { key: "profile", label: "Profile" },
+  { key: "general", label: "General" },
+];
+
 export function OwnerSettingsTabs({
   username,
   activeTab,
@@ -37,10 +33,6 @@ export function OwnerSettingsTabs({
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [localTab, setLocalTab] = useState<OwnerSettingsTab>(activeTab);
-
-  useEffect(() => {
-    setLocalTab(activeTab);
-  }, [activeTab]);
 
   const navRef = useRef<HTMLElement | null>(null);
   const tabRefs = useRef<Map<OwnerSettingsTab, HTMLButtonElement | null>>(
@@ -76,8 +68,10 @@ export function OwnerSettingsTabs({
   const handleClick = (tab: OwnerSettingsTab) => {
     if (tab === localTab) return;
     setLocalTab(tab);
+    const href =
+      tab === "profile" ? `/${username}` : `/${username}?tab=general`;
     startTransition(() => {
-      router.push(ownerSettingsHref(username, tab), { scroll: false });
+      router.push(href, { scroll: false });
     });
   };
 

@@ -5,8 +5,8 @@ import { resolveHandle } from "@/lib/handles/resolve";
 import { isOrgMember } from "@/lib/authorization";
 
 // Settings sub-route under the unified `/[handle]` namespace. User
-// account settings live on the own-profile page (`/${username}` and
-// `?tab=general`); this route 404s for other people's handles and
+// account settings live on the own-profile page (`/${username}`, with
+// `?tab=` for Notifications / Agents / Payments); this route 404s for other people's handles and
 // redirects the owner there. For orgs it hosts Clerk's
 // <OrganizationProfile />.
 
@@ -22,7 +22,7 @@ export default async function HandleSettingsPage(props: {
   // dashboard settings if the viewer is the owner, otherwise 404.
   if (!resolution) notFound();
   if (resolution.kind === "user") {
-    if (resolution.userId === userId) redirect(`/${handle}?tab=general`);
+    if (resolution.userId === userId) redirect(`/${handle}`);
     notFound();
   }
 

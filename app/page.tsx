@@ -147,10 +147,8 @@ export default async function HomePage() {
           <div className="flex flex-1 items-center justify-center px-4">
             <div className="flex w-full max-w-2xl flex-col items-center gap-4 text-center">
               {/* Real, selectable <h1> — states what the product does
-                  rather than spelling the brand. No inline fontFamily:
-                  globals.css already routes every heading through
-                  --font-heading (PP Frama), so this needs no font of
-                  its own and adds no webfont to the critical path. */}
+                  rather than spelling the brand. Same system stack as
+                  the rest of the app; no webfont on the critical path. */}
               <h1 className="text-balance text-3xl leading-[1.1] tracking-tight sm:text-4xl">
                 Print in any material, and share your ideas
               </h1>
