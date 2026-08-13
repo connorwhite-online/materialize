@@ -7,6 +7,7 @@ import { Factory } from "@/components/icons/factory";
 import { Materials } from "@/components/icons/materials";
 import { Code } from "@/components/icons/code";
 import { ChevronRight } from "@/components/icons/chevron-right";
+import { HomeFaq } from "@/components/home/home-faq";
 
 /**
  * Below-the-fold marketing content for the anon home page.
@@ -75,9 +76,9 @@ const BENEFITS = [
 export function HomeMarketing() {
   return (
     <div className="border-t border-border bg-muted/20">
-      {/* pb clears the fixed HomeBottomBar so the final CTA is never
-          permanently hidden behind it. */}
-      <div className="mx-auto max-w-6xl px-4 py-16 pb-40 sm:py-24">
+      {/* Bottom padding used to clear the fixed HomeBottomBar; that
+          bar is gone (search lives in the top bar now). */}
+      <div className="mx-auto max-w-6xl px-4 py-16 sm:py-24">
         {/* How it works */}
         <section aria-labelledby="how-it-works" className="space-y-3">
           <h2
@@ -148,6 +149,11 @@ export function HomeMarketing() {
             })}
           </div>
         </section>
+
+        {/* Q&A block. Carries the FAQPage JSON-LD emitted from
+            app/page.tsx and gives the page substantive prose aimed at
+            the long-tail queries the head term can't win. */}
+        <HomeFaq />
 
         {/* Closing CTA — two authoritative internal links for crawlers
             and a clear next step for readers. */}

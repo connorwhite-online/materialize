@@ -421,7 +421,7 @@ export async function EarningsTab({ userId }: { userId: string }) {
           <StatCard
             label="Comments"
             value={commentsTotal}
-            href="/dashboard/comments"
+            href="/notifications"
             hint="On your files + projects"
           />
           <StatCard

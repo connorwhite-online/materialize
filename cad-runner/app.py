@@ -1368,6 +1368,19 @@ def _assemble_parts_payload(
     payload["remeshed"] = any(p.get("remeshed") for p in parts)
     if first.get("decimatedForExport"):
         payload["decimatedForExport"] = first["decimatedForExport"]
+    # Feature chips for assemblies: this branch never emitted them at all,
+    # so multi-part builds silently lost every chip. No per-part topo ships
+    # (see docstring), so faceIds can't resolve — pass no shape and emit
+    # params + spans only, the same graceful degradation the chip contract
+    # already documents ("empty when the op's faces didn't survive").
+    try:
+        from features import finalize_features
+
+        feats = finalize_features(None, None)
+        if feats:
+            payload["features"] = feats
+    except Exception:  # noqa: BLE001
+        pass
     payload["ok"] = all_ok
 
 
@@ -1810,11 +1823,24 @@ def _session_exec_reply(
         payload["namespace"] = _session_namespace_summary(ns)
         return payload
 
-    return {
+    reply = {
         "ok": True,
         "stdout": buf.getvalue(),
         "namespace": _session_namespace_summary(ns),
     }
+    # Ops recorded by a run-less exec (e.g. `Hole` in a sketch-only setup
+    # step) would otherwise be wiped by the next exec's hook reset before any
+    # payload ever reported them. No shape/topo yet → params + spans only,
+    # faceIds empty; the Node loop accumulates these across the session.
+    try:
+        from features import finalize_features
+
+        feats = finalize_features(None, None)
+        if feats:
+            reply["features"] = feats
+    except Exception:  # noqa: BLE001
+        pass
+    return reply
 
 
 def _session_worker(

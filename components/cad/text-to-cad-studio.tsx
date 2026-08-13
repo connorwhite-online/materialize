@@ -23,10 +23,12 @@ import {
   Loader2Icon,
   MessageSquareTextIcon,
   PackageIcon,
+  PaletteIcon,
   PaperclipIcon,
   PencilIcon,
   PinIcon,
   PlusIcon,
+  RulerDimensionLineIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react";
@@ -48,7 +50,6 @@ import { Layers } from "@/components/icons/layers";
 import {
   deleteCadBuild,
   getCadTopoUrl,
-  recordCadFeedback,
   renameCadGeneration,
   rerunCadWithParams,
   reviseCadFeatureStatement,
@@ -58,6 +59,11 @@ import {
 import { StepDownloadLink } from "@/components/files/step-download-button";
 import { diffParams, extractParams } from "@/components/cad/param-diff";
 import { FeatureChips } from "@/components/cad/feature-chips";
+import {
+  TurnFeedbackSheet,
+  TurnFeedbackTrigger,
+  hasFeedback,
+} from "@/components/cad/turn-feedback-sheet";
 import { featureIdsForFaceIds } from "@/components/cad/feature-timeline";
 import type {
   CadStreamEvent,
@@ -74,6 +80,10 @@ import {
   networksSummary,
 } from "@/lib/cad/network-check";
 import { parseFeatures } from "@/lib/cad/features";
+import {
+  summarizeDimensionChecks,
+  type DimensionCheckResult,
+} from "@/lib/cad/dimension-check";
 // Type-only: lib/cad/brief is server-only at runtime; the type is erased.
 import type { ViewerAnnotation } from "@/components/viewer/model-viewer";
 import { planComposerSubmit } from "@/components/cad/composer-submit";
@@ -84,12 +94,7 @@ import {
   resolveEffectiveSelectedPartId,
 } from "@/components/cad/assembly-selection";
 import { useKeyboardStickyBottom } from "@/lib/hooks/use-keyboard-sticky-bottom";
-import {
-  CAD_FEEDBACK_TAGS,
-  CAD_FEEDBACK_TAG_LABELS,
-  type CadFeedbackTag,
-  type CadRating,
-} from "@/lib/cad/feedback";
+import { type CadRating } from "@/lib/cad/feedback";
 import { cn } from "@/lib/utils";
 
 // A few human-written example prompts for the empty state — plain strings that
@@ -158,6 +163,13 @@ export interface StudioTurn {
    * absent on turns minted before the signal was threaded.
    */
   hasStep?: boolean;
+  /**
+   * Dimension-contract verdicts (MTR-197): the brief's spec callouts checked
+   * deterministically against the built geometry. Drives the viewer's
+   * dimension annotation layer and the "n/m verified" chip. Empty/absent on
+   * turns without targets or minted before the column existed.
+   */
+  dimensionChecks?: DimensionCheckResult[];
   /**
    * The generation this one revised — encodes the branch structure within
    * a thread (a fork when it isn't the immediately preceding turn).
@@ -496,12 +508,20 @@ export function TextToCadStudio({
   const [showBuildsMenu, setShowBuildsMenu] = useState(false);
   // Which build's three-dot menu is open in the sidebar.
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
-  // Eval feedback: auto-prompt per turn until rated/dismissed, then collapse to
-  // an edit affordance. `feedbackEditing` force-opens the panel for a turn.
-  const [feedbackDismissed, setFeedbackDismissed] = useState<Set<string>>(
-    new Set()
-  );
+  // Eval feedback lives in a bottom sheet (components/cad/turn-feedback-sheet).
+  // `feedbackEditing` holds the generation id the sheet is open for — set by
+  // the layout's trigger button, and once automatically when a build finishes
+  // (`autoPromptedRef` keeps that to a single prompt per generation). It is
+  // deliberately NOT opened just because an unrated turn is on screen: that
+  // condition is true all through thread history, and as a modal it would
+  // throw a sheet in the user's face on every click back.
   const [feedbackEditing, setFeedbackEditing] = useState<string | null>(null);
+  const autoPromptedRef = useRef<Set<string>>(new Set());
+  // A generation that just finished and is waiting for the reveal to end
+  // before we prompt for feedback on it.
+  const [pendingFeedbackTurnId, setPendingFeedbackTurnId] = useState<
+    string | null
+  >(null);
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
@@ -512,6 +532,17 @@ export function TextToCadStudio({
   // In-flight attachment decodes; the send button waits for zero so a fast
   // submit can't race a still-reading file out of the request.
   const [attaching, setAttaching] = useState(0);
+  // Pre-build concept picker (composer-side diverge step): direction cards
+  // fetched from /api/cad/concepts, chosen with NO time pressure — unlike
+  // the in-job card, which auto-resolves on the serverless clock. The pick
+  // rides the generate request as `concept.png`.
+  const [concepts, setConcepts] = useState<
+    { id: string; label: string; detail?: string; png: string }[] | null
+  >(null);
+  const [conceptsLoading, setConceptsLoading] = useState(false);
+  const [selectedConceptId, setSelectedConceptId] = useState<string | null>(
+    null
+  );
   const [selectedPartId, setSelectedPartId] = useState<string | null>(null);
   const [savingModel, setSavingModel] = useState(false);
   const [savedAssets, setSavedAssets] = useState<Set<string>>(new Set());
@@ -522,6 +553,9 @@ export function TextToCadStudio({
   const [compareOn, setCompareOn] = useState(false);
   const [annotateMode, setAnnotateMode] = useState(false);
   const [annotations, setAnnotations] = useState<StudioAnnotation[]>([]);
+  // Dimension annotation layer (MTR-197): studio-owned like annotateMode, so
+  // the "n/m verified" chip and the viewer toolbar button share one state.
+  const [dimensionsOn, setDimensionsOn] = useState(false);
   // Per-generation B-rep topology URL for EXACT viewer picking (MTR-174):
   // fetched lazily for the viewed single-solid turn. A stored `null` means
   // "confirmed no topology" (mesh-mode / legacy) so we never refetch and the
@@ -761,6 +795,24 @@ export function TextToCadStudio({
     return () => clearTimeout(t);
   }, [transition]);
 
+  // Auto-prompt for feedback once per finished build — AFTER the reveal, never
+  // during it: the whole point of the morph is watching the part appear, and a
+  // modal over that moment would cover the thing being judged. Waits for the
+  // transition to clear, skips a turn that already carries feedback, and marks
+  // the id so a re-render (or coming back to the turn later) never re-prompts.
+  useEffect(() => {
+    const id = pendingFeedbackTurnId;
+    if (!id || transition || generating) return;
+    setPendingFeedbackTurnId(null);
+    if (autoPromptedRef.current.has(id)) return;
+    autoPromptedRef.current.add(id);
+    const turn = threads
+      .flatMap((t) => t.turns)
+      .find((t) => t.id === id && t.status === "succeeded");
+    if (!turn || hasFeedback(turn)) return;
+    setFeedbackEditing(id);
+  }, [pendingFeedbackTurnId, transition, generating, threads]);
+
   // Auto-grow the composer textarea with its content (capped), and shrink
   // back when it's cleared after a send.
   useEffect(() => {
@@ -818,6 +870,7 @@ export function TextToCadStudio({
     setAnnotations([]);
     setAnnotateMode(false);
     setCompareOn(false);
+    setDimensionsOn(false);
   }, [activeAssetId]);
 
   // Lazily resolve the viewed build's B-rep topology sidecar so the viewer
@@ -939,6 +992,24 @@ export function TextToCadStudio({
     viewedTurn.id in topoUrls &&
     topoUrls[viewedTurn.id] == null;
 
+  // The turn the feedback sheet is editing. Resolved across ALL threads rather
+  // than off `viewedTurn`, so the sheet keeps its target even if the viewed
+  // turn changes underneath it (a background job landing, say) instead of
+  // silently snapping onto a different generation mid-edit.
+  const feedbackTarget =
+    (feedbackEditing
+      ? threads.flatMap((t) => t.turns).find((t) => t.id === feedbackEditing)
+      : null) ?? null;
+
+  // Dimension-contract verdicts for the viewed turn (MTR-197). Never during
+  // compare or a live param preview — the solid on screen is then a different
+  // geometry than the one these verdicts were measured against.
+  const viewerDimensionChecks =
+    !compareBaseAssetId && !paramPreviewUrl && viewedTurn?.status === "succeeded"
+      ? viewedTurn.dimensionChecks ?? []
+      : [];
+  const dimensionSummary = summarizeDimensionChecks(viewerDimensionChecks);
+
   const viewedFeatures = viewedTurn?.features ?? [];
   const activeFeature =
     viewedFeatures.find((f) => f.id === activeFeatureId) ?? null;
@@ -985,6 +1056,8 @@ export function TextToCadStudio({
       projectSlug: res.projectSlug,
       remeshed: res.remeshed,
       networksReport: res.networksReport ?? null,
+      // Re-verified contract from the rebuilt geometry (MTR-197).
+      dimensionChecks: res.dimensionChecks ?? [],
       hasStep: res.hasStep,
       parentGenerationId: res.parentGenerationId,
     };
@@ -1169,6 +1242,8 @@ export function TextToCadStudio({
     setSubmittedPrompt(null);
     setImages([]);
     setAttachError(null);
+    setConcepts(null);
+    setSelectedConceptId(null);
     setSelectedPartId(null);
     setShowHistory(false);
     setShowBuildsMenu(false);
@@ -1322,6 +1397,9 @@ export function TextToCadStudio({
       projectSlug: ev.projectSlug ?? null,
       remeshed: ev.remeshed ?? false,
       networksReport: ev.networksReport ?? null,
+      // Dimension-contract verdicts ride the done event so the annotation
+      // layer + verified chip are stable at first paint (MTR-197).
+      dimensionChecks: ev.dimensionChecks ?? [],
       // STEP presence rides the done event so the action row is stable at first
       // paint (MTR-215).
       hasStep: ev.hasStep ?? false,
@@ -1378,6 +1456,11 @@ export function TextToCadStudio({
     setPrompt("");
     setImages([]);
     setAttachError(null);
+    setConcepts(null);
+    setSelectedConceptId(null);
+    // Queue the feedback prompt; the effect above fires it once the reveal
+    // finishes so the sheet never covers the morph.
+    setPendingFeedbackTurnId(ev.generationId);
   }
 
   async function addFiles(files: FileList | File[] | null | undefined) {
@@ -1435,6 +1518,53 @@ export function TextToCadStudio({
 
   function removeImage(id: string) {
     setImages((prev) => prev.filter((i) => i.id !== id));
+  }
+
+  // Fetch direction cards for the current prompt (+ attached refs). Errors
+  // land in the attachError line; an empty result means "no picker today —
+  // build anyway" (the in-job picker remains the fallback).
+  async function fetchConcepts() {
+    if (conceptsLoading || generating) return;
+    const p = prompt.trim();
+    if (p.length < 3) {
+      setAttachError(
+        "Describe what you want to make first — directions are generated from your prompt."
+      );
+      return;
+    }
+    setConceptsLoading(true);
+    setAttachError(null);
+    try {
+      const res = await fetch("/api/cad/concepts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: p,
+          images: images.length
+            ? images.map((i) => ({ data: i.data, mediaType: i.mediaType }))
+            : undefined,
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const { concepts: fetched } = (await res.json()) as {
+        concepts: { id: string; label: string; detail?: string; png: string }[];
+      };
+      if (!fetched?.length) {
+        setConcepts(null);
+        setAttachError(
+          "Couldn't generate direction concepts right now — you can build anyway."
+        );
+        return;
+      }
+      setConcepts(fetched);
+      setSelectedConceptId(fetched[0].id);
+    } catch {
+      setAttachError(
+        "Couldn't generate direction concepts right now — you can build anyway."
+      );
+    } finally {
+      setConceptsLoading(false);
+    }
   }
 
   async function submit() {
@@ -1544,6 +1674,12 @@ export function TextToCadStudio({
           images: images.length
             ? images.map((i) => ({ data: i.data, mediaType: i.mediaType }))
             : undefined,
+          // Pre-build concept pick (composer picker): the chosen direction's
+          // render becomes the build's enforced aesthetic target.
+          concept: (() => {
+            const chosen = concepts?.find((c) => c.id === selectedConceptId);
+            return chosen ? { png: chosen.png } : undefined;
+          })(),
           // Target-process threading (MTR-171) stays supported by the route but
           // is no longer asked up-front in the composer (MTR-208): the signal
           // will later be auto-derived from a material/print selection.
@@ -1872,7 +2008,7 @@ export function TextToCadStudio({
                         if (e.key === "Enter") saveName();
                         if (e.key === "Escape") setRenaming(false);
                       }}
-                      className="w-56 rounded-md border border-foreground/20 bg-card px-2 py-1 text-sm outline-none focus:border-foreground/40"
+                      className="field-text w-56 rounded-md border border-foreground/20 bg-card px-2 py-1 outline-none focus:border-foreground/40 sm:text-sm"
                     />
                     <button
                       type="button"
@@ -2092,6 +2228,9 @@ export function TextToCadStudio({
                     fixedFrame
                     annotateMode={annotateMode}
                     onToggleAnnotate={() => setAnnotateMode((v) => !v)}
+                    dimensionChecks={viewerDimensionChecks}
+                    dimensionsOn={dimensionsOn}
+                    onToggleDimensions={() => setDimensionsOn((v) => !v)}
                     annotations={annotations}
                     onAnnotate={(a) =>
                       setAnnotations((prev) => [
@@ -2315,6 +2454,42 @@ export function TextToCadStudio({
               </p>
             ))}
 
+          {/* Dimension contract (MTR-197): machine-checked spec callouts.
+              Clicking toggles the viewer's annotation layer so "verified"
+              is inspectable on the geometry, not taken on faith. Counts
+              cover only checks that actually RAN (honesty rail); declared-
+              but-unverified targets get the muted state, never a green. */}
+          {!generating && viewerDimensionChecks.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setDimensionsOn((v) => !v)}
+              aria-pressed={dimensionsOn}
+              className={`mt-3 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                dimensionSummary.failed > 0
+                  ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
+                  : dimensionSummary.ran > 0
+                    ? "bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/15 dark:text-emerald-400"
+                    : "bg-muted/60 text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              {dimensionSummary.failed > 0 ? (
+                <AlertTriangleIcon className="size-4 shrink-0" />
+              ) : (
+                <RulerDimensionLineIcon className="size-4 shrink-0" />
+              )}
+              <span className="flex-1">
+                {dimensionSummary.failed > 0
+                  ? `Dimensions: ${dimensionSummary.failed} of ${dimensionSummary.ran} checked out of spec`
+                  : dimensionSummary.ran > 0
+                    ? `Dimensions verified ${dimensionSummary.label} against the built geometry`
+                    : `${dimensionSummary.total} dimension target${dimensionSummary.total === 1 ? "" : "s"} declared — not yet verifiable`}
+              </span>
+              <span className="text-xs opacity-70">
+                {dimensionsOn ? "Hide on model" : "Show on model"}
+              </span>
+            </button>
+          )}
+
           {/* Feedback — the in-the-moment eval signal (feeds /text-to-cad/eval).
               Sits ABOVE the actions; auto-prompts after each generation until
               rated or dismissed, then collapses to a small edit affordance. */}
@@ -2322,43 +2497,14 @@ export function TextToCadStudio({
             viewedTurn?.status === "succeeded" &&
             (() => {
               const vt = viewedTurn;
-              const rated =
-                !!vt.rating ||
-                vt.feedbackTags.length > 0 ||
-                !!vt.feedbackNote;
-              const open =
-                feedbackEditing === vt.id ||
-                (!rated && !feedbackDismissed.has(vt.id));
-              return open ? (
-                <TurnFeedback
-                  key={vt.id}
+              // Only the trigger lives in the layout now; the form itself is a
+              // bottom sheet (opened here, or auto-opened once after a build's
+              // reveal — see pendingFeedbackTurnId).
+              return (
+                <TurnFeedbackTrigger
                   turn={vt}
-                  onSaved={(patch) => {
-                    applyFeedback(vt.id, patch);
-                    setFeedbackEditing(null);
-                  }}
-                  onDismiss={() => {
-                    setFeedbackDismissed((s) => new Set(s).add(vt.id));
-                    setFeedbackEditing(null);
-                  }}
+                  onOpen={() => setFeedbackEditing(vt.id)}
                 />
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setFeedbackEditing(vt.id)}
-                  className="mt-4 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-                >
-                  <MessageSquareTextIcon className="size-3.5" />
-                  {rated
-                    ? `Feedback ${
-                        vt.rating === "good"
-                          ? "👍"
-                          : vt.rating === "bad"
-                            ? "👎"
-                            : "saved"
-                      } · edit`
-                    : "Add feedback"}
-                </button>
               );
             })()}
 
@@ -2492,7 +2638,7 @@ export function TextToCadStudio({
                         } — at (${a.point
                           .map((n) => n.toFixed(0))
                           .join(", ")}) mm`}
-                        className="min-w-0 flex-1 rounded-md border border-foreground/15 bg-card px-2 py-1 text-sm outline-none focus:border-foreground/30"
+                        className="field-text min-w-0 flex-1 rounded-md border border-foreground/15 bg-card px-2 py-1 outline-none focus:border-foreground/30 sm:text-sm"
                       />
                       <button
                         type="button"
@@ -2746,17 +2892,16 @@ export function TextToCadStudio({
       </div>
 
       {/* Floating composer */}
-      {/* nav:pl-56 matches the app layout's left sidebar gutter so this
-          viewport-fixed bar lines up with the page's content area; the inner
-          grid then mirrors the page grid so the composer centers under the
-          viewer column and ignores the Builds sidebar (empty 300px track). */}
+      {/* The inner grid mirrors the page grid so the composer centers
+          under the viewer column and ignores the Builds sidebar
+          (empty 300px track). */}
       <div
         ref={composerFixedRef}
-        className="pointer-events-none fixed inset-x-0 bottom-0 z-30 nav:pl-56"
+        className="pointer-events-none fixed inset-x-0 bottom-0 z-30"
       >
-        {/* Sub-nav viewports show the floating MobileTabBar pill (bottom-6,
-            z-40); lift the composer above it so its controls stay tappable.
-            At nav+ the pill is gone and the sidebar rail takes over. */}
+        {/* Sub-nav viewports show the floating MobileNav pill (bottom-6,
+            z-50); lift the composer above it so its controls stay tappable.
+            At nav+ the pill is gone and the top bar takes over. */}
         <div className="mx-auto grid max-w-6xl gap-8 px-4 pb-28 nav:pb-4 lg:grid-cols-[1fr_300px]">
           <div className="pointer-events-auto mx-auto w-full min-w-0 max-w-2xl">
           {/* Morphing generation thread (MTR-209). Present for the WHOLE
@@ -2810,6 +2955,43 @@ export function TextToCadStudio({
                       <XIcon className="size-2.5" />
                     </button>
                   </div>
+                ))}
+              </div>
+            )}
+
+            {/* Pre-build direction cards: pick with no time pressure (the
+                in-job card auto-resolves on the serverless clock; this one
+                waits forever). Tap toggles; the pick sends with the build. */}
+            {concepts && (
+              <div className="mb-2 flex gap-2 overflow-x-auto px-1">
+                {concepts.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    aria-pressed={selectedConceptId === c.id}
+                    title={c.detail}
+                    onClick={() =>
+                      setSelectedConceptId((cur) =>
+                        cur === c.id ? null : c.id
+                      )
+                    }
+                    className={cn(
+                      "w-24 shrink-0 overflow-hidden rounded-lg border text-left transition-colors",
+                      selectedConceptId === c.id
+                        ? "border-foreground ring-1 ring-foreground"
+                        : "border-foreground/15 hover:border-foreground/40"
+                    )}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`data:image/png;base64,${c.png}`}
+                      alt={c.label}
+                      className="aspect-square w-full object-cover"
+                    />
+                    <span className="block truncate px-1.5 py-1 text-[10px] font-medium">
+                      {c.label}
+                    </span>
+                  </button>
                 ))}
               </div>
             )}
@@ -2871,7 +3053,7 @@ export function TextToCadStudio({
               }
               // text-base (16px) on mobile prevents iOS Safari from auto-
               // zooming when the field is focused (it zooms any input < 16px).
-              className="max-h-[200px] w-full resize-none border-0 bg-transparent px-2 py-1.5 text-base outline-none disabled:opacity-60 nav:text-sm"
+              className="field-text max-h-[200px] w-full resize-none border-0 bg-transparent px-2 py-1.5 outline-none disabled:opacity-60 nav:text-sm"
             />
             {/* Toolbar below the text: attach + draft-brief (left), send
                 (right). */}
@@ -2887,6 +3069,24 @@ export function TextToCadStudio({
                 >
                   <PaperclipIcon className="size-4" />
                 </button>
+                {/* Explore design directions — fresh builds only (revision
+                    turns get the in-job refine card instead). */}
+                {!activeThread && (
+                  <button
+                    type="button"
+                    onClick={fetchConcepts}
+                    disabled={generating || conceptsLoading}
+                    aria-label="Explore design directions"
+                    title="Explore design directions"
+                    className="flex size-8 cursor-pointer items-center justify-center rounded-lg text-muted-foreground hover:bg-foreground/5 hover:text-foreground disabled:opacity-40"
+                  >
+                    {conceptsLoading ? (
+                      <Loader2Icon className="size-4 animate-spin" />
+                    ) : (
+                      <PaletteIcon className="size-4" />
+                    )}
+                  </button>
+                )}
               </div>
               <input
                 ref={fileInputRef}
@@ -2922,6 +3122,20 @@ export function TextToCadStudio({
           </div>
         </div>
       </div>
+
+      {/* Eval feedback (rating + tags + note) as a bottom sheet. Portals to
+          <body>, so its position here is only about ownership of the state,
+          not layout. Opened by the trigger under the model actions, or once
+          automatically after a build's reveal finishes. */}
+      <TurnFeedbackSheet
+        open={!!feedbackTarget}
+        turn={feedbackTarget}
+        onClose={() => setFeedbackEditing(null)}
+        onSaved={(patch) => {
+          if (feedbackTarget) applyFeedback(feedbackTarget.id, patch);
+          setFeedbackEditing(null);
+        }}
+      />
     </div>
   );
 }
@@ -3389,7 +3603,7 @@ export function Questionnaire({
             placeholder="Or answer in your own words…"
             aria-label="Custom answer"
             // text-base on mobile keeps iOS Safari from auto-zooming the field.
-            className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground/60 disabled:opacity-50 sm:text-sm"
+            className="field-text min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground/60 disabled:opacity-50 sm:text-sm"
           />
           <button
             type="submit"
@@ -3527,148 +3741,3 @@ function describeEvent(ev: CadProgressEvent): {
   }
 }
 
-/**
- * Per-turn feedback widget — the in-the-moment human eval signal. Seeded
- * from the turn (remounted via `key` when the viewed turn changes), saves
- * through recordCadFeedback, and reports saved values up so the in-memory
- * threads stay in sync. Rolls up on /text-to-cad/eval.
- */
-function TurnFeedback({
-  turn,
-  onSaved,
-  onDismiss,
-}: {
-  turn: StudioTurn;
-  onSaved: (
-    patch: Pick<StudioTurn, "rating" | "feedbackTags" | "feedbackNote">
-  ) => void;
-  onDismiss?: () => void;
-}) {
-  const [rating, setRating] = useState<CadRating | null>(turn.rating);
-  const [tags, setTags] = useState<CadFeedbackTag[]>(
-    turn.feedbackTags.filter((t): t is CadFeedbackTag =>
-      (CAD_FEEDBACK_TAGS as readonly string[]).includes(t)
-    )
-  );
-  const [note, setNote] = useState(turn.feedbackNote ?? "");
-  const [saved, setSaved] = useState(false);
-  const [saving, startSaving] = useTransition();
-
-  function toggleTag(tag: CadFeedbackTag) {
-    setSaved(false);
-    setTags((t) => (t.includes(tag) ? t.filter((x) => x !== tag) : [...t, tag]));
-  }
-
-  function save() {
-    startSaving(async () => {
-      const res = await recordCadFeedback({
-        generationId: turn.id,
-        rating,
-        tags,
-        note,
-      });
-      if ("ok" in res) {
-        setSaved(true);
-        onSaved({
-          rating,
-          feedbackTags: tags,
-          feedbackNote: note.trim() || null,
-        });
-      }
-    });
-  }
-
-  return (
-    <div className="mt-5 rounded-lg border border-foreground/10 p-3">
-      <div className="flex items-center gap-2">
-        <span className="text-xs font-medium text-muted-foreground">
-          How did this turn out?
-        </span>
-        {onDismiss && (
-          <button
-            type="button"
-            onClick={onDismiss}
-            aria-label="Dismiss feedback"
-            className="order-last ml-auto flex size-6 items-center justify-center rounded-md text-muted-foreground/70 hover:bg-foreground/10 hover:text-foreground"
-          >
-            <XIcon className="size-3.5" />
-          </button>
-        )}
-        <button
-          type="button"
-          aria-pressed={rating === "good"}
-          onClick={() => {
-            setSaved(false);
-            setRating((r) => (r === "good" ? null : "good"));
-          }}
-          className={cn(
-            "rounded-md border px-2 py-1 text-sm",
-            rating === "good"
-              ? "border-foreground/40 bg-foreground/5"
-              : "border-foreground/15"
-          )}
-        >
-          👍
-        </button>
-        <button
-          type="button"
-          aria-pressed={rating === "bad"}
-          onClick={() => {
-            setSaved(false);
-            setRating((r) => (r === "bad" ? null : "bad"));
-          }}
-          className={cn(
-            "rounded-md border px-2 py-1 text-sm",
-            rating === "bad"
-              ? "border-foreground/40 bg-foreground/5"
-              : "border-foreground/15"
-          )}
-        >
-          👎
-        </button>
-      </div>
-
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {CAD_FEEDBACK_TAGS.map((tag) => (
-          <button
-            key={tag}
-            type="button"
-            aria-pressed={tags.includes(tag)}
-            onClick={() => toggleTag(tag)}
-            className={cn(
-              "rounded-full border px-2 py-0.5 text-xs",
-              tags.includes(tag)
-                ? "border-foreground/40 bg-foreground/5"
-                : "border-foreground/15 text-muted-foreground"
-            )}
-          >
-            {CAD_FEEDBACK_TAG_LABELS[tag]}
-          </button>
-        ))}
-      </div>
-
-      <input
-        value={note}
-        onChange={(e) => {
-          setSaved(false);
-          setNote(e.target.value);
-        }}
-        maxLength={1000}
-        placeholder="Optional note…"
-        className="mt-2 w-full rounded-md border border-foreground/15 bg-card px-2 py-1 text-xs outline-none focus:border-foreground/30"
-      />
-
-      <div className="mt-2 flex items-center gap-3">
-        <button
-          type="button"
-          onClick={save}
-          disabled={saving}
-          className="rounded-md border border-foreground/15 px-3 py-1 text-xs font-medium disabled:opacity-50"
-        >
-          {saving ? "Saving…" : "Save feedback"}
-        </button>
-        {saved && <span className="text-xs text-muted-foreground">Saved ✓</span>}
-      </div>
-    </div>
-  );
-}

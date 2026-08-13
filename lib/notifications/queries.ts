@@ -23,7 +23,7 @@ import { swallow } from "@/lib/utils/swallow";
  * covers this case; the try/catch enforces it.
  *
  * Wrapped in React.cache so multiple callers within the same request
- * (app/(app)/layout.tsx + components/profile/user-profile-view.tsx)
+ * (app/(app)/layout.tsx and the authed branch of app/page.tsx)
  * share a single DB round trip instead of each re-querying.
  */
 export const getMyUnreadNotificationCount = cache(

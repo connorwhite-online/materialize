@@ -13,19 +13,22 @@ import { test, expect } from "@playwright/test";
  */
 
 test.describe("anon smoke", () => {
-  test("home renders with hero, search, and bottom bar", async ({ page }) => {
+  test("home renders with hero, search, and login", async ({ page }) => {
     const response = await page.goto("/");
     expect(response?.status()).toBe(200);
 
-    // HeroShowcase mounts a <canvas> for the 3D viewport — its
-    // presence proves the client component hydrated.
-    await expect(page.locator("canvas").first()).toBeVisible({
-      timeout: 10_000,
-    });
+    // The hero is now static server-rendered markup — no canvas. This
+    // used to assert on HeroShowcase's <canvas> as a hydration proof;
+    // that mount is gone (see the visual slot in app/page.tsx), so the
+    // heading is what proves the hero rendered, and the Login CTA
+    // below proves the client bundle hydrated.
+    await expect(
+      page.getByRole("heading", { level: 1, name: /print in any material/i })
+    ).toBeVisible();
 
-    // HomeBottomBar exposes a Sign-in CTA for anon visitors.
-    const signIn = page.getByRole("button", { name: /sign in/i });
-    await expect(signIn.first()).toBeVisible();
+    await expect(page.getByPlaceholder("Search (⌘K)")).toBeVisible();
+    await expect(page.getByRole("link", { name: /^print$/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /login/i }).first()).toBeVisible();
   });
 
   test("/files browse page loads", async ({ page }) => {

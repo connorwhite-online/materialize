@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { auth } from "@clerk/nextjs/server";
 import { getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
 import { PrintPageContent } from "@/components/print/print-page-content";
@@ -5,6 +6,31 @@ import { loadLibraryTiles, type LibraryTile } from "@/lib/print/library-tiles";
 import { getCheckoutModel } from "@/lib/env";
 import { loadProjectPrintTiles } from "@/lib/print/project-tiles";
 import { logError } from "@/lib/logger";
+
+/**
+ * The instant-quote landing page. It had no metadata, so it inherited
+ * the generic site title despite being the page that answers the
+ * highest-intent query we can serve: someone who wants a thing printed.
+ *
+ * Every variant canonicalizes back to bare `/print`. The `?material=`,
+ * `?project=` and `?expand=` params only pre-seed the configurator —
+ * the page's indexable content is identical across all of them, so
+ * letting each combination be indexed separately would split signals
+ * across near-duplicate URLs for no gain.
+ */
+export const metadata: Metadata = {
+  title: "3D Printing Service — Upload a Model, Get an Instant Quote",
+  description:
+    "Upload an STL, OBJ, 3MF or STEP file and get instant 3D printing quotes from vetted manufacturers. Choose from 60+ materials including PLA, resin, nylon and metal — printed and shipped to your door, no printer required.",
+  alternates: { canonical: "/print" },
+  openGraph: {
+    type: "website",
+    title: "3D Printing Service — Upload a Model, Get an Instant Quote",
+    description:
+      "Upload a 3D model, compare live quotes from vetted print shops across 60+ materials, and have the finished part shipped to you.",
+    url: "/print",
+  },
+};
 
 export default async function PrintPage(props: {
   searchParams: Promise<{ material?: string; expand?: string; project?: string }>;

@@ -1,11 +1,26 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
-import { eq, and, isNull, inArray } from "drizzle-orm";
+import { eq, and, isNull, inArray, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { notifications } from "@/lib/db/schema";
 import { logError } from "@/lib/logger";
+import {
+  hasUsableActor,
+  type NotificationPayload,
+} from "@/lib/notifications/inbox";
+import type { NotificationType } from "@/lib/notifications/types";
+
+const INBOX_LIMIT = 50;
+
+export type NotificationListItem = {
+  id: string;
+  type: NotificationType;
+  payload: NotificationPayload;
+  readAt: string | null;
+  createdAt: string;
+};
 
 type Result = { ok: true } | { error: string };
 
@@ -98,5 +113,48 @@ export async function markNotificationsRead(
   } catch (error) {
     logError("markNotificationsRead", error);
     return { error: "Failed to mark as read" };
+  }
+}
+
+/**
+ * Recent inbox rows for the bell popover. Dates are ISO strings so the
+ * client doesn't have to guess at server-action Date serialization.
+ * Malformed payloads are dropped the same way the full inbox tab does.
+ */
+export async function listMyNotifications(): Promise<
+  { items: NotificationListItem[] } | { error: string }
+> {
+  try {
+    const { userId } = await auth();
+    if (!userId) return { error: "Unauthorized" };
+
+    const rows = await db
+      .select({
+        id: notifications.id,
+        type: notifications.type,
+        payload: notifications.payload,
+        readAt: notifications.readAt,
+        createdAt: notifications.createdAt,
+      })
+      .from(notifications)
+      .where(eq(notifications.userId, userId))
+      .orderBy(desc(notifications.createdAt))
+      .limit(INBOX_LIMIT);
+
+    const items: NotificationListItem[] = [];
+    for (const row of rows) {
+      if (!hasUsableActor(row.payload)) continue;
+      items.push({
+        id: row.id,
+        type: row.type as NotificationType,
+        payload: row.payload,
+        readAt: row.readAt ? row.readAt.toISOString() : null,
+        createdAt: row.createdAt.toISOString(),
+      });
+    }
+    return { items };
+  } catch (error) {
+    logError("listMyNotifications", error);
+    return { error: "Failed to load notifications" };
   }
 }

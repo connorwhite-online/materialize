@@ -64,7 +64,7 @@ QuoteConfigurator:
 
 **Local Stripe webhook forwarding** — the order only advances from `cart_created` → `ordered` when `/api/webhooks/stripe` runs `handlePrintOrderPayment`. In local dev, Stripe can't reach `localhost:3000` on its own, so run `stripe listen --forward-to localhost:3000/api/webhooks/stripe` in a side terminal during checkout testing. Without it, the order sits in the profile's "Carts" section with a Resume button that just relinks to the same Stripe session — easy to mistake for "payment didn't go through." The `STRIPE_WEBHOOK_SECRET` for local dev is the value the `stripe listen` command prints on startup, not the one from the Stripe dashboard.
 
-**Sandbox indicator** — when Stripe is on test keys (`sk_test_*`) or `CRAFTCLOUD_USE_MOCK !== "false"` (the default), an amber "Sandbox" pill renders in the nav (sidebar at nav+, header at sub-nav). Detection lives in `isSandboxMode()` in `lib/env.ts`. If you add another mock/test gate, OR it into that helper so the badge keeps reflecting reality.
+**Sandbox indicator** — when Stripe is on test keys (`sk_test_*`) or `CRAFTCLOUD_USE_MOCK !== "false"` (the default), an amber "Sandbox" pill renders in the nav (bubbled off the logomark at nav+; in the collapsed mobile pill, and on the avatar in the expanded mobile menu, at sub-nav). Detection lives in `isSandboxMode()` in `lib/env.ts`. If you add another mock/test gate, OR it into that helper so the badge keeps reflecting reality.
 
 **Stripe redirect URL** — `createStripeSessionForOrder` derives the `success_url` / `cancel_url` base from request headers (`x-forwarded-host` + `x-forwarded-proto`), NOT from `NEXT_PUBLIC_APP_URL`. The env var bakes at build time; when unset in production it falls back to `http://localhost:3000` and the hardcoded localhost lands in every customer's post-payment redirect. The `tokens/page.tsx` MCP URL uses the same header-derived pattern for the same reason. Don't reintroduce `NEXT_PUBLIC_APP_URL` for runtime URL construction.
 
@@ -212,16 +212,19 @@ Never call the DB cart a "CraftCloud cart." They are distinct: the DB cart is a 
 Three components in `components/brand/logo.tsx`, all painting with
 `fill="currentColor"` so they follow the surrounding `text-*` token in both themes:
 
-- **`<Logomark>`** — the "M" alone. Use where there's no horizontal room: the nav
-  rail (12rem wide — the full word needs ~14rem at nav size), the fee-sheet tile.
+- **`<Logomark>`** — the "M" alone. Use where there's no horizontal room: the top
+  bar's brand link, the mobile nav's collapsed pill on `/`, its Home menu row, the
+  fee-sheet tile. (The full word needs ~14rem at nav size, which none of those have.)
 - **`<Wordmark>`** — the full word, static.
 - **`<AnimatedWordmark>`** — the same word with a CSS-only reveal: the "M" is
   always painted and the other ten letters drift in left-to-right, each blurred
   and lifted, settling as a bottom-to-top wipe fills it in. `animateOnMount`
   plays it once (keyframes — works with JS disabled); `expanded` makes it a
   controlled toggle between the word and the bare mark, which reverses the
-  stagger so it peels right-to-left back to the "M". Live on the landing header,
-  the auth modal, `/sign-in`, `/sign-up`, and `/onboarding`.
+  stagger so it peels right-to-left back to the "M". Live on the landing header
+  (at `nav+` only — below that the header falls back to `<Logomark>`, because the
+  word would crowd the search pill on a phone), the auth modal, `/sign-in`,
+  `/sign-up`, and `/onboarding`.
 
 All geometry lives in `components/brand/logo-paths.ts` — **the only place path
 data is defined**. Updating the logo means replacing the `d` strings there (one
@@ -240,7 +243,34 @@ per-letter `--mz-i`, and `prefers-reduced-motion` collapses it to instant.
 ## Fonts
 
 - **Body** — system font stack (`-apple-system, SF Pro, …`), set in `app/globals.css` via `--font-sans`. No webfont download.
-- **Hero display** — local OTFs in `public/`: `PPFuji-Bold.otf` as `--font-display` and `PPPlayground-Light.otf` as `--font-script`. Loaded via `next/font/local` in `app/layout.tsx`. Applied via inline `fontFamily: "var(--font-display)…"` on the home hero `<h1>` ("Materialize" display + "Anything" script) and the nav brand link. The hero heading is real selectable text, not an SVG — it must stay an `<h1>` so the home page (the URL every backlink points at) ships a crawlable heading.
+- **Display** — `PPFuji-Bold.otf` (`--font-display`) is **no longer loaded in the browser.** It set the old home-hero wordmark; the brand is an SVG now (§ Brand logo) and nothing consumes the variable, so `app/layout.tsx` doesn't declare it. `lib/og/render-card.tsx` still reads the same OTF off disk for OG cards — server-side, unaffected. The file stays in `public/`.
+- **Headings** — every `<h1>`–`<h6>` already routes through `--font-heading` (PP Frama Regular) in `app/globals.css:359`. Headings need no inline `fontFamily`, and adding one is almost always a mistake.
+- **`PPPlayground-Light.otf` (`--font-script`) is currently unused.** It set the "Anything" word in the old wordmark hero; that hero is gone and the 157KB OTF preload went with it. The file is still in `public/` — if you reintroduce it, declare it in the route that uses it (not `app/layout.tsx`) so it doesn't load site-wide.
+- The home hero heading is real selectable text, not an SVG — it must stay an `<h1>` so the home page (the URL every backlink points at) ships a crawlable heading. It states what the product does; the brand mark lives in the header `<Logomark />` instead, so "Materialize" still appears above the fold.
+
+## Mobile navigation
+
+Sub-`nav` viewports (< 67.5rem) get `components/nav/mobile-nav.tsx` instead of the desktop `TopBar` — a single floating surface that morphs:
+
+- **Collapsed** it is a pill: the current page's icon, the page title, a chevron grabber (with the unread pip on it), and the sandbox chip. `/` shows the brand `<Logomark>`.
+- **Tapped** it widens and grows upward into a menu card — Home / Search (`/files`) / Print / Materials / Notifications, plus the owner-only Prometheus entry — with the desktop-style avatar + name/@username container taking over the pill's row at the bottom. Anon visitors get a Sign in row and no inbox.
+
+Two things to keep in mind when touching it:
+
+- **Never put `layout` on the card.** Its width is animated as a number, between the expanded width (viewport-clamped) and a collapsed width measured off an invisible ghost copy of the row (`useNavWidths`). Motion's layout FLIP scale-transforms children across a size change, which visibly stretches the row's text — the same trap already documented on `HomeBottomBar`. Only the menu block animates `height: 0 ↔ auto`; the card's height follows it.
+- **Open state is derived, not an effect.** `openPath` stores the pathname the menu was opened on, so "collapse on navigate" and "collapse when the keyboard is up" fall out of `openPath === pathname && !keyboardOpen` rather than a `setState`-in-effect (which the React compiler lint rejects).
+
+Route/label resolution lives in `components/nav/mobile-nav-destinations.ts` (pure, unit-tested): `navDestinations()` builds the menu, `isDestinationActive()` is exact-match (a `/files/<slug>` detail page is not the Search listing), and `resolvePageIdentity()` resolves the collapsed pill's icon + title, falling back through section prefixes so a detail page still names its section.
+
+The inbox is a real page at `/notifications` (moved from `/dashboard/comments`, which now permanent-redirects) — desktop still reads it through the bell popover in the top bar, mobile navigates to it.
+
+## Home landing page
+
+`app/page.tsx` is the anon marketing page. Authed users get a home dashboard on the same URL (pending orders if any, upload dropzone, recent files if any, then the full library) instead of being sent to their profile. It is deliberately cheap for anon visitors: a static hero (heading + copy, no webfont of its own), the shared `<TopBar />` (search / Print / Login), then the server-rendered `<HomeMarketing />` sections and `<HomeFaq />`. The owner's own `/${username}` page is profile/settings (Profile + General tabs), not the old library/orders dashboard.
+
+The three.js / R3F hero showcase **is unmounted, not deleted.** `components/home/hero-showcase.tsx`, `hero-showcase-lazy.tsx`, `showcase-mesh.tsx`, `showcase-particles.tsx` and `material-carousel.tsx` are all still in the tree; `<HeroShowcase />` in the hero's visual slot restores it in one line. Anything that replaces it must (a) load through the `hero-showcase-lazy.tsx` `next/dynamic` + `ssr: false` wrapper so three.js stays off the critical path, and (b) reserve the canvas's height in the placeholder so its arrival doesn't shift the copy above it.
+
+The home page also emits the site's only `Organization` / `WebSite` JSON-LD (both are `@id`-keyed singletons — do not repeat them on other routes) and the `FAQPage` node. FAQ copy lives in `lib/seo/home-faq.ts` and is read by both the JSON-LD and `<HomeFaq />`; never inline that copy in the component, because Google requires marked-up answers to appear verbatim on the page and two copies drift.
 
 ## Database migrations
 

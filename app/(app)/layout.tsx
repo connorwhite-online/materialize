@@ -1,19 +1,16 @@
-import { CartProvider } from "@/components/print/cart-context";
-import { CartPanel } from "@/components/print/cart-panel";
-import { MainMenuSidebar } from "@/components/nav/main-menu";
-import { MobileTabBar } from "@/components/nav/mobile-tab-bar";
 import { getMyUnreadNotificationCount } from "@/lib/notifications/queries";
 import { isSandboxMode } from "@/lib/env";
 import { resolveTextToCadAccess } from "@/lib/features";
+import { AppShell } from "@/components/nav/app-shell";
 
 export default async function AppLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // Server-fetch the unread count once per request; the dot indicator
-  // on the sidebar avatar uses this as its initial value and the SSE
-  // stream picks up the live updates afterwards.
+  // Server-fetch the unread count once per request; the desktop bell
+  // and the mobile-tab bell use this as the initial value and poll
+  // for live updates afterwards.
   //
   // Owner-only experimental nav entry. Resolved server-side and threaded
   // down; the page itself re-checks the gate and 404s as a second layer.
@@ -30,40 +27,12 @@ export default async function AppLayout({
   ]);
   const sandbox = isSandboxMode();
   return (
-    <CartProvider>
-      {/*
-        nav:pl-56 reserves a 14rem gutter on the left for the
-        sidebar card to live in. Below the nav breakpoint (1080px,
-        defined in globals.css) the rail is hidden and the floating
-        MobileTabBar at the bottom carries the same nav. We use a
-        custom breakpoint instead of lg (1024px) because at 1024 the
-        page feels cramped with both the centered max-w-7xl content
-        and the sidebar gutter — by 1080 there's enough room.
-      */}
-      <div className="flex min-h-screen flex-col nav:pl-56">
-        {/*
-          Sandbox heads-up. At nav+ it rides inside the sidebar rail
-          (passed to MainMenuSidebar); on sub-nav it pips the top-right
-          corner of the profile avatar in the MobileTabBar.
-        */}
-        <MainMenuSidebar
-          initialUnreadCount={initialUnreadCount}
-          sandbox={sandbox}
-          textToCad={textToCad}
-        />
-        {/*
-          Bottom padding on sub-nav reserves space for the floating
-          MobileTabBar so the last of the page content isn't trapped
-          behind it. Cleared at nav+ where the bar is hidden.
-        */}
-        <main className="flex-1 pb-28 nav:pb-0">{children}</main>
-        <MobileTabBar
-          initialUnreadCount={initialUnreadCount}
-          textToCad={textToCad}
-          sandbox={sandbox}
-        />
-        <CartPanel />
-      </div>
-    </CartProvider>
+    <AppShell
+      initialUnreadCount={initialUnreadCount}
+      sandbox={sandbox}
+      textToCad={textToCad}
+    >
+      {children}
+    </AppShell>
   );
 }

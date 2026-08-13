@@ -3,7 +3,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import {
   extractRepoUrl,
   extractReadmeImagePaths,
-  extractKicadFacts,
+  extractPdfUrls,
   fetchRepoContext,
 } from "@/lib/cad/repo-fetch";
 
@@ -50,33 +50,24 @@ describe("extractReadmeImagePaths", () => {
   });
 });
 
-describe("extractKicadFacts", () => {
-  it("measures the board outline bbox from Edge.Cuts", () => {
-    const pcb = `
-      (gr_line (start 100 50) (end 158.4 50) (stroke (width 0.1)) (layer "Edge.Cuts"))
-      (gr_line (start 158.4 50) (end 158.4 142.1) (stroke (width 0.1)) (layer "Edge.Cuts"))
-      (gr_line (start 158.4 142.1) (end 100 142.1) (stroke (width 0.1)) (layer "Edge.Cuts"))
-      (gr_line (start 100 142.1) (end 100 50) (stroke (width 0.1)) (layer "Edge.Cuts"))
-    `;
-    const facts = extractKicadFacts(pcb);
-    expect(facts[0]).toContain("58.4 x 92.1 mm");
-    expect(facts[0]).toContain("Edge.Cuts");
+describe("extractPdfUrls", () => {
+  it("finds https pdf urls, rejects unsafe hosts, caps at 2", () => {
+    const prompt = [
+      "datasheets: https://cdn.vendor.com/ds/esp32-s3.pdf",
+      "http://insecure.com/x.pdf",
+      "https://192.168.1.5/leak.pdf",
+      "https://localhost/x.pdf",
+      "https://user:pw@host.com/x.pdf",
+      "https://a.com/1.pdf https://b.com/2.pdf https://c.com/3.pdf",
+    ].join(" ");
+    const urls = extractPdfUrls(prompt);
+    expect(urls).toHaveLength(2);
+    expect(urls[0]).toBe("https://cdn.vendor.com/ds/esp32-s3.pdf");
+    expect(urls.every((u) => u.startsWith("https://"))).toBe(true);
   });
 
-  it("counts non-plated mounting drills by diameter", () => {
-    const pcb = `
-      (pad "" np_thru_hole circle (at 0 0) (size 5.4 5.4) (drill 3.2) (layers "*.Cu"))
-      (pad "" np_thru_hole circle (at 10 0) (size 5.4 5.4) (drill 3.2) (layers "*.Cu"))
-      (pad "1" thru_hole circle (at 5 5) (size 1.7 1.7) (drill 1.0) (layers "*.Cu"))
-    `;
-    const facts = extractKicadFacts(pcb);
-    expect(facts.some((f) => f.includes("2 x 3.2 mm drill"))).toBe(true);
-    // Plated (component) holes are not mounting holes.
-    expect(facts.some((f) => f.includes("1.0"))).toBe(false);
-  });
-
-  it("returns [] for garbage", () => {
-    expect(extractKicadFacts("not a board")).toEqual([]);
+  it("returns [] with no pdf links", () => {
+    expect(extractPdfUrls("a 20mm cube")).toEqual([]);
   });
 });
 

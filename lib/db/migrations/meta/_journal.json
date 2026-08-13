@@ -428,6 +428,20 @@
       "when": 1786002100000,
       "tag": "0060_cad_job_transcript",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1786002200000,
+      "tag": "0061_cad_fetched_facts",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1786002300000,
+      "tag": "0062_cad_dimension_checks",
+      "breakpoints": true
     }
   ]
 }

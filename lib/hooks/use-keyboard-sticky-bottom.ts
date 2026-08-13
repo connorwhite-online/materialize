@@ -61,6 +61,38 @@ export function useKeyboardStickyBottom(
 }
 
 /**
+ * The live bottom overlap in px — the keyboard's height — from the same
+ * VisualViewport source as the pin and the open/closed signal.
+ *
+ * Where `useKeyboardStickyBottom` mutates one element's `bottom` imperatively,
+ * this returns the number so a component can lay itself out around the
+ * keyboard (e.g. `NativeSheet` pads its bottom AND shrinks its max height, so
+ * a sheet with an input rides above the keyboard instead of under it). Returns
+ * 0 during SSR and wherever VisualViewport is absent, which makes every
+ * consumer a no-op on those platforms.
+ */
+export function useKeyboardOverlap(): number {
+  const [overlap, setOverlap] = useState(0);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    const update = () => setOverlap(keyboardOverlapPx());
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  }, []);
+
+  return overlap;
+}
+
+/**
  * `true` while the on-screen (soft) keyboard is open, detected from the same
  * VisualViewport overlap the sticky-bottom pin uses. Global surfaces (the
  * mobile bottom nav, MTR-212) read this to fade themselves out while a text

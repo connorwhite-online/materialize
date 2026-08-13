@@ -17,6 +17,7 @@ import { CadMeter, runWithCadContext } from "@/lib/cad/metering";
 import { runCadGeneration } from "@/lib/cad/orchestrate";
 import type { PromptImage } from "@/lib/cad/model-client";
 import {
+  appendConceptReference,
   buildThreadHistory,
   resolveReferenceImages,
 } from "@/lib/cad/reference-images";
@@ -194,6 +195,11 @@ export interface ExecuteCadJobInput {
   priorBrief?: unknown;
   /** User-reviewed brief from the studio's brief card (fresh builds only). */
   providedBrief?: unknown;
+  /**
+   * Concept render the user chose in the composer's pre-build picker
+   * (base64 PNG) — the harness uses it verbatim as the aesthetic target.
+   */
+  providedConcept?: { png: string } | null;
 }
 
 /**
@@ -543,7 +549,7 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
     try {
       const fetched = await runWithCadContext(
         { meter, credentials, recorder },
-        () => fetchRepoContext(prompt, controller.signal)
+        () => fetchRepoContext(prompt, controller.signal, { userId })
       );
       if (fetched) {
         fetchedFacts = fetched.facts || undefined;
@@ -611,6 +617,7 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
         images,
         threadHistory,
         fetchedFacts,
+        providedConcept: input.providedConcept ?? null,
         signal: controller.signal,
         onProgress,
         onQuestion,
@@ -654,6 +661,17 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
       return;
     }
 
+    // Persist the concept this build aimed toward as a thread reference
+    // (user refs always outrank it; skipped when the slots are full), so
+    // revisions keep building toward the SAME chosen target. Best-effort.
+    if (result.conceptPng) {
+      await appendConceptReference({
+        generationId,
+        userId,
+        png: result.conceptPng,
+      });
+    }
+
     // Terminal record INTO progress — the same CadDoneEvent shape the old
     // SSE route sent, so the events route replays a finished job verbatim.
     const done: CadDoneEvent = {
@@ -672,6 +690,9 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
       // first paint (no post-mount "Download STEP" pop-in, MTR-215).
       hasStep: persisted.hasStep,
       features: persisted.features ?? [],
+      // Dimension-contract verdicts (MTR-197) — the annotation layer +
+      // verified chip are stable at first paint, like features.
+      dimensionChecks: persisted.dimensionChecks ?? [],
     };
     await flushTerminal(done);
     await markJob({ status: "done", finishedAt: new Date(), ...usagePatch() });

@@ -1592,7 +1592,7 @@ export const cadGenerations = pgTable(
      * inline — so history queries stay small.
      */
     referenceImages: jsonb("reference_images").$type<
-      { key: string; mediaType: string }[]
+      { key: string; mediaType: string; label?: string }[]
     >(),
     /**
      * Instrumented construction features for the feature-chip UX
@@ -1626,6 +1626,17 @@ export const cadGenerations = pgTable(
       plugs?: number;
       error?: string;
     }>(),
+    /**
+     * Dimension-contract results (MTR-197): each brief dimension target
+     * checked deterministically against the built geometry, with matched
+     * topology face ids for feature-level kinds. Small jsonb list (a handful
+     * of callouts) kept on the row — like `features` — so the studio renders
+     * the dimension annotation layer + verified chip without a second fetch.
+     * Null when the run carried no targets or predates the check.
+     */
+    dimensionChecks: jsonb("dimension_checks").$type<
+      import("@/lib/cad/dimension-check").DimensionCheckResult[]
+    >(),
     /**
      * Config fingerprint: WHICH harness configuration produced this row
      * (per-role models, flags, router verdict) — the treatment beside the
@@ -1769,6 +1780,31 @@ export const cadJobs = pgTable(
     index("cad_jobs_generation_id_idx").on(table.generationId),
     // Covers the worker poll (WHERE status = 'queued' ORDER BY created_at).
     index("cad_jobs_status_created_idx").on(table.status, table.createdAt),
+  ]
+);
+
+// Fetched-facts cache (lib/cad/repo-fetch.ts): the distilled mechanical
+// fact sheet for a set of URLs a prompt linked (GitHub repo and/or
+// datasheet PDFs), cached per user so re-generating against the same
+// project skips the trees API, the board-file download, and the distill
+// model call. `sourceUrl` is the canonical cache key (sorted URLs joined
+// with a space). Rows are re-read for 7 days (app-layer TTL), then
+// re-fetched and replaced; stale rows are harmless and tiny (text only).
+export const cadFetchedFacts = pgTable(
+  "cad_fetched_facts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sourceUrl: text("source_url").notNull(),
+    facts: text("facts").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("cad_fetched_facts_user_url_idx").on(table.userId, table.sourceUrl),
   ]
 );
 

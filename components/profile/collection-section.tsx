@@ -16,6 +16,7 @@ interface CollectionSectionProps {
   isOwner: boolean;
   fileCount: number;
   defaultOpen?: boolean;
+  compact?: boolean;
   children: React.ReactNode;
 }
 
@@ -34,6 +35,7 @@ export function CollectionSection({
   isOwner,
   fileCount,
   defaultOpen = true,
+  compact = false,
   children,
 }: CollectionSectionProps) {
   const [open, setOpen] = useState(defaultOpen);
@@ -44,7 +46,7 @@ export function CollectionSection({
       : `${fileCount} ${fileCount === 1 ? "File" : "Files"}`;
 
   return (
-    <section className="rounded-2xl bg-muted/50 p-5">
+    <section className={compact ? "rounded-xl bg-muted/50 p-3" : "rounded-2xl bg-muted/50 p-5"}>
       <div className="flex items-start justify-between gap-3">
         <button
           type="button"
@@ -59,7 +61,7 @@ export function CollectionSection({
           >
             <ChevronRight size={16} />
           </motion.span>
-          <h2 className="min-w-0 truncate text-lg font-semibold">{name}</h2>
+          <h2 className={compact ? "min-w-0 truncate text-sm font-semibold" : "min-w-0 truncate text-lg font-semibold"}>{name}</h2>
           <Badge
             variant="outline"
             className={cn(

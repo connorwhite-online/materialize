@@ -1404,9 +1404,9 @@ export function QuoteConfigurator({
                       }
                       setQuantity(clamped);
                     }}
-                    // text-base on phones (iOS auto-zooms < 16px),
-                    // text-sm on md+ to match the rest of the row.
-                    className="h-10 w-20 rounded-xl border border-border bg-card/60 backdrop-blur-sm px-3.5 py-1 text-base md:text-sm outline-none transition-[color,box-shadow,border-color] duration-150 ease-out hover:bg-card focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 dark:border-input dark:bg-input/30"
+                    // field-text keeps 16px on phones (iOS auto-zooms below
+                    // that); text-sm on md+ to match the rest of the row.
+                    className="field-text h-10 w-20 rounded-xl border border-border bg-card/60 backdrop-blur-sm px-3.5 py-1 md:text-sm outline-none transition-[color,box-shadow,border-color] duration-150 ease-out hover:bg-card focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 dark:border-input dark:bg-input/30"
                   />
                   <span id="quantity-range-hint" className="sr-only">
                     Enter a quantity between 1 and 100.

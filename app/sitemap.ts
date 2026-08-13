@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { files, projects, users } from "@/lib/db/schema";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { logError } from "@/lib/logger";
+import { CATEGORIES } from "@/lib/categories";
 
 /**
  * Sitemap for crawlers and agent discovery.
@@ -34,6 +35,19 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${APP_URL}/llms.txt`, lastModified: now, changeFrequency: "monthly", priority: 0.5 },
     { url: `${APP_URL}/llms-full.txt`, lastModified: now, changeFrequency: "weekly", priority: 0.5 },
   ];
+
+  // Curated category facets on the browse page. These are a finite,
+  // known set (unlike `?q=` free-text search, which /files marks
+  // noindex) and each one is a real landing page for "3d print files
+  // for <category>" queries, so they belong in the sitemap. The
+  // canonical emitted by /files' generateMetadata matches this URL
+  // shape exactly — keep the two in step.
+  const categoryEntries: MetadataRoute.Sitemap = CATEGORIES.map((c) => ({
+    url: `${APP_URL}/files?category=${c.id}`,
+    lastModified: now,
+    changeFrequency: "weekly",
+    priority: 0.7,
+  }));
 
   let materialEntries: MetadataRoute.Sitemap = [];
   try {
@@ -128,6 +142,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   return [
     ...staticEntries,
+    ...categoryEntries,
     ...materialEntries,
     ...fileEntries,
     ...projectEntries,

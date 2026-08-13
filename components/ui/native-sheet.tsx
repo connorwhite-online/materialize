@@ -9,6 +9,7 @@ import {
   useReducedMotion,
   type PanInfo,
 } from "motion/react";
+import { useKeyboardOverlap } from "@/lib/hooks/use-keyboard-sticky-bottom";
 import { cn } from "@/lib/utils";
 
 /**
@@ -27,6 +28,17 @@ import { cn } from "@/lib/utils";
  * `dismissible={false}` locks the sheet during moments that must not
  * be interrupted (e.g. a payment mid-confirmation): backdrop taps,
  * Escape, and drag all no-op; the grabber hides to signal it.
+ *
+ * KEYBOARD: sheets hold inputs, and a bottom-anchored `position: fixed`
+ * surface sits at the bottom of the LAYOUT viewport — which iOS leaves
+ * full-height under an open keyboard (we set `viewport.interactiveWidget
+ * = "overlays-content"` in app/layout.tsx), so the sheet's own fields
+ * would hide behind it. We read the VisualViewport overlap and both pad
+ * the container up and shrink the panel's max height by it, so the sheet
+ * rides above the keyboard and its content still scrolls within what's
+ * actually visible. The offset lands on the CONTAINER, never the panel:
+ * the panel's `y` is owned by the spring + drag-to-dismiss gesture, and
+ * writing a transform there would fight it.
  */
 export interface NativeSheetProps {
   open: boolean;
@@ -51,6 +63,8 @@ export function NativeSheet({
   className,
 }: NativeSheetProps) {
   const reducedMotion = useReducedMotion();
+  // On-screen keyboard height (0 when closed / unsupported → no-op).
+  const keyboardOverlap = useKeyboardOverlap();
   // Drag starts only from the grabber (dragListener={false} below):
   // the content area may scroll, and a sheet-wide drag listener would
   // capture vertical touch moves before the scroll container sees
@@ -105,6 +119,14 @@ export function NativeSheet({
           role="dialog"
           aria-modal="true"
           aria-label={ariaLabel}
+          // Lift the sheet above the on-screen keyboard. The backdrop is
+          // absolutely positioned to `inset-0` inside this box, so it still
+          // covers the full screen — only the panel is pushed up.
+          style={
+            keyboardOverlap > 0
+              ? { paddingBottom: keyboardOverlap }
+              : undefined
+          }
         >
           <motion.div
             className="absolute inset-0 bg-black/45 backdrop-blur-[2px]"
@@ -126,6 +148,16 @@ export function NativeSheet({
               "pb-[max(env(safe-area-inset-bottom),1.25rem)]",
               className
             )}
+            // The dvh-based max-height above doesn't shrink for the keyboard
+            // (it overlays content rather than resizing the viewport), so take
+            // the overlap off explicitly — otherwise tall sheet content is
+            // capped to a height that extends behind the keyboard and the
+            // inner scroll container can't reach its own end.
+            style={
+              keyboardOverlap > 0
+                ? { maxHeight: `calc(100dvh - 2rem - ${keyboardOverlap}px)` }
+                : undefined
+            }
             initial={
               reducedMotion ? { opacity: 0 } : { y: "100%", opacity: 1 }
             }

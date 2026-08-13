@@ -1,12 +1,10 @@
-import { redirect } from "next/navigation";
-import { currentUser } from "@clerk/nextjs/server";
+import { permanentRedirect } from "next/navigation";
 
-// Dashboard's "comments inbox" view lives on the profile page as a
-// `?tab=comments` panel — same convention as orders / earnings — so
-// the dashboard route just redirects there.
-export default async function CommentsRedirect() {
-  const user = await currentUser();
-  if (!user) redirect("/");
-  if (!user.username) redirect("/onboarding");
-  redirect(`/${user.username}?tab=comments`);
+/**
+ * The inbox used to live here. It moved to /notifications so the mobile
+ * nav's Notifications destination has a URL that matches its label; this
+ * stays as a redirect for bookmarks and older links.
+ */
+export default function DashboardCommentsPage() {
+  permanentRedirect("/notifications");
 }

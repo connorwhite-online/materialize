@@ -59,6 +59,18 @@ export const CONCEPT_FROM_REFS_LABEL =
 export const CONCEPT_JUDGE_LABEL =
   "Concept render this build aimed toward — the aesthetic target.";
 
+/** Caption for a concept the user explicitly chose (picker / composer). */
+export const CONCEPT_CHOSEN_LABEL =
+  "Concept render the user CHOSE as this build's aesthetic target.";
+
+/**
+ * Caption a chosen concept carries as a PERSISTED thread reference
+ * (lib/cad/reference-images.ts) — matched exactly to find the thread's
+ * current target on later turns, so keep it byte-stable.
+ */
+export const CONCEPT_THREAD_REF_LABEL =
+  "Concept render this thread is building toward — the chosen aesthetic target, NOT something the user provided.";
+
 // Shared style suffix. The CAD-expressibility clause is load-bearing: the
 // concept is a build target, so it must stay inside what the B-rep/SDF
 // engines can realize (solids, shells, uniform fillets) — no fabric, no
