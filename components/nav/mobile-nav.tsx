@@ -58,12 +58,17 @@ const SPRING_CLOSE: Transition = {
 };
 
 /**
- * Closing height starts almost immediately so the card shrinks *with*
- * the peeling rows instead of waiting until they are gone (which left
- * a blank white card collapsing). A tiny delay lets the first row go
- * soft before anything is clipped.
+ * Closing height waits a tenth of a second so the top rows can go
+ * soft, then springs out slower than open — the peel has to stay on
+ * screen. A snappier close (stiffness 460) shrank the card empty
+ * before the stagger had travelled two rows.
  */
-const HEIGHT_CLOSE: Transition = { ...SPRING_CLOSE, delay: 0.05 };
+const HEIGHT_CLOSE: Transition = {
+  type: "spring",
+  stiffness: 320,
+  damping: 36,
+  delay: 0.1,
+};
 /**
  * The pill ↔ user-container swap. The incoming row waits out most of
  * the outgoing one's fade, so the two are never both legible — without
