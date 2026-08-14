@@ -9,6 +9,15 @@ const nextConfig: NextConfig = {
   },
   images: {
     /**
+     * Prefer AVIF (then WebP) for the anon-home 4K hero masters and
+     * everything else that flows through `/_next/image`. AVIF cuts
+     * transfer size substantially on photographic art at quality 75;
+     * WebP remains the fallback for browsers that don't take AVIF.
+     * Each format is cached separately, which is fine for a small set
+     * of static marketing assets.
+     */
+    formats: ["image/avif", "image/webp"],
+    /**
      * Next.js 16 breaking change: when `localPatterns` is absent the
      * framework defaults to `[{ pathname: "**", search: "" }]`, which
      * blocks ALL local image URLs that carry a query string from the
