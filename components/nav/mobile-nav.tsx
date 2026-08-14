@@ -25,6 +25,7 @@ import { useAuthModal } from "@/components/auth/auth-modal";
 import { useCart } from "@/components/print/cart-context";
 import { useKeyboardOpen } from "@/lib/hooks/use-keyboard-sticky-bottom";
 import { useUnreadCount } from "@/lib/hooks/use-unread-count";
+import { EASE_OUT_SOFT } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
 /** Widest the expanded card gets; clamped to the viewport below. */
@@ -37,12 +38,11 @@ const MIN_COLLAPSED_WIDTH = 172;
 const ROW_HEIGHT = 56;
 
 /**
- * The card's own motion: a short ease-out tween, deliberately quicker
- * than the content wave below. Stiffness springs (and even
- * `visualDuration` + `bounce: 0`) left a long asymptotic crawl of
- * sub-pixel width/height that shimmered the rounded card, backdrop
- * blur, and labels right before rest — filmed at 60fps, the last
- * ~150ms was all jitter. A cubic lands on the target and stops.
+ * Card morph — finite ease-out tweens. Stiffness springs left a long
+ * asymptotic crawl of sub-pixel width/height that shimmered the
+ * rounded card, backdrop-blur, and labels right before rest. A cubic
+ * lands on the target and stops. Deliberately quicker than the row
+ * cascade so the container still lands first.
  */
 const CARD_IN: Transition = {
   duration: 0.28,
@@ -52,22 +52,19 @@ const CARD_OUT: Transition = {
   duration: 0.24,
   ease: [0.4, 0, 0.2, 1],
 };
+/** Height close waits so the row peel can go soft before clipping. */
+const HEIGHT_CLOSE: Transition = { ...CARD_OUT, delay: 0.06 };
+
+/** Row lift — same expo-out as the card; no spring asymptote on `y`. */
+const ROW_SETTLE: Transition = {
+  duration: 0.28,
+  ease: [0.22, 1, 0.36, 1],
+};
 
 /**
- * Closing height waits a beat so the row cascade can go soft (blur +
- * fade) before the card starts clipping them. Frame-stepping a 60fps
- * capture of the old close showed the rows sitting at full opacity for
- * ~8 frames while the card shrank under them — five labels squashing
- * into each other. The rows now own their exit; this delay is only so
- * the height tween doesn't outrun the first of them.
- */
-const HEIGHT_CLOSE: Transition = { ...CARD_OUT, delay: 0.06 };
-/**
- * The pill ↔ user-container swap. Opacity-only (no y) — a slide on
- * the identity row used to fight the card's last few pixels of height
- * settle and read as the bottom row jittering. The incoming row still
- * waits out most of the outgoing fade so the two are never both
- * legible mid-collapse.
+ * The pill ↔ user-container swap on OPEN. Opacity-only (no y) — a
+ * slide fought the card's last height pixels and read as bottom-row
+ * jitter. Incoming still waits out most of the outgoing fade.
  */
 const IDENTITY_IN: Transition = {
   duration: 0.13,
@@ -75,6 +72,23 @@ const IDENTITY_IN: Transition = {
   ease: [0.32, 0.72, 0, 1],
 };
 const IDENTITY_OUT: Transition = { duration: 0.07, ease: "easeIn" };
+/**
+ * Closing: hold the open identity (Sign in / user) until the menu has
+ * actually shrunk. Consecutive close frames showed "Search" printing
+ * over "Sign in" in a still-tall card — the pill identity was swapping
+ * on the open-path timing while height was still delayed. Same ease as
+ * open; just later, so it lands as the card becomes a pill.
+ */
+const IDENTITY_IN_CLOSE: Transition = {
+  duration: 0.13,
+  delay: 0.18,
+  ease: [0.32, 0.72, 0, 1],
+};
+const IDENTITY_OUT_CLOSE: Transition = {
+  duration: 0.07,
+  delay: 0.1,
+  ease: "easeIn",
+};
 
 const DRAG_CLOSE_OFFSET = 64;
 const DRAG_CLOSE_VELOCITY = 500;
@@ -164,7 +178,7 @@ export function MobileNav({
   );
 
   // Pixel height for the destination list — animating to a number
-  // (not `"auto"`) so the spring lands on an exact value instead of
+  // (not `"auto"`) so the tween lands on an exact value instead of
   // snapping from the last interpolated px back to `auto` at rest.
   const menuNavRef = useRef<HTMLElement>(null);
   const [menuHeight, setMenuHeight] = useState(0);
@@ -293,7 +307,7 @@ export function MobileNav({
                   // own their own fade, so there is no phase where a
                   // half-lit card sits on screen waiting for content.
                   // Height is a measured px value (see menuHeight), not
-                  // `"auto"`, so the spring can rest without a snap.
+                  // `"auto"`, so the tween can rest without a snap.
                   initial={{ height: 0 }}
                   animate={{ height: menuHeight }}
                   exit={{
@@ -301,7 +315,11 @@ export function MobileNav({
                     transition: reducedMotion ? { duration: 0 } : HEIGHT_CLOSE,
                   }}
                   transition={reducedMotion ? { duration: 0 } : CARD_IN}
-                  className="overflow-hidden"
+                  // Stick the list to the pill. Height shrinks the box
+                  // from the top, so Home is clipped first and Materials
+                  // stays parked next to the identity — the other way
+                  // shears the bottom rows and is what read as jitter.
+                  className="flex flex-col justify-end overflow-hidden"
                 >
                   {/* Fixed width so the list never reflows mid-morph while
                       the card itself is still widening. */}
@@ -311,7 +329,12 @@ export function MobileNav({
                     aria-label="Primary"
                     style={{ width: expandedWidth }}
                   >
-                    <ul className="flex flex-col gap-0.5 p-1.5">
+                    <motion.ul
+                      variants={LIST_VARIANTS}
+                      initial="hidden"
+                      animate="visible"
+                      className="flex flex-col gap-0.5 p-1.5"
+                    >
                       {destinations.map((item, index) => {
                         const active = isDestinationActive(pathname, item.href);
                         const badge =
@@ -324,11 +347,8 @@ export function MobileNav({
                         return (
                           <motion.li
                             key={item.href}
-                            custom={{ index, count: destinations.length }}
                             variants={reducedMotion ? undefined : ITEM_VARIANTS}
-                            initial={reducedMotion ? false : "hidden"}
-                            animate={reducedMotion ? false : "visible"}
-                            exit={reducedMotion ? undefined : "exit"}
+                            exit={reducedMotion ? undefined : rowExit(index)}
                           >
                             <Link
                               href={item.href}
@@ -374,7 +394,7 @@ export function MobileNav({
                           </motion.li>
                         );
                       })}
-                    </ul>
+                    </motion.ul>
                     <div className="mx-3 h-px bg-border" />
                   </nav>
                 </motion.div>
@@ -395,7 +415,7 @@ export function MobileNav({
                       exit={
                         reducedMotion
                           ? { opacity: 0 }
-                          : { opacity: 0, transition: IDENTITY_OUT }
+                          : { opacity: 0, transition: IDENTITY_OUT_CLOSE }
                       }
                       transition={reducedMotion ? { duration: 0 } : IDENTITY_IN}
                       className="absolute inset-0 flex items-center"
@@ -459,7 +479,7 @@ export function MobileNav({
                           ? { opacity: 0 }
                           : { opacity: 0, transition: IDENTITY_OUT }
                       }
-                      transition={reducedMotion ? { duration: 0 } : IDENTITY_IN}
+                      transition={reducedMotion ? { duration: 0 } : IDENTITY_IN_CLOSE}
                       className="absolute inset-0 flex items-center text-left"
                     >
                       <PageIdentityContent identity={identity} profile={pillProfile} />
@@ -580,73 +600,75 @@ function TrailingCluster({
 
 /** Wordmark `--mz-stagger-in` — readable cascade, not a simultaneous pop. */
 const STAGGER_IN = 0.038;
-/** Wordmark `--mz-stagger-out` — close peels faster than it arrives. */
-const STAGGER_OUT = 0.024;
+/** Close peels a hair slower than the wordmark's 24ms so the wave reads. */
+const STAGGER_OUT = 0.032;
 
-type RowStagger = { index: number; count: number };
+const LIST_VARIANTS: Variants = {
+  hidden: {},
+  // Reveal outward from the pill: last child (nearest the bottom
+  // edge) leads. No `delayChildren` — the first row starts with the
+  // card, or the card reads as an empty box.
+  visible: {
+    transition: { staggerChildren: STAGGER_IN, staggerDirection: -1 },
+  },
+};
+
+const ROW_LEAVE: Transition = {
+  duration: 0.22,
+  ease: [0.4, 0, 1, 1],
+};
+
+/**
+ * Close target with the delay baked in. AnimatePresence resolves
+ * function variants using `presenceContext.custom`, not the child's
+ * `custom` prop, so a per-item function delay always came out 0.
+ * An object `exit` with `delay: index * STAGGER_OUT` is the stagger.
+ */
+function rowExit(index: number) {
+  const delay = index * STAGGER_OUT;
+  return {
+    opacity: 0,
+    y: 6,
+    filter: "blur(8px)",
+    transition: {
+      ...ROW_LEAVE,
+      delay,
+      opacity: { ...ROW_LEAVE, delay, duration: 0.16 },
+      filter: { ...ROW_LEAVE, delay, duration: 0.18 },
+    },
+  };
+}
 
 /**
  * Rows materialise rather than slide: a short lift plus a blur that
  * resolves as they land. Both are finite tweens — springs left a
- * sub-pixel crawl on `y` (and used to on `scale`) that re-rasterised
- * glyphs each frame and read as jitter right before rest. Travel
- * stays small (10px) so the eye reads focus-in, not a slide from
- * elsewhere.
- *
- * Stagger is per-item delay rather than `staggerChildren`, because the
- * list is nested inside the height wrapper's AnimatePresence and a
- * parent `exit` variant does not reliably orchestrate descendants.
- * Open: last child (nearest the pill) leads. Close: first child (nearest
- * the shrinking top edge) leads, so nothing opaque gets clipped.
+ * sub-pixel crawl on `y` that re-rasterised glyphs each frame and
+ * read as jitter right before rest. No `scale` — scaling type inside
+ * a height box is what made close frames jitter as the browser
+ * relaid out each flex row. Travel stays small (8px) so the eye
+ * reads focus-in, not a slide from elsewhere.
  */
 const ITEM_VARIANTS: Variants = {
   hidden: {
     opacity: 0,
-    y: 10,
+    y: 8,
     filter: "blur(8px)",
+    transition: {
+      duration: 0.18,
+      ease: [0.4, 0, 1, 1],
+      opacity: { duration: 0.14, ease: "easeIn" },
+      filter: { duration: 0.16, ease: "easeIn" },
+    },
   },
-  visible: ({ index, count }: RowStagger) => {
-    const delay = (count - 1 - index) * STAGGER_IN;
-    // Same expo-out as the card — lift finishes cleanly, no asymptote.
-    const settle: Transition = {
-      duration: 0.28,
-      ease: [0.22, 1, 0.36, 1],
-      delay,
-    };
-    // Logo ease: sharpness catches up a frame after the row has
-    // mostly landed, which is the "focus in" the stagger is for.
-    // Delay is repeated on each key — per-property transitions do
-    // not inherit a sibling `delay`.
-    const focus: Transition = {
-      duration: 0.2,
-      ease: [0.22, 0.9, 0.28, 1],
-      delay,
-    };
-    return {
-      opacity: 1,
-      y: 0,
-      filter: "blur(0px)",
-      transition: {
-        y: settle,
-        opacity: focus,
-        filter: { ...focus, duration: 0.24 },
-      },
-    };
-  },
-  exit: ({ index }: RowStagger) => {
-    const delay = index * STAGGER_OUT;
-    return {
-      opacity: 0,
-      y: 10,
-      filter: "blur(8px)",
-      transition: {
-        delay,
-        duration: 0.14,
-        ease: [0.4, 0, 1, 1],
-        opacity: { delay, duration: 0.11, ease: "easeIn" },
-        filter: { delay, duration: 0.12, ease: "easeIn" },
-      },
-    };
+  visible: {
+    opacity: 1,
+    y: 0,
+    filter: "blur(0px)",
+    transition: {
+      y: ROW_SETTLE,
+      opacity: { duration: 0.22, ease: EASE_OUT_SOFT },
+      filter: { duration: 0.24, ease: EASE_OUT_SOFT },
+    },
   },
 };
 

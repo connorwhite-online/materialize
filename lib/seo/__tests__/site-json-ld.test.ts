@@ -89,13 +89,14 @@ describe("faqPageJsonLd", () => {
 });
 
 describe("HOME_FAQ content", () => {
-  it("answers the brand-collision question explicitly", () => {
-    // The single highest-value entry on the page: someone who lands
-    // here wondering whether this is the Belgian company gets a direct
-    // answer, and so does an answer engine summarizing the page.
-    const entry = HOME_FAQ.find((f) => /Materialise|i\.materialise/.test(f.question));
-    expect(entry).toBeDefined();
-    expect(entry!.answer).toMatch(/^No\./);
+  it("answers the brand-collision question explicitly, last", () => {
+    // Still the highest-value disambiguation, but it sits at the
+    // bottom so product questions lead. Someone who lands here
+    // wondering whether this is the Belgian company still gets a
+    // direct answer, and so does an answer engine summarizing the page.
+    const entry = HOME_FAQ.at(-1);
+    expect(entry?.question).toMatch(/Materialise|i\.materialise/);
+    expect(entry?.answer).toMatch(/^No\./);
   });
 
   it("has unique questions", () => {
