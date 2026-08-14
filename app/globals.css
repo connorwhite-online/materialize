@@ -515,14 +515,17 @@
    wipe fills it in, like snow blowing across the word and sticking.
 
    Cost: CSS only. No JS, no rAF, no motion library. The stagger is a delay
-   computed from a per-letter --mz-i, and the only layout-affecting property is
-   the wrapper's own width — one element, sized in px, nothing reflows around
-   it because the wrapper reserves its own box.
+   computed from a per-letter --mz-i, and the only layout-affecting properties
+   are the wrapper's own width and (on toggle-collapse) height — one element,
+   sized in px, nothing reflows around it because the wrapper reserves its box.
 
-   The wrapper CROPS, it does not scale. The SVG inside is always the full
-   wordmark at the requested height; collapsing just narrows the window down to
-   the mark's width. That's why the "M" holds perfectly still across the
-   transition — it is the same painted glyph in both states.
+   The wrapper CROPS the word; it does not scale the wordmark SVG. Letters
+   always paint at --mz-h. On toggle-collapse (scroll), only the mark path
+   (`.mz-logo-mark`, the standalone logo.svg "M") scales up via
+   --mz-mark-scale so it finishes a bit taller than the word it replaced.
+   Scaling the whole SVG would grow the remaining letters as they peel —
+   the opposite of this. Mount-mode reveal stays crop-only so first paint
+   never shrinks a large M into a small word.
    ------------------------------------------------------------------------- */
 
 .mz-logo {
@@ -537,8 +540,11 @@
      Both widths are the artwork's aspect ratios: 415/251 and 3479/251. */
   --mz-w-mark: calc(var(--mz-h, 20px) * 1.65339);
   --mz-w-full: calc(var(--mz-h, 20px) * 13.86056);
+  /* Collapsed mark vs the word it replaced. Tune here. */
+  --mz-mark-scale: 1.45;
 
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   height: var(--mz-h, 20px);
   width: var(--mz-w-full);
   overflow: hidden;
@@ -548,13 +554,30 @@
 }
 .mz-logo > svg {
   display: block;
+  overflow: visible;
   height: var(--mz-h, 20px);
   width: var(--mz-w-full);
 }
-/* Collapsed = cropped to the mark. The SVG inside keeps its full width and
-   simply overflows to the right, which is what holds the "M" still. */
+/* The persistent "M". Origin is the mark's own left-center so it grows
+   into the peeling letters instead of shifting left. */
+.mz-logo-mark {
+  transform-box: fill-box;
+  transform-origin: 0% 50%;
+  transform: scale(1);
+}
+/* Collapsed = cropped to the mark. The SVG inside keeps its full layout
+   width and overflows to the right, which is what holds the "M" still. */
 .mz-logo[data-mz-expanded="false"] {
   width: var(--mz-w-mark);
+}
+/* Toggle-collapse only: grow the mark, not the word. Mount mode is
+   always data-mz-expanded="true" and must not pick this up. */
+.mz-logo[data-mz-mode="toggle"][data-mz-expanded="false"] {
+  width: calc(var(--mz-w-mark) * var(--mz-mark-scale));
+  height: calc(var(--mz-h, 20px) * var(--mz-mark-scale));
+}
+.mz-logo[data-mz-mode="toggle"][data-mz-expanded="false"] .mz-logo-mark {
+  transform: scale(var(--mz-mark-scale));
 }
 
 /* Timing. Letters lead the crop slightly so they animate into space the
@@ -574,7 +597,12 @@
 
 /* --- Controlled mode: `expanded` drives it, transitions run both ways. --- */
 .mz-logo[data-mz-mode="toggle"] {
-  transition: width var(--mz-crop-ms) var(--mz-ease);
+  transition:
+    width var(--mz-crop-ms) var(--mz-ease),
+    height var(--mz-crop-ms) var(--mz-ease);
+}
+.mz-logo[data-mz-mode="toggle"] .mz-logo-mark {
+  transition: transform var(--mz-crop-ms) var(--mz-ease);
 }
 .mz-logo[data-mz-mode="toggle"] .mz-logo-letter {
   transform-box: fill-box;
@@ -657,6 +685,7 @@
    collapsed crop still applies — it's a state, not an animation. */
 @media (prefers-reduced-motion: reduce) {
   .mz-logo,
+  .mz-logo .mz-logo-mark,
   .mz-logo .mz-logo-letter,
   .mz-logo .mz-logo-letter-clip {
     transition: none !important;

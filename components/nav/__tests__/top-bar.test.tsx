@@ -59,6 +59,9 @@ describe("TopBar brand lockup", () => {
     setScrollY(40);
     const logo = document.querySelector(".mz-logo") as HTMLElement;
     expect(logo.dataset.mzExpanded).toBe("false");
+    // Word size stays 11px; the M grows via --mz-mark-scale in CSS.
+    expect(logo.style.getPropertyValue("--mz-h")).toBe("11px");
+    expect(logo.dataset.mzMode).toBe("toggle");
   });
 
   it("re-expands the wordmark after scrolling back to the top", () => {

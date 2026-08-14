@@ -223,7 +223,11 @@ Three components in `components/brand/logo.tsx`, all painting with
   controlled toggle between the word and the bare mark, which reverses the
   stagger so it peels right-to-left back to the "M". Live on the desktop top bar
   (anon and authed — `expanded` tracks scroll, so the word peels back to the M
-  once the page moves; 11px tall, vertically centered on the 40px search row),
+  once the page moves; 11px tall, vertically centered on the 40px search row).
+  Collapse crops the word and scales **only the mark** (`--mz-mark-scale` in
+  `globals.css`) so the logo.svg "M" finishes taller than the word was — do
+  not scale the wordmark SVG itself or the remaining letters grow as they
+  peel. Mount-mode (`animateOnMount`) stays crop-only. Also on
   the landing header at `nav+` only (below that it falls back to `<Logomark>`),
   the auth modal, `/sign-in`, `/sign-up`, and `/onboarding`.
 
