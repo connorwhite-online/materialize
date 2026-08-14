@@ -2,7 +2,7 @@
 /**
  * Behaviour of the morphing mobile nav: the collapsed pill names the
  * current page, tapping it discloses the destination menu plus the
- * user container, and anon visitors get a sign-in row instead of an
+ * user container, and anon visitors get a Login button instead of an
  * inbox they can't read.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -183,7 +183,7 @@ describe("MobileNav", () => {
     expect(screen.getByLabelText("7 unread").textContent).toBe("7");
   });
 
-  it("gives anon visitors a sign-in row and no inbox", async () => {
+  it("gives anon visitors a Login button and no inbox", async () => {
     mockUser = null;
     render(<MobileNav initialUnreadCount={0} />);
 
@@ -195,7 +195,7 @@ describe("MobileNav", () => {
     ).toEqual(["/", "/files", "/print", "/materials"]);
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+      fireEvent.click(screen.getByRole("button", { name: "Login" }));
     });
     expect(openAuth).toHaveBeenCalledWith("sign-in");
   });

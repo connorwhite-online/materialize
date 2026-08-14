@@ -14,6 +14,7 @@ import {
 } from "motion/react";
 import { Grabber } from "@/components/icons/grabber";
 import { UserAvatar } from "@/components/auth/user-avatar";
+import { Button } from "@/components/ui/button";
 import {
   iconSizeProps,
   isDestinationActive,
@@ -73,9 +74,9 @@ const IDENTITY_IN: Transition = {
 };
 const IDENTITY_OUT: Transition = { duration: 0.07, ease: "easeIn" };
 /**
- * Closing: hold the open identity (Sign in / user) until the menu has
+ * Closing: hold the open identity (Login / user) until the menu has
  * actually shrunk. Consecutive close frames showed "Search" printing
- * over "Sign in" in a still-tall card — the pill identity was swapping
+ * over "Login" in a still-tall card — the pill identity was swapping
  * on the open-path timing while height was still delayed. Same ease as
  * open; just later, so it lands as the card becomes a pill.
  */
@@ -447,21 +448,19 @@ export function MobileNav({
                           </span>
                         </Link>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            close();
-                            openAuth("sign-in");
-                          }}
-                          className="mx-1.5 flex min-w-0 flex-1 items-center gap-3 rounded-[22px] px-3 py-2.5 text-left text-[0.9375rem] font-medium transition-colors active:bg-muted/60"
-                        >
-                          <UserAvatar
-                            seed="anonymous"
-                            displayName="Sign in"
-                            className="h-9 w-9 shrink-0 opacity-60"
-                          />
-                          <span className="flex-1 truncate">Sign in</span>
-                        </button>
+                        <div className="mx-1.5 flex min-w-0 flex-1 items-center">
+                          <Button
+                            size="default"
+                            variant="secondary"
+                            className="w-full border-border bg-secondary hover:bg-muted"
+                            onClick={() => {
+                              close();
+                              openAuth("sign-in");
+                            }}
+                          >
+                            Login
+                          </Button>
+                        </div>
                       )}
                     </motion.div>
                   ) : (
