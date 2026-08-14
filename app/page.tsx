@@ -146,11 +146,11 @@ export default async function HomePage() {
           absolute inset-0 + object-cover). The three.js / R3F showcase
           that used to sit in a visual slot below the copy is unmounted,
           not deleted — hero-showcase*.tsx et al. stay in the tree. */}
-      <section className="relative flex min-h-dvh w-full flex-col overflow-hidden">
+      <section className="relative isolate flex min-h-dvh w-full flex-col overflow-hidden">
         <HeroBackground />
         {/* Brand mark lives in TopBar so "Materialize" still appears
             above the fold. The h1 states what the product does. */}
-        <main className="relative flex flex-1 flex-col">
+        <main className="relative z-10 flex flex-1 flex-col">
           <div className="flex flex-1 items-center justify-center px-4">
             <div className="flex w-full max-w-2xl flex-col items-center gap-4 text-center">
               {/* Real, selectable <h1> — states what the product does
