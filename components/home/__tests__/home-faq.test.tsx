@@ -11,19 +11,23 @@ describe("HomeFaq", () => {
       expect(screen.getByText(item.question)).toBeTruthy();
       expect(screen.getByText(item.answer)).toBeTruthy();
     }
-    expect(document.querySelectorAll("details")).toHaveLength(HOME_FAQ.length);
+    expect(
+      screen.getAllByRole("button", { expanded: false })
+    ).toHaveLength(HOME_FAQ.length);
   });
 
   it("opens from the question and closes from a click on the answer", () => {
     render(<HomeFaq />);
-    const card = document.querySelector("details") as HTMLDetailsElement;
-    const answer = card.querySelector("p") as HTMLElement;
-    expect(card.open).toBe(false);
+    const question = screen.getByRole("button", {
+      name: HOME_FAQ[0].question,
+    });
+    const answer = screen.getByText(HOME_FAQ[0].answer);
+    expect(question.getAttribute("aria-expanded")).toBe("false");
 
-    fireEvent.click(card.querySelector("summary")!);
-    expect(card.open).toBe(true);
+    fireEvent.click(question);
+    expect(question.getAttribute("aria-expanded")).toBe("true");
 
     fireEvent.click(answer);
-    expect(card.open).toBe(false);
+    expect(question.getAttribute("aria-expanded")).toBe("false");
   });
 });

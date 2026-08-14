@@ -5,10 +5,10 @@ import { FaqCard } from "@/components/home/faq-card";
  * Visible FAQ for the anon home page, backing the `FAQPage` JSON-LD
  * emitted alongside it.
  *
- * Each item is a `<details>` card so the answer stays in the DOM (and
- * matches `acceptedAnswer.text`) even while collapsed. Copy lives in
- * `lib/seo/home-faq.ts` — do not inline it here, or the markup and the
- * visible text will drift apart.
+ * Each item is a springy accordion card. The answer stays in the DOM
+ * (height 0 when closed) so it still matches `acceptedAnswer.text`.
+ * Copy lives in `lib/seo/home-faq.ts` — do not inline it here, or the
+ * markup and the visible text will drift apart.
  */
 export function HomeFaq() {
   return (

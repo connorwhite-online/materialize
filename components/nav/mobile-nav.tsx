@@ -25,6 +25,7 @@ import { useAuthModal } from "@/components/auth/auth-modal";
 import { useCart } from "@/components/print/cart-context";
 import { useKeyboardOpen } from "@/lib/hooks/use-keyboard-sticky-bottom";
 import { useUnreadCount } from "@/lib/hooks/use-unread-count";
+import { SPRING, SPRING_CLOSE, SPRING_SETTLE, EASE_OUT_SOFT } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
 /** Widest the expanded card gets; clamped to the viewport below. */
@@ -36,29 +37,7 @@ const MIN_COLLAPSED_WIDTH = 172;
 /** Height of the always-present identity row (`h-14`). */
 const ROW_HEIGHT = 56;
 
-/**
- * The card's own motion: fast, with a hair of overshoot and no wobble.
- * Deliberately quicker than the content wave below — filming Linear's
- * nav at 60fps, its card reaches full size in ~100ms and the rows keep
- * arriving for another ~200ms. The container landing early is what
- * makes the cascade read as life rather than lag; when the two finish
- * together (as ours did) the whole thing feels heavier than it is.
- */
-const SPRING: Transition = {
-  type: "spring",
-  stiffness: 520,
-  damping: 38,
-  mass: 0.8,
-};
-/** Critically damped — collapsing height must not overshoot past 0. */
-const SPRING_CLOSE: Transition = {
-  type: "spring",
-  stiffness: 460,
-  damping: 44,
-};
-
-/**
- * Closing height waits a beat so the row cascade can go soft (blur +
+/** Closing height waits a beat so the row cascade can go soft (blur +
  * fade) before the card starts clipping them. Frame-stepping a 60fps
  * capture of the old close showed the rows sitting at full opacity for
  * ~8 frames while the card shrank under them — five labels squashing
@@ -586,20 +565,14 @@ const ITEM_VARIANTS: Variants = {
   },
   visible: ({ index, count }: RowStagger) => {
     const delay = (count - 1 - index) * STAGGER_IN;
-    const settle: Transition = {
-      type: "spring",
-      stiffness: 380,
-      damping: 32,
-      mass: 0.7,
-      delay,
-    };
+    const settle: Transition = { ...SPRING_SETTLE, delay };
     // Logo ease: sharpness catches up a frame after the row has
     // mostly landed, which is the "focus in" the stagger is for.
     // Delay is repeated on each key — per-property transitions do
     // not inherit a sibling `delay`.
     const focus: Transition = {
       duration: 0.22,
-      ease: [0.22, 0.9, 0.28, 1],
+      ease: EASE_OUT_SOFT,
       delay,
     };
     return {
