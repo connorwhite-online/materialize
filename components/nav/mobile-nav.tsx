@@ -63,7 +63,7 @@ const SPRING_CLOSE: Transition = {
  * a blank white card collapsing). A tiny delay lets the first row go
  * soft before anything is clipped.
  */
-const HEIGHT_CLOSE: Transition = { ...SPRING_CLOSE, delay: 0.02 };
+const HEIGHT_CLOSE: Transition = { ...SPRING_CLOSE, delay: 0.05 };
 /**
  * The pill ↔ user-container swap. The incoming row waits out most of
  * the outgoing one's fade, so the two are never both legible — without
@@ -292,10 +292,9 @@ export function MobileNav({
                       variants={LIST_VARIANTS}
                       initial="hidden"
                       animate="visible"
-                      exit="hidden"
                       className="flex flex-col gap-0.5 p-1.5"
                     >
-                      {destinations.map((item) => {
+                      {destinations.map((item, index) => {
                         const active = isDestinationActive(pathname, item.href);
                         const badge =
                           item.href === "/print" && cartCount > 0
@@ -308,6 +307,7 @@ export function MobileNav({
                           <motion.li
                             key={item.href}
                             variants={reducedMotion ? undefined : ITEM_VARIANTS}
+                            exit={reducedMotion ? undefined : rowExit(index)}
                           >
                             <Link
                               href={item.href}
@@ -563,14 +563,7 @@ const STAGGER_IN = 0.038;
 const STAGGER_OUT = 0.032;
 
 const LIST_VARIANTS: Variants = {
-  // Close peels top → bottom: the row nearest the shrinking top edge
-  // leaves first. Stagger lives here — not on per-item `custom` —
-  // because AnimatePresence's exit resolver ignores the child's
-  // `custom` prop and reads `presenceContext.custom` instead, which
-  // made every row exit on delay 0.
-  hidden: {
-    transition: { staggerChildren: STAGGER_OUT, staggerDirection: 1 },
-  },
+  hidden: {},
   // Reveal outward from the pill: last child (nearest the bottom
   // edge) leads. No `delayChildren` — the first row starts with the
   // card, or the card reads as an empty box.
@@ -579,12 +572,39 @@ const LIST_VARIANTS: Variants = {
   },
 };
 
+const ROW_LEAVE: Transition = {
+  duration: 0.22,
+  ease: [0.4, 0, 1, 1],
+};
+
+/**
+ * Close target with the delay baked in. AnimatePresence resolves
+ * function variants using `presenceContext.custom`, not the child's
+ * `custom` prop, so a per-item function delay always came out 0.
+ * An object `exit` with `delay: index * STAGGER_OUT` is the stagger.
+ */
+function rowExit(index: number) {
+  const delay = index * STAGGER_OUT;
+  return {
+    opacity: 0,
+    y: 10,
+    scale: 0.98,
+    filter: "blur(8px)",
+    transition: {
+      ...ROW_LEAVE,
+      delay,
+      opacity: { ...ROW_LEAVE, delay, duration: 0.18 },
+      filter: { ...ROW_LEAVE, delay, duration: 0.2 },
+    },
+  };
+}
+
 /**
  * Rows materialise rather than slide: a short lift plus a blur that
  * resolves as they land. Filter is a tween (springs on blur feel
  * drunk); position is a spring so they settle. The travel stays small
  * — at 10px the eye reads it as coming into focus, not as sliding in
- * from somewhere. Close reuses `hidden`.
+ * from somewhere.
  */
 const ITEM_VARIANTS: Variants = {
   hidden: {
