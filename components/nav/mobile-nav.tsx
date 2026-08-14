@@ -37,25 +37,20 @@ const MIN_COLLAPSED_WIDTH = 172;
 const ROW_HEIGHT = 56;
 
 /**
- * The card's own motion: fast, zero bounce. Stiffness springs used to
- * leave a long asymptotic crawl (~200ms of sub-pixel width/height
- * motion after the eye thought it was done) which read as jitter on
- * the rounded card + backdrop-blur + text. `visualDuration` +
- * `bounce: 0` lands on the target in a fixed window with no settle
- * wobble. Still quicker than the content wave below — the container
- * landing early is what makes the cascade read as life rather than
- * lag (Linear's card ~100ms, rows keep arriving past it).
+ * The card's own motion: a short ease-out tween, deliberately quicker
+ * than the content wave below. Stiffness springs (and even
+ * `visualDuration` + `bounce: 0`) left a long asymptotic crawl of
+ * sub-pixel width/height that shimmered the rounded card, backdrop
+ * blur, and labels right before rest — filmed at 60fps, the last
+ * ~150ms was all jitter. A cubic lands on the target and stops.
  */
-const SPRING: Transition = {
-  type: "spring",
-  visualDuration: 0.28,
-  bounce: 0,
+const CARD_IN: Transition = {
+  duration: 0.28,
+  ease: [0.22, 1, 0.36, 1],
 };
-/** Same duration-based spring on close — no overshoot past 0 height. */
-const SPRING_CLOSE: Transition = {
-  type: "spring",
-  visualDuration: 0.26,
-  bounce: 0,
+const CARD_OUT: Transition = {
+  duration: 0.24,
+  ease: [0.4, 0, 0.2, 1],
 };
 
 /**
@@ -64,9 +59,9 @@ const SPRING_CLOSE: Transition = {
  * capture of the old close showed the rows sitting at full opacity for
  * ~8 frames while the card shrank under them — five labels squashing
  * into each other. The rows now own their exit; this delay is only so
- * the height spring doesn't outrun the first of them.
+ * the height tween doesn't outrun the first of them.
  */
-const HEIGHT_CLOSE: Transition = { ...SPRING_CLOSE, delay: 0.06 };
+const HEIGHT_CLOSE: Transition = { ...CARD_OUT, delay: 0.06 };
 /**
  * The pill ↔ user-container swap. Opacity-only (no y) — a slide on
  * the identity row used to fight the card's last few pixels of height
@@ -190,7 +185,7 @@ export function MobileNav({
     }
     const nav = menuNavRef.current;
     if (!nav) return;
-    const measure = () => setMenuHeight(nav.scrollHeight);
+    const measure = () => setMenuHeight(Math.ceil(nav.scrollHeight));
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
@@ -276,7 +271,7 @@ export function MobileNav({
           <motion.div
             initial={false}
             animate={{ width: open ? expandedWidth : collapsedWidth }}
-            transition={reducedMotion ? { duration: 0 } : open ? SPRING : SPRING_CLOSE}
+            transition={reducedMotion ? { duration: 0 } : open ? CARD_IN : CARD_OUT}
             drag={open && !reducedMotion ? "y" : false}
             dragConstraints={{ top: 0, bottom: 0 }}
             dragElastic={{ top: 0.02, bottom: 0.4 }}
@@ -305,7 +300,7 @@ export function MobileNav({
                     height: 0,
                     transition: reducedMotion ? { duration: 0 } : HEIGHT_CLOSE,
                   }}
-                  transition={reducedMotion ? { duration: 0 } : SPRING_CLOSE}
+                  transition={reducedMotion ? { duration: 0 } : CARD_IN}
                   className="overflow-hidden"
                 >
                   {/* Fixed width so the list never reflows mid-morph while
@@ -592,12 +587,11 @@ type RowStagger = { index: number; count: number };
 
 /**
  * Rows materialise rather than slide: a short lift plus a blur that
- * resolves as they land. Filter is a tween (springs on blur feel
- * drunk); position is a zero-bounce duration spring so it lands
- * without the sub-pixel crawl that used to shimmer the labels.
- * No `scale` — scaling text through 0.99→1 re-rasterises glyphs each
- * frame and read as jitter right before rest. Travel stays small
- * (10px) so the eye reads focus-in, not a slide from elsewhere.
+ * resolves as they land. Both are finite tweens — springs left a
+ * sub-pixel crawl on `y` (and used to on `scale`) that re-rasterised
+ * glyphs each frame and read as jitter right before rest. Travel
+ * stays small (10px) so the eye reads focus-in, not a slide from
+ * elsewhere.
  *
  * Stagger is per-item delay rather than `staggerChildren`, because the
  * list is nested inside the height wrapper's AnimatePresence and a
@@ -613,10 +607,10 @@ const ITEM_VARIANTS: Variants = {
   },
   visible: ({ index, count }: RowStagger) => {
     const delay = (count - 1 - index) * STAGGER_IN;
+    // Same expo-out as the card — lift finishes cleanly, no asymptote.
     const settle: Transition = {
-      type: "spring",
-      visualDuration: 0.3,
-      bounce: 0,
+      duration: 0.28,
+      ease: [0.22, 1, 0.36, 1],
       delay,
     };
     // Logo ease: sharpness catches up a frame after the row has
