@@ -113,4 +113,18 @@ describe("AnimatedWordmark", () => {
     rerender(<AnimatedWordmark height={32} />);
     expect(root().style.getPropertyValue("--mz-h")).toBe("32px");
   });
+
+  it("pins the collapsed-mark scale in globals.css so the M grows on collapse", () => {
+    // The "absorbing" scale lives in CSS, not the component. If someone
+    // drops --mz-mark-scale the collapsed lockup shrinks back to the
+    // word's height and the effect is gone.
+    const css = readFileSync(
+      path.join(process.cwd(), "app/globals.css"),
+      "utf8"
+    );
+    expect(css).toMatch(/--mz-mark-scale:\s*1\.\d+/);
+    expect(css).toMatch(
+      /data-mz-expanded="false"[\s\S]*?scale\(var\(--mz-mark-scale\)\)/
+    );
+  });
 });

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useUser } from "@clerk/nextjs";
 import { AnimatedWordmark, Logomark } from "@/components/brand/logo";
@@ -10,8 +11,12 @@ import { NotificationsPopover } from "@/components/nav/notifications-popover";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { Button } from "@/components/ui/button";
 import { useAuthModal } from "@/components/auth/auth-modal";
+import { useScrolledPast } from "@/lib/hooks/use-scrolled-past";
 import { cn } from "@/lib/utils";
 import { BUBBLE_SHADOW } from "@/components/nav/bubble-shadow";
+
+/** First nudge of scroll that collapses the landing wordmark into the mark. */
+const WORDMARK_COLLAPSE_PX = 24;
 
 const ICON_GLYPH =
   "text-neutral-900 hover:text-neutral-900 dark:text-neutral-100 dark:hover:text-neutral-100";
@@ -46,6 +51,16 @@ export function TopBar({
   textToCad = false,
   alwaysVisible = false,
 }: TopBarProps) {
+  const scrolled = useScrolledPast(WORDMARK_COLLAPSE_PX, alwaysVisible);
+  // Stay in mount-animation mode until the first scroll so the snow-in
+  // reveal still plays on load. After that, `expanded` drives collapse
+  // (and the reverse expand when the user returns to the top).
+  const [collapseArmed, setCollapseArmed] = useState(false);
+  useEffect(() => {
+    if (scrolled) setCollapseArmed(true);
+  }, [scrolled]);
+  const wordmarkExpanded = collapseArmed ? !scrolled : undefined;
+
   return (
     <header
       className={cn(
@@ -79,7 +94,11 @@ export function TopBar({
                     unlayered CSS and would outrank a `hidden` utility put
                     on the component itself. */}
                 <span className="hidden nav:block">
-                  <AnimatedWordmark animateOnMount height={22} />
+                  <AnimatedWordmark
+                    animateOnMount
+                    expanded={wordmarkExpanded}
+                    height={22}
+                  />
                 </span>
                 <Logomark height={22} className="nav:hidden" />
               </>
@@ -121,10 +140,7 @@ export function TopBar({
         </div>
 
         <div className="flex items-center justify-end pt-0">
-          <AuthCluster
-            initialUnreadCount={initialUnreadCount}
-            subtleLogin={alwaysVisible}
-          />
+          <AuthCluster initialUnreadCount={initialUnreadCount} />
         </div>
       </div>
     </header>
@@ -133,11 +149,8 @@ export function TopBar({
 
 function AuthCluster({
   initialUnreadCount,
-  subtleLogin = false,
 }: {
   initialUnreadCount: number;
-  /** Landing page: frosted glass instead of the primary pill. */
-  subtleLogin?: boolean;
 }) {
   const { user, isLoaded, isSignedIn } = useUser();
   const { openAuth } = useAuthModal();
@@ -150,11 +163,7 @@ function AuthCluster({
     return (
       <Button
         size="default"
-        variant={subtleLogin ? "ghost" : "default"}
-        className={cn(
-          subtleLogin &&
-            "glass text-foreground shadow-none before:hidden hover:bg-glass/90 dark:hover:bg-glass/90"
-        )}
+        variant="secondary"
         onClick={() => openAuth("sign-in")}
       >
         Login
