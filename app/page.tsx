@@ -142,26 +142,31 @@ export default async function HomePage() {
           on small screens — anon home matches authed routes. */}
       <TopBar initialUnreadCount={0} textToCad={textToCad} />
 
-      {/* Hero — exactly one screen. min-h-dvh (not h-dvh) keeps the
-          hero at one mobile viewport while letting HomeMarketing below
-          grow the page. dvh, not vh: 100vh on iOS Safari includes the
-          URL-bar area, so the hero would come out taller than what's
-          actually visible; dvh tracks URL-bar visibility.
+      {/* Hero — exactly one screen. h-svh (not min-h-dvh / 100vh):
+          iOS 26 Safari changed `vh` to window.outerHeight (chrome
+          collapsed) in every tab mode, and the Liquid Glass toolbar
+          overlays the layout viewport. `dvh` still tracks hide/show
+          but first paint in Bottom tab mode is the LARGE size, so a
+          100dvh hero is taller than what's visible and the next
+          section peeks under the toolbar. `svh` is the chrome-expanded
+          height — the first screen the visitor actually sees. Siblings
+          below (HomeMarketing) still grow the page; TopBar is fixed.
 
-          Background art covers this first screen (100dvh × 100dvw via
-          absolute inset-0 + object-cover). The three.js / R3F showcase
-          that used to sit in a visual slot below the copy is unmounted,
-          not deleted — hero-showcase*.tsx et al. stay in the tree. */}
-      <section className="relative isolate flex min-h-dvh w-full flex-col overflow-hidden">
+          Background art covers this first screen (absolute inset-0 +
+          object-cover). The three.js / R3F showcase that used to sit
+          in a visual slot below the copy is unmounted, not deleted —
+          hero-showcase*.tsx et al. stay in the tree. */}
+      <section className="relative isolate flex h-svh w-full flex-col overflow-hidden">
         <HeroBackground />
         {/* Brand mark lives in TopBar so "Materialize" still appears
             above the fold. The h1 states what the product does. */}
         <main className="relative z-10 flex flex-1 flex-col">
-          {/* Mobile: copy high on the first screen (TopBar is hidden
-              below `nav`; only the floating pill sits at the bottom).
+          {/* Mobile: copy below center, padded above the floating pill
+              (`fixed bottom-6` + h-14). Top-aligned sat in the light
+              beam and the muted subheading disappeared against it.
               Desktop (nav+): vertically centered, left-aligned with
               generous padding so it clears the sculpture. */}
-          <div className="flex flex-1 items-start justify-start px-6 pt-16 sm:px-8 nav:items-center nav:px-16 nav:pt-0 lg:px-24 xl:px-32">
+          <div className="flex flex-1 items-end justify-start px-6 pb-32 sm:px-8 nav:items-center nav:px-16 nav:pb-0 lg:px-24 xl:px-32">
             <div className="flex w-full max-w-xl flex-col items-start gap-4 text-left">
               {/* Real, selectable <h1> — states what the product does
                   rather than spelling the brand. Same system stack as
@@ -169,7 +174,7 @@ export default async function HomePage() {
               <h1 className="text-balance text-3xl leading-[1.1] tracking-tight sm:text-4xl">
                 Print anything, share your ideas
               </h1>
-              <p className="max-w-lg text-pretty text-base leading-relaxed text-muted-foreground">
+              <p className="max-w-lg text-pretty text-base leading-relaxed text-foreground/80">
                 Get prints delivered to your door, and pick from 60+ materials.
                 Share your hardware projects and files.
               </p>

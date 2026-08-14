@@ -23,7 +23,7 @@ test.describe("anon smoke", () => {
     // heading is what proves the hero rendered, and the Login CTA
     // below proves the client bundle hydrated.
     await expect(
-      page.getByRole("heading", { level: 1, name: /print in any material/i })
+      page.getByRole("heading", { level: 1, name: /print anything/i })
     ).toBeVisible();
 
     await expect(page.getByPlaceholder("Search (⌘K)")).toBeVisible();
