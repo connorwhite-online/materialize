@@ -129,7 +129,7 @@ export default function SignInPage() {
       >
         <AnimatedWordmark
           animateOnMount
-          className="[--mz-h:14px] sm:[--mz-h:16px]"
+          className="[--mz-h:7px] sm:[--mz-h:8px]"
         />
       </Link>
 

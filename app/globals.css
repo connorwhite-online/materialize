@@ -581,7 +581,7 @@
   --mz-stagger-out: 24ms;
   --mz-crop-ms: 700ms;
   /* Blur is in SVG user units (the artwork is 251 tall), so it scales with
-     the logo — a 20px nav lockup and a 64px hero lockup blur by the same
+     the logo — a 22px nav lockup and a 64px hero lockup blur by the same
      visual proportion. */
   --mz-blur: 22px;
   --mz-lift: 14%;

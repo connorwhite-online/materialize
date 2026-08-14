@@ -11,12 +11,15 @@ import { NotificationsPopover } from "@/components/nav/notifications-popover";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { Button } from "@/components/ui/button";
 import { useAuthModal } from "@/components/auth/auth-modal";
-import { useScrolledPast } from "@/lib/hooks/use-scrolled-past";
+import { useScrolled } from "@/lib/hooks/use-scrolled";
 import { cn } from "@/lib/utils";
 import { BUBBLE_SHADOW } from "@/components/nav/bubble-shadow";
 
-/** First nudge of scroll that collapses the landing wordmark into the mark. */
-const WORDMARK_COLLAPSE_PX = 24;
+/**
+ * Full lockup height. Collapsed CSS (`--mz-mark-scale`) grows the M
+ * past this so it reads as absorbing the peeling letters.
+ */
+const NAV_LOGO_HEIGHT = 22;
 
 const ICON_GLYPH =
   "text-neutral-900 hover:text-neutral-900 dark:text-neutral-100 dark:hover:text-neutral-100";
@@ -51,7 +54,7 @@ export function TopBar({
   textToCad = false,
   alwaysVisible = false,
 }: TopBarProps) {
-  const scrolled = useScrolledPast(WORDMARK_COLLAPSE_PX, alwaysVisible);
+  const scrolled = useScrolled();
   // Stay in mount-animation mode until the first scroll so the snow-in
   // reveal still plays on load. After that, `expanded` drives collapse
   // (and the reverse expand when the user returns to the top).
@@ -80,11 +83,11 @@ export function TopBar({
             : "grid-cols-[1fr_auto_1fr]"
         )}
       >
-        <div className="flex items-center gap-3">
+        <div className="flex h-10 items-center gap-3">
           <Link
             href="/"
             aria-label="Materialize — home"
-            className="relative flex items-center text-foreground transition-opacity hover:opacity-80"
+            className="relative flex h-10 items-center text-foreground transition-opacity hover:opacity-80"
           >
             {alwaysVisible ? (
               <>
@@ -97,13 +100,13 @@ export function TopBar({
                   <AnimatedWordmark
                     animateOnMount
                     expanded={wordmarkExpanded}
-                    height={22}
+                    height={NAV_LOGO_HEIGHT}
                   />
                 </span>
-                <Logomark height={22} className="nav:hidden" />
+                <Logomark height={NAV_LOGO_HEIGHT} className="nav:hidden" />
               </>
             ) : (
-              <Logomark height={22} />
+              <Logomark height={NAV_LOGO_HEIGHT} />
             )}
           </Link>
           {textToCad && (
@@ -139,7 +142,7 @@ export function TopBar({
           </Button>
         </div>
 
-        <div className="flex items-center justify-end pt-0">
+        <div className="flex h-10 items-center justify-end">
           <AuthCluster initialUnreadCount={initialUnreadCount} />
         </div>
       </div>

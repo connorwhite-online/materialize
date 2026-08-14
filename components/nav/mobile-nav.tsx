@@ -37,19 +37,9 @@ const MIN_COLLAPSED_WIDTH = 172;
 /** Height of the always-present identity row (`h-14`). */
 const ROW_HEIGHT = 56;
 
-/** Closing height waits a beat so the row cascade can go soft (blur +
- * fade) before the card starts clipping them. Frame-stepping a 60fps
- * capture of the old close showed the rows sitting at full opacity for
- * ~8 frames while the card shrank under them — five labels squashing
- * into each other. The rows now own their exit; this delay is only so
- * the height spring doesn't outrun the first of them.
- */
-const HEIGHT_CLOSE: Transition = { ...SPRING_CLOSE, delay: 0.06 };
 /**
- * The pill ↔ user-container swap. The incoming row waits out most of
- * the outgoing one's fade, so the two are never both legible — without
- * the delay you catch "Search" and "Connor White" printed over each
- * other mid-collapse.
+ * The pill ↔ user-container swap on OPEN. Incoming waits out most of
+ * the outgoing fade so the two are never both legible.
  */
 const IDENTITY_IN: Transition = {
   duration: 0.13,
@@ -57,6 +47,23 @@ const IDENTITY_IN: Transition = {
   ease: [0.32, 0.72, 0, 1],
 };
 const IDENTITY_OUT: Transition = { duration: 0.07, ease: "easeIn" };
+/**
+ * Closing: hold the open identity (Sign in / user) until the menu has
+ * actually shrunk. Consecutive close frames showed "Search" printing
+ * over "Sign in" in a still-tall card — the pill identity was swapping
+ * on the open-path timing while height was still delayed. Same ease as
+ * open; just later, so it lands as the card becomes a pill.
+ */
+const IDENTITY_IN_CLOSE: Transition = {
+  duration: 0.13,
+  delay: 0.18,
+  ease: [0.32, 0.72, 0, 1],
+};
+const IDENTITY_OUT_CLOSE: Transition = {
+  duration: 0.07,
+  delay: 0.1,
+  ease: "easeIn",
+};
 
 const DRAG_CLOSE_OFFSET = 64;
 const DRAG_CLOSE_VELOCITY = 500;
@@ -257,10 +264,14 @@ export function MobileNav({
                   animate={{ height: "auto" }}
                   exit={{
                     height: 0,
-                    transition: reducedMotion ? { duration: 0 } : HEIGHT_CLOSE,
+                    transition: reducedMotion ? { duration: 0 } : SPRING_CLOSE,
                   }}
                   transition={reducedMotion ? { duration: 0 } : SPRING_CLOSE}
-                  className="overflow-hidden"
+                  // Stick the list to the pill. Height shrinks the box
+                  // from the top, so Home is clipped first and Materials
+                  // stays parked next to the identity — the other way
+                  // shears the bottom rows and is what read as jitter.
+                  className="flex flex-col justify-end overflow-hidden"
                 >
                   {/* Fixed width so the list never reflows mid-morph while
                       the card itself is still widening. */}
@@ -269,7 +280,12 @@ export function MobileNav({
                     aria-label="Primary"
                     style={{ width: expandedWidth }}
                   >
-                    <ul className="flex flex-col gap-0.5 p-1.5">
+                    <motion.ul
+                      variants={LIST_VARIANTS}
+                      initial="hidden"
+                      animate="visible"
+                      className="flex flex-col gap-0.5 p-1.5"
+                    >
                       {destinations.map((item, index) => {
                         const active = isDestinationActive(pathname, item.href);
                         const badge =
@@ -282,11 +298,8 @@ export function MobileNav({
                         return (
                           <motion.li
                             key={item.href}
-                            custom={{ index, count: destinations.length }}
                             variants={reducedMotion ? undefined : ITEM_VARIANTS}
-                            initial={reducedMotion ? false : "hidden"}
-                            animate={reducedMotion ? false : "visible"}
-                            exit={reducedMotion ? undefined : "exit"}
+                            exit={reducedMotion ? undefined : rowExit(index)}
                           >
                             <Link
                               href={item.href}
@@ -332,7 +345,7 @@ export function MobileNav({
                           </motion.li>
                         );
                       })}
-                    </ul>
+                    </motion.ul>
                     <div className="mx-3 h-px bg-border" />
                   </nav>
                 </motion.div>
@@ -353,7 +366,7 @@ export function MobileNav({
                       exit={
                         reducedMotion
                           ? { opacity: 0 }
-                          : { opacity: 0, y: -8, transition: IDENTITY_OUT }
+                          : { opacity: 0, y: -8, transition: IDENTITY_OUT_CLOSE }
                       }
                       transition={reducedMotion ? { duration: 0 } : IDENTITY_IN}
                       className="absolute inset-0 flex items-center"
@@ -417,7 +430,7 @@ export function MobileNav({
                           ? { opacity: 0 }
                           : { opacity: 0, y: 8, transition: IDENTITY_OUT }
                       }
-                      transition={reducedMotion ? { duration: 0 } : IDENTITY_IN}
+                      transition={reducedMotion ? { duration: 0 } : IDENTITY_IN_CLOSE}
                       className="absolute inset-0 flex items-center text-left"
                     >
                       <PageIdentityContent identity={identity} profile={pillProfile} />
@@ -538,71 +551,74 @@ function TrailingCluster({
 
 /** Wordmark `--mz-stagger-in` — readable cascade, not a simultaneous pop. */
 const STAGGER_IN = 0.038;
-/** Wordmark `--mz-stagger-out` — close peels faster than it arrives. */
-const STAGGER_OUT = 0.024;
+/** Close peels a hair slower than the wordmark's 24ms so the wave reads. */
+const STAGGER_OUT = 0.032;
 
-type RowStagger = { index: number; count: number };
+const LIST_VARIANTS: Variants = {
+  hidden: {},
+  // Reveal outward from the pill: last child (nearest the bottom
+  // edge) leads. No `delayChildren` — the first row starts with the
+  // card, or the card reads as an empty box.
+  visible: {
+    transition: { staggerChildren: STAGGER_IN, staggerDirection: -1 },
+  },
+};
+
+const ROW_LEAVE: Transition = {
+  duration: 0.22,
+  ease: [0.4, 0, 1, 1],
+};
+
+/**
+ * Close target with the delay baked in. AnimatePresence resolves
+ * function variants using `presenceContext.custom`, not the child's
+ * `custom` prop, so a per-item function delay always came out 0.
+ * An object `exit` with `delay: index * STAGGER_OUT` is the stagger.
+ */
+function rowExit(index: number) {
+  const delay = index * STAGGER_OUT;
+  return {
+    opacity: 0,
+    y: 6,
+    filter: "blur(8px)",
+    transition: {
+      ...ROW_LEAVE,
+      delay,
+      opacity: { ...ROW_LEAVE, delay, duration: 0.16 },
+      filter: { ...ROW_LEAVE, delay, duration: 0.18 },
+    },
+  };
+}
 
 /**
  * Rows materialise rather than slide: a short lift plus a blur that
  * resolves as they land. Filter is a tween (springs on blur feel
- * drunk); position is a spring so they settle. The travel stays small
- * — at 10px the eye reads it as coming into focus, not as sliding in
- * from somewhere.
- *
- * Stagger is per-item delay rather than `staggerChildren`, because the
- * list is nested inside the height wrapper's AnimatePresence and a
- * parent `exit` variant does not reliably orchestrate descendants.
- * Open: last child (nearest the pill) leads. Close: first child (nearest
- * the shrinking top edge) leads, so nothing opaque gets clipped.
+ * drunk); position is a spring so they settle. No `scale` — scaling
+ * type inside a height:auto box is what made close frames jitter as
+ * the browser relaid out each flex row. The travel stays small — at
+ * 8px the eye reads it as coming into focus, not as sliding in.
  */
 const ITEM_VARIANTS: Variants = {
   hidden: {
     opacity: 0,
-    y: 10,
-    scale: 0.98,
+    y: 8,
     filter: "blur(8px)",
+    transition: {
+      duration: 0.18,
+      ease: [0.4, 0, 1, 1],
+      opacity: { duration: 0.14, ease: "easeIn" },
+      filter: { duration: 0.16, ease: "easeIn" },
+    },
   },
-  visible: ({ index, count }: RowStagger) => {
-    const delay = (count - 1 - index) * STAGGER_IN;
-    const settle: Transition = { ...SPRING_SETTLE, delay };
-    // Logo ease: sharpness catches up a frame after the row has
-    // mostly landed, which is the "focus in" the stagger is for.
-    // Delay is repeated on each key — per-property transitions do
-    // not inherit a sibling `delay`.
-    const focus: Transition = {
-      duration: 0.22,
-      ease: EASE_OUT_SOFT,
-      delay,
-    };
-    return {
-      opacity: 1,
-      y: 0,
-      scale: 1,
-      filter: "blur(0px)",
-      transition: {
-        y: settle,
-        scale: settle,
-        opacity: focus,
-        filter: { ...focus, duration: 0.28 },
-      },
-    };
-  },
-  exit: ({ index }: RowStagger) => {
-    const delay = index * STAGGER_OUT;
-    return {
-      opacity: 0,
-      y: 10,
-      scale: 0.98,
-      filter: "blur(8px)",
-      transition: {
-        delay,
-        duration: 0.15,
-        ease: [0.4, 0, 1, 1],
-        opacity: { delay, duration: 0.12, ease: "easeIn" },
-        filter: { delay, duration: 0.14, ease: "easeIn" },
-      },
-    };
+  visible: {
+    opacity: 1,
+    y: 0,
+    filter: "blur(0px)",
+    transition: {
+      y: SPRING_SETTLE,
+      opacity: { duration: 0.22, ease: EASE_OUT_SOFT },
+      filter: { duration: 0.28, ease: EASE_OUT_SOFT },
+    },
   },
 };
 

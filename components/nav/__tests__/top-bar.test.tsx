@@ -26,8 +26,8 @@ vi.mock("@/components/nav/top-search", () => ({
   TopSearch: () => <div data-testid="top-search" />,
 }));
 
-vi.mock("@/components/print/cart-context", () => ({
-  useCart: () => null,
+vi.mock("@/components/nav/notifications-popover", () => ({
+  NotificationsPopover: () => <div data-testid="bell" />,
 }));
 
 import { TopBar } from "../top-bar";
@@ -37,6 +37,9 @@ function setScrollY(y: number) {
     value: y,
     configurable: true,
     writable: true,
+  });
+  act(() => {
+    window.dispatchEvent(new Event("scroll"));
   });
 }
 
@@ -81,13 +84,11 @@ describe("TopBar landing wordmark", () => {
     expect(logo().dataset.mzExpanded).toBe("true");
 
     setScrollY(40);
-    act(() => window.dispatchEvent(new Event("scroll")));
 
     expect(logo().dataset.mzMode).toBe("toggle");
     expect(logo().dataset.mzExpanded).toBe("false");
 
     setScrollY(0);
-    act(() => window.dispatchEvent(new Event("scroll")));
     expect(logo().dataset.mzExpanded).toBe("true");
   });
 
@@ -96,7 +97,14 @@ describe("TopBar landing wordmark", () => {
     expect(document.querySelector(".mz-logo")).toBeNull();
 
     setScrollY(80);
-    act(() => window.dispatchEvent(new Event("scroll")));
     expect(document.querySelector(".mz-logo")).toBeNull();
+  });
+
+  it("vertically centers the brand link on the search-row height", () => {
+    render(<TopBar initialUnreadCount={0} alwaysVisible />);
+    const home = screen.getByRole("link", { name: "Materialize — home" });
+    expect(home.className).toMatch(/\bh-10\b/);
+    expect(home.className).toMatch(/\bitems-center\b/);
+    expect(home.parentElement?.className).toMatch(/\bh-10\b/);
   });
 });

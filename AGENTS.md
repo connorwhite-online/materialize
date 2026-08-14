@@ -212,20 +212,22 @@ Never call the DB cart a "CraftCloud cart." They are distinct: the DB cart is a 
 Three components in `components/brand/logo.tsx`, all painting with
 `fill="currentColor"` so they follow the surrounding `text-*` token in both themes:
 
-- **`<Logomark>`** — the "M" alone. Use where there's no horizontal room: the top
-  bar's brand link, the mobile nav's collapsed pill on `/` (where it stands alone,
-  with no title beside it), the fee-sheet tile. (The full word needs ~14rem at nav
-  size, which none of those have.)
+- **`<Logomark>`** — the "M" alone. Use where there's no horizontal room: the
+  landing header below `nav` (where it stands in for the word), the mobile nav's
+  collapsed pill on `/` (no title beside it), the fee-sheet tile.
 - **`<Wordmark>`** — the full word, static.
 - **`<AnimatedWordmark>`** — the same word with a CSS-only reveal: the "M" is
   always painted and the other ten letters drift in left-to-right, each blurred
   and lifted, settling as a bottom-to-top wipe fills it in. `animateOnMount`
   plays it once (keyframes — works with JS disabled); `expanded` makes it a
   controlled toggle between the word and the bare mark, which reverses the
-  stagger so it peels right-to-left back to the "M". Live on the landing header
-  (at `nav+` only — below that the header falls back to `<Logomark>`, because the
-  word would crowd the search pill on a phone), the auth modal, `/sign-in`,
-  `/sign-up`, and `/onboarding`.
+  stagger so it peels right-to-left back to the "M". Live on the landing
+  header at `nav+` (22px tall, vertically centered on the 40px search row;
+  `animateOnMount` until the first scroll, then `expanded` tracks scroll so
+  the word peels back to a slightly taller M via `--mz-mark-scale` in
+  `globals.css`; below `nav` it falls back to `<Logomark>`), the auth
+  modal, `/sign-in`, `/sign-up`, and `/onboarding`. App chrome uses
+  `<Logomark>` at the same 22px — it does not collapse.
 
 All geometry lives in `components/brand/logo-paths.ts` — **the only place path
 data is defined**. Updating the logo means replacing the `d` strings there (one
@@ -260,8 +262,8 @@ Sub-`nav` viewports (< 67.5rem) get `components/nav/mobile-nav.tsx` instead of t
 
 Two things to keep in mind when touching it:
 
-- **Never put `layout` on the card.** Its width is animated as a number, between the expanded width (viewport-clamped) and a collapsed width measured off an invisible ghost copy of the row (`useNavWidths`). Motion's layout FLIP scale-transforms children across a size change, which visibly stretches the row's text — the same trap already documented on `HomeBottomBar`. Only the menu block animates `height: 0 ↔ auto`; the card's height follows it.
-- **Container lands first, content keeps arriving.** Opening, the card springs to full size in ~150ms while the rows keep resolving for another ~150ms behind it (38ms stagger — the wordmark's `--mz-stagger-in` — bottom row first, each row a short lift plus an 8px blur that sharpens as it lands). That gap is the whole effect: when container and content finish together the nav feels heavier than it is. The block animates height only — the rows own their fade and blur, so the card is never an empty box waiting for content. Closing, the rows peel top → bottom (24ms stagger, same as `--mz-stagger-out`) with the blur returning, and height waits 60ms before springing out so the cascade goes soft before anything is clipped. The pill ↔ user-container crossfade delays its incoming half so the two are never both legible.
+- **Never put `layout` on the card.** Its width is animated as a number, between the expanded width (viewport-clamped) and a collapsed width measured off an invisible ghost copy of the row (`useNavWidths`). Motion's layout FLIP scale-transforms children across a size change, which visibly stretches the row's text — the same trap already documented on `HomeBottomBar`. Only the menu block animates `height: 0 ↔ auto`; the card's height follows it. The menu block is `flex flex-col justify-end` so shrinking height clips Home (the top) first; default top-alignment shears Materials into the identity row and reads as close-jitter.
+- **Container lands first, content keeps arriving.** Opening, the card springs to full size in ~150ms while the rows keep resolving for another ~150ms behind it (38ms stagger — the wordmark's `--mz-stagger-in` — bottom row first, each row a short lift plus an 8px blur that sharpens as it lands). That gap is the whole effect: when container and content finish together the nav feels heavier than it is. The block animates height only — the rows own their fade and blur, so the card is never an empty box waiting for content. Closing, height springs immediately with width (same critically-damped close — do not delay it) while rows peel top → bottom (32ms stagger, delay baked into each row's `exit`). The pill identity must not swap until the card is nearly a pill; if it uses the open-path 50ms delay, "Search" prints over "Sign in" in a still-tall card. The close identity enter waits 180ms.
 - **Retimes get filmed, not eyeballed.** Every number above came from stepping 60fps captures — a reference clip of Linear's nav, and our own via CDP `Page.screencast` (Playwright's screenshot loop is far too slow to see this). Two defects were invisible until filmed: rows squashing under a shrinking card, and a ~100ms empty-box flash on open.
 - **Open state is derived, not an effect.** `openPath` stores the pathname the menu was opened on, so "collapse on navigate" and "collapse when the keyboard is up" fall out of `openPath === pathname && !keyboardOpen` rather than a `setState`-in-effect (which the React compiler lint rejects).
 

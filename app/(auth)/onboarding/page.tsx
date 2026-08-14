@@ -39,7 +39,7 @@ export default function OnboardingPage() {
       <AnimatedWordmark
         title="Materialize"
         animateOnMount
-        className="mb-8 text-foreground [--mz-h:14px] sm:[--mz-h:16px]"
+        className="mb-8 text-foreground [--mz-h:7px] sm:[--mz-h:8px]"
       />
 
       <Card className="w-full max-w-sm">
