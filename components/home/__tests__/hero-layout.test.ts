@@ -32,9 +32,13 @@ describe("anon home hero layout", () => {
   });
 
   it("places desktop copy below center, not vertically centered", () => {
-    expect(page).toMatch(/\bnav:pb-24\b/);
-    expect(page).not.toMatch(/\bnav:items-center\b/);
-    expect(page).not.toMatch(/\bnav:pb-0\b/);
+    const copy = page.match(
+      /<div className="(flex flex-1 items-end[^"]*)">/
+    )?.[1];
+    expect(copy).toBeDefined();
+    expect(copy).toMatch(/\bnav:pb-24\b/);
+    expect(copy).not.toMatch(/\bnav:items-center\b/);
+    expect(copy).not.toMatch(/\bnav:pb-0\b/);
   });
 
   it("asks TopBar for the landing wordmark and blur feather", () => {
