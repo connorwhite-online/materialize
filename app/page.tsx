@@ -3,9 +3,12 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { TopBar } from "@/components/nav/top-bar";
 import { AppShell } from "@/components/nav/app-shell";
+import { MobileNav } from "@/components/nav/mobile-nav";
 import { HeroBackground } from "@/components/home/hero-background";
 import { HomeDashboard } from "@/components/home/home-dashboard";
 import { HomeMarketing } from "@/components/home/home-marketing";
+import { CartProvider } from "@/components/print/cart-context";
+import { CartPanel } from "@/components/print/cart-panel";
 import { isSandboxMode } from "@/lib/env";
 import { resolveTextToCadAccess } from "@/lib/features";
 import { getMyUnreadNotificationCount } from "@/lib/notifications/queries";
@@ -107,7 +110,7 @@ export default async function HomePage() {
   // flow (no h-dvh / overflow-hidden) so the content below the fold
   // can extend it.
   return (
-    <div className="flex flex-col">
+    <CartProvider>
       {/* Site-level structured data. Only the home page emits these:
           Organization and WebSite are singletons keyed by `@id`, and
           repeating them on every route gives a crawler N competing
@@ -134,7 +137,10 @@ export default async function HomePage() {
         }}
       />
 
-      <TopBar initialUnreadCount={0} textToCad={textToCad} alwaysVisible />
+      {/* Same chrome as AppShell, minus sandbox: TopBar hides below
+          `nav` (no alwaysVisible) and the morphing MobileNav takes over
+          on small screens — anon home matches authed routes. */}
+      <TopBar initialUnreadCount={0} textToCad={textToCad} />
 
       {/* Hero — exactly one screen. min-h-dvh (not h-dvh) keeps the
           hero at one mobile viewport while letting HomeMarketing below
@@ -146,13 +152,17 @@ export default async function HomePage() {
           absolute inset-0 + object-cover). The three.js / R3F showcase
           that used to sit in a visual slot below the copy is unmounted,
           not deleted — hero-showcase*.tsx et al. stay in the tree. */}
-      <section className="relative flex min-h-dvh w-full flex-col overflow-hidden">
+      <section className="relative isolate flex min-h-dvh w-full flex-col overflow-hidden">
         <HeroBackground />
         {/* Brand mark lives in TopBar so "Materialize" still appears
             above the fold. The h1 states what the product does. */}
-        <main className="relative flex flex-1 flex-col">
-          <div className="flex flex-1 items-center justify-center px-4">
-            <div className="flex w-full max-w-2xl flex-col items-center gap-4 text-center">
+        <main className="relative z-10 flex flex-1 flex-col">
+          {/* Mobile: copy high on the first screen (TopBar is hidden
+              below `nav`; only the floating pill sits at the bottom).
+              Desktop (nav+): vertically centered, left-aligned with
+              generous padding so it clears the sculpture. */}
+          <div className="flex flex-1 items-start justify-start px-6 pt-16 sm:px-8 nav:items-center nav:px-16 nav:pt-0 lg:px-24 xl:px-32">
+            <div className="flex w-full max-w-xl flex-col items-start gap-4 text-left">
               {/* Real, selectable <h1> — states what the product does
                   rather than spelling the brand. Same system stack as
                   the rest of the app; no webfont on the critical path. */}
@@ -170,8 +180,13 @@ export default async function HomePage() {
 
       {/* Below the fold: server-rendered features + benefits + internal
           links so crawlers and agents get real content, not the
-          JS-only hero shell. */}
-      <HomeMarketing />
-    </div>
+          JS-only hero shell. pb-28 clears the floating mobile nav. */}
+      <div className="pb-28 nav:pb-0">
+        <HomeMarketing />
+      </div>
+
+      <MobileNav initialUnreadCount={0} textToCad={textToCad} />
+      <CartPanel />
+    </CartProvider>
   );
 }

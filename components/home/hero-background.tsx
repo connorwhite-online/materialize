@@ -88,7 +88,11 @@ export function HeroBackground() {
   return (
     <div
       aria-hidden
-      className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
+      // No negative z-index — `z-index: -10` paints behind the opaque
+      // `bg-background` on <html>/<body> (and the fixed body gradient),
+      // so the art was loading but invisible. DOM order + a raised
+      // `z-10` on the hero <main> keeps copy above the absolute fill.
+      className="pointer-events-none absolute inset-0 overflow-hidden"
     >
       {/* Light — hidden when <html class="dark"> */}
       <div className="absolute inset-0 dark:hidden">
