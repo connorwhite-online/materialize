@@ -25,7 +25,7 @@ describe("anon home hero layout", () => {
   });
 
   it("paints the subheading darker than muted-foreground", () => {
-    expect(classNames).toMatch(/text-foreground\/80/);
+    expect(classNames).toMatch(/text-foreground\/90/);
     const sub = page.match(
       /<p className="([^"]*)">\s*Get prints delivered to your door/
     );
