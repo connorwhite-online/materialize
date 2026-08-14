@@ -100,6 +100,13 @@ and the 2023–26 landscape): the verdict on the editable-feature-timeline thesi
 and a prioritized cost package (prompt caching, prompt modularization, role
 routing) for the harness. Recommendations filed as MTR-220–228.
 
+[11-scan-to-cad.md](./11-scan-to-cad.md) (2026-08-14) records scan-to-CAD:
+attach a 3D scan of a real object and design around it. The accuracy budget is
+the interesting part — phone lidar lands at ±5–10mm where a snap fit needs
+±0.2mm, so v1 is loose fits only — along with the proxy ladder that turns an
+open, noisy capture into geometry a kernel will accept, and the extraction
+check that catches a cradle holding its object too well to come out.
+
 Related pre-existing issues: MTR-35 (annotation v1, shipped — 01 is its v2), MTR-44
 (assemblies 2/2), MTR-46 (enhancement backlog), MTR-48 (studio cleanups — superseded in
 part by 05), MTR-50 (thumbnails), MTR-51 (production enablement — prerequisite for 02's

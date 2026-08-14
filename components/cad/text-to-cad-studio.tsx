@@ -29,10 +29,20 @@ import {
   PinIcon,
   PlusIcon,
   RulerDimensionLineIcon,
+  ScanIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react";
 import { zipSync } from "fflate";
+import {
+  DEFAULT_CAPTURE_TIER,
+  MAX_GEOMETRY_REFS,
+  MAX_SCAN_BYTES,
+  SCAN_FILE_TYPES,
+  scanFileTypeFromName,
+  CAPTURE_TIERS,
+  type CaptureTierId,
+} from "@/lib/cad/scan-tiers";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { MetaballLoader } from "@/components/ui/metaball-loader";
@@ -271,6 +281,23 @@ async function readReferenceImage(
     if (allowRawFallback) return raw();
     throw err;
   }
+}
+
+/**
+ * One piece of geometry the user attached (a scan today; a STEP to remix
+ * later). The bytes go straight to R2 via the presign route — only the key
+ * travels with the build, because a scan is tens of megabytes and would not
+ * survive the generate request body.
+ */
+interface AttachedGeometry {
+  id: string;
+  /** R2 key, once the upload lands. Absent while uploading or on failure. */
+  key?: string;
+  fileType: string;
+  label: string;
+  captureTier: CaptureTierId;
+  uploading: boolean;
+  error?: string;
 }
 
 interface AttachedImage {
@@ -526,6 +553,7 @@ export function TextToCadStudio({
   const [nameDraft, setNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
   const [images, setImages] = useState<AttachedImage[]>([]);
+  const [geometry, setGeometry] = useState<AttachedGeometry[]>([]);
   // Attachment problems are TOLD, not swallowed — a silently dropped file
   // reads as "the build lost my images" (seen in the wild with HEIC).
   const [attachError, setAttachError] = useState<string | null>(null);
@@ -584,6 +612,7 @@ export function TextToCadStudio({
   // instant opacity swaps instead of layout/spring animation (Accessibility).
   const reduceMotion = useReducedMotion();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const geometryInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Outer fixed wrapper of the floating composer — its `bottom` is rewritten
   // from the VisualViewport API so the composer stays pinned above the iOS
@@ -1241,6 +1270,9 @@ export function TextToCadStudio({
     setPrompt("");
     setSubmittedPrompt(null);
     setImages([]);
+    // Same lifetime as images. A revision does not need it re-attached: the
+    // server inherits the parent's geometry refs.
+    setGeometry([]);
     setAttachError(null);
     setConcepts(null);
     setSelectedConceptId(null);
@@ -1455,6 +1487,9 @@ export function TextToCadStudio({
     // user's typed instruction (and any attached refs) stay put to retry.
     setPrompt("");
     setImages([]);
+    // Same lifetime as images. A revision does not need it re-attached: the
+    // server inherits the parent's geometry refs.
+    setGeometry([]);
     setAttachError(null);
     setConcepts(null);
     setSelectedConceptId(null);
@@ -1462,6 +1497,119 @@ export function TextToCadStudio({
     // finishes so the sheet never covers the morph.
     setPendingFeedbackTurnId(ev.generationId);
   }
+
+  /**
+   * Attach a scan. Uploads straight to R2 through the presign route rather
+   * than riding the generate body: a phone capture is tens of megabytes, where
+   * a reference image is capped around 6.5MB of base64.
+   *
+   * A failed upload stays visible as a chip with its reason. The old instinct
+   * here would be to drop it silently, which reads to the user as "the build
+   * ignored my scan" — the same trap the image path already documents.
+   */
+  async function addGeometry(files: FileList | File[] | null | undefined) {
+    const list = Array.from(files ?? []);
+    if (!list.length) return;
+    const slots = MAX_GEOMETRY_REFS - geometry.length;
+    if (slots <= 0) return;
+
+    for (const file of list.slice(0, slots)) {
+      const fileType = scanFileTypeFromName(file.name);
+      const id = `geo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      if (!fileType) {
+        setGeometry((prev) => [
+          ...prev,
+          {
+            id,
+            fileType: "",
+            label: file.name,
+            captureTier: DEFAULT_CAPTURE_TIER,
+            uploading: false,
+            error: `Unsupported format — export as ${SCAN_FILE_TYPES.map((f) => f.toUpperCase()).join(", ")}`,
+          },
+        ]);
+        continue;
+      }
+      if (file.size > MAX_SCAN_BYTES) {
+        setGeometry((prev) => [
+          ...prev,
+          {
+            id,
+            fileType,
+            label: file.name,
+            captureTier: DEFAULT_CAPTURE_TIER,
+            uploading: false,
+            error: `Too large (${Math.round(file.size / 1024 / 1024)}MB) — export at a lower density`,
+          },
+        ]);
+        continue;
+      }
+
+      setGeometry((prev) => [
+        ...prev,
+        {
+          id,
+          fileType,
+          label: file.name,
+          captureTier: DEFAULT_CAPTURE_TIER,
+          uploading: true,
+        },
+      ]);
+
+      try {
+        const presign = await fetch("/api/cad/geometry/presign", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename: file.name,
+            contentType: file.type || "application/octet-stream",
+            fileSize: file.size,
+          }),
+        });
+        if (!presign.ok) {
+          const body = (await presign.json().catch(() => null)) as {
+            error?: string;
+          } | null;
+          throw new Error(body?.error ?? "Could not start the upload");
+        }
+        const { uploadUrl, storageKey } = (await presign.json()) as {
+          uploadUrl: string;
+          storageKey: string;
+        };
+        const put = await fetch(uploadUrl, {
+          method: "PUT",
+          body: file,
+          headers: { "Content-Type": file.type || "application/octet-stream" },
+        });
+        if (!put.ok) throw new Error("Upload failed");
+        setGeometry((prev) =>
+          prev.map((g) =>
+            g.id === id ? { ...g, key: storageKey, uploading: false } : g
+          )
+        );
+      } catch (err) {
+        setGeometry((prev) =>
+          prev.map((g) =>
+            g.id === id
+              ? {
+                  ...g,
+                  uploading: false,
+                  error:
+                    err instanceof Error ? err.message : "Upload failed",
+                }
+              : g
+          )
+        );
+      }
+    }
+  }
+
+  function removeGeometry(id: string) {
+    setGeometry((prev) => prev.filter((g) => g.id !== id));
+  }
+
+  /** Only fully-uploaded attachments travel with a build. */
+  const readyGeometry = geometry.filter((g) => g.key && !g.error);
 
   async function addFiles(files: FileList | File[] | null | undefined) {
     if (!files) return;
@@ -1673,6 +1821,17 @@ export function TextToCadStudio({
           name: parentId && activeThread ? threadLabel(activeThread) : undefined,
           images: images.length
             ? images.map((i) => ({ data: i.data, mediaType: i.mediaType }))
+            : undefined,
+          // Attached geometry travels as R2 keys, never bytes — the upload
+          // already happened. Only fully-landed ones go: a chip still
+          // uploading or in error must not silently become "no scan".
+          geometry: readyGeometry.length
+            ? readyGeometry.map((g) => ({
+                key: g.key,
+                fileType: g.fileType,
+                label: g.label,
+                captureTier: g.captureTier,
+              }))
             : undefined,
           // Pre-build concept pick (composer picker): the chosen direction's
           // render becomes the build's enforced aesthetic target.
@@ -2936,6 +3095,54 @@ export function TextToCadStudio({
             }}
             className="rounded-2xl border border-foreground/15 bg-card/95 p-2 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80"
           >
+            {geometry.length > 0 && (
+              <div className="mb-2 space-y-1.5 px-1">
+                <div className="flex flex-wrap gap-1.5">
+                  {geometry.map((g) => (
+                    <span
+                      key={g.id}
+                      className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs ${
+                        g.error
+                          ? "border-destructive/40 text-destructive"
+                          : "border-foreground/15 text-muted-foreground"
+                      }`}
+                    >
+                      {g.uploading ? (
+                        <Loader2Icon className="size-3 animate-spin" />
+                      ) : (
+                        <ScanIcon className="size-3" />
+                      )}
+                      <span className="max-w-[12rem] truncate">{g.label}</span>
+                      {g.error && <span className="truncate">— {g.error}</span>}
+                      <button
+                        type="button"
+                        onClick={() => removeGeometry(g.id)}
+                        aria-label={`Remove ${g.label}`}
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        <XIcon className="size-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+                {/* The one thing a user cannot see for themselves, said before
+                    they ask for something the capture cannot support. */}
+                {readyGeometry.length > 0 && (
+                  <p className="text-[11px] leading-snug text-muted-foreground">
+                    A phone scan is accurate to about ±
+                    {CAPTURE_TIERS[DEFAULT_CAPTURE_TIER].surfaceErrorMm}mm, so
+                    this builds a loose fit (
+                    {CAPTURE_TIERS[DEFAULT_CAPTURE_TIER].archetypes
+                      .slice(0, 3)
+                      .join(", ")}
+                    ) with{" "}
+                    {CAPTURE_TIERS[DEFAULT_CAPTURE_TIER].clearanceMm}mm of
+                    clearance — not a press or snap fit.
+                  </p>
+                )}
+              </div>
+            )}
+
             {images.length > 0 && (
               <div className="mb-2 flex flex-wrap gap-2 px-1">
                 {images.map((img) => (
@@ -3069,6 +3276,27 @@ export function TextToCadStudio({
                 >
                   <PaperclipIcon className="size-4" />
                 </button>
+                <button
+                  type="button"
+                  onClick={() => geometryInputRef.current?.click()}
+                  disabled={generating || geometry.length >= MAX_GEOMETRY_REFS}
+                  aria-label="Attach a 3D scan"
+                  title="Attach a 3D scan to build around"
+                  className="flex size-8 cursor-pointer items-center justify-center rounded-lg text-muted-foreground hover:bg-foreground/5 hover:text-foreground disabled:opacity-40"
+                >
+                  <ScanIcon className="size-4" />
+                </button>
+                <input
+                  ref={geometryInputRef}
+                  type="file"
+                  accept={SCAN_FILE_TYPES.map((f) => `.${f}`).join(",")}
+                  multiple
+                  hidden
+                  onChange={(e) => {
+                    addGeometry(e.target.files);
+                    e.target.value = "";
+                  }}
+                />
                 {/* Explore design directions — fresh builds only (revision
                     turns get the in-job refine card instead). */}
                 {!activeThread && (
