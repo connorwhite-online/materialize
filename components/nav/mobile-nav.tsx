@@ -37,24 +37,25 @@ const MIN_COLLAPSED_WIDTH = 172;
 const ROW_HEIGHT = 56;
 
 /**
- * The card's own motion: fast, with a hair of overshoot and no wobble.
- * Deliberately quicker than the content wave below — filming Linear's
- * nav at 60fps, its card reaches full size in ~100ms and the rows keep
- * arriving for another ~200ms. The container landing early is what
- * makes the cascade read as life rather than lag; when the two finish
- * together (as ours did) the whole thing feels heavier than it is.
+ * The card's own motion: fast, zero bounce. Stiffness springs used to
+ * leave a long asymptotic crawl (~200ms of sub-pixel width/height
+ * motion after the eye thought it was done) which read as jitter on
+ * the rounded card + backdrop-blur + text. `visualDuration` +
+ * `bounce: 0` lands on the target in a fixed window with no settle
+ * wobble. Still quicker than the content wave below — the container
+ * landing early is what makes the cascade read as life rather than
+ * lag (Linear's card ~100ms, rows keep arriving past it).
  */
 const SPRING: Transition = {
   type: "spring",
-  stiffness: 520,
-  damping: 38,
-  mass: 0.8,
+  visualDuration: 0.28,
+  bounce: 0,
 };
-/** Critically damped — collapsing height must not overshoot past 0. */
+/** Same duration-based spring on close — no overshoot past 0 height. */
 const SPRING_CLOSE: Transition = {
   type: "spring",
-  stiffness: 460,
-  damping: 44,
+  visualDuration: 0.26,
+  bounce: 0,
 };
 
 /**
@@ -67,10 +68,11 @@ const SPRING_CLOSE: Transition = {
  */
 const HEIGHT_CLOSE: Transition = { ...SPRING_CLOSE, delay: 0.06 };
 /**
- * The pill ↔ user-container swap. The incoming row waits out most of
- * the outgoing one's fade, so the two are never both legible — without
- * the delay you catch "Search" and "Connor White" printed over each
- * other mid-collapse.
+ * The pill ↔ user-container swap. Opacity-only (no y) — a slide on
+ * the identity row used to fight the card's last few pixels of height
+ * settle and read as the bottom row jittering. The incoming row still
+ * waits out most of the outgoing fade so the two are never both
+ * legible mid-collapse.
  */
 const IDENTITY_IN: Transition = {
   duration: 0.13,
@@ -166,6 +168,12 @@ export function MobileNav({
     pillProfile?.handle ?? null
   );
 
+  // Pixel height for the destination list — animating to a number
+  // (not `"auto"`) so the spring lands on an exact value instead of
+  // snapping from the last interpolated px back to `auto` at rest.
+  const menuNavRef = useRef<HTMLElement>(null);
+  const [menuHeight, setMenuHeight] = useState(0);
+
   // Also collapses while the keyboard is up — the whole nav is faded
   // out of the way then, and it must not come back mid-typing.
   const open = openPath !== null && openPath === pathname && !keyboardOpen;
@@ -174,6 +182,21 @@ export function MobileNav({
     () => setOpenPath((current) => (current === null ? pathname : null)),
     [pathname]
   );
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setMenuHeight(0);
+      return;
+    }
+    const nav = menuNavRef.current;
+    if (!nav) return;
+    const measure = () => setMenuHeight(nav.scrollHeight);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(nav);
+    return () => observer.disconnect();
+  }, [open, destinations.length, expandedWidth, isSignedIn]);
 
   // Escape closes; the page behind stops scrolling while the menu is up.
   useEffect(() => {
@@ -274,8 +297,10 @@ export function MobileNav({
                   // Opening, the block only animates height — the rows
                   // own their own fade, so there is no phase where a
                   // half-lit card sits on screen waiting for content.
+                  // Height is a measured px value (see menuHeight), not
+                  // `"auto"`, so the spring can rest without a snap.
                   initial={{ height: 0 }}
-                  animate={{ height: "auto" }}
+                  animate={{ height: menuHeight }}
                   exit={{
                     height: 0,
                     transition: reducedMotion ? { duration: 0 } : HEIGHT_CLOSE,
@@ -286,6 +311,7 @@ export function MobileNav({
                   {/* Fixed width so the list never reflows mid-morph while
                       the card itself is still widening. */}
                   <nav
+                    ref={menuNavRef}
                     id={menuId}
                     aria-label="Primary"
                     style={{ width: expandedWidth }}
@@ -369,12 +395,12 @@ export function MobileNav({
                   {open ? (
                     <motion.div
                       key="user"
-                      initial={reducedMotion ? false : { opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
+                      initial={reducedMotion ? false : { opacity: 0 }}
+                      animate={{ opacity: 1 }}
                       exit={
                         reducedMotion
                           ? { opacity: 0 }
-                          : { opacity: 0, y: -8, transition: IDENTITY_OUT }
+                          : { opacity: 0, transition: IDENTITY_OUT }
                       }
                       transition={reducedMotion ? { duration: 0 } : IDENTITY_IN}
                       className="absolute inset-0 flex items-center"
@@ -431,12 +457,12 @@ export function MobileNav({
                       aria-expanded={false}
                       aria-controls={menuId}
                       aria-label={`${identity.label} — open navigation menu`}
-                      initial={reducedMotion ? false : { opacity: 0, y: -8 }}
-                      animate={{ opacity: 1, y: 0 }}
+                      initial={reducedMotion ? false : { opacity: 0 }}
+                      animate={{ opacity: 1 }}
                       exit={
                         reducedMotion
                           ? { opacity: 0 }
-                          : { opacity: 0, y: 8, transition: IDENTITY_OUT }
+                          : { opacity: 0, transition: IDENTITY_OUT }
                       }
                       transition={reducedMotion ? { duration: 0 } : IDENTITY_IN}
                       className="absolute inset-0 flex items-center text-left"
@@ -567,9 +593,11 @@ type RowStagger = { index: number; count: number };
 /**
  * Rows materialise rather than slide: a short lift plus a blur that
  * resolves as they land. Filter is a tween (springs on blur feel
- * drunk); position is a spring so they settle. The travel stays small
- * — at 10px the eye reads it as coming into focus, not as sliding in
- * from somewhere.
+ * drunk); position is a zero-bounce duration spring so it lands
+ * without the sub-pixel crawl that used to shimmer the labels.
+ * No `scale` — scaling text through 0.99→1 re-rasterises glyphs each
+ * frame and read as jitter right before rest. Travel stays small
+ * (10px) so the eye reads focus-in, not a slide from elsewhere.
  *
  * Stagger is per-item delay rather than `staggerChildren`, because the
  * list is nested inside the height wrapper's AnimatePresence and a
@@ -581,16 +609,14 @@ const ITEM_VARIANTS: Variants = {
   hidden: {
     opacity: 0,
     y: 10,
-    scale: 0.98,
     filter: "blur(8px)",
   },
   visible: ({ index, count }: RowStagger) => {
     const delay = (count - 1 - index) * STAGGER_IN;
     const settle: Transition = {
       type: "spring",
-      stiffness: 380,
-      damping: 32,
-      mass: 0.7,
+      visualDuration: 0.3,
+      bounce: 0,
       delay,
     };
     // Logo ease: sharpness catches up a frame after the row has
@@ -598,20 +624,18 @@ const ITEM_VARIANTS: Variants = {
     // Delay is repeated on each key — per-property transitions do
     // not inherit a sibling `delay`.
     const focus: Transition = {
-      duration: 0.22,
+      duration: 0.2,
       ease: [0.22, 0.9, 0.28, 1],
       delay,
     };
     return {
       opacity: 1,
       y: 0,
-      scale: 1,
       filter: "blur(0px)",
       transition: {
         y: settle,
-        scale: settle,
         opacity: focus,
-        filter: { ...focus, duration: 0.28 },
+        filter: { ...focus, duration: 0.24 },
       },
     };
   },
@@ -620,14 +644,13 @@ const ITEM_VARIANTS: Variants = {
     return {
       opacity: 0,
       y: 10,
-      scale: 0.98,
       filter: "blur(8px)",
       transition: {
         delay,
-        duration: 0.15,
+        duration: 0.14,
         ease: [0.4, 0, 1, 1],
-        opacity: { delay, duration: 0.12, ease: "easeIn" },
-        filter: { delay, duration: 0.14, ease: "easeIn" },
+        opacity: { delay, duration: 0.11, ease: "easeIn" },
+        filter: { delay, duration: 0.12, ease: "easeIn" },
       },
     };
   },
