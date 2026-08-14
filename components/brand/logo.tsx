@@ -125,14 +125,15 @@ export interface AnimatedWordmarkProps extends BaseProps {
  * Performance: no JS animation, no `requestAnimationFrame`, no motion
  * library. Everything is CSS transitions and keyframes declared once in
  * `app/globals.css` (`.mz-logo-*`), staggered by a `--mz-i` custom property
- * per letter. The only animating layout property is the wrapper's width, on a
- * single absolutely-sized element. `prefers-reduced-motion` collapses the
- * whole thing to an instant state change.
+ * per letter. The animating layout properties are the wrapper's width and
+ * height, on a single absolutely-sized element. `prefers-reduced-motion`
+ * collapses the whole thing to an instant state change.
  *
- * The wrapper crops rather than scales: the SVG inside is always the full
- * wordmark at the requested height, and the wrapper's width slides between
- * the mark's width and the word's. That's why the "M" never shifts or
- * resizes across the transition — it is literally the same painted glyph.
+ * Collapsing crops the wrapper to the mark and scales the SVG up slightly
+ * (`--mz-mark-scale` in globals.css) so the "M" ends up taller than the
+ * word was — it reads as absorbing the letters as they peel off. The SVG
+ * itself is always the full wordmark at the requested height; scale and
+ * crop are CSS on top of that.
  */
 export function AnimatedWordmark({
   height,

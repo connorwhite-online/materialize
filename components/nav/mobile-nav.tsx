@@ -25,6 +25,7 @@ import { useAuthModal } from "@/components/auth/auth-modal";
 import { useCart } from "@/components/print/cart-context";
 import { useKeyboardOpen } from "@/lib/hooks/use-keyboard-sticky-bottom";
 import { useUnreadCount } from "@/lib/hooks/use-unread-count";
+import { SPRING, SPRING_CLOSE, SPRING_SETTLE, EASE_OUT_SOFT } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
 /** Widest the expanded card gets; clamped to the viewport below. */
@@ -35,27 +36,6 @@ const VIEWPORT_GUTTER = 32;
 const MIN_COLLAPSED_WIDTH = 172;
 /** Height of the always-present identity row (`h-14`). */
 const ROW_HEIGHT = 56;
-
-/**
- * The card's own motion: fast, with a hair of overshoot and no wobble.
- * Deliberately quicker than the content wave below — filming Linear's
- * nav at 60fps, its card reaches full size in ~100ms and the rows keep
- * arriving for another ~200ms. The container landing early is what
- * makes the cascade read as life rather than lag; when the two finish
- * together (as ours did) the whole thing feels heavier than it is.
- */
-const SPRING: Transition = {
-  type: "spring",
-  stiffness: 520,
-  damping: 38,
-  mass: 0.8,
-};
-/** Critically damped — collapsing height must not overshoot past 0. */
-const SPRING_CLOSE: Transition = {
-  type: "spring",
-  stiffness: 460,
-  damping: 44,
-};
 
 /**
  * The pill ↔ user-container swap on OPEN. Incoming waits out most of
@@ -635,9 +615,9 @@ const ITEM_VARIANTS: Variants = {
     y: 0,
     filter: "blur(0px)",
     transition: {
-      y: { type: "spring", stiffness: 380, damping: 32, mass: 0.7 },
-      opacity: { duration: 0.22, ease: [0.22, 0.9, 0.28, 1] },
-      filter: { duration: 0.28, ease: [0.22, 0.9, 0.28, 1] },
+      y: SPRING_SETTLE,
+      opacity: { duration: 0.22, ease: EASE_OUT_SOFT },
+      filter: { duration: 0.28, ease: EASE_OUT_SOFT },
     },
   },
 };

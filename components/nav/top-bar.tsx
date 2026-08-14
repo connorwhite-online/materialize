@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useUser } from "@clerk/nextjs";
 import { AnimatedWordmark, Logomark } from "@/components/brand/logo";
@@ -14,8 +15,11 @@ import { useScrolled } from "@/lib/hooks/use-scrolled";
 import { cn } from "@/lib/utils";
 import { BUBBLE_SHADOW } from "@/components/nav/bubble-shadow";
 
-/** Half of the previous 22px lockup. Width follows the artwork (~9.5rem). */
-const NAV_LOGO_HEIGHT = 11;
+/**
+ * Full lockup height. Collapsed CSS (`--mz-mark-scale`) grows the M
+ * past this so it reads as absorbing the peeling letters.
+ */
+const NAV_LOGO_HEIGHT = 22;
 
 const ICON_GLYPH =
   "text-neutral-900 hover:text-neutral-900 dark:text-neutral-100 dark:hover:text-neutral-100";
@@ -51,6 +55,14 @@ export function TopBar({
   alwaysVisible = false,
 }: TopBarProps) {
   const scrolled = useScrolled();
+  // Stay in mount-animation mode until the first scroll so the snow-in
+  // reveal still plays on load. After that, `expanded` drives collapse
+  // (and the reverse expand when the user returns to the top).
+  const [collapseArmed, setCollapseArmed] = useState(false);
+  useEffect(() => {
+    if (scrolled) setCollapseArmed(true);
+  }, [scrolled]);
+  const wordmarkExpanded = collapseArmed ? !scrolled : undefined;
 
   return (
     <header
@@ -77,22 +89,25 @@ export function TopBar({
             aria-label="Materialize — home"
             className="relative flex h-10 items-center text-foreground transition-opacity hover:opacity-80"
           >
-            {/* Desktop: the wordmark peels back to the M once the page
-                scrolls. The wrapper does the responsive hiding on the
-                landing page — `.mz-logo` is unlayered CSS and would
-                outrank a `hidden` utility put on the component itself.
-                Below `nav` the landing header falls back to the mark
-                (no room for the word next to the search pill). App
-                routes hide this whole bar below `nav`. */}
-            {alwaysVisible && (
-              <Logomark height={NAV_LOGO_HEIGHT} className="nav:hidden" />
+            {alwaysVisible ? (
+              <>
+                {/* Landing page: the full lockup drifts in on first paint,
+                    but only where the header has room for ~14rem of word.
+                    The wrapper does the responsive hiding — `.mz-logo` is
+                    unlayered CSS and would outrank a `hidden` utility put
+                    on the component itself. */}
+                <span className="hidden nav:block">
+                  <AnimatedWordmark
+                    animateOnMount
+                    expanded={wordmarkExpanded}
+                    height={NAV_LOGO_HEIGHT}
+                  />
+                </span>
+                <Logomark height={NAV_LOGO_HEIGHT} className="nav:hidden" />
+              </>
+            ) : (
+              <Logomark height={NAV_LOGO_HEIGHT} />
             )}
-            <span className={alwaysVisible ? "hidden nav:block" : undefined}>
-              <AnimatedWordmark
-                expanded={!scrolled}
-                height={NAV_LOGO_HEIGHT}
-              />
-            </span>
           </Link>
           {textToCad && (
             <Button
@@ -128,10 +143,7 @@ export function TopBar({
         </div>
 
         <div className="flex h-10 items-center justify-end">
-          <AuthCluster
-            initialUnreadCount={initialUnreadCount}
-            subtleLogin={alwaysVisible}
-          />
+          <AuthCluster initialUnreadCount={initialUnreadCount} />
         </div>
       </div>
     </header>
@@ -140,11 +152,8 @@ export function TopBar({
 
 function AuthCluster({
   initialUnreadCount,
-  subtleLogin = false,
 }: {
   initialUnreadCount: number;
-  /** Landing page: frosted glass instead of the primary pill. */
-  subtleLogin?: boolean;
 }) {
   const { user, isLoaded, isSignedIn } = useUser();
   const { openAuth } = useAuthModal();
@@ -157,11 +166,8 @@ function AuthCluster({
     return (
       <Button
         size="default"
-        variant={subtleLogin ? "ghost" : "default"}
-        className={cn(
-          subtleLogin &&
-            "glass bg-background/85 text-foreground shadow-none before:hidden hover:bg-background/95 dark:bg-background/80 dark:hover:bg-background/90"
-        )}
+        variant="secondary"
+        className="border-border bg-secondary hover:bg-muted"
         onClick={() => openAuth("sign-in")}
       >
         Login

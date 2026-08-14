@@ -221,11 +221,13 @@ Three components in `components/brand/logo.tsx`, all painting with
   and lifted, settling as a bottom-to-top wipe fills it in. `animateOnMount`
   plays it once (keyframes — works with JS disabled); `expanded` makes it a
   controlled toggle between the word and the bare mark, which reverses the
-  stagger so it peels right-to-left back to the "M". Live on the desktop top bar
-  (anon and authed — `expanded` tracks scroll, so the word peels back to the M
-  once the page moves; 11px tall, vertically centered on the 40px search row),
-  the landing header at `nav+` only (below that it falls back to `<Logomark>`),
-  the auth modal, `/sign-in`, `/sign-up`, and `/onboarding`.
+  stagger so it peels right-to-left back to the "M". Live on the landing
+  header at `nav+` (22px tall, vertically centered on the 40px search row;
+  `animateOnMount` until the first scroll, then `expanded` tracks scroll so
+  the word peels back to a slightly taller M via `--mz-mark-scale` in
+  `globals.css`; below `nav` it falls back to `<Logomark>`), the auth
+  modal, `/sign-in`, `/sign-up`, and `/onboarding`. App chrome uses
+  `<Logomark>` at the same 22px — it does not collapse.
 
 All geometry lives in `components/brand/logo-paths.ts` — **the only place path
 data is defined**. Updating the logo means replacing the `d` strings there (one
