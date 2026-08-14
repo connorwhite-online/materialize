@@ -121,7 +121,10 @@ export function TopBar({
         </div>
 
         <div className="flex items-center justify-end pt-0">
-          <AuthCluster initialUnreadCount={initialUnreadCount} />
+          <AuthCluster
+            initialUnreadCount={initialUnreadCount}
+            subtleLogin={alwaysVisible}
+          />
         </div>
       </div>
     </header>
@@ -130,8 +133,11 @@ export function TopBar({
 
 function AuthCluster({
   initialUnreadCount,
+  subtleLogin = false,
 }: {
   initialUnreadCount: number;
+  /** Landing page: frosted glass instead of the primary pill. */
+  subtleLogin?: boolean;
 }) {
   const { user, isLoaded, isSignedIn } = useUser();
   const { openAuth } = useAuthModal();
@@ -142,7 +148,15 @@ function AuthCluster({
 
   if (!isSignedIn || !user) {
     return (
-      <Button size="default" onClick={() => openAuth("sign-in")}>
+      <Button
+        size="default"
+        variant={subtleLogin ? "ghost" : "default"}
+        className={cn(
+          subtleLogin &&
+            "glass text-foreground shadow-none before:hidden hover:bg-glass/90 dark:hover:bg-glass/90"
+        )}
+        onClick={() => openAuth("sign-in")}
+      >
         Login
       </Button>
     );
