@@ -174,7 +174,7 @@ export default async function HomePage() {
               <h1 className="text-balance text-3xl leading-[1.1] tracking-tight sm:text-4xl">
                 Print anything, share your ideas
               </h1>
-              <p className="max-w-lg text-pretty text-base leading-relaxed text-foreground/80">
+              <p className="max-w-lg text-pretty text-base leading-relaxed text-foreground/90 [text-shadow:0_0_18px_var(--background),0_1px_2px_var(--background)]">
                 Get prints delivered to your door, and pick from 60+ materials.
                 Share your hardware projects and files.
               </p>
