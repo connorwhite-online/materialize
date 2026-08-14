@@ -22,6 +22,13 @@ import {
   resolveReferenceImages,
 } from "@/lib/cad/reference-images";
 import {
+  loadGeometryForRun,
+  resolveGeometryRefs,
+  type AttachedGeometry,
+} from "@/lib/cad/geometry-refs";
+import { resolveCaptureTier } from "@/lib/cad/scan-tiers";
+import type { ScanContext } from "@/lib/cad/harness";
+import {
   CadTranscriptRecorder,
   transcriptsEnabled,
 } from "@/lib/cad/transcript";
@@ -200,6 +207,12 @@ export interface ExecuteCadJobInput {
    * (base64 PNG) — the harness uses it verbatim as the aesthetic target.
    */
   providedConcept?: { png: string } | null;
+  /**
+   * Geometry the user attached this turn (scan-to-CAD, and MTR-207 remix).
+   * Already validated against the caller's own key prefix in the generate
+   * route, before this job existed.
+   */
+  geometry?: AttachedGeometry[] | null;
 }
 
 /**
@@ -566,6 +579,46 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
     // falls back to the request's own images and no history — never a
     // failed generation. User-attached images lead; repo-fetched ones fill
     // the remaining slots.
+    // Attached geometry: persist + inherit like reference images, then pull the
+    // bytes for the sidecar. Best-effort by the same contract — a scan we
+    // cannot load leaves the run to proceed on the prompt alone rather than
+    // killing a thread over a swept object.
+    let scans: ScanContext | null = null;
+    try {
+      const refs = await resolveGeometryRefs({
+        generationId,
+        userId,
+        parentGenerationId: input.parentGenerationId,
+        geometry: input.geometry,
+      });
+      if (refs.length) {
+        const meshes = await loadGeometryForRun(refs);
+        const bindings = refs
+          .filter((r) => meshes[r.name])
+          .map((r) => {
+            const tier = resolveCaptureTier(r.captureTier);
+            return {
+              name: r.name,
+              ...(r.label ? { label: r.label } : {}),
+              clearanceMm: r.clearanceMm ?? tier.clearanceMm,
+              proxyLevel: r.proxyLevel ?? tier.proxyLevel,
+              captureTier: tier.id,
+            };
+          });
+        if (bindings.length) {
+          const tier = resolveCaptureTier(bindings[0].captureTier);
+          scans = {
+            meshes,
+            bindings,
+            tightFits: tier.tightFits,
+            surfaceErrorMm: tier.surfaceErrorMm,
+          };
+        }
+      }
+    } catch (err) {
+      logError("executeCadJob.geometry", err);
+    }
+
     try {
       images = await resolveReferenceImages({
         generationId,
@@ -618,6 +671,7 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
         threadHistory,
         fetchedFacts,
         providedConcept: input.providedConcept ?? null,
+        scans,
         signal: controller.signal,
         onProgress,
         onQuestion,

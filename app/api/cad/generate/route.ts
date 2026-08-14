@@ -9,6 +9,7 @@ import { canUseTextToCad } from "@/lib/features";
 import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
 import type { PriorFeedback } from "@/lib/cad/harness";
 import { createCadJob, executeCadJob } from "@/lib/cad/jobs";
+import { sanitizeAttachedGeometry } from "@/lib/cad/geometry-refs";
 import type { PromptImage } from "@/lib/cad/model-client";
 import { PROCESS_DFM, type CadProcess } from "@/lib/cad/knowledge/dfm";
 import { checkCadGenerateRateLimit } from "./rate-limit";
@@ -119,6 +120,12 @@ export async function POST(request: Request) {
      * today's behavior. Revisions inherit the parent's process when unset.
      */
     process?: unknown;
+    /**
+     * Geometry the user attached: `[{key, fileType, label?, captureTier?}]`,
+     * where each key was minted by /api/cad/geometry/presign and the bytes
+     * already live in R2. Validated against the caller's own key prefix.
+     */
+    geometry?: unknown;
   };
   try {
     body = await request.json();
@@ -199,6 +206,12 @@ export async function POST(request: Request) {
   // conservative envelope (unchanged behavior for existing flows).
   const process = resolveGenerationProcess(body.process, parentFingerprint);
 
+  // Attached geometry arrives as R2 keys the presign route minted, never as
+  // bytes — a scan is tens of megabytes and would not survive this body.
+  // sanitizeAttachedGeometry re-checks each key against the caller's own
+  // prefix, so a forged key is dropped here rather than fetched.
+  const geometry = sanitizeAttachedGeometry(body.geometry, userId);
+
   const [row] = await db
     .insert(cadGenerations)
     .values({
@@ -228,6 +241,7 @@ export async function POST(request: Request) {
       priorSourceCode,
       priorFeedback,
       priorBrief,
+      geometry: geometry.length ? geometry : undefined,
       // Size-capped: the harness zod-validates; this only blocks abuse.
       providedBrief:
         body.brief != null && JSON.stringify(body.brief).length <= 20_000

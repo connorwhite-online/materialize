@@ -1595,6 +1595,33 @@ export const cadGenerations = pgTable(
       { key: string; mediaType: string; label?: string }[]
     >(),
     /**
+     * Scan / CAD geometry attached to this turn (lib/cad/geometry-refs.ts).
+     * The sibling of referenceImages for GEOMETRY rather than pictures, and
+     * inherited by revisions the same way, so "make the lid taller" on turn 3
+     * still reaches a model that knows what it is building around.
+     *
+     * Deliberately NOT a files/fileAssets row: this is studio input, not a
+     * library artifact, so it needs no file_format enum migration and never
+     * surfaces on marketplace or library surfaces. Same GC contract as
+     * referenceImages — a key is live while ANY row lists it.
+     *
+     * Shared with the remix/edit workflow (MTR-207): a user-uploaded STEP and
+     * a phone scan are the same kind of input, differing only in the proxy
+     * derivation applied to them sidecar-side.
+     */
+    geometryRefs: jsonb("geometry_refs").$type<
+      {
+        key: string;
+        name: string;
+        fileType: string;
+        label?: string;
+        captureTier?: string;
+        proxyLevel?: string;
+        clearanceMm?: number;
+        byteSize?: number;
+      }[]
+    >(),
+    /**
      * Instrumented construction features for the feature-chip UX
      * (extrude/fillet/chamfer/… + faceIds into topo). Small jsonb list —
      * kept on the row so the studio can render chips without a second

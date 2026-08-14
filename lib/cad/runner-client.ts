@@ -76,6 +76,23 @@ export interface RunCadCodeOptions {
    * it. Omitted (not sent) when absent.
    */
   checks?: Record<string, unknown> | null;
+  /**
+   * Scan ingestion: user geometry to bind into the script's namespace before
+   * it runs, as `{name: {b64, fileType, proxyLevel, clearanceMm}}`. The
+   * sidecar reduces each to a watertight PROXY SOLID (cad-runner/scan_proxy.py)
+   * and binds THAT — generated code never touches the raw capture, which is
+   * open, noisy and unbooleanable. Derivation reports come back on `scans`.
+   * Omitted (not sent) when absent; older sidecars ignore it.
+   */
+  meshes?: Record<string, CadSidecarMesh> | null;
+}
+
+/** One entry of the sidecar's `meshes` payload. */
+export interface CadSidecarMesh {
+  b64: string;
+  fileType: string;
+  proxyLevel: string;
+  clearanceMm: number;
 }
 
 /**
@@ -137,6 +154,9 @@ async function runCadCodeLive(
       formats,
       ...(opts?.engine ? { engine: opts.engine } : {}),
       ...(opts?.checks ? { checks: opts.checks } : {}),
+      ...(opts?.meshes && Object.keys(opts.meshes).length
+        ? { meshes: opts.meshes }
+        : {}),
       allowRemesh: opts?.allowRemesh ?? false,
     }),
     signal,

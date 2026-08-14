@@ -162,6 +162,17 @@ export async function runCadGeneration(
       onProgress: input.onProgress,
     });
 
+  // Attached geometry pins the route to the scripted harness, ahead of every
+  // other consideration. The generative backend never sees the proxy at all
+  // (it builds a mesh from text), and the agentic loop has no scan tool yet —
+  // either would quietly ignore the very object the user asked us to build
+  // around and hand back something plausible that does not fit.
+  if (input.scans && Object.keys(input.scans.meshes).length > 0) {
+    note({ type: "route", route: "scan" });
+    const result = await runHarness(input);
+    return { ...result, route: "scan" };
+  }
+
   if (!agenticEnabled()) {
     // Kill switch / no sessions / no model: today's behavior, unchanged.
     const useGenerative =

@@ -2,7 +2,7 @@ import "server-only";
 
 import { activeCadContext, meterSidecarCall } from "./metering";
 import { sidecarDispatcher } from "./sidecar-fetch";
-import type { CadOutputFormat, CadRunResult } from "./types";
+import type { CadOutputFormat, CadRunResult, CadScanReport } from "./types";
 
 /**
  * Client for the sidecar's stateful session mode (docs/text-to-cad/03 §A) — a
@@ -160,6 +160,21 @@ export async function execInSession(
 }
 
 /** Bounding box the sidecar reports for an imported STEP (mm). */
+export interface ImportMeshResult {
+  ok: boolean;
+  name?: string;
+  byteSize?: number;
+  boundingBox?: {
+    min: [number, number, number];
+    max: [number, number, number];
+    size: [number, number, number];
+  } | null;
+  /** Proxy derivation report (cad-runner/scan_proxy.py). */
+  scan?: CadScanReport;
+  namespace?: string[];
+  error?: string;
+}
+
 export interface ImportStepResult {
   ok: boolean;
   name?: string;
@@ -189,6 +204,50 @@ export async function importStepIntoSession(
   return sessionFetch<ImportStepResult>(`/session/${sessionId}/import_step`, {
     method: "POST",
     body: { stepB64, name },
+    signal,
+  });
+}
+
+/**
+ * Import an uploaded scan (base64 mesh) into the session namespace as a
+ * watertight PROXY SOLID under `name`.
+ *
+ * The mesh twin of `importStepIntoSession`, and separate from it for a real
+ * reason: a STEP is already a clean B-rep the kernel accepts, while a scan is
+ * an open, noisy triangle soup it will refuse outright. The sidecar's
+ * scan_proxy ladder is what stands between them, so what lands in the
+ * namespace is the derived proxy, never the raw capture.
+ *
+ * Returns the proxy's bounding box — its frame (grounded on z=0,
+ * footprint-aligned) is the only frame generated code may assume, since the
+ * scan's own origin is arbitrary — plus the derivation report, which names
+ * any degradation the ladder had to make.
+ *
+ * Needs no CAD kernel (pure trimesh/scipy), so unlike import_step this path
+ * runs anywhere the sidecar's mesh stack is installed. The agentic loop and
+ * the remix workflow (MTR-207) are its intended callers; the scripted harness
+ * binds scans through /run's `meshes` field instead.
+ */
+export async function importMeshIntoSession(
+  sessionId: string,
+  meshB64: string,
+  opts: {
+    name?: string;
+    fileType?: string;
+    proxyLevel?: string;
+    clearanceMm?: number;
+  } = {},
+  signal?: AbortSignal
+): Promise<ImportMeshResult> {
+  return sessionFetch<ImportMeshResult>(`/session/${sessionId}/import_mesh`, {
+    method: "POST",
+    body: {
+      meshB64,
+      name: opts.name ?? "scan",
+      fileType: opts.fileType ?? "stl",
+      proxyLevel: opts.proxyLevel ?? "hull",
+      clearanceMm: opts.clearanceMm ?? 3,
+    },
     signal,
   });
 }

@@ -5,7 +5,7 @@ import {
   hasModelCredentials,
   type PromptImage,
 } from "./model-client";
-import { runCadCode } from "./runner-client";
+import { runCadCode, type CadSidecarMesh } from "./runner-client";
 import {
   buildSystemPrompt,
   selectSystemPromptSections,
@@ -75,6 +75,7 @@ import { getNetworksReport, networksFailure } from "./network-check";
 import {
   BREP_OUTPUT_FORMATS,
   CUSTOM_ANSWER_PREFIX,
+  type CadOutputFormat,
   formatThreadHistory,
   labelUserReferences,
   type CadProgressEvent,
@@ -120,6 +121,27 @@ const MIN_ATTEMPT_MS = 60_000;
 const REFERENCE_IMAGES_NOTE =
   'The user attached reference image(s), each captioned "User reference image N". They are the design target: take the form language, proportions, and visible features from them. The written instructions win on any conflict.';
 
+/** One attached piece of geometry, as the harness needs to describe it. */
+export interface ScanBinding {
+  /** Namespace identifier the proxy is bound to (a Python identifier). */
+  name: string;
+  /** Original filename, for the prompt's benefit. */
+  label?: string;
+  clearanceMm: number;
+  proxyLevel: string;
+  captureTier: string;
+}
+
+export interface ScanContext {
+  /** Sidecar `meshes` payload, keyed by binding name. */
+  meshes: Record<string, CadSidecarMesh>;
+  bindings: ScanBinding[];
+  /** Whether the capture is accurate enough to attempt a press/snap fit. */
+  tightFits: boolean;
+  /** Typical capture error, mm — quoted to the model so it sizes honestly. */
+  surfaceErrorMm: number;
+}
+
 export interface HarnessInput {
   prompt: string;
   /** When editing an existing generation, its source code to revise. */
@@ -153,6 +175,16 @@ export interface HarnessInput {
    * in-job picker and concept generation are skipped entirely.
    */
   providedConcept?: { png: string } | null;
+  /**
+   * Geometry the user attached this turn — scans, or (MTR-207) a STEP to
+   * remix. Resolved by lib/cad/geometry-refs.ts and reduced sidecar-side to
+   * watertight proxy solids bound into the script's namespace.
+   *
+   * Presence of this changes the shape of the whole run: the job goes to MESH
+   * mode, because a proxy IS a mesh and no B-rep kernel can boolean against
+   * one, and the scan-fit checks come along.
+   */
+  scans?: ScanContext | null;
   maxAttempts?: number;
   signal?: AbortSignal;
   /**
@@ -327,6 +359,39 @@ interface PromptExtras {
    * dims. "" / undefined = nothing sourced.
    */
   partSourcing?: string | null;
+  /** Bound scan proxies + their measured size (see buildScanBlock). */
+  scans?: string | null;
+}
+
+/**
+ * Describe the bound scan proxies to the model.
+ *
+ * Deliberately quotes the CAPTURE ERROR alongside the dimensions. The model
+ * cannot see how the object was measured, and given a size in millimetres it
+ * will reach for the tolerances millimetres usually imply — which for a phone
+ * scan is off by two orders of magnitude. Saying the error out loud, next to
+ * the number it qualifies, is what keeps it from designing a snap fit.
+ */
+function buildScanBlock(scans: ScanContext, bindings: ScanBinding[]): string {
+  const lines = bindings.map((b) => {
+    const what = b.label ? `${b.label} — ` : "";
+    return [
+      `- \`${b.name}\`: ${what}a watertight proxy of the user's object,`,
+      `  already grown by ${b.clearanceMm}mm of fit clearance`,
+      `  (proxy shape: ${b.proxyLevel}). Read its size from`,
+      `  \`${b.name}.extents\` / \`${b.name}.bounds\`.`,
+    ].join(" ");
+  });
+  return [
+    "ATTACHED GEOMETRY (bound in your namespace before your code runs):",
+    ...lines,
+    "",
+    `Capture accuracy: about ±${scans.surfaceErrorMm}mm.` +
+      (scans.tightFits
+        ? ""
+        : " Far too coarse for a press or snap fit — design a loose fit with" +
+          " compliant retention and say so in your approach."),
+  ].join("\n");
 }
 
 function buildUserPrompt(
@@ -378,6 +443,7 @@ function buildUserPrompt(
   // Off-the-shelf part sourcing (MTR-200): real vendor / local-fastener
   // envelopes so cavities and cutouts FIT, plus honest miss notes.
   if (extras.partSourcing) out += `\n\n${extras.partSourcing}`;
+  if (extras.scans) out += `\n\n${extras.scans}`;
 
   // Revision: replay the persisted brief so the revised code still honors the
   // original structured requirements. Tolerate any shape — the column is
@@ -510,7 +576,23 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
   // prompt and reused for every attempt (fresh generate + every repair turn)
   // so the assembled prefix stays byte-stable within the job — a sibling PR's
   // prompt caching depends on that stability.
-  const systemPrompt = buildSystemPrompt(selectSystemPromptSections(input.prompt));
+  // Attached geometry reshapes the run: MESH mode (a proxy is a mesh, so no
+  // B-rep kernel can boolean it), the scan prompt contract, and the scan-fit
+  // checks. Computed once so the assembled prompt stays byte-stable across
+  // attempts for prompt caching (MTR-221).
+  const scans = input.scans ?? null;
+  const scanBindings = scans?.bindings.filter((b) => scans.meshes[b.name]) ?? [];
+  const hasScans = scanBindings.length > 0;
+  const systemPrompt = buildSystemPrompt(
+    selectSystemPromptSections(input.prompt, { scan: hasScans })
+  );
+  const scanBlock = hasScans ? buildScanBlock(scans!, scanBindings) : null;
+  // Mesh mode produces no STEP — a scan-built part is marching-cubes geometry,
+  // so there is no B-rep to export. Asking for one would just log a failure.
+  const runFormats: CadOutputFormat[] = hasScans ? ["stl"] : BREP_OUTPUT_FORMATS;
+  const runEngineOpts = hasScans
+    ? { engine: "mesh", meshes: scans!.meshes }
+    : {};
 
   // Swallow listener errors — progress is cosmetic, never load-bearing.
   const emit = (event: CadProgressEvent) => {
@@ -641,7 +723,23 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
   // flow through the SAME dimension-check → repair-hint machinery. Null (no
   // `checks` sent at all) when the brief names no known component.
   const fitChecks = buildFitChecksFromTargets(dimensionTargets);
-  const runChecks = fitChecks ? { fit: fitChecks } : undefined;
+  const scanFitCheck = hasScans
+    ? {
+        // The proxy is graded WHERE IT WAS BOUND — the prompt contract pins it
+        // at the origin precisely so this needs no placement guess.
+        scan: scanBindings[0].name,
+        id: scanBindings[0].name,
+        clearanceMm: scanBindings[0].clearanceMm,
+        removalAxis: "+z",
+      }
+    : null;
+  const runChecks =
+    fitChecks || scanFitCheck
+      ? {
+          ...(fitChecks ? { fit: fitChecks } : {}),
+          ...(scanFitCheck ? { scanFit: scanFitCheck } : {}),
+        }
+      : undefined;
   // The last run's dimension-check results, surfaced on the return + used to
   // drive a dimension-specific repair turn.
   let dimensionChecks: DimensionCheckResult[] = [];
@@ -883,7 +981,12 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
       const priorRender = repairNote ? lastRun?.renderPng : undefined;
       const userPrompt = repairNote
         ? [
-            buildUserPrompt(input, plan, { brief, exemplarIds, partSourcing: partSourcingBlock }),
+            buildUserPrompt(input, plan, {
+              brief,
+              exemplarIds,
+              partSourcing: partSourcingBlock,
+              scans: scanBlock,
+            }),
             "",
             `The previous attempt failed because ${repairNote}. Here is that code:`,
             "```python",
@@ -901,7 +1004,12 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
           ]
             .filter(Boolean)
             .join("\n")
-        : buildUserPrompt(input, plan, { brief, exemplarIds, partSourcing: partSourcingBlock });
+        : buildUserPrompt(input, plan, {
+              brief,
+              exemplarIds,
+              partSourcing: partSourcingBlock,
+              scans: scanBlock,
+            });
       const images: PromptImage[] = [
         ...promptRefs,
         ...(conceptImg ? [conceptImg] : []),
@@ -933,7 +1041,8 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
     }
 
     emit({ type: "phase", phase: "executing", attempt, maxAttempts });
-    lastRun = await runCadCode(lastCode, BREP_OUTPUT_FORMATS, input.signal, {
+    lastRun = await runCadCode(lastCode, runFormats, input.signal, {
+      ...runEngineOpts,
       checks: runChecks,
       // Internal-thread compound recipe: watertight ONLY via the mesh
       // pipeline (kernel-verified — booleans shatter or silently drop the
@@ -954,7 +1063,8 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
       lastRun.validation.isSolid &&
       !lastRun.validation.isWatertight
     ) {
-      const remeshed = await runCadCode(lastCode, BREP_OUTPUT_FORMATS, input.signal, {
+      const remeshed = await runCadCode(lastCode, runFormats, input.signal, {
+        ...runEngineOpts,
         allowRemesh: true,
         checks: runChecks,
       });

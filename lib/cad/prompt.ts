@@ -49,6 +49,45 @@ Common build123d pitfalls — these are the frequent failure modes, avoid them:
 - For a multi-part assembly assign \`parts = {"base": <solid>, "lid": <solid>}\` (each its own watertight solid); never assign both \`result\` and \`parts\`.
 - Build only what a CSG kernel can express. If the request asks for things build123d CANNOT do — topology optimization, generative/organic-optimized geometry, FLEXIBLE or ARTICULATED joints, print-in-place mechanisms, springs/living hinges — do NOT attempt them literally (they fail). Instead build a clean, RIGID, simplified version that captures the function (e.g. a fixed clamp at a sensible angle instead of a "pivotable" one), and rely on fillets/tapers for any "organic" feel.`;
 
+/**
+ * Scan-proxy contract. Injected only when the turn actually carries geometry
+ * (a payload signal, not a prompt one), so an ordinary prompt never pays for
+ * it.
+ *
+ * The hard part to convey is not the API — it is the ACCURACY. The model
+ * cannot see that the object was measured to ±8mm, and left to itself it will
+ * design the snap-fit it has seen a thousand times in its training data. The
+ * clearance is already baked into the proxy, so the rules below are about not
+ * undoing it.
+ */
+const SCAN_MODE_RULES = `SCANNED OBJECT (a real object the user captured):
+- The user's object is ALREADY BOUND in your namespace as a watertight
+  \`trimesh.Trimesh\` under the name(s) given in the task. It is a PROXY:
+  cleaned, closed, grounded on z=0, footprint-aligned to X/Y, and already
+  GROWN by the fit clearance. Do not offset, scale or re-align it.
+- Work in MESH MODE (numpy / trimesh / sdf_kit, \`result\` = a Trimesh). The
+  proxy is a mesh, so no B-rep kernel can boolean against it. \`sdf_kit\`'s
+  \`from_mesh\` bridges it into the SDF world — that is the intended route.
+- Read its real dimensions off the object (\`scan.bounds\`, \`scan.extents\`).
+  NEVER invent dimensions for it, and never assume it is symmetric.
+- Carve the cavity from the proxy WITH A MARGIN, and at a resolution at least
+  as fine as the feature you care about. Carving exactly to the proxy lands
+  half a voxel tight and the object will not seat.
+- THE OBJECT MUST COME BACK OUT. Subtract the proxy swept along the removal
+  direction as well as the proxy itself, or you will produce a cavity reached
+  through an opening narrower than the object — geometrically perfect and
+  physically useless. This is checked.
+- The capture is accurate to a few MILLIMETRES, not to a tenth. Design LOOSE
+  FITS with compliant retention — cradles, trays, sleeves, stands, mounts,
+  straps, flexures. Do NOT design press fits, snap fits, or any feature whose
+  function depends on sub-millimetre agreement with the scan.
+- LEAVE THE PROXY AT THE ORIGIN. Build the case around it where it stands:
+  the object rests ON z=0, so the case's floor occupies NEGATIVE z and its
+  walls rise around the proxy. Do not translate the proxy up onto a floor —
+  move the floor down instead. The fit checks grade the proxy where it was
+  bound, so a moved proxy reads as a collision.
+- The object RESTS on the cavity floor; touching it there is correct.`
+
 const MESH_MODE_RULES = `MESH MODE — for geometry build123d CANNOT express:
 - build123d is a B-rep/CSG kernel: it builds with extrude/revolve/loft/boolean and CANNOT make gyroids, TPMS / minimal surfaces, lattices, heat-exchanger cores, voronoi/porous infills, or truly organic field-driven blends. Do NOT try to fake these with many booleans (they fail). For these, switch to MESH MODE.
 - Mesh-mode contract: write Python that samples an implicit scalar field on a numpy grid, extracts a surface with \`skimage.measure.marching_cubes\`, builds a \`trimesh.Trimesh\`, and assigns IT to \`result\` (a trimesh mesh, NOT a build123d object). The sidecar exports STL from the mesh (no STEP in mesh mode).
@@ -81,6 +120,8 @@ export interface SystemPromptSections {
   sdf: boolean;
   /** Dual-fluid exchanger bullets (rendered inside the SDF section). */
   exchanger: boolean;
+  /** Scan-proxy contract (a user's captured object is bound in the namespace). */
+  scan: boolean;
 }
 
 /**
@@ -97,12 +138,20 @@ const ORGANIC_IMPLICIT_TRIGGERS =
  * the result for every attempt (scripted + repair turns) so the assembled
  * system prompt stays byte-stable within the job.
  */
-export function selectSystemPromptSections(prompt: string): SystemPromptSections {
+export function selectSystemPromptSections(
+  prompt: string,
+  opts?: { scan?: boolean }
+): SystemPromptSections {
   // The exchanger pipeline is SDF-built, so an exchanger-shaped prompt gets
   // the mesh + SDF vocabulary too.
   const exchanger = needsExchangerRecipe(prompt);
-  const organic = exchanger || ORGANIC_IMPLICIT_TRIGGERS.test(prompt);
-  return { mesh: organic, sdf: organic, exchanger };
+  // A scan turns the job organic by construction: the proxy is a mesh, and
+  // the part is built AROUND arbitrary captured geometry, which is what the
+  // SDF vocabulary exists for. Unlike the others this is a PAYLOAD signal,
+  // not a prompt one — "make a case for this" says nothing about meshes.
+  const scan = opts?.scan === true;
+  const organic = exchanger || scan || ORGANIC_IMPLICIT_TRIGGERS.test(prompt);
+  return { mesh: organic, sdf: organic, exchanger, scan };
 }
 
 /**
@@ -113,6 +162,7 @@ export function selectSystemPromptSections(prompt: string): SystemPromptSections
  */
 export function buildSystemPrompt(sections: SystemPromptSections): string {
   const parts = [CORE_RULES];
+  if (sections.scan) parts.push(SCAN_MODE_RULES);
   if (sections.mesh) parts.push(MESH_MODE_RULES);
   if (sections.sdf || sections.exchanger) {
     parts.push(
@@ -135,6 +185,10 @@ export const SYSTEM_PROMPT = buildSystemPrompt({
   mesh: true,
   sdf: true,
   exchanger: true,
+  // NOT part of the monolith. The scan contract is gated on a turn actually
+  // carrying geometry, and it tells the model an object "is already bound in
+  // your namespace" — which is false for every request that has no scan.
+  scan: false,
 });
 
 /**

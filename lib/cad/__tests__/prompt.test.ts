@@ -53,7 +53,7 @@ describe("SYSTEM_PROMPT parts-dict contract (MTR-44)", () => {
 describe("system prompt gating (MTR-222)", () => {
   it("assembles core-only sections for a plain mechanical prompt", () => {
     const sections = selectSystemPromptSections("a bracket with two M5 bolt holes");
-    expect(sections).toEqual({ mesh: false, sdf: false, exchanger: false });
+    expect(sections).toEqual({ mesh: false, sdf: false, exchanger: false, scan: false });
     const prompt = buildSystemPrompt(sections);
     expect(prompt).toContain("build123d");
     expect(prompt).toContain("SYMBOLIC SELECTORS");
@@ -65,7 +65,7 @@ describe("system prompt gating (MTR-222)", () => {
   it("includes the mesh + SDF/TPMS sections and the exchanger bullets for a two-fluid prompt", () => {
     const prompt = "a dual-fluid gyroid heat exchanger, hot across cold";
     const sections = selectSystemPromptSections(prompt);
-    expect(sections).toEqual({ mesh: true, sdf: true, exchanger: true });
+    expect(sections).toEqual({ mesh: true, sdf: true, exchanger: true, scan: false });
     const assembled = buildSystemPrompt(sections);
     expect(assembled).toContain("MESH MODE");
     expect(assembled).toContain("ORGANIC-FUNCTIONAL");
@@ -84,14 +84,41 @@ describe("system prompt gating (MTR-222)", () => {
     expect(assembled).not.toContain("DUAL-FLUID EXCHANGERS");
   });
 
+  it("adds the scan contract only when the turn carries geometry", () => {
+    // A payload signal, not a prompt one: the words give nothing away.
+    const prompt = "make a case for this";
+    expect(selectSystemPromptSections(prompt).scan).toBe(false);
+    expect(buildSystemPrompt(selectSystemPromptSections(prompt))).not.toContain(
+      "SCANNED OBJECT"
+    );
+
+    const withScan = selectSystemPromptSections(prompt, { scan: true });
+    expect(withScan.scan).toBe(true);
+    // A scan is organic by construction — the proxy is a mesh, so the mesh and
+    // SDF vocabulary has to come with it or the model cannot use the binding.
+    expect(withScan.mesh).toBe(true);
+    expect(withScan.sdf).toBe(true);
+
+    const assembledWithScan = buildSystemPrompt(withScan);
+    expect(assembledWithScan).toContain("SCANNED OBJECT");
+    expect(assembledWithScan).toContain("MESH MODE");
+    // The two rails that keep an over-confident model from designing to a
+    // precision the capture never had, and from trapping the object.
+    expect(assembledWithScan).toContain("MUST COME BACK OUT");
+    expect(assembledWithScan).toMatch(/do NOT design press fits/i);
+  });
+
   it("keeps the full SYSTEM_PROMPT export containing every section for compatibility", () => {
     expect(SYSTEM_PROMPT).toContain("build123d");
     expect(SYSTEM_PROMPT).toContain("MESH MODE");
     expect(SYSTEM_PROMPT).toContain("ORGANIC-FUNCTIONAL");
     expect(SYSTEM_PROMPT).toContain("DUAL-FLUID EXCHANGERS");
     expect(SYSTEM_PROMPT).toEqual(
-      buildSystemPrompt({ mesh: true, sdf: true, exchanger: true })
+      buildSystemPrompt({ mesh: true, sdf: true, exchanger: true, scan: false })
     );
+    // The scan contract claims an object is already bound in the namespace,
+    // so it must stay OUT of the always-on prompt.
+    expect(SYSTEM_PROMPT).not.toContain("SCANNED OBJECT");
   });
 });
 

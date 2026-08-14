@@ -219,9 +219,46 @@ export interface CadRunResult {
       error?: string;
     };
     networks?: CadNetworksReport;
+    /**
+     * Scan-fit verdicts (containment / retention / extraction) when the run
+     * requested them. `ok: null` on a result means the check could not be
+     * evaluated — honest-not-run, never a silent pass.
+     */
+    scanFit?: {
+      results?: CadFitCheckResult[];
+      pitchMm?: number;
+      error?: string;
+    };
     [key: string]: unknown;
   };
+  /**
+   * Per-attachment proxy derivation reports, keyed by the name the proxy was
+   * bound to. Carries the level actually used, the closed size, and every
+   * degradation the ladder had to make — so a scan that could only be reduced
+   * to its convex hull says so instead of quietly pretending otherwise.
+   */
+  scans?: Record<string, CadScanReport>;
   /** stderr / exception message when compile or export failed. */
+  error?: string;
+}
+
+/** One scan's proxy derivation report (cad-runner/scan_proxy.py). */
+export interface CadScanReport {
+  name?: string;
+  level?: string;
+  requestedLevel?: string;
+  clearanceMm?: number;
+  sizeMm?: number[];
+  bboxMm?: { min: number[]; max: number[] };
+  volumeMm3?: number;
+  watertight?: boolean;
+  bottomCapped?: boolean;
+  capMethod?: string;
+  groundPlane?: string;
+  inputTriangles?: number;
+  proxyTriangles?: number;
+  decimated?: { from: number; to: number; error?: string };
+  warnings?: string[];
   error?: string;
 }
 
