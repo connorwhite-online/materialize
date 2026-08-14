@@ -58,14 +58,12 @@ const SPRING_CLOSE: Transition = {
 };
 
 /**
- * Closing height waits a beat so the row cascade can go soft (blur +
- * fade) before the card starts clipping them. Frame-stepping a 60fps
- * capture of the old close showed the rows sitting at full opacity for
- * ~8 frames while the card shrank under them — five labels squashing
- * into each other. The rows now own their exit; this delay is only so
- * the height spring doesn't outrun the first of them.
+ * Closing height starts almost immediately so the card shrinks *with*
+ * the peeling rows instead of waiting until they are gone (which left
+ * a blank white card collapsing). A tiny delay lets the first row go
+ * soft before anything is clipped.
  */
-const HEIGHT_CLOSE: Transition = { ...SPRING_CLOSE, delay: 0.06 };
+const HEIGHT_CLOSE: Transition = { ...SPRING_CLOSE, delay: 0.02 };
 /**
  * The pill ↔ user-container swap. The incoming row waits out most of
  * the outgoing one's fade, so the two are never both legible — without
@@ -559,8 +557,8 @@ function TrailingCluster({
 
 /** Wordmark `--mz-stagger-in` — readable cascade, not a simultaneous pop. */
 const STAGGER_IN = 0.038;
-/** Wordmark `--mz-stagger-out` — close peels faster than it arrives. */
-const STAGGER_OUT = 0.024;
+/** Wordmark `--mz-stagger-out` plus a hair — close has to be readable. */
+const STAGGER_OUT = 0.032;
 
 type RowStagger = { index: number; count: number };
 
@@ -584,7 +582,9 @@ const ITEM_VARIANTS: Variants = {
     scale: 0.98,
     filter: "blur(8px)",
   },
-  visible: ({ index, count }: RowStagger) => {
+  visible: (custom: RowStagger | undefined) => {
+    const index = custom?.index ?? 0;
+    const count = custom?.count ?? 1;
     const delay = (count - 1 - index) * STAGGER_IN;
     const settle: Transition = {
       type: "spring",
@@ -615,19 +615,22 @@ const ITEM_VARIANTS: Variants = {
       },
     };
   },
-  exit: ({ index }: RowStagger) => {
-    const delay = index * STAGGER_OUT;
+  exit: (custom: RowStagger | undefined) => {
+    const delay = (custom?.index ?? 0) * STAGGER_OUT;
+    const leave: Transition = {
+      delay,
+      duration: 0.2,
+      ease: [0.4, 0, 1, 1],
+    };
     return {
       opacity: 0,
       y: 10,
       scale: 0.98,
       filter: "blur(8px)",
       transition: {
-        delay,
-        duration: 0.15,
-        ease: [0.4, 0, 1, 1],
-        opacity: { delay, duration: 0.12, ease: "easeIn" },
-        filter: { delay, duration: 0.14, ease: "easeIn" },
+        ...leave,
+        opacity: { ...leave, duration: 0.16 },
+        filter: { ...leave, duration: 0.18 },
       },
     };
   },
