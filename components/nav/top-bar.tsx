@@ -164,6 +164,7 @@ function AuthCluster({
       <Button
         size="default"
         variant="secondary"
+        className="border-border bg-secondary hover:bg-muted"
         onClick={() => openAuth("sign-in")}
       >
         Login
