@@ -75,19 +75,24 @@ export function TopBar({
           <Link
             href="/"
             aria-label="Materialize — home"
-            className="relative flex h-10 items-center text-foreground transition-opacity hover:opacity-80"
+            className="relative flex h-10 items-center leading-none text-foreground transition-opacity hover:opacity-80"
           >
             {/* Desktop: the wordmark peels back to the M once the page
                 scrolls. The wrapper does the responsive hiding on the
                 landing page — `.mz-logo` is unlayered CSS and would
                 outrank a `hidden` utility put on the component itself.
-                Below `nav` the landing header falls back to the mark
-                (no room for the word next to the search pill). App
-                routes hide this whole bar below `nav`. */}
+                `nav:flex` (not `nav:block`) so the wrapper doesn't grow
+                a line-box strut that sits the mark off the search
+                centerline. Below `nav` the landing header falls back
+                to the mark. App routes hide this whole bar below `nav`. */}
             {alwaysVisible && (
               <Logomark height={NAV_LOGO_HEIGHT} className="nav:hidden" />
             )}
-            <span className={alwaysVisible ? "hidden nav:block" : undefined}>
+            <span
+              className={
+                alwaysVisible ? "hidden nav:flex nav:items-center" : "flex items-center"
+              }
+            >
               <AnimatedWordmark
                 expanded={!scrolled}
                 height={NAV_LOGO_HEIGHT}
@@ -160,7 +165,10 @@ function AuthCluster({
         variant={subtleLogin ? "ghost" : "default"}
         className={cn(
           subtleLogin &&
-            "glass bg-background/85 text-foreground shadow-none before:hidden hover:bg-background/95 dark:bg-background/80 dark:hover:bg-background/90"
+            cn(
+              BUBBLE_SHADOW,
+              "border-black/10 before:hidden dark:border-white/15"
+            )
         )}
         onClick={() => openAuth("sign-in")}
       >

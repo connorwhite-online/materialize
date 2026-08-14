@@ -77,11 +77,12 @@ describe("TopBar brand lockup", () => {
     expect(home.parentElement?.className).toMatch(/\bh-10\b/);
   });
 
-  it("gives the landing Login button a more opaque glass fill", () => {
+  it("gives the landing Login button the same opaque chip fill as the search bar", () => {
     render(<TopBar initialUnreadCount={0} alwaysVisible />);
     const login = screen.getByRole("button", { name: "Login" });
-    expect(login.className).toMatch(/bg-background\/85/);
-    expect(login.className).toMatch(/\bglass\b/);
+    expect(login.className).toMatch(/from-neutral-50/);
+    expect(login.className).toMatch(/to-white/);
+    expect(login.className).toMatch(/border-black\/10/);
   });
 
   it("uses the collapsing wordmark on authed app chrome too", () => {
