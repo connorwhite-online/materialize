@@ -4,7 +4,10 @@ import { redirect } from "next/navigation";
 import { TopBar } from "@/components/nav/top-bar";
 import { AppShell } from "@/components/nav/app-shell";
 import { MobileNav } from "@/components/nav/mobile-nav";
-import { HeroBackground } from "@/components/home/hero-background";
+import {
+  HeroBackground,
+  HeroChromeTint,
+} from "@/components/home/hero-background";
 import { HomeDashboard } from "@/components/home/home-dashboard";
 import { HomeMarketing } from "@/components/home/home-marketing";
 import { CartProvider } from "@/components/print/cart-context";
@@ -151,33 +154,44 @@ export default async function HomePage() {
           Background art is absolute + object-cover. The three.js / R3F
           showcase that used to sit in a visual slot below the copy is
           unmounted, not deleted — hero-showcase*.tsx et al. stay in
-          the tree. */}
-      <section className="relative isolate flex h-lvh min-h-[100vh] w-full flex-col overflow-hidden">
-        <HeroBackground />
-        {/* Brand mark lives in TopBar so "Materialize" still appears
-            above the fold. The h1 states what the product does. */}
-        <main className="relative z-10 flex h-svh max-h-svh flex-col nav:h-full nav:max-h-none">
-          {/* Mobile: copy below center, padded above the floating pill
-              (`fixed bottom-6` plus safe-area + h-14). Top-aligned sat in the light
-              beam and the muted subheading disappeared against it.
-              Desktop (nav+): vertically centered, left-aligned with
-              generous padding so it clears the sculpture. */}
-          <div className="flex flex-1 items-end justify-start px-6 pb-32 sm:px-8 nav:items-center nav:px-16 nav:pb-0 lg:px-24 xl:px-32">
-            <div className="flex w-full max-w-xl flex-col items-start gap-4 text-left">
-              {/* Real, selectable <h1> — states what the product does
-                  rather than spelling the brand. Same system stack as
-                  the rest of the app; no webfont on the critical path. */}
-              <h1 className="text-balance text-3xl leading-[1.1] tracking-tight sm:text-4xl">
-                Print anything, share your ideas
-              </h1>
-              <p className="max-w-lg text-pretty text-base leading-relaxed text-foreground/90 [text-shadow:0_0_18px_var(--background),0_1px_2px_var(--background)]">
-                Get prints delivered to your door, and pick from 60+ materials.
-                Share your hardware projects and files.
-              </p>
+          the tree.
+
+          The wrapper exists for <HeroChromeTint />: it is the sticky
+          strip's containing block, so the strip un-sticks — and Safari
+          drops back to the <body> colour — the moment the hero leaves
+          the screen and the cream marketing sections take over. */}
+      <div className="relative w-full">
+        {/* Must precede the art: it is a normal-flow sticky element,
+            and its static position is the top edge of the hero. */}
+        <HeroChromeTint />
+        <section className="relative isolate flex h-lvh min-h-[100vh] w-full flex-col overflow-hidden">
+          <HeroBackground />
+          {/* Brand mark lives in TopBar so "Materialize" still appears
+              above the fold. The h1 states what the product does. */}
+          <main className="relative z-10 flex h-svh max-h-svh flex-col nav:h-full nav:max-h-none">
+            {/* Mobile: copy below center, padded above the floating pill
+                (`fixed bottom-6` plus safe-area + h-14). Top-aligned sat
+                in the light beam and the muted subheading disappeared
+                against it. Desktop (nav+): vertically centered,
+                left-aligned with generous padding so it clears the
+                sculpture. */}
+            <div className="flex flex-1 items-end justify-start px-6 pb-32 sm:px-8 nav:items-center nav:px-16 nav:pb-0 lg:px-24 xl:px-32">
+              <div className="flex w-full max-w-xl flex-col items-start gap-4 text-left">
+                {/* Real, selectable <h1> — states what the product does
+                    rather than spelling the brand. Same system stack as
+                    the rest of the app; no webfont on the critical path. */}
+                <h1 className="text-balance text-3xl leading-[1.1] tracking-tight sm:text-4xl">
+                  Print anything, share your ideas
+                </h1>
+                <p className="max-w-lg text-pretty text-base leading-relaxed text-foreground/90 [text-shadow:0_0_18px_var(--background),0_1px_2px_var(--background)]">
+                  Get prints delivered to your door, and pick from 60+
+                  materials. Share your hardware projects and files.
+                </p>
+              </div>
             </div>
-          </div>
-        </main>
-      </section>
+          </main>
+        </section>
+      </div>
 
       {/* Below the fold: server-rendered features + benefits + internal
           links so crawlers and agents get real content, not the
