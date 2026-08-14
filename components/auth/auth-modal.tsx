@@ -65,7 +65,7 @@ export function AuthModalProvider({ children }: { children: React.ReactNode }) {
             <AnimatedWordmark
               title="Materialize"
               animateOnMount
-              className="mx-auto text-foreground [--mz-h:13px] sm:[--mz-h:14px]"
+              className="mx-auto text-foreground [--mz-h:7px]"
             />
             <DialogTitle className="text-center">
               {mode === "sign-in" ? "Sign in" : "Create an account"}

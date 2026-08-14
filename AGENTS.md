@@ -212,20 +212,20 @@ Never call the DB cart a "CraftCloud cart." They are distinct: the DB cart is a 
 Three components in `components/brand/logo.tsx`, all painting with
 `fill="currentColor"` so they follow the surrounding `text-*` token in both themes:
 
-- **`<Logomark>`** — the "M" alone. Use where there's no horizontal room: the top
-  bar's brand link, the mobile nav's collapsed pill on `/` (where it stands alone,
-  with no title beside it), the fee-sheet tile. (The full word needs ~14rem at nav
-  size, which none of those have.)
+- **`<Logomark>`** — the "M" alone. Use where there's no horizontal room: the
+  landing header below `nav` (where it stands in for the word), the mobile nav's
+  collapsed pill on `/` (no title beside it), the fee-sheet tile.
 - **`<Wordmark>`** — the full word, static.
 - **`<AnimatedWordmark>`** — the same word with a CSS-only reveal: the "M" is
   always painted and the other ten letters drift in left-to-right, each blurred
   and lifted, settling as a bottom-to-top wipe fills it in. `animateOnMount`
   plays it once (keyframes — works with JS disabled); `expanded` makes it a
   controlled toggle between the word and the bare mark, which reverses the
-  stagger so it peels right-to-left back to the "M". Live on the landing header
-  (at `nav+` only — below that the header falls back to `<Logomark>`, because the
-  word would crowd the search pill on a phone), the auth modal, `/sign-in`,
-  `/sign-up`, and `/onboarding`.
+  stagger so it peels right-to-left back to the "M". Live on the desktop top bar
+  (anon and authed — `expanded` tracks scroll, so the word peels back to the M
+  once the page moves; 11px tall, vertically centered on the 40px search row),
+  the landing header at `nav+` only (below that it falls back to `<Logomark>`),
+  the auth modal, `/sign-in`, `/sign-up`, and `/onboarding`.
 
 All geometry lives in `components/brand/logo-paths.ts` — **the only place path
 data is defined**. Updating the logo means replacing the `d` strings there (one
