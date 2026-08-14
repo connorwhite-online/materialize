@@ -1,21 +1,28 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { describe, expect, it } from "vitest";
 
 /**
  * Pin the anon-home hero layout contracts. These are easy to regress
- * from a Tailwind class shuffle — iOS 26 Safari in particular treats
- * `vh`/`dvh` as taller than the visible first screen.
+ * from a Tailwind class shuffle — iOS 26 Safari overlays chrome on
+ * the layout viewport, so svh-only leaves --background bars around
+ * the photo.
  */
 const page = readFileSync(resolve(__dirname, "../../../app/page.tsx"), "utf8");
+const layout = readFileSync(resolve(__dirname, "../../../app/layout.tsx"), "utf8");
 const classNames = [...page.matchAll(/className="([^"]*)"/g)]
   .map((match) => match[1])
   .join(" ");
 
 describe("anon home hero layout", () => {
-  it("sizes the first screen to svh, not dvh/vh", () => {
+  it("paints the photo on the large viewport, copy on svh", () => {
+    expect(classNames).toMatch(/\bh-lvh\b/);
+    expect(classNames).toMatch(/min-h-\[100vh\]/);
     expect(classNames).toMatch(/\bh-svh\b/);
-    expect(classNames).not.toMatch(/\bmin-h-dvh\b/);
-    expect(classNames).not.toMatch(/\bh-dvh\b/);
+  });
+
+  it("covers the iOS unsafe areas so the photo can sit under chrome", () => {
+    expect(layout).toMatch(/viewportFit:\s*"cover"/);
   });
 
   it("places mobile copy below center, padded above the floating pill", () => {
@@ -25,7 +32,7 @@ describe("anon home hero layout", () => {
   });
 
   it("paints the subheading darker than muted-foreground", () => {
-    expect(classNames).toMatch(/text-foreground\/80/);
+    expect(classNames).toMatch(/text-foreground\/90/);
     const sub = page.match(
       /<p className="([^"]*)">\s*Get prints delivered to your door/
     );
