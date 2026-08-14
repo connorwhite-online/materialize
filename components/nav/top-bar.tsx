@@ -10,8 +10,12 @@ import { NotificationsPopover } from "@/components/nav/notifications-popover";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { Button } from "@/components/ui/button";
 import { useAuthModal } from "@/components/auth/auth-modal";
+import { useScrolled } from "@/lib/hooks/use-scrolled";
 import { cn } from "@/lib/utils";
 import { BUBBLE_SHADOW } from "@/components/nav/bubble-shadow";
+
+/** Half of the previous 22px lockup. Width follows the artwork (~9.5rem). */
+const NAV_LOGO_HEIGHT = 11;
 
 const ICON_GLYPH =
   "text-neutral-900 hover:text-neutral-900 dark:text-neutral-100 dark:hover:text-neutral-100";
@@ -46,6 +50,8 @@ export function TopBar({
   textToCad = false,
   alwaysVisible = false,
 }: TopBarProps) {
+  const scrolled = useScrolled();
+
   return (
     <header
       className={cn(
@@ -65,27 +71,28 @@ export function TopBar({
             : "grid-cols-[1fr_auto_1fr]"
         )}
       >
-        <div className="flex items-center gap-3">
+        <div className="flex h-10 items-center gap-3">
           <Link
             href="/"
             aria-label="Materialize — home"
-            className="relative flex items-center text-foreground transition-opacity hover:opacity-80"
+            className="relative flex h-10 items-center text-foreground transition-opacity hover:opacity-80"
           >
-            {alwaysVisible ? (
-              <>
-                {/* Landing page: the full lockup drifts in on first paint,
-                    but only where the header has room for ~14rem of word.
-                    The wrapper does the responsive hiding — `.mz-logo` is
-                    unlayered CSS and would outrank a `hidden` utility put
-                    on the component itself. */}
-                <span className="hidden nav:block">
-                  <AnimatedWordmark animateOnMount height={22} />
-                </span>
-                <Logomark height={22} className="nav:hidden" />
-              </>
-            ) : (
-              <Logomark height={22} />
+            {/* Desktop: the wordmark peels back to the M once the page
+                scrolls. The wrapper does the responsive hiding on the
+                landing page — `.mz-logo` is unlayered CSS and would
+                outrank a `hidden` utility put on the component itself.
+                Below `nav` the landing header falls back to the mark
+                (no room for the word next to the search pill). App
+                routes hide this whole bar below `nav`. */}
+            {alwaysVisible && (
+              <Logomark height={NAV_LOGO_HEIGHT} className="nav:hidden" />
             )}
+            <span className={alwaysVisible ? "hidden nav:block" : undefined}>
+              <AnimatedWordmark
+                expanded={!scrolled}
+                height={NAV_LOGO_HEIGHT}
+              />
+            </span>
           </Link>
           {textToCad && (
             <Button
@@ -120,7 +127,7 @@ export function TopBar({
           </Button>
         </div>
 
-        <div className="flex items-center justify-end pt-0">
+        <div className="flex h-10 items-center justify-end">
           <AuthCluster
             initialUnreadCount={initialUnreadCount}
             subtleLogin={alwaysVisible}
@@ -153,7 +160,7 @@ function AuthCluster({
         variant={subtleLogin ? "ghost" : "default"}
         className={cn(
           subtleLogin &&
-            "glass text-foreground shadow-none before:hidden hover:bg-glass/90 dark:hover:bg-glass/90"
+            "glass bg-background/85 text-foreground shadow-none before:hidden hover:bg-background/95 dark:bg-background/80 dark:hover:bg-background/90"
         )}
         onClick={() => openAuth("sign-in")}
       >
