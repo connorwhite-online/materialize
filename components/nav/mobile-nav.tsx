@@ -257,7 +257,7 @@ export function MobileNav({
       <div
         aria-hidden={keyboardOpen || undefined}
         className={cn(
-          "pointer-events-none fixed inset-x-0 bottom-6 z-50 flex justify-center px-4 nav:hidden",
+          "pointer-events-none fixed inset-x-0 z-50 flex justify-center px-4 nav:hidden bottom-[calc(1.5rem+env(safe-area-inset-bottom,0px))]",
           "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
           keyboardOpen && "translate-y-6 opacity-0"
         )}

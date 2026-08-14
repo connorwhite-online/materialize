@@ -142,27 +142,23 @@ export default async function HomePage() {
           on small screens — anon home matches authed routes. */}
       <TopBar initialUnreadCount={0} textToCad={textToCad} />
 
-      {/* Hero — exactly one screen. h-svh (not min-h-dvh / 100vh):
-          iOS 26 Safari changed `vh` to window.outerHeight (chrome
-          collapsed) in every tab mode, and the Liquid Glass toolbar
-          overlays the layout viewport. `dvh` still tracks hide/show
-          but first paint in Bottom tab mode is the LARGE size, so a
-          100dvh hero is taller than what's visible and the next
-          section peeks under the toolbar. `svh` is the chrome-expanded
-          height — the first screen the visitor actually sees. Siblings
-          below (HomeMarketing) still grow the page; TopBar is fixed.
+      {/* Hero — photo fills the LARGE viewport (behind iOS 26 overlay
+          chrome) so --background doesn't show as white bars above/below
+          the art. `h-lvh` + `min-h-[100vh]` used-height is the larger of
+          the two (iOS 26: vh === outerHeight). Copy is `h-svh` so type
+          stays in the visible hole above the toolbar.
 
-          Background art covers this first screen (absolute inset-0 +
-          object-cover). The three.js / R3F showcase that used to sit
-          in a visual slot below the copy is unmounted, not deleted —
-          hero-showcase*.tsx et al. stay in the tree. */}
-      <section className="relative isolate flex h-svh w-full flex-col overflow-hidden">
+          Background art is absolute + object-cover. The three.js / R3F
+          showcase that used to sit in a visual slot below the copy is
+          unmounted, not deleted — hero-showcase*.tsx et al. stay in
+          the tree. */}
+      <section className="relative isolate flex h-lvh min-h-[100vh] w-full flex-col overflow-hidden">
         <HeroBackground />
         {/* Brand mark lives in TopBar so "Materialize" still appears
             above the fold. The h1 states what the product does. */}
-        <main className="relative z-10 flex flex-1 flex-col">
+        <main className="relative z-10 flex h-svh max-h-svh flex-col nav:h-full nav:max-h-none">
           {/* Mobile: copy below center, padded above the floating pill
-              (`fixed bottom-6` + h-14). Top-aligned sat in the light
+              (`fixed bottom-6` plus safe-area + h-14). Top-aligned sat in the light
               beam and the muted subheading disappeared against it.
               Desktop (nav+): vertically centered, left-aligned with
               generous padding so it clears the sculpture. */}

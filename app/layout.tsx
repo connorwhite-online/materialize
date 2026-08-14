@@ -143,6 +143,11 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  // Cover the iOS status-bar / home-indicator unsafe areas so the
+  // anon-home photo can paint behind Liquid Glass chrome instead of
+  // leaving a --background strip. Fixed bottom chrome adds
+  // env(safe-area-inset-bottom) on top of its existing offset.
+  viewportFit: "cover",
   interactiveWidget: "overlays-content",
 };
 

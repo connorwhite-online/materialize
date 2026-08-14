@@ -61,7 +61,7 @@ function ThemePicture({
   } = getImageProps({ ...COMMON, ...MOBILE, src: mobileSrc });
 
   return (
-    <picture>
+    <picture className="absolute inset-0 block size-full">
       <source media={DESKTOP_MQ} srcSet={desktop} sizes={COMMON.sizes} />
       <source
         media="(max-width: 767px)"
@@ -92,7 +92,7 @@ export function HeroBackground() {
       // `bg-background` on <html>/<body> (and the fixed body gradient),
       // so the art was loading but invisible. DOM order + a raised
       // `z-10` on the hero <main> keeps copy above the absolute fill.
-      className="pointer-events-none absolute inset-0 overflow-hidden"
+      className="pointer-events-none absolute left-0 right-0 overflow-hidden top-[calc(-1*env(safe-area-inset-top,0px))] bottom-[calc(-1*env(safe-area-inset-bottom,0px))]"
     >
       {/* Light — hidden when <html class="dark"> */}
       <div className="absolute inset-0 dark:hidden">
