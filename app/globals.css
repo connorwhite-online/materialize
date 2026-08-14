@@ -246,37 +246,49 @@
 /* Browser-chrome tint for the anon-home hero (iOS 26 / Safari 26).
 
    Safari 26 retired `<meta name="theme-color">` — the tag still parses,
-   the value is ignored. The status-bar band above the page and the wash
-   under the floating toolbar are now sampled from the CSS of the page
-   itself: the `background-color` of a fixed- or sticky-positioned
-   element sitting within a few pixels of that viewport edge, falling
-   back to <body>'s own background-color when there isn't one.
+   the value is ignored. The status-bar band above the page is browser
+   chrome, not layout viewport: `viewport-fit: cover` frees it only for
+   a home-screen app, so in a tab nothing of ours can paint there.
+   Safari instead FILLS it with a colour sampled from the page, and the
+   sampling rules are narrow:
 
-   That fallback is what put a cream strip above the hero photo: <body>
-   is `--background`, so Safari filled the status bar with it. And no
-   amount of `viewport-fit: cover` fixes that — in the browser (as
-   opposed to a home-screen app) the band is chrome, not layout
-   viewport, so no element of ours can paint into it. The only lever is
-   the colour Safari fills it with, and the only way to set that colour
-   is to hand it a sampleable element (see `HeroChromeTint` in
-   components/home/hero-background.tsx).
+     - `background-color` only. A `background-image` — including a
+       gradient — is never read, however opaque it renders.
+     - `<body>`'s background-color is the source. `<html>`'s is ignored.
+     - A `fixed`/`sticky` element hugging the viewport edge can pre-empt
+       body, but that path is unreliable (a sticky strip sitting at its
+       natural offset at scroll 0 was NOT picked up on an iPhone), so we
+       don't build on it.
+     - Sampled at initial render. Changing the colour from JavaScript
+       later does not re-tint the band.
+
+   That is why the band showed as a cream strip above the photo: it was
+   `--background`, read straight off <body>. So the fix is to give <body>
+   the hero's own edge colour while the hero is the page.
+
+   This costs nothing visually. <body> also carries an opaque
+   `--background-gradient` as a `background-image` (both themes), and a
+   background-image paints over the background-color across the whole
+   body box — so body's colour is invisible on-page and only ever
+   surfaces in the chrome band Safari samples it for.
+
+   Trade-off worth knowing: the band keeps the hero's colour for the
+   whole route, including once you scroll to the cream marketing
+   sections. Scroll cannot fix it — the sticky-element path that would
+   have released the colour is the one that doesn't work, and JS
+   re-tinting isn't a thing. Matching the hero wins because the hero is
+   the first screen and the full-bleed surface; the marketing sections
+   are below the fold.
 
    Values are the mean RGB of the top edge of the four hero masters in
-   public/home. Re-measure them whenever the art is replaced — the
-   `hero art` test in components/home/__tests__ fails if the files
-   change so this can't silently drift:
+   public/home. Re-measure them whenever the art is replaced:
 
      node -e 'const s=require("sharp"),f="public/home/home-v1-light-mobile.png";
        s(f).raw().toBuffer({resolveWithObject:true}).then(({data,info})=>{
          let r=0,g=0,b=0,n=0;
          for(let y=0;y<24;y++)for(let x=0;x<info.width;x++){
            const i=(y*info.width+x)*info.channels;r+=data[i];g+=data[i+1];b+=data[i+2];n++}
-         console.log(Math.round(r/n),Math.round(g/n),Math.round(b/n))})'
-
-   Only the TOP edge gets a sampler. Leave the bottom alone: with no
-   fixed element near it, iOS 26 renders the real page through the
-   translucent toolbar, and planting a solid colour there would swap
-   that live blur for a flat fill. */
+         console.log(Math.round(r/n),Math.round(g/n),Math.round(b/n))})'  */
 :root {
   --hero-chrome-tint: #8e8379;
 }
@@ -295,6 +307,16 @@
   .dark {
     --hero-chrome-tint: #122028;
   }
+}
+
+/* Scoped by `:has()` to the anon hero's marker attribute, so the tint
+   is live on exactly the one route that wants it and nowhere else — the
+   authed home renders <HomeDashboard /> on the same URL and has no
+   marker. Deliberately unlayered: `body` gets `bg-background` from
+   `@layer base`, and any unlayered rule outranks a layered one
+   regardless of specificity. */
+body:has([data-hero-chrome]) {
+  background-color: var(--hero-chrome-tint);
 }
 
 @theme inline {

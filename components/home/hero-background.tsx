@@ -95,10 +95,12 @@ export function HeroBackground() {
       //
       // Plain inset-0, no `env(safe-area-inset-*)` bleed: the hero
       // <section> is `overflow-hidden`, so the negative offsets this
-      // used to carry were clipped away and never bought a pixel. In
-      // Safari the unsafe areas aren't ours to paint into at all (see
-      // HeroChromeTint); in a home-screen app `viewport-fit: cover`
-      // already stretches the layout viewport over them.
+      // used to carry were clipped away and never bought a pixel. In a
+      // Safari tab the unsafe areas aren't ours to paint into at all —
+      // the status-bar band is chrome, and the only lever is the colour
+      // Safari fills it with (`--hero-chrome-tint`, app/globals.css).
+      // In a home-screen app `viewport-fit: cover` already stretches
+      // the layout viewport over them, so inset-0 covers both.
       className="pointer-events-none absolute inset-0 overflow-hidden"
     >
       {/* Light — hidden when <html class="dark"> */}
@@ -116,41 +118,5 @@ export function HeroBackground() {
         />
       </div>
     </div>
-  );
-}
-
-/**
- * Colours the iOS 26 browser chrome to match the top of the hero art.
- *
- * Safari 26 samples the `background-color` of a fixed/sticky element
- * near a viewport edge to tint its own chrome, and falls back to
- * <body> when there is none — which is why the status bar sat above
- * the photo as a cream `--background` strip. Content can't be painted
- * into that band from a browser tab, so the fix is to give Safari a
- * strip of the right colour to sample. `--hero-chrome-tint` carries
- * the measured edge colour of the four masters above (app/globals.css).
- *
- * Three details are load-bearing:
- *
- * - **sticky, not fixed.** The strip stops sticking when the hero
- *   scrolls past, so Safari falls back to <body> exactly when the
- *   cream marketing sections take the screen. A fixed strip would
- *   hold the photo's colour over the whole page.
- * - **6px tall, full width.** Safari ignores candidates under ~3px
- *   high or much narrower than the viewport; 6px clears the bar with
- *   room to spare. It renders above the photo (rather than hiding
- *   behind it) so the sampler can't be optimised out of the render
- *   tree — and since it wears the photo's own edge colour, it reads
- *   as part of the status bar, not as a line across the art.
- * - **`-mb-1.5` cancels its own height** so it costs the hero no
- *   layout, and no `opacity` / `backdrop-filter` / pseudo-element,
- *   each of which disqualifies an element from being sampled.
- */
-export function HeroChromeTint() {
-  return (
-    <div
-      aria-hidden
-      className="pointer-events-none sticky top-0 z-20 -mb-1.5 h-1.5 w-full bg-[var(--hero-chrome-tint)]"
-    />
   );
 }

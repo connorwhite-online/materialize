@@ -50,50 +50,41 @@ describe("anon home hero layout", () => {
 });
 
 /**
- * iOS 26 Safari fills the status-bar band with a colour sampled from
- * the page, and `<meta name="theme-color">` no longer feeds it. The
- * only input we control is the background-color of a fixed/sticky
- * element near the viewport's top edge — so these assertions guard the
- * properties that make <HeroChromeTint /> sampleable at all. Break any
- * one of them and the band silently reverts to a cream `--background`
- * strip above the photo, which is a visual-only regression no type
- * check or render test would catch.
+ * iOS 26 Safari fills the status-bar band above the page with a colour
+ * sampled from the page, and the sampling rules are narrow enough that
+ * an innocuous-looking edit silently restores the cream strip:
+ * `background-color` only (a `background-image` is never read), off
+ * `<body>` (never `<html>`), at initial render (JS can't re-tint).
+ * `<meta name="theme-color">` is ignored outright. None of that shows
+ * up as a type error or a failing render, so it is pinned here.
  */
 describe("anon home browser-chrome tint", () => {
-  const tintStrip = heroBackground.match(
-    /export function HeroChromeTint\(\)[\s\S]*?className="([^"]*)"/
-  )?.[1];
-
-  it("renders the sampler above the hero art", () => {
-    expect(page).toMatch(/<HeroChromeTint \/>/);
-    // The strip is a normal-flow sticky element: its static position
-    // has to be the top of the hero, so it must precede the <section>.
-    expect(page.indexOf("<HeroChromeTint />")).toBeLessThan(
-      page.indexOf("<HeroBackground />")
+  it("marks the hero so body:has() can scope the tint to this route", () => {
+    expect(page).toMatch(/data-hero-chrome/);
+    expect(globals).toMatch(
+      /body:has\(\[data-hero-chrome\]\)\s*\{[^}]*background-color:\s*var\(--hero-chrome-tint\)/
     );
   });
 
-  it("is sticky, full width, and tall enough for Safari to sample", () => {
-    expect(tintStrip).toBeDefined();
-    // Fixed would hold the hero's colour over the whole page; sticky
-    // releases it when the hero scrolls away.
-    expect(tintStrip).toMatch(/\bsticky\b/);
-    expect(tintStrip).toMatch(/\btop-0\b/);
-    expect(tintStrip).toMatch(/\bw-full\b/);
-    // 6px — Safari ignores candidates only a pixel or two high.
-    expect(tintStrip).toMatch(/\bh-1\.5\b/);
-    // Costs the hero no layout.
-    expect(tintStrip).toMatch(/-mb-1\.5/);
-    expect(tintStrip).toMatch(/bg-\[var\(--hero-chrome-tint\)\]/);
+  it("tints background-color, not a background-image", () => {
+    const rule = globals.match(
+      /body:has\(\[data-hero-chrome\]\)\s*\{([^}]*)\}/
+    )?.[1];
+    expect(rule).toBeDefined();
+    // A gradient here would render identically on-page and be invisible
+    // to the sampler — the exact trap this whole mechanism exists for.
+    expect(rule).not.toMatch(/background-image/);
+    expect(rule).not.toMatch(/gradient/);
   });
 
-  it("carries no property that disqualifies it from sampling", () => {
-    // Safari skips elements behind opacity, blur, or backdrop-filter,
-    // and never reads pseudo-elements.
-    expect(tintStrip).not.toMatch(/\bopacity-/);
-    expect(tintStrip).not.toMatch(/backdrop-/);
-    expect(tintStrip).not.toMatch(/\bblur\b/);
-    expect(tintStrip).not.toMatch(/\bhidden\b/);
+  it("keeps the tint rule unlayered so it outranks @layer base", () => {
+    // `body` gets bg-background from @layer base; an unlayered rule
+    // wins over any layered one regardless of specificity, so the tint
+    // must not be nested inside a @layer block.
+    const upto = globals.slice(0, globals.indexOf("body:has([data-hero-chrome])"));
+    const opened = (upto.match(/@layer[^{]*\{/g) ?? []).length;
+    const closed = (upto.match(/^\}/gm) ?? []).length;
+    expect(opened).toBeLessThanOrEqual(closed);
   });
 
   it("defines a light, dark, and desktop tint matching the art", () => {
@@ -108,9 +99,11 @@ describe("anon home browser-chrome tint", () => {
     );
   });
 
-  it("leaves the bottom edge untinted", () => {
-    // A sampler near the bottom would replace iOS 26's live blur under
-    // the floating toolbar with a flat fill.
-    expect(heroBackground).not.toMatch(/bottom-0[^"]*bg-\[var\(--hero-chrome-tint\)\]/);
+  it("does not reintroduce the fixed/sticky sampler strip", () => {
+    // Tried and rejected: a sticky strip at its natural offset was not
+    // picked up on an iPhone, and a fixed one would leave a 6px band of
+    // the hero's colour pinned over the cream marketing sections.
+    expect(heroBackground).not.toMatch(/HeroChromeTint/);
+    expect(page).not.toMatch(/HeroChromeTint/);
   });
 });
