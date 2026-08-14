@@ -196,6 +196,12 @@ class RunRequest(BaseModel):
     # Each check is failure-isolated: an error becomes {"error": str} for that
     # check, never a failed run.
     checks: Optional[dict] = None
+    # Scan ingestion: user-supplied geometry bound into the namespace before the
+    # script runs, as {name: {b64, fileType, proxyLevel?, clearanceMm?}}. Each
+    # entry is reduced to a watertight PROXY SOLID by scan_proxy first —
+    # generated code never sees the raw capture, which is open, noisy and
+    # unbooleanable. Derivation reports come back under `scans`.
+    meshes: Optional[dict] = None
 
 
 class SessionCreateRequest(BaseModel):
@@ -215,6 +221,19 @@ class SessionImportStepRequest(BaseModel):
     # session namespace under `name` for boolean/cavity/mate operations.
     stepB64: str
     name: str = "part"
+
+
+class SessionImportMeshRequest(BaseModel):
+    # Scan ingestion, session twin of SessionImportStepRequest: a base64 mesh
+    # (obj/stl/ply/glb) reduced to a watertight proxy solid and bound under
+    # `name`. Separate from import_step because a scan is an open, noisy
+    # triangle soup the CAD kernel will not accept — scan_proxy is what stands
+    # between the two.
+    meshB64: str
+    fileType: str = "stl"
+    name: str = "scan"
+    proxyLevel: str = "hull"
+    clearanceMm: float = 3.0
 
 
 def _check_auth(request: Request) -> None:
@@ -1116,7 +1135,88 @@ def _coerce_fluid_plugs(declared):
     return plugs, None
 
 
-def _run_checks(mesh, checks: dict) -> dict:
+# Scan ingestion caps. A phone scan is megabytes of triangles at a density far
+# past anything the proxy ladder resolves, and every one of them is paid for in
+# voxelization; decimating on receipt keeps a 1M-triangle capture from turning
+# a 20-second job into a five-minute one.
+MAX_SCAN_TRIANGLES = int(os.environ.get("CAD_MAX_SCAN_TRIANGLES", "200000"))
+SCAN_FILE_TYPES = ("stl", "obj", "ply", "glb", "gltf", "3mf")
+
+
+def _load_scan_proxy(name: str, entry: dict):
+    """Decode one uploaded scan and reduce it to a proxy solid.
+
+    Returns (proxy_mesh, report). Raises ValueError with a message meant for
+    the USER, since a scan we cannot read is theirs to fix by re-exporting --
+    not something a repair turn can code around."""
+    import base64 as _b64
+    import io
+
+    import trimesh
+
+    from scan_proxy import derive_proxy
+
+    file_type = str(entry.get("fileType") or "stl").lower().lstrip(".")
+    if file_type not in SCAN_FILE_TYPES:
+        raise ValueError(
+            f"{name}: unsupported scan format {file_type!r} "
+            f"(expected one of {', '.join(SCAN_FILE_TYPES)})"
+        )
+    raw = _b64.b64decode(entry.get("b64") or "")
+    if not raw:
+        raise ValueError(f"{name}: empty scan payload")
+    mesh = trimesh.load(io.BytesIO(raw), file_type=file_type, force="mesh")
+    if not hasattr(mesh, "faces") or not len(mesh.faces):
+        raise ValueError(f"{name}: scan contains no triangles")
+
+    decimated = None
+    if len(mesh.faces) > MAX_SCAN_TRIANGLES:
+        before = int(len(mesh.faces))
+        try:
+            mesh = mesh.simplify_quadric_decimation(face_count=MAX_SCAN_TRIANGLES)
+            decimated = {"from": before, "to": int(len(mesh.faces))}
+        except Exception:  # noqa: BLE001 -- density is a cost problem, not a
+            # correctness one; carry on at full resolution rather than fail.
+            decimated = {"from": before, "to": before, "error": "decimation failed"}
+
+    proxy, report = derive_proxy(
+        mesh,
+        level=entry.get("proxyLevel") or "hull",
+        clearance_mm=float(entry.get("clearanceMm") or 0.0),
+    )
+    report["name"] = name
+    report["fileType"] = file_type
+    report["byteSize"] = len(raw)
+    if decimated:
+        report["decimated"] = decimated
+    return proxy, report
+
+
+def _bind_scans(ns: dict, meshes: Optional[dict]) -> dict:
+    """Bind every uploaded scan's proxy into `ns`; return {name: report}.
+
+    A failed scan is REPORTED, not raised: a script may reference several, and
+    one bad upload should surface as a named error the user can act on rather
+    than a dead run with no diagnosis."""
+    reports: dict = {}
+    proxies: dict = {}
+    for name, entry in (meshes or {}).items():
+        if not str(name).isidentifier():
+            reports[str(name)] = {"error": f"invalid namespace name {name!r}"}
+            continue
+        try:
+            proxy, report = _load_scan_proxy(name, entry or {})
+        except Exception as err:  # noqa: BLE001 -- one bad scan, not a dead run
+            reports[name] = {"error": str(err)}
+            continue
+        ns[name] = proxy
+        proxies[name] = proxy
+        reports[name] = report
+    ns["_scan_proxies"] = proxies
+    return reports
+
+
+def _run_checks(mesh, checks: dict, proxies: Optional[dict] = None) -> dict:
     """Post-export physics/plumbing probes (MTR-179/180) on the final mesh.
     Runs in the child; networks/fea are imported lazily so /run stays cheap
     when no checks are requested. Each check is failure-isolated: it reports
@@ -1145,6 +1245,19 @@ def _run_checks(mesh, checks: dict) -> dict:
                 )
             except Exception as err:  # noqa: BLE001
                 out["networks"] = {"error": str(err)}
+    scan_spec = checks.get("scanFit")
+    if scan_spec is not None:
+        try:
+            from fit import check_scan_fit
+
+            key = str(scan_spec.get("scan") or "scan")
+            proxy = (proxies or {}).get(key)
+            if proxy is None:
+                out["scanFit"] = {"error": f"no scan proxy bound under {key!r}"}
+            else:
+                out["scanFit"] = _plain(check_scan_fit(mesh, proxy, scan_spec))
+        except Exception as err:  # noqa: BLE001
+            out["scanFit"] = {"error": str(err)}
     fea_spec = checks.get("fea")
     if fea_spec is not None:
         try:
@@ -1390,6 +1503,7 @@ def _build_run_payload(
     engine: str,
     allow_remesh: bool,
     checks: Optional[dict],
+    proxies: Optional[dict] = None,
 ) -> dict:
     """Build the full /run response payload from an exec'd namespace holding
     `result` (single solid) or `parts` ({name: solid}). Shared by the one-shot
@@ -1478,7 +1592,7 @@ def _build_run_payload(
                     payload["promotedFromSingle"] = True
                     # Fit/network checks reference the whole enclosure.
                     if checks and mesh is not None:
-                        payload["checks"] = _run_checks(mesh, checks)
+                        payload["checks"] = _run_checks(mesh, checks, proxies)
                 else:
                     payload["files"] = entry["files"]
                     payload["renderPng"] = entry["renderPng"]
@@ -1507,7 +1621,7 @@ def _build_run_payload(
                         and entry["validation"].get("bodyCount", 1) == 1
                     )
                     if checks and mesh is not None:
-                        payload["checks"] = _run_checks(mesh, checks)
+                        payload["checks"] = _run_checks(mesh, checks, proxies)
         else:
             payload["error"] = (
                 "script did not assign `result` or a non-empty `parts` dict"
@@ -1540,6 +1654,7 @@ def _execute(
     engine: str = "build123d",
     allow_remesh: bool = False,
     checks: Optional[dict] = None,
+    meshes: Optional[dict] = None,
 ) -> None:
     """One-shot child-process worker: exec the script, export, measure,
     validate. Output contract: the script assigns either `result` (a single
@@ -1558,6 +1673,15 @@ def _execute(
         # Warm the kernel for the chosen engine (the script also imports what
         # it needs); no-op for "mesh".
         _warm_engine(engine)
+
+        # Scans are decoded and reduced to proxies HERE — after the warm, before
+        # the lockdown. This is our code operating on user data (never
+        # model-written code), and it needs the same trusted window the engine
+        # warm does; doing it after the guard would put mesh loading behind the
+        # egress/spawn block for no gain.
+        ns: dict = {}
+        scans = _bind_scans(ns, meshes)
+
         # Lock down AFTER the trusted warm, BEFORE the untrusted script runs
         # (MTR-187): scrub secrets from the child env, then block egress/spawn.
         _scrub_child_env()
@@ -1572,11 +1696,15 @@ def _execute(
         except Exception:  # noqa: BLE001
             pass
 
-        ns: dict = {}
         exec(compile(code, "<generated>", "exec"), ns, ns)  # noqa: S102
         payload["validation"]["compiled"] = True
 
-        payload = _build_run_payload(ns, formats, engine, allow_remesh, checks)
+        payload = _build_run_payload(
+            ns, formats, engine, allow_remesh, checks,
+            proxies=ns.get("_scan_proxies"),
+        )
+        if scans:
+            payload["scans"] = scans
         out.put(payload)
     except Exception as err:  # noqa: BLE001
         payload["error"] = str(err)
@@ -1765,6 +1893,58 @@ def _session_import_step_reply(ns: dict, msg: dict, engine: str) -> dict:
                 pass
 
 
+def _session_import_mesh_reply(ns: dict, msg: dict) -> dict:
+    """Bind an uploaded scan's PROXY SOLID into the session namespace.
+
+    The session twin of `_session_import_step_reply`, and the reason scan
+    ingestion needed its own door rather than reusing that one: a STEP is
+    already a clean B-rep, while a scan is an open, noisy triangle soup that
+    OpenCASCADE will not accept at all. `scan_proxy.derive_proxy` is what
+    stands between them, so what lands in the namespace is the closed proxy,
+    never the raw capture.
+
+    Like import_step it returns the bound part's bounding box, because the
+    proxy's frame (grounded on z=0, footprint-aligned) is the only frame the
+    generated code may assume — the scan's own origin is arbitrary. The
+    derivation report rides along so the model can see what it is designing
+    against, including anything the ladder had to degrade."""
+    name = str(msg.get("name") or "scan")
+    if not name.isidentifier():
+        return {"ok": False, "error": f"invalid namespace name {name!r}"}
+    try:
+        proxy, report = _load_scan_proxy(name, {
+            "b64": msg.get("meshB64"),
+            "fileType": msg.get("fileType"),
+            "proxyLevel": msg.get("proxyLevel"),
+            "clearanceMm": msg.get("clearanceMm"),
+        })
+    except Exception as err:  # noqa: BLE001 — keep the session alive
+        return {"ok": False, "error": f"import_mesh: {err}"}
+
+    ns[name] = proxy
+    proxies = ns.get("_scan_proxies")
+    if not isinstance(proxies, dict):
+        proxies = {}
+        ns["_scan_proxies"] = proxies
+    proxies[name] = proxy
+
+    import numpy as np
+
+    lo, hi = np.asarray(proxy.bounds, float)
+    return {
+        "ok": True,
+        "name": name,
+        "byteSize": report.get("byteSize"),
+        "boundingBox": {
+            "min": [float(v) for v in lo],
+            "max": [float(v) for v in hi],
+            "size": [float(v) for v in (hi - lo)],
+        },
+        "scan": report,
+        "namespace": _session_namespace_summary(ns),
+    }
+
+
 def _session_exec_reply(
     ns: dict, msg: dict, engine: str
 ) -> dict:
@@ -1818,6 +1998,7 @@ def _session_exec_reply(
             engine,
             bool(msg.get("allowRemesh")),
             msg.get("checks"),
+            proxies=ns.get("_scan_proxies"),
         )
         payload["stdout"] = buf.getvalue()
         payload["namespace"] = _session_namespace_summary(ns)
@@ -1923,6 +2104,12 @@ def _session_worker(
             # container image (needs OCP/build123d import_step) — DOCKER-VERIFIED;
             # failure-isolated so a missing kernel never kills the session.
             outq.put(_session_import_step_reply(ns, msg, engine))
+        elif op == "import_mesh":
+            # Scan ingestion: reduce an uploaded capture to a watertight proxy
+            # and bind it, so generated code can cavity/mate against a real
+            # object. Needs no CAD kernel (pure trimesh/scipy), so unlike
+            # import_step this path runs anywhere the mesh stack is installed.
+            outq.put(_session_import_mesh_reply(ns, msg))
         elif op == "snapshot":
             # Checkpoint the current `result` in-namespace (docs 03 §A v1).
             # Copy so later in-place mutation of `result` (trimesh methods
@@ -2157,6 +2344,37 @@ def session_import_step(
     return reply
 
 
+@app.post("/session/{session_id}/import_mesh")
+def session_import_mesh(
+    session_id: str, req: SessionImportMeshRequest, request: Request
+) -> dict:
+    """Bind an uploaded scan's derived proxy into the session namespace.
+    Returns the proxy's bounding box (its frame is grounded + footprint-
+    aligned, unlike the scan's arbitrary origin) plus the derivation report."""
+    _check_auth(request)
+    session = _get_session(session_id)
+    with session.lock:
+        if session.dead:
+            raise HTTPException(status_code=410, detail="session terminated")
+        reply, failure = session.request(
+            {
+                "op": "import_mesh",
+                "meshB64": req.meshB64,
+                "fileType": req.fileType,
+                "name": req.name,
+                "proxyLevel": req.proxyLevel,
+                "clearanceMm": req.clearanceMm,
+            },
+            RUN_TIMEOUT_S,
+        )
+    if reply is None:
+        raise HTTPException(
+            status_code=410,
+            detail=f"session terminated ({failure or 'crash'})",
+        )
+    return reply
+
+
 @app.post("/session/{session_id}/snapshot")
 def session_snapshot(session_id: str, request: Request) -> dict:
     _check_auth(request)
@@ -2208,7 +2426,8 @@ def run(req: RunRequest, request: Request) -> dict:
     out: "mp.Queue" = ctx.Queue()
     proc = ctx.Process(
         target=_execute,
-        args=(req.code, req.formats, out, req.engine, req.allowRemesh, req.checks),
+        args=(req.code, req.formats, out, req.engine, req.allowRemesh,
+              req.checks, req.meshes),
     )
     proc.start()
 

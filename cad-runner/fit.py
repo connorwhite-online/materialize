@@ -55,7 +55,7 @@ from scipy import ndimage
 
 from sdf_kit import _solid_voxels
 
-__all__ = ["check_fit"]
+__all__ = ["check_fit", "check_scan_fit"]
 
 # Feasibility: every sampled envelope voxel must be air.
 _AIR_FRACTION_OK = 0.999
@@ -472,4 +472,276 @@ def check_fit(mesh, spec):
                 "ok": None,
                 "note": f"fit check failed to run: {err}",
             })
+    return {"pitchMm": pitch, "results": results}
+
+
+# --- scan fit (proxy-envelope variant of the checks above) --------------------
+# Fraction of the proxy that must sit in interior air for containment.
+_SCAN_CONTAIN_OK = 0.995
+# A direction counts as "walled" when this fraction of its outward rays hits
+# solid. Deliberately the same bar as _WALL_MIN_BLOCKED for parametric ports.
+_SCAN_WALL_MIN_BLOCKED = 0.35
+# ...and this many of the five candidate directions (4 lateral + floor) must
+# clear that bar for the enclosure to be RETAINING the object rather than
+# sitting next to it.
+_SCAN_MIN_WALLS = 2
+# Interference thinner than this is CONTACT, not collision -- an object seated
+# in a cavity rests on its floor. Fixed in mm so the verdict is pitch-stable.
+_SCAN_CONTACT_SKIN_MM = 0.8
+# Below this overlap between proxy and enclosure bbox there is nothing to
+# measure at all -- reported honest-not-run instead of vacuously passing.
+# Deliberately tiny: a TRAY legitimately wraps only the bottom of an object,
+# and a stricter gate would refuse to grade a perfectly good design.
+_SCAN_MIN_OVERLAP = 0.01
+
+_AXES = {
+    "+x": (0, 1), "-x": (0, -1),
+    "+y": (1, 1), "-y": (1, -1),
+    "+z": (2, 1), "-z": (2, -1),
+}
+
+
+def _axis_key(axis):
+    """Normalize a removal axis to one of the six signed axis keys."""
+    if isinstance(axis, str):
+        key = axis.strip().lower()
+        if key in _AXES:
+            return key
+        return "+z"
+    try:
+        vec = np.asarray(axis, float).reshape(3)
+    except Exception:  # noqa: BLE001 -- fall back to lifting straight up
+        return "+z"
+    if not np.any(np.isfinite(vec)) or not np.any(vec):
+        return "+z"
+    i = int(np.argmax(np.abs(vec)))
+    return f"{'+' if vec[i] >= 0 else '-'}{'xyz'[i]}"
+
+
+def _filled_occupancy(mesh, pitch, pad=2):
+    """Solid occupancy of `mesh`, filling every enclosed void.
+
+    Deliberately NOT `_solid_voxels`: that preserves internal cavities, which
+    costs a per-pocket ray-parity classification (measured: 29.5s for a plain
+    cylinder at 0.55mm) and is the wrong answer here anyway. A proxy stands in
+    for the OUTSIDE of a physical object; a void inside it is a scan artifact,
+    and treating it as air would let the generator cut a pocket into nothing.
+    A flood fill from the grid boundary is both correct and O(n)."""
+    vg = mesh.voxelized(pitch)
+    surf = np.pad(np.asarray(vg.matrix, bool), pad)
+    origin = np.asarray(vg.transform, float)[:3, 3] - pad * pitch
+    lbl, n = ndimage.label(~surf)
+    if n == 0:
+        return surf, origin
+    outside = set()
+    for face in (lbl[0], lbl[-1], lbl[:, 0], lbl[:, -1], lbl[:, :, 0], lbl[:, :, -1]):
+        outside.update(np.unique(face).tolist())
+    outside.discard(0)
+    open_lut = np.zeros(n + 1, bool)
+    if outside:
+        open_lut[list(outside)] = True
+    return surf | ~open_lut[lbl], origin
+
+
+def _proxy_occupancy(grid, proxy):
+    """Rasterize `proxy` onto the enclosure's own lattice.
+
+    Registration is exact by construction: the proxy's solid voxel CENTERS are
+    mapped through the same world->index transform the air grid uses, so the
+    two never drift apart the way two independently-anchored voxelizations
+    would. Returns (occupancy array shaped like grid.air, overlap fraction)."""
+    solid, origin = _filled_occupancy(proxy, grid.pitch, pad=2)
+    cells = np.argwhere(solid)
+    if len(cells) == 0:
+        return np.zeros_like(grid.air), 0.0
+    world = np.asarray(origin, float) + cells * grid.pitch
+    idx = np.rint((world - grid.origin) / grid.pitch).astype(int)
+    shape = np.asarray(grid.air.shape)
+    inside = np.all((idx >= 0) & (idx < shape), axis=1)
+    occ = np.zeros_like(grid.air)
+    ii = idx[inside]
+    if len(ii):
+        occ[ii[:, 0], ii[:, 1], ii[:, 2]] = True
+    return occ, float(inside.mean())
+
+
+def _beyond(field, axis_key):
+    """For each cell, whether `field` is set anywhere at or beyond it along
+    `axis_key` -- the vectorized equivalent of casting a ray that way."""
+    ax, sign = _AXES[axis_key]
+    if sign < 0:
+        return np.maximum.accumulate(field, axis=ax)
+    return np.flip(np.maximum.accumulate(np.flip(field, axis=ax), axis=ax), axis=ax)
+
+
+def _swept(occ, axis_key):
+    """Occupancy swept to infinity along `axis_key` -- every cell the proxy
+    would pass through on its way out. The proxy moving +z covers the cells
+    that have proxy at or BELOW them, which is `_beyond` looking the other
+    way."""
+    ax, sign = _AXES[axis_key]
+    return _beyond(occ, f"{'-' if sign > 0 else '+'}{'xyz'[ax]}")
+
+
+def _place_proxy(proxy, spec):
+    """Move the proxy to where the DESIGN puts it before grading.
+
+    The proxy arrives in the object's own resting frame (footprint-aligned,
+    sitting on z=0). A case almost never leaves it there -- an object seats on
+    top of the cavity floor, so the generated code translates it up by the
+    floor thickness, and possibly around in XY. Grading the unplaced proxy
+    would then read the floor as a collision (measured: a perfectly good cup
+    with a 4mm floor scored 89.2% containment) and reject correct designs.
+
+    `placementMm` and `rotationZDeg` must therefore mirror whatever the
+    generated code did with the proxy. Rotation is Z-only on purpose: the
+    object's resting plane is the one thing a case may not tilt."""
+    if proxy is None or not spec:
+        return proxy
+    rot = float(spec.get("rotationZDeg") or 0.0)
+    shift = spec.get("placementMm") or [0.0, 0.0, 0.0]
+    try:
+        shift = np.asarray(shift, float).reshape(3)
+    except Exception:  # noqa: BLE001 -- a malformed placement is no placement
+        shift = np.zeros(3)
+    if rot == 0.0 and not np.any(shift):
+        return proxy
+    moved = proxy.copy()
+    if rot:
+        theta = np.radians(rot)
+        c, s = np.cos(theta), np.sin(theta)
+        mat = np.eye(4)
+        mat[:2, :2] = [[c, -s], [s, c]]
+        moved.apply_transform(mat)
+    if np.any(shift):
+        moved.apply_translation(shift)
+    return moved
+
+
+def check_scan_fit(mesh, proxy, spec=None):
+    """Verify a generated enclosure against a SCAN PROXY rather than a
+    parametric component envelope.
+
+    `check_fit` slides a box through the air grid because a PCB is a box. A
+    scanned object is not, so the three questions change shape:
+
+      containment  -- the proxy (already grown by its clearance) sits in
+                      interior air, i.e. the case does not intersect the
+                      object it is built around;
+      retention    -- the shell actually walls the proxy on enough sides to
+                      hold it, rather than being a plate it rests beside;
+      extraction   -- sweeping the proxy along the removal axis stays in air
+                      all the way out. THIS is the check the parametric path
+                      never needed: a cradle can enclose a scanned object
+                      through an opening narrower than the object and be
+                      geometrically perfect but physically useless, and
+                      nothing else in the suite would notice.
+
+    The three are only meaningful TOGETHER. Containment is evaluated over the
+    proxy's overlap with the part -- deliberately, so a tray that cups only
+    the bottom of an object can still be graded -- which means a part far too
+    small to hold anything passes containment vacuously. Retention is what
+    catches that one, and extraction is what catches the part that holds the
+    object too well.
+
+    Resolution honesty, same posture as fit.py's other checks and networks.py:
+    verified at voxel pitch p means "no interference thicker than ~p".
+
+    Returns {"pitchMm": p, "results": [...]}; `ok: null` marks a check that
+    could not be evaluated rather than one that passed."""
+    spec = spec or {}
+    cid = str(spec.get("id") or "scan")
+    proxy = _place_proxy(proxy, spec)
+
+    def row(kind, ok, note, **extra):
+        out = {"id": f"scanfit:{cid}:{kind}", "kind": f"scan_{kind}",
+               "ok": ok, "note": note}
+        out.update(extra)
+        return out
+
+    if not bool(mesh.is_watertight):
+        return {"pitchMm": None, "results": [], "error":
+                "scan fit needs a watertight enclosure; run it after repair"}
+    if proxy is None or not len(getattr(proxy, "faces", [])):
+        return {"pitchMm": None, "results": [], "error": "no scan proxy available"}
+
+    pitch = _pitch_for(mesh, [])
+    grid = _AirGrid(mesh, pitch)
+    occ, overlap = _proxy_occupancy(grid, proxy)
+    n_occ = int(occ.sum())
+    results = []
+
+    # Shrink the proxy by a thin skin before asking about interference.
+    # Surface voxelization dilates BOTH the part and the proxy by ~half a
+    # pitch, and an object SEATED in a cavity touches its floor by design --
+    # so the contact layer reads as a collision otherwise. Measured on a
+    # correct cup: 4,157 interfering cells, all of them in a single layer at
+    # the seating plane, scoring 98.6% and failing.
+    #
+    # The skin is fixed in MILLIMETRES, not voxels, so the verdict does not
+    # move when the pitch does. At 0.8mm it is two orders of magnitude below
+    # phone-lidar capture error, so nothing it forgives could have been
+    # trusted geometry in the first place.
+    skin = max(1, int(np.ceil(_SCAN_CONTACT_SKIN_MM / pitch)))
+    core = ndimage.binary_erosion(occ, iterations=skin)
+    if not core.any():
+        core = occ
+
+    if n_occ == 0 or overlap < _SCAN_MIN_OVERLAP:
+        note = (
+            f"the proxy and the part barely overlap (overlap {overlap:.1%})"
+            " -- the generated part is not built around the scanned object"
+        )
+        return {"pitchMm": pitch, "results": [
+            row("containment", None, note, overlap=round(overlap, 4)),
+            row("retention", False, note),
+            row("extraction", None, note),
+        ]}
+
+    # 1. containment -- proxy cells must be air inside the enclosure.
+    air_frac = float(grid.air[core].mean())
+    results.append(row(
+        "containment", bool(air_frac >= _SCAN_CONTAIN_OK),
+        f"{air_frac:.1%} of the overlapping scan proxy sits in interior air "
+        f"(need {_SCAN_CONTAIN_OK:.1%}); overlap {overlap:.0%}, clearance "
+        f"{spec.get('clearanceMm')}mm at {pitch:.2f}mm voxels",
+        got=round(air_frac, 4), overlap=round(overlap, 4),
+    ))
+
+    # 2. retention -- how many sides actually wall the proxy in.
+    # Asking the grid directly rather than marching a ray per sample point:
+    # "is there solid beyond this cell along d" is one reversed accumulate per
+    # axis, exact on the same lattice and vectorized over every proxy cell at
+    # once. The ray-marching version sampled 220 points x 5 directions and
+    # cost ~2 minutes per case; this is instant and samples ALL of them.
+    solid = ~grid.air
+    walls = {}
+    for key in ("+x", "-x", "+y", "-y", "-z"):
+        walls[key] = round(float(_beyond(solid, key)[occ].mean()), 3)
+    walled = [k for k, v in walls.items() if v >= _SCAN_WALL_MIN_BLOCKED]
+    results.append(row(
+        "retention", bool(len(walled) >= _SCAN_MIN_WALLS),
+        f"walled on {len(walled)} of 5 sides ({', '.join(walled) or 'none'}); "
+        f"need {_SCAN_MIN_WALLS}",
+        got=walls,
+    ))
+
+    # 3. extraction -- the object must be able to come back out.
+    axis_key = _axis_key(spec.get("removalAxis", "+z"))
+    swept = _swept(core, axis_key) & ~occ
+    n_swept = int(swept.sum())
+    if n_swept == 0:
+        results.append(row(
+            "extraction", None,
+            f"no material between the proxy and the {axis_key} opening to test",
+        ))
+    else:
+        clear = float(grid.air[swept].mean())
+        results.append(row(
+            "extraction", bool(clear >= _SCAN_CONTAIN_OK),
+            f"{clear:.1%} of the {axis_key} withdrawal path is clear "
+            f"(need {_SCAN_CONTAIN_OK:.1%}) -- below this the object is "
+            "trapped by an opening narrower than itself",
+            got=round(clear, 4), axis=axis_key,
+        ))
     return {"pitchMm": pitch, "results": results}
