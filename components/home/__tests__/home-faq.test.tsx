@@ -5,43 +5,35 @@ import { HomeFaq } from "../home-faq";
 import { HOME_FAQ } from "@/lib/seo/home-faq";
 
 describe("HomeFaq", () => {
-  it("titles the section Questions?", () => {
+  it("renders every question and keeps every answer in the DOM", () => {
     render(<HomeFaq />);
-    expect(
-      screen.getByRole("heading", { level: 2, name: "Questions?" }).textContent
-    ).toBe("Questions?");
-  });
-
-  it("renders each question as a collapsed disclosure whose answer is in the DOM", () => {
-    const { container } = render(<HomeFaq />);
-    const items = container.querySelectorAll("details");
-    expect(items).toHaveLength(HOME_FAQ.length);
-
-    for (const [i, item] of HOME_FAQ.entries()) {
-      const details = items[i];
-      expect(details.open).toBe(false);
-      expect(details.querySelector("summary")?.textContent).toContain(
-        item.question
-      );
-      // Answers must stay in the HTML even while collapsed — FAQPage
-      // JSON-LD is a structured-data violation if the marked-up text
-      // isn't on the page.
-      expect(details.textContent).toContain(item.answer);
+    for (const item of HOME_FAQ) {
+      expect(screen.getByText(item.question)).toBeTruthy();
+      expect(screen.getByText(item.answer)).toBeTruthy();
     }
+    expect(
+      screen.getAllByRole("button", { expanded: false })
+    ).toHaveLength(HOME_FAQ.length);
   });
 
-  it("opens an item so the answer appears below the question", () => {
-    const { container } = render(<HomeFaq />);
-    const first = container.querySelector("details")!;
-    fireEvent.click(first.querySelector("summary")!);
-    expect(first.open).toBe(true);
+  it("opens from the question and closes from a click on the answer", () => {
+    render(<HomeFaq />);
+    const question = screen.getByRole("button", {
+      name: HOME_FAQ[0].question,
+    });
+    const answer = screen.getByText(HOME_FAQ[0].answer);
+    expect(question.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(question);
+    expect(question.getAttribute("aria-expanded")).toBe("true");
+
+    fireEvent.click(answer);
+    expect(question.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("places the Materialise disambiguation last", () => {
-    const { container } = render(<HomeFaq />);
-    const last = [...container.querySelectorAll("details")].at(-1);
-    expect(last?.querySelector("summary")?.textContent).toMatch(
-      /Materialise|i\.materialise/
-    );
+    render(<HomeFaq />);
+    const questions = screen.getAllByRole("button");
+    expect(questions.at(-1)?.textContent).toMatch(/Materialise|i\.materialise/);
   });
 });

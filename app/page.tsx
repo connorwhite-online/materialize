@@ -3,6 +3,7 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { TopBar } from "@/components/nav/top-bar";
 import { AppShell } from "@/components/nav/app-shell";
+import { HeroBackground } from "@/components/home/hero-background";
 import { HomeDashboard } from "@/components/home/home-dashboard";
 import { HomeMarketing } from "@/components/home/home-marketing";
 import { isSandboxMode } from "@/lib/env";
@@ -139,43 +140,31 @@ export default async function HomePage() {
           hero at one mobile viewport while letting HomeMarketing below
           grow the page. dvh, not vh: 100vh on iOS Safari includes the
           URL-bar area, so the hero would come out taller than what's
-          actually visible; dvh tracks URL-bar visibility. */}
-      <section className="flex min-h-dvh flex-col">
+          actually visible; dvh tracks URL-bar visibility.
+
+          Background art covers this first screen (100dvh × 100dvw via
+          absolute inset-0 + object-cover). The three.js / R3F showcase
+          that used to sit in a visual slot below the copy is unmounted,
+          not deleted — hero-showcase*.tsx et al. stay in the tree. */}
+      <section className="relative flex min-h-dvh w-full flex-col overflow-hidden">
+        <HeroBackground />
         {/* Brand mark lives in TopBar so "Materialize" still appears
             above the fold. The h1 states what the product does. */}
-        <main className="flex flex-1 flex-col">
+        <main className="relative flex flex-1 flex-col">
           <div className="flex flex-1 items-center justify-center px-4">
             <div className="flex w-full max-w-2xl flex-col items-center gap-4 text-center">
               {/* Real, selectable <h1> — states what the product does
                   rather than spelling the brand. Same system stack as
                   the rest of the app; no webfont on the critical path. */}
               <h1 className="text-balance text-3xl leading-[1.1] tracking-tight sm:text-4xl">
-                Print in any material, and share your ideas
+                Print anything, share your ideas
               </h1>
               <p className="max-w-lg text-pretty text-base leading-relaxed text-muted-foreground">
-                Upload a model, pick from 60+ materials, and we print and ship
-                it — no printer required. Browse designs from other makers, or
-                publish your own and earn on every print.
+                Get prints delivered to your door, and pick from 60+ materials.
+                Share your hardware projects and files.
               </p>
             </div>
           </div>
-
-          {/* ─── Visual slot ───────────────────────────────────────────
-              The three.js / R3F hero showcase used to mount here and was
-              the single heaviest thing on the anon landing page. It is
-              unmounted, not deleted: components/home/hero-showcase*.tsx,
-              showcase-mesh.tsx, showcase-particles.tsx and
-              material-carousel.tsx are all still in the tree, and
-              re-adding <HeroShowcase /> here restores the old behavior
-              in one line.
-
-              Whatever replaces it should keep the two properties that
-              made the old mount safe: load it through
-              hero-showcase-lazy.tsx's next/dynamic + `ssr: false`
-              wrapper so three.js stays off the critical path, and give
-              the placeholder the same reserved height as the real
-              canvas so its arrival doesn't shift the copy above it.
-              ────────────────────────────────────────────────────────── */}
         </main>
       </section>
 

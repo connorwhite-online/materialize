@@ -64,6 +64,10 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  /* Springy settle — a hair of overshoot, no wobble. Same curve as
+     `--mz-ease` on the wordmark. Use as `ease-spring` / `ease-out-soft`. */
+  --ease-spring: cubic-bezier(0.22, 1.15, 0.32, 1);
+  --ease-out-soft: cubic-bezier(0.22, 0.9, 0.28, 1);
 }
 
 /* Neutral tokens carry a very subtle warm bias — hue 80, tiny chroma.
@@ -583,13 +587,13 @@
 /* Timing. Letters lead the crop slightly so they animate into space the
    window has already opened rather than popping out from under its edge. */
 .mz-logo {
-  --mz-ease: cubic-bezier(0.22, 0.9, 0.28, 1);
+  --mz-ease: var(--ease-out-soft, cubic-bezier(0.22, 0.9, 0.28, 1));
   --mz-letter-ms: 520ms;
   --mz-stagger-in: 38ms;
   --mz-stagger-out: 24ms;
   --mz-crop-ms: 700ms;
   /* Blur is in SVG user units (the artwork is 251 tall), so it scales with
-     the logo — an 11px nav lockup and a 64px hero lockup blur by the same
+     the logo — a 22px nav lockup and a 64px hero lockup blur by the same
      visual proportion. */
   --mz-blur: 22px;
   --mz-lift: 14%;

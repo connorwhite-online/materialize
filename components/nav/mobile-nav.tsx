@@ -25,6 +25,7 @@ import { useAuthModal } from "@/components/auth/auth-modal";
 import { useCart } from "@/components/print/cart-context";
 import { useKeyboardOpen } from "@/lib/hooks/use-keyboard-sticky-bottom";
 import { useUnreadCount } from "@/lib/hooks/use-unread-count";
+import { EASE_OUT_SOFT } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
 /** Widest the expanded card gets; clamped to the viewport below. */
@@ -37,29 +38,33 @@ const MIN_COLLAPSED_WIDTH = 172;
 const ROW_HEIGHT = 56;
 
 /**
- * The card's own motion: fast, with a hair of overshoot and no wobble.
- * Deliberately quicker than the content wave below — filming Linear's
- * nav at 60fps, its card reaches full size in ~100ms and the rows keep
- * arriving for another ~200ms. The container landing early is what
- * makes the cascade read as life rather than lag; when the two finish
- * together (as ours did) the whole thing feels heavier than it is.
+ * Card morph — finite ease-out tweens. Stiffness springs left a long
+ * asymptotic crawl of sub-pixel width/height that shimmered the
+ * rounded card, backdrop-blur, and labels right before rest. A cubic
+ * lands on the target and stops. Deliberately quicker than the row
+ * cascade so the container still lands first.
  */
-const SPRING: Transition = {
-  type: "spring",
-  stiffness: 520,
-  damping: 38,
-  mass: 0.8,
+const CARD_IN: Transition = {
+  duration: 0.28,
+  ease: [0.22, 1, 0.36, 1],
 };
-/** Critically damped — collapsing height must not overshoot past 0. */
-const SPRING_CLOSE: Transition = {
-  type: "spring",
-  stiffness: 460,
-  damping: 44,
+const CARD_OUT: Transition = {
+  duration: 0.24,
+  ease: [0.4, 0, 0.2, 1],
+};
+/** Height close waits so the row peel can go soft before clipping. */
+const HEIGHT_CLOSE: Transition = { ...CARD_OUT, delay: 0.06 };
+
+/** Row lift — same expo-out as the card; no spring asymptote on `y`. */
+const ROW_SETTLE: Transition = {
+  duration: 0.28,
+  ease: [0.22, 1, 0.36, 1],
 };
 
 /**
- * The pill ↔ user-container swap on OPEN. Incoming waits out most of
- * the outgoing fade so the two are never both legible.
+ * The pill ↔ user-container swap on OPEN. Opacity-only (no y) — a
+ * slide fought the card's last height pixels and read as bottom-row
+ * jitter. Incoming still waits out most of the outgoing fade.
  */
 const IDENTITY_IN: Transition = {
   duration: 0.13,
@@ -172,6 +177,12 @@ export function MobileNav({
     pillProfile?.handle ?? null
   );
 
+  // Pixel height for the destination list — animating to a number
+  // (not `"auto"`) so the tween lands on an exact value instead of
+  // snapping from the last interpolated px back to `auto` at rest.
+  const menuNavRef = useRef<HTMLElement>(null);
+  const [menuHeight, setMenuHeight] = useState(0);
+
   // Also collapses while the keyboard is up — the whole nav is faded
   // out of the way then, and it must not come back mid-typing.
   const open = openPath !== null && openPath === pathname && !keyboardOpen;
@@ -180,6 +191,21 @@ export function MobileNav({
     () => setOpenPath((current) => (current === null ? pathname : null)),
     [pathname]
   );
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setMenuHeight(0);
+      return;
+    }
+    const nav = menuNavRef.current;
+    if (!nav) return;
+    const measure = () => setMenuHeight(Math.ceil(nav.scrollHeight));
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(nav);
+    return () => observer.disconnect();
+  }, [open, destinations.length, expandedWidth, isSignedIn]);
 
   // Escape closes; the page behind stops scrolling while the menu is up.
   useEffect(() => {
@@ -259,7 +285,7 @@ export function MobileNav({
           <motion.div
             initial={false}
             animate={{ width: open ? expandedWidth : collapsedWidth }}
-            transition={reducedMotion ? { duration: 0 } : open ? SPRING : SPRING_CLOSE}
+            transition={reducedMotion ? { duration: 0 } : open ? CARD_IN : CARD_OUT}
             drag={open && !reducedMotion ? "y" : false}
             dragConstraints={{ top: 0, bottom: 0 }}
             dragElastic={{ top: 0.02, bottom: 0.4 }}
@@ -280,13 +306,15 @@ export function MobileNav({
                   // Opening, the block only animates height — the rows
                   // own their own fade, so there is no phase where a
                   // half-lit card sits on screen waiting for content.
+                  // Height is a measured px value (see menuHeight), not
+                  // `"auto"`, so the tween can rest without a snap.
                   initial={{ height: 0 }}
-                  animate={{ height: "auto" }}
+                  animate={{ height: menuHeight }}
                   exit={{
                     height: 0,
-                    transition: reducedMotion ? { duration: 0 } : SPRING_CLOSE,
+                    transition: reducedMotion ? { duration: 0 } : HEIGHT_CLOSE,
                   }}
-                  transition={reducedMotion ? { duration: 0 } : SPRING_CLOSE}
+                  transition={reducedMotion ? { duration: 0 } : CARD_IN}
                   // Stick the list to the pill. Height shrinks the box
                   // from the top, so Home is clipped first and Materials
                   // stays parked next to the identity — the other way
@@ -296,6 +324,7 @@ export function MobileNav({
                   {/* Fixed width so the list never reflows mid-morph while
                       the card itself is still widening. */}
                   <nav
+                    ref={menuNavRef}
                     id={menuId}
                     aria-label="Primary"
                     style={{ width: expandedWidth }}
@@ -381,12 +410,12 @@ export function MobileNav({
                   {open ? (
                     <motion.div
                       key="user"
-                      initial={reducedMotion ? false : { opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
+                      initial={reducedMotion ? false : { opacity: 0 }}
+                      animate={{ opacity: 1 }}
                       exit={
                         reducedMotion
                           ? { opacity: 0 }
-                          : { opacity: 0, y: -8, transition: IDENTITY_OUT_CLOSE }
+                          : { opacity: 0, transition: IDENTITY_OUT_CLOSE }
                       }
                       transition={reducedMotion ? { duration: 0 } : IDENTITY_IN}
                       className="absolute inset-0 flex items-center"
@@ -443,12 +472,12 @@ export function MobileNav({
                       aria-expanded={false}
                       aria-controls={menuId}
                       aria-label={`${identity.label} — open navigation menu`}
-                      initial={reducedMotion ? false : { opacity: 0, y: -8 }}
-                      animate={{ opacity: 1, y: 0 }}
+                      initial={reducedMotion ? false : { opacity: 0 }}
+                      animate={{ opacity: 1 }}
                       exit={
                         reducedMotion
                           ? { opacity: 0 }
-                          : { opacity: 0, y: 8, transition: IDENTITY_OUT }
+                          : { opacity: 0, transition: IDENTITY_OUT }
                       }
                       transition={reducedMotion ? { duration: 0 } : IDENTITY_IN_CLOSE}
                       className="absolute inset-0 flex items-center text-left"
@@ -612,11 +641,12 @@ function rowExit(index: number) {
 
 /**
  * Rows materialise rather than slide: a short lift plus a blur that
- * resolves as they land. Filter is a tween (springs on blur feel
- * drunk); position is a spring so they settle. No `scale` — scaling
- * type inside a height:auto box is what made close frames jitter as
- * the browser relaid out each flex row. The travel stays small — at
- * 8px the eye reads it as coming into focus, not as sliding in.
+ * resolves as they land. Both are finite tweens — springs left a
+ * sub-pixel crawl on `y` that re-rasterised glyphs each frame and
+ * read as jitter right before rest. No `scale` — scaling type inside
+ * a height box is what made close frames jitter as the browser
+ * relaid out each flex row. Travel stays small (8px) so the eye
+ * reads focus-in, not a slide from elsewhere.
  */
 const ITEM_VARIANTS: Variants = {
   hidden: {
@@ -635,9 +665,9 @@ const ITEM_VARIANTS: Variants = {
     y: 0,
     filter: "blur(0px)",
     transition: {
-      y: { type: "spring", stiffness: 380, damping: 32, mass: 0.7 },
-      opacity: { duration: 0.22, ease: [0.22, 0.9, 0.28, 1] },
-      filter: { duration: 0.28, ease: [0.22, 0.9, 0.28, 1] },
+      y: ROW_SETTLE,
+      opacity: { duration: 0.22, ease: EASE_OUT_SOFT },
+      filter: { duration: 0.24, ease: EASE_OUT_SOFT },
     },
   },
 };
