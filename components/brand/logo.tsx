@@ -126,14 +126,16 @@ export interface AnimatedWordmarkProps extends BaseProps {
  * library. Everything is CSS transitions and keyframes declared once in
  * `app/globals.css` (`.mz-logo-*`), staggered by a `--mz-i` custom property
  * per letter. The animating layout properties are the wrapper's width and
- * height, on a single absolutely-sized element. `prefers-reduced-motion`
- * collapses the whole thing to an instant state change.
+ * (on toggle-collapse) height, on a single absolutely-sized element.
+ * `prefers-reduced-motion` collapses the whole thing to an instant state
+ * change.
  *
- * Collapsing crops the wrapper to the mark and scales the SVG up slightly
- * (`--mz-mark-scale` in globals.css) so the "M" ends up taller than the
- * word was — it reads as absorbing the letters as they peel off. The SVG
- * itself is always the full wordmark at the requested height; scale and
- * crop are CSS on top of that.
+ * The wrapper crops the word; it does not scale the wordmark SVG. Letters
+ * always paint at the requested height. On a controlled collapse, only
+ * the mark path (`.mz-logo-mark`) scales up (`--mz-mark-scale` in
+ * globals.css) so the "M" finishes taller than the word it replaced.
+ * Mount-mode reveal stays crop-only — scaling the collapsed mark there
+ * would play as a shrinking M plus a growing word on first paint.
  */
 export function AnimatedWordmark({
   height,
@@ -185,8 +187,11 @@ export function AnimatedWordmark({
       >
         {WORDMARK_GLYPHS.map((glyph, i) => {
           // Index 0 is the "M" — it is the persistent mark and never
-          // animates, so it renders outside the staggered group.
-          if (i === 0) return <path key="mark" d={glyph.d} />;
+          // wipes with the letters. `.mz-logo-mark` is what toggle-
+          // collapse scales up; the rest of the SVG stays at --mz-h.
+          if (i === 0) {
+            return <path key="mark" className="mz-logo-mark" d={glyph.d} />;
+          }
           // Two nested elements, deliberately: rendering order is
           // filter → clip, so the blur has to live on an ancestor of the
           // clipped path. Flattened onto one element, the clip would shave

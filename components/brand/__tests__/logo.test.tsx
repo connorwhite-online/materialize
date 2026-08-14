@@ -72,6 +72,9 @@ describe("AnimatedWordmark", () => {
     expect(container.querySelector("svg > path")?.getAttribute("d")).toBe(
       WORDMARK_GLYPHS[0].d
     );
+    expect(container.querySelector("svg > path")?.classList.contains("mz-logo-mark")).toBe(
+      true
+    );
   });
 
   it("paces the stagger forward for reveal and backward for collapse", () => {
@@ -114,17 +117,21 @@ describe("AnimatedWordmark", () => {
     expect(root().style.getPropertyValue("--mz-h")).toBe("32px");
   });
 
-  it("pins the collapsed-mark scale in globals.css so the M grows on collapse", () => {
-    // The "absorbing" scale lives in CSS, not the component. If someone
-    // drops --mz-mark-scale the collapsed lockup shrinks back to the
-    // word's height and the effect is gone.
+  it("grows only the mark on toggle-collapse, never the wordmark SVG", () => {
+    // A previous pass scaled `> svg`, which made the remaining letters
+    // grow as they peeled — the opposite of the scroll effect. The
+    // scale lives on `.mz-logo-mark` and only under toggle+collapsed,
+    // so mount-mode first paint cannot shrink a large M into a small word.
     const css = readFileSync(
       path.join(process.cwd(), "app/globals.css"),
       "utf8"
     );
     expect(css).toMatch(/--mz-mark-scale:\s*1\.\d+/);
     expect(css).toMatch(
-      /data-mz-expanded="false"[\s\S]*?scale\(var\(--mz-mark-scale\)\)/
+      /data-mz-mode="toggle"\]\[data-mz-expanded="false"\][\s\S]*?\.mz-logo-mark \{[\s\S]*?scale\(var\(--mz-mark-scale\)\)/
+    );
+    expect(css).not.toMatch(
+      /data-mz-expanded="false"\] > svg \{[\s\S]*?scale\(var\(--mz-mark-scale\)\)/
     );
   });
 });

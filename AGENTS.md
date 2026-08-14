@@ -224,10 +224,13 @@ Three components in `components/brand/logo.tsx`, all painting with
   stagger so it peels right-to-left back to the "M". Live on the landing
   header at `nav+` (22px tall, vertically centered on the 40px search row;
   `animateOnMount` until the first scroll, then `expanded` tracks scroll so
-  the word peels back to a slightly taller M via `--mz-mark-scale` in
-  `globals.css`; below `nav` it falls back to `<Logomark>`), the auth
-  modal, `/sign-in`, `/sign-up`, and `/onboarding`. App chrome uses
-  `<Logomark>` at the same 22px — it does not collapse.
+  the word peels back to the M). Collapse crops the word and scales **only
+  the mark** (`.mz-logo-mark` via `--mz-mark-scale` in `globals.css`) so the
+  logo.svg "M" finishes taller than the word was — do **not** scale the
+  wordmark SVG itself or the remaining letters grow as they peel.
+  Mount-mode stays crop-only. Below `nav` it falls back to `<Logomark>`;
+  also on the auth modal, `/sign-in`, `/sign-up`, and `/onboarding`. App
+  chrome uses `<Logomark>` at the same 22px — it does not collapse.
 
 All geometry lives in `components/brand/logo-paths.ts` — **the only place path
 data is defined**. Updating the logo means replacing the `d` strings there (one

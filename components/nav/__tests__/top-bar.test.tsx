@@ -87,6 +87,9 @@ describe("TopBar landing wordmark", () => {
 
     expect(logo().dataset.mzMode).toBe("toggle");
     expect(logo().dataset.mzExpanded).toBe("false");
+    // Word size stays 22px; the M grows via --mz-mark-scale on
+    // `.mz-logo-mark` (not the whole SVG).
+    expect(logo().style.getPropertyValue("--mz-h")).toBe("22px");
 
     setScrollY(0);
     expect(logo().dataset.mzExpanded).toBe("true");
