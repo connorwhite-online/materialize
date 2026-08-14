@@ -288,8 +288,14 @@ export function MobileNav({
                     aria-label="Primary"
                     style={{ width: expandedWidth }}
                   >
-                    <ul className="flex flex-col gap-0.5 p-1.5">
-                      {destinations.map((item, index) => {
+                    <motion.ul
+                      variants={LIST_VARIANTS}
+                      initial="hidden"
+                      animate="visible"
+                      exit="hidden"
+                      className="flex flex-col gap-0.5 p-1.5"
+                    >
+                      {destinations.map((item) => {
                         const active = isDestinationActive(pathname, item.href);
                         const badge =
                           item.href === "/print" && cartCount > 0
@@ -301,11 +307,7 @@ export function MobileNav({
                         return (
                           <motion.li
                             key={item.href}
-                            custom={{ index, count: destinations.length }}
                             variants={reducedMotion ? undefined : ITEM_VARIANTS}
-                            initial={reducedMotion ? false : "hidden"}
-                            animate={reducedMotion ? false : "visible"}
-                            exit={reducedMotion ? undefined : "exit"}
                           >
                             <Link
                               href={item.href}
@@ -351,7 +353,7 @@ export function MobileNav({
                           </motion.li>
                         );
                       })}
-                    </ul>
+                    </motion.ul>
                     <div className="mx-3 h-px bg-border" />
                   </nav>
                 </motion.div>
@@ -557,23 +559,32 @@ function TrailingCluster({
 
 /** Wordmark `--mz-stagger-in` — readable cascade, not a simultaneous pop. */
 const STAGGER_IN = 0.038;
-/** Wordmark `--mz-stagger-out` plus a hair — close has to be readable. */
+/** Close peels a hair slower than the wordmark's 24ms so the wave reads. */
 const STAGGER_OUT = 0.032;
 
-type RowStagger = { index: number; count: number };
+const LIST_VARIANTS: Variants = {
+  // Close peels top → bottom: the row nearest the shrinking top edge
+  // leaves first. Stagger lives here — not on per-item `custom` —
+  // because AnimatePresence's exit resolver ignores the child's
+  // `custom` prop and reads `presenceContext.custom` instead, which
+  // made every row exit on delay 0.
+  hidden: {
+    transition: { staggerChildren: STAGGER_OUT, staggerDirection: 1 },
+  },
+  // Reveal outward from the pill: last child (nearest the bottom
+  // edge) leads. No `delayChildren` — the first row starts with the
+  // card, or the card reads as an empty box.
+  visible: {
+    transition: { staggerChildren: STAGGER_IN, staggerDirection: -1 },
+  },
+};
 
 /**
  * Rows materialise rather than slide: a short lift plus a blur that
  * resolves as they land. Filter is a tween (springs on blur feel
  * drunk); position is a spring so they settle. The travel stays small
  * — at 10px the eye reads it as coming into focus, not as sliding in
- * from somewhere.
- *
- * Stagger is per-item delay rather than `staggerChildren`, because the
- * list is nested inside the height wrapper's AnimatePresence and a
- * parent `exit` variant does not reliably orchestrate descendants.
- * Open: last child (nearest the pill) leads. Close: first child (nearest
- * the shrinking top edge) leads, so nothing opaque gets clipped.
+ * from somewhere. Close reuses `hidden`.
  */
 const ITEM_VARIANTS: Variants = {
   hidden: {
@@ -581,58 +592,26 @@ const ITEM_VARIANTS: Variants = {
     y: 10,
     scale: 0.98,
     filter: "blur(8px)",
-  },
-  visible: (custom: RowStagger | undefined) => {
-    const index = custom?.index ?? 0;
-    const count = custom?.count ?? 1;
-    const delay = (count - 1 - index) * STAGGER_IN;
-    const settle: Transition = {
-      type: "spring",
-      stiffness: 380,
-      damping: 32,
-      mass: 0.7,
-      delay,
-    };
-    // Logo ease: sharpness catches up a frame after the row has
-    // mostly landed, which is the "focus in" the stagger is for.
-    // Delay is repeated on each key — per-property transitions do
-    // not inherit a sibling `delay`.
-    const focus: Transition = {
+    transition: {
       duration: 0.22,
-      ease: [0.22, 0.9, 0.28, 1],
-      delay,
-    };
-    return {
-      opacity: 1,
-      y: 0,
-      scale: 1,
-      filter: "blur(0px)",
-      transition: {
-        y: settle,
-        scale: settle,
-        opacity: focus,
-        filter: { ...focus, duration: 0.28 },
-      },
-    };
-  },
-  exit: (custom: RowStagger | undefined) => {
-    const delay = (custom?.index ?? 0) * STAGGER_OUT;
-    const leave: Transition = {
-      delay,
-      duration: 0.2,
       ease: [0.4, 0, 1, 1],
-    };
-    return {
-      opacity: 0,
-      y: 10,
-      scale: 0.98,
-      filter: "blur(8px)",
-      transition: {
-        ...leave,
-        opacity: { ...leave, duration: 0.16 },
-        filter: { ...leave, duration: 0.18 },
-      },
-    };
+      opacity: { duration: 0.18, ease: "easeIn" },
+      filter: { duration: 0.2, ease: "easeIn" },
+    },
+  },
+  visible: {
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    filter: "blur(0px)",
+    transition: {
+      y: { type: "spring", stiffness: 380, damping: 32, mass: 0.7 },
+      scale: { type: "spring", stiffness: 380, damping: 32, mass: 0.7 },
+      // Logo ease: sharpness catches up a frame after the row has
+      // mostly landed, which is the "focus in" the stagger is for.
+      opacity: { duration: 0.22, ease: [0.22, 0.9, 0.28, 1] },
+      filter: { duration: 0.28, ease: [0.22, 0.9, 0.28, 1] },
+    },
   },
 };
 
