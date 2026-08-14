@@ -6,7 +6,7 @@
  * inbox they can't read.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { usePathname } from "next/navigation";
 
 let mockUser: {
@@ -123,6 +123,22 @@ describe("MobileNav", () => {
     expect(trigger().textContent).toContain("Materials");
     expect(trigger().getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByRole("navigation", { name: "Primary" })).toBeNull();
+  });
+
+  it("collapses the destinations when the grabber is tapped again", async () => {
+    render(<MobileNav initialUnreadCount={0} />);
+
+    await openMenu();
+    expect(screen.getByRole("navigation", { name: "Primary" })).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Close navigation menu" }));
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("navigation", { name: "Primary" })).toBeNull();
+    });
+    expect(trigger().getAttribute("aria-expanded")).toBe("false");
   });
 
   it("discloses the destinations and the user container when tapped", async () => {
