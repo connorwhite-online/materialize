@@ -257,7 +257,16 @@ depends on that ordering) and re-exporting `app/icon.svg`, the one intentional
 duplicate. A test pins `app/icon.svg` to `MARK_PATH` so the favicon can't drift.
 
 Motion and sizing live in `app/globals.css` (`.mz-logo*`), not in the component,
-so timing can be retuned without touching TSX. Sizing flows from a single
+so timing can be retuned without touching TSX. **Timing is measured, not
+eyeballed** — the current values came from a 60fps device capture cross-checked
+against a rAF harness driving the same rules in Chromium (the two agreed to
+~30ms). Today: reveal settles at ~350ms, peel at ~420ms. The reveal used to run
+~714ms and read as sluggish, almost entirely because nine letters of 38ms
+stagger burned 342ms before the last one started — `--mz-stagger-in` is the
+first lever to reach for, not `--mz-letter-ms`. Note the asymmetry is
+deliberate: a letter you are waiting to arrive reads slower than one you are
+watching leave, so the collapse tolerates a longer stagger than the reveal.
+The re-measuring recipe is in the CSS comment. Sizing flows from a single
 `--mz-h`; the component writes it inline **only when a `height` prop is passed**,
 because inline styles outrank stylesheet rules and would otherwise defeat the
 responsive `[--mz-h:15px] sm:[--mz-h:20px]` class escape hatch. Nothing animates

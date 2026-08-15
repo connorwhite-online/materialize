@@ -674,13 +674,36 @@ body:has([data-hero-chrome]) {
 }
 
 /* Timing. Letters lead the crop slightly so they animate into space the
-   window has already opened rather than popping out from under its edge. */
+   window has already opened rather than popping out from under its edge.
+
+   Retuned from a 60fps device capture (iPhone, mobile pill) cross-checked
+   against a rAF harness driving these exact rules in Chromium — the
+   harness reproduced the device to within ~30ms, so the numbers below are
+   measured, not guessed.
+
+   The old values made the mark→word reveal drag: the last letter did not
+   finish until ~714ms, because nine letters of 38ms stagger burned 342ms
+   before it even started. Collapse never read as slow at the same
+   durations — a letter you are waiting to arrive is far more noticeable
+   than one you are watching leave — so this cuts the reveal roughly in
+   half and leaves the peel's character alone:
+
+     reveal   width settled 481ms → 273ms, last letter 714ms → 357ms
+     collapse                            last letter 580ms → 432ms
+
+   `--mz-stagger-out` stays near its old 24ms on purpose; the collapse is
+   quicker here only because it shares --mz-letter-ms. Both navs read
+   these, so desktop and the mobile pill retune together.
+
+   To re-measure: extract the pill region at 60fps
+   (`ffmpeg -vf crop=…,format=gray -f rawvideo`), count dark pixels per
+   column per frame, and read the width ramp. Do not eyeball it. */
 .mz-logo {
   --mz-ease: var(--ease-out-soft, cubic-bezier(0.22, 0.9, 0.28, 1));
-  --mz-letter-ms: 520ms;
-  --mz-stagger-in: 38ms;
-  --mz-stagger-out: 24ms;
-  --mz-crop-ms: 700ms;
+  --mz-letter-ms: 320ms;
+  --mz-stagger-in: 14ms;
+  --mz-stagger-out: 22ms;
+  --mz-crop-ms: 380ms;
   /* Blur is in SVG user units (the artwork is 251 tall), so it scales with
      the logo — a 22px nav lockup and a 64px hero lockup blur by the same
      visual proportion. */
