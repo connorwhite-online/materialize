@@ -331,7 +331,15 @@ export function MobileNav({
             className={cn(
               "pointer-events-auto overflow-hidden rounded-[28px]",
               keyboardOpen && "pointer-events-none",
-              "bg-background/85 backdrop-blur-2xl",
+              // The design system's frosted surface (globals.css), the
+              // same fill dialogs and popovers wear: --popover-translucent
+              // plus blur + saturate, with a solid --popover fallback
+              // where backdrop-filter is unsupported. It replaces a
+              // hand-rolled `bg-background/85 backdrop-blur-2xl` that was
+              // a near-miss of this treatment — one surface, one recipe.
+              // Utilities beat the components layer, so do NOT put a
+              // `bg-*` next to it or the translucency is silently lost.
+              "glass-surface",
               "ring-1 ring-border/70",
               "shadow-[0_2px_8px_-2px_oklch(0_0_0/0.14),0_18px_44px_-14px_oklch(0_0_0/0.38)]"
             )}

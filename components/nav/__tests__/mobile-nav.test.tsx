@@ -5,6 +5,8 @@
  * user container, and anon visitors get a Login button instead of an
  * inbox they can't read.
  */
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { usePathname } from "next/navigation";
@@ -276,5 +278,25 @@ describe("MobileNav brand lockup", () => {
     render(<MobileNav initialUnreadCount={0} />);
     expect(document.querySelector(".mz-logo")).toBeNull();
     expect(trigger().textContent).toContain("Search");
+  });
+});
+
+/**
+ * The card wears the design system's frosted fill. Pinned at source
+ * level because the failure is silent: `.glass-surface` lives in
+ * `@layer components`, so ANY `bg-*` utility beside it wins and the
+ * card goes opaque with no error and no failing render.
+ */
+describe("MobileNav card surface", () => {
+  const src = readFileSync(resolve(__dirname, "../mobile-nav.tsx"), "utf8");
+  const cardClasses =
+    src.match(/"pointer-events-auto overflow-hidden[\s\S]*?\n\s*\)\}/)?.[0] ?? "";
+
+  it("uses the shared glass surface", () => {
+    expect(cardClasses).toContain("glass-surface");
+  });
+
+  it("carries no bg-* utility that would beat it", () => {
+    expect(cardClasses).not.toMatch(/"bg-|\sbg-[a-z]/);
   });
 });
