@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useUser } from "@clerk/nextjs";
 import { AnimatedWordmark, Logomark } from "@/components/brand/logo";
@@ -11,15 +10,24 @@ import { NotificationsPopover } from "@/components/nav/notifications-popover";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { Button } from "@/components/ui/button";
 import { useAuthModal } from "@/components/auth/auth-modal";
-import { useScrolled } from "@/lib/hooks/use-scrolled";
+import { useWordmarkExpanded } from "@/lib/hooks/use-wordmark-expanded";
 import { cn } from "@/lib/utils";
 import { BUBBLE_SHADOW } from "@/components/nav/bubble-shadow";
 
-/**
- * Full lockup height. Collapsed CSS (`--mz-mark-scale`) grows the M
- * past this so it reads as absorbing the peeling letters.
- */
+/** Static mark height in app chrome. This one never collapses. */
 const NAV_LOGO_HEIGHT = 22;
+
+/**
+ * Height of the animated lockup — the size the word wipes in at. The
+ * collapsed mark grows past it via `--mz-mark-scale` (globals.css), so
+ * these two numbers are a pair: 12px word → 16px mark. Changing this
+ * without changing the scale changes where the M lands.
+ *
+ * Deliberately NOT `NAV_LOGO_HEIGHT`. They were one constant until the
+ * lockup was tuned to 11px, at which point bumping it to 22 for the
+ * static mark silently doubled the animated one too.
+ */
+const NAV_WORDMARK_HEIGHT = 12;
 
 const ICON_GLYPH =
   "text-neutral-900 hover:text-neutral-900 dark:text-neutral-100 dark:hover:text-neutral-100";
@@ -66,15 +74,10 @@ export function TopBar({
   alwaysVisible = false,
   landing = false,
 }: TopBarProps) {
-  const scrolled = useScrolled();
-  // Stay in mount-animation mode until the first scroll so the snow-in
-  // reveal still plays on load. After that, `expanded` drives collapse
-  // (and the reverse expand when the user returns to the top).
-  const [collapseArmed, setCollapseArmed] = useState(false);
-  useEffect(() => {
-    if (scrolled) setCollapseArmed(true);
-  }, [scrolled]);
-  const wordmarkExpanded = collapseArmed ? !scrolled : undefined;
+  // Undefined until the first scroll, so the snow-in reveal still plays
+  // on load; a boolean after that drives collapse (and the reverse
+  // expand on the way back up). Shared with the mobile brand pill.
+  const wordmarkExpanded = useWordmarkExpanded();
   // Landing dropped `alwaysVisible` when it gained MobileNav; the
   // wordmark still belongs on desktop there. `alwaysVisible` keeps
   // the same lockup for any remaining full-viewport TopBar.
@@ -130,7 +133,7 @@ export function TopBar({
                   <AnimatedWordmark
                     animateOnMount
                     expanded={wordmarkExpanded}
-                    height={NAV_LOGO_HEIGHT}
+                    height={NAV_WORDMARK_HEIGHT}
                   />
                 </span>
                 <Logomark height={NAV_LOGO_HEIGHT} className="nav:hidden" />
