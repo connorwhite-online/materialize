@@ -143,11 +143,11 @@ export default async function HomePage() {
           animation and swaps the nav wash for a blur over the photo. */}
       <TopBar landing initialUnreadCount={0} textToCad={textToCad} />
 
-      {/* Hero — photo fills the LARGE viewport (behind iOS 26 overlay
-          chrome) so --background doesn't show as white bars above/below
-          the art. `h-lvh` + `min-h-[100vh]` used-height is the larger of
-          the two (iOS 26: vh === outerHeight). Copy is `h-svh` so type
-          stays in the visible hole above the toolbar.
+      {/* Hero — the photo runs 10% past the dynamic viewport so the
+          browser chrome never exposes its bottom edge. HeroBackground
+          feathers the last 20dvh into --background before marketing
+          content begins. Copy stays h-svh, inside the first visible
+          screen rather than following the extra image runway.
 
           Background art is absolute + object-cover. The three.js / R3F
           showcase that used to sit in a visual slot below the copy is
@@ -161,12 +161,12 @@ export default async function HomePage() {
           Tailwind reshuffle can't quietly drop it. */}
       <section
         data-hero-chrome
-        className="relative isolate flex h-lvh min-h-[100vh] w-full flex-col overflow-hidden"
+        className="relative isolate flex h-[110dvh] min-h-[110dvh] w-full flex-col overflow-hidden"
       >
         <HeroBackground />
         {/* Brand mark lives in TopBar so "Materialize" still appears
             above the fold. The h1 states what the product does. */}
-        <main className="relative z-10 flex h-svh max-h-svh flex-col nav:h-full nav:max-h-none">
+        <main className="relative z-10 flex h-svh max-h-svh flex-col">
           {/* Mobile: copy below center, padded above the floating pill
               (`fixed bottom-6` plus safe-area + h-14). Top-aligned sat
               in the light beam and the muted subheading disappeared
