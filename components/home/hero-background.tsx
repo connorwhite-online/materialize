@@ -115,6 +115,11 @@ export function HeroBackground() {
           desktopSrc={IMG.desktopDark}
         />
       </div>
+      {/* The hero extends to 110dvh; dissolve its last 20dvh into the
+          page token so the transition to HomeMarketing has no hard
+          image edge in either theme. Keep this inside the art layer,
+          below the z-10 copy. */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-[20dvh] bg-gradient-to-b from-transparent via-background/55 to-background" />
     </div>
   );
 }
