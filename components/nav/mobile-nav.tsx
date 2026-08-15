@@ -39,10 +39,10 @@ const VIEWPORT_GUTTER = 32;
 const MIN_COLLAPSED_WIDTH = 172;
 /**
  * Height the brand lockup wipes in at on the pill. Same pair as the
- * desktop nav (NAV_WORDMARK_HEIGHT in top-bar.tsx): 12px word, and
+ * desktop nav (NAV_WORDMARK_HEIGHT in top-bar.tsx): 10px word, and
  * `--mz-mark-scale` lands the collapsed mark at 16px.
  */
-const PILL_WORDMARK_HEIGHT = 12;
+const PILL_WORDMARK_HEIGHT = 10;
 
 /** Height of the always-present identity row (`h-14`). */
 const ROW_HEIGHT = 56;
@@ -64,6 +64,19 @@ const CARD_OUT: Transition = {
 };
 /** Height close waits so the row peel can go soft before clipping. */
 const HEIGHT_CLOSE: Transition = { ...CARD_OUT, delay: 0.06 };
+/**
+ * Width tween for the COLLAPSED card. Mirrors `--mz-crop-ms` and
+ * `--ease-out-soft` from globals.css, and that pairing is the whole
+ * point: the pill's width is the lockup's width plus constant padding,
+ * so running both on the same duration and curve makes them the same
+ * animation. Anything else and the pill lags — measured on device at
+ * ~65px of clipping for ~230ms mid-reveal.
+ *
+ * It replaces CARD_OUT here, which still drives the menu's height close.
+ * Keep the two within ~20ms of each other or the card's width and height
+ * visibly disagree on close.
+ */
+const CARD_CROP: Transition = { duration: 0.26, ease: [0.22, 0.9, 0.28, 1] };
 
 /** Row lift — same expo-out as the card; no spring asymptote on `y`. */
 const ROW_SETTLE: Transition = {
@@ -286,21 +299,18 @@ export function MobileNav({
             same type scale, no `flex-1` — so its intrinsic width is
             exactly what the pill should be for this page title.
 
-            On the anon brand pill this ghost is not static: it holds a
-            real <AnimatedWordmark>, so the lockup's own CSS crop resizes
-            it frame by frame and the ResizeObserver below re-measures
-            throughout. `visibility: hidden` still lays out and still
-            transitions, which is what makes that work. The card is
-            therefore chasing a moving target while the word peels — it
-            tweens toward each new measurement with CARD_OUT, so the pill
-            eases shut a beat behind the letters rather than in lockstep.
-            That lag is unverified on device; if it reads as slack, film
-            it (CDP screencast, per AGENTS.md) before retuning, and retune
-            --mz-crop-ms rather than adding a second width animation. */}
+            On the anon brand pill it holds a real <AnimatedWordmark>,
+            and `mz-nav-ghost` FREEZES that copy (globals.css) so it
+            reports the lockup's final width immediately instead of
+            animating. Letting it animate made the card chase a moving
+            target: measured on device, the pill ran ~65px narrower than
+            its content for ~230ms mid-reveal and clipped the word.
+            Frozen, the card runs one tween (CARD_CROP) on the crop's own
+            duration and curve, so pill and word expand as one. */}
         <div
           ref={ghostRef}
           aria-hidden
-          className="pointer-events-none invisible absolute left-0 top-0 flex items-center"
+          className="mz-nav-ghost pointer-events-none invisible absolute left-0 top-0 flex items-center"
           style={{ height: ROW_HEIGHT }}
         >
           <PageIdentityContent
@@ -322,7 +332,9 @@ export function MobileNav({
           <motion.div
             initial={false}
             animate={{ width: open ? expandedWidth : collapsedWidth }}
-            transition={reducedMotion ? { duration: 0 } : open ? CARD_IN : CARD_OUT}
+            transition={
+              reducedMotion ? { duration: 0 } : open ? CARD_IN : CARD_CROP
+            }
             drag={open && !reducedMotion ? "y" : false}
             dragConstraints={{ top: 0, bottom: 0 }}
             dragElastic={{ top: 0.02, bottom: 0.4 }}
