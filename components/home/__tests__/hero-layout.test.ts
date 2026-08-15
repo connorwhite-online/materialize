@@ -39,13 +39,28 @@ describe("anon home hero layout", () => {
     expect(classNames).not.toMatch(/\bpt-16\b/);
   });
 
-  it("paints the subheading darker than muted-foreground", () => {
+  it("places desktop copy below center, not vertically centered", () => {
+    const copy = page.match(
+      /<div className="(flex flex-1 items-end[^"]*)">/
+    )?.[1];
+    expect(copy).toBeDefined();
+    expect(copy).toMatch(/\bnav:pb-24\b/);
+    expect(copy).not.toMatch(/\bnav:items-center\b/);
+    expect(copy).not.toMatch(/\bnav:pb-0\b/);
+  });
+
+  it("asks TopBar for the landing wordmark and blur feather", () => {
+    expect(page).toMatch(/<TopBar\s+landing\b/);
+  });
+
+  it("paints the subheading darker than muted-foreground, with no glow", () => {
     expect(classNames).toMatch(/text-foreground\/90/);
     const sub = page.match(
       /<p className="([^"]*)">\s*Get prints delivered to your door/
     );
     expect(sub?.[1]).toBeDefined();
     expect(sub?.[1]).not.toMatch(/text-muted-foreground/);
+    expect(sub?.[1]).not.toMatch(/text-shadow/);
   });
 });
 

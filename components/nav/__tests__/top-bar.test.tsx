@@ -76,7 +76,7 @@ describe("TopBar anon Login", () => {
 
 describe("TopBar landing wordmark", () => {
   it("plays the mount reveal until the first scroll, then collapses", () => {
-    render(<TopBar initialUnreadCount={0} alwaysVisible />);
+    render(<TopBar initialUnreadCount={0} landing />);
     const logo = () => document.querySelector(".mz-logo") as HTMLElement;
 
     expect(logo()).toBeTruthy();
@@ -104,10 +104,24 @@ describe("TopBar landing wordmark", () => {
   });
 
   it("vertically centers the brand link on the search-row height", () => {
-    render(<TopBar initialUnreadCount={0} alwaysVisible />);
+    render(<TopBar initialUnreadCount={0} landing />);
     const home = screen.getByRole("link", { name: "Materialize — home" });
     expect(home.className).toMatch(/\bh-10\b/);
     expect(home.className).toMatch(/\bitems-center\b/);
     expect(home.parentElement?.className).toMatch(/\bh-10\b/);
+  });
+
+  it("feathers the landing hero with blur instead of a background wash", () => {
+    const { rerender } = render(<TopBar initialUnreadCount={0} landing />);
+    const feather = () =>
+      document.querySelector("[data-nav-feather]") as HTMLElement;
+
+    expect(feather().className).toMatch(/backdrop-blur/);
+    expect(feather().className).not.toMatch(/bg-gradient-to-b/);
+    expect(feather().style.maskImage).toMatch(/linear-gradient/);
+
+    rerender(<TopBar initialUnreadCount={0} />);
+    expect(feather().className).toMatch(/bg-gradient-to-b/);
+    expect(feather().className).not.toMatch(/backdrop-blur/);
   });
 });

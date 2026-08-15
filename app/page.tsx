@@ -139,8 +139,9 @@ export default async function HomePage() {
 
       {/* Same chrome as AppShell, minus sandbox: TopBar hides below
           `nav` (no alwaysVisible) and the morphing MobileNav takes over
-          on small screens — anon home matches authed routes. */}
-      <TopBar initialUnreadCount={0} textToCad={textToCad} />
+          on small screens. `landing` keeps the desktop wordmark
+          animation and swaps the nav wash for a blur over the photo. */}
+      <TopBar landing initialUnreadCount={0} textToCad={textToCad} />
 
       {/* Hero — photo fills the LARGE viewport (behind iOS 26 overlay
           chrome) so --background doesn't show as white bars above/below
@@ -169,10 +170,10 @@ export default async function HomePage() {
           {/* Mobile: copy below center, padded above the floating pill
               (`fixed bottom-6` plus safe-area + h-14). Top-aligned sat
               in the light beam and the muted subheading disappeared
-              against it. Desktop (nav+): vertically centered,
-              left-aligned with generous padding so it clears the
-              sculpture. */}
-          <div className="flex flex-1 items-end justify-start px-6 pb-32 sm:px-8 nav:items-center nav:px-16 nav:pb-0 lg:px-24 xl:px-32">
+              against it. Desktop (nav+): also below center —
+              left-aligned in the lower third so it clears the
+              sculpture and the light beam. */}
+          <div className="flex flex-1 items-end justify-start px-6 pb-32 sm:px-8 nav:px-16 nav:pb-24 lg:px-24 lg:pb-28 xl:px-32">
             <div className="flex w-full max-w-xl flex-col items-start gap-4 text-left">
               {/* Real, selectable <h1> — states what the product does
                   rather than spelling the brand. Same system stack as
@@ -180,7 +181,7 @@ export default async function HomePage() {
               <h1 className="text-balance text-3xl leading-[1.1] tracking-tight sm:text-4xl">
                 Print anything, share your ideas
               </h1>
-              <p className="max-w-lg text-pretty text-base leading-relaxed text-foreground/90 [text-shadow:0_0_18px_var(--background),0_1px_2px_var(--background)]">
+              <p className="max-w-lg text-pretty text-base leading-relaxed text-foreground/90">
                 Get prints delivered to your door, and pick from 60+
                 materials. Share your hardware projects and files.
               </p>

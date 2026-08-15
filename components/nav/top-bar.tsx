@@ -36,23 +36,35 @@ interface TopBarProps {
   /** Owner-only: show the experimental Text-to-CAD entry next to the mark. */
   textToCad?: boolean;
   /**
-   * Show at every viewport. The landing page has no MobileNav, so
-   * it passes this; app routes omit it and hide below the `nav`
-   * breakpoint where the tab bar takes over.
+   * Show at every viewport. App routes omit it and hide below the
+   * `nav` breakpoint where MobileNav takes over. The anon landing
+   * also omits this (it has its own MobileNav) and passes `landing`
+   * instead so the desktop wordmark still animates.
    */
   alwaysVisible?: boolean;
+  /**
+   * Anon marketing home. Desktop shows the animated wordmark (snow-in
+   * on load, peel back to the M on scroll) and feathers the hero with
+   * a masked backdrop-blur instead of the opaque gradient wash — a
+   * white fade over the photo reads as a hard band.
+   */
+  landing?: boolean;
 }
+
+const LANDING_BLUR_MASK =
+  "linear-gradient(to bottom, black 0%, black 35%, transparent 100%)";
 
 /**
  * App chrome: brand + optional Prometheus on the left, cmdk search
  * (Print nested in the pill) + Materials in the center, auth cluster
  * on the right. A gradient wash behind the bar feathers page content
- * as it scrolls underneath.
+ * as it scrolls underneath; the landing hero swaps that for blur.
  */
 export function TopBar({
   initialUnreadCount,
   textToCad = false,
   alwaysVisible = false,
+  landing = false,
 }: TopBarProps) {
   const scrolled = useScrolled();
   // Stay in mount-animation mode until the first scroll so the snow-in
@@ -63,6 +75,10 @@ export function TopBar({
     if (scrolled) setCollapseArmed(true);
   }, [scrolled]);
   const wordmarkExpanded = collapseArmed ? !scrolled : undefined;
+  // Landing dropped `alwaysVisible` when it gained MobileNav; the
+  // wordmark still belongs on desktop there. `alwaysVisible` keeps
+  // the same lockup for any remaining full-viewport TopBar.
+  const animateWordmark = landing || alwaysVisible;
 
   return (
     <header
@@ -73,7 +89,20 @@ export function TopBar({
     >
       <div
         aria-hidden
-        className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-background from-35% via-background/80 to-transparent"
+        data-nav-feather
+        className={
+          landing
+            ? "absolute inset-x-0 top-0 h-36 backdrop-blur-2xl"
+            : "absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-background from-35% via-background/80 to-transparent"
+        }
+        style={
+          landing
+            ? {
+                maskImage: LANDING_BLUR_MASK,
+                WebkitMaskImage: LANDING_BLUR_MASK,
+              }
+            : undefined
+        }
       />
       <div
         className={cn(
@@ -89,13 +118,14 @@ export function TopBar({
             aria-label="Materialize — home"
             className="relative flex h-10 items-center text-foreground transition-opacity hover:opacity-80"
           >
-            {alwaysVisible ? (
+            {animateWordmark ? (
               <>
-                {/* Landing page: the full lockup drifts in on first paint,
-                    but only where the header has room for ~14rem of word.
-                    The wrapper does the responsive hiding — `.mz-logo` is
-                    unlayered CSS and would outrank a `hidden` utility put
-                    on the component itself. */}
+                {/* Desktop: the full lockup drifts in on first paint,
+                    then peels back to the M on scroll. The wrapper does
+                    the responsive hiding — `.mz-logo` is unlayered CSS
+                    and would outrank a `hidden` utility put on the
+                    component itself. Below `nav` the header falls back
+                    to the mark (no room for the word next to search). */}
                 <span className="hidden nav:block">
                   <AnimatedWordmark
                     animateOnMount
