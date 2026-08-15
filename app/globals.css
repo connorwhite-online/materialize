@@ -7,6 +7,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-background-translucent: var(--background-translucent);
+  --color-home-marketing: var(--home-marketing);
   --color-foreground: var(--foreground);
   /* Apple system font first, then the rest of the cross-platform
      system stack. `system-ui` picks up San Francisco on macOS/iOS
@@ -78,6 +79,14 @@
 :root {
   --background: oklch(0.975 0.006 80);
   --background-translucent: oklch(0.975 0.006 80 / 0.72);
+  /* Shared opaque endpoint for the hero feather and HomeMarketing.
+     Both surfaces must resolve to the exact same pixel or their join
+     reads as a horizontal band. */
+  --home-marketing: color-mix(
+    in oklch,
+    var(--muted) 20%,
+    var(--background)
+  );
   /* Bottom-to-top page gradient. Bottom sits a hair darker + slightly
      warmer than --background, fading up to the current near-white.
      Lightness delta is intentionally tiny (~0.02) so the page reads

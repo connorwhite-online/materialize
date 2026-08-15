@@ -14,6 +14,10 @@ const heroBackground = readFileSync(
   resolve(__dirname, "../hero-background.tsx"),
   "utf8"
 );
+const homeMarketing = readFileSync(
+  resolve(__dirname, "../home-marketing.tsx"),
+  "utf8"
+);
 const globals = readFileSync(
   resolve(__dirname, "../../../app/globals.css"),
   "utf8"
@@ -32,8 +36,10 @@ describe("anon home hero layout", () => {
 
   it("feathers the bottom of the photo into the page background", () => {
     expect(heroBackground).toMatch(
-      /bottom-0[^"]*h-\[20dvh\][^"]*bg-gradient-to-b[^"]*from-transparent[^"]*to-background/
+      /bottom-0[^"]*h-\[20dvh\][^"]*bg-gradient-to-b[^"]*from-transparent[^"]*to-home-marketing/
     );
+    expect(homeMarketing).toMatch(/className="bg-home-marketing"/);
+    expect(homeMarketing).not.toMatch(/border-t/);
   });
 
   it("covers the iOS unsafe areas so the photo can sit under chrome", () => {

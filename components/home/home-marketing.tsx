@@ -75,7 +75,7 @@ const BENEFITS = [
 
 export function HomeMarketing() {
   return (
-    <div className="border-t border-border bg-muted/20">
+    <div className="bg-home-marketing">
       {/* Bottom padding used to clear the fixed HomeBottomBar; that
           bar is gone (search lives in the top bar now). */}
       <div className="mx-auto max-w-6xl px-4 py-16 sm:py-24">
