@@ -221,16 +221,34 @@ Three components in `components/brand/logo.tsx`, all painting with
   and lifted, settling as a bottom-to-top wipe fills it in. `animateOnMount`
   plays it once (keyframes — works with JS disabled); `expanded` makes it a
   controlled toggle between the word and the bare mark, which reverses the
-  stagger so it peels right-to-left back to the "M". Live on the landing
-  header at `nav+` (22px tall, vertically centered on the 40px search row;
-  `animateOnMount` until the first scroll, then `expanded` tracks scroll so
-  the word peels back to the M). Collapse crops the word and scales **only
-  the mark** (`.mz-logo-mark` via `--mz-mark-scale` in `globals.css`) so the
-  logo.svg "M" finishes taller than the word was — do **not** scale the
-  wordmark SVG itself or the remaining letters grow as they peel.
-  Mount-mode stays crop-only. Below `nav` it falls back to `<Logomark>`;
-  also on the auth modal, `/sign-in`, `/sign-up`, and `/onboarding`. App
-  chrome uses `<Logomark>` at the same 22px — it does not collapse.
+  stagger so it peels right-to-left back to the "M". Collapse crops the word
+  and scales **only the mark** (`.mz-logo-mark` via `--mz-mark-scale` in
+  `globals.css`) so the logo.svg "M" finishes taller than the word was — do
+  **not** scale the wordmark SVG itself or the remaining letters grow as they
+  peel. Mount-mode stays crop-only.
+
+  **The lockup is two numbers that only mean anything together**: the height
+  the word wipes in at, and the scale that lands the collapsed mark.
+  Currently **12px word → 16px mark** (`NAV_WORDMARK_HEIGHT` in
+  `top-bar.tsx` and `PILL_WORDMARK_HEIGHT` in `mobile-nav.tsx`, both paired
+  with `--mz-mark-scale: 1.33333`). Change one and you must change the other.
+  This has gone wrong once already: the lockup was tuned to 11px × 1.45, then
+  a commit raised the height to 22px because the *static* mark shared the same
+  constant — silently doubling the collapsed M to 32px. `NAV_LOGO_HEIGHT` (22px,
+  app chrome, does not collapse) is deliberately a separate constant now, and
+  a test in `components/nav/__tests__/top-bar.test.tsx` pins the product of the
+  pair rather than either number.
+
+  Live on **both** navs, driven by the same `useWordmarkExpanded()`
+  (`lib/hooks/`) so they can't drift: the landing header at `nav+` (vertically
+  centered on the 40px search row) and the **anon** home pill in `<MobileNav>`
+  below it. `animateOnMount` until the first scroll, then `expanded` tracks
+  scroll. The hook returns `undefined` before the first scroll on purpose —
+  that unset value is what keeps `AnimatedWordmark` in mount mode; hand it a
+  boolean from the start and the wipe-in never plays. Signed-in home keeps the
+  bare `<Logomark>` — that pill sits over a dashboard, not a hero. Also
+  `<Logomark>` on the auth modal, `/sign-in`, `/sign-up`, `/onboarding`, and
+  app chrome (22px, no collapse).
 
 All geometry lives in `components/brand/logo-paths.ts` — **the only place path
 data is defined**. Updating the logo means replacing the `d` strings there (one
@@ -259,7 +277,7 @@ per-letter `--mz-i`, and `prefers-reduced-motion` collapses it to instant.
 Sub-`nav` viewports (< 67.5rem) get `components/nav/mobile-nav.tsx` instead of the desktop `TopBar` — a single floating surface that morphs:
 
 - **Collapsed** it is a pill: the current page's icon, the page title, and a grabber (two chevrons, open ends facing — `components/icons/grabber.tsx`). The unread pip is a `bg-destructive` dot straddling the pill's top-right edge — it hangs off a `relative` wrapper *outside* the card, because the card is `overflow-hidden` (the height animation needs that) and would clip it. The Notifications row's count chip wears the same red, so "unread" is one colour wherever you meet it; the cart count stays neutral. The grabber reads the same open or closed, so unlike a lone chevron it doesn't rotate. No sandbox chip — that moved to the checkout surfaces (§ Print quote pipeline).
-- **`/` is mark-only**: the pill shows the brand `<Logomark>` alone and drops the title (`markOnly` on the resolved identity), and skips the min-width floor so it shrinks to fit. The button still names itself "Home — open navigation menu" for assistive tech. Inversely, the **menu row** for Home is labelled, so it takes the house glyph (`components/icons/home.tsx`) — the logomark only ever stands alone.
+- **`/` is mark-only**: the pill drops the title (`markOnly` on the resolved identity) and skips the min-width floor so it shrinks to fit. Anon gets the full `<AnimatedWordmark>` there rather than the bare `<Logomark>` — same wipe-in and scroll-collapse as the desktop nav (§ Brand logo). That makes the pill's width *animated by the logo*: the measuring ghost holds a real lockup, so the lockup's own CSS crop resizes the ghost frame by frame and the `ResizeObserver` in `useNavWidths` re-measures throughout (`visibility: hidden` still lays out and still transitions — that is what makes it work). The card tweens toward each new measurement with `CARD_OUT`, so the pill eases shut a beat behind the letters. If that lag ever reads as slack, film it and retune `--mz-crop-ms` — do **not** add a second width animation on the card, which would put two curves on one edge. The button still names itself "Home — open navigation menu" for assistive tech. Inversely, the **menu row** for Home is labelled, so it takes the house glyph (`components/icons/home.tsx`) — the logomark only ever stands alone.
 - **On the viewer's own profile** the pill wears their avatar and `@handle` (truncated at 8.5rem) instead of a glyph and the word "Profile" — the page is them. `identity.label` still names the button for assistive tech.
 - **Tapped** it widens and grows upward into a menu card — Home / Search (`/files`) / Print / Materials / Notifications, plus the owner-only Prometheus entry — with the desktop-style avatar + name/@username container taking over the pill's row at the bottom. Anon visitors get the same destinations minus Notifications, and a full-width secondary **Login** button (same as TopBar) in place of the avatar row — no inbox.
 

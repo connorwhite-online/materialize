@@ -629,8 +629,12 @@ body:has([data-hero-chrome]) {
      Both widths are the artwork's aspect ratios: 415/251 and 3479/251. */
   --mz-w-mark: calc(var(--mz-h, 20px) * 1.65339);
   --mz-w-full: calc(var(--mz-h, 20px) * 13.86056);
-  /* Collapsed mark vs the word it replaced. Tune here. */
-  --mz-mark-scale: 1.45;
+  /* Collapsed mark vs the word it replaced. Paired with the lockup
+     height at the call site: the nav wipes the word in at 12px and this
+     lands the mark at 16px. Tune here, but check NAV_WORDMARK_HEIGHT in
+     components/nav/top-bar.tsx — the pair is the design, not either
+     number alone. */
+  --mz-mark-scale: 1.33333;
 
   display: inline-flex;
   align-items: center;

@@ -208,3 +208,73 @@ describe("MobileNav", () => {
     expect(screen.getByRole("link", { name: /Prometheus/ })).toBeTruthy();
   });
 });
+
+/** Same scroll shim the top-bar spec uses; useScrolled reads window.scrollY. */
+function setScrollY(y: number) {
+  Object.defineProperty(window, "scrollY", {
+    value: y,
+    configurable: true,
+    writable: true,
+  });
+  act(() => {
+    window.dispatchEvent(new Event("scroll"));
+  });
+}
+
+/**
+ * The anon home pill carries the full animated lockup, not the bare
+ * mark — the same wipe-in and scroll-collapse the desktop nav makes.
+ * Signed-in home keeps the mark: that pill sits over a dashboard.
+ */
+describe("MobileNav brand lockup", () => {
+  beforeEach(() => {
+    vi.mocked(usePathname).mockReturnValue("/");
+    setScrollY(0);
+  });
+
+  it("wipes the lockup in on anon home, then peels it to the mark", () => {
+    mockUser = null;
+    render(<MobileNav initialUnreadCount={0} />);
+    const logo = () => document.querySelector(".mz-logo") as HTMLElement;
+
+    expect(logo()).toBeTruthy();
+    // Unset `expanded` is what puts it in mount mode — see
+    // useWordmarkExpanded. A boolean here would skip the reveal.
+    expect(logo().dataset.mzMode).toBe("mount");
+    expect(logo().style.getPropertyValue("--mz-h")).toBe("12px");
+
+    setScrollY(40);
+    expect(logo().dataset.mzMode).toBe("toggle");
+    expect(logo().dataset.mzExpanded).toBe("false");
+
+    setScrollY(0);
+    expect(logo().dataset.mzExpanded).toBe("true");
+
+    // Still just the mark for assistive tech — the lockup is decorative
+    // and the button keeps naming the page.
+    expect(trigger().getAttribute("aria-label")).toBe(
+      "Home — open navigation menu"
+    );
+  });
+
+  it("keeps the bare mark for signed-in home", () => {
+    mockUser = {
+      id: "user_1",
+      username: "connorwhite",
+      fullName: "Connor White",
+      hasImage: false,
+      imageUrl: "",
+      primaryEmailAddress: { emailAddress: "connor@example.com" },
+    };
+    render(<MobileNav initialUnreadCount={0} />);
+    expect(document.querySelector(".mz-logo")).toBeNull();
+  });
+
+  it("leaves other pages' pills alone", () => {
+    mockUser = null;
+    vi.mocked(usePathname).mockReturnValue("/files");
+    render(<MobileNav initialUnreadCount={0} />);
+    expect(document.querySelector(".mz-logo")).toBeNull();
+    expect(trigger().textContent).toContain("Search");
+  });
+});

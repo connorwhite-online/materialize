@@ -24,6 +24,8 @@ import {
 } from "@/components/nav/mobile-nav-destinations";
 import { useAuthModal } from "@/components/auth/auth-modal";
 import { useCart } from "@/components/print/cart-context";
+import { AnimatedWordmark } from "@/components/brand/logo";
+import { useWordmarkExpanded } from "@/lib/hooks/use-wordmark-expanded";
 import { useKeyboardOpen } from "@/lib/hooks/use-keyboard-sticky-bottom";
 import { useUnreadCount } from "@/lib/hooks/use-unread-count";
 import { EASE_OUT_SOFT } from "@/lib/motion";
@@ -35,6 +37,13 @@ const MAX_WIDTH = 304;
 const VIEWPORT_GUTTER = 32;
 /** Floor for a titled collapsed pill so short titles ("Print") aren't stubby. */
 const MIN_COLLAPSED_WIDTH = 172;
+/**
+ * Height the brand lockup wipes in at on the pill. Same pair as the
+ * desktop nav (NAV_WORDMARK_HEIGHT in top-bar.tsx): 12px word, and
+ * `--mz-mark-scale` lands the collapsed mark at 16px.
+ */
+const PILL_WORDMARK_HEIGHT = 12;
+
 /** Height of the always-present identity row (`h-14`). */
 const ROW_HEIGHT = 56;
 
@@ -148,6 +157,17 @@ export function MobileNav({
     textToCad,
     signedIn: !!isSignedIn,
   });
+
+  /**
+   * Anon home swaps the bare mark for the full animated lockup: it
+   * wipes in on load and peels back to the mark on scroll, the same
+   * gesture the desktop nav makes, driven by the same hook so the two
+   * can't drift. Signed-in home keeps the mark — that pill sits over a
+   * dashboard, not a hero, and has no wipe-in to justify.
+   */
+  const wordmarkExpanded = useWordmarkExpanded();
+  const brand =
+    !isSignedIn && identity.markOnly ? { expanded: wordmarkExpanded } : null;
 
   const displayName =
     user?.fullName ||
@@ -264,14 +284,30 @@ export function MobileNav({
       >
         {/* Invisible measuring copy of the collapsed row. Same markup,
             same type scale, no `flex-1` — so its intrinsic width is
-            exactly what the pill should be for this page title. */}
+            exactly what the pill should be for this page title.
+
+            On the anon brand pill this ghost is not static: it holds a
+            real <AnimatedWordmark>, so the lockup's own CSS crop resizes
+            it frame by frame and the ResizeObserver below re-measures
+            throughout. `visibility: hidden` still lays out and still
+            transitions, which is what makes that work. The card is
+            therefore chasing a moving target while the word peels — it
+            tweens toward each new measurement with CARD_OUT, so the pill
+            eases shut a beat behind the letters rather than in lockstep.
+            That lag is unverified on device; if it reads as slack, film
+            it (CDP screencast, per AGENTS.md) before retuning, and retune
+            --mz-crop-ms rather than adding a second width animation. */}
         <div
           ref={ghostRef}
           aria-hidden
           className="pointer-events-none invisible absolute left-0 top-0 flex items-center"
           style={{ height: ROW_HEIGHT }}
         >
-          <PageIdentityContent identity={identity} profile={pillProfile} />
+          <PageIdentityContent
+            identity={identity}
+            profile={pillProfile}
+            brand={brand}
+          />
           {/* Same trailing content the collapsed pill renders — the
               grabber costs width, so it has to be in the measurement.
               (The pip hangs off the card's edge and costs none.) */}
@@ -481,7 +517,11 @@ export function MobileNav({
                       transition={reducedMotion ? { duration: 0 } : IDENTITY_IN_CLOSE}
                       className="absolute inset-0 flex items-center text-left"
                     >
-                      <PageIdentityContent identity={identity} profile={pillProfile} />
+                      <PageIdentityContent
+                        identity={identity}
+                        profile={pillProfile}
+                        brand={brand}
+                      />
                     </motion.button>
                   )}
                 </AnimatePresence>
@@ -525,10 +565,19 @@ type PillProfile = {
 function PageIdentityContent({
   identity,
   profile,
+  brand,
 }: {
   identity: PageIdentity;
   /** Set only on the viewer's own profile page. */
   profile?: PillProfile | null;
+  /**
+   * Set only on the anon brand pill, where the mark is replaced by the
+   * animated lockup. `expanded` is `undefined` while the wipe-in plays
+   * (see useWordmarkExpanded), so the flag has to be its own object —
+   * "not a brand pill" and "brand pill, still mounting" both read as
+   * undefined otherwise.
+   */
+  brand?: { expanded: boolean | undefined } | null;
 }) {
   const { Icon, label, markOnly } = identity;
   if (profile) {
@@ -551,7 +600,17 @@ function PageIdentityContent({
   if (markOnly) {
     return (
       <span className="flex items-center pl-4 text-foreground">
-        <Icon {...iconSizeProps(Icon, 22)} className="shrink-0" />
+        {brand ? (
+          // The lockup sizes and crops itself off --mz-h; no width
+          // classes here, or they would fight the CSS that animates it.
+          <AnimatedWordmark
+            animateOnMount
+            expanded={brand.expanded}
+            height={PILL_WORDMARK_HEIGHT}
+          />
+        ) : (
+          <Icon {...iconSizeProps(Icon, 22)} className="shrink-0" />
+        )}
       </span>
     );
   }
