@@ -47,9 +47,14 @@ describe("anon home hero layout", () => {
   });
 
   it("places mobile copy below center, padded above the floating pill", () => {
-    expect(classNames).toMatch(/\bitems-end\b/);
-    expect(classNames).toMatch(/\bpb-32\b/);
-    expect(classNames).not.toMatch(/\bpt-16\b/);
+    // Assert on the copy container itself: `pb-*` also appears on the
+    // marketing wrapper below the fold, so matching the whole file would
+    // pass on the wrong element.
+    const copy = page.match(/<div className="(flex flex-1 items-end[^"]*)">/)?.[1];
+    expect(copy).toBeDefined();
+    expect(copy).toMatch(/\bitems-end\b/);
+    expect(copy).toMatch(/\bpb-28\b/);
+    expect(copy).not.toMatch(/\bpt-16\b/);
   });
 
   it("places desktop copy below center, not vertically centered", () => {
@@ -133,5 +138,32 @@ describe("anon home browser-chrome tint", () => {
     // the hero's colour pinned over the cream marketing sections.
     expect(heroBackground).not.toMatch(/HeroChromeTint/);
     expect(page).not.toMatch(/HeroChromeTint/);
+  });
+});
+
+/**
+ * iOS 26 owns the status-bar band and we cannot paint into it (see the
+ * `--hero-chrome-tint` comment in globals.css). The top feather is what
+ * turns that unavoidable join from a hard edge into a soft one, so both
+ * halves of the trick — the token it fades to, and the fact that it is
+ * mobile-only — are worth pinning.
+ */
+describe("anon home hero top feather", () => {
+  const feather = heroBackground.match(
+    /className="pointer-events-none absolute inset-x-0 top-0[^"]*"/
+  )?.[0];
+
+  it("fades the top of the art into the same token the band uses", () => {
+    expect(feather).toBeDefined();
+    expect(feather).toMatch(/from-hero-chrome-tint/);
+    expect(feather).not.toMatch(/home-marketing/);
+  });
+
+  it("is mobile-only — desktop has no status-bar band to hide", () => {
+    expect(feather).toMatch(/\bmd:hidden\b/);
+  });
+
+  it("still feathers the bottom into the marketing surface", () => {
+    expect(heroBackground).toMatch(/bottom-0[^"]*to-home-marketing/);
   });
 });

@@ -8,6 +8,7 @@
   --color-background: var(--background);
   --color-background-translucent: var(--background-translucent);
   --color-home-marketing: var(--home-marketing);
+  --color-hero-chrome-tint: var(--hero-chrome-tint);
   --color-foreground: var(--foreground);
   /* Apple system font first, then the rest of the cross-platform
      system stack. `system-ui` picks up San Francisco on macOS/iOS
@@ -630,11 +631,11 @@ body:has([data-hero-chrome]) {
   --mz-w-mark: calc(var(--mz-h, 20px) * 1.65339);
   --mz-w-full: calc(var(--mz-h, 20px) * 13.86056);
   /* Collapsed mark vs the word it replaced. Paired with the lockup
-     height at the call site: the nav wipes the word in at 12px and this
+     height at the call site: the nav wipes the word in at 10px and this
      lands the mark at 16px. Tune here, but check NAV_WORDMARK_HEIGHT in
      components/nav/top-bar.tsx — the pair is the design, not either
      number alone. */
-  --mz-mark-scale: 1.33333;
+  --mz-mark-scale: 1.6;
 
   display: inline-flex;
   align-items: center;
@@ -703,7 +704,7 @@ body:has([data-hero-chrome]) {
   --mz-letter-ms: 320ms;
   --mz-stagger-in: 14ms;
   --mz-stagger-out: 22ms;
-  --mz-crop-ms: 380ms;
+  --mz-crop-ms: 260ms;
   /* Blur is in SVG user units (the artwork is 251 tall), so it scales with
      the logo — a 22px nav lockup and a 64px hero lockup blur by the same
      visual proportion. */
@@ -795,6 +796,30 @@ body:has([data-hero-chrome]) {
 .mz-logo[data-mz-mode="mount"] .mz-logo-letter-clip {
   animation: mz-logo-stick var(--mz-letter-ms) var(--mz-ease) both;
   animation-delay: calc(var(--mz-i) * var(--mz-stagger-in));
+}
+
+/* The mobile nav measures its collapsed width off an invisible ghost copy
+   of the row (`useNavWidths`). Once that ghost holds a real lockup, its
+   crop animates too — and the card, tweening toward each new measurement,
+   arrives late. Measured on device: the pill ran ~65px narrower than its
+   own content for ~230ms mid-reveal, so the word was clipped against the
+   pill's right edge, then the pill nudged wider again 200ms after the word
+   had settled.
+
+   Freeze the ghost so it reports the FINAL width immediately. The card
+   then runs exactly one width animation, on the crop's own duration and
+   curve (`CARD_CROP` in mobile-nav.tsx). Because the pill's width is the
+   lockup's width plus constant padding, matching duration and easing makes
+   the two mathematically the same animation — the word cannot outrun its
+   container, and the pill reads as being pushed open by the letters.
+
+   `!important` on purpose: this has to beat every `.mz-logo*` rule above
+   whatever their specificity, and the ghost is a ruler that is never
+   painted, so there is nothing to preserve. */
+.mz-nav-ghost .mz-logo,
+.mz-nav-ghost .mz-logo * {
+  transition: none !important;
+  animation: none !important;
 }
 
 /* Reduced motion: state changes instantly, nothing drifts or blurs. The

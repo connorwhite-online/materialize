@@ -173,12 +173,12 @@ export default async function HomePage() {
               against it. Desktop (nav+): also below center —
               left-aligned in the lower third so it clears the
               sculpture and the light beam. */}
-          <div className="flex flex-1 items-end justify-start px-6 pb-32 sm:px-8 nav:px-16 nav:pb-24 lg:px-24 lg:pb-28 xl:px-32">
+          <div className="flex flex-1 items-end justify-start px-6 pb-28 sm:px-8 nav:px-16 nav:pb-24 lg:px-24 lg:pb-28 xl:px-32">
             <div className="flex w-full max-w-xl flex-col items-start gap-4 text-left">
               {/* Real, selectable <h1> — states what the product does
                   rather than spelling the brand. Same system stack as
                   the rest of the app; no webfont on the critical path. */}
-              <h1 className="text-balance text-3xl leading-[1.1] tracking-tight sm:text-4xl">
+              <h1 className="text-balance text-2xl leading-[1.1] tracking-tight sm:text-4xl">
                 Print anything, share your ideas
               </h1>
               <p className="max-w-lg text-pretty text-base leading-relaxed text-foreground/90">

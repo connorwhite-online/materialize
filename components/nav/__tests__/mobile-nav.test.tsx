@@ -243,7 +243,7 @@ describe("MobileNav brand lockup", () => {
     // Unset `expanded` is what puts it in mount mode — see
     // useWordmarkExpanded. A boolean here would skip the reveal.
     expect(logo().dataset.mzMode).toBe("mount");
-    expect(logo().style.getPropertyValue("--mz-h")).toBe("12px");
+    expect(logo().style.getPropertyValue("--mz-h")).toBe("10px");
 
     setScrollY(40);
     expect(logo().dataset.mzMode).toBe("toggle");
@@ -298,5 +298,35 @@ describe("MobileNav card surface", () => {
 
   it("carries no bg-* utility that would beat it", () => {
     expect(cardClasses).not.toMatch(/"bg-|\sbg-[a-z]/);
+  });
+});
+
+/**
+ * The ghost is a ruler, not a surface. If it animates, the card chases a
+ * moving target and clips the word against its own edge — measured at
+ * ~65px for ~230ms on device before this was frozen.
+ */
+describe("MobileNav measuring ghost", () => {
+  const src = readFileSync(resolve(__dirname, "../mobile-nav.tsx"), "utf8");
+  const globals = readFileSync(
+    resolve(__dirname, "../../../app/globals.css"),
+    "utf8"
+  );
+
+  it("freezes the ghost's lockup", () => {
+    expect(src).toMatch(/className="mz-nav-ghost /);
+    expect(globals).toMatch(
+      /\.mz-nav-ghost \.mz-logo[\s\S]*?transition:\s*none\s*!important/
+    );
+  });
+
+  it("tweens the collapsed card on the crop's own duration", () => {
+    // The pill's width IS the lockup's width plus constant padding, so
+    // these must match --mz-crop-ms or the pill lags and clips.
+    const crop = Number(globals.match(/--mz-crop-ms:\s*(\d+)ms/)?.[1]);
+    const card = Number(src.match(/const CARD_CROP[^=]*=\s*\{\s*duration:\s*([\d.]+)/)?.[1]);
+    expect(crop).toBeGreaterThan(0);
+    expect(card * 1000).toBeCloseTo(crop, 0);
+    expect(src).toMatch(/open \? CARD_IN : CARD_CROP/);
   });
 });

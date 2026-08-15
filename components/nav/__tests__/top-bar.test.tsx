@@ -140,11 +140,11 @@ describe("TopBar landing wordmark", () => {
  * an unrelated static mark that shared the constant, and nothing caught
  * that the collapsed M had silently doubled to 32px.
  */
-const LOCKUP_HEIGHT_PX = 12;
+const LOCKUP_HEIGHT_PX = 10;
 const COLLAPSED_MARK_PX = 16;
 
 describe("nav lockup sizing", () => {
-  it("wipes the word in at 12px and lands the mark at 16px", () => {
+  it("wipes the word in at 10px and lands the mark at 16px", () => {
     const globals = readFileSync(
       resolve(__dirname, "../../../app/globals.css"),
       "utf8"
@@ -159,7 +159,7 @@ describe("nav lockup sizing", () => {
   it("keeps the static app-chrome mark off the lockup height", () => {
     const topBar = readFileSync(resolve(__dirname, "../top-bar.tsx"), "utf8");
     // One constant for both is exactly how the collapsed M doubled.
-    expect(topBar).toMatch(/NAV_WORDMARK_HEIGHT = 12/);
+    expect(topBar).toMatch(/NAV_WORDMARK_HEIGHT = 10/);
     expect(topBar).toMatch(/NAV_LOGO_HEIGHT = 22/);
     expect(topBar).toMatch(/height=\{NAV_WORDMARK_HEIGHT\}/);
   });

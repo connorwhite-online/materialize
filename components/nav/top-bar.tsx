@@ -20,14 +20,14 @@ const NAV_LOGO_HEIGHT = 22;
 /**
  * Height of the animated lockup — the size the word wipes in at. The
  * collapsed mark grows past it via `--mz-mark-scale` (globals.css), so
- * these two numbers are a pair: 12px word → 16px mark. Changing this
+ * these two numbers are a pair: 10px word → 16px mark. Changing this
  * without changing the scale changes where the M lands.
  *
  * Deliberately NOT `NAV_LOGO_HEIGHT`. They were one constant until the
  * lockup was tuned to 11px, at which point bumping it to 22 for the
  * static mark silently doubled the animated one too.
  */
-const NAV_WORDMARK_HEIGHT = 12;
+const NAV_WORDMARK_HEIGHT = 10;
 
 const ICON_GLYPH =
   "text-neutral-900 hover:text-neutral-900 dark:text-neutral-100 dark:hover:text-neutral-100";
