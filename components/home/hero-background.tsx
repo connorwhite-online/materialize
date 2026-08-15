@@ -117,6 +117,21 @@ export function HeroBackground() {
           desktopSrc={IMG.desktopDark}
         />
       </div>
+      {/* Top feather — mobile only. iOS 26 fills the status-bar band with
+          a colour sampled from <body> (--hero-chrome-tint, see
+          globals.css) and we cannot paint into that band ourselves, so
+          the join is always band-meets-photo. Even with the colour
+          matched, the photo arrives with detail — beams, the light
+          shaft — and cut-off detail is what reads as a seam. Dissolving
+          the top of the art into the SAME token the band uses trades a
+          hard edge for a soft one: whatever residual mismatch Safari's
+          own treatment introduces is now spread over 12dvh instead of
+          landing on one pixel row.
+
+          Not on desktop (`md:`, the width where HeroBackground swaps to
+          the landscape masters): there is no status-bar band there, so
+          the feather would only mute the top of the art for nothing. */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-[12dvh] bg-gradient-to-b from-hero-chrome-tint via-hero-chrome-tint/55 to-transparent md:hidden" />
       {/* The hero extends to 110dvh; dissolve its last 20dvh into the
           page token so the transition to HomeMarketing has no hard
           image edge in either theme. Keep this inside the art layer,

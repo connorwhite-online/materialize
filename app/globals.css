@@ -8,6 +8,7 @@
   --color-background: var(--background);
   --color-background-translucent: var(--background-translucent);
   --color-home-marketing: var(--home-marketing);
+  --color-hero-chrome-tint: var(--hero-chrome-tint);
   --color-foreground: var(--foreground);
   /* Apple system font first, then the rest of the cross-platform
      system stack. `system-ui` picks up San Francisco on macOS/iOS
