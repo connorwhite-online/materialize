@@ -152,17 +152,8 @@ export default async function HomePage() {
           Background art is absolute + object-cover. The three.js / R3F
           showcase that used to sit in a visual slot below the copy is
           unmounted, not deleted — hero-showcase*.tsx et al. stay in
-          the tree.
-
-          `data-hero-chrome` is the marker `body:has()` keys off to give
-          <body> the hero's edge colour (app/globals.css) — which is the
-          only thing iOS 26 Safari will read for the status-bar band
-          above the page. It is an attribute rather than a class so a
-          Tailwind reshuffle can't quietly drop it. */}
-      <section
-        data-hero-chrome
-        className="relative isolate flex h-[110dvh] min-h-[110dvh] w-full flex-col overflow-hidden"
-      >
+          the tree. */}
+      <section className="relative isolate flex h-[110dvh] min-h-[110dvh] w-full flex-col overflow-hidden">
         <HeroBackground />
         {/* Brand mark lives in TopBar so "Materialize" still appears
             above the fold. The h1 states what the product does. */}

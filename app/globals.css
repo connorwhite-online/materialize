@@ -8,7 +8,6 @@
   --color-background: var(--background);
   --color-background-translucent: var(--background-translucent);
   --color-home-marketing: var(--home-marketing);
-  --color-hero-chrome-tint: var(--hero-chrome-tint);
   --color-foreground: var(--foreground);
   /* Apple system font first, then the rest of the cross-platform
      system stack. `system-ui` picks up San Francisco on macOS/iOS
@@ -253,81 +252,43 @@
   --gradient-sunken: none;
 }
 
-/* Browser-chrome tint for the anon-home hero (iOS 26 / Safari 26).
+/* iOS 26 / Safari 26 chrome bands — what we learned, and what NOT to redo.
 
-   Safari 26 retired `<meta name="theme-color">` — the tag still parses,
-   the value is ignored. The status-bar band above the page is browser
-   chrome, not layout viewport: `viewport-fit: cover` frees it only for
-   a home-screen app, so in a tab nothing of ours can paint there.
-   Safari instead FILLS it with a colour sampled from the page, and the
-   sampling rules are narrow:
+   The status-bar band above the page and the wash under the floating
+   toolbar are browser chrome. `viewport-fit: cover` frees them only for a
+   home-screen app; in a tab nothing of ours can paint there. Safari fills
+   them with a colour sampled from the page, under narrow rules:
+   `background-color` only (a `background-image`, gradient included, is
+   never read), off `<body>` (`<html>`'s is ignored), at initial render
+   (JS cannot re-tint later). `<meta name="theme-color">` is ignored
+   outright.
 
-     - `background-color` only. A `background-image` — including a
-       gradient — is never read, however opaque it renders.
-     - `<body>`'s background-color is the source. `<html>`'s is ignored.
-     - A `fixed`/`sticky` element hugging the viewport edge can pre-empt
-       body, but that path is unreliable (a sticky strip sitting at its
-       natural offset at scroll 0 was NOT picked up on an iPhone), so we
-       don't build on it.
-     - Sampled at initial render. Changing the colour from JavaScript
-       later does not re-tint the band.
+   Two fixes were tried and reverted, in this order:
 
-   That is why the band showed as a cream strip above the photo: it was
-   `--background`, read straight off <body>. So the fix is to give <body>
-   the hero's own edge colour while the hero is the page.
+   1. A `fixed`/`sticky` sampler strip at the viewport edge. A sticky one
+      sitting at its natural offset at scroll 0 was not picked up on an
+      iPhone at all; a fixed one would pin the hero's colour over the
+      cream marketing sections forever.
 
-   This costs nothing visually. <body> also carries an opaque
-   `--background-gradient` as a `background-image` (both themes), and a
-   background-image paints over the background-color across the whole
-   body box — so body's colour is invisible on-page and only ever
-   surfaces in the chrome band Safari samples it for.
+   2. Tinting `<body>` to the hero's top-edge colour
+      (`body:has([data-hero-chrome])`). This DID take effect — and that
+      was the problem. Safari feeds one body colour to BOTH bands, for
+      the whole route, in every state. So the top band matched the art
+      while the bottom band, the scrolled page, and anything behind the
+      open nav menu or the auth modal wore a colour belonging to the top
+      of a photo. On device it read as two mismatched strips framing the
+      page, worst in dark mode where the token was a blue-grey against a
+      warm near-black UI.
 
-   Trade-off worth knowing: the band keeps the hero's colour for the
-   whole route, including once you scroll to the cream marketing
-   sections. Scroll cannot fix it — the sticky-element path that would
-   have released the colour is the one that doesn't work, and JS
-   re-tinting isn't a thing. Matching the hero wins because the hero is
-   the first screen and the full-bleed surface; the marketing sections
-   are below the fold.
+   So: leave `<body>` on `--background`. Both bands then match the rest of
+   the app everywhere and in every state, which is the only thing one
+   colour can do honestly. The seam at the top of the hero is handled
+   where it belongs — `<HeroBackground />` feathers the art into
+   `--background` over its first 12dvh, so the join is flat-to-flat in one
+   colour rather than a hard edge against photographic detail.
 
-   Values are the mean RGB of the top edge of the four hero masters in
-   public/home. Re-measure them whenever the art is replaced:
-
-     node -e 'const s=require("sharp"),f="public/home/home-v1-light-mobile.png";
-       s(f).raw().toBuffer({resolveWithObject:true}).then(({data,info})=>{
-         let r=0,g=0,b=0,n=0;
-         for(let y=0;y<24;y++)for(let x=0;x<info.width;x++){
-           const i=(y*info.width+x)*info.channels;r+=data[i];g+=data[i+1];b+=data[i+2];n++}
-         console.log(Math.round(r/n),Math.round(g/n),Math.round(b/n))})'  */
-:root {
-  --hero-chrome-tint: #8e8379;
-}
-
-.dark {
-  --hero-chrome-tint: #232c39;
-}
-
-/* 768px, not `nav` — this tracks the art, and <HeroBackground /> swaps
-   the portrait masters for the landscape ones at exactly this width. */
-@media (min-width: 768px) {
-  :root {
-    --hero-chrome-tint: #857f71;
-  }
-
-  .dark {
-    --hero-chrome-tint: #122028;
-  }
-}
-
-/* Scoped by `:has()` to the anon hero's marker attribute, so the tint
-   is live on exactly the one route that wants it and nowhere else — the
-   authed home renders <HomeDashboard /> on the same URL and has no
-   marker. Deliberately unlayered: `body` gets `bg-background` from
-   `@layer base`, and any unlayered rule outranks a layered one
-   regardless of specificity. */
-body:has([data-hero-chrome]) {
-  background-color: var(--hero-chrome-tint);
-}
+   If you are tempted to tint the band again: the band is not yours, it is
+   shared by every state of the route, and it cannot change on scroll. */
 
 @theme inline {
   --shadow-raised: var(--shadow-raised);

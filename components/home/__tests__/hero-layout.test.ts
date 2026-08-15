@@ -83,79 +83,40 @@ describe("anon home hero layout", () => {
 });
 
 /**
- * iOS 26 Safari fills the status-bar band above the page with a colour
- * sampled from the page, and the sampling rules are narrow enough that
- * an innocuous-looking edit silently restores the cream strip:
- * `background-color` only (a `background-image` is never read), off
- * `<body>` (never `<html>`), at initial render (JS can't re-tint).
- * `<meta name="theme-color">` is ignored outright. None of that shows
- * up as a type error or a failing render, so it is pinned here.
+ * The chrome bands are shared by BOTH edges, the whole route, and every
+ * state (menu open, auth modal). Tinting <body> to the hero's top-edge
+ * colour was tried and reverted — it matched the top of the photo and
+ * mismatched everything else, worst in dark mode. Leaving <body> on
+ * --background is the only honest thing one colour can do, so this
+ * guards the revert.
  */
-describe("anon home browser-chrome tint", () => {
-  it("marks the hero so body:has() can scope the tint to this route", () => {
-    expect(page).toMatch(/data-hero-chrome/);
-    expect(globals).toMatch(
-      /body:has\(\[data-hero-chrome\]\)\s*\{[^}]*background-color:\s*var\(--hero-chrome-tint\)/
-    );
+describe("anon home browser-chrome bands", () => {
+  it("does not tint <body> for the hero", () => {
+    expect(globals).not.toMatch(/body:has\(\[data-hero-chrome\]\)\s*\{/);
+    expect(globals).not.toMatch(/--hero-chrome-tint:/);
+    expect(page).not.toMatch(/data-hero-chrome/);
   });
 
-  it("tints background-color, not a background-image", () => {
-    const rule = globals.match(
-      /body:has\(\[data-hero-chrome\]\)\s*\{([^}]*)\}/
-    )?.[1];
-    expect(rule).toBeDefined();
-    // A gradient here would render identically on-page and be invisible
-    // to the sampler — the exact trap this whole mechanism exists for.
-    expect(rule).not.toMatch(/background-image/);
-    expect(rule).not.toMatch(/gradient/);
-  });
-
-  it("keeps the tint rule unlayered so it outranks @layer base", () => {
-    // `body` gets bg-background from @layer base; an unlayered rule
-    // wins over any layered one regardless of specificity, so the tint
-    // must not be nested inside a @layer block.
-    const upto = globals.slice(0, globals.indexOf("body:has([data-hero-chrome])"));
-    const opened = (upto.match(/@layer[^{]*\{/g) ?? []).length;
-    const closed = (upto.match(/^\}/gm) ?? []).length;
-    expect(opened).toBeLessThanOrEqual(closed);
-  });
-
-  it("defines a light, dark, and desktop tint matching the art", () => {
-    expect(globals).toMatch(/--hero-chrome-tint:\s*#8e8379/);
-    expect(globals).toMatch(/--hero-chrome-tint:\s*#232c39/);
-    expect(globals).toMatch(/--hero-chrome-tint:\s*#857f71/);
-    expect(globals).toMatch(/--hero-chrome-tint:\s*#122028/);
-    // The swap has to happen where <HeroBackground /> swaps masters,
-    // not at the `nav` layout breakpoint.
-    expect(globals).toMatch(
-      /@media \(min-width: 768px\) \{[\s\S]*?--hero-chrome-tint/
-    );
-  });
-
-  it("does not reintroduce the fixed/sticky sampler strip", () => {
-    // Tried and rejected: a sticky strip at its natural offset was not
-    // picked up on an iPhone, and a fixed one would leave a 6px band of
-    // the hero's colour pinned over the cream marketing sections.
-    expect(heroBackground).not.toMatch(/HeroChromeTint/);
-    expect(page).not.toMatch(/HeroChromeTint/);
+  it("keeps the hero comment explaining why, so it isn't re-added", () => {
+    expect(globals).toMatch(/BOTH bands/);
   });
 });
 
 /**
- * iOS 26 owns the status-bar band and we cannot paint into it (see the
- * `--hero-chrome-tint` comment in globals.css). The top feather is what
- * turns that unavoidable join from a hard edge into a soft one, so both
- * halves of the trick — the token it fades to, and the fact that it is
- * mobile-only — are worth pinning.
+ * iOS 26 owns the status-bar band and fills it with <body>'s colour.
+ * The top feather is what turns that unavoidable join from a hard edge
+ * into a soft one, so both halves — the colour it fades to, and the fact
+ * that it is mobile-only — are worth pinning.
  */
 describe("anon home hero top feather", () => {
   const feather = heroBackground.match(
     /className="pointer-events-none absolute inset-x-0 top-0[^"]*"/
   )?.[0];
 
-  it("fades the top of the art into the same token the band uses", () => {
+  it("fades the top of the art into the colour the band will be", () => {
     expect(feather).toBeDefined();
-    expect(feather).toMatch(/from-hero-chrome-tint/);
+    // --background is <body>'s colour, which is what Safari samples.
+    expect(feather).toMatch(/from-background/);
     expect(feather).not.toMatch(/home-marketing/);
   });
 

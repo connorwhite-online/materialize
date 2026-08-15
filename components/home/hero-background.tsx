@@ -97,8 +97,8 @@ export function HeroBackground() {
       // <section> is `overflow-hidden`, so the negative offsets this
       // used to carry were clipped away and never bought a pixel. In a
       // Safari tab the unsafe areas aren't ours to paint into at all —
-      // the status-bar band is chrome, and the only lever is the colour
-      // Safari fills it with (`--hero-chrome-tint`, app/globals.css).
+      // the status-bar band is chrome, filled with <body>'s colour
+      // (`--background`); the top feather below softens the join.
       // In a home-screen app `viewport-fit: cover` already stretches
       // the layout viewport over them, so inset-0 covers both.
       className="pointer-events-none absolute inset-0 overflow-hidden"
@@ -118,20 +118,23 @@ export function HeroBackground() {
         />
       </div>
       {/* Top feather — mobile only. iOS 26 fills the status-bar band with
-          a colour sampled from <body> (--hero-chrome-tint, see
-          globals.css) and we cannot paint into that band ourselves, so
-          the join is always band-meets-photo. Even with the colour
-          matched, the photo arrives with detail — beams, the light
-          shaft — and cut-off detail is what reads as a seam. Dissolving
-          the top of the art into the SAME token the band uses trades a
-          hard edge for a soft one: whatever residual mismatch Safari's
-          own treatment introduces is now spread over 12dvh instead of
-          landing on one pixel row.
+          <body>'s background-color and we cannot paint into that band
+          ourselves, so the join is always band-meets-photo. Tinting body
+          to match the art was tried and reverted (globals.css): Safari
+          feeds one colour to BOTH bands for the whole route, so matching
+          the top of the photo mismatched everything else.
 
-          Not on desktop (`md:`, the width where HeroBackground swaps to
-          the landscape masters): there is no status-bar band there, so
-          the feather would only mute the top of the art for nothing. */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-[12dvh] bg-gradient-to-b from-hero-chrome-tint via-hero-chrome-tint/55 to-transparent md:hidden" />
+          Feather instead. `--background` is what the band will be, and
+          dissolving the art into it kills the seam for the right reason:
+          a photo arrives with detail — beams, the light shaft — and
+          cut-off detail is what the eye reads as an edge, however well
+          the colour matches. Flat-to-flat in one colour has nothing to
+          cut off.
+
+          Not on desktop (`md:`, where HeroBackground swaps to the
+          landscape masters): no status-bar band there, so the feather
+          would only mute the top of the art for nothing. */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-[12dvh] bg-gradient-to-b from-background via-background/55 to-transparent md:hidden" />
       {/* The hero extends to 110dvh; dissolve its last 20dvh into the
           page token so the transition to HomeMarketing has no hard
           image edge in either theme. Keep this inside the art layer,
