@@ -1,6 +1,7 @@
 import { ImageResponse } from "next/og";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { resolveImageUrl, shouldFullBleed } from "./card-image";
 
 export const OG_SIZE = { width: 1200, height: 630 } as const;
 export const OG_CONTENT_TYPE = "image/png";
@@ -21,7 +22,10 @@ function loadBrandFont() {
 // render a graceful no-image variant.
 async function fetchImageDataUrl(url: string): Promise<string | null> {
   try {
-    const res = await fetch(url, { cache: "force-cache" });
+    const absolute = await resolveImageUrl(url);
+    if (!absolute) return null;
+    if (absolute.startsWith("data:")) return absolute;
+    const res = await fetch(absolute, { cache: "force-cache" });
     if (!res.ok) return null;
     const contentType = res.headers.get("content-type") || "image/png";
     const buf = await res.arrayBuffer();
@@ -32,11 +36,39 @@ async function fetchImageDataUrl(url: string): Promise<string | null> {
   }
 }
 
+const BRAND_BG = "#0a0a0a";
+
 type CardProps = {
   title: string;
   subtitle?: string | null;
   imageUrl?: string | null;
   imageShape?: "square" | "circle";
+  /**
+   * `"full"` gives the artwork the whole 1200×630 frame. Chat clients
+   * and social cards already print the title and domain beneath the
+   * image, so the split card's in-image text is duplicated chrome —
+   * and it shrinks the artwork to a third of the frame to show it.
+   *
+   * `"split"` (the default) keeps the image tile + text column, which
+   * is still the right call for profiles (a circular avatar has no
+   * business being cropped to a 1.9:1 banner) and is the automatic
+   * fallback whenever no image resolved.
+   */
+  layout?: "split" | "full";
+  /**
+   * How a full-bleed image fills the frame.
+   *
+   * `"cover"` for photography — catalog product shots, project photos.
+   *
+   * `"contain"` for our own canvas captures. File thumbnails are
+   * transparent-background WebP renders of a model normalized to fill
+   * a square viewport (`components/viewer/thumbnail-capture.tsx`), so
+   * cropping them to 1.9:1 lops off the top and bottom of the part.
+   * Contained at full height on the brand background it still reads as
+   * full-bleed, because the transparent background and the card
+   * background are the same colour.
+   */
+  fit?: "cover" | "contain";
 };
 
 export async function renderOgCard(props: CardProps): Promise<ImageResponse> {
@@ -50,6 +82,47 @@ export async function renderOgCard(props: CardProps): Promise<ImageResponse> {
   const truncate = (s: string, n: number) =>
     s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s;
 
+  // The `imgSrc` re-test is what narrows it to a string for the <img>
+  // below — `shouldFullBleed` returns an opaque boolean, so TypeScript
+  // cannot carry the null check across the call on its own.
+  if (shouldFullBleed(props.layout, !!imgSrc) && imgSrc) {
+    return new ImageResponse(
+      (
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            display: "flex",
+            background: BRAND_BG,
+            fontFamily: "Materialize",
+          }}
+        >
+          <img
+            src={imgSrc}
+            width={OG_SIZE.width}
+            height={OG_SIZE.height}
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: props.fit ?? "cover",
+            }}
+          />
+        </div>
+      ),
+      {
+        ...OG_SIZE,
+        fonts: [
+          {
+            name: "Materialize",
+            data: brandFont,
+            style: "normal",
+            weight: 700,
+          },
+        ],
+      }
+    );
+  }
+
   return new ImageResponse(
     (
       <div
@@ -57,7 +130,7 @@ export async function renderOgCard(props: CardProps): Promise<ImageResponse> {
           width: "100%",
           height: "100%",
           display: "flex",
-          background: "#0a0a0a",
+          background: BRAND_BG,
           color: "#fafafa",
           fontFamily: "Materialize",
           padding: 72,

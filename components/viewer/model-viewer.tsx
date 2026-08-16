@@ -2,13 +2,15 @@
 
 import {
   Suspense,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
-import { Canvas, useFrame, useLoader } from "@react-three/fiber";
+import { Canvas, useFrame, useLoader, useThree } from "@react-three/fiber";
 import { OrbitControls, Stage, Center, Grid, Line } from "@react-three/drei";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import {
@@ -47,6 +49,8 @@ import {
   RulerIcon,
   ScissorsIcon,
 } from "lucide-react";
+import { FrameCorners } from "@/components/icons/frame-corners";
+import { previewViewFromOrbit, type PreviewView } from "./preview-camera";
 import { StlModel } from "./loaders/stl-model";
 import { ObjModel } from "./loaders/obj-model";
 import { ThreeMfModel } from "./loaders/threemf-model";
@@ -722,6 +726,27 @@ interface ModelViewerProps {
    * second, competing point cloud snapping in beneath it (MTR-214).
    */
   hideLoadingFallback?: boolean;
+  /**
+   * Opt in to the "Update preview" control — a labelled button inside
+   * the viewer's frame that re-shoots the file's snapshot from
+   * whatever angle the creator has orbited to.
+   *
+   * Fires with a rig-independent `PreviewView` (direction + framing)
+   * rather than a raw camera position, because the offscreen capture
+   * rig normalizes the model to its own scale and lens; see
+   * `./preview-camera` for why a position would not transfer.
+   *
+   * Omit it and nothing renders — every existing caller is unaffected.
+   * Callers are responsible for gating on ownership: this only offers
+   * the control, it does not decide who may see it.
+   */
+  onCapturePreview?: (view: PreviewView) => void;
+  /**
+   * Progress of the caller's capture, reflected in the button's label
+   * and disabled state. The button owns none of this itself — the
+   * upload lives with the caller that has the file id.
+   */
+  capturePreviewStatus?: "idle" | "capturing" | "saved" | "error";
 }
 
 /**
@@ -738,6 +763,72 @@ function ReadySignal({ onReady }: { onReady?: () => void }) {
   }, []);
   return null;
 }
+
+/**
+ * Records the camera-to-target distance at the viewer's settled
+ * automatic fit — the baseline "Update preview" measures a creator's
+ * zoom against (see `previewViewFromOrbit`).
+ *
+ * Rendered inside the Suspense boundary, so it only starts looking
+ * once the model's loader has resolved; before that the camera still
+ * sits at its unfitted mount position and would give a meaningless
+ * baseline. drei's `<Stage adjustCamera>` then reframes via `<Bounds>`,
+ * which animates, so "settled" is defined as the distance holding
+ * steady across a few consecutive frames rather than any single one.
+ *
+ * Records once and stops. A later re-fit would move the baseline out
+ * from under a zoom the creator has already dialled in.
+ */
+function PreviewFrameProbe({
+  controlsRef,
+  baselineRef,
+  onSettled,
+}: {
+  controlsRef: RefObject<OrbitControlsImpl | null>;
+  baselineRef: RefObject<number | null>;
+  onSettled: () => void;
+}) {
+  const camera = useThree((state) => state.camera);
+  const lastDistance = useRef<number | null>(null);
+  const stableFrames = useRef(0);
+  const recorded = useRef(false);
+
+  useFrame(() => {
+    if (recorded.current) return;
+    const controls = controlsRef.current;
+    if (!controls) return;
+
+    const distance = camera.position.distanceTo(controls.target);
+    if (!(distance > 0)) return;
+
+    const previous = lastDistance.current;
+    // Relative tolerance: these are model-native units, which for an
+    // STL are millimetres and can run to the hundreds.
+    if (previous !== null && Math.abs(distance - previous) <= distance * 1e-4) {
+      stableFrames.current += 1;
+    } else {
+      stableFrames.current = 0;
+    }
+    lastDistance.current = distance;
+
+    if (stableFrames.current >= STABLE_FRAMES_FOR_BASELINE) {
+      recorded.current = true;
+      baselineRef.current = distance;
+      onSettled();
+    }
+  });
+
+  return null;
+}
+
+const STABLE_FRAMES_FOR_BASELINE = 3;
+
+const CAPTURE_PREVIEW_LABELS = {
+  idle: "Update preview",
+  capturing: "Updating\u2026",
+  saved: "Preview updated",
+  error: "Couldn\u2019t update",
+} as const;
 
 /**
  * Wrap the model in a group scaled+centered so its longest axis fits the shared
@@ -1258,6 +1349,8 @@ export function ModelViewer({
   onToggleDimensions,
   onReady,
   hideLoadingFallback = false,
+  onCapturePreview,
+  capturePreviewStatus = "idle",
 }: ModelViewerProps) {
   const isPreview = mode === "preview";
   // Wheel zoom defaults to true unless explicitly disabled. The
@@ -1266,6 +1359,37 @@ export function ModelViewer({
     enableWheelZoom === undefined ? !isPreview : enableWheelZoom;
   const controlsRef = useRef<OrbitControlsImpl>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // "Update preview" — the camera distance at the viewer's own settled
+  // fit, and whether we have it yet. The button stays disabled until
+  // the probe reports in, which also covers the load window: there is
+  // no meaningful angle to capture before the model is on screen.
+  const previewBaselineRef = useRef<number | null>(null);
+  const [previewBaselineReady, setPreviewBaselineReady] = useState(false);
+  const capturePreviewEnabled = !!onCapturePreview;
+
+  const markPreviewBaselineReady = useCallback(
+    () => setPreviewBaselineReady(true),
+    []
+  );
+
+  const handleCapturePreview = useCallback(() => {
+    const controls = controlsRef.current;
+    const baseline = previewBaselineRef.current;
+    if (!onCapturePreview || !controls || !baseline) return;
+
+    const camera = controls.object;
+    const t = controls.target;
+    const offset: [number, number, number] = [
+      camera.position.x - t.x,
+      camera.position.y - t.y,
+      camera.position.z - t.z,
+    ];
+
+    onCapturePreview(
+      previewViewFromOrbit({ offset, baselineDistance: baseline })
+    );
+  }, [onCapturePreview]);
 
   // What kind of geometry the annotate tool selects.
   const [target, setTarget] = useState<"face" | "edge">("face");
@@ -1423,6 +1547,13 @@ export function ModelViewer({
             {/* Real "geometry loaded" signal — commits with the mesh, after
                 Suspense resolves (MTR-214). */}
             {onReady && <ReadySignal onReady={onReady} />}
+            {capturePreviewEnabled && (
+              <PreviewFrameProbe
+                controlsRef={controlsRef}
+                baselineRef={previewBaselineRef}
+                onSettled={markPreviewBaselineReady}
+              />
+            )}
             {fixedFrame && inspectable ? (
               // Studio: fixed camera + deterministic fit (no Stage), so this
               // viewer registers with the deforming-loader canvas. MaterializeMaterial
@@ -1579,6 +1710,31 @@ export function ModelViewer({
             className="flex h-8 w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
           >
             <MinusIcon className="size-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Update preview — re-shoot the file's snapshot from the angle
+          the creator has orbited to. Bottom-right, opposite the zoom
+          controls on the same baseline. Only the file-detail viewer
+          passes `onCapturePreview`, and that viewer is not
+          `inspectable`, so this never collides with the measure
+          readout that shares this corner. */}
+      {capturePreviewEnabled && (
+        <div className="absolute bottom-3 right-3 flex items-center overflow-hidden rounded-full border border-border/60 bg-background/40 backdrop-blur-md">
+          <button
+            type="button"
+            onClick={handleCapturePreview}
+            disabled={
+              !previewBaselineReady || capturePreviewStatus === "capturing"
+            }
+            title="Save the current angle as this file's preview image"
+            className="flex h-8 items-center gap-1.5 px-3 text-xs text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+          >
+            <FrameCorners size={14} strokeWidth={1.75} />
+            <span aria-live="polite">
+              {CAPTURE_PREVIEW_LABELS[capturePreviewStatus]}
+            </span>
           </button>
         </div>
       )}

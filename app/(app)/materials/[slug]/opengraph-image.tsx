@@ -25,11 +25,19 @@ export default async function Image({
   }
 
   const { material, group } = hit;
+  // Full-bleed: the catalog product shot fills the whole 1200×630.
+  // Chat clients and social cards already print the material name and
+  // the domain directly under the image, so the in-card title was
+  // duplicating that while squeezing the photo into a third of the
+  // frame. With no photo, renderOgCard falls back to the split card
+  // and the title carries the link on its own.
   return renderOgCard({
     title: material.name,
     subtitle: `${group.name} · 3D printing material`,
+    layout: "full",
+    fit: "cover",
     imageUrl: material.featuredImage
-      ? resolveCatalogImage(material.featuredImage, 920)
+      ? resolveCatalogImage(material.featuredImage, OG_SIZE.width)
       : null,
   });
 }

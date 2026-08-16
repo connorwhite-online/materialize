@@ -1,6 +1,7 @@
 "use client";
 
 import { ModelViewer } from "./model-viewer";
+import type { PreviewView } from "./preview-camera";
 
 interface MaterialPreviewProps {
   modelUrl: string;
@@ -9,6 +10,9 @@ interface MaterialPreviewProps {
   className?: string;
   enableWheelZoom?: boolean;
   showZoomControls?: boolean;
+  /** Opt in to the in-frame "Update preview" control. See ModelViewer. */
+  onCapturePreview?: (view: PreviewView) => void;
+  capturePreviewStatus?: "idle" | "capturing" | "saved" | "error";
 }
 
 export function MaterialPreview({
@@ -18,6 +22,8 @@ export function MaterialPreview({
   className,
   enableWheelZoom,
   showZoomControls,
+  onCapturePreview,
+  capturePreviewStatus,
 }: MaterialPreviewProps) {
   return (
     <ModelViewer
@@ -28,6 +34,8 @@ export function MaterialPreview({
       className={className}
       enableWheelZoom={enableWheelZoom}
       showZoomControls={showZoomControls}
+      onCapturePreview={onCapturePreview}
+      capturePreviewStatus={capturePreviewStatus}
     />
   );
 }

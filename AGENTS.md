@@ -311,6 +311,30 @@ The three.js / R3F hero showcase **is unmounted, not deleted.** `components/home
 
 The home page also emits the site's only `Organization` / `WebSite` JSON-LD (both are `@id`-keyed singletons — do not repeat them on other routes) and the `FAQPage` node. FAQ copy lives in `lib/seo/home-faq.ts` and is read by both the JSON-LD and `<HomeFaq />`; never inline that copy in the component, because Google requires marked-up answers to appear verbatim on the page and two copies drift.
 
+## Link previews (OG cards)
+
+One renderer, `lib/og/render-card.tsx`, behind every `opengraph-image.tsx`. Two layouts:
+
+- **`layout: "full"`** — the artwork owns all 1200×630. Chat clients and social cards already print the title and the domain beneath the image, so in-card text is duplicated chrome that costs two thirds of the frame. Used by `/files/[slug]` and `/materials/[slug]`.
+- **`layout: "split"`** (default) — image tile + title/subtitle column. Still right for `/[handle]`, where the image is a circular avatar with no business being cropped to a 1.9:1 banner, and it is the automatic fallback whenever no image resolved — `shouldFullBleed()` degrades a `"full"` request rather than emitting a blank rectangle.
+
+**`fit` is not cosmetic.** Materials are photographs → `cover`. Files are **transparent-background WebP canvas captures** of a model normalized to fill a square viewport (`components/viewer/thumbnail-capture.tsx`) → `contain`, or `cover` crops the part's extremities away. Contained still reads as full-bleed only because the capture's transparent background and the card's `#0a0a0a` are the same colour; change one and you must change the other.
+
+**`files.thumbnailUrl` is relative and must be resolved before any server-side fetch.** It is stored as `/api/thumbnails/{fileId}` (plus a `?v=` cache-buster) — deliberately, because presigned R2 URLs cap at 7 days and next/image's optimizer won't follow redirects. Node's `fetch` rejects a relative URL outright, and `fetchImageDataUrl` swallowed the throw, so **file OG cards silently rendered the no-image placeholder from the day they shipped.** `resolveImageUrl()` (`lib/og/card-image.ts`) resolves against the live request host via `deriveAppUrl()` — not `NEXT_PUBLIC_APP_URL`, which bakes at build time (§ Print quote pipeline). It rejects protocol-relative `//host/path` **before** the leading-slash branch: `new URL("//evil.example/x", base)` inherits only the scheme and resolves to `evil.example`.
+
+Renders are pinned by `lib/og/__tests__/render-smoke.test.tsx`, which renders each layout end to end. Satori **silently ignores** CSS it doesn't support rather than erroring, so a layout it can't handle produces a card that renders and looks wrong — set `OG_SMOKE_OUT=<dir>` to dump the PNGs and actually look at them.
+
+## Owner-chosen file previews
+
+A file's thumbnail used to be shot once, automatically, head-on, the first time the owner opened `/files/[slug]` with no cached thumbnail (`FileThumbnailGenerator`). That one frame then represents the file on browse cards, library tiles, search, JSON-LD and the OG card. **Update preview** (`components/files/file-preview.tsx`, owner-only, rendered inside the viewer frame) re-shoots it from whatever angle the creator orbited to.
+
+- **It re-renders offscreen, it does not screenshot the live canvas.** The live canvas is 4:3, carries UI chrome, and sets no `preserveDrawingBuffer`, so reading it back is only valid inside a synchronous render. Re-shooting through the existing `ThumbnailCapture` rig keeps every thumbnail in the product square, identically lit and identically normalized — the creator changes the angle, not the format.
+- **Camera positions do not transfer between the two rigs.** The viewer renders at the model's native scale (millimetres, for an STL) inside drei's `<Stage adjustCamera>` at fov 45; the capture rig normalizes to a fixed world size at fov 40. What transfers is direction plus **framing** — the fraction of viewport height the model spans, which at fixed fov varies purely as the inverse of distance. All of it is in `components/viewer/preview-camera.ts`, unit-tested.
+- **Framing is measured against the viewer's own settled fit**, recorded once by `PreviewFrameProbe` after the distance holds steady for a few frames (Stage's `<Bounds>` refit animates, so no single frame is trustworthy). That baseline is defined as equal to the capture rig's default framing, so pressing the button without touching the zoom reproduces exactly the automatic shot from your angle.
+- **Do not measure the scene to get the model's size instead.** `<Stage>` defaults to `shadows="contact"`, so the graph carries a `ContactShadows` ground plane far larger than the part, and a bounding box over it reports the shadow catcher.
+- **The light rig rotates with the camera.** The three-point rig is authored relative to the *viewer*, not the model; pinned to world axes, orbiting to the back of a part yields a silhouette.
+- Writes go through the existing `POST /api/thumbnails`, which re-checks ownership, caps size and verifies WebP magic bytes. `canUpdatePreview` governs what is *offered*, never what is permitted.
+
 ## Database migrations
 
 `lib/db/migrations/` + `meta/_journal.json`, applied by the neon-http migrator (`npm run db:migrate`, which `npm run build` runs first).
