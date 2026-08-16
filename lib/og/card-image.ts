@@ -4,6 +4,8 @@
  * `next/og` (which drags in satori and a WASM resvg build).
  */
 
+import sharp from "sharp";
+
 import { deriveAppUrl } from "@/lib/utils/request-url";
 
 /**
@@ -61,4 +63,72 @@ export function shouldFullBleed(
   hasImage: boolean
 ): boolean {
   return layout === "full" && hasImage;
+}
+
+/**
+ * Image formats satori can put in an `<img>` without help.
+ *
+ * Satori rasterizes through resvg, whose decoders cover PNG, JPEG and
+ * GIF; SVG it handles natively. Anything else throws from deep inside
+ * the renderer — a WebP source fails with `u2 is not iterable`, which
+ * names nothing and points nowhere.
+ */
+const SATORI_SAFE_FORMATS = new Set(["png", "jpeg", "gif", "svg"]);
+
+const MIME_FOR_FORMAT: Record<string, string> = {
+  png: "image/png",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  svg: "image/svg+xml",
+};
+
+/** Nothing larger than the card itself is worth carrying. */
+const MAX_EDGE = 1200;
+
+/**
+ * Turn fetched image bytes into a data URL satori can actually render.
+ *
+ * This exists because **our file thumbnails are WebP** — the viewer
+ * captures `toDataURL("image/webp")` — and satori cannot decode WebP.
+ * It is not a preview-environment quirk: hand the renderer a real
+ * production thumbnail and the OG route 500s. It went unnoticed only
+ * because the relative-URL bug meant the fetch never once succeeded,
+ * so satori was never handed the bytes. Fixing that bug is what
+ * exposed this one.
+ *
+ * `sharp().metadata()` does double duty: it reports the true format
+ * (the `content-type` header is not to be trusted — an SSO gate or an
+ * error page will happily return HTML under a 200) and it throws on
+ * anything that is not a decodable image, which is exactly the signal
+ * we want. Callers treat null as "render the no-image card".
+ */
+export async function toSatoriSafeDataUrl(
+  buf: Buffer
+): Promise<string | null> {
+  try {
+    const { format } = await sharp(buf).metadata();
+    if (!format) return null;
+
+    if (SATORI_SAFE_FORMATS.has(format)) {
+      const mime = MIME_FOR_FORMAT[format];
+      if (!mime) return null;
+      return `data:${mime};base64,${buf.toString("base64")}`;
+    }
+
+    // WebP, AVIF, TIFF, … — transcode. Bounded to the card's own size
+    // so a large source cannot balloon into a multi-megabyte PNG held
+    // in memory purely to be downscaled by the renderer anyway.
+    const png = await sharp(buf)
+      .resize({
+        width: MAX_EDGE,
+        height: MAX_EDGE,
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .png()
+      .toBuffer();
+    return `data:image/png;base64,${png.toString("base64")}`;
+  } catch {
+    return null;
+  }
 }

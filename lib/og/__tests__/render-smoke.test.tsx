@@ -1,5 +1,6 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { writeFileSync, mkdirSync } from "node:fs";
+import sharp from "sharp";
 import { renderOgCard } from "../render-card";
 
 vi.mock("next/headers", () => ({
@@ -100,5 +101,103 @@ describe("OG card rendering", () => {
       })
     );
     expectPng(buf);
+  }, 30000);
+});
+
+/**
+ * Regression: satori cannot decode WebP, and every file thumbnail this
+ * product captures IS WebP (`toDataURL("image/webp")` in
+ * `components/viewer/thumbnail-capture.tsx`). Handed the raw bytes it
+ * throws `u2 is not iterable` from deep inside the renderer, and the
+ * OG route 500s — a broken link preview rather than a plain one.
+ *
+ * This was invisible until the relative-URL bug was fixed: the fetch
+ * had never once succeeded, so satori had never been handed a
+ * thumbnail. Fixing that bug is what exposed this.
+ */
+describe("source formats satori cannot decode", () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  async function swatch(format: "webp" | "png" | "avif") {
+    const base = sharp({
+      create: {
+        width: 512,
+        height: 512,
+        channels: 4,
+        background: { r: 150, g: 150, b: 150, alpha: 1 },
+      },
+    });
+    if (format === "webp") return base.webp().toBuffer();
+    if (format === "avif") return base.avif().toBuffer();
+    return base.png().toBuffer();
+  }
+
+  function mockFetchReturning(buf: Buffer, contentType: string) {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(new Uint8Array(buf), {
+        status: 200,
+        headers: { "content-type": contentType },
+      })
+    ) as unknown as typeof fetch;
+  }
+
+  it("renders a WebP thumbnail instead of throwing", async () => {
+    mockFetchReturning(await swatch("webp"), "image/webp");
+    const res = await renderOgCard({
+      title: "Caribiner Hook",
+      subtitle: "by connor",
+      layout: "full",
+      fit: "contain",
+      imageUrl: "/api/thumbnails/file_123",
+    });
+    const buf = Buffer.from(await res.arrayBuffer());
+    expectPng(buf);
+  }, 30000);
+
+  it("renders an AVIF source instead of throwing", async () => {
+    // Cloudinary's f_auto can return AVIF, so material cards are
+    // exposed to the same failure as file cards.
+    mockFetchReturning(await swatch("avif"), "image/avif");
+    const res = await renderOgCard({
+      title: "SLS Nylon PA12",
+      subtitle: "Nylons · 3D printing material",
+      layout: "full",
+      fit: "cover",
+      imageUrl: "https://res.cloudinary.com/all3dp/image/upload/x.jpg",
+    });
+    expectPng(Buffer.from(await res.arrayBuffer()));
+  }, 30000);
+
+  it("degrades to the no-image card when the response is not an image", async () => {
+    // A Vercel preview's SSO gate, or any error page, answers 200 with
+    // HTML. Encoding that as a data: URL and handing it to satori is
+    // the other way this route reaches a 500.
+    mockFetchReturning(
+      Buffer.from("<!doctype html><title>Login</title>", "utf8"),
+      "text/html"
+    );
+    const res = await renderOgCard({
+      title: "Caribiner Hook",
+      subtitle: "by connor",
+      layout: "full",
+      fit: "contain",
+      imageUrl: "/api/thumbnails/file_123",
+    });
+    expectPng(Buffer.from(await res.arrayBuffer()));
+  }, 30000);
+
+  it("still renders a PNG source unchanged", async () => {
+    mockFetchReturning(await swatch("png"), "image/png");
+    const res = await renderOgCard({
+      title: "Plain PNG",
+      subtitle: null,
+      layout: "full",
+      fit: "contain",
+      imageUrl: "/api/thumbnails/file_123",
+    });
+    expectPng(Buffer.from(await res.arrayBuffer()));
   }, 30000);
 });

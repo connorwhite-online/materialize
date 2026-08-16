@@ -1,7 +1,11 @@
 import { ImageResponse } from "next/og";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { resolveImageUrl, shouldFullBleed } from "./card-image";
+import {
+  resolveImageUrl,
+  shouldFullBleed,
+  toSatoriSafeDataUrl,
+} from "./card-image";
 
 export const OG_SIZE = { width: 1200, height: 630 } as const;
 export const OG_CONTENT_TYPE = "image/png";
@@ -24,13 +28,25 @@ async function fetchImageDataUrl(url: string): Promise<string | null> {
   try {
     const absolute = await resolveImageUrl(url);
     if (!absolute) return null;
-    if (absolute.startsWith("data:")) return absolute;
+    // Data URLs go through the same normalization as fetched bytes —
+    // an inline WebP breaks satori exactly like a fetched one.
+    if (absolute.startsWith("data:")) {
+      const comma = absolute.indexOf(",");
+      if (comma === -1) return null;
+      const isBase64 = absolute.slice(0, comma).includes(";base64");
+      const payload = absolute.slice(comma + 1);
+      return await toSatoriSafeDataUrl(
+        Buffer.from(
+          isBase64 ? payload : decodeURIComponent(payload),
+          isBase64 ? "base64" : "utf8"
+        )
+      );
+    }
     const res = await fetch(absolute, { cache: "force-cache" });
     if (!res.ok) return null;
-    const contentType = res.headers.get("content-type") || "image/png";
-    const buf = await res.arrayBuffer();
-    const b64 = Buffer.from(buf).toString("base64");
-    return `data:${contentType};base64,${b64}`;
+    // Never trust the response's own content-type, and never hand the
+    // bytes straight to satori — see `toSatoriSafeDataUrl`.
+    return await toSatoriSafeDataUrl(Buffer.from(await res.arrayBuffer()));
   } catch {
     return null;
   }
