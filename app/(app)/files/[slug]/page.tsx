@@ -794,26 +794,32 @@ export default async function FileDetailPage(props: {
               </>
             )}
 
-            <div className="flex flex-col gap-2">
-              <div className="flex gap-2">
+            {/* Primary action row. Download + Print are what this page is
+                for, so they get the tallest size in the system and a filled
+                treatment on both — the outline/sm pair read as tertiary
+                chrome next to the 3D preview. Print keeps `default` so it
+                still wins the row; Download is `secondary` rather than
+                `outline` so it has weight without competing. */}
+            <div className="flex flex-col gap-2.5">
+              <div className="flex gap-2.5">
                 {canDownload && (
                   <Button
-                    variant="outline"
-                    size="sm"
-                    className="min-w-0 flex-1"
+                    variant="secondary"
+                    size="xl"
+                    className="min-w-0 flex-1 font-semibold"
                     render={<a href={`/files/${slug}/download`} />}
                   >
-                    <Download size={14} />
+                    <Download size={18} />
                     Download
                   </Button>
                 )}
                 {assets[0] && (
                   <Button
-                    size="sm"
-                    className="min-w-0 flex-1"
+                    size="xl"
+                    className="min-w-0 flex-1 font-semibold"
                     render={<Link href={`/print/${assets[0].id}`} />}
                   >
-                    <Print size={14} />
+                    <Print size={18} />
                     Print
                   </Button>
                 )}
@@ -825,7 +831,6 @@ export default async function FileDetailPage(props: {
               {canDownload && assets[0] && (
                 <StepDownloadLink
                   fileAssetId={assets[0].id}
-                  size="sm"
                   className="w-full"
                 />
               )}
