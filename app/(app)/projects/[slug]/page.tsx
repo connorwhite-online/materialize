@@ -22,9 +22,9 @@ import { loadProjectBySlug } from "./loader";
 import { generateDownloadUrl } from "@/lib/storage";
 import { Card, CardContent } from "@/components/ui/card";
 import { ExpandableDescription } from "@/components/ui/expandable-description";
-import { DownloadIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Factory } from "@/components/icons/factory";
+import { Download } from "@/components/icons/download";
+import { Print } from "@/components/icons/print";
 import { OwnerBar } from "@/components/ui/owner-bar";
 import { DeleteProjectButton } from "@/components/projects/delete-project-button";
 import { BomDisplay } from "@/components/projects/bom-display";
@@ -806,23 +806,29 @@ export default async function ProjectDetailPage(props: {
 
             {renderPurchasePanel()}
 
+            {/* Primary action row — same treatment as the file detail page
+                (`app/(app)/files/[slug]/page.tsx`): tallest size in the
+                system, filled on both, Print keeping `default` so it still
+                wins the row. The glyphs match that page and the nav's Print
+                entry; `Factory` is reserved for the manufacturer/vendor
+                concept (vendor picker, production payment), not this CTA. */}
             {bundledFiles.length > 0 && (
-              <div className="flex gap-2">
+              <div className="flex gap-2.5">
                 <Button
-                  variant="outline"
-                  size="sm"
-                  className="flex-1"
+                  variant="secondary"
+                  size="xl"
+                  className="min-w-0 flex-1 font-semibold"
                   render={<Link href="#project-files" />}
                 >
-                  <DownloadIcon className="size-4" />
+                  <Download size={18} />
                   Download
                 </Button>
                 <Button
-                  size="sm"
-                  className="flex-1"
+                  size="xl"
+                  className="min-w-0 flex-1 font-semibold"
                   render={<Link href={`/print?project=${project.slug}`} />}
                 >
-                  <Factory className="size-4" />
+                  <Print size={18} />
                   Print
                 </Button>
               </div>
