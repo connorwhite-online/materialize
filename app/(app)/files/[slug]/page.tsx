@@ -35,7 +35,7 @@ import { DeleteFileButton } from "@/components/files/delete-file-button";
 import { StepDownloadLink } from "@/components/files/step-download-button";
 import { EditFileButton } from "@/components/files/edit-file-button";
 import { FileThumbnailGeneratorLazy } from "@/components/files/file-thumbnail-generator-lazy";
-import { OrderModelPreviewLazy } from "@/components/print/order-model-preview-lazy";
+import { FilePreview } from "@/components/files/file-preview";
 import { VerifyingPill } from "@/components/files/verifying-pill";
 import { ListingFlaggedBanner } from "@/components/files/listing-flagged-banner";
 import {
@@ -709,10 +709,16 @@ export default async function FileDetailPage(props: {
           <div>
             {previewable && primaryAsset ? (
               <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
-                <OrderModelPreviewLazy
+                <FilePreview
+                  fileId={file.id}
                   fileAssetId={primaryAsset.id}
                   format={primaryAsset.format}
                   materialColor={recommendedMaterial?.color ?? "#a1a1aa"}
+                  recommendedMaterialId={file.recommendedMaterialId}
+                  // Owner-only affordance. `POST /api/thumbnails`
+                  // re-checks ownership regardless, so this governs
+                  // what is offered, not what is permitted.
+                  canUpdatePreview={isOwner}
                 />
               </div>
             ) : (

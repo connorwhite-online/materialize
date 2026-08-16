@@ -114,7 +114,18 @@ export async function POST(request: Request) {
     }
 
     // Store the stable redirect URL, not a pre-signed download URL.
-    const thumbnailUrl = `/api/thumbnails/${fileId}`;
+    //
+    // The `v` suffix is a cache buster. The R2 key is derived from the
+    // file id, so re-capturing overwrites the same object behind the
+    // same URL — and the GET route serves it `public, max-age=300`
+    // (`app/api/thumbnails/[fileId]/route.ts`). Without a changing
+    // URL, a creator who re-shoots their preview keeps being served
+    // the old image by their own browser and by any CDN in front of
+    // us, which reads as the save having silently failed. Nothing
+    // parses this column's shape — consumers either hand it straight
+    // to an <img>/next/image `src` or test it for an `http(s)://`
+    // prefix, both of which are indifferent to a query string.
+    const thumbnailUrl = `/api/thumbnails/${fileId}?v=${Date.now().toString(36)}`;
 
     await db
       .update(files)

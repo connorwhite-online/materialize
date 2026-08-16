@@ -33,9 +33,18 @@ export default async function Image({
   }
 
   const creator = row.displayName || row.username;
+  // Full-bleed, contained. The thumbnail is a transparent-background
+  // WebP capture of the model normalized to fill a square viewport
+  // (`components/viewer/thumbnail-capture.tsx`), so `cover` would crop
+  // the part's top and bottom away. Contained at full height on the
+  // brand background it still reads as full-bleed — the capture's
+  // transparent background and the card's background are the same
+  // colour, so there is no visible letterbox.
   return renderOgCard({
     title: row.name,
     subtitle: creator ? `by ${creator}` : null,
+    layout: "full",
+    fit: "contain",
     imageUrl: row.thumbnailUrl,
   });
 }

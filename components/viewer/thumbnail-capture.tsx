@@ -4,12 +4,18 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { MATERIALS } from "@/lib/materials";
+import {
+  CAPTURE_DEFAULT_DISTANCE,
+  CAPTURE_FOV,
+  CAPTURE_TARGET_WORLD_SIZE,
+} from "./preview-camera";
 import { StlModel } from "./loaders/stl-model";
 import { ObjModel } from "./loaders/obj-model";
 import { ThreeMfModel } from "./loaders/threemf-model";
@@ -20,6 +26,17 @@ interface ThumbnailCaptureProps {
   fileId: string;
   onCapture: (fileId: string, dataUrl: string) => void;
   recommendedMaterialId?: string | null;
+  /**
+   * Where to put the camera, in the normalized capture space (the model
+   * is centred on the origin at `TARGET_WORLD_SIZE`). Defaults to the
+   * head-on shot the automatic first capture has always used.
+   *
+   * Supplied by "Update preview" when a creator picks their own angle —
+   * `capturePositionFor()` in `./preview-camera` converts the detail
+   * viewer's camera into this space. Applied on mount only, which is
+   * fine because a capture always mounts a fresh rig.
+   */
+  cameraPosition?: [number, number, number];
 }
 
 /**
@@ -31,7 +48,52 @@ interface ThumbnailCaptureProps {
  * coordinates (which was producing nearly-blank captures).
  */
 
-const TARGET_WORLD_SIZE = 2.4;
+const TARGET_WORLD_SIZE = CAPTURE_TARGET_WORLD_SIZE;
+
+const DEFAULT_CAMERA_POSITION: [number, number, number] = [
+  0,
+  0,
+  CAPTURE_DEFAULT_DISTANCE,
+];
+
+/**
+ * Aim the camera at the origin, where `NormalizedModel` centres the
+ * model. R3F only orients its default camera for us in the head-on
+ * case; an arbitrary orbit position needs an explicit `lookAt`, or the
+ * camera keeps staring down -Z and the model leaves the frame.
+ */
+function AimAtOrigin() {
+  const camera = useThree((state) => state.camera);
+  useEffect(() => {
+    camera.lookAt(0, 0, 0);
+    camera.updateProjectionMatrix();
+  }, [camera]);
+  return null;
+}
+
+/**
+ * Rotation that carries the light rig around with the camera.
+ *
+ * The three-point rig below is authored in world space for the default
+ * head-on shot: key light up and to the right, fill behind-left, rim
+ * from behind. That is a deliberate arrangement relative to the
+ * VIEWER, not to the model — leave it pinned to world axes and a
+ * creator who orbits round to the back of their part gets a capture
+ * lit from behind, which is to say a silhouette.
+ *
+ * So rotate the whole rig by the same rotation that carries the
+ * default view direction onto the chosen one. Every angle is then lit
+ * exactly like the head-on default is, which is the point: the creator
+ * is choosing an angle, not a lighting setup.
+ */
+function lightRigQuaternion(
+  cameraPosition: [number, number, number]
+): THREE.Quaternion {
+  const from = new THREE.Vector3(0, 0, 1);
+  const to = new THREE.Vector3(...cameraPosition);
+  if (to.lengthSq() === 0) return new THREE.Quaternion();
+  return new THREE.Quaternion().setFromUnitVectors(from, to.normalize());
+}
 
 function NormalizedModel({
   onReady,
@@ -206,6 +268,7 @@ export function ThumbnailCapture({
   fileId,
   onCapture,
   recommendedMaterialId,
+  cameraPosition,
 }: ThumbnailCaptureProps) {
   const stableOnCapture = useCallback(onCapture, [onCapture]);
   const [ready, setReady] = useState(false);
@@ -216,29 +279,43 @@ export function ThumbnailCapture({
   const materialColor = material?.color;
   const useCustomShader = !!material;
 
+  const resolvedCamera = cameraPosition ?? DEFAULT_CAMERA_POSITION;
+  const lightRig = useMemo(
+    () => lightRigQuaternion(resolvedCamera),
+    // Position is a fresh tuple each render; compare by value.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [resolvedCamera[0], resolvedCamera[1], resolvedCamera[2]]
+  );
+
   return (
     <div className="fixed -left-[9999px] top-0 h-[512px] w-[512px] pointer-events-none">
       <Canvas
-        camera={{ position: [0, 0, 4.5], fov: 40 }}
+        camera={{
+          position: resolvedCamera,
+          fov: CAPTURE_FOV,
+        }}
         dpr={1}
         gl={{ antialias: true, preserveDrawingBuffer: true }}
       >
+        <AimAtOrigin />
         <ambientLight intensity={0.16} color="#fff3e3" />
-        <directionalLight
-          position={[5, 6, 5]}
-          intensity={1.4}
-          color="#ffeed6"
-        />
-        <directionalLight
-          position={[-6, -1, -3]}
-          intensity={0.35}
-          color="#fff2e0"
-        />
-        <directionalLight
-          position={[0, 2, -6]}
-          intensity={0.75}
-          color="#ffefd8"
-        />
+        <group quaternion={lightRig}>
+          <directionalLight
+            position={[5, 6, 5]}
+            intensity={1.4}
+            color="#ffeed6"
+          />
+          <directionalLight
+            position={[-6, -1, -3]}
+            intensity={0.35}
+            color="#fff2e0"
+          />
+          <directionalLight
+            position={[0, 2, -6]}
+            intensity={0.75}
+            color="#ffefd8"
+          />
+        </group>
 
         <Suspense fallback={null}>
           <NormalizedModel onReady={() => setReady(true)}>

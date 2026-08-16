@@ -1,11 +1,19 @@
 "use client";
 
 import { MaterialPreview } from "@/components/viewer/material-preview";
+import type { PreviewView } from "@/components/viewer/preview-camera";
 
 interface OrderModelPreviewProps {
   fileAssetId: string;
   format: "stl" | "obj" | "3mf" | "step" | "amf";
   materialColor: string;
+  /**
+   * Opt in to the in-frame "Update preview" control. Passed only by the
+   * file-detail page, and only for the file's owner — see
+   * `components/files/file-preview.tsx`.
+   */
+  onCapturePreview?: (view: PreviewView) => void;
+  capturePreviewStatus?: "idle" | "capturing" | "saved" | "error";
 }
 
 const PREVIEWABLE = new Set(["stl", "obj", "3mf"]);
@@ -27,6 +35,8 @@ export function OrderModelPreview({
   fileAssetId,
   format,
   materialColor,
+  onCapturePreview,
+  capturePreviewStatus,
 }: OrderModelPreviewProps) {
   if (!PREVIEWABLE.has(format)) {
     return (
@@ -46,6 +56,8 @@ export function OrderModelPreview({
       className="h-full w-full"
       enableWheelZoom={false}
       showZoomControls
+      onCapturePreview={onCapturePreview}
+      capturePreviewStatus={capturePreviewStatus}
     />
   );
 }
