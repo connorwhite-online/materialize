@@ -255,6 +255,56 @@ describe("source formats satori cannot decode", () => {
     expectPng(Buffer.from(await res.arrayBuffer()));
   }, 30000);
 
+  it("fans a stack of real transparent WebP captures", async () => {
+    // The closest thing to production this can get without a database:
+    // file thumbnails are transparent-background WebP, which is both
+    // the format satori cannot decode (so every tile goes through the
+    // sharp transcode) and the reason the tiles are contain-fit. The
+    // stack had only ever been rendered from opaque SVG stand-ins.
+    const capture = async (inset: number) =>
+      sharp({
+        create: {
+          width: 512,
+          height: 512,
+          channels: 4,
+          background: { r: 0, g: 0, b: 0, alpha: 0 },
+        },
+      })
+        .composite([
+          {
+            input: Buffer.from(
+              `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512">
+                 <rect x="${inset}" y="${inset}" width="${512 - inset * 2}" height="${
+                   512 - inset * 2
+                 }" rx="40" fill="#b4b4b4"/>
+               </svg>`
+            ),
+            top: 0,
+            left: 0,
+          },
+        ])
+        .webp()
+        .toBuffer();
+
+    const tiles = await Promise.all([40, 70, 100, 130].map(capture));
+    let call = 0;
+    globalThis.fetch = vi.fn(async () => {
+      const buf = tiles[call++ % tiles.length];
+      return new Response(new Uint8Array(buf), {
+        status: 200,
+        headers: { "content-type": "image/webp" },
+      });
+    }) as unknown as typeof fetch;
+
+    const res = await renderOgCard({
+      title: "Desk Organizer Set",
+      subtitle: "Project by connor",
+      layout: "stack",
+      images: tiles.map((_, i) => `/api/thumbnails/f${i}`),
+    });
+    expectPng(await save("project-stack-webp", res));
+  }, 30000);
+
   it("still renders a PNG source unchanged", async () => {
     mockFetchReturning(await swatch("png"), "image/png");
     const res = await renderOgCard({
