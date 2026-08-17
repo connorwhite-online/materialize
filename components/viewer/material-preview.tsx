@@ -13,6 +13,7 @@ interface MaterialPreviewProps {
   /** Opt in to the in-frame "Update preview" control. See ModelViewer. */
   onCapturePreview?: (view: PreviewView) => void;
   capturePreviewStatus?: "idle" | "capturing" | "saved" | "error";
+  capturePreviewMessage?: string | null;
 }
 
 export function MaterialPreview({
@@ -24,6 +25,7 @@ export function MaterialPreview({
   showZoomControls,
   onCapturePreview,
   capturePreviewStatus,
+  capturePreviewMessage,
 }: MaterialPreviewProps) {
   return (
     <ModelViewer
@@ -36,6 +38,7 @@ export function MaterialPreview({
       showZoomControls={showZoomControls}
       onCapturePreview={onCapturePreview}
       capturePreviewStatus={capturePreviewStatus}
+      capturePreviewMessage={capturePreviewMessage}
     />
   );
 }

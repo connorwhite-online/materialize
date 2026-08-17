@@ -747,6 +747,13 @@ interface ModelViewerProps {
    * upload lives with the caller that has the file id.
    */
   capturePreviewStatus?: "idle" | "capturing" | "saved" | "error";
+  /**
+   * Why the last capture failed, surfaced on the button's tooltip.
+   * The label has room for "Couldn't update" and no more, and an
+   * error with no stated reason is what turns a one-line fix into a
+   * bug report.
+   */
+  capturePreviewMessage?: string | null;
 }
 
 /**
@@ -1351,6 +1358,7 @@ export function ModelViewer({
   hideLoadingFallback = false,
   onCapturePreview,
   capturePreviewStatus = "idle",
+  capturePreviewMessage,
 }: ModelViewerProps) {
   const isPreview = mode === "preview";
   // Wheel zoom defaults to true unless explicitly disabled. The
@@ -1728,7 +1736,11 @@ export function ModelViewer({
             disabled={
               !previewBaselineReady || capturePreviewStatus === "capturing"
             }
-            title="Save the current angle as this file's preview image"
+            title={
+              capturePreviewStatus === "error" && capturePreviewMessage
+                ? capturePreviewMessage
+                : "Save the current angle as this file's preview image"
+            }
             className="flex h-8 items-center gap-1.5 px-3 text-xs text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
           >
             <FrameCorners size={14} strokeWidth={1.75} />

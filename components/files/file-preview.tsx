@@ -65,6 +65,7 @@ export function FilePreview({
 }: FilePreviewProps) {
   const router = useRouter();
   const [status, setStatus] = useState<CaptureStatus>("idle");
+  const [message, setMessage] = useState<string | null>(null);
   const [pendingView, setPendingView] = useState<PreviewView | null>(null);
 
   // Settle the button back to its resting label so a creator can shoot
@@ -73,12 +74,16 @@ export function FilePreview({
   // about the label not lying about being current.
   useEffect(() => {
     if (status !== "saved" && status !== "error") return;
-    const timer = setTimeout(() => setStatus("idle"), 2500);
+    const timer = setTimeout(() => {
+      setStatus("idle");
+      setMessage(null);
+    }, 2500);
     return () => clearTimeout(timer);
   }, [status]);
 
   const onCapturePreview = useCallback((view: PreviewView) => {
     setStatus("capturing");
+    setMessage(null);
     setPendingView(view);
   }, []);
 
@@ -92,10 +97,24 @@ export function FilePreview({
           body: JSON.stringify({ fileId: id, dataUrl }),
         });
         if (!res.ok) {
-          console.warn("[file-preview] POST failed", await res.text());
+          const detail = await res.text();
+          console.warn("[file-preview] POST failed", detail);
+          let reason = "";
+          try {
+            reason = (JSON.parse(detail) as { error?: string }).error ?? "";
+          } catch {
+            // Non-JSON body (a proxy error page, say) — the status
+            // line is all we can honestly report.
+          }
+          setMessage(
+            reason
+              ? `Couldn't save the preview: ${reason}`
+              : `Couldn't save the preview (HTTP ${res.status})`
+          );
           setStatus("error");
           return;
         }
+        setMessage(null);
         setStatus("saved");
         // The thumbnail URL is stable (`/api/thumbnails/{fileId}`), so a
         // route refresh alone would re-render the same src against a
@@ -104,6 +123,11 @@ export function FilePreview({
         router.refresh();
       } catch (err) {
         console.warn("[file-preview] POST error", err);
+        setMessage(
+          err instanceof Error
+            ? `Couldn't save the preview: ${err.message}`
+            : "Couldn't save the preview — the upload didn't complete."
+        );
         setStatus("error");
       }
     },
@@ -118,6 +142,7 @@ export function FilePreview({
         materialColor={materialColor}
         onCapturePreview={canUpdatePreview ? onCapturePreview : undefined}
         capturePreviewStatus={status}
+        capturePreviewMessage={message}
       />
       {pendingView && (
         <Suspense fallback={null}>
