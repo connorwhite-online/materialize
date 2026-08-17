@@ -18,7 +18,7 @@ import {
   printOrderItems,
 } from "@/lib/db/schema";
 import { eq, and, asc, desc, inArray, count } from "drizzle-orm";
-import { loadFileBySlug } from "./loader";
+import { loadFileBySlug, loadPreviewView } from "./loader";
 import { ownsLoadedFile, userHasUsedFile } from "@/lib/entitlement";
 import { isOrgMember } from "@/lib/authorization";
 import { Card, CardContent } from "@/components/ui/card";
@@ -36,7 +36,7 @@ import { StepDownloadLink } from "@/components/files/step-download-button";
 import { EditFileButton } from "@/components/files/edit-file-button";
 import { FileThumbnailGeneratorLazy } from "@/components/files/file-thumbnail-generator-lazy";
 import { FilePreview } from "@/components/files/file-preview";
-import { savedPreviewView } from "@/components/viewer/preview-camera";
+
 import { VerifyingPill } from "@/components/files/verifying-pill";
 import { ListingFlaggedBanner } from "@/components/files/listing-flagged-banner";
 import {
@@ -133,6 +133,14 @@ export default async function FileDetailPage(props: {
   // "writer" branch covers org-private drafts so any team member can
   // see them, not just the original uploader.
   if (!file) notFound();
+
+  // Loaded separately from the file row on purpose — see
+  // `loadPreviewView`. Null whenever the file is still on the
+  // automatic head-on capture, and also whenever the read fails, so a
+  // schema that lags a deploy costs the camera angle rather than the
+  // page.
+  const previewView = await loadPreviewView(file.id);
+
   const viewerCanWrite =
     !!userId &&
     (userId === file.userId ||
@@ -723,7 +731,7 @@ export default async function FileDetailPage(props: {
                   // Everyone opens on the angle the author chose, not
                   // just the author. Null for files still on the
                   // automatic head-on capture.
-                  initialView={savedPreviewView(file)}
+                  initialView={previewView}
                 />
               </div>
             ) : (
