@@ -115,6 +115,72 @@ describe("OG card rendering", () => {
  * had never once succeeded, so satori had never been handed a
  * thumbnail. Fixing that bug is what exposed this.
  */
+describe("project stack layout", () => {
+  function tile(label: string, hue: number) {
+    return (
+      "data:image/svg+xml;base64," +
+      Buffer.from(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512">
+          <polygon points="256,90 430,420 82,420" fill="hsl(${hue},8%,72%)"/>
+          <text x="256" y="470" font-size="42" text-anchor="middle" fill="#666">${label}</text>
+        </svg>`
+      ).toString("base64")
+    );
+  }
+
+  it("fans multiple file previews across the frame", async () => {
+    const buf = await save(
+      "project-stack-4",
+      await renderOgCard({
+        title: "Desk Organizer Set",
+        subtitle: "Project by connor",
+        layout: "stack",
+        images: [0, 1, 2, 3].map((i) => tile(`${i + 1}`, i * 40)),
+      })
+    );
+    expectPng(buf);
+  }, 30000);
+
+  it("fits five tiles inside the frame", async () => {
+    const buf = await save(
+      "project-stack-5",
+      await renderOgCard({
+        title: "Full Bench Kit",
+        subtitle: "Project by connor",
+        layout: "stack",
+        images: [0, 1, 2, 3, 4].map((i) => tile(`${i + 1}`, i * 40)),
+      })
+    );
+    expectPng(buf);
+  }, 30000);
+
+  it("stays centred with only two tiles", async () => {
+    const buf = await save(
+      "project-stack-2",
+      await renderOgCard({
+        title: "Two Part Bracket",
+        subtitle: "Project by connor",
+        layout: "stack",
+        images: [tile("1", 0), tile("2", 120)],
+      })
+    );
+    expectPng(buf);
+  }, 30000);
+
+  it("falls back to the split card when no tile art resolves", async () => {
+    const buf = await save(
+      "project-stack-empty",
+      await renderOgCard({
+        title: "Desk Organizer Set",
+        subtitle: "Project by connor",
+        layout: "stack",
+        images: [],
+      })
+    );
+    expectPng(buf);
+  }, 30000);
+});
+
 describe("source formats satori cannot decode", () => {
   const realFetch = globalThis.fetch;
   afterEach(() => {
@@ -187,6 +253,56 @@ describe("source formats satori cannot decode", () => {
       imageUrl: "/api/thumbnails/file_123",
     });
     expectPng(Buffer.from(await res.arrayBuffer()));
+  }, 30000);
+
+  it("fans a stack of real transparent WebP captures", async () => {
+    // The closest thing to production this can get without a database:
+    // file thumbnails are transparent-background WebP, which is both
+    // the format satori cannot decode (so every tile goes through the
+    // sharp transcode) and the reason the tiles are contain-fit. The
+    // stack had only ever been rendered from opaque SVG stand-ins.
+    const capture = async (inset: number) =>
+      sharp({
+        create: {
+          width: 512,
+          height: 512,
+          channels: 4,
+          background: { r: 0, g: 0, b: 0, alpha: 0 },
+        },
+      })
+        .composite([
+          {
+            input: Buffer.from(
+              `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512">
+                 <rect x="${inset}" y="${inset}" width="${512 - inset * 2}" height="${
+                   512 - inset * 2
+                 }" rx="40" fill="#b4b4b4"/>
+               </svg>`
+            ),
+            top: 0,
+            left: 0,
+          },
+        ])
+        .webp()
+        .toBuffer();
+
+    const tiles = await Promise.all([40, 70, 100, 130].map(capture));
+    let call = 0;
+    globalThis.fetch = vi.fn(async () => {
+      const buf = tiles[call++ % tiles.length];
+      return new Response(new Uint8Array(buf), {
+        status: 200,
+        headers: { "content-type": "image/webp" },
+      });
+    }) as unknown as typeof fetch;
+
+    const res = await renderOgCard({
+      title: "Desk Organizer Set",
+      subtitle: "Project by connor",
+      layout: "stack",
+      images: tiles.map((_, i) => `/api/thumbnails/f${i}`),
+    });
+    expectPng(await save("project-stack-webp", res));
   }, 30000);
 
   it("still renders a PNG source unchanged", async () => {

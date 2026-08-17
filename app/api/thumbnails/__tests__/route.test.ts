@@ -5,10 +5,19 @@
  * `thumbnails/{fileId}.webp` key (later streamed back same-origin by
  * the GET route). These tests cover the reject paths the fix adds:
  * wrong data-URL prefix, oversized payload, and bytes that don't
- * carry the WebP RIFF/WEBP magic header.
+ * carry the declared format's magic header.
+ *
+ * The accepted-prefix allowlist carries TWO entries. `toDataURL(type)`
+ * is specified to fall back to PNG, silently, for any type the browser
+ * cannot encode, and Safari decodes WebP but does not encode it — so
+ * captures taken on iOS arrive as PNG. Requiring WebP 400'd every one
+ * of them: visibly as "Couldn't update" on the viewer's Update-preview
+ * button, and invisibly for the automatic first capture, which only
+ * console.warns, so an iPhone upload simply never got a thumbnail.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import sharp from "sharp";
 
 const mockDbWhere = vi.fn();
 const mockDbSet = vi.fn(() => ({ where: vi.fn() }));
@@ -60,11 +69,113 @@ describe("POST /api/thumbnails", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
   });
 
-  it("rejects a dataUrl outside the data:image/webp;base64, prefix", async () => {
+  it("rejects a dataUrl outside the accepted prefix allowlist", async () => {
+    for (const dataUrl of [
+      "data:image/gif;base64,aGVsbG8=",
+      "data:image/svg+xml;base64,aGVsbG8=",
+      "data:text/html;base64,aGVsbG8=",
+      "https://evil.example/x.webp",
+    ]) {
+      const res = await POST(makeRequest({ fileId: "file-1", dataUrl }));
+      expect(res.status).toBe(400);
+    }
+    expect(mockGenerateUploadUrl).not.toHaveBeenCalled();
+  });
+
+  it("rejects PNG-declared bytes that aren't actually a PNG", async () => {
+    // The bytes must match the format the caller declared — widening
+    // the allowlist must not widen what gets past the magic-byte gate.
     const res = await POST(
       makeRequest({
         fileId: "file-1",
-        dataUrl: "data:image/png;base64,aGVsbG8=",
+        dataUrl: `data:image/png;base64,${Buffer.from("nope").toString("base64")}`,
+      })
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(json.error).toMatch(/not a valid PNG/i);
+    expect(mockGenerateUploadUrl).not.toHaveBeenCalled();
+  });
+
+  it("rejects WebP bytes smuggled under the PNG prefix, and vice versa", async () => {
+    const pngUnderWebp = await POST(
+      makeRequest({
+        fileId: "file-1",
+        dataUrl: `data:image/webp;base64,${(
+          await sharp({
+            create: {
+              width: 4,
+              height: 4,
+              channels: 4,
+              background: { r: 0, g: 0, b: 0, alpha: 0 },
+            },
+          })
+            .png()
+            .toBuffer()
+        ).toString("base64")}`,
+      })
+    );
+    expect(pngUnderWebp.status).toBe(400);
+
+    const webpUnderPng = await POST(
+      makeRequest({
+        fileId: "file-1",
+        dataUrl: `data:image/png;base64,${VALID_WEBP_BYTES.toString("base64")}`,
+      })
+    );
+    expect(webpUnderPng.status).toBe(400);
+
+    expect(mockGenerateUploadUrl).not.toHaveBeenCalled();
+  });
+
+  it("accepts a PNG capture (Safari/iOS) and stores it as WebP", async () => {
+    // The regression: Safari cannot encode WebP, so toDataURL falls
+    // back to PNG and this route used to 400 every mobile capture.
+    const png = await sharp({
+      create: {
+        width: 32,
+        height: 32,
+        channels: 4,
+        background: { r: 120, g: 120, b: 120, alpha: 1 },
+      },
+    })
+      .png()
+      .toBuffer();
+
+    const res = await POST(
+      makeRequest({
+        fileId: "file-1",
+        dataUrl: `data:image/png;base64,${png.toString("base64")}`,
+      })
+    );
+
+    expect(res.status).toBe(200);
+    // Normalized server-side: the key, the signed content type and
+    // everything downstream stay single-format regardless of which
+    // encoder the capturing browser had.
+    expect(mockGenerateUploadUrl).toHaveBeenCalledWith(
+      "thumbnails/file-1.webp",
+      "image/webp",
+      300
+    );
+
+    const put = vi.mocked(globalThis.fetch).mock.calls[0];
+    const body = put[1]?.body as Buffer;
+    expect(body.subarray(0, 4).toString("ascii")).toBe("RIFF");
+    expect(body.subarray(8, 12).toString("ascii")).toBe("WEBP");
+  });
+
+  it("rejects an undecodable PNG rather than storing it", async () => {
+    // Valid PNG signature, garbage payload — passes the magic-byte
+    // gate, fails the transcode. Must 400, not 500.
+    const res = await POST(
+      makeRequest({
+        fileId: "file-1",
+        dataUrl: `data:image/png;base64,${Buffer.concat([
+          Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+          Buffer.from("garbage payload that is not a real PNG body"),
+        ]).toString("base64")}`,
       })
     );
 
