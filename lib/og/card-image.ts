@@ -59,7 +59,7 @@ export async function resolveImageUrl(url: string): Promise<string | null> {
  * link is.
  */
 export function shouldFullBleed(
-  layout: "split" | "full" | undefined,
+  layout: "split" | "full" | "stack" | undefined,
   hasImage: boolean
 ): boolean {
   return layout === "full" && hasImage;

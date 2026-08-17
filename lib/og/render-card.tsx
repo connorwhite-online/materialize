@@ -70,7 +70,7 @@ type CardProps = {
    * business being cropped to a 1.9:1 banner) and is the automatic
    * fallback whenever no image resolved.
    */
-  layout?: "split" | "full";
+  layout?: "split" | "full" | "stack";
   /**
    * How a full-bleed image fills the frame.
    *
@@ -85,18 +85,134 @@ type CardProps = {
    * background are the same colour.
    */
   fit?: "cover" | "contain";
+  /**
+   * Artwork for `layout: "stack"` — a project's bundled file previews,
+   * fanned across the frame. Ignored by the other layouts.
+   */
+  images?: string[] | null;
 };
 
+/**
+ * Fan geometry for the stack layout.
+ *
+ * The tile size is DERIVED from the count rather than fixed: a fixed
+ * size overflows the frame as soon as there are more than three tiles,
+ * and the outermost previews get clipped by the card edge — which is
+ * exactly the art a stack exists to show. Solve for the largest tile
+ * whose fanned width still fits inside the padding instead.
+ *
+ * Rotation expands a square's bounding box (a side-T square at angle θ
+ * spans T·(cosθ + sinθ), ~1.15T at 9°), so the padding has to absorb
+ * that on top of the laid-out width — hence the generous PAD.
+ *
+ * Satori supports `transform`, but composes it far more literally than
+ * a browser does, so tiles are laid out by flexbox and only *rotated*
+ * by transform; the overlap comes from negative margins, which satori
+ * handles predictably.
+ */
+const STACK_PAD = 70;
+const STACK_MAX_TILE = 420;
+/** Overlap as a fraction of tile width. */
+const STACK_OVERLAP_RATIO = 0.18;
+const STACK_MAX_ANGLE = 9;
+
+export interface StackGeometry {
+  tile: number;
+  /** Negative margin between adjacent tiles. */
+  overlap: number;
+}
+
+export function stackGeometry(count: number): StackGeometry {
+  const n = Math.max(count, 1);
+  const available = OG_SIZE.width - STACK_PAD * 2;
+  // width = n·T − (n−1)·(ratio·T)  ⇒  T = width / (n − ratio·(n−1))
+  const denominator = n - STACK_OVERLAP_RATIO * (n - 1);
+  const tile = Math.min(STACK_MAX_TILE, Math.floor(available / denominator));
+  return { tile, overlap: -Math.round(tile * STACK_OVERLAP_RATIO) };
+}
+
+/** Rotation for tile `i` of `count`, fanned symmetrically about the centre. */
+export function stackTileAngle(i: number, count: number): number {
+  if (count <= 1) return 0;
+  const mid = (count - 1) / 2;
+  const step = STACK_MAX_ANGLE / mid;
+  return Number(((i - mid) * step).toFixed(2));
+}
+
 export async function renderOgCard(props: CardProps): Promise<ImageResponse> {
-  const [brandFont, imgSrc] = await Promise.all([
+  const [brandFont, imgSrc, stackResolved] = await Promise.all([
     loadBrandFont(),
     props.imageUrl ? fetchImageDataUrl(props.imageUrl) : Promise.resolve(null),
+    props.layout === "stack" && props.images?.length
+      ? Promise.all(props.images.map((u) => fetchImageDataUrl(u)))
+      : Promise.resolve([] as (string | null)[]),
   ]);
+
+  // Drop tiles whose art failed to resolve rather than rendering a
+  // hole in the fan; if none survive, the layouts below fall through
+  // to the split card.
+  const stackSrcs = stackResolved.filter((v): v is string => !!v);
 
   const radius = props.imageShape === "circle" ? 9999 : 32;
 
   const truncate = (s: string, n: number) =>
     s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s;
+
+  if (props.layout === "stack" && stackSrcs.length > 0) {
+    const { tile, overlap } = stackGeometry(stackSrcs.length);
+    return new ImageResponse(
+      (
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: BRAND_BG,
+            fontFamily: "Materialize",
+          }}
+        >
+          {stackSrcs.map((src, i) => (
+            <div
+              key={i}
+              style={{
+                display: "flex",
+                width: tile,
+                height: tile,
+                marginLeft: i === 0 ? 0 : overlap,
+                borderRadius: Math.round(tile * 0.1),
+                overflow: "hidden",
+                background: "#141414",
+                border: "1px solid #2a2a2a",
+                transform: `rotate(${stackTileAngle(i, stackSrcs.length)}deg)`,
+              }}
+            >
+              <img
+                src={src}
+                width={tile}
+                height={tile}
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  // Contained: these are the same square, transparent
+                  // model captures the file cards use, and cropping
+                  // them to a tile would clip the part.
+                  objectFit: "contain",
+                }}
+              />
+            </div>
+          ))}
+        </div>
+      ),
+      {
+        ...OG_SIZE,
+        fonts: [
+          { name: "Materialize", data: brandFont, style: "normal", weight: 700 },
+        ],
+      }
+    );
+  }
 
   // The `imgSrc` re-test is what narrows it to a string for the <img>
   // below — `shouldFullBleed` returns an opaque boolean, so TypeScript
