@@ -188,3 +188,71 @@ export function capturePositionFor(
   const [dx, dy, dz] = normalizeDirection(view.direction);
   return [dx * distance, dy * distance, dz * distance];
 }
+
+/**
+ * The inverse of `previewViewFromOrbit`: where to put the DETAIL
+ * VIEWER's camera so it reproduces a saved view.
+ *
+ * Same anchor, used the other way round. The viewer's settled
+ * automatic fit is defined as equal to the capture rig's default
+ * framing, so a saved framing of exactly `defaultFraming()` returns
+ * the baseline distance unchanged — a file whose owner never touched
+ * the zoom opens at precisely the fit the viewer would have chosen for
+ * itself, just rotated to their angle.
+ *
+ * Framing at a fixed field of view is purely the inverse of distance,
+ * so the conversion needs neither the model's dimensions nor the
+ * viewer's lens.
+ */
+export function viewerDistanceForFraming(
+  baselineDistance: number,
+  framing: number
+): number {
+  if (!(baselineDistance > 0) || !(framing > 0)) return baselineDistance;
+  const clamped = clamp(framing, MIN_FRAMING, MAX_FRAMING);
+  return baselineDistance * (defaultFraming() / clamped);
+}
+
+/**
+ * Camera position that reproduces `view` in the detail viewer, given
+ * the controls' target and the distance at the viewer's settled fit.
+ */
+export function viewerCameraPositionFor(params: {
+  view: PreviewView;
+  target: [number, number, number];
+  baselineDistance: number;
+}): [number, number, number] {
+  const [dx, dy, dz] = normalizeDirection(params.view.direction);
+  const distance = viewerDistanceForFraming(
+    params.baselineDistance,
+    params.view.framing
+  );
+  return [
+    params.target[0] + dx * distance,
+    params.target[1] + dy * distance,
+    params.target[2] + dz * distance,
+  ];
+}
+
+/**
+ * Read a saved view off a file row. Returns null unless all four
+ * values are present and the direction is non-degenerate — a
+ * partially-written row must fall back to the viewer's own framing
+ * rather than aim the camera at nothing.
+ */
+export function savedPreviewView(row: {
+  previewDirX: number | null;
+  previewDirY: number | null;
+  previewDirZ: number | null;
+  previewFraming: number | null;
+}): PreviewView | null {
+  const { previewDirX: x, previewDirY: y, previewDirZ: z } = row;
+  const framing = row.previewFraming;
+  if (x == null || y == null || z == null || framing == null) return null;
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+    return null;
+  }
+  if (!Number.isFinite(framing) || framing <= 0) return null;
+  if (Math.hypot(x, y, z) === 0) return null;
+  return { direction: normalizeDirection([x, y, z]), framing };
+}

@@ -14,6 +14,7 @@ interface MaterialPreviewProps {
   onCapturePreview?: (view: PreviewView) => void;
   capturePreviewStatus?: "idle" | "capturing" | "saved" | "error";
   capturePreviewMessage?: string | null;
+  initialView?: PreviewView | null;
 }
 
 export function MaterialPreview({
@@ -26,6 +27,7 @@ export function MaterialPreview({
   onCapturePreview,
   capturePreviewStatus,
   capturePreviewMessage,
+  initialView,
 }: MaterialPreviewProps) {
   return (
     <ModelViewer
@@ -39,6 +41,7 @@ export function MaterialPreview({
       onCapturePreview={onCapturePreview}
       capturePreviewStatus={capturePreviewStatus}
       capturePreviewMessage={capturePreviewMessage}
+      initialView={initialView}
     />
   );
 }

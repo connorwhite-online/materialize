@@ -43,6 +43,11 @@ export const loadFileBySlug = cache(async function loadFileBySlug(slug: string) 
       minWallThickness: files.minWallThickness,
       visibility: files.visibility,
       coverPhotoId: files.coverPhotoId,
+      // Owner-chosen preview camera — the viewer opens on it.
+      previewDirX: files.previewDirX,
+      previewDirY: files.previewDirY,
+      previewDirZ: files.previewDirZ,
+      previewFraming: files.previewFraming,
       downloadCount: files.downloadCount,
       viewCount: files.viewCount,
       createdAt: files.createdAt,

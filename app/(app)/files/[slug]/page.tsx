@@ -36,6 +36,7 @@ import { StepDownloadLink } from "@/components/files/step-download-button";
 import { EditFileButton } from "@/components/files/edit-file-button";
 import { FileThumbnailGeneratorLazy } from "@/components/files/file-thumbnail-generator-lazy";
 import { FilePreview } from "@/components/files/file-preview";
+import { savedPreviewView } from "@/components/viewer/preview-camera";
 import { VerifyingPill } from "@/components/files/verifying-pill";
 import { ListingFlaggedBanner } from "@/components/files/listing-flagged-banner";
 import {
@@ -719,6 +720,10 @@ export default async function FileDetailPage(props: {
                   // re-checks ownership regardless, so this governs
                   // what is offered, not what is permitted.
                   canUpdatePreview={isOwner}
+                  // Everyone opens on the angle the author chose, not
+                  // just the author. Null for files still on the
+                  // automatic head-on capture.
+                  initialView={savedPreviewView(file)}
                 />
               </div>
             ) : (

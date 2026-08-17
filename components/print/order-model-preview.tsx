@@ -15,6 +15,7 @@ interface OrderModelPreviewProps {
   onCapturePreview?: (view: PreviewView) => void;
   capturePreviewStatus?: "idle" | "capturing" | "saved" | "error";
   capturePreviewMessage?: string | null;
+  initialView?: PreviewView | null;
 }
 
 const PREVIEWABLE = new Set(["stl", "obj", "3mf"]);
@@ -39,6 +40,7 @@ export function OrderModelPreview({
   onCapturePreview,
   capturePreviewStatus,
   capturePreviewMessage,
+  initialView,
 }: OrderModelPreviewProps) {
   if (!PREVIEWABLE.has(format)) {
     return (
@@ -61,6 +63,7 @@ export function OrderModelPreview({
       onCapturePreview={onCapturePreview}
       capturePreviewStatus={capturePreviewStatus}
       capturePreviewMessage={capturePreviewMessage}
+      initialView={initialView}
     />
   );
 }
