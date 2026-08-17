@@ -803,3 +803,37 @@
   }
 }
 
+/* Mobile nav unread pip: mounts the instant the pill starts collapsing
+   (React conditional on `!open`), but has no business showing up while
+   the card is still shrinking underneath it. Held invisible for 260ms —
+   matches `--mz-crop-ms` / `CARD_CROP` in mobile-nav.tsx, the width tween
+   that drives the collapse — then fades in with a light overshoot so it
+   reads as landing rather than co-animating with the card. Retune the
+   delay alongside CARD_CROP if that duration ever changes.
+
+   Scale animates via the standalone `scale` property, not
+   `transform: scale()` — the element already carries a Tailwind
+   `translate-x-1/2 -translate-y-1/2` transform to straddle the pill's
+   corner, and `scale` composes independently instead of clobbering it. */
+@keyframes mz-nav-pip-in {
+  from {
+    opacity: 0;
+    scale: 0.5;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+.mz-nav-pip {
+  animation: mz-nav-pip-in 220ms var(--ease-spring) both;
+  animation-delay: 260ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mz-nav-pip {
+    animation: none;
+    opacity: 1;
+    scale: 1;
+  }
+}
+
