@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { ChevronRight } from "@/components/icons/chevron-right";
 import { Layers } from "@/components/icons/layers";
+import { Print } from "@/components/icons/print";
 import { Sparkles } from "@/components/icons/sparkles";
 import {
   findMaterialBySlug,
@@ -175,11 +176,16 @@ export default async function MaterialDetailPage(props: {
             </p>
           )}
 
+          {/* This page's one job is to start a print, so the CTA carries the
+              same weight as the Download/Print row on file + project detail
+              (`size="xl"`, the Print glyph, semibold). */}
           <div className="mt-6">
             <Button
-              size="lg"
+              size="xl"
+              className="font-semibold"
               render={<Link href={`/print?material=${material.id}`} />}
             >
+              <Print size={18} />
               Print with {material.name}
             </Button>
           </div>
