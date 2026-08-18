@@ -13,12 +13,14 @@ import { buildKnowledgeBlock } from "./knowledge";
 import { needsExchangerRecipe } from "./knowledge/exchanger-recipe";
 import { usesInternalThreadRecipe } from "./knowledge/bd-warehouse";
 import { selectExemplars, formatExemplars } from "./knowledge/exemplars";
+import { fitTargetsForBrief } from "./knowledge/components";
 import { judgeAesthetics, type AestheticJudgement } from "./critique";
 import { CAD_FEEDBACK_TAG_LABELS, type CadFeedbackTag } from "./feedback";
 import {
   checkDimensionTargets,
   summarizeDimensionChecks,
   formatDimensionRepairHints,
+  hasDimensionFailures,
   type DimensionCheckResult,
   type DimensionTarget,
 } from "./dimension-check";
@@ -28,10 +30,15 @@ import {
   networksInconclusive,
   networksSummary,
 } from "./network-check";
-import { cadBriefSchema, type CadBrief } from "./brief";
+import {
+  buildBrief,
+  cadBriefSchema,
+  formatBriefForPrompt,
+  type CadBrief,
+} from "./brief";
 import { enrichRepairHint } from "./repair-taxonomy";
 import { sampleStlPoints } from "./stl-points";
-import { modelForRole } from "./models";
+import { briefStepEnabled, modelForRole } from "./models";
 import {
   sourcePart,
   catalogEnabled,
@@ -91,6 +98,11 @@ function maxAgenticQuestions(): number {
 // Tool-turn cap: each turn = one model call + its tool executions. Complex
 // parts per doc 03 need >4 execs; 16 bounds cost without strangling them.
 const MAX_TOOL_TURNS = 16;
+// How many times finish() may be refused for an incomplete part before the
+// loop honors it anyway. The gate exists to stop the agent declaring done on
+// an unverified solid; it must never become a way to LOSE the part. Past this
+// cap, shipping a flagged result beats spending the remaining budget arguing.
+const MAX_FINISH_REFUSALS = 2;
 // Wall-clock budget. 600s: a full-scale TPMS/exchanger build spends 3-4
 // minutes in a SINGLE final mesh, so the old 240s cut large parts off
 // mid-assembly. Local/self-hosted runs are unbounded by the platform;
@@ -331,7 +343,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: "finish",
     description:
-      "Declare the model done. The last exec'd `result` becomes the returned part — make sure the final exec assigned it and it graded clean.",
+      "Declare the model done. The last exec'd `result` becomes the returned part — make sure the final exec assigned it and it graded clean. GATED: refused, with the outstanding list, while the part fails its structural grade, misses the brief's dimension contract, or lacks a required dual-fluid isolation check.",
     input_schema: NO_INPUT,
   },
 ];
@@ -342,7 +354,8 @@ const LOOP_GUIDANCE = `You are working in a PERSISTENT Python session via tools 
 - When a step fails, fix THAT step — the previous steps are still in the namespace; do not restart from scratch.
 - snapshot() before risky operations (large fillets, shells, big booleans); rollback() if the step wrecks the solid.
 - Keep each exec small and per-step; assign the running solid to \`result\` whenever a printable state exists so progress is never lost.
-- You have a bounded budget (tool turns + wall clock). Get to a valid \`result\` early, then refine; call grade() and then finish() when it grades clean.
+- You have a bounded budget (tool turns + wall clock). Get to a valid \`result\` early so progress is never lost — but a valid shape is a CHECKPOINT, not the finish line. Keep building until the part is actually the thing that was asked for.
+- finish() is GATED and can be REFUSED: while \`result\` fails the structural grade, misses the brief's dimension contract, or (dual-fluid) has no isolation check, finish() returns the outstanding list instead of ending the build. Call grade() to see where you stand, fix what it names, then finish().
 
 Review doctrine (MTR-199) — renders are DIAGNOSTIC, not authoritative:
 - Convert every VISUAL concern into a follow-up GEOMETRY check before acting on it. If a hole looks off-centre or a wall looks thin, the next tool call is measure() (or an exec that prints the coordinate/bbox), NOT a blind regenerate. Only treat a concern as real once a measurement confirms it.
@@ -367,7 +380,7 @@ function buildSystemPrompt(input: HarnessInput): string {
     .join("\n\n");
 }
 
-function buildTaskPrompt(input: HarnessInput): string {
+function buildTaskPrompt(input: HarnessInput, brief?: CadBrief): string {
   const lines: string[] = [];
   if (input.priorSourceCode) {
     lines.push(
@@ -398,7 +411,13 @@ function buildTaskPrompt(input: HarnessInput): string {
       'The user attached reference image(s), each captioned "User reference image N". They are the design target: take the form language, proportions, and visible features from them. The written instructions win on any conflict.'
     );
   }
-  if (input.priorBrief != null) {
+  // The contract the finish() gate holds this build to — SHOW it, or the agent
+  // gets refused for numbers it was never told. A parsed brief gets the same
+  // readable block the scripted harness sends; an unparseable prior brief
+  // keeps its raw-JSON framing rather than being dropped.
+  if (brief) {
+    lines.push("", formatBriefForPrompt(brief));
+  } else if (input.priorBrief != null) {
     lines.push("", `Design brief from the original build (honor its numbers): ${JSON.stringify(input.priorBrief)}`);
   }
   const fb = input.priorFeedback;
@@ -485,16 +504,23 @@ export async function runAgenticHarness(
   const model = modelForRole("implement");
   const startedAt = Date.now();
 
-  // Dimension contract (MTR-197): targets from the provided/prior brief, if any.
-  // The agentic loop has no brief step of its own, so this is a no-op unless the
-  // caller threaded a brief through.
-  const dimensionTargets = extractAgenticDimensionTargets(input);
+  const telemetry: NonNullable<HarnessResult["telemetry"]> = [];
+
+  // The contract this build is held to: caller-threaded, else built here for a
+  // fresh build (resolveAgenticBrief). Without it the loop has no objective
+  // notion of "complete" — which is exactly how it used to finish() on a
+  // simplified part and call it done.
+  const brief = await resolveAgenticBrief(input, (ms, briefModel) => {
+    telemetry.push({ role: "brief", model: briefModel, ms });
+  });
+  // Dimension contract (MTR-197): asserted by grade() and by the finish() gate.
+  const dimensionTargets = dimensionTargetsFromBrief(brief);
   let dimensionChecks: DimensionCheckResult[] = [];
 
-  // Design intent for the aesthetic judge (MTR-223): the caller-threaded brief
-  // (the loop builds no brief of its own) plus the agent's opening plan text,
-  // captured from its first substantive text output below.
-  const intentBrief = parseAgenticIntentBrief(input);
+  // Design intent for the aesthetic judge (MTR-223): the brief above plus the
+  // agent's opening plan text, captured from its first substantive text
+  // output below.
+  const intentBrief = brief;
   let agentPlan: string | undefined;
 
   const emit = (event: CadProgressEvent) => {
@@ -504,8 +530,6 @@ export async function runAgenticHarness(
       /* progress is cosmetic */
     }
   };
-
-  const telemetry: NonNullable<HarnessResult["telemetry"]> = [];
 
   let sessionId: string | null = null;
   // Running source assembly: the exec history, step-marked, so the persisted
@@ -533,6 +557,8 @@ export async function runAgenticHarness(
   let toolTurns = 0;
   let execCount = 0;
   let finished = false;
+  // finish() calls refused so far because the part wasn't verifiably complete.
+  let finishRefusals = 0;
   // True when the loop exited because the turn/time budget ran out while the
   // model was still mid-build (as opposed to a graceful stop or finish()).
   // bestRun in this state is whatever last passed the shallow structural
@@ -575,7 +601,7 @@ export async function runAgenticHarness(
       {
         role: "user",
         content: [
-          { type: "text", text: buildTaskPrompt(input) },
+          { type: "text", text: buildTaskPrompt(input, brief) },
           // Caption-then-image, same as completeText: each reference is
           // announced by its own text block so it can't be confused with the
           // tool-result renders that follow in later turns.
@@ -757,7 +783,7 @@ export async function runAgenticHarness(
     run,
     aestheticScore: judgement?.available ? (judgement.score ?? null) : null,
     aestheticDims: judgement?.available ? (judgement.perDimension ?? null) : null,
-    brief: input.priorBrief,
+    brief: brief ?? input.priorBrief,
     dimensionChecks,
     telemetry,
     ...(partSourcing.sourced.length > 0 || partSourcing.misses.length > 0
@@ -783,13 +809,57 @@ export async function runAgenticHarness(
           : bestRun,
       aestheticScore: null,
       aestheticDims: null,
-      brief: input.priorBrief,
+      brief: brief ?? input.priorBrief,
       dimensionChecks,
       telemetry,
       ...(partSourcing.sourced.length > 0 || partSourcing.misses.length > 0
         ? { partSourcing }
         : {}),
     };
+  }
+
+  /**
+   * What still stands between the current state and a defensible "done",
+   * evaluated against the run that will ACTUALLY be exported (`bestRun` — the
+   * last one to pass the structural grade), not whatever `lastRun` happens to
+   * hold after an experiment.
+   *
+   * Honesty rail (MTR-199): only checks that RAN can block. A mesh-mode part
+   * with no topology manifest reports its feature targets not-run, and
+   * not-run never counts as failed — `hasDimensionFailures` enforces this.
+   */
+  function outstandingForFinish(): string[] {
+    const out: string[] = [];
+    const shipping = bestRun;
+    if (!shipping) {
+      out.push(
+        lastRun
+          ? `\`result\` does not pass the structural grade: ${gradeRun(lastRun).failures.join("; ")}`
+          : "no solid has been produced yet — exec code that assigns `result`"
+      );
+      return out;
+    }
+    if (dimensionTargets.length > 0) {
+      dimensionChecks = checkDimensionTargets(shipping, dimensionTargets);
+      if (hasDimensionFailures(dimensionChecks)) {
+        out.push(
+          `the brief's dimension contract is not met:\n${formatDimensionRepairHints(dimensionChecks)}`
+        );
+      }
+    }
+    // Dual-fluid isolation (MTR-179): a mixed exchanger is scrap however it
+    // looks, and for an exchanger-class prompt a MISSING report is itself the
+    // defect — the declaration never happened.
+    const report = getNetworksReport(shipping);
+    const isolationFailure = networksFailure(report);
+    if (isolationFailure) {
+      out.push(`fluid isolation failed: ${isolationFailure}`);
+    } else if (!report && needsExchangerRecipe(input.prompt)) {
+      out.push(
+        "no dual-fluid isolation check ran — declare fluid_ports (LIST of {name, point:[x,y,z], r}), fluid_plugs (LIST of {a, b, r}) and fluid_min_feature = wall in an exec, then re-grade"
+      );
+    }
+    return out;
   }
 
   /** Dispatch one tool call; returns the tool_result content blocks. */
@@ -1161,8 +1231,33 @@ export async function runAgenticHarness(
         ];
       }
       case "finish": {
+        const outstanding = outstandingForFinish();
+        // Refuse an early finish() on a part that can't be shown to be
+        // complete, and hand back exactly what's outstanding so the next step
+        // is targeted. Bounded (MAX_FINISH_REFUSALS): the gate must not be a
+        // way to lose the part to a budget spent arguing.
+        if (outstanding.length > 0 && finishRefusals < MAX_FINISH_REFUSALS) {
+          finishRefusals++;
+          return [
+            textBlock(
+              JSON.stringify({
+                finished: false,
+                outstanding,
+                refusalsLeft: MAX_FINISH_REFUSALS - finishRefusals,
+                guidance:
+                  "Not done yet. Fix these, exec the corrected build so `result` holds the COMPLETE part, then call finish() again.",
+              })
+            ),
+          ];
+        }
         finished = true;
-        return [textBlock("finishing — the last `result` will be exported")];
+        return [
+          textBlock(
+            outstanding.length > 0
+              ? `finishing with checks still outstanding (${outstanding.join("; ")}) — the last passing \`result\` will be exported`
+              : "finishing — the last `result` will be exported"
+          ),
+        ];
       }
       default:
         return [textBlock(`unknown tool: ${use.name}`)];
@@ -1170,27 +1265,62 @@ export async function runAgenticHarness(
   }
 }
 
-/**
- * Dimension targets from the caller-threaded brief (provided or prior). The
- * agentic loop builds no brief of its own, so this is empty unless the
- * orchestrator passed one. Best-effort: malformed briefs yield no targets.
- */
-function extractAgenticDimensionTargets(input: HarnessInput): DimensionTarget[] {
-  const source = input.providedBrief ?? input.priorBrief;
-  if (source == null) return [];
-  const parsed = cadBriefSchema.safeParse(source);
-  if (!parsed.success) return [];
-  return (parsed.data.dimensionTargets as DimensionTarget[] | undefined) ?? [];
+/** Best-effort parse of an untyped brief value; undefined when absent/malformed. */
+function parseBrief(value: unknown): CadBrief | undefined {
+  if (value == null) return undefined;
+  const parsed = cadBriefSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
 }
 
 /**
- * The caller-threaded brief as judge intent (MTR-223) — same source and
- * best-effort parse as the dimension targets above; undefined when absent or
- * malformed so the judge prompt stays unchanged.
+ * The brief this build is held to. Caller-threaded first (the composer's
+ * providedBrief, or a revision's priorBrief), otherwise BUILT HERE for a fresh
+ * build — the loop used to have no brief of its own, so on the orchestrate
+ * path `dimensionTargets` was always empty and the MTR-197 dimension contract
+ * silently checked nothing on exactly the parts that need it most.
+ *
+ * Deliberately does NOT run the brief's `questions` machinery the scripted
+ * harness runs: this loop asks through `ask_user` (MTR-191) and two competing
+ * question paths in one build is worse than one. Best-effort by contract — any
+ * failure yields no brief and the loop proceeds exactly as before.
  */
-function parseAgenticIntentBrief(input: HarnessInput): CadBrief | undefined {
-  const source = input.providedBrief ?? input.priorBrief;
-  if (source == null) return undefined;
-  const parsed = cadBriefSchema.safeParse(source);
-  return parsed.success ? parsed.data : undefined;
+async function resolveAgenticBrief(
+  input: HarnessInput,
+  onTelemetry: (ms: number, model: string | undefined) => void
+): Promise<CadBrief | undefined> {
+  const threaded = parseBrief(input.providedBrief) ?? parseBrief(input.priorBrief);
+  if (threaded) return threaded;
+  // A revision honors the original contract or none — never invent a new one
+  // mid-thread, or turn 2 gets held to numbers turn 1 never agreed to.
+  if (input.priorSourceCode) return undefined;
+  if (!briefStepEnabled() || !hasModelCredentials()) return undefined;
+
+  const model = modelForRole("brief");
+  const started = Date.now();
+  try {
+    return (
+      (await buildBrief({
+        prompt: input.prompt,
+        images: input.images,
+        facts: input.fetchedFacts,
+        signal: input.signal,
+      })) ?? undefined
+    );
+  } catch (err) {
+    if ((err as Error)?.name === "AbortError") throw err;
+    return undefined;
+  } finally {
+    onTelemetry(Date.now() - started, model);
+  }
+}
+
+/**
+ * The machine-checkable targets a brief carries: its declared callouts plus
+ * the auto-emitted component-fit targets (MTR-204). Mirrors the scripted
+ * harness's `extractDimensionTargets` so both paths check the same contract.
+ */
+function dimensionTargetsFromBrief(brief: CadBrief | undefined): DimensionTarget[] {
+  if (!brief) return [];
+  const declared = (brief.dimensionTargets as DimensionTarget[] | undefined) ?? [];
+  return [...declared, ...fitTargetsForBrief(brief)];
 }

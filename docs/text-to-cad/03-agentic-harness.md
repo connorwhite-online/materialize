@@ -57,6 +57,14 @@ New `runAgenticHarness` (sibling of `runHarness`, same `HarnessResult` contract 
   named/located features (v1: bbox + volume + per-axis extents only).
 - `grade()` — run `gradeRun` + (if enabled) the aesthetic judge on the current state.
 - `finish()` — declare done; harness exports STL/STEP from the session and returns.
+  **Gated (2026-08):** refused while the run that would actually ship (`bestRun`) fails
+  the structural grade, misses the brief's dimension contract, or — for an
+  exchanger-class prompt — carries no `check_networks` report; the refusal returns the
+  outstanding list. Bounded by `MAX_FINISH_REFUSALS = 2`, after which finish() is honored
+  and the result is flagged, because a gate that spends the whole budget arguing loses the
+  part entirely. Only checks that RAN can block (honesty rail). The loop now also resolves
+  its OWN brief on a fresh build (`resolveAgenticBrief`) — before that, `dimensionTargets`
+  was empty on the orchestrate path and the gate would have had nothing to check.
 
 System prompt: the existing `SYSTEM_PROMPT` rules + knowledge block + exemplar machinery
 (`buildKnowledgeBlock`, `selectExemplars`) carry over verbatim — the *taste* stack is

@@ -98,11 +98,16 @@ beforeEach(() => {
   createMock.mockReset();
   execMock.mockReset();
   process.env.ANTHROPIC_API_KEY = "sk-test";
+  // The loop builds its own brief on a fresh build; these tests script the
+  // model turn-by-turn and aren't about the brief, so skip that model call
+  // rather than letting it consume a scripted response.
+  process.env.CAD_BRIEF_STEP = "false";
 });
 
 afterEach(() => {
   if (savedKey === undefined) delete process.env.ANTHROPIC_API_KEY;
   else process.env.ANTHROPIC_API_KEY = savedKey;
+  delete process.env.CAD_BRIEF_STEP;
 });
 
 describe("agentic feature accumulation", () => {
