@@ -554,11 +554,15 @@ export function MobileNav({
           {/* Unread pip — collapsed only; once open, the inbox is a menu
               row carrying its own count. It straddles the pill's
               top-right edge at 45°, so it reads as a badge on the nav
-              itself rather than a mark on the grabber. */}
+              itself rather than a mark on the grabber. `mz-nav-pip`
+              (globals.css) holds it invisible for the card's own crop
+              duration so it doesn't co-animate with a still-shrinking
+              pill, then lands with a fade + spring scale once the
+              collapse has actually settled. */}
           {!open && unreadCount > 0 && (
             <span
               aria-hidden
-              className="pointer-events-none absolute right-1.5 top-1.5 h-3 w-3 -translate-y-1/2 translate-x-1/2 rounded-full bg-destructive ring-2 ring-background"
+              className="mz-nav-pip pointer-events-none absolute right-1.5 top-1.5 h-3 w-3 -translate-y-1/2 translate-x-1/2 rounded-full bg-destructive ring-2 ring-background"
             />
           )}
         </div>
