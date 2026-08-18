@@ -231,6 +231,64 @@ describe("POST /api/thumbnails", () => {
     );
   });
 
+  it("persists the chosen camera alongside the image", async () => {
+    await POST(
+      makeRequest({
+        fileId: "file-1",
+        dataUrl: VALID_WEBP_DATA_URL,
+        previewView: { direction: [0, 0.5, 0.866], framing: 0.73 },
+      })
+    );
+
+    // One write: a capture and the angle it was shot from are one
+    // fact, and splitting them invites a row claiming an angle its
+    // thumbnail never came from.
+    expect(mockDbSet).toHaveBeenCalledTimes(1);
+    expect(
+      (mockDbSet.mock.calls as unknown as unknown[][])[0][0]
+    ).toMatchObject({
+      previewDirX: 0,
+      previewDirY: 0.5,
+      previewDirZ: 0.866,
+      previewFraming: 0.73,
+    });
+  });
+
+  it("leaves the camera columns untouched for an automatic capture", async () => {
+    // The automatic first capture posts no view, and null is what
+    // tells the viewer to keep its own framing — writing a default
+    // here would erase that distinction.
+    await POST(makeRequest({ fileId: "file-1", dataUrl: VALID_WEBP_DATA_URL }));
+
+    const written = (mockDbSet.mock.calls as unknown as unknown[][])[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(written).toHaveProperty("thumbnailUrl");
+    expect(written).not.toHaveProperty("previewDirX");
+    expect(written).not.toHaveProperty("previewFraming");
+  });
+
+  it("rejects a malformed preview view rather than half-writing it", async () => {
+    for (const previewView of [
+      { direction: [0, 1], framing: 0.7 },
+      { direction: [0, 1, 0], framing: 0 },
+      { direction: [0, 1, 0], framing: -1 },
+      { direction: ["a", 1, 0], framing: 0.7 },
+      { framing: 0.7 },
+    ]) {
+      const res = await POST(
+        makeRequest({
+          fileId: "file-1",
+          dataUrl: VALID_WEBP_DATA_URL,
+          previewView,
+        })
+      );
+      expect(res.status).toBe(400);
+    }
+    expect(mockDbSet).not.toHaveBeenCalled();
+  });
+
   it("404s when the caller doesn't own the file", async () => {
     mockDbWhere.mockResolvedValue([]);
     const res = await POST(

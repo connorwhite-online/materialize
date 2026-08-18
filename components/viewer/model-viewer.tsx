@@ -50,7 +50,11 @@ import {
   ScissorsIcon,
 } from "lucide-react";
 import { FrameCorners } from "@/components/icons/frame-corners";
-import { previewViewFromOrbit, type PreviewView } from "./preview-camera";
+import {
+  previewViewFromOrbit,
+  viewerCameraPositionFor,
+  type PreviewView,
+} from "./preview-camera";
 import { StlModel } from "./loaders/stl-model";
 import { ObjModel } from "./loaders/obj-model";
 import { ThreeMfModel } from "./loaders/threemf-model";
@@ -754,6 +758,17 @@ interface ModelViewerProps {
    * bug report.
    */
   capturePreviewMessage?: string | null;
+  /**
+   * Open on the angle the file's owner chose, instead of the viewer's
+   * own head-on default. Applied once, as soon as the automatic fit
+   * settles — that fit is the baseline the saved framing is measured
+   * against, so it has to land first.
+   *
+   * Null/undefined keeps the default framing, which is the right
+   * behaviour for every file whose thumbnail came from the automatic
+   * capture.
+   */
+  initialView?: PreviewView | null;
 }
 
 /**
@@ -1359,6 +1374,7 @@ export function ModelViewer({
   onCapturePreview,
   capturePreviewStatus = "idle",
   capturePreviewMessage,
+  initialView,
 }: ModelViewerProps) {
   const isPreview = mode === "preview";
   // Wheel zoom defaults to true unless explicitly disabled. The
@@ -1375,11 +1391,32 @@ export function ModelViewer({
   const previewBaselineRef = useRef<number | null>(null);
   const [previewBaselineReady, setPreviewBaselineReady] = useState(false);
   const capturePreviewEnabled = !!onCapturePreview;
+  // The probe supplies the settled baseline, which both the capture
+  // button and a saved initial view depend on.
+  const needsFrameProbe = capturePreviewEnabled || !!initialView;
 
-  const markPreviewBaselineReady = useCallback(
-    () => setPreviewBaselineReady(true),
-    []
-  );
+  // Applied at most once. Re-aiming on a later re-fit would yank the
+  // camera out from under someone who has since orbited it themselves.
+  const initialViewAppliedRef = useRef(false);
+
+  const markPreviewBaselineReady = useCallback(() => {
+    setPreviewBaselineReady(true);
+
+    const controls = controlsRef.current;
+    const baseline = previewBaselineRef.current;
+    if (!initialView || !controls || !baseline) return;
+    if (initialViewAppliedRef.current) return;
+    initialViewAppliedRef.current = true;
+
+    const t = controls.target;
+    const [x, y, z] = viewerCameraPositionFor({
+      view: initialView,
+      target: [t.x, t.y, t.z],
+      baselineDistance: baseline,
+    });
+    controls.object.position.set(x, y, z);
+    controls.update();
+  }, [initialView]);
 
   const handleCapturePreview = useCallback(() => {
     const controls = controlsRef.current;
@@ -1555,7 +1592,7 @@ export function ModelViewer({
             {/* Real "geometry loaded" signal — commits with the mesh, after
                 Suspense resolves (MTR-214). */}
             {onReady && <ReadySignal onReady={onReady} />}
-            {capturePreviewEnabled && (
+            {needsFrameProbe && (
               <PreviewFrameProbe
                 controlsRef={controlsRef}
                 baselineRef={previewBaselineRef}

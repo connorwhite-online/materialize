@@ -33,6 +33,13 @@ interface FilePreviewProps {
    * whether the affordance is shown.
    */
   canUpdatePreview?: boolean;
+  /**
+   * The angle this file's owner chose, if they ever pressed "Update
+   * preview". The viewer opens on it instead of its head-on default —
+   * the saved angle is the author's declared best view of the object,
+   * so it should be the one everybody arrives at.
+   */
+  initialView?: PreviewView | null;
 }
 
 /**
@@ -62,6 +69,7 @@ export function FilePreview({
   materialColor,
   recommendedMaterialId,
   canUpdatePreview = false,
+  initialView,
 }: FilePreviewProps) {
   const router = useRouter();
   const [status, setStatus] = useState<CaptureStatus>("idle");
@@ -89,12 +97,23 @@ export function FilePreview({
 
   const onCaptured = useCallback(
     async (id: string, dataUrl: string) => {
+      // Read before clearing — the state update below is what unmounts
+      // the capture rig, and the view has to travel with the image.
+      const view = pendingView;
       setPendingView(null);
       try {
         const res = await fetch("/api/thumbnails", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fileId: id, dataUrl }),
+          body: JSON.stringify({
+          fileId: id,
+          dataUrl,
+          // Sent with the image so the file remembers the angle it was
+          // shot from, and can open on it.
+          previewView: view
+            ? { direction: view.direction, framing: view.framing }
+            : undefined,
+        }),
         });
         if (!res.ok) {
           const detail = await res.text();
@@ -131,7 +150,7 @@ export function FilePreview({
         setStatus("error");
       }
     },
-    [router]
+    [router, pendingView]
   );
 
   return (
@@ -143,6 +162,7 @@ export function FilePreview({
         onCapturePreview={canUpdatePreview ? onCapturePreview : undefined}
         capturePreviewStatus={status}
         capturePreviewMessage={message}
+        initialView={initialView}
       />
       {pendingView && (
         <Suspense fallback={null}>

@@ -65,8 +65,20 @@ function formatFromDataUrl(dataUrl: string): AcceptedFormat | null {
   return null;
 }
 
+/**
+ * The camera the owner chose, when the capture came from "Update
+ * preview" rather than the automatic first shot. Optional: the
+ * automatic path posts without it, and the columns staying null is
+ * what tells the detail viewer to keep its own framing.
+ */
+const previewViewSchema = z.object({
+  direction: z.tuple([z.number(), z.number(), z.number()]),
+  framing: z.number().positive(),
+});
+
 const bodySchema = z.object({
   fileId: z.string().min(1),
+  previewView: previewViewSchema.optional(),
   dataUrl: z
     .string()
     .min(1)
@@ -118,7 +130,7 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-    const { fileId, dataUrl } = parsed.data;
+    const { fileId, dataUrl, previewView } = parsed.data;
 
     // Verify ownership
     const [file] = await db
@@ -205,9 +217,23 @@ export async function POST(request: Request) {
     // prefix, both of which are indifferent to a query string.
     const thumbnailUrl = `/api/thumbnails/${fileId}?v=${Date.now().toString(36)}`;
 
+    // Persist the chosen camera alongside the image, in the same write.
+    // A capture and the angle it was taken from are one fact; splitting
+    // them across two round trips invites a row that claims an angle
+    // its thumbnail was never shot from.
     await db
       .update(files)
-      .set({ thumbnailUrl })
+      .set(
+        previewView
+          ? {
+              thumbnailUrl,
+              previewDirX: previewView.direction[0],
+              previewDirY: previewView.direction[1],
+              previewDirZ: previewView.direction[2],
+              previewFraming: previewView.framing,
+            }
+          : { thumbnailUrl }
+      )
       .where(eq(files.id, fileId));
 
     return Response.json({ thumbnailUrl });

@@ -9,6 +9,7 @@ import {
   timestamp,
   jsonb,
   numeric,
+  doublePrecision,
   pgEnum,
   index,
   check,
@@ -303,6 +304,28 @@ export const files = pgTable("files", {
   // FK declared in the migration with ON DELETE SET NULL so the
   // column self-clears if the picked photo is deleted.
   coverPhotoId: uuid("cover_photo_id"),
+  /**
+   * The camera the owner chose when they last pressed "Update preview",
+   * as a unit direction from the model's centre plus `previewFraming`
+   * — the fraction of viewport height the model spans. Rig-independent
+   * on purpose: the detail viewer and the offscreen capture rig use
+   * different scales and lenses, so a raw camera position does not
+   * transfer between them (see `components/viewer/preview-camera.ts`).
+   *
+   * Written by `POST /api/thumbnails` alongside the capture, and read
+   * back by the detail viewer so a file always opens on the angle its
+   * author picked. Null on every file whose thumbnail came from the
+   * automatic head-on capture, which is the signal to keep the
+   * viewer's own default framing.
+   *
+   * Stored as four plain columns rather than a jsonb blob because the
+   * interesting question about them is aggregate — where do authors
+   * actually point the camera — and that wants `avg()`, not parsing.
+   */
+  previewDirX: doublePrecision("preview_dir_x"),
+  previewDirY: doublePrecision("preview_dir_y"),
+  previewDirZ: doublePrecision("preview_dir_z"),
+  previewFraming: doublePrecision("preview_framing"),
   // Set when a deferred check (e.g. async geometry-hash dedup) finds
   // something that should pull this listing out of public view. The
   // server action that detects the collision flips status -> archived

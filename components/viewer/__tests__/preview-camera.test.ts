@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
+  savedPreviewView,
+  viewerCameraPositionFor,
+  viewerDistanceForFraming,
   CAPTURE_DEFAULT_DISTANCE,
   CAPTURE_FOV,
   CAPTURE_TARGET_WORLD_SIZE,
@@ -196,5 +199,135 @@ describe("capture rig constants", () => {
     );
     expect(defaultFraming()).toBeGreaterThan(MIN_FRAMING);
     expect(defaultFraming()).toBeLessThan(MAX_FRAMING);
+  });
+});
+
+describe("restoring a saved view in the detail viewer", () => {
+  it("round-trips: capture an angle, restore it, get the same camera back", () => {
+    // The property that matters. previewViewFromOrbit and
+    // viewerCameraPositionFor are inverses, so a file opens on exactly
+    // the camera its owner pressed the button at.
+    const baseline = 180;
+    const target: [number, number, number] = [0, 0, 0];
+
+    for (const offset of [
+      [0, 0, 180],
+      [90, 90, 90],
+      [-40, 120, -60],
+      [0, 0, 90], // zoomed in
+      [0, 0, 320], // zoomed out
+    ] as [number, number, number][]) {
+      const view = previewViewFromOrbit({ offset, baselineDistance: baseline });
+      const restored = viewerCameraPositionFor({
+        view,
+        target,
+        baselineDistance: baseline,
+      });
+
+      // Same direction.
+      const a = normalizeDirection(offset);
+      const b = normalizeDirection(restored);
+      expect(b[0]).toBeCloseTo(a[0], 6);
+      expect(b[1]).toBeCloseTo(a[1], 6);
+      expect(b[2]).toBeCloseTo(a[2], 6);
+
+      // Same distance, up to the framing clamp.
+      const original = Math.hypot(...offset);
+      const clampedLow = view.framing === MAX_FRAMING;
+      const clampedHigh = view.framing === MIN_FRAMING;
+      if (!clampedLow && !clampedHigh) {
+        expect(length(restored)).toBeCloseTo(original, 6);
+      }
+    }
+  });
+
+  it("leaves an untouched zoom at the viewer's own settled fit", () => {
+    // Press the button without zooming and the file opens at exactly
+    // the distance the viewer would have picked for itself — only the
+    // angle differs.
+    const baseline = 240;
+    // An orbit at the baseline distance — rotated, but not zoomed. The
+    // magnitude has to equal the baseline for the zoom to count as
+    // untouched, which is the whole point of the assertion.
+    const c = baseline / Math.SQRT2;
+    const view = previewViewFromOrbit({
+      offset: [0, c, c],
+      baselineDistance: baseline,
+    });
+    expect(Math.hypot(0, c, c)).toBeCloseTo(baseline, 6);
+    expect(viewerDistanceForFraming(baseline, view.framing)).toBeCloseTo(
+      baseline,
+      6
+    );
+  });
+
+  it("moves the camera closer for a tighter saved framing", () => {
+    const baseline = 200;
+    expect(
+      viewerDistanceForFraming(baseline, defaultFraming() * 2)
+    ).toBeLessThan(baseline);
+    expect(
+      viewerDistanceForFraming(baseline, defaultFraming() / 2)
+    ).toBeGreaterThan(baseline);
+  });
+
+  it("offsets from the controls' target, not the world origin", () => {
+    const pos = viewerCameraPositionFor({
+      view: { direction: [0, 0, 1], framing: defaultFraming() },
+      target: [10, -5, 3],
+      baselineDistance: 100,
+    });
+    expect(pos[0]).toBeCloseTo(10, 6);
+    expect(pos[1]).toBeCloseTo(-5, 6);
+    expect(pos[2]).toBeCloseTo(103, 6);
+  });
+
+  it("returns the baseline unchanged for a nonsense framing", () => {
+    expect(viewerDistanceForFraming(150, 0)).toBe(150);
+    expect(viewerDistanceForFraming(150, -1)).toBe(150);
+    expect(viewerDistanceForFraming(0, 0.5)).toBe(0);
+  });
+});
+
+describe("savedPreviewView", () => {
+  const row = {
+    previewDirX: 0,
+    previewDirY: 1,
+    previewDirZ: 1,
+    previewFraming: 0.7,
+  };
+
+  it("reads a complete row and normalizes the direction", () => {
+    const view = savedPreviewView(row)!;
+    expect(view).not.toBeNull();
+    expect(length(view.direction)).toBeCloseTo(1, 10);
+    expect(view.framing).toBe(0.7);
+  });
+
+  it("returns null when any component is missing", () => {
+    // A partially-written row must fall back to the viewer's own
+    // framing rather than aim the camera at nothing.
+    for (const key of [
+      "previewDirX",
+      "previewDirY",
+      "previewDirZ",
+      "previewFraming",
+    ] as const) {
+      expect(savedPreviewView({ ...row, [key]: null })).toBeNull();
+    }
+  });
+
+  it("rejects a degenerate or non-finite direction", () => {
+    expect(
+      savedPreviewView({ ...row, previewDirX: 0, previewDirY: 0, previewDirZ: 0 })
+    ).toBeNull();
+    expect(savedPreviewView({ ...row, previewDirY: Number.NaN })).toBeNull();
+    expect(savedPreviewView({ ...row, previewDirZ: Infinity })).toBeNull();
+  });
+
+  it("rejects a non-positive framing", () => {
+    expect(savedPreviewView({ ...row, previewFraming: 0 })).toBeNull();
+    expect(savedPreviewView({ ...row, previewFraming: -0.5 })).toBeNull();
+    expect(savedPreviewView({ ...row, previewFraming: Number.NaN })).toBeNull();
   });
 });
