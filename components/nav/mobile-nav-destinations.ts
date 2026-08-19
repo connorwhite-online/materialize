@@ -168,3 +168,53 @@ export function iconSizeProps(
 ): { size?: number; height?: number } {
   return Icon === Logomark ? { height: Math.round(size * 0.8) } : { size };
 }
+
+/**
+ * Is this path somewhere the mobile nav can reach in one tap?
+ *
+ * The menu's rows plus the identity row (which links to the viewer's
+ * own profile) are the entire surface. Anywhere else — a file detail
+ * page, an order, someone else's profile — is a leaf you can only have
+ * arrived at, so it earns a back button.
+ *
+ * Takes the same flags as `navDestinations` on purpose: /notifications
+ * isn't reachable for an anon visitor and /prometheus isn't reachable
+ * without the owner flag, so those pages are leaves for them too.
+ */
+export function isNavReachable(
+  pathname: string | null,
+  {
+    textToCad = false,
+    signedIn = false,
+    ownProfilePath = null,
+  }: {
+    textToCad?: boolean;
+    signedIn?: boolean;
+    /** The signed-in viewer's `/<username>` page, if they have one. */
+    ownProfilePath?: string | null;
+  } = {}
+): boolean {
+  if (!pathname) return true;
+  if (ownProfilePath && pathname === ownProfilePath) return true;
+  return navDestinations({ textToCad, signedIn }).some((d) =>
+    isDestinationActive(pathname, d.href)
+  );
+}
+
+/**
+ * Where "back" goes when there is no in-app history to pop — a shared
+ * link opened cold, or a new tab. Resolves to the nav destination the
+ * page sits under (`/files/<slug>` → `/files`), which is where the menu
+ * would have sent them, and to home when nothing owns it.
+ *
+ * Deliberately ignores the auth/owner flags: this is a destination for
+ * a user who is already looking at the page, not a menu row.
+ */
+export function backFallbackHref(pathname: string | null): string {
+  if (!pathname) return "/";
+  const section = [...NAV_DESTINATIONS, TEXT_TO_CAD_DESTINATION]
+    .filter((d) => d.href !== "/" && pathname.startsWith(`${d.href}/`))
+    // Longest prefix wins, so a nested destination beats its parent.
+    .sort((a, b) => b.href.length - a.href.length)[0];
+  return section?.href ?? "/";
+}

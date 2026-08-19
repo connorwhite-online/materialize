@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
 import {
   AnimatePresence,
@@ -12,12 +12,15 @@ import {
   type Transition,
   type Variants,
 } from "motion/react";
+import { ChevronLeft } from "@/components/icons/chevron-left";
 import { Grabber } from "@/components/icons/grabber";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { Button } from "@/components/ui/button";
 import {
+  backFallbackHref,
   iconSizeProps,
   isDestinationActive,
+  isNavReachable,
   navDestinations,
   resolvePageIdentity,
   type PageIdentity,
@@ -116,6 +119,50 @@ const IDENTITY_OUT_CLOSE: Transition = {
 const DRAG_CLOSE_OFFSET = 64;
 const DRAG_CLOSE_VELOCITY = 500;
 
+/**
+ * The nav's surface recipe: the design system's frosted fill
+ * (`--popover-translucent` + blur/saturate, solid `--popover` where
+ * `backdrop-filter` is unsupported), a hairline ring, and the lifted
+ * shadow. One constant rather than two class lists, because the card
+ * and the back button that oozes out of it have to read as one piece
+ * of glass that split — a drift between them is immediately visible.
+ *
+ * `.glass-surface` lives in `@layer components`, so ANY `bg-*` utility
+ * placed beside it silently wins and the surface goes opaque with no
+ * error and no failing render. A test pins that.
+ */
+const NAV_SURFACE = cn(
+  "glass-surface",
+  "ring-1 ring-border/70",
+  "shadow-[0_2px_8px_-2px_oklch(0_0_0/0.14),0_18px_44px_-14px_oklch(0_0_0/0.38)]"
+);
+
+/** Back button touch target — the grabber's 44px, mirrored. */
+const BACK_SIZE = 44;
+/** Gap it settles at, clear of the card's left edge. */
+const BACK_GAP = 8;
+/**
+ * The ooze. The button is anchored to the card's left edge and grows
+ * leftward out of it: width 0 → 44 while its RIGHT corners round from
+ * square to full. Square-right reads as a slice of the card itself, so
+ * the rounding is what sells it detaching rather than appearing.
+ *
+ * It is positioned absolutely against the card's shrink-wrapper, so
+ * none of this moves the pill — the card stays centred in the viewport
+ * whether the button is out, oozing, or gone.
+ *
+ * Same curve family as CARD_IN / CARD_OUT: this is the same surface.
+ */
+const BACK_OOZE_IN: Transition = { duration: 0.32, ease: [0.22, 1, 0.36, 1] };
+const BACK_OOZE_OUT: Transition = { duration: 0.2, ease: [0.4, 0, 0.2, 1] };
+/** The glyph waits out the first third of the ooze rather than being clipped in half. */
+const BACK_GLYPH_IN: Transition = {
+  duration: 0.18,
+  delay: 0.1,
+  ease: EASE_OUT_SOFT,
+};
+const BACK_GLYPH_OUT: Transition = { duration: 0.1, ease: "easeIn" };
+
 interface MobileNavProps {
   /** Server-fetched unread notification count for the pip / row badge. */
   initialUnreadCount: number;
@@ -145,6 +192,7 @@ export function MobileNav({
   textToCad = false,
 }: MobileNavProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const { user, isLoaded, isSignedIn } = useUser();
   const { openAuth } = useAuthModal();
   const cart = useCart();
@@ -262,7 +310,31 @@ export function MobileNav({
     }
   };
 
-
+  /**
+   * Leaf pages — a file, an order, someone else's profile — have no row
+   * in the menu, so the only way out is back. The button oozes out of
+   * the card's left edge there and retracts everywhere else, including
+   * while the menu is open: the menu IS the way out then, and a chip
+   * floating beside a full-height card reads as a stray.
+   */
+  const showBack =
+    !open &&
+    !isNavReachable(pathname, {
+      textToCad,
+      signedIn: !!isSignedIn,
+      ownProfilePath,
+    });
+  const fallbackHref = backFallbackHref(pathname);
+  const goBack = useCallback(() => {
+    // A cold deep link (shared URL, fresh tab) has nothing of ours to
+    // pop — stepping back would walk the user off the site — so fall
+    // through to the section this page belongs to instead.
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+      return;
+    }
+    router.push(fallbackHref);
+  }, [router, fallbackHref]);
 
   return (
     <>
@@ -343,17 +415,11 @@ export function MobileNav({
             className={cn(
               "pointer-events-auto overflow-hidden rounded-[28px]",
               keyboardOpen && "pointer-events-none",
-              // The design system's frosted surface (globals.css), the
-              // same fill dialogs and popovers wear: --popover-translucent
-              // plus blur + saturate, with a solid --popover fallback
-              // where backdrop-filter is unsupported. It replaces a
-              // hand-rolled `bg-background/85 backdrop-blur-2xl` that was
-              // a near-miss of this treatment — one surface, one recipe.
-              // Utilities beat the components layer, so do NOT put a
-              // `bg-*` next to it or the translucency is silently lost.
-              "glass-surface",
-              "ring-1 ring-border/70",
-              "shadow-[0_2px_8px_-2px_oklch(0_0_0/0.14),0_18px_44px_-14px_oklch(0_0_0/0.38)]"
+              // Frosted fill + ring + shadow, shared with the back
+              // button (see NAV_SURFACE). Utilities beat the components
+              // layer, so do NOT put a `bg-*` next to it or the
+              // translucency is silently lost.
+              NAV_SURFACE
             )}
           >
             <AnimatePresence initial={false}>
@@ -565,6 +631,70 @@ export function MobileNav({
               className="mz-nav-pip pointer-events-none absolute right-1.5 top-1.5 h-3 w-3 -translate-y-1/2 translate-x-1/2 rounded-full bg-destructive ring-2 ring-background"
             />
           )}
+
+          {/* Back button — see `showBack`. Absolutely positioned against
+              this same shrink-wrapper and anchored to the identity row's
+              bottom edge, so it costs the card no layout: the pill stays
+              exactly where it is whether the button is out or not.
+
+              `overflow-hidden` is what makes the ooze read — the glyph is
+              clipped by the growing width instead of squashing — and the
+              left corners stay full via the class while only the RIGHT
+              pair animates 0 → 22px inline. */}
+          <AnimatePresence>
+            {showBack && (
+              <motion.button
+                key="back"
+                type="button"
+                onClick={goBack}
+                aria-label="Go back"
+                initial={{
+                  width: 0,
+                  marginRight: 0,
+                  borderTopRightRadius: 0,
+                  borderBottomRightRadius: 0,
+                }}
+                animate={{
+                  width: BACK_SIZE,
+                  marginRight: BACK_GAP,
+                  borderTopRightRadius: BACK_SIZE / 2,
+                  borderBottomRightRadius: BACK_SIZE / 2,
+                }}
+                exit={{
+                  width: 0,
+                  marginRight: 0,
+                  borderTopRightRadius: 0,
+                  borderBottomRightRadius: 0,
+                  transition: reducedMotion ? { duration: 0 } : BACK_OOZE_OUT,
+                }}
+                transition={reducedMotion ? { duration: 0 } : BACK_OOZE_IN}
+                style={{
+                  height: BACK_SIZE,
+                  bottom: (ROW_HEIGHT - BACK_SIZE) / 2,
+                }}
+                className={cn(
+                  "pointer-events-auto absolute right-full flex items-center justify-center",
+                  "overflow-hidden rounded-l-full text-muted-foreground",
+                  "transition-colors active:text-foreground",
+                  keyboardOpen && "pointer-events-none",
+                  NAV_SURFACE
+                )}
+              >
+                <motion.span
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{
+                    opacity: 0,
+                    transition: reducedMotion ? { duration: 0 } : BACK_GLYPH_OUT,
+                  }}
+                  transition={reducedMotion ? { duration: 0 } : BACK_GLYPH_IN}
+                  className="flex shrink-0 items-center justify-center"
+                >
+                  <ChevronLeft size={20} />
+                </motion.span>
+              </motion.button>
+            )}
+          </AnimatePresence>
         </div>
       </div>
     </>
