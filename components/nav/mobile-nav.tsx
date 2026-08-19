@@ -144,8 +144,9 @@ const BACK_GAP = 8;
 /**
  * The ooze. The button is anchored to the card's left edge and grows
  * leftward out of it: width 0 → 44 while its RIGHT corners round from
- * square to full. Square-right reads as a slice of the card itself, so
- * the rounding is what sells it detaching rather than appearing.
+ * square to half the height, landing as a 44px circle. Square-right
+ * reads as a slice of the card itself, so the rounding is what sells it
+ * detaching rather than appearing.
  *
  * It is positioned absolutely against the card's shrink-wrapper, so
  * none of this moves the pill — the card stays centred in the viewport
@@ -671,10 +672,21 @@ export function MobileNav({
                 style={{
                   height: BACK_SIZE,
                   bottom: (ROW_HEIGHT - BACK_SIZE) / 2,
+                  // NOT `rounded-l-full`. Tailwind's `full` is an
+                  // effectively infinite radius, and when the radii on
+                  // one edge overrun the box CSS scales EVERY corner by
+                  // the same factor — so an infinite left pair crushed
+                  // the animated right pair to ~0 and the button settled
+                  // as a hard vertical cut. Filmed; the computed style
+                  // still reported 22px, because that resolution happens
+                  // at use time. Half the height is the same semicircle
+                  // without poisoning the scale.
+                  borderTopLeftRadius: BACK_SIZE / 2,
+                  borderBottomLeftRadius: BACK_SIZE / 2,
                 }}
                 className={cn(
                   "pointer-events-auto absolute right-full flex items-center justify-center",
-                  "overflow-hidden rounded-l-full text-muted-foreground",
+                  "overflow-hidden text-muted-foreground",
                   "transition-colors active:text-foreground",
                   keyboardOpen && "pointer-events-none",
                   NAV_SURFACE

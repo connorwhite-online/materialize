@@ -458,7 +458,7 @@ describe("MobileNav back button ooze", () => {
     expect(button).toContain("marginRight: BACK_GAP");
   });
 
-  it("rounds only the right corners, from 0 to full", () => {
+  it("rounds only the right corners, from 0 to half the height", () => {
     expect(button).toMatch(/initial=\{\{[\s\S]*?borderTopRightRadius: 0/);
     expect(button).toMatch(/initial=\{\{[\s\S]*?borderBottomRightRadius: 0/);
     expect(button).toMatch(
@@ -467,9 +467,15 @@ describe("MobileNav back button ooze", () => {
     expect(button).toMatch(
       /animate=\{\{[\s\S]*?borderBottomRightRadius: BACK_SIZE \/ 2/
     );
-    // Left stays full throughout — only the seam with the card moves.
-    expect(button).toContain("rounded-l-full");
-    expect(button).not.toContain("borderTopLeftRadius");
+    // The left pair is a static half-height, set inline rather than via
+    // `rounded-l-full`: Tailwind's infinite radius makes CSS scale EVERY
+    // corner down when the edge overruns, which crushed the animated
+    // right pair to ~0 and settled the button as a hard vertical cut.
+    expect(button).toContain("borderTopLeftRadius: BACK_SIZE / 2");
+    expect(button).toContain("borderBottomLeftRadius: BACK_SIZE / 2");
+    // As a class-list token — the comment beside the style block names
+    // it deliberately, to say why it must not come back.
+    expect(button).not.toMatch(/"[^"\n]*rounded-l-full/);
   });
 
   it("settles 8px clear of the card", () => {
