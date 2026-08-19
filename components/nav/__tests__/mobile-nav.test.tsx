@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 let mockUser: {
   id: string;
@@ -66,7 +66,29 @@ async function openMenu() {
   });
 }
 
+const routerBack = vi.fn();
+const routerPush = vi.fn();
+
+/** jsdom pins history.length at 1; most tests want "we have history". */
+function setHistoryLength(length: number) {
+  Object.defineProperty(window.history, "length", {
+    value: length,
+    configurable: true,
+  });
+}
+
 beforeEach(() => {
+  routerBack.mockClear();
+  routerPush.mockClear();
+  vi.mocked(useRouter).mockReturnValue({
+    back: routerBack,
+    push: routerPush,
+    replace: vi.fn(),
+    refresh: vi.fn(),
+    forward: vi.fn(),
+    prefetch: vi.fn(),
+  } as unknown as ReturnType<typeof useRouter>);
+  setHistoryLength(3);
   mockCartCount = 0;
   mockUser = {
     id: "user_1",
@@ -289,15 +311,26 @@ describe("MobileNav brand lockup", () => {
  */
 describe("MobileNav card surface", () => {
   const src = readFileSync(resolve(__dirname, "../mobile-nav.tsx"), "utf8");
-  const cardClasses =
-    src.match(/"pointer-events-auto overflow-hidden[\s\S]*?\n\s*\)\}/)?.[0] ?? "";
+  const surface = src.match(/const NAV_SURFACE = cn\(([\s\S]*?)\n\);/)?.[1] ?? "";
 
   it("uses the shared glass surface", () => {
-    expect(cardClasses).toContain("glass-surface");
+    expect(surface).toContain("glass-surface");
   });
 
   it("carries no bg-* utility that would beat it", () => {
-    expect(cardClasses).not.toMatch(/"bg-|\sbg-[a-z]/);
+    expect(surface).not.toMatch(/bg-/);
+  });
+
+  it("dresses the card and the back button from the one recipe", () => {
+    // Two hand-copied class lists drift, and the back button is meant
+    // to look like a piece of the card that slid out of it.
+    const card =
+      src.match(/"pointer-events-auto overflow-hidden[\s\S]*?\n\s*\)\}/)?.[0] ?? "";
+    const backButton =
+      src.match(/"pointer-events-auto absolute right-full[\s\S]*?\n\s*\)\}/)?.[0] ??
+      "";
+    expect(card).toContain("NAV_SURFACE");
+    expect(backButton).toContain("NAV_SURFACE");
   });
 });
 
@@ -328,5 +361,128 @@ describe("MobileNav measuring ghost", () => {
     expect(crop).toBeGreaterThan(0);
     expect(card * 1000).toBeCloseTo(crop, 0);
     expect(src).toMatch(/open \? CARD_IN : CARD_CROP/);
+  });
+});
+
+/**
+ * Leaf pages have no row in the menu, so the only way out is back. The
+ * button oozes out of the card's left edge — absolutely positioned, so
+ * the pill never moves — and retracts anywhere the nav can already go.
+ */
+describe("MobileNav back button", () => {
+  const back = () => screen.queryByRole("button", { name: "Go back" });
+
+  it("stays retracted on pages the menu can reach", () => {
+    for (const path of ["/", "/files", "/print", "/materials", "/notifications"]) {
+      vi.mocked(usePathname).mockReturnValue(path);
+      const { unmount } = render(<MobileNav initialUnreadCount={0} />);
+      expect(back(), `expected no back button on ${path}`).toBeNull();
+      unmount();
+    }
+  });
+
+  it("stays retracted on the viewer's own profile — the identity row goes there", () => {
+    vi.mocked(usePathname).mockReturnValue("/connorwhite");
+    render(<MobileNav initialUnreadCount={0} />);
+    expect(back()).toBeNull();
+  });
+
+  it("oozes out on a leaf page and pops history", () => {
+    vi.mocked(usePathname).mockReturnValue("/files/some-widget");
+    render(<MobileNav initialUnreadCount={0} />);
+
+    const button = back();
+    expect(button).toBeTruthy();
+    fireEvent.click(button!);
+    expect(routerBack).toHaveBeenCalled();
+    expect(routerPush).not.toHaveBeenCalled();
+  });
+
+  it("appears on someone else's profile", () => {
+    vi.mocked(usePathname).mockReturnValue("/someone-else");
+    render(<MobileNav initialUnreadCount={0} />);
+    expect(back()).toBeTruthy();
+  });
+
+  it("treats a destination the viewer can't see as a leaf", () => {
+    // Anon has no /notifications row, and /prometheus is owner-only —
+    // both are dead ends for them, so both get the way out.
+    mockUser = null;
+    vi.mocked(usePathname).mockReturnValue("/prometheus");
+    const { unmount } = render(<MobileNav initialUnreadCount={0} />);
+    expect(back()).toBeTruthy();
+    unmount();
+
+    vi.mocked(usePathname).mockReturnValue("/prometheus");
+    render(<MobileNav initialUnreadCount={0} textToCad />);
+    expect(back()).toBeNull();
+  });
+
+  it("falls through to the section on a cold deep link", () => {
+    // Nothing of ours in the stack — popping would walk off the site.
+    setHistoryLength(1);
+    vi.mocked(usePathname).mockReturnValue("/files/some-widget");
+    render(<MobileNav initialUnreadCount={0} />);
+
+    fireEvent.click(back()!);
+    expect(routerBack).not.toHaveBeenCalled();
+    expect(routerPush).toHaveBeenCalledWith("/files");
+  });
+
+  it("retracts while the menu is open — the menu is the way out then", async () => {
+    vi.mocked(usePathname).mockReturnValue("/files/some-widget");
+    render(<MobileNav initialUnreadCount={0} />);
+    expect(back()).toBeTruthy();
+
+    await openMenu();
+
+    await waitFor(() => {
+      expect(back()).toBeNull();
+    });
+  });
+});
+
+/**
+ * The ooze itself: it must cost the card no layout (the pill is centred
+ * in the viewport and must not shift), and its right corners must round
+ * from square to full so it reads as sliding out of the card rather
+ * than fading in beside it.
+ */
+describe("MobileNav back button ooze", () => {
+  const src = readFileSync(resolve(__dirname, "../mobile-nav.tsx"), "utf8");
+  const button =
+    src.match(/key="back"[\s\S]*?<\/motion\.button>/)?.[0] ?? "";
+
+  it("is positioned absolutely against the card, so nothing reflows", () => {
+    expect(button).toContain("absolute right-full");
+    expect(button).toContain("marginRight: BACK_GAP");
+  });
+
+  it("rounds only the right corners, from 0 to half the height", () => {
+    expect(button).toMatch(/initial=\{\{[\s\S]*?borderTopRightRadius: 0/);
+    expect(button).toMatch(/initial=\{\{[\s\S]*?borderBottomRightRadius: 0/);
+    expect(button).toMatch(
+      /animate=\{\{[\s\S]*?borderTopRightRadius: BACK_SIZE \/ 2/
+    );
+    expect(button).toMatch(
+      /animate=\{\{[\s\S]*?borderBottomRightRadius: BACK_SIZE \/ 2/
+    );
+    // The left pair is a static half-height, set inline rather than via
+    // `rounded-l-full`: Tailwind's infinite radius makes CSS scale EVERY
+    // corner down when the edge overruns, which crushed the animated
+    // right pair to ~0 and settled the button as a hard vertical cut.
+    expect(button).toContain("borderTopLeftRadius: BACK_SIZE / 2");
+    expect(button).toContain("borderBottomLeftRadius: BACK_SIZE / 2");
+    // As a class-list token — the comment beside the style block names
+    // it deliberately, to say why it must not come back.
+    expect(button).not.toMatch(/"[^"\n]*rounded-l-full/);
+  });
+
+  it("settles 8px clear of the card", () => {
+    expect(src).toMatch(/const BACK_GAP = 8;/);
+  });
+
+  it("clips the glyph as it grows instead of squashing it", () => {
+    expect(button).toContain("overflow-hidden");
   });
 });
