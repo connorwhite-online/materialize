@@ -353,6 +353,26 @@ describe("MobileNav measuring ghost", () => {
     );
   });
 
+  it("closes the card's width and height on one shared tween", () => {
+    // Filmed at 60fps: with the height on its own tween — a 240ms cubic
+    // delayed 60ms so the row peel could "go soft before clipping" — the
+    // card was 72% collapsed in WIDTH while its height had not moved at
+    // all, peaking at an 82-point divergence. It shut sideways into a
+    // letterbox and only then dropped. Matching durations is not enough;
+    // two curves of the same length still trace different paths. The
+    // same constant for both is the only version that cannot drift.
+    expect(src).toMatch(/open \? CARD_IN : CARD_CROP/);
+    expect(src).toMatch(
+      /transition: reducedMotion \? \{ duration: 0 \} : CARD_CROP,/
+    );
+  });
+
+  it("gives that shared close tween no delay", () => {
+    const crop = src.match(/const CARD_CROP[^=]*=\s*\{([^}]*)\}/)?.[1] ?? "";
+    expect(crop).toContain("duration");
+    expect(crop).not.toContain("delay");
+  });
+
   it("tweens the collapsed card on the crop's own duration", () => {
     // The pill's width IS the lockup's width plus constant padding, so
     // these must match --mz-crop-ms or the pill lags and clips.
