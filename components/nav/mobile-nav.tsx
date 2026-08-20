@@ -152,17 +152,38 @@ const BACK_GAP = 8;
  * none of this moves the pill — the card stays centred in the viewport
  * whether the button is out, oozing, or gone.
  *
- * Same curve family as CARD_IN / CARD_OUT: this is the same surface.
+ * **The curve is the whole thing, and it is NOT the card's expo-out.**
+ * `[0.22, 1, 0.36, 1]` puts almost all its travel up front: filmed on
+ * an iPhone at 60fps, the chip was already a third of the way out —
+ * detached, past half its final gap — on the FIRST frame after the
+ * route committed, so the emergence never happened; then it spent
+ * another ~200ms creeping the last 28%. Two defects from one curve: no
+ * ooze, and a tail still moving long after the page and the pill title
+ * had both cut in a single frame. (The card's own comment warns about
+ * exactly this asymptote for springs; an expo-out has it too.)
+ *
+ * A standard-ease cubic instead. It leaves ~20% of the width in the
+ * first quarter of the tween, which is the part that reads as sliding
+ * out from under the card, and it lands rather than approaches.
+ *
+ * Nothing else in this navigation animates — the page swaps in one
+ * frame and so does the pill's title — so the chip is the only thing
+ * the eye can catch trailing. Keep it under the card's own CARD_IN
+ * (280ms); it is one 44px element, not a container.
  */
-const BACK_OOZE_IN: Transition = { duration: 0.32, ease: [0.22, 1, 0.36, 1] };
-const BACK_OOZE_OUT: Transition = { duration: 0.2, ease: [0.4, 0, 0.2, 1] };
-/** The glyph waits out the first third of the ooze rather than being clipped in half. */
+const BACK_OOZE_IN: Transition = { duration: 0.18, ease: [0.4, 0, 0.2, 1] };
+const BACK_OOZE_OUT: Transition = { duration: 0.13, ease: [0.4, 0, 0.2, 1] };
+/**
+ * The glyph waits out the first third of the ooze rather than being
+ * clipped in half, but lands INSIDE the container's tween — an empty
+ * white disc holding for the last frames reads as a missing icon.
+ */
 const BACK_GLYPH_IN: Transition = {
-  duration: 0.18,
-  delay: 0.1,
+  duration: 0.1,
+  delay: 0.06,
   ease: EASE_OUT_SOFT,
 };
-const BACK_GLYPH_OUT: Transition = { duration: 0.1, ease: "easeIn" };
+const BACK_GLYPH_OUT: Transition = { duration: 0.07, ease: "easeIn" };
 
 interface MobileNavProps {
   /** Server-fetched unread notification count for the pip / row badge. */
