@@ -61,23 +61,28 @@ const CARD_IN: Transition = {
   duration: 0.28,
   ease: [0.22, 1, 0.36, 1],
 };
-const CARD_OUT: Transition = {
-  duration: 0.24,
-  ease: [0.4, 0, 0.2, 1],
-};
-/** Height close waits so the row peel can go soft before clipping. */
-const HEIGHT_CLOSE: Transition = { ...CARD_OUT, delay: 0.06 };
 /**
- * Width tween for the COLLAPSED card. Mirrors `--mz-crop-ms` and
- * `--ease-out-soft` from globals.css, and that pairing is the whole
- * point: the pill's width is the lockup's width plus constant padding,
- * so running both on the same duration and curve makes them the same
- * animation. Anything else and the pill lags — measured on device at
- * ~65px of clipping for ~230ms mid-reveal.
+ * Width tween for the COLLAPSED card, and — because the two have to be
+ * the same animation — the menu's height close as well.
  *
- * It replaces CARD_OUT here, which still drives the menu's height close.
- * Keep the two within ~20ms of each other or the card's width and height
- * visibly disagree on close.
+ * It mirrors `--mz-crop-ms` and `--ease-out-soft` from globals.css, and
+ * that pairing is the whole point: the pill's width is the lockup's
+ * width plus constant padding, so running both on the same duration and
+ * curve makes them the same animation. Anything else and the pill lags —
+ * measured on device at ~65px of clipping for ~230ms mid-reveal.
+ *
+ * **Height closes on this too, with no delay.** It used to run its own
+ * tween (a 240ms cubic delayed 60ms, "so the row peel can go soft before
+ * clipping"), and the delay is what the eye actually caught: filmed at
+ * 60fps, the card was **72% collapsed in width while its height had not
+ * moved at all**, peaking at an 82-point divergence — it shut sideways
+ * into a wide letterbox and only then dropped. Matching durations is not
+ * enough either; two curves of the same length still trace different
+ * paths. One constant for both is the only version that cannot drift.
+ *
+ * The rows still peel top → bottom over the top of it, which is coherent
+ * because the menu block is `justify-end`: height clips from the top, so
+ * the rows being clipped first are the ones already leaving.
  */
 const CARD_CROP: Transition = { duration: 0.26, ease: [0.22, 0.9, 0.28, 1] };
 
@@ -457,7 +462,10 @@ export function MobileNav({
                   animate={{ height: menuHeight }}
                   exit={{
                     height: 0,
-                    transition: reducedMotion ? { duration: 0 } : HEIGHT_CLOSE,
+                    // The same tween the card's width is running — see
+                    // CARD_CROP. Not merely the same duration: the same
+                    // object, so the two can never diverge.
+                    transition: reducedMotion ? { duration: 0 } : CARD_CROP,
                   }}
                   transition={reducedMotion ? { duration: 0 } : CARD_IN}
                   // Stick the list to the pill. Height shrinks the box
