@@ -486,3 +486,49 @@ describe("MobileNav back button ooze", () => {
     expect(button).toContain("overflow-hidden");
   });
 });
+
+/**
+ * Timing. Nothing else in this navigation animates — the page swaps in
+ * one frame and so does the pill's title — so the chip is the only
+ * thing the eye can catch trailing, and the numbers below are what
+ * keep it from doing that. All three came off 60fps captures: an
+ * iPhone recording of the shipped build, then a rAF-sampled harness
+ * driving the real component.
+ */
+describe("MobileNav back button timing", () => {
+  const src = readFileSync(resolve(__dirname, "../mobile-nav.tsx"), "utf8");
+  const num = (name: string, field: string) =>
+    Number(
+      src
+        .match(new RegExp(`const ${name}[^=]*=\\s*\\{([^}]*)\\}`))?.[1]
+        .match(new RegExp(`${field}:\\s*([\\d.]+)`))?.[1]
+    );
+  const ease = (name: string) =>
+    src.match(new RegExp(`const ${name}[^=]*=\\s*\\{[^}]*ease:\\s*(\\[[^\\]]*\\])`))?.[1];
+
+  it("lands inside the card's own morph", () => {
+    // The chip is one 44px element, not a container. Filmed at 320ms it
+    // was still creeping ~200ms after the page and the title had cut.
+    const cardIn = num("CARD_IN", "duration");
+    expect(cardIn).toBeGreaterThan(0);
+    expect(num("BACK_OOZE_IN", "duration")).toBeLessThanOrEqual(cardIn);
+    expect(num("BACK_OOZE_OUT", "duration")).toBeLessThan(
+      num("BACK_OOZE_IN", "duration")
+    );
+  });
+
+  it("does not use the card's expo-out, which has no visible start", () => {
+    // `[0.22, 1, 0.36, 1]` spends ~20% of the width in its first frame,
+    // so the chip appeared already detached and the ooze never read.
+    const expo = ease("CARD_IN");
+    expect(expo).toBe("[0.22, 1, 0.36, 1]");
+    expect(ease("BACK_OOZE_IN")).not.toBe(expo);
+  });
+
+  it("lands the glyph before the chip stops growing", () => {
+    // An empty white disc holding for the last frames reads as a
+    // missing icon, not as content arriving behind its container.
+    expect(num("BACK_GLYPH_IN", "delay") + num("BACK_GLYPH_IN", "duration"))
+      .toBeLessThanOrEqual(num("BACK_OOZE_IN", "duration"));
+  });
+});
