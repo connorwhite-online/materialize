@@ -32,8 +32,8 @@ describe("HomeDropzone", () => {
     render(<HomeDropzone />);
     expect(screen.getByText("Add a File")).toBeTruthy();
     expect(
-      screen.getByText("click here or drag in a file (max 200mb)")
-    ).toBeTruthy();
+      screen.queryByText("click here or drag in a file (max 200mb)")
+    ).toBeNull();
     expect(screen.queryByText("Upload a file")).toBeNull();
     const project = screen.getByRole("button", { name: /new project/i });
     expect(project.getAttribute("href")).toBe("/projects/new");

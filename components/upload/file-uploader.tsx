@@ -104,14 +104,9 @@ export function FileUploader({
           onChange={handleChange}
         />
         {featured ? (
-          // Design-system frosted plate: `.glass` paints `--glass` +
-          // `--glass-border` + 12px blur. Do not add a `bg-*` utility
-          // beside it — the class lives in `@layer components` and a
-          // background utility would silently go opaque.
-          <span className="relative z-[2] flex flex-col items-center rounded-2xl px-5 py-3 text-foreground glass">
-            <p className="text-base font-medium tracking-tight">{title}</p>
-            <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>
-          </span>
+          <p className="relative z-[2] text-lg font-semibold tracking-tight">
+            {title}
+          </p>
         ) : (
           <>
             <p className="text-sm font-medium">{title}</p>

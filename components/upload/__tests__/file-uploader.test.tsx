@@ -10,24 +10,21 @@ describe("FileUploader", () => {
     expect(screen.getByText("STL, OBJ, 3MF, STEP, AMF — Max 200MB")).toBeTruthy();
   });
 
-  it("accepts featured home copy", () => {
+  it("accepts featured home copy without a plate or subtext", () => {
     const { container } = render(
       <FileUploader
         featured
         title="Add a File"
-        subtitle="click here or drag in a file (max 200mb)"
         onFileSelected={() => {}}
       />
     );
     expect(screen.getByText("Add a File")).toBeTruthy();
+    expect(screen.getByText("Add a File").className).toMatch(/font-semibold/);
     expect(
-      screen.getByText("click here or drag in a file (max 200mb)")
-    ).toBeTruthy();
+      screen.queryByText("click here or drag in a file (max 200mb)")
+    ).toBeNull();
     expect(screen.queryByText("Drag and drop or click to upload")).toBeNull();
-    // Copy sits on the design-system `.glass` plate (token + blur).
-    const plate = container.querySelector(".glass");
-    expect(plate).toBeTruthy();
-    expect(plate?.className).not.toMatch(/(?:^|\s)bg-/);
+    expect(container.querySelector(".glass")).toBeNull();
     expect(container.innerHTML).not.toMatch(/radial-gradient\(ellipse_at_center/);
   });
 

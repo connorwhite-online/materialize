@@ -26,7 +26,6 @@ export function HomeDropzone() {
         <FileUploader
           featured
           title="Add a File"
-          subtitle="click here or drag in a file (max 200mb)"
           backdrop={<DropzonePrimitives />}
           onFileSelected={(file, format) => start(file, format)}
         />
