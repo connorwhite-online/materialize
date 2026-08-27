@@ -23,7 +23,8 @@ describe("HomeDashboard authed create cluster", () => {
 
   it("does not show a visible Library heading", () => {
     expect(dashboard).not.toMatch(/mb-4 text-sm font-medium">Library/);
-    expect(dashboard).toMatch(/sr-only">Library/);
+    expect(dashboard).not.toMatch(/sr-only">Library/);
+    expect(libraryTab).toMatch(/sr-only">Library/);
   });
 });
 
@@ -43,5 +44,10 @@ describe("HomeDashboard recent files", () => {
 describe("authed-home library chrome", () => {
   it("hides the item-count and Add row on the compact home library", () => {
     expect(libraryTab).toMatch(/isOwner && !compact/);
+  });
+
+  it("skips the empty-state explainer on the compact home library", () => {
+    expect(libraryTab).toMatch(/if \(compact\) return null/);
+    expect(libraryTab).not.toMatch(/LibraryEmptyState compact/);
   });
 });

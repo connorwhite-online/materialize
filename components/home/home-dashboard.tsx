@@ -91,10 +91,7 @@ export async function HomeDashboard({ userId }: { userId: string }) {
         </section>
       )}
 
-      <section>
-        <h2 className="sr-only">Library</h2>
-        <LibraryTab userId={userId} isOwner compact />
-      </section>
+      <LibraryTab userId={userId} isOwner compact />
     </div>
   );
 }
