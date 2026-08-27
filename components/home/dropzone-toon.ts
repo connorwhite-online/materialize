@@ -4,7 +4,8 @@
  * Flat unlit fills read as stickers with no form. A grayscale cel ramp
  * just muddy-darkens them. The dropzone shader mixes the catalog mid
  * toward a hue-shifted shadow and highlight over a wrapped Lambert
- * term — soft gradients, still graphic, plus the ink outline.
+ * term — quiet color blends (purplish blue, pinkish red, yellowish
+ * green), still graphic, plus the ink outline.
  *
  * drei's `<Outlines screenspace>` flag is named backwards relative
  * to CSS: `true` extrudes along normals in world units (the inverted

@@ -38,7 +38,7 @@ describe("dropzone primitives shading", () => {
     expect(shader).toContain("uShadow");
     expect(shader).toContain("uHighlight");
     expect(shader).toContain("smoothstep");
-    expect(shader).toContain("0.5 + 0.5");
+    expect(shader).toContain("look.toonColor");
   });
 
   it("inks in the warm near-black, not pure black", () => {
@@ -53,23 +53,29 @@ describe("dropzone primitives shading", () => {
 });
 
 describe("toon gradient tints", () => {
-  it("shifts steel cool and the plastics warm, never just darker grey", () => {
-    const steel = rgb(DROPZONE_LOOKS.steel.toonShadow);
+  it("tints the three live primitives as quiet hue blends", () => {
+    const steel = rgb(DROPZONE_LOOKS.steel.toonColor);
     expect(steel.b).toBeGreaterThan(steel.r);
+    expect(steel.r).toBeGreaterThanOrEqual(steel.g);
 
-    const resin = rgb(DROPZONE_LOOKS.resin.toonShadow);
-    expect(resin.r).toBeGreaterThan(resin.b);
+    const resin = rgb(DROPZONE_LOOKS.resin.toonColor);
+    expect(resin.r).toBeGreaterThan(resin.g);
+    expect(resin.g).toBeGreaterThanOrEqual(resin.b);
 
-    const pla = rgb(DROPZONE_LOOKS.pla.toonShadow);
+    const pla = rgb(DROPZONE_LOOKS.pla.toonColor);
+    expect(pla.g).toBeGreaterThan(pla.r);
+    expect(pla.g).toBeGreaterThan(pla.b);
     expect(pla.r).toBeGreaterThan(pla.b);
   });
 
-  it("keeps the highlight lighter than the catalog mid on every look", () => {
+  it("keeps the highlight lighter than the toon mid on every look", () => {
     for (const look of Object.values(DROPZONE_LOOKS)) {
-      expect(luma(rgb(look.toonHighlight))).toBeGreaterThan(luma(rgb(look.color)));
-      expect(luma(rgb(look.toonShadow))).toBeLessThan(luma(rgb(look.color)));
-      expect(look.toonShadow).not.toBe(look.color);
-      expect(look.toonHighlight).not.toBe(look.color);
+      expect(luma(rgb(look.toonHighlight))).toBeGreaterThan(
+        luma(rgb(look.toonColor))
+      );
+      expect(luma(rgb(look.toonShadow))).toBeLessThan(luma(rgb(look.toonColor)));
+      expect(look.toonShadow).not.toBe(look.toonColor);
+      expect(look.toonHighlight).not.toBe(look.toonColor);
     }
   });
 });

@@ -9,9 +9,10 @@ import { DROPZONE_LOOKS, type DropzoneLookId } from "./dropzone-looks";
  * Soft colored toon for the dropzone primitives.
  *
  * Half-Lambert wrap so the dark side stays a tint, not a hole. Two
- * wide smoothsteps mix catalog → shadow and catalog → highlight so
- * the shade reads as a gradient, not a comic cutout. A cheap
- * hemisphere and rim add a little extra chroma as the shape turns.
+ * wide smoothsteps mix the look's toon mid → shadow and mid →
+ * highlight so the shade reads as a quiet color blend, not a comic
+ * cutout. A cheap hemisphere and rim add a little extra chroma as
+ * the shape turns.
  *
  * Uniforms are set on the instance (not the constructor) — drei's
  * factory class ignores constructor args, which left the viewer
@@ -70,12 +71,12 @@ export function DropzoneToonMaterial({ lookId }: { lookId: DropzoneLookId }) {
   const look = DROPZONE_LOOKS[lookId];
   const material = useMemo(() => {
     const m = new DropzoneToonShaderMaterial();
-    m.uColor = new THREE.Color(look.color);
+    m.uColor = new THREE.Color(look.toonColor);
     m.uShadow = new THREE.Color(look.toonShadow);
     m.uHighlight = new THREE.Color(look.toonHighlight);
     m.toneMapped = false;
     return m;
-  }, [look.color, look.toonShadow, look.toonHighlight]);
+  }, [look.toonColor, look.toonShadow, look.toonHighlight]);
 
   useEffect(() => () => material.dispose(), [material]);
 

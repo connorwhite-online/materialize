@@ -23,7 +23,7 @@ export function DropzonePrimitivesFallback() {
             key={primitive.look}
             className={`absolute ${primitive.fallbackClass}`}
             style={{
-              background: `linear-gradient(145deg, ${look.toonHighlight} 0%, ${look.color} 46%, ${look.toonShadow} 100%)`,
+              background: `linear-gradient(145deg, ${look.toonHighlight} 0%, ${look.toonColor} 46%, ${look.toonShadow} 100%)`,
               boxShadow: `0 0 0 2px ${TOON_INK}`,
             }}
           />
