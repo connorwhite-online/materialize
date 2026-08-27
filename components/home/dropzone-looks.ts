@@ -114,13 +114,13 @@ export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
   {
     look: "gold",
     kind: "roundedSlab",
-    position: [-0.15, -0.82, -0.35],
+    position: [1.85, -0.58, 0.15],
     scale: 0.55,
     rotSpeed: [0.04, 0.07, 0.02],
     floatAmp: 0.06,
     floatSpeed: 0.55,
     phase: 0.9,
     fallbackClass:
-      "bottom-[6%] left-[18%] h-9 w-14 rotate-12 rounded-2xl sm:h-10 sm:w-16",
+      "right-[7%] bottom-[8%] h-9 w-14 rotate-12 rounded-2xl sm:h-10 sm:w-16",
   },
 ];

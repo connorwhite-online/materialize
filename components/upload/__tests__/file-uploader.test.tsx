@@ -24,9 +24,8 @@ describe("FileUploader", () => {
       screen.getByText("click here or drag in a file (max 200mb)")
     ).toBeTruthy();
     expect(screen.queryByText("Drag and drop or click to upload")).toBeNull();
-    // Copy sits on a glass plate instead of a full-area wash, so the
-    // letters stay readable over the 3D backdrop.
-    expect(container.querySelector(".glass-surface")).toBeTruthy();
+    // Copy sits on a frosted plate instead of a full-area wash.
+    expect(container.innerHTML).toMatch(/color-mix\(in_oklab,var\(--background\)_92%/);
     expect(container.innerHTML).not.toMatch(/radial-gradient\(ellipse_at_center/);
   });
 

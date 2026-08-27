@@ -63,6 +63,7 @@ describe("DROPZONE_PRIMITIVES", () => {
     const [cube, sphere, slab] = DROPZONE_PRIMITIVES;
     expect(cube.position[0]).toBeLessThan(-1.5);
     expect(sphere.position[0]).toBeGreaterThan(1.5);
-    expect(slab.position[1]).toBeLessThan(-0.5);
+    expect(slab.position[0]).toBeGreaterThan(1.2);
+    expect(Math.abs(slab.position[1])).toBeGreaterThan(0.4);
   });
 });

@@ -104,10 +104,11 @@ export function FileUploader({
           onChange={handleChange}
         />
         {featured ? (
-          // Frosted plate around the copy only — a full-area scrim
-          // washed the primitives and still lost the letters to
-          // highlights. `.glass-surface` must not sit next to a `bg-*`.
-          <span className="relative z-[2] flex flex-col items-center rounded-2xl px-5 py-3 text-popover-foreground glass-surface ring-1 ring-foreground/10">
+          // Opaque-enough plate around the copy only. Nav `.glass-surface`
+          // is ~82% translucent and lets highlights punch through the
+          // letters; this mix stays frosted without losing contrast.
+          // No `bg-*` utility — that would fight a future glass class.
+          <span className="relative z-[2] flex flex-col items-center rounded-2xl px-5 py-3 text-foreground shadow-sm ring-1 ring-foreground/10 [background-color:color-mix(in_oklab,var(--background)_92%,transparent)] backdrop-blur-md">
             <p className="text-base font-medium tracking-tight">{title}</p>
             <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>
           </span>
