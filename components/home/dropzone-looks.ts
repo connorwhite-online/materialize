@@ -158,8 +158,8 @@ export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
     kind: "roundedTriangle",
     // Bottom edge, slightly right of the copy — its own slot, clipped
     // by the well so the point stays inside and the base runs out.
-    position: [0.24, -0.82, 0.12],
-    scale: 1.48,
+    position: [0.24, -0.72, 0.12],
+    scale: 1.55,
     rotSpeed: [0.006, 0.035, 0.004],
     floatAmp: 0.04,
     floatSpeed: 0.55,
