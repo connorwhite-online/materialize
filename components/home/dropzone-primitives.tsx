@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Outlines, RoundedBox } from "@react-three/drei";
 import { useReducedMotion } from "motion/react";
 import * as THREE from "three";
@@ -71,6 +71,9 @@ function PrimitiveMesh({
   paused: boolean;
 }) {
   const groupRef = useRef<THREE.Group>(null);
+  const { viewport } = useThree();
+  const x = spec.position[0] * (viewport.width / 2);
+  const y = spec.position[1] * (viewport.height / 2);
 
   useFrame(({ clock }) => {
     const group = groupRef.current;
@@ -81,8 +84,10 @@ function PrimitiveMesh({
       spec.phase * 0.7,
       spec.phase * 0.2,
     ];
+    group.position.x = spec.position[0] * (viewport.width / 2);
     group.position.y =
-      spec.position[1] + Math.sin(t * spec.floatSpeed + spec.phase) * spec.floatAmp;
+      spec.position[1] * (viewport.height / 2) +
+      Math.sin(t * spec.floatSpeed + spec.phase) * spec.floatAmp;
     group.rotation.x = rest[0] + t * spec.rotSpeed[0];
     group.rotation.y = rest[1] + t * spec.rotSpeed[1];
     group.rotation.z = rest[2] + t * spec.rotSpeed[2];
@@ -97,7 +102,7 @@ function PrimitiveMesh({
   return (
     <group
       ref={groupRef}
-      position={spec.position as [number, number, number]}
+      position={[x, y, spec.position[2]]}
       scale={spec.scale}
       rotation={[rest[0], rest[1], rest[2]]}
     >

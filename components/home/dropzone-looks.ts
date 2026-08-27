@@ -95,7 +95,12 @@ export type DropzonePrimitiveKind = "roundedBox" | "sphere" | "roundedTriangle";
 export interface DropzonePrimitive {
   look: DropzoneLookId;
   kind: DropzonePrimitiveKind;
-  /** World-space rest pose inside the dropzone canvas. */
+  /**
+   * Rest pose as a fraction of the visible frustum: x -1 is the left
+   * edge, +1 the right; y -1 is the bottom, +1 the top. Values past
+   * ±1 (or a scale that overruns the remaining margin) clip against
+   * the dropzone border — that's intentional.
+   */
   position: readonly [number, number, number];
   scale: number;
   rotSpeed: readonly [number, number, number];
@@ -110,56 +115,57 @@ export interface DropzonePrimitive {
   restRotation?: readonly [number, number, number];
   /**
    * Tailwind placement for the CSS stand-in (loading / no-WebGL).
-   * Keep these on the edges so the "Add a File" copy stays clear.
+   * Hang off the dashed well so the CSS stand-in also clips.
    */
   fallbackClass: string;
 }
 
 /**
- * Three chunky primitives, each in its own corner so they don't nest:
- * steel cube upper-left, PLA triangle lower-left, resin sphere right.
- * Tuned for a wide, short dropzone (~2:1) with the camera at z ≈ 6.5,
- * fov 28. Rotation is slow on purpose — a leisurely turn, not a
- * tumble (`rotSpeed` is rad/s).
+ * Three chunky primitives parked on the frame so they read as coming
+ * in from outside the dashed well: steel cube left, resin sphere
+ * right, PLA triangle along the bottom. Oversized on purpose — the
+ * dropzone clips them. Tuned for a wide, short well (~2:1–3.5:1)
+ * with the camera at z ≈ 6.5, fov 28. `position` is a fraction of
+ * the frustum (see field note). Rotation is slow on purpose.
  */
 export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
   {
     look: "steel",
     kind: "roundedBox",
-    position: [-2.38, 0.06, -0.15],
-    scale: 0.9,
+    position: [-0.96, 0.12, -0.15],
+    scale: 1.52,
     rotSpeed: [0.035, 0.08, 0.018],
     floatAmp: 0.08,
     floatSpeed: 0.7,
     phase: 0.4,
     fallbackClass:
-      "left-[3%] top-[22%] size-16 rounded-3xl sm:size-[4.5rem]",
+      "-left-8 top-[8%] size-28 rounded-3xl sm:-left-10 sm:size-32",
   },
   {
     look: "resin",
     kind: "sphere",
-    position: [2.4, 0.16, 0.05],
-    scale: 0.84,
+    position: [0.96, 0.18, 0.05],
+    scale: 1.48,
     rotSpeed: [0.025, 0.055, 0.012],
     floatAmp: 0.1,
     floatSpeed: 0.85,
     phase: 1.2,
-    fallbackClass: "right-[4%] top-[16%] size-16 rounded-full sm:size-[4.25rem]",
+    fallbackClass:
+      "-right-8 top-[6%] size-28 rounded-full sm:-right-10 sm:size-32",
   },
   {
     look: "pla",
     kind: "roundedTriangle",
-    // Bottom edge, between the copy and the sphere — the dropzone is
-    // too short to stack anything under the cube, so this is the
-    // triangle's own slot.
-    position: [0.62, -0.74, 0.14],
-    scale: 0.92,
+    // Bottom edge, slightly right of the copy — its own slot, clipped
+    // by the well so the point stays inside and the base runs out.
+    position: [0.24, -0.82, 0.12],
+    scale: 1.48,
     rotSpeed: [0.006, 0.035, 0.004],
     floatAmp: 0.04,
     floatSpeed: 0.55,
     phase: 0.2,
     restRotation: [0.08, 0.18, 0],
     fallbackClass:
-      "right-[32%] bottom-[7%] h-[3.75rem] w-[3.4rem] [clip-path:polygon(50%_2%,56%_8%,97%_88%,90%_100%,10%_100%,3%_88%,44%_8%)]",
+      "-bottom-8 right-[22%] h-28 w-24 [clip-path:polygon(50%_2%,56%_8%,97%_88%,90%_100%,10%_100%,3%_88%,44%_8%)] sm:h-32 sm:w-28",
   },
 ];

@@ -50,6 +50,11 @@ describe("dropzone primitives shading", () => {
     expect(TOON_OUTLINE_THICKNESS).toBeGreaterThan(0.02);
     expect(TOON_OUTLINE_THICKNESS).toBeLessThan(0.08);
   });
+
+  it("places primitives in frustum fractions so they clip the well", () => {
+    expect(src).toContain("viewport.width");
+    expect(src).toContain("viewport.height");
+  });
 });
 
 function chroma({ r, g, b }: { r: number; g: number; b: number }) {

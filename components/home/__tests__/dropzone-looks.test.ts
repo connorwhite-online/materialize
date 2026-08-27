@@ -64,25 +64,18 @@ describe("DROPZONE_PRIMITIVES", () => {
     }
   });
 
-  it("parks shapes on the edges so the copy stays clear", () => {
+  it("parks oversized shapes on the frame so they clip the border", () => {
     const [cube, sphere, triangle] = DROPZONE_PRIMITIVES;
-    expect(cube.position[0]).toBeLessThan(-1.5);
-    expect(sphere.position[0]).toBeGreaterThan(1.5);
-    // Bottom slot, between the copy and the sphere — not stacked on
-    // the cube and not nested under the sphere.
-    expect(triangle.position[0]).toBeGreaterThan(0.4);
-    expect(triangle.position[0]).toBeLessThan(1.8);
-    expect(triangle.position[1]).toBeLessThan(-0.5);
-    const distFromCube = Math.hypot(
-      cube.position[0] - triangle.position[0],
-      cube.position[1] - triangle.position[1]
-    );
-    expect(distFromCube).toBeGreaterThan(3);
-    const distFromSphere = Math.hypot(
-      sphere.position[0] - triangle.position[0],
-      sphere.position[1] - triangle.position[1]
-    );
-    expect(distFromSphere).toBeGreaterThan(1.3);
+    for (const spec of DROPZONE_PRIMITIVES) {
+      expect(spec.scale).toBeGreaterThanOrEqual(1.4);
+    }
+    // Frustum-normalized: ±1 is the visible edge.
+    expect(cube.position[0]).toBeLessThan(-0.9);
+    expect(sphere.position[0]).toBeGreaterThan(0.9);
+    expect(triangle.position[1]).toBeLessThan(-0.7);
+    // Triangle keeps the bottom slot, not a nest under the sphere.
+    expect(triangle.position[0]).toBeGreaterThan(0.1);
+    expect(triangle.position[0]).toBeLessThan(0.5);
     expect(triangle.restRotation).toBeDefined();
   });
 });
