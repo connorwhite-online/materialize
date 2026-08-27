@@ -8,19 +8,18 @@ import * as THREE from "three";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { DropzonePrimitivesFallback } from "./dropzone-primitives-fallback";
 import {
-  DROPZONE_LOOKS,
   DROPZONE_PRIMITIVES,
   type DropzoneLookId,
   type DropzonePrimitive,
 } from "./dropzone-looks";
 import { makeRoundedConeGeometry } from "./rounded-cone";
 import { TOON_INK, TOON_OUTLINE_THICKNESS } from "./dropzone-toon";
+import { DropzoneToonMaterial } from "./dropzone-toon-material";
 
 function ToonSkin({ lookId }: { lookId: DropzoneLookId }) {
-  const look = DROPZONE_LOOKS[lookId];
   return (
     <>
-      <meshBasicMaterial color={look.color} toneMapped={false} />
+      <DropzoneToonMaterial lookId={lookId} />
       <Outlines
         screenspace
         thickness={TOON_OUTLINE_THICKNESS}

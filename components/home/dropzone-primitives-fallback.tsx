@@ -7,7 +7,8 @@ import { TOON_INK } from "./dropzone-toon";
  * context still leaves the dropzone looking designed, not empty.
  *
  * Decorative only (`aria-hidden`); the file input remains the control.
- * Flat fill + ink ring matches the toon treatment of the canvas.
+ * Flat fill + ink ring is the no-WebGL stand-in; the canvas shades
+ * a colored toon gradient. The CSS gradient uses the same tints.
  */
 export function DropzonePrimitivesFallback() {
   return (
@@ -22,7 +23,7 @@ export function DropzonePrimitivesFallback() {
             key={primitive.look}
             className={`absolute ${primitive.fallbackClass}`}
             style={{
-              background: look.color,
+              background: `linear-gradient(145deg, ${look.toonHighlight} 0%, ${look.color} 46%, ${look.toonShadow} 100%)`,
               boxShadow: `0 0 0 2px ${TOON_INK}`,
             }}
           />

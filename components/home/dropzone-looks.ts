@@ -4,13 +4,20 @@
  * Inlined (rather than imported from `lib/materials`) so the home
  * client chunk doesn't pull the full editorial preset library. A test
  * pins each `catalogId` + colour against the real catalog / hero
- * overrides so these can't drift silently. The canvas paints them as
- * unlit toon fills — metalness / transmission are kept so the pin
- * still matches the catalog row, but they are not used at draw time.
+ * overrides so these can't drift silently. Shade is a soft colored
+ * toon gradient (`toonShadow` / catalog / `toonHighlight`); metalness
+ * and transmission stay on the object so the catalog pin still
+ * matches the row, but they are not used at draw time.
  */
 export type DropzoneLook = {
   catalogId: string;
   color: string;
+  /**
+   * Soft toon-gradient tints. Shadow is a hue-shifted darker, highlight
+   * a hue-shifted lighter — not a multiply-toward-black cel ramp.
+   */
+  toonShadow: string;
+  toonHighlight: string;
   metalness: number;
   roughness: number;
   clearcoat?: number;
@@ -26,6 +33,8 @@ export const DROPZONE_LOOKS: Record<
   steel: {
     catalogId: "steel-316l",
     color: "#8a8a8a",
+    toonShadow: "#5f7388",
+    toonHighlight: "#e4eaf2",
     metalness: 1,
     roughness: 0.35,
   },
@@ -33,6 +42,8 @@ export const DROPZONE_LOOKS: Record<
     catalogId: "resin-standard",
     // Hero override — translucent cream, not the stock opaque resin.
     color: "#e6dfcc",
+    toonShadow: "#c4a06c",
+    toonHighlight: "#fff8ec",
     metalness: 0,
     roughness: 0.08,
     clearcoat: 0.9,
@@ -43,6 +54,8 @@ export const DROPZONE_LOOKS: Record<
   gold: {
     catalogId: "gold-18k",
     color: "#d4a94a",
+    toonShadow: "#9a6e22",
+    toonHighlight: "#f6e3a4",
     metalness: 1,
     roughness: 0.15,
   },
@@ -50,6 +63,8 @@ export const DROPZONE_LOOKS: Record<
     catalogId: "pla-white",
     // Hero override — warmer off-white so it holds a silhouette.
     color: "#c4bca8",
+    toonShadow: "#9a7b4e",
+    toonHighlight: "#f3ead6",
     metalness: 0,
     roughness: 0.42,
     clearcoat: 0.25,
@@ -57,6 +72,8 @@ export const DROPZONE_LOOKS: Record<
   aluminum: {
     catalogId: "aluminum",
     color: "#b0b0b0",
+    toonShadow: "#6a7886",
+    toonHighlight: "#eef2f5",
     metalness: 1,
     roughness: 0.42,
   },

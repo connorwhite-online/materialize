@@ -1,9 +1,10 @@
 /**
  * Graphic toon treatment for the authed-home dropzone primitives.
  *
- * Pencil-scribble / hatch at this scale (a ~12rem well) reads as
- * noise, not a sketch. Flat fills + a world-space ink stroke is the
- * cel look that still reads as a shape from across the dashboard.
+ * Flat unlit fills read as stickers with no form. A grayscale cel ramp
+ * just muddy-darkens them. The dropzone shader mixes the catalog mid
+ * toward a hue-shifted shadow and highlight over a wrapped Lambert
+ * term — soft gradients, still graphic, plus the ink outline.
  *
  * drei's `<Outlines screenspace>` flag is named backwards relative
  * to CSS: `true` extrudes along normals in world units (the inverted
