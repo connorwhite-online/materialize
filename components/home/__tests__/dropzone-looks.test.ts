@@ -41,9 +41,14 @@ describe("DROPZONE_LOOKS", () => {
 });
 
 describe("DROPZONE_PRIMITIVES", () => {
-  it("uses only the three remaining chunky kinds — no torus or capsule", () => {
-    const kinds = new Set(DROPZONE_PRIMITIVES.map((p) => p.kind));
-    expect(kinds).toEqual(new Set(["roundedBox", "sphere", "roundedSlab"]));
+  it("uses a steel cube, resin sphere, and PLA rounded cone", () => {
+    const kinds = DROPZONE_PRIMITIVES.map((p) => p.kind);
+    expect(kinds).toEqual(["roundedBox", "sphere", "roundedCone"]);
+    expect(DROPZONE_PRIMITIVES.map((p) => p.look)).toEqual([
+      "steel",
+      "resin",
+      "pla",
+    ]);
   });
 
   it("keeps each used look unique", () => {
@@ -60,10 +65,10 @@ describe("DROPZONE_PRIMITIVES", () => {
   });
 
   it("parks shapes on the edges so the copy stays clear", () => {
-    const [cube, sphere, slab] = DROPZONE_PRIMITIVES;
+    const [cube, sphere, cone] = DROPZONE_PRIMITIVES;
     expect(cube.position[0]).toBeLessThan(-1.5);
     expect(sphere.position[0]).toBeGreaterThan(1.5);
-    expect(slab.position[0]).toBeGreaterThan(1.2);
-    expect(Math.abs(slab.position[1])).toBeGreaterThan(0.4);
+    expect(cone.position[0]).toBeGreaterThan(1.2);
+    expect(Math.abs(cone.position[1])).toBeGreaterThan(0.3);
   });
 });

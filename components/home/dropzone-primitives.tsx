@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { RoundedBox } from "@react-three/drei";
 import { useReducedMotion } from "motion/react";
@@ -14,6 +14,7 @@ import {
   type DropzoneLookId,
   type DropzonePrimitive,
 } from "./dropzone-looks";
+import { makeRoundedConeGeometry } from "./rounded-cone";
 
 function LookMaterial({ lookId }: { lookId: DropzoneLookId }) {
   const look = DROPZONE_LOOKS[lookId];
@@ -47,17 +48,8 @@ function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
           {material}
         </RoundedBox>
       );
-    case "roundedSlab":
-      return (
-        <RoundedBox
-          args={[1.25, 0.72, 1.25]}
-          radius={0.24}
-          smoothness={8}
-          bevelSegments={6}
-        >
-          {material}
-        </RoundedBox>
-      );
+    case "roundedCone":
+      return <RoundedCone>{material}</RoundedCone>;
     case "sphere":
       return (
         <mesh>
@@ -66,6 +58,12 @@ function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
         </mesh>
       );
   }
+}
+
+function RoundedCone({ children }: { children: React.ReactNode }) {
+  const geometry = useMemo(() => makeRoundedConeGeometry(), []);
+  useEffect(() => () => geometry.dispose(), [geometry]);
+  return <mesh geometry={geometry}>{children}</mesh>;
 }
 
 function PrimitiveMesh({

@@ -62,7 +62,7 @@ export const DROPZONE_LOOKS: Record<
 
 export type DropzoneLookId = keyof typeof DROPZONE_LOOKS;
 
-export type DropzonePrimitiveKind = "roundedBox" | "sphere" | "roundedSlab";
+export type DropzonePrimitiveKind = "roundedBox" | "sphere" | "roundedCone";
 
 export interface DropzonePrimitive {
   look: DropzoneLookId;
@@ -83,9 +83,10 @@ export interface DropzonePrimitive {
 
 /**
  * Three chunky primitives parked on the edges so the copy in the
- * middle stays clear. Tuned for a wide, short dropzone (~2:1) with
- * the camera at z ≈ 6.5, fov 28. Rotation is slow on purpose —
- * a leisurely turn, not a tumble (`rotSpeed` is rad/s).
+ * middle stays clear: steel cube, resin sphere, PLA rounded cone.
+ * Tuned for a wide, short dropzone (~2:1) with the camera at z ≈ 6.5,
+ * fov 28. Rotation is slow on purpose — a leisurely turn, not a
+ * tumble (`rotSpeed` is rad/s).
  */
 export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
   {
@@ -112,15 +113,15 @@ export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
     fallbackClass: "right-[5%] top-[14%] size-16 rounded-full sm:size-[4.25rem]",
   },
   {
-    look: "gold",
-    kind: "roundedSlab",
-    position: [1.85, -0.58, 0.15],
-    scale: 0.55,
+    look: "pla",
+    kind: "roundedCone",
+    position: [1.9, -0.48, 0.12],
+    scale: 0.82,
     rotSpeed: [0.04, 0.07, 0.02],
     floatAmp: 0.06,
     floatSpeed: 0.55,
     phase: 0.9,
     fallbackClass:
-      "right-[7%] bottom-[8%] h-9 w-14 rotate-12 rounded-2xl sm:h-10 sm:w-16",
+      "right-[6%] bottom-[5%] h-[3.5rem] w-11 [clip-path:polygon(50%_0%,96%_80%,78%_100%,22%_100%,4%_80%)]",
   },
 ];
