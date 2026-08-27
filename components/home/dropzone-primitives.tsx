@@ -14,21 +14,15 @@ import {
   type DropzonePrimitive,
 } from "./dropzone-looks";
 import { makeRoundedConeGeometry } from "./rounded-cone";
-import { makeToonRamp, TOON_INK } from "./dropzone-toon";
+import { TOON_INK, TOON_OUTLINE_THICKNESS } from "./dropzone-toon";
 
 function ToonSkin({ lookId }: { lookId: DropzoneLookId }) {
   const look = DROPZONE_LOOKS[lookId];
-  const ramp = useMemo(() => makeToonRamp(), []);
-  useEffect(() => () => ramp.dispose(), [ramp]);
   return (
     <>
-      <meshToonMaterial
-        color={look.color}
-        gradientMap={ramp}
-        toneMapped={false}
-      />
+      <meshBasicMaterial color={look.color} toneMapped={false} />
       <Outlines
-        thickness={0.045}
+        thickness={TOON_OUTLINE_THICKNESS}
         color={TOON_INK}
         angle={Math.PI}
         toneMapped={false}
@@ -104,8 +98,6 @@ function PrimitiveMesh({
 function Scene({ paused }: { paused: boolean }) {
   return (
     <>
-      <ambientLight intensity={0.7} />
-      <directionalLight position={[4, 5, 6]} intensity={1.85} />
       {DROPZONE_PRIMITIVES.map((spec) => (
         <PrimitiveMesh key={spec.look} spec={spec} paused={paused} />
       ))}

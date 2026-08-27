@@ -4,8 +4,8 @@
  * Inlined (rather than imported from `lib/materials`) so the home
  * client chunk doesn't pull the full editorial preset library. A test
  * pins each `catalogId` + colour against the real catalog / hero
- * overrides so these can't drift silently. The canvas shades them as
- * flat toon fills — metalness / transmission are kept so the pin
+ * overrides so these can't drift silently. The canvas paints them as
+ * unlit toon fills — metalness / transmission are kept so the pin
  * still matches the catalog row, but they are not used at draw time.
  */
 export type DropzoneLook = {
