@@ -1,92 +1,57 @@
 /**
- * Catalog colours for the authed-home dropzone primitives.
+ * Printable-material looks for the authed-home dropzone primitives.
  *
  * Inlined (rather than imported from `lib/materials`) so the home
  * client chunk doesn't pull the full editorial preset library. A test
- * pins each `catalogId` + colour against the real catalog / hero
- * overrides so these can't drift silently. Shade is a same-family
- * colored-pencil ramp (`toonShadow` / `toonColor` / `toonHighlight`).
- * Metalness and transmission stay on the object so the catalog pin
- * still matches the row, but they are not used at draw time.
+ * pins each `catalogId` + PBR against the real catalog / hero
+ * overrides so these can't drift silently.
+ *
+ * Live set: stainless 316L, translucent resin, Nylon PA12 — the three
+ * shapes read as real print materials under studio IBL.
  */
+
 export type DropzoneLook = {
   catalogId: string;
   color: string;
-  /**
-   * Same-family pencil ramp — periwinkle, rose, chartreuse.
-   * Mids are value-aligned so the three shapes feel like one set.
-   */
-  toonColor: string;
-  toonShadow: string;
-  toonHighlight: string;
   metalness: number;
   roughness: number;
   clearcoat?: number;
+  clearcoatRoughness?: number;
   transmission?: number;
   ior?: number;
   thickness?: number;
 };
 
-export const DROPZONE_LOOKS: Record<
-  "steel" | "resin" | "gold" | "pla" | "aluminum",
-  DropzoneLook
-> = {
-  steel: {
-    catalogId: "steel-316l",
-    color: "#8a8a8a",
-    // Square — periwinkle pencil (aligned mid value with the set).
-    toonColor: "#9088d2",
-    toonShadow: "#58529c",
-    toonHighlight: "#ccc8ef",
-    metalness: 1,
-    roughness: 0.35,
-  },
-  resin: {
-    catalogId: "resin-standard",
-    // Hero override — translucent cream, not the stock opaque resin.
-    color: "#e6dfcc",
-    // Sphere — rose pencil.
-    toonColor: "#d2909a",
-    toonShadow: "#9c5664",
-    toonHighlight: "#efc9cf",
-    metalness: 0,
-    roughness: 0.08,
-    clearcoat: 0.9,
-    transmission: 0.85,
-    ior: 1.5,
-    thickness: 1.2,
-  },
-  gold: {
-    catalogId: "gold-18k",
-    color: "#d4a94a",
-    toonColor: "#d4a94a",
-    toonShadow: "#9a6e22",
-    toonHighlight: "#f6e3a4",
-    metalness: 1,
-    roughness: 0.15,
-  },
-  pla: {
-    catalogId: "pla-white",
-    // Hero override — warmer off-white so it holds a silhouette.
-    color: "#c4bca8",
-    // Triangle — chartreuse pencil.
-    toonColor: "#b0d290",
-    toonShadow: "#6e9c56",
-    toonHighlight: "#dff0c9",
-    metalness: 0,
-    roughness: 0.42,
-    clearcoat: 0.25,
-  },
-  aluminum: {
-    catalogId: "aluminum",
-    color: "#b0b0b0",
-    toonColor: "#b0b0b0",
-    toonShadow: "#6a7886",
-    toonHighlight: "#eef2f5",
-    metalness: 1,
-    roughness: 0.42,
-  },
-};
+export const DROPZONE_LOOKS: Record<"steel" | "resin" | "nylon", DropzoneLook> =
+  {
+    steel: {
+      // Stainless Steel 316L — catalog row as-is.
+      catalogId: "steel-316l",
+      color: "#8a8a8a",
+      metalness: 1,
+      roughness: 0.35,
+    },
+    resin: {
+      // Hero resin override — cream + transmission so the sphere reads
+      // translucent, not chalky opaque stock resin.
+      catalogId: "resin-standard",
+      color: "#e6dfcc",
+      metalness: 0,
+      roughness: 0.08,
+      clearcoat: 0.9,
+      clearcoatRoughness: 0.1,
+      transmission: 0.85,
+      ior: 1.5,
+      thickness: 1.2,
+    },
+    nylon: {
+      // Nylon PA12 — matte SLS plastic.
+      catalogId: "nylon-pa12",
+      color: "#d4cfc7",
+      metalness: 0,
+      roughness: 0.8,
+    },
+  };
 
 export type DropzoneLookId = keyof typeof DROPZONE_LOOKS;
 
@@ -109,22 +74,35 @@ export interface DropzonePrimitive {
   floatSpeed: number;
   phase: number;
   /**
-   * Starting Euler tilt. Omitted → derived from `phase` (the square
-   * and sphere). The triangle sets this explicitly so it stays
-   * face-on enough to read as a triangle, not a tumbling wedge.
+   * Starting Euler tilt. Omitted → derived from `phase`. The triangle
+   * and square set this so their silhouettes stay readable.
    */
   restRotation?: readonly [number, number, number];
   /**
    * Tailwind placement for the CSS stand-in (loading / no-WebGL).
-   * Hang off the dashed well so the CSS stand-in also clips a little.
    */
   fallbackClass: string;
 }
 
+/** Canvas CSS width (px) below which shapes shrink to fit the well. */
+export const DROPZONE_MOBILE_MAX_WIDTH = 520;
+
+/** Multiplier applied to each primitive's `scale` on narrow canvases. */
+export const DROPZONE_MOBILE_SCALE = 0.68;
+
+/** Corner radius on the unit rounded square — chubby, still a square. */
+export const DROPZONE_SQUARE_RADIUS = 0.36;
+
 /**
- * Three chubby sketch shapes: rounded square left, sphere right,
- * rounded triangle along the bottom. Desktop scale is modest; the
- * scene shrinks them further on narrow canvases. Rotation is slow.
+ * Pull frustum positions slightly inward on mobile so chubby shapes
+ * sit inside the dashed well instead of clipping past the frame.
+ */
+export const DROPZONE_MOBILE_POSITION = 0.86;
+
+/**
+ * Three chubby print-material shapes: stainless square left, resin
+ * sphere right, nylon triangle along the bottom. Desktop scale is
+ * modest; the scene shrinks them further on narrow canvases.
  */
 export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
   {
@@ -132,7 +110,6 @@ export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
     kind: "roundedBox",
     position: [-0.88, 0.06, -0.15],
     scale: 1.0,
-    // 3/4 view so the chubby square reads as a square, not a ball.
     restRotation: [0.32, 0.52, 0.08],
     rotSpeed: [0.02, 0.045, 0.01],
     floatAmp: 0.07,
@@ -153,7 +130,7 @@ export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
     fallbackClass: "-right-2 top-[16%] size-14 rounded-full sm:size-20",
   },
   {
-    look: "pla",
+    look: "nylon",
     kind: "roundedTriangle",
     position: [0.18, -0.58, 0.12],
     scale: 0.98,
@@ -161,7 +138,6 @@ export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
     floatAmp: 0.035,
     floatSpeed: 0.5,
     phase: 0.2,
-    // Face-on enough that the chubby triangle still reads as a triangle.
     restRotation: [0.04, 0.12, 0],
     fallbackClass:
       "-bottom-2 right-[26%] h-14 w-12 [clip-path:polygon(50%_2%,55%_10%,97%_88%,90%_100%,10%_100%,3%_88%,45%_10%)] sm:h-20 sm:w-[4.5rem]",

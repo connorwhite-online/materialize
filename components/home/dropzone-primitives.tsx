@@ -2,44 +2,44 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Outlines, RoundedBox } from "@react-three/drei";
+import { RoundedBox } from "@react-three/drei";
 import { useReducedMotion } from "motion/react";
 import * as THREE from "three";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
+import { StudioEnvironment } from "@/components/viewer/studio-environment";
 import { DropzonePrimitivesFallback } from "./dropzone-primitives-fallback";
-import {
-  DROPZONE_PRIMITIVES,
-  type DropzoneLookId,
-  type DropzonePrimitive,
-} from "./dropzone-looks";
-import { makeRoundedTriangleGeometry } from "./rounded-triangle";
 import {
   DROPZONE_MOBILE_MAX_WIDTH,
   DROPZONE_MOBILE_POSITION,
   DROPZONE_MOBILE_SCALE,
+  DROPZONE_PRIMITIVES,
   DROPZONE_SQUARE_RADIUS,
-  TOON_INK,
-  TOON_OUTLINE_THICKNESS,
-} from "./dropzone-toon";
-import { DropzoneToonMaterial } from "./dropzone-toon-material";
+  DROPZONE_LOOKS,
+  type DropzoneLookId,
+  type DropzonePrimitive,
+} from "./dropzone-looks";
+import { makeRoundedTriangleGeometry } from "./rounded-triangle";
 
-function ToonSkin({ lookId }: { lookId: DropzoneLookId }) {
+function PhysicalSkin({ lookId }: { lookId: DropzoneLookId }) {
+  const look = DROPZONE_LOOKS[lookId];
+  const transmitting = (look.transmission ?? 0) > 0;
   return (
-    <>
-      <DropzoneToonMaterial lookId={lookId} />
-      <Outlines
-        screenspace
-        thickness={TOON_OUTLINE_THICKNESS}
-        color={TOON_INK}
-        angle={Math.PI}
-        toneMapped={false}
-      />
-    </>
+    <meshPhysicalMaterial
+      color={look.color}
+      metalness={look.metalness}
+      roughness={look.roughness}
+      clearcoat={look.clearcoat ?? 0}
+      clearcoatRoughness={look.clearcoatRoughness ?? 0.1}
+      transmission={look.transmission ?? 0}
+      ior={look.ior ?? 1.5}
+      thickness={look.thickness ?? 0.5}
+      transparent={transmitting}
+    />
   );
 }
 
 function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
-  const skin = <ToonSkin lookId={spec.look} />;
+  const skin = <PhysicalSkin lookId={spec.look} />;
   switch (spec.kind) {
     case "roundedBox":
       return (
@@ -57,7 +57,7 @@ function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
     case "sphere":
       return (
         <mesh>
-          <sphereGeometry args={[0.56, 40, 40]} />
+          <sphereGeometry args={[0.56, 48, 48]} />
           {skin}
         </mesh>
       );
@@ -74,7 +74,6 @@ function useDropzoneLayout() {
   const { size } = useThree();
   const mobile = size.width < DROPZONE_MOBILE_MAX_WIDTH;
   return {
-    mobile,
     scaleMul: mobile ? DROPZONE_MOBILE_SCALE : 1,
     posMul: mobile ? DROPZONE_MOBILE_POSITION : 1,
   };
@@ -133,6 +132,8 @@ function PrimitiveMesh({
 function Scene({ paused }: { paused: boolean }) {
   return (
     <>
+      <ambientLight intensity={0.35} />
+      <StudioEnvironment />
       {DROPZONE_PRIMITIVES.map((spec) => (
         <PrimitiveMesh key={spec.look} spec={spec} paused={paused} />
       ))}
@@ -141,10 +142,11 @@ function Scene({ paused }: { paused: boolean }) {
 }
 
 /**
- * Floating flat-sketch primitives behind the authed-home file dropzone.
- * Decorative — `pointer-events` stay off so the file input remains
- * the only control. Pauses when scrolled off-screen or when the user
- * prefers reduced motion.
+ * Floating print-material primitives behind the authed-home file
+ * dropzone — stainless, resin, nylon under studio IBL. Decorative;
+ * `pointer-events` stay off so the file input remains the only
+ * control. Pauses when scrolled off-screen or when the user prefers
+ * reduced motion.
  */
 export function DropzonePrimitives() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -177,7 +179,7 @@ export function DropzonePrimitives() {
             antialias: true,
             alpha: true,
             powerPreference: "low-power",
-            toneMapping: THREE.NoToneMapping,
+            toneMapping: THREE.ACESFilmicToneMapping,
           }}
           frameloop={paused ? "demand" : "always"}
         >
