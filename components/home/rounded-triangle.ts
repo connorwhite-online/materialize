@@ -1,12 +1,12 @@
 import * as THREE from "three";
 
 /**
- * Equilateral triangle in XY, pointing +Y. The fillet is a small
- * bite off each vertex so the sides stay long and straight — a
- * literal triangle with rounded corners, not a Reuleaux blob.
+ * Equilateral triangle in XY, pointing +Y. A large fillet on each
+ * vertex makes a chubby, pillowy triangle — still a triangle in
+ * silhouette, not a Reuleaux blob.
  */
-export const ROUNDED_TRIANGLE_SIDE = 1.32;
-export const ROUNDED_TRIANGLE_CORNER_RADIUS = 0.11;
+export const ROUNDED_TRIANGLE_SIDE = 1.28;
+export const ROUNDED_TRIANGLE_CORNER_RADIUS = 0.28;
 
 export function roundedTriangleShape(
   side = ROUNDED_TRIANGLE_SIDE,
@@ -45,8 +45,7 @@ export function roundedTriangleShape(
 
     if (i === 0) shape.moveTo(pStart.x, pStart.y);
     else shape.lineTo(pStart.x, pStart.y);
-    // Convex CCW outline: a0→a1 CCW is the long interior sweep (a
-    // circular lobe). Clockwise is the short outward fillet.
+    // Convex CCW outline: clockwise is the short outward fillet.
     shape.absarc(center.x, center.y, cornerRadius, a0, a1, true);
   }
 
@@ -55,17 +54,17 @@ export function roundedTriangleShape(
 }
 
 /**
- * Extruded triangle token. A small bevel rounds the rim (the
- * edges) without eating the silhouette the way a chunky bevel does.
+ * Extruded chubby triangle token. A generous bevel rounds the rim
+ * so the edges feel soft like a sketch sticker.
  */
 export function makeRoundedTriangleGeometry(): THREE.ExtrudeGeometry {
   const geometry = new THREE.ExtrudeGeometry(roundedTriangleShape(), {
-    depth: 0.2,
+    depth: 0.34,
     bevelEnabled: true,
-    bevelThickness: 0.035,
-    bevelSize: 0.035,
-    bevelSegments: 3,
-    curveSegments: 20,
+    bevelThickness: 0.07,
+    bevelSize: 0.07,
+    bevelSegments: 4,
+    curveSegments: 28,
   });
   geometry.center();
   geometry.computeVertexNormals();

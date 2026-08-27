@@ -13,7 +13,14 @@ import {
   type DropzonePrimitive,
 } from "./dropzone-looks";
 import { makeRoundedTriangleGeometry } from "./rounded-triangle";
-import { TOON_INK, TOON_OUTLINE_THICKNESS } from "./dropzone-toon";
+import {
+  DROPZONE_MOBILE_MAX_WIDTH,
+  DROPZONE_MOBILE_POSITION,
+  DROPZONE_MOBILE_SCALE,
+  DROPZONE_SQUARE_RADIUS,
+  TOON_INK,
+  TOON_OUTLINE_THICKNESS,
+} from "./dropzone-toon";
 import { DropzoneToonMaterial } from "./dropzone-toon-material";
 
 function ToonSkin({ lookId }: { lookId: DropzoneLookId }) {
@@ -38,9 +45,9 @@ function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
       return (
         <RoundedBox
           args={[1, 1, 1]}
-          radius={0.28}
-          smoothness={8}
-          bevelSegments={6}
+          radius={DROPZONE_SQUARE_RADIUS}
+          smoothness={6}
+          bevelSegments={4}
         >
           {skin}
         </RoundedBox>
@@ -50,7 +57,7 @@ function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
     case "sphere":
       return (
         <mesh>
-          <sphereGeometry args={[0.58, 48, 48]} />
+          <sphereGeometry args={[0.56, 40, 40]} />
           {skin}
         </mesh>
       );
@@ -63,6 +70,16 @@ function RoundedTriangle({ children }: { children: React.ReactNode }) {
   return <mesh geometry={geometry}>{children}</mesh>;
 }
 
+function useDropzoneLayout() {
+  const { size } = useThree();
+  const mobile = size.width < DROPZONE_MOBILE_MAX_WIDTH;
+  return {
+    mobile,
+    scaleMul: mobile ? DROPZONE_MOBILE_SCALE : 1,
+    posMul: mobile ? DROPZONE_MOBILE_POSITION : 1,
+  };
+}
+
 function PrimitiveMesh({
   spec,
   paused,
@@ -72,8 +89,10 @@ function PrimitiveMesh({
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const { viewport } = useThree();
-  const x = spec.position[0] * (viewport.width / 2);
-  const y = spec.position[1] * (viewport.height / 2);
+  const { scaleMul, posMul } = useDropzoneLayout();
+  const x = spec.position[0] * posMul * (viewport.width / 2);
+  const y = spec.position[1] * posMul * (viewport.height / 2);
+  const scale = spec.scale * scaleMul;
 
   useFrame(({ clock }) => {
     const group = groupRef.current;
@@ -84,10 +103,10 @@ function PrimitiveMesh({
       spec.phase * 0.7,
       spec.phase * 0.2,
     ];
-    group.position.x = spec.position[0] * (viewport.width / 2);
+    group.position.x = spec.position[0] * posMul * (viewport.width / 2);
     group.position.y =
-      spec.position[1] * (viewport.height / 2) +
-      Math.sin(t * spec.floatSpeed + spec.phase) * spec.floatAmp;
+      spec.position[1] * posMul * (viewport.height / 2) +
+      Math.sin(t * spec.floatSpeed + spec.phase) * spec.floatAmp * scaleMul;
     group.rotation.x = rest[0] + t * spec.rotSpeed[0];
     group.rotation.y = rest[1] + t * spec.rotSpeed[1];
     group.rotation.z = rest[2] + t * spec.rotSpeed[2];
@@ -103,7 +122,7 @@ function PrimitiveMesh({
     <group
       ref={groupRef}
       position={[x, y, spec.position[2]]}
-      scale={spec.scale}
+      scale={scale}
       rotation={[rest[0], rest[1], rest[2]]}
     >
       <PrimitiveBody spec={spec} />
@@ -122,7 +141,7 @@ function Scene({ paused }: { paused: boolean }) {
 }
 
 /**
- * Floating toon-ink primitives behind the authed-home file dropzone.
+ * Floating flat-sketch primitives behind the authed-home file dropzone.
  * Decorative — `pointer-events` stay off so the file input remains
  * the only control. Pauses when scrolled off-screen or when the user
  * prefers reduced motion.

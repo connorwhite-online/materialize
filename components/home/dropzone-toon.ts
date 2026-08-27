@@ -1,9 +1,9 @@
 /**
- * Graphic toon treatment for the authed-home dropzone primitives.
+ * Flat sketch treatment for the authed-home dropzone primitives.
  *
- * Lighting is quantized into four paint chips (deep / shadow / mid /
- * highlight) plus a hard specular coin and a rim stroke — comic cel,
- * not a wrapped Lambert blend. The ink outline is a world-space hull.
+ * Fill is almost flat pastel with a soft pencil shade on the dark
+ * side — no cel bands, no specular coin. Form comes from the ink
+ * silhouette (world-space outline hull) rather than lighting tricks.
  *
  * drei's `<Outlines screenspace>` flag is named backwards relative
  * to CSS: `true` extrudes along normals in world units (the inverted
@@ -11,22 +11,32 @@
  * the first frame and inflates a "2px" stroke into a dark blob.
  */
 
-/** Warm ink, same hue family as the UI foreground — not pure black. */
-export const TOON_INK = "#2c261c";
+/** Warm ink — sketchbook pencil, not pure black. */
+export const TOON_INK = "#2a241c";
 
 /**
  * World-space outline extrusion (`screenspace` on `<Outlines>`).
- * A comic pen stroke — heavy enough to read as ink, not a hairline.
+ * A chunky pen stroke so the silhouette reads like a doodle.
  */
-export const TOON_OUTLINE_THICKNESS = 0.052;
+export const TOON_OUTLINE_THICKNESS = 0.045;
 
 /**
- * Wrap-lighting edges for the four cel bands.
- * Deep → shadow → mid → lit, in that order.
+ * How hard the soft pencil shade leans into the dark side.
+ * 0 = pure flat fill; 1 = full shadow tint. Kept quiet on purpose.
  */
-export const TOON_DEEP_EDGE = 0.28;
-export const TOON_MID_EDGE = 0.5;
-export const TOON_LIT_EDGE = 0.78;
+export const TOON_PENCIL_STRENGTH = 0.22;
 
-/** Fresnel threshold for the cartoon rim stroke (1 − N·V). */
-export const TOON_RIM_EDGE = 0.58;
+/** Canvas CSS width (px) below which shapes shrink to fit the well. */
+export const DROPZONE_MOBILE_MAX_WIDTH = 520;
+
+/** Multiplier applied to each primitive's `scale` on narrow canvases. */
+export const DROPZONE_MOBILE_SCALE = 0.68;
+
+/** Corner radius on the unit rounded square — chubby, not a sharp cube. */
+export const DROPZONE_SQUARE_RADIUS = 0.42;
+
+/**
+ * Pull frustum positions slightly inward on mobile so chubby shapes
+ * sit inside the dashed well instead of clipping past the frame.
+ */
+export const DROPZONE_MOBILE_POSITION = 0.86;

@@ -41,7 +41,7 @@ describe("DROPZONE_LOOKS", () => {
 });
 
 describe("DROPZONE_PRIMITIVES", () => {
-  it("uses a steel cube, resin sphere, and PLA rounded triangle", () => {
+  it("uses a rounded square, resin sphere, and PLA rounded triangle", () => {
     const kinds = DROPZONE_PRIMITIVES.map((p) => p.kind);
     expect(kinds).toEqual(["roundedBox", "sphere", "roundedTriangle"]);
     expect(DROPZONE_PRIMITIVES.map((p) => p.look)).toEqual([
@@ -64,19 +64,22 @@ describe("DROPZONE_PRIMITIVES", () => {
     }
   });
 
-  it("parks modest-scale shapes on the frame", () => {
-    const [cube, sphere, triangle] = DROPZONE_PRIMITIVES;
+  it("parks modest-scale chubby shapes on the frame", () => {
+    const [square, sphere, triangle] = DROPZONE_PRIMITIVES;
     for (const spec of DROPZONE_PRIMITIVES) {
-      expect(spec.scale).toBeGreaterThanOrEqual(1);
-      expect(spec.scale).toBeLessThan(1.2);
+      expect(spec.scale).toBeGreaterThanOrEqual(0.9);
+      expect(spec.scale).toBeLessThanOrEqual(1.1);
     }
     // Frustum-normalized: ±1 is the visible edge.
-    expect(cube.position[0]).toBeLessThan(-0.8);
+    expect(square.position[0]).toBeLessThan(-0.8);
     expect(sphere.position[0]).toBeGreaterThan(0.8);
     expect(triangle.position[1]).toBeLessThan(-0.5);
     // Triangle keeps the bottom slot, not a nest under the sphere.
     expect(triangle.position[0]).toBeGreaterThan(0.1);
     expect(triangle.position[0]).toBeLessThan(0.5);
     expect(triangle.restRotation).toBeDefined();
+    // Mobile fallback sizes stay smaller than the sm: bump.
+    expect(square.fallbackClass).toMatch(/size-14/);
+    expect(sphere.fallbackClass).toMatch(/size-14/);
   });
 });

@@ -2,12 +2,13 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
-  TOON_DEEP_EDGE,
+  DROPZONE_MOBILE_MAX_WIDTH,
+  DROPZONE_MOBILE_POSITION,
+  DROPZONE_MOBILE_SCALE,
+  DROPZONE_SQUARE_RADIUS,
   TOON_INK,
-  TOON_LIT_EDGE,
-  TOON_MID_EDGE,
   TOON_OUTLINE_THICKNESS,
-  TOON_RIM_EDGE,
+  TOON_PENCIL_STRENGTH,
 } from "../dropzone-toon";
 import { DROPZONE_LOOKS } from "../dropzone-looks";
 
@@ -20,6 +21,10 @@ function luma({ r, g, b }: { r: number; g: number; b: number }) {
   return r + g + b;
 }
 
+function chroma({ r, g, b }: { r: number; g: number; b: number }) {
+  return Math.max(r, g, b) - Math.min(r, g, b);
+}
+
 describe("dropzone primitives shading", () => {
   const src = readFileSync(
     resolve(__dirname, "../dropzone-primitives.tsx"),
@@ -30,7 +35,7 @@ describe("dropzone primitives shading", () => {
     "utf8"
   );
 
-  it("uses the colored toon shader and ink outlines, not PBR or flat unlit", () => {
+  it("uses the flat sketch shader and ink outlines, not PBR or cel bands", () => {
     expect(src).toContain("DropzoneToonMaterial");
     expect(src).toContain("Outlines");
     expect(src).toContain("TOON_INK");
@@ -39,36 +44,20 @@ describe("dropzone primitives shading", () => {
     expect(src).not.toContain("meshToonMaterial");
     expect(src).not.toContain("meshPhysicalMaterial");
     expect(src).not.toContain("StudioEnvironment");
+    expect(shader).not.toContain("celstep");
+    expect(shader).not.toContain("specBlob");
+    expect(shader).not.toContain("deepBand");
   });
 
-  it("shades with hard cel bands, a rim stroke, and a specular coin", () => {
-    expect(shader).toContain("uDeep");
+  it("shades with a flat fill and soft pencil, plus paper grain", () => {
+    expect(shader).toContain("uColor");
     expect(shader).toContain("uShadow");
-    expect(shader).toContain("uHighlight");
-    expect(shader).toContain("celstep");
-    expect(shader).toContain("deepBand");
-    expect(shader).toContain("midBand");
-    expect(shader).toContain("litBand");
-    expect(shader).toContain("rimBand");
-    expect(shader).toContain("specBlob");
+    expect(shader).toContain("uPencil");
+    expect(shader).toContain("paperGrain");
     expect(shader).toContain("look.toonColor");
-    expect(shader).toContain("look.toonDeep");
-    expect(shader).not.toContain("hemi");
-  });
-
-  it("quantizes lighting at the exported cel edges", () => {
-    expect(TOON_DEEP_EDGE).toBeGreaterThan(0.2);
-    expect(TOON_DEEP_EDGE).toBeLessThan(TOON_MID_EDGE);
-    expect(TOON_MID_EDGE).toBeGreaterThan(0.4);
-    expect(TOON_MID_EDGE).toBeLessThan(0.6);
-    expect(TOON_LIT_EDGE).toBeGreaterThan(TOON_MID_EDGE);
-    expect(TOON_LIT_EDGE).toBeLessThan(0.9);
-    expect(TOON_RIM_EDGE).toBeGreaterThan(0.45);
-    expect(TOON_RIM_EDGE).toBeLessThan(0.75);
-    expect(shader).toContain("uDeepEdge");
-    expect(shader).toContain("uMidEdge");
-    expect(shader).toContain("uLitEdge");
-    expect(shader).toContain("uRimEdge");
+    expect(shader).toContain("look.toonShadow");
+    expect(TOON_PENCIL_STRENGTH).toBeGreaterThan(0.1);
+    expect(TOON_PENCIL_STRENGTH).toBeLessThan(0.4);
   });
 
   it("inks in the warm near-black, not pure black", () => {
@@ -86,52 +75,58 @@ describe("dropzone primitives shading", () => {
     expect(src).toContain("viewport.height");
   });
 
-  it("paints the CSS stand-in with the same four hard chips", () => {
+  it("shrinks shapes on narrow canvases so they fit the mobile well", () => {
+    expect(src).toContain("DROPZONE_MOBILE_SCALE");
+    expect(src).toContain("DROPZONE_MOBILE_POSITION");
+    expect(DROPZONE_MOBILE_MAX_WIDTH).toBeGreaterThan(400);
+    expect(DROPZONE_MOBILE_MAX_WIDTH).toBeLessThan(700);
+    expect(DROPZONE_MOBILE_SCALE).toBeGreaterThan(0.5);
+    expect(DROPZONE_MOBILE_SCALE).toBeLessThan(0.85);
+    expect(DROPZONE_MOBILE_POSITION).toBeGreaterThan(0.75);
+    expect(DROPZONE_MOBILE_POSITION).toBeLessThan(1);
+  });
+
+  it("keeps the square chubby-round", () => {
+    expect(DROPZONE_SQUARE_RADIUS).toBeGreaterThanOrEqual(0.38);
+    expect(DROPZONE_SQUARE_RADIUS).toBeLessThan(0.5);
+    expect(src).toContain("DROPZONE_SQUARE_RADIUS");
+  });
+
+  it("paints the CSS stand-in as a flat fill with ink ring", () => {
     const fallback = readFileSync(
       resolve(__dirname, "../dropzone-primitives-fallback.tsx"),
       "utf8"
     );
-    expect(fallback).toContain("look.toonDeep");
-    expect(fallback).toContain("look.toonShadow");
     expect(fallback).toContain("look.toonColor");
-    expect(fallback).toContain("look.toonHighlight");
-    expect(fallback).toMatch(/22%[\s\S]*48%[\s\S]*72%/);
+    expect(fallback).toContain("TOON_INK");
+    expect(fallback).not.toContain("toonDeep");
+    expect(fallback).not.toContain("linear-gradient");
   });
 });
 
-function chroma({ r, g, b }: { r: number; g: number; b: number }) {
-  return Math.max(r, g, b) - Math.min(r, g, b);
-}
-
-describe("toon gradient tints", () => {
-  it("tints the three live primitives as cartoon hues, not grey", () => {
+describe("toon sketch tints", () => {
+  it("tints the three live primitives as pastel hues, not grey", () => {
     const steel = rgb(DROPZONE_LOOKS.steel.toonColor);
     expect(steel.b).toBeGreaterThan(steel.r);
     expect(steel.r).toBeGreaterThanOrEqual(steel.g);
-    expect(chroma(steel)).toBeGreaterThan(50);
+    expect(chroma(steel)).toBeGreaterThan(40);
 
     const resin = rgb(DROPZONE_LOOKS.resin.toonColor);
     expect(resin.r).toBeGreaterThan(resin.g);
     expect(resin.r).toBeGreaterThan(resin.b);
-    expect(chroma(resin)).toBeGreaterThan(50);
+    expect(chroma(resin)).toBeGreaterThan(40);
 
     const pla = rgb(DROPZONE_LOOKS.pla.toonColor);
     expect(pla.g).toBeGreaterThan(pla.r);
     expect(pla.g).toBeGreaterThan(pla.b);
     expect(pla.r).toBeGreaterThan(pla.b);
-    expect(chroma(pla)).toBeGreaterThan(50);
+    expect(chroma(pla)).toBeGreaterThan(40);
   });
 
-  it("keeps a four-chip ramp from deep to highlight on every look", () => {
+  it("keeps the pencil shade darker than the flat fill on every look", () => {
     for (const look of Object.values(DROPZONE_LOOKS)) {
-      expect(luma(rgb(look.toonHighlight))).toBeGreaterThan(
-        luma(rgb(look.toonColor))
-      );
       expect(luma(rgb(look.toonShadow))).toBeLessThan(luma(rgb(look.toonColor)));
-      expect(luma(rgb(look.toonDeep))).toBeLessThan(luma(rgb(look.toonShadow)));
-      expect(look.toonDeep).not.toBe(look.toonShadow);
       expect(look.toonShadow).not.toBe(look.toonColor);
-      expect(look.toonHighlight).not.toBe(look.toonColor);
     }
   });
 });
