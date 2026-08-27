@@ -68,18 +68,20 @@ describe("DROPZONE_PRIMITIVES", () => {
     const [cube, sphere, triangle] = DROPZONE_PRIMITIVES;
     expect(cube.position[0]).toBeLessThan(-1.5);
     expect(sphere.position[0]).toBeGreaterThan(1.5);
-    // Triangle gets the lower-left pocket, not a nest under the sphere.
-    expect(triangle.position[0]).toBeLessThan(-1.0);
-    expect(triangle.position[1]).toBeLessThan(-0.4);
+    // Triangle gets the lower-left corner, stacked under the cube with
+    // air between them — not a nest under the sphere or against the copy.
+    expect(triangle.position[0]).toBeLessThan(-2.0);
+    expect(triangle.position[1]).toBeLessThan(-0.5);
     const distFromCube = Math.hypot(
       cube.position[0] - triangle.position[0],
       cube.position[1] - triangle.position[1]
     );
-    expect(distFromCube).toBeGreaterThan(1.2);
+    expect(distFromCube).toBeGreaterThan(1.1);
     const distFromSphere = Math.hypot(
       sphere.position[0] - triangle.position[0],
       sphere.position[1] - triangle.position[1]
     );
     expect(distFromSphere).toBeGreaterThan(2.5);
+    expect(triangle.restRotation).toBeDefined();
   });
 });

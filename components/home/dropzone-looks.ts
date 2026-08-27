@@ -103,6 +103,12 @@ export interface DropzonePrimitive {
   floatSpeed: number;
   phase: number;
   /**
+   * Starting Euler tilt. Omitted → derived from `phase` (the cube and
+   * sphere). The triangle sets this explicitly so it stays face-on
+   * enough to read as a triangle, not a tumbling wedge.
+   */
+  restRotation?: readonly [number, number, number];
+  /**
    * Tailwind placement for the CSS stand-in (loading / no-WebGL).
    * Keep these on the edges so the "Add a File" copy stays clear.
    */
@@ -120,14 +126,14 @@ export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
   {
     look: "steel",
     kind: "roundedBox",
-    position: [-2.3, 0.42, -0.15],
-    scale: 0.88,
+    position: [-2.42, 0.5, -0.15],
+    scale: 0.84,
     rotSpeed: [0.035, 0.08, 0.018],
     floatAmp: 0.08,
     floatSpeed: 0.7,
     phase: 0.4,
     fallbackClass:
-      "left-[3%] top-[8%] size-16 rounded-3xl sm:size-[4.5rem]",
+      "left-[3%] top-[6%] size-16 rounded-3xl sm:size-[4.25rem]",
   },
   {
     look: "resin",
@@ -143,14 +149,16 @@ export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
   {
     look: "pla",
     kind: "roundedTriangle",
-    // Own pocket, lower-left — not tucked under the sphere.
-    position: [-1.4, -0.66, 0.12],
-    scale: 0.98,
-    rotSpeed: [0.016, 0.05, 0.01],
-    floatAmp: 0.06,
+    // Far lower-left — its own corner, not a nest under the cube or
+    // a crowd against the copy.
+    position: [-2.38, -0.72, 0.1],
+    scale: 0.86,
+    rotSpeed: [0.01, 0.045, 0.008],
+    floatAmp: 0.05,
     floatSpeed: 0.55,
-    phase: 0.5,
+    phase: 0.2,
+    restRotation: [0.22, 0.4, -0.08],
     fallbackClass:
-      "left-[8%] bottom-[6%] h-[4.5rem] w-[4rem] [clip-path:polygon(50%_2%,56%_8%,97%_88%,90%_100%,10%_100%,3%_88%,44%_8%)]",
+      "left-[3%] bottom-[6%] h-[4.25rem] w-[3.75rem] [clip-path:polygon(50%_2%,56%_8%,97%_88%,90%_100%,10%_100%,3%_88%,44%_8%)]",
   },
 ];

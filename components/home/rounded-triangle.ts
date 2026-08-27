@@ -60,10 +60,10 @@ export function roundedTriangleShape(
  */
 export function makeRoundedTriangleGeometry(): THREE.ExtrudeGeometry {
   const geometry = new THREE.ExtrudeGeometry(roundedTriangleShape(), {
-    depth: 0.3,
+    depth: 0.2,
     bevelEnabled: true,
-    bevelThickness: 0.045,
-    bevelSize: 0.045,
+    bevelThickness: 0.035,
+    bevelSize: 0.035,
     bevelSegments: 3,
     curveSegments: 20,
   });

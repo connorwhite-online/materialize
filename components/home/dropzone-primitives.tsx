@@ -76,19 +76,30 @@ function PrimitiveMesh({
     const group = groupRef.current;
     if (!group || paused) return;
     const t = clock.elapsedTime;
+    const rest = spec.restRotation ?? [
+      spec.phase * 0.4,
+      spec.phase * 0.7,
+      spec.phase * 0.2,
+    ];
     group.position.y =
       spec.position[1] + Math.sin(t * spec.floatSpeed + spec.phase) * spec.floatAmp;
-    group.rotation.x = spec.phase * 0.4 + t * spec.rotSpeed[0];
-    group.rotation.y = spec.phase * 0.7 + t * spec.rotSpeed[1];
-    group.rotation.z = spec.phase * 0.2 + t * spec.rotSpeed[2];
+    group.rotation.x = rest[0] + t * spec.rotSpeed[0];
+    group.rotation.y = rest[1] + t * spec.rotSpeed[1];
+    group.rotation.z = rest[2] + t * spec.rotSpeed[2];
   });
+
+  const rest = spec.restRotation ?? [
+    spec.phase * 0.4,
+    spec.phase * 0.7,
+    spec.phase * 0.2,
+  ];
 
   return (
     <group
       ref={groupRef}
       position={spec.position as [number, number, number]}
       scale={spec.scale}
-      rotation={[spec.phase * 0.4, spec.phase * 0.7, spec.phase * 0.2]}
+      rotation={[rest[0], rest[1], rest[2]]}
     >
       <PrimitiveBody spec={spec} />
     </group>
