@@ -2,9 +2,12 @@ import { Badge } from "@/components/ui/badge";
 
 interface LibrarySectionProps {
   name: string;
-  /** Count shown in the header pill (e.g. number of files/projects). */
+  /** Count shown in the header pill. */
   count: number;
-  /** Singular/plural noun for the count pill ("File" → "3 Files"). */
+  /**
+   * Singular noun for the accessible label ("File" → "3 Files").
+   * Not shown in the chip — the heading already names the section.
+   */
   countNoun: string;
   /** Empty-library glyph prepended to the heading (box / layers). */
   icon: React.ReactNode;
@@ -27,9 +30,9 @@ export function LibrarySection({
   compact = false,
   children,
 }: LibrarySectionProps) {
-  const countLabel =
+  const countAria =
     count === 0
-      ? "Empty"
+      ? `Empty ${name.toLowerCase()}`
       : `${count} ${count === 1 ? countNoun : `${countNoun}s`}`;
 
   return (
@@ -45,8 +48,12 @@ export function LibrarySection({
         >
           {name}
         </h2>
-        <Badge variant="outline" className="ml-4 h-6 shrink-0 px-2.5">
-          {countLabel}
+        <Badge
+          variant="outline"
+          aria-label={countAria}
+          className="ml-3 h-7 min-w-7 shrink-0 px-2.5 text-sm font-semibold tabular-nums"
+        >
+          {count === 0 ? "Empty" : count}
         </Badge>
       </div>
       <div className="pt-4">{children}</div>

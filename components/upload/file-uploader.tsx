@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useState, type ReactNode } from "react";
+import { cn } from "@/lib/utils";
 import {
   ACCEPTED_FORMATS,
   MAX_FILE_SIZE,
@@ -16,6 +17,17 @@ interface FileUploaderProps {
     file: File,
     format: "stl" | "obj" | "3mf" | "step" | "amf"
   ) => void;
+  /** Headline inside the drop area. */
+  title?: string;
+  /** Muted line under the headline. */
+  subtitle?: string;
+  /**
+   * Authed-home treatment: taller rounded well with room for a
+   * decorative backdrop. Other surfaces keep the compact dashed box.
+   */
+  featured?: boolean;
+  /** Absolutely positioned behind the copy. Decorative only. */
+  backdrop?: ReactNode;
 }
 
 /**
@@ -24,7 +36,13 @@ interface FileUploaderProps {
  * happen here — uploads are deferred until form submit so abandoned
  * sessions don't leave orphaned blobs in R2.
  */
-export function FileUploader({ onFileSelected }: FileUploaderProps) {
+export function FileUploader({
+  onFileSelected,
+  title = "Drag and drop or click to upload",
+  subtitle = "STL, OBJ, 3MF, STEP, AMF — Max 200MB",
+  featured = false,
+  backdrop,
+}: FileUploaderProps) {
   const [error, setError] = useState<string | null>(null);
 
   const handleFile = useCallback(
@@ -71,20 +89,30 @@ export function FileUploader({ onFileSelected }: FileUploaderProps) {
       <label
         onDrop={handleDrop}
         onDragOver={(e) => e.preventDefault()}
-        className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-foreground/15 bg-foreground/[0.03] p-12 text-center transition-colors hover:border-primary/50 hover:bg-foreground/[0.06] dark:border-foreground/20 dark:bg-foreground/[0.04] dark:hover:bg-foreground/[0.08] focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2"
+        className={cn(
+          "group/drop flex cursor-pointer flex-col items-center justify-center border-2 border-dashed text-center transition-colors focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2",
+          featured
+            ? "relative min-h-[11.5rem] overflow-hidden rounded-2xl border-foreground/15 bg-foreground/[0.03] px-6 py-10 hover:border-primary/50 dark:border-foreground/20 dark:bg-foreground/[0.035] dark:hover:border-primary/40 sm:min-h-[12.5rem]"
+            : "rounded-xl border-foreground/15 bg-foreground/[0.03] p-12 hover:border-primary/50 hover:bg-foreground/[0.06] dark:border-foreground/20 dark:bg-foreground/[0.04] dark:hover:bg-foreground/[0.08]"
+        )}
       >
+        {backdrop}
         <input
           type="file"
           className="sr-only"
           accept={acceptExtensions}
           onChange={handleChange}
         />
-        <p className="text-sm font-medium">
-          Drag and drop or click to upload
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          STL, OBJ, 3MF, STEP, AMF — Max 200MB
-        </p>
+        {featured ? (
+          <p className="relative z-[2] text-lg font-semibold tracking-tight">
+            {title}
+          </p>
+        ) : (
+          <>
+            <p className="text-sm font-medium">{title}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>
+          </>
+        )}
       </label>
       {error && (
         <p role="alert" className="mt-2 text-sm text-destructive">
