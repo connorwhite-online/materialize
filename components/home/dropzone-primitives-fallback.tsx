@@ -16,18 +16,19 @@ export function DropzonePrimitivesFallback() {
     >
       {DROPZONE_PRIMITIVES.map((primitive) => {
         const look = DROPZONE_LOOKS[primitive.look];
+        // Soft material stand-ins: metal flash, cream resin, matte black nylon.
         const highlight =
           look.metalness > 0.5
             ? "#d8d8d8"
             : look.transmission
               ? "#f4f0e6"
-              : "#ebe7e0";
+              : "#5a5a5a";
         const shadow =
           look.metalness > 0.5
             ? "#5a5a5a"
             : look.transmission
               ? "#b8ad96"
-              : "#9e978c";
+              : "#141414";
         return (
           <span
             key={primitive.look}
