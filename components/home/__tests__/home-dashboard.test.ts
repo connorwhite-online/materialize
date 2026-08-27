@@ -11,17 +11,22 @@ const fileCard = readFileSync(
   "utf8"
 );
 
-describe("HomeDashboard recent files", () => {
+describe("HomeDashboard authed create cluster", () => {
   it("no longer shows a visible Upload a file heading", () => {
     expect(dashboard).not.toMatch(/Upload a file/);
+    expect(dashboard).toMatch(/sr-only">Add to your library/);
   });
+});
 
+describe("HomeDashboard recent files", () => {
   it("uses the same thumbnail well as library file cards", () => {
     const well =
       "rounded-lg border border-border bg-gradient-to-br from-muted/60 to-muted/30";
     expect(fileCard).toContain(well);
     expect(dashboard).toContain(well);
     expect(dashboard).toContain("hover:border-primary/30");
-    expect(dashboard).not.toMatch(/bg-muted transition-colors group-hover:border-primary\/40/);
+    expect(dashboard).not.toMatch(
+      /bg-muted transition-colors group-hover:border-primary\/40/
+    );
   });
 });
