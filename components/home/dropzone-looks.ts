@@ -115,57 +115,54 @@ export interface DropzonePrimitive {
   restRotation?: readonly [number, number, number];
   /**
    * Tailwind placement for the CSS stand-in (loading / no-WebGL).
-   * Hang off the dashed well so the CSS stand-in also clips.
+   * Hang off the dashed well so the CSS stand-in also clips a little.
    */
   fallbackClass: string;
 }
 
 /**
- * Three chunky primitives parked on the frame so they read as coming
- * in from outside the dashed well: steel cube left, resin sphere
- * right, PLA triangle along the bottom. Oversized on purpose — the
- * dropzone clips them. Tuned for a wide, short well (~2:1–3.5:1)
- * with the camera at z ≈ 6.5, fov 28. `position` is a fraction of
- * the frustum (see field note). Rotation is slow on purpose.
+ * Three primitives parked on the frame: steel cube left, resin sphere
+ * right, PLA triangle along the bottom. Scale stays modest so the
+ * silhouettes read; they may kiss the dashed well. `position` is a
+ * fraction of the frustum (see field note). Rotation is slow on
+ * purpose.
  */
 export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
   {
     look: "steel",
     kind: "roundedBox",
-    position: [-0.96, 0.12, -0.15],
-    scale: 1.52,
+    position: [-0.9, 0.08, -0.15],
+    scale: 1.08,
     rotSpeed: [0.035, 0.08, 0.018],
     floatAmp: 0.08,
     floatSpeed: 0.7,
     phase: 0.4,
     fallbackClass:
-      "-left-8 top-[8%] size-28 rounded-3xl sm:-left-10 sm:size-32",
+      "-left-3 top-[18%] size-20 rounded-3xl sm:size-24",
   },
   {
     look: "resin",
     kind: "sphere",
-    position: [0.96, 0.18, 0.05],
-    scale: 1.48,
+    position: [0.9, 0.14, 0.05],
+    scale: 1.04,
     rotSpeed: [0.025, 0.055, 0.012],
     floatAmp: 0.1,
     floatSpeed: 0.85,
     phase: 1.2,
-    fallbackClass:
-      "-right-8 top-[6%] size-28 rounded-full sm:-right-10 sm:size-32",
+    fallbackClass: "-right-3 top-[14%] size-20 rounded-full sm:size-24",
   },
   {
     look: "pla",
     kind: "roundedTriangle",
-    // Bottom edge, slightly right of the copy — its own slot, clipped
-    // by the well so the point stays inside and the base runs out.
-    position: [0.24, -0.72, 0.12],
-    scale: 1.55,
+    // Bottom edge, slightly right of the copy — its own slot.
+    position: [0.22, -0.62, 0.12],
+    scale: 1.06,
     rotSpeed: [0.006, 0.035, 0.004],
     floatAmp: 0.04,
     floatSpeed: 0.55,
     phase: 0.2,
     restRotation: [0.08, 0.18, 0],
     fallbackClass:
-      "-bottom-8 right-[22%] h-28 w-24 [clip-path:polygon(50%_2%,56%_8%,97%_88%,90%_100%,10%_100%,3%_88%,44%_8%)] sm:h-32 sm:w-28",
+      "-bottom-3 right-[24%] h-20 w-[4.5rem] [clip-path:polygon(50%_2%,56%_8%,97%_88%,90%_100%,10%_100%,3%_88%,44%_8%)] sm:h-24 sm:w-[5.25rem]",
   },
 ];
