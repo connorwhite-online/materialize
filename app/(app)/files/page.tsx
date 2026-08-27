@@ -10,7 +10,7 @@ import {
   collections,
   collectionItems,
 } from "@/lib/db/schema";
-import { eq, desc, ilike, and, or, sql, inArray, isNotNull, notExists, type SQL } from "drizzle-orm";
+import { eq, desc, ilike, and, or, sql, inArray, isNotNull, type SQL } from "drizzle-orm";
 import { unstable_cache } from "next/cache";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
@@ -29,6 +29,12 @@ import {
   rankOrderedRows,
   rankSearchRows,
 } from "@/lib/discovery";
+import {
+  BROWSE_FILES_SHOWN,
+  fetchFileCandidatePool,
+  fileCandidateColumns,
+  fileNotInAnyProjectCondition,
+} from "@/lib/discovery/browse-pool";
 import { recentDownloadCounts } from "@/lib/discovery/signals";
 import { Download } from "@/components/icons/download";
 import { formatCompactCount } from "@/lib/utils/format-count";
@@ -36,24 +42,18 @@ import { getAvatarGradient } from "@/lib/utils/avatar-gradient";
 import { FileTitleTooltip } from "@/components/browse/file-title-tooltip";
 import { BUBBLE_SHADOW } from "@/components/nav/bubble-shadow";
 
-const PER_SECTION = 24;
+// Shared with the ranking inspector, which marks this cutoff — see
+// BROWSE_FILES_SHOWN. Also the per-section cap for projects,
+// collections and creators, which the inspector doesn't cover.
+const PER_SECTION = BROWSE_FILES_SHOWN;
 
 /**
- * Candidate pool sizes for the ranked grid. Ranking can only reorder
- * what it is given, so each section fetches several times what it
- * renders and lets `lib/discovery` pick — fetch exactly PER_SECTION
- * and the SQL's ORDER BY is still the real ranker.
- *
- * Files draw from two sources, deliberately: an all-time popularity
- * pool and a freshness pool. One source alone is self-reinforcing —
- * order by downloads and new work can never enter the pool to earn
- * any, order by recency and nothing proven ever appears. This is the
- * smallest useful version of what X calls candidate sources, and new
- * ones (same-category, co-download, followed creators) slot in here
- * without the ranker changing.
+ * Pool sizes for the ranked sections. Ranking can only reorder what it
+ * is given, so each section fetches several times what it renders —
+ * fetch exactly PER_SECTION and the SQL's ORDER BY is still the real
+ * ranker. The file pools live in `lib/discovery/browse-pool` because
+ * the ranking inspector reads the same ones.
  */
-const FILE_POOL_POPULAR = 96;
-const FILE_POOL_FRESH = 48;
 const PROJECT_POOL = 36;
 /**
  * Pool size per section on the active search/filter path. Same reason
@@ -90,52 +90,6 @@ const IDLE_BROWSE_CACHE_TAG = "idle-browse";
 const IDLE_BROWSE_CACHE_TTL_SECONDS = 120;
 
 /**
- * The columns every file-candidate query selects. Shared by the idle
- * pools and the active search/filter path so a candidate row is one
- * shape everywhere the ranker sees it — `createdAt` and `category`
- * are here for ranking (freshness, and the category-bridge signal),
- * not for rendering.
- */
-const fileCandidateColumns = {
-  id: files.id,
-  name: files.name,
-  slug: files.slug,
-  price: files.price,
-  thumbnailUrl: files.thumbnailUrl,
-  coverPhotoId: files.coverPhotoId,
-  downloadCount: files.downloadCount,
-  createdAt: files.createdAt,
-  category: files.category,
-  tags: files.tags,
-  designTags: files.designTags,
-  username: users.username,
-  displayName: users.displayName,
-  avatarUrl: users.avatarUrl,
-};
-
-/** First occurrence of each id wins, preserving input order. */
-function dedupeById<T extends { id: string }>(rows: readonly T[]): T[] {
-  const seen = new Set<string>();
-  return rows.filter((row) => (seen.has(row.id) ? false : seen.add(row.id)));
-}
-
-/**
- * Files bundled into a project are surfaced under that project, not as
- * standalone entries in the Files section. Correlated NOT EXISTS so a
- * file with any project membership drops out. Pure function of the
- * schema (no request-specific input), so it's safe to call both inside
- * the cached idle-browse fetch and in the live search/filter path.
- */
-function fileNotInAnyProjectCondition() {
-  return notExists(
-    db
-      .select({ one: sql`1` })
-      .from(projectFiles)
-      .where(eq(projectFiles.fileId, files.id))
-  );
-}
-
-/**
  * Idle-browse (`!active`) data: ranked files + projects + creators.
  *
  * "Recent" used to be accurate here and stopped being so long before
@@ -150,27 +104,8 @@ function fileNotInAnyProjectCondition() {
  */
 const getIdleBrowseData = unstable_cache(
   async () => {
-    const fileNotInAnyProject = fileNotInAnyProjectCondition();
-    const publishedFile = and(
-      eq(files.status, "published"),
-      eq(files.visibility, "public"),
-      fileNotInAnyProject
-    );
-    const [popularPool, freshPool, projectPool, recentCreators] = await Promise.all([
-      db
-        .select(fileCandidateColumns)
-        .from(files)
-        .innerJoin(users, eq(files.userId, users.id))
-        .where(publishedFile)
-        .orderBy(desc(files.downloadCount))
-        .limit(FILE_POOL_POPULAR),
-      db
-        .select(fileCandidateColumns)
-        .from(files)
-        .innerJoin(users, eq(files.userId, users.id))
-        .where(publishedFile)
-        .orderBy(desc(files.createdAt))
-        .limit(FILE_POOL_FRESH),
+    const [filePool, projectPool, recentCreators] = await Promise.all([
+      fetchFileCandidatePool(),
       db
         .select({
           id: projects.id,
@@ -204,19 +139,10 @@ const getIdleBrowseData = unstable_cache(
         .limit(12),
     ]);
 
-    // The two file pools overlap (a popular file can also be a recent
-    // one) — dedupe before ranking so a file can't hold two grid slots.
-    const filePool = dedupeById([...popularPool, ...freshPool]);
-    const recentDownloads = await recentDownloadCounts(
-      filePool.map((f) => f.id)
-    );
-    const rankedFiles = rankBrowseRows(
-      filePool.map((f) => ({
-        ...f,
-        recentDownloads: recentDownloads.get(f.id) ?? 0,
-      })),
-      { creatorKey: (f) => f.username, limit: PER_SECTION }
-    );
+    const rankedFiles = rankBrowseRows(filePool, {
+      creatorKey: (f) => f.username,
+      limit: PER_SECTION,
+    });
     // Projects have no download signal of their own, so they keep their
     // recency order and only get the creator spread.
     const rankedProjects = rankOrderedRows(projectPool, {

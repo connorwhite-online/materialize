@@ -54,19 +54,52 @@ export function popularityScore(
   now: Date = new Date(),
   params: PopularityParams = DISCOVERY_PARAMS.popularity
 ): number {
+  return popularityBreakdown(input, now, params).total;
+}
+
+/** The three terms of `popularityScore`, plus their sum. */
+export interface PopularityBreakdown {
+  /** `recentWeight * log1p(downloads in the recent window)`. */
+  recent: number;
+  /** `allTimeWeight * log1p(all-time downloads)`. */
+  allTime: number;
+  /** The decaying new-listing head start. */
+  freshness: number;
+  /** What `popularityScore` returns. */
+  total: number;
+}
+
+/**
+ * `popularityScore` with its terms kept apart, for the ranking
+ * inspector at `/internal/discovery`.
+ *
+ * `popularityScore` is defined as this function's `total` rather than
+ * the two being computed side by side. An inspector that can drift
+ * from the ranker it inspects is worse than no inspector: it would
+ * explain a ranking the grid isn't using, and you would trust it.
+ */
+export function popularityBreakdown(
+  input: PopularityInput,
+  now: Date = new Date(),
+  params: PopularityParams = DISCOVERY_PARAMS.popularity
+): PopularityBreakdown {
   const downloads = Math.max(0, input.downloadCount || 0);
   const recent = Math.max(0, input.recentDownloads || 0);
 
   const ageMs = input.createdAt
     ? now.getTime() - input.createdAt.getTime()
     : Number.POSITIVE_INFINITY;
-  const freshness =
+  const rawFreshness =
     params.freshnessBoost *
     timeDecay(ageMs, params.freshnessHalfLifeDays * DAY_MS);
 
-  return (
-    params.recentWeight * Math.log1p(recent) +
-    params.allTimeWeight * Math.log1p(downloads) +
-    (Number.isFinite(freshness) ? freshness : 0)
-  );
+  const terms = {
+    recent: params.recentWeight * Math.log1p(recent),
+    allTime: params.allTimeWeight * Math.log1p(downloads),
+    freshness: Number.isFinite(rawFreshness) ? rawFreshness : 0,
+  };
+  return {
+    ...terms,
+    total: terms.recent + terms.allTime + terms.freshness,
+  };
 }

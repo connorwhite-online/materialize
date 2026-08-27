@@ -15,8 +15,8 @@ export type {
   PopularityParams,
   QualityBoostParams,
 } from "./params";
-export { popularityScore, timeDecay } from "./popularity";
-export type { PopularityInput } from "./popularity";
+export { popularityBreakdown, popularityScore, timeDecay } from "./popularity";
+export type { PopularityBreakdown, PopularityInput } from "./popularity";
 export { relevanceScore } from "./relevance";
 export type { RelevanceFields } from "./relevance";
 export {
@@ -24,10 +24,17 @@ export {
   positionDiscount,
   qualityBoost,
   rescore,
+  rescoreWithFactors,
 } from "./rescoring";
-export type { Candidate, Rescorer } from "./rescoring";
-export { rankBrowseRows, rankOrderedRows, rankSearchRows } from "./rank";
+export type { Candidate, RescoredCandidate, Rescorer } from "./rescoring";
+export {
+  explainBrowseRanking,
+  rankBrowseRows,
+  rankOrderedRows,
+  rankSearchRows,
+} from "./rank";
 export type {
+  BrowseExplanation,
   BrowseRankOptions,
   BrowseRow,
   OrderedRankOptions,

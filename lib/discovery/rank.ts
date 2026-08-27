@@ -4,13 +4,20 @@ import {
   type PopularityParams,
   type QualityBoostParams,
 } from "./params";
-import { popularityScore, type PopularityInput } from "./popularity";
+import {
+  popularityBreakdown,
+  popularityScore,
+  type PopularityBreakdown,
+  type PopularityInput,
+} from "./popularity";
 import { relevanceScore, type RelevanceFields } from "./relevance";
 import {
   groupDiversityRescorer,
   qualityBoost,
   rescore,
+  rescoreWithFactors,
   type Candidate,
+  type RescoredCandidate,
   type Rescorer,
 } from "./rescoring";
 
@@ -53,6 +60,18 @@ export function rankBrowseRows<T extends BrowseRow>(
   rows: readonly T[],
   options: BrowseRankOptions<T>
 ): T[] {
+  return runBrowseRanking(rows, options).map((candidate) => candidate.item);
+}
+
+/**
+ * The browse ranking itself. `rankBrowseRows` and
+ * `explainBrowseRanking` are both projections of this one call, so the
+ * inspector can never explain an ordering the grid isn't serving.
+ */
+function runBrowseRanking<T extends BrowseRow>(
+  rows: readonly T[],
+  options: BrowseRankOptions<T>
+): RescoredCandidate<T>[] {
   const now = options.now ?? new Date();
   const candidates: Candidate<T>[] = rows.map((row) => ({
     id: row.id,
@@ -60,16 +79,56 @@ export function rankBrowseRows<T extends BrowseRow>(
     score: popularityScore(row, now, options.popularity),
   }));
 
-  const ranked = rescore(candidates, [
+  const ranked = rescoreWithFactors(candidates, [
     groupDiversityRescorer<T>(
       options.creatorKey,
       options.diversity ?? DISCOVERY_PARAMS.browseDiversity
     ),
   ]);
 
-  const limited =
-    options.limit == null ? ranked : ranked.slice(0, options.limit);
-  return limited.map((candidate) => candidate.item);
+  return options.limit == null ? ranked : ranked.slice(0, options.limit);
+}
+
+/** One ranked row with the arithmetic that placed it there. */
+export interface BrowseExplanation<T> {
+  row: T;
+  /** Final position, 1-based. */
+  rank: number;
+  /** The three popularity terms and their sum (the base score). */
+  popularity: PopularityBreakdown;
+  /**
+   * Creator-diversity multiplier. 1 means the row was not discounted —
+   * either its creator has one row in the pool, or this is their best.
+   */
+  diversityFactor: number;
+  /** `popularity.total * diversityFactor`. */
+  score: number;
+}
+
+/**
+ * `rankBrowseRows` with the scoring kept, for `/internal/discovery`.
+ *
+ * Ranking is cheap and pure once the rows are in hand, so the
+ * inspector re-runs it rather than the grid paying to record it.
+ */
+export function explainBrowseRanking<T extends BrowseRow>(
+  rows: readonly T[],
+  options: BrowseRankOptions<T>
+): BrowseExplanation<T>[] {
+  // Resolve `now` once and hand it down: letting runBrowseRanking
+  // default its own would score the ranking and explain it at two
+  // different instants, so the freshness term shown wouldn't be quite
+  // the one that produced the order.
+  const now = options.now ?? new Date();
+  return runBrowseRanking(rows, { ...options, now }).map((candidate, index) => ({
+    row: candidate.item,
+    rank: index + 1,
+    popularity: popularityBreakdown(candidate.item, now, options.popularity),
+    // Single rescorer today; named rather than indexed so adding one
+    // upstream is a compile error here instead of a silently wrong label.
+    diversityFactor: candidate.factors[0] ?? 1,
+    score: candidate.score,
+  }));
 }
 
 /** Identity, relevance fields, and the counts the quality boost reads. */

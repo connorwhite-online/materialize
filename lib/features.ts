@@ -82,3 +82,67 @@ export async function resolveTextToCadAccess(): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Internal tools — the owner-only operator surfaces under `/internal`.
+ *
+ * Same fail-closed shape as the text-to-CAD gate above (kill switch
+ * AND an allow-list), with one addition: a Clerk `publicMetadata`
+ * flag is honoured alongside the env allow-list, so access can be
+ * granted or revoked from the Clerk dashboard without a redeploy.
+ * `publicMetadata` rides along on the `currentUser()` call the email
+ * already requires, so it costs no extra request.
+ *
+ * Deliberately separate from `canUseTextToCad` rather than reusing it:
+ * "can use the CAD studio" and "can read operator dashboards" are
+ * different grants that will diverge the first time someone needs one
+ * without the other, and collapsing them now makes that separation a
+ * migration instead of an edit.
+ */
+export function isInternalToolsEnabled(): boolean {
+  return process.env.INTERNAL_TOOLS_ENABLED === "true";
+}
+
+function internalAllowedEmails(): string[] {
+  return (process.env.INTERNAL_TOOLS_ALLOWED_EMAILS ?? "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+/**
+ * Clerk `publicMetadata.internal === true`. Strict equality on the
+ * boolean, not truthiness: `publicMetadata` is operator-editable free
+ * JSON, and a stray `"false"` string is truthy.
+ */
+export function hasInternalMetadataFlag(user: ClerkUserLike | null): boolean {
+  const metadata = (user as { publicMetadata?: Record<string, unknown> } | null)
+    ?.publicMetadata;
+  return metadata?.internal === true;
+}
+
+/**
+ * The single choke point for every internal surface.
+ *
+ * Next's own auth guidance is that layouts are the wrong place for
+ * this — they don't re-render on navigation, so the session isn't
+ * re-checked on a route change, and they don't cover nested segments,
+ * route handlers or server actions. So every internal entry point
+ * calls this itself, and this function is the thing to change when the
+ * grant mechanism changes.
+ */
+export async function resolveInternalToolsAccess(): Promise<boolean> {
+  if (!isInternalToolsEnabled()) return false;
+  try {
+    const user = (await currentUser()) as ClerkUserLike;
+    if (!user) return false;
+    return (
+      internalAllowedEmails().includes((primaryEmail(user) ?? "").toLowerCase())
+      || hasInternalMetadataFlag(user)
+    );
+  } catch {
+    // currentUser() throws when the Clerk proxy context is absent —
+    // fail closed, same as resolveTextToCadAccess.
+    return false;
+  }
+}
