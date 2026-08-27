@@ -132,7 +132,13 @@ function PrimitiveMesh({
 function Scene({ paused }: { paused: boolean }) {
   return (
     <>
-      <ambientLight intensity={0.35} />
+      {/* Same key/fill/rim as the marketing hero so stainless, resin,
+          and nylon read the way they do on the torus, not as unlit
+          gray blobs. */}
+      <ambientLight intensity={0.5} />
+      <directionalLight position={[5, 5, 5]} intensity={1.2} />
+      <directionalLight position={[-5, -3, -5]} intensity={0.5} />
+      <directionalLight position={[0, -5, 2]} intensity={0.3} />
       <StudioEnvironment />
       {DROPZONE_PRIMITIVES.map((spec) => (
         <PrimitiveMesh key={spec.look} spec={spec} paused={paused} />

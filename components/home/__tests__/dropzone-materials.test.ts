@@ -18,6 +18,7 @@ describe("dropzone primitives materials", () => {
   it("renders printable PBR materials under studio IBL, not toon/cel", () => {
     expect(src).toContain("meshPhysicalMaterial");
     expect(src).toContain("StudioEnvironment");
+    expect(src).toContain("directionalLight");
     expect(src).toContain("PhysicalSkin");
     expect(src).not.toContain("DropzoneToonMaterial");
     expect(src).not.toContain("Outlines");
