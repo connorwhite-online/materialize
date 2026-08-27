@@ -1,7 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { TOON_INK, TOON_OUTLINE_THICKNESS, TOON_LIT_EDGE, TOON_MID_EDGE } from "../dropzone-toon";
+import {
+  TOON_DEEP_EDGE,
+  TOON_INK,
+  TOON_LIT_EDGE,
+  TOON_MID_EDGE,
+  TOON_OUTLINE_THICKNESS,
+  TOON_RIM_EDGE,
+} from "../dropzone-toon";
 import { DROPZONE_LOOKS } from "../dropzone-looks";
 
 function rgb(hex: string) {
@@ -34,24 +41,34 @@ describe("dropzone primitives shading", () => {
     expect(src).not.toContain("StudioEnvironment");
   });
 
-  it("shades with hard cel bands and a specular coin, not a soft wrap", () => {
+  it("shades with hard cel bands, a rim stroke, and a specular coin", () => {
+    expect(shader).toContain("uDeep");
     expect(shader).toContain("uShadow");
     expect(shader).toContain("uHighlight");
     expect(shader).toContain("celstep");
+    expect(shader).toContain("deepBand");
     expect(shader).toContain("midBand");
     expect(shader).toContain("litBand");
+    expect(shader).toContain("rimBand");
     expect(shader).toContain("specBlob");
     expect(shader).toContain("look.toonColor");
+    expect(shader).toContain("look.toonDeep");
     expect(shader).not.toContain("hemi");
   });
 
   it("quantizes lighting at the exported cel edges", () => {
-    expect(TOON_MID_EDGE).toBeGreaterThan(0.3);
-    expect(TOON_MID_EDGE).toBeLessThan(0.55);
+    expect(TOON_DEEP_EDGE).toBeGreaterThan(0.2);
+    expect(TOON_DEEP_EDGE).toBeLessThan(TOON_MID_EDGE);
+    expect(TOON_MID_EDGE).toBeGreaterThan(0.4);
+    expect(TOON_MID_EDGE).toBeLessThan(0.6);
     expect(TOON_LIT_EDGE).toBeGreaterThan(TOON_MID_EDGE);
     expect(TOON_LIT_EDGE).toBeLessThan(0.9);
+    expect(TOON_RIM_EDGE).toBeGreaterThan(0.45);
+    expect(TOON_RIM_EDGE).toBeLessThan(0.75);
+    expect(shader).toContain("uDeepEdge");
     expect(shader).toContain("uMidEdge");
     expect(shader).toContain("uLitEdge");
+    expect(shader).toContain("uRimEdge");
   });
 
   it("inks in the warm near-black, not pure black", () => {
@@ -67,6 +84,18 @@ describe("dropzone primitives shading", () => {
   it("places primitives in frustum fractions so they clip the well", () => {
     expect(src).toContain("viewport.width");
     expect(src).toContain("viewport.height");
+  });
+
+  it("paints the CSS stand-in with the same four hard chips", () => {
+    const fallback = readFileSync(
+      resolve(__dirname, "../dropzone-primitives-fallback.tsx"),
+      "utf8"
+    );
+    expect(fallback).toContain("look.toonDeep");
+    expect(fallback).toContain("look.toonShadow");
+    expect(fallback).toContain("look.toonColor");
+    expect(fallback).toContain("look.toonHighlight");
+    expect(fallback).toMatch(/22%[\s\S]*48%[\s\S]*72%/);
   });
 });
 
@@ -93,12 +122,14 @@ describe("toon gradient tints", () => {
     expect(chroma(pla)).toBeGreaterThan(50);
   });
 
-  it("keeps the highlight lighter than the toon mid on every look", () => {
+  it("keeps a four-chip ramp from deep to highlight on every look", () => {
     for (const look of Object.values(DROPZONE_LOOKS)) {
       expect(luma(rgb(look.toonHighlight))).toBeGreaterThan(
         luma(rgb(look.toonColor))
       );
       expect(luma(rgb(look.toonShadow))).toBeLessThan(luma(rgb(look.toonColor)));
+      expect(luma(rgb(look.toonDeep))).toBeLessThan(luma(rgb(look.toonShadow)));
+      expect(look.toonDeep).not.toBe(look.toonShadow);
       expect(look.toonShadow).not.toBe(look.toonColor);
       expect(look.toonHighlight).not.toBe(look.toonColor);
     }

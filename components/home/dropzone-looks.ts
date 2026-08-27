@@ -4,20 +4,21 @@
  * Inlined (rather than imported from `lib/materials`) so the home
  * client chunk doesn't pull the full editorial preset library. A test
  * pins each `catalogId` + colour against the real catalog / hero
- * overrides so these can't drift silently. Shade is a hard three-chip
- * cel ramp (`toonShadow` / `toonColor` / `toonHighlight`) plus a
- * specular coin. Metalness and transmission stay on the object so
- * the catalog pin still matches the row, but they are not used at
- * draw time.
+ * overrides so these can't drift silently. Shade is a hard four-chip
+ * cel ramp (`toonDeep` / `toonShadow` / `toonColor` / `toonHighlight`)
+ * plus a specular coin and a rim stroke. Metalness and transmission
+ * stay on the object so the catalog pin still matches the row, but
+ * they are not used at draw time.
  */
 export type DropzoneLook = {
   catalogId: string;
   color: string;
   /**
    * Cel-ramp tints — purplish blue, pinkish red, yellowish green.
-   * Punchy enough to read as cartoon paint, still those three hues.
+   * Poster-flat cartoon paint, still those three hues.
    */
   toonColor: string;
+  toonDeep: string;
   toonShadow: string;
   toonHighlight: string;
   metalness: number;
@@ -36,9 +37,10 @@ export const DROPZONE_LOOKS: Record<
     catalogId: "steel-316l",
     color: "#8a8a8a",
     // Cube — cartoon periwinkle.
-    toonColor: "#746ce0",
-    toonShadow: "#3c3694",
-    toonHighlight: "#f2efff",
+    toonColor: "#7a6ef0",
+    toonDeep: "#241e6a",
+    toonShadow: "#4a40c0",
+    toonHighlight: "#fff6ff",
     metalness: 1,
     roughness: 0.35,
   },
@@ -47,9 +49,10 @@ export const DROPZONE_LOOKS: Record<
     // Hero override — translucent cream, not the stock opaque resin.
     color: "#e6dfcc",
     // Sphere — cartoon rose.
-    toonColor: "#ee6e78",
-    toonShadow: "#c03850",
-    toonHighlight: "#ffe6ea",
+    toonColor: "#f45d6c",
+    toonDeep: "#7a1830",
+    toonShadow: "#d0344c",
+    toonHighlight: "#fff1f3",
     metalness: 0,
     roughness: 0.08,
     clearcoat: 0.9,
@@ -61,6 +64,7 @@ export const DROPZONE_LOOKS: Record<
     catalogId: "gold-18k",
     color: "#d4a94a",
     toonColor: "#d4a94a",
+    toonDeep: "#6a4a12",
     toonShadow: "#9a6e22",
     toonHighlight: "#f6e3a4",
     metalness: 1,
@@ -71,9 +75,10 @@ export const DROPZONE_LOOKS: Record<
     // Hero override — warmer off-white so it holds a silhouette.
     color: "#c4bca8",
     // Triangle — cartoon yellow-green.
-    toonColor: "#c2dc4e",
-    toonShadow: "#6a9624",
-    toonHighlight: "#f4fac4",
+    toonColor: "#c8ea3a",
+    toonDeep: "#3a6410",
+    toonShadow: "#6aaa1c",
+    toonHighlight: "#fbffce",
     metalness: 0,
     roughness: 0.42,
     clearcoat: 0.25,
@@ -82,6 +87,7 @@ export const DROPZONE_LOOKS: Record<
     catalogId: "aluminum",
     color: "#b0b0b0",
     toonColor: "#b0b0b0",
+    toonDeep: "#3e4a54",
     toonShadow: "#6a7886",
     toonHighlight: "#eef2f5",
     metalness: 1,
