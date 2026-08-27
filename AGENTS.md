@@ -169,6 +169,45 @@ There are **two** material sources and they do NOT share ids:
 
 `MaterialPicker.preselectMaterialId` expects a **CraftCloud** id. `/materials/[slug]` pulls from the CraftCloud catalog (not lib/materials), so the "Print with X" link passes the right kind of id already. Any new consumer of `preselectMaterialId` must do the same — local lib/materials ids will silently no-op.
 
+## Discovery ranking
+
+`lib/discovery/` decides the order of the browse grid (`/files`) and search results (both the page's active path and the `/api/search` typeahead). Before it, order was whatever the SQL's `ORDER BY` said: the grid was an all-time `downloadCount` leaderboard, and search sorted by `createdAt`, so an exact title match lost to any newer listing containing the string.
+
+The structure is lifted from X's `home-mixer` (see `HeuristicScorer.scala`), and the shape is the point:
+
+```
+candidate pool (several sources)  →  base score  →  × rescorers  →  sort  →  slice
+```
+
+- **`params.ts` holds every tunable number.** Ranking functions take their params as an argument defaulting to that object, so tuning is a one-file diff and tests rank against explicit params. This mirrors why X's open-sourced `ModelWeights.*Param` all read `default = 0.0` — their structure is code, their weights are configuration. Ours has no config service, so the file is the config.
+- **`popularity.ts`** — time-decayed popularity replacing raw `downloadCount`: `log1p(recent window) + 0.35·log1p(all-time) + a freshness boost that halves every 14 days`. `log1p` is load-bearing; on raw counts one viral file is a permanent fixture. The freshness boost is calibrated *against* the recent-downloads term (a boost of B ≈ `e^B - 1` recent downloads), so retuning it means doing that arithmetic, not eyeballing it.
+- **`relevance.ts`** — how well a row matches, scoring rows the ILIKE already returned. It is not a retrieval engine and must not become one; if we move to trigram/full-text, this is what `ts_rank` replaces.
+- **`rescoring.ts`** — the multiplier stack. Two invariants: rescorers are **listwise** (computed from the whole candidate set, which is the only way "your third file in this grid" is expressible), and they **all read the same input scores**, with the products taken at the end. Chain one rescorer's output into the next and the stack silently becomes order-dependent; a test pins that it isn't.
+- **`signals.ts` is the only module that touches Postgres.** Everything else is pure and unit-tested without a DB, which is also what keeps the db client out of any bundle that imports a scorer. It is deliberately not re-exported from `index.ts`.
+
+Two things that look like details and aren't:
+
+- **Pools must be bigger than what renders.** Every call site fetches several times its output (`FILE_POOL_POPULAR`/`FILE_POOL_FRESH`/`SEARCH_POOL` in `app/(app)/files/page.tsx`, `SEARCH_POOL` in `app/api/search/route.ts`). Fetch exactly what you render and the `ORDER BY` is still the real ranker, with `lib/discovery` only shuffling the rows it already picked. The files grid draws from **two** pools — popularity and freshness — because either alone is self-reinforcing: sort by downloads and new work can never enter the pool to earn any. New candidate sources (same-category, co-download, followed creators) belong here, and the ranker doesn't change when you add one.
+- **`rankOrderedRows` uses reciprocal rank, not a linear countdown.** With a linear base score the diversity discount means different things at different list lengths — it reorders freely in a list of 40 and cannot reorder a list of 3 at all — which makes pool size an invisible tuning knob. A test pins length-independence.
+
+Diversity params differ per surface on purpose: the browse grid runs X's own author-diversity values (decay 0.5, floor 0.25) because it's the shop window, while search is much gentler (0.8 / 0.6) — someone searching "articulated dragon" is entitled to a page of them from the person who makes them.
+
+**Not built yet, and the reason it matters:** impression decay (X's `ImpressedAuthorDecayRescoringProvider` — "seen it, show me something else") needs served-impression logging, and we have none: `files.viewCount` / `projects.viewCount` are read in one loader and **never incremented by anything**. That's the gating dependency for the next rescorer, not a missing function.
+
+## Internal tools (`/internal`)
+
+Owner-only operator surfaces. Today: `/internal/discovery`, a read-only inspector for the browse ranking.
+
+**The gate is `resolveInternalToolsAccess()` (`lib/features.ts`), and every entry point calls it itself.** Not a layout — Next's own auth guidance is explicit that layouts don't re-render on navigation (so the session isn't re-checked on a route change) and don't cover nested segments, route handlers or server actions. A page, a route handler and a server action under `/internal` each need the call. Fail-closed like the text-to-CAD gate: `INTERNAL_TOOLS_ENABLED=true` **plus** either an email on `INTERNAL_TOOLS_ALLOWED_EMAILS` or Clerk `publicMetadata.internal === true` (the metadata path rides on the `currentUser()` call the email already needs, so grants and revokes don't need a redeploy). Deliberately a separate grant from `canUseTextToCad` — they will diverge.
+
+**Internal routes must be listed in `PUBLIC_ROUTES` (`lib/auth/public-routes.ts`).** That reads backwards and isn't: "public" there means public *at the proxy layer only*, which is what lets the page's own gate run and `notFound()`. Reaching `auth.protect()` instead redirects an anonymous visitor to sign-in, which tells them the route exists. This has already gone wrong once — the list named `/text-to-cad(.*)` for months after that route was renamed to `/prometheus`, so `/prometheus` stayed public only by accident (a single root segment matches the vanity-profile pattern) while `/prometheus/eval` and `/prometheus/exemplars` disclosed themselves. The list is extracted from `proxy.ts` and pinned by `lib/auth/__tests__/public-routes.test.ts` against Clerk's real matcher.
+
+Two consequences of that vanity-profile pattern worth knowing: **any single-segment route is proxy-public unless explicitly excluded** (`/notifications` is, and self-gates with a redirect — that's required, not incidental), and a **sub-route is not**, so a new internal tool with children needs its own `(.*)` entry.
+
+**The inspector shares the grid's code, it does not re-implement it.** `fetchFileCandidatePool()` (`lib/discovery/browse-pool.ts`) is the one definition of the browse pool, `explainBrowseRanking()` and `rankBrowseRows()` are both projections of one `runBrowseRanking()` call, `popularityScore()` is defined as `popularityBreakdown().total`, and `rescore()` is `rescoreWithFactors()` with fields dropped. Tests pin each equivalence. An inspector that can drift explains a ranking nobody is served, which is worse than having none because you'd believe it.
+
+**It is read-only on purpose.** A param editor needs runtime-mutable `DISCOVERY_PARAMS` — a store, a cached read on every ranking call, and a second DB-touching path through a layer that has exactly one (`signals.ts`). It is also premature while there is no impression logging: with no signal saying whether a change helped, sliders only produce wrong changes faster. Tuning stays a one-file diff in `params.ts`.
+
 ## Categories — CON-165
 
 `lib/categories/index.ts` — curated browse taxonomy (flat, ~21 slugs). Plain-text slugs stored on `files`, `projects`, and `collections` (indexed `category` columns). Validation is app-layer via `isCategoryId` / the Zod helper exported from the same file — an unknown slug from a stale client is rejected on write and silently dropped on read (e.g. invalid `?category=` on `/files`). `keywords` feed search: a query matching a category's label, id, or keywords surfaces every item in that category (`categoryIdsMatchingQuery`), so "drone" or "gps" pulls the Hobby & RC shelf even when no item spells it out. Category filter chips: `components/files/category-filter-bar.tsx`.

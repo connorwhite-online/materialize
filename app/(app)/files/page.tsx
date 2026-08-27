@@ -10,7 +10,7 @@ import {
   collections,
   collectionItems,
 } from "@/lib/db/schema";
-import { eq, desc, ilike, and, or, sql, inArray, isNotNull, notExists, type SQL } from "drizzle-orm";
+import { eq, desc, ilike, and, or, sql, inArray, isNotNull, type SQL } from "drizzle-orm";
 import { unstable_cache } from "next/cache";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
@@ -24,13 +24,45 @@ import {
   getCategoryById,
 } from "@/lib/categories";
 import { CardImageCarousel } from "@/components/photos/card-image-carousel";
+import {
+  rankBrowseRows,
+  rankOrderedRows,
+  rankSearchRows,
+} from "@/lib/discovery";
+import {
+  BROWSE_FILES_SHOWN,
+  fetchFileCandidatePool,
+  fileCandidateColumns,
+  fileNotInAnyProjectCondition,
+} from "@/lib/discovery/browse-pool";
+import { recentDownloadCounts } from "@/lib/discovery/signals";
 import { Download } from "@/components/icons/download";
 import { formatCompactCount } from "@/lib/utils/format-count";
 import { getAvatarGradient } from "@/lib/utils/avatar-gradient";
 import { FileTitleTooltip } from "@/components/browse/file-title-tooltip";
 import { BUBBLE_SHADOW } from "@/components/nav/bubble-shadow";
 
-const PER_SECTION = 24;
+// Shared with the ranking inspector, which marks this cutoff — see
+// BROWSE_FILES_SHOWN. Also the per-section cap for projects,
+// collections and creators, which the inspector doesn't cover.
+const PER_SECTION = BROWSE_FILES_SHOWN;
+
+/**
+ * Pool sizes for the ranked sections. Ranking can only reorder what it
+ * is given, so each section fetches several times what it renders —
+ * fetch exactly PER_SECTION and the SQL's ORDER BY is still the real
+ * ranker. The file pools live in `lib/discovery/browse-pool` because
+ * the ranking inspector reads the same ones.
+ */
+const PROJECT_POOL = 36;
+/**
+ * Pool size per section on the active search/filter path. Same reason
+ * as the idle pools: the ranker needs more rows than it renders, and
+ * an ILIKE scan's cost is the scan, not the number of rows it returns.
+ */
+const SEARCH_POOL = PER_SECTION * 4;
+/** Projects rendered on the idle grid (a subset of PROJECT_POOL). */
+const PROJECTS_SHOWN = 12;
 /**
  * Below this length we prefix-match (`x%`) instead of substring
  * (`%x%`) — the same threshold the live home search uses. Single-
@@ -58,23 +90,12 @@ const IDLE_BROWSE_CACHE_TAG = "idle-browse";
 const IDLE_BROWSE_CACHE_TTL_SECONDS = 120;
 
 /**
- * Files bundled into a project are surfaced under that project, not as
- * standalone entries in the Files section. Correlated NOT EXISTS so a
- * file with any project membership drops out. Pure function of the
- * schema (no request-specific input), so it's safe to call both inside
- * the cached idle-browse fetch and in the live search/filter path.
- */
-function fileNotInAnyProjectCondition() {
-  return notExists(
-    db
-      .select({ one: sql`1` })
-      .from(projectFiles)
-      .where(eq(projectFiles.fileId, files.id))
-  );
-}
-
-/**
- * Idle-browse (`!active`) data: recent projects + files + creators.
+ * Idle-browse (`!active`) data: ranked files + projects + creators.
+ *
+ * "Recent" used to be accurate here and stopped being so long before
+ * this change — the files query has ordered by `downloadCount` for a
+ * while. It is now explicitly ranked (`lib/discovery`), and the names
+ * say so.
  * Globally identical for every anonymous hit — no query/category/
  * viewer input — so it's a single cache entry for the whole site
  * rather than 6 fresh Neon round trips per hit (PERF-16). Mirrors the
@@ -83,32 +104,8 @@ function fileNotInAnyProjectCondition() {
  */
 const getIdleBrowseData = unstable_cache(
   async () => {
-    const fileNotInAnyProject = fileNotInAnyProjectCondition();
-    const [recentFiles, recentProjects, recentCreators] = await Promise.all([
-      db
-        .select({
-          id: files.id,
-          name: files.name,
-          slug: files.slug,
-          price: files.price,
-          thumbnailUrl: files.thumbnailUrl,
-          coverPhotoId: files.coverPhotoId,
-          downloadCount: files.downloadCount,
-          username: users.username,
-          displayName: users.displayName,
-          avatarUrl: users.avatarUrl,
-        })
-        .from(files)
-        .innerJoin(users, eq(files.userId, users.id))
-        .where(
-          and(
-            eq(files.status, "published"),
-            eq(files.visibility, "public"),
-            fileNotInAnyProject
-          )
-        )
-        .orderBy(desc(files.downloadCount))
-        .limit(PER_SECTION),
+    const [filePool, projectPool, recentCreators] = await Promise.all([
+      fetchFileCandidatePool(),
       db
         .select({
           id: projects.id,
@@ -127,7 +124,7 @@ const getIdleBrowseData = unstable_cache(
         .where(and(eq(projects.status, "published"), eq(projects.visibility, "public")))
         .groupBy(projects.id, users.username, users.displayName, users.avatarUrl, projects.createdAt)
         .orderBy(desc(projects.createdAt))
-        .limit(12),
+        .limit(PROJECT_POOL),
       db
         .selectDistinctOn([users.id], {
           id: users.id,
@@ -142,23 +139,54 @@ const getIdleBrowseData = unstable_cache(
         .limit(12),
     ]);
 
+    const rankedFiles = rankBrowseRows(filePool, {
+      creatorKey: (f) => f.username,
+      limit: PER_SECTION,
+    });
+    // Projects have no download signal of their own, so they keep their
+    // recency order and only get the creator spread.
+    const rankedProjects = rankOrderedRows(projectPool, {
+      creatorKey: (p) => p.creatorUsername,
+      limit: PROJECTS_SHOWN,
+    });
+
+    // Photo hydration runs on the ranked survivors, never the pool —
+    // it is one query per section either way, but the IN-list stays
+    // proportional to what is rendered.
     const [photosByFile, photosByProject, thumbnailsByProject] = await Promise.all([
-      fetchAdditionalPhotosByFile(recentFiles),
-      fetchAdditionalPhotosByProject(recentProjects),
-      fetchFileThumbnailsByProject(recentProjects.map((p) => p.id)),
+      fetchAdditionalPhotosByFile(rankedFiles),
+      fetchAdditionalPhotosByProject(rankedProjects),
+      fetchFileThumbnailsByProject(rankedProjects.map((p) => p.id)),
     ]);
 
-    const recentWithPhotos: FileRow[] = recentFiles.map((f) => ({
-      ...f,
+    // Project down to exactly what the grid renders, rather than
+    // spreading the candidate row. The ranking-only columns
+    // (`createdAt`, `category`, `tags`, `designTags`) have done their
+    // job by now, and `createdAt` is a Date: this return value is
+    // serialized into the Next data cache, so a Date left in it comes
+    // back from a cache hit as an ISO string, typed as a Date and
+    // wrong only on the second request. Nothing downstream reads it
+    // today — which is exactly why it would be found late.
+    const filesWithPhotos: FileRow[] = rankedFiles.map((f) => ({
+      id: f.id,
+      name: f.name,
+      slug: f.slug,
+      price: f.price,
+      thumbnailUrl: f.thumbnailUrl,
+      coverPhotoId: f.coverPhotoId,
+      downloadCount: f.downloadCount,
+      username: f.username,
+      displayName: f.displayName,
+      avatarUrl: f.avatarUrl,
       additionalPhotoIds: photosByFile.get(f.id) ?? [],
     }));
-    const projectsWithPhotos: ProjectRow[] = recentProjects.map((p) => ({
+    const projectsWithPhotos: ProjectRow[] = rankedProjects.map((p) => ({
       ...p,
       additionalPhotoIds: photosByProject.get(p.id) ?? [],
       fileThumbnails: thumbnailsByProject.get(p.id) ?? [],
     }));
 
-    return { recentWithPhotos, projectsWithPhotos, recentCreators };
+    return { filesWithPhotos, projectsWithPhotos, recentCreators };
   },
   ["idle-browse-grid"],
   { revalidate: IDLE_BROWSE_CACHE_TTL_SECONDS, tags: [IDLE_BROWSE_CACHE_TAG] }
@@ -389,7 +417,7 @@ export default async function BrowsePage(props: {
   // getIdleBrowseData() so an anonymous-hit stampede shares one Neon
   // round trip per IDLE_BROWSE_CACHE_TTL_SECONDS window (PERF-16).
   if (!active) {
-    const { recentWithPhotos, projectsWithPhotos, recentCreators } =
+    const { filesWithPhotos, projectsWithPhotos, recentCreators } =
       await getIdleBrowseData();
 
     return (
@@ -415,10 +443,10 @@ export default async function BrowsePage(props: {
           <h2 className="mb-4 text-sm font-medium text-muted-foreground">
             Files
           </h2>
-          {recentWithPhotos.length === 0 ? (
+          {filesWithPhotos.length === 0 ? (
             <p className="text-sm text-muted-foreground">No files published yet</p>
           ) : (
-            <FileGrid files={recentWithPhotos} />
+            <FileGrid files={filesWithPhotos} />
           )}
         </section>
 
@@ -503,20 +531,9 @@ export default async function BrowsePage(props: {
 
   // Search/browse state: sections in parallel. Materials are intentionally
   // excluded — they have their own /materials page with rich filters.
-  const [fileRows, projectRows, collectionRows, userRows] = await Promise.all([
+  const [filePool, projectPool, collectionPool, userRows] = await Promise.all([
     db
-      .select({
-        id: files.id,
-        name: files.name,
-        slug: files.slug,
-        price: files.price,
-        thumbnailUrl: files.thumbnailUrl,
-        coverPhotoId: files.coverPhotoId,
-        downloadCount: files.downloadCount,
-        username: users.username,
-        displayName: users.displayName,
-        avatarUrl: users.avatarUrl,
-      })
+      .select(fileCandidateColumns)
       .from(files)
       .innerJoin(users, eq(files.userId, users.id))
       .where(
@@ -529,7 +546,7 @@ export default async function BrowsePage(props: {
         )
       )
       .orderBy(desc(files.createdAt))
-      .limit(PER_SECTION),
+      .limit(SEARCH_POOL),
     db
       .select({
         id: projects.id,
@@ -537,6 +554,9 @@ export default async function BrowsePage(props: {
         name: projects.name,
         thumbnailUrl: projects.thumbnailUrl,
         coverPhotoId: projects.coverPhotoId,
+        category: projects.category,
+        tags: projects.tags,
+        designTags: projects.designTags,
         creatorUsername: users.username,
         creatorDisplayName: users.displayName,
         creatorAvatarUrl: users.avatarUrl,
@@ -561,12 +581,14 @@ export default async function BrowsePage(props: {
         projects.createdAt
       )
       .orderBy(desc(projects.createdAt))
-      .limit(PER_SECTION),
+      .limit(SEARCH_POOL),
     db
       .select({
         id: collections.id,
         slug: collections.slug,
         name: collections.name,
+        category: collections.category,
+        tags: collections.tags,
         creatorUsername: users.username,
         creatorDisplayName: users.displayName,
         fileCount: sql<number>`cast(count(${collectionItems.fileId}) as int)`,
@@ -591,9 +613,60 @@ export default async function BrowsePage(props: {
         collections.createdAt
       )
       .orderBy(desc(collections.createdAt))
-      .limit(PER_SECTION),
+      .limit(SEARCH_POOL),
     userQuery,
   ]);
+
+  // Rank the pools. Which ranker applies depends on what the viewer
+  // actually asked for, and the distinction matters: with a text query
+  // the question is "how well does this match", and popularity is only
+  // a tiebreak; with a category chip and no text there is nothing to
+  // match against, so the section is a shelf and ranks like the idle
+  // grid does.
+  const matchedCategorySet = new Set(matchedCategoryIds);
+  const withCategoryHit = <T extends { category: string | null }>(row: T) => ({
+    ...row,
+    matchedCategory: !!row.category && matchedCategorySet.has(row.category),
+  });
+
+  let fileRows;
+  if (query) {
+    fileRows = rankSearchRows(query, filePool.map(withCategoryHit), {
+      creatorKey: (f) => f.username,
+      limit: PER_SECTION,
+    });
+  } else {
+    const recentDownloads = await recentDownloadCounts(
+      filePool.map((f) => f.id)
+    );
+    fileRows = rankBrowseRows(
+      filePool.map((f) => ({
+        ...f,
+        recentDownloads: recentDownloads.get(f.id) ?? 0,
+      })),
+      { creatorKey: (f) => f.username, limit: PER_SECTION }
+    );
+  }
+
+  const projectRows = query
+    ? rankSearchRows(query, projectPool.map(withCategoryHit), {
+        creatorKey: (p) => p.creatorUsername,
+        limit: PER_SECTION,
+      })
+    : rankOrderedRows(projectPool, {
+        creatorKey: (p) => p.creatorUsername,
+        limit: PER_SECTION,
+      });
+
+  const collectionRows = query
+    ? rankSearchRows(query, collectionPool.map(withCategoryHit), {
+        creatorKey: (c) => c.creatorUsername,
+        limit: PER_SECTION,
+      })
+    : rankOrderedRows(collectionPool, {
+        creatorKey: (c) => c.creatorUsername,
+        limit: PER_SECTION,
+      });
 
   const [photosByFile, photosByProject, thumbnailsByProject] = await Promise.all([
     fetchAdditionalPhotosByFile(fileRows),

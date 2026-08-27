@@ -14,8 +14,18 @@ import { getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
 import { arrayTextIlike } from "@/lib/db/search";
 import { categoryIdsMatchingQuery } from "@/lib/categories";
 import { logError } from "@/lib/logger";
+import { rankSearchRows } from "@/lib/discovery";
 
 const PER_CATEGORY_LIMIT = 8;
+/**
+ * Rows fetched per type before ranking. The typeahead shows
+ * PER_CATEGORY_LIMIT, but ranking can only reorder what it was given —
+ * fetch exactly 8 and `ORDER BY created_at DESC` is still choosing the
+ * results, with the ranker only shuffling whichever 8 happened to be
+ * newest. The extra rows are close to free: an ILIKE scan pays for the
+ * scan, not for the rows it returns.
+ */
+const SEARCH_POOL = PER_CATEGORY_LIMIT * 5;
 /**
  * Short cache window for the DB half of search. The home bar fires a
  * request on every keystroke and crawlers/agents replay popular
@@ -135,6 +145,10 @@ const searchDb = unstable_cache(
           slug: files.slug,
           name: files.name,
           thumbnailUrl: files.thumbnailUrl,
+          category: files.category,
+          tags: files.tags,
+          designTags: files.designTags,
+          downloadCount: files.downloadCount,
           creatorUsername: users.username,
           creatorDisplayName: users.displayName,
         })
@@ -155,13 +169,16 @@ const searchDb = unstable_cache(
           )
         )
         .orderBy(desc(files.createdAt))
-        .limit(PER_CATEGORY_LIMIT),
+        .limit(SEARCH_POOL),
       db
         .select({
           id: projects.id,
           slug: projects.slug,
           name: projects.name,
           thumbnailUrl: projects.thumbnailUrl,
+          category: projects.category,
+          tags: projects.tags,
+          designTags: projects.designTags,
           creatorUsername: users.username,
           creatorDisplayName: users.displayName,
           fileCount: sql<number>`cast(count(${projectFiles.fileId}) as int)`,
@@ -190,12 +207,14 @@ const searchDb = unstable_cache(
           projects.createdAt
         )
         .orderBy(desc(projects.createdAt))
-        .limit(PER_CATEGORY_LIMIT),
+        .limit(SEARCH_POOL),
       db
         .select({
           id: collections.id,
           slug: collections.slug,
           name: collections.name,
+          category: collections.category,
+          tags: collections.tags,
           creatorUsername: users.username,
           creatorDisplayName: users.displayName,
           fileCount: sql<number>`cast(count(${collectionItems.fileId}) as int)`,
@@ -225,7 +244,7 @@ const searchDb = unstable_cache(
           collections.createdAt
         )
         .orderBy(desc(collections.createdAt))
-        .limit(PER_CATEGORY_LIMIT),
+        .limit(SEARCH_POOL),
       db
         .select({
           id: users.id,
@@ -247,7 +266,30 @@ const searchDb = unstable_cache(
         .limit(PER_CATEGORY_LIMIT),
     ]);
 
-    return { fileRows, projectRows, collectionRows, userRows };
+    // Rank inside the cached helper so the cache entry holds the final
+    // ordered slice: ranking is a pure function of (query, rows), so
+    // there is nothing per-viewer to keep out of it.
+    const matchedCategorySet = new Set(matchedCategoryIds);
+    const withCategoryHit = <T extends { category: string | null }>(row: T) => ({
+      ...row,
+      matchedCategory: !!row.category && matchedCategorySet.has(row.category),
+    });
+
+    return {
+      fileRows: rankSearchRows(q, fileRows.map(withCategoryHit), {
+        creatorKey: (r) => r.creatorUsername,
+        limit: PER_CATEGORY_LIMIT,
+      }),
+      projectRows: rankSearchRows(q, projectRows.map(withCategoryHit), {
+        creatorKey: (r) => r.creatorUsername,
+        limit: PER_CATEGORY_LIMIT,
+      }),
+      collectionRows: rankSearchRows(q, collectionRows.map(withCategoryHit), {
+        creatorKey: (r) => r.creatorUsername,
+        limit: PER_CATEGORY_LIMIT,
+      }),
+      userRows,
+    };
   },
   ["global-search-db"],
   { revalidate: SEARCH_CACHE_TTL_SECONDS }
