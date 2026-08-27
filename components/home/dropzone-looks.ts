@@ -152,14 +152,14 @@ export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
     // Bottom edge, between the copy and the sphere — the dropzone is
     // too short to stack anything under the cube, so this is the
     // triangle's own slot.
-    position: [1.05, -0.78, 0.12],
-    scale: 0.72,
-    rotSpeed: [0.01, 0.04, 0.006],
-    floatAmp: 0.05,
+    position: [0.62, -0.74, 0.14],
+    scale: 0.92,
+    rotSpeed: [0.006, 0.035, 0.004],
+    floatAmp: 0.04,
     floatSpeed: 0.55,
     phase: 0.2,
-    restRotation: [0.16, 0.28, -0.05],
+    restRotation: [0.08, 0.18, 0],
     fallbackClass:
-      "right-[28%] bottom-[6%] h-[3.5rem] w-[3.15rem] [clip-path:polygon(50%_2%,56%_8%,97%_88%,90%_100%,10%_100%,3%_88%,44%_8%)]",
+      "right-[32%] bottom-[7%] h-[3.75rem] w-[3.4rem] [clip-path:polygon(50%_2%,56%_8%,97%_88%,90%_100%,10%_100%,3%_88%,44%_8%)]",
   },
 ];
