@@ -55,9 +55,17 @@ test.describe("library tab", () => {
     // there; reload so we don't race Clerk finishing the session.
     await page.goto("/");
 
+    // Authed home no longer shows a visible Library heading, item
+    // tally, or + Add — those live in the create cluster above.
+    // The heading stays in the a11y tree as sr-only.
+    await expect(page.getByText("Add a File")).toBeVisible({
+      timeout: 10_000,
+    });
     await expect(
-      page.getByRole("heading", { name: "Library" })
-    ).toBeVisible({ timeout: 10_000 });
+      page.getByRole("heading", { name: "Library", exact: true })
+    ).toBeHidden();
+    await expect(page.getByRole("button", { name: /^add$/i })).toHaveCount(0);
+    await expect(page.getByText(/^\d+ items?$/)).toHaveCount(0);
 
     // The seeded file should appear in the library by its name.
     // We don't pin to a specific card component selector — copy
