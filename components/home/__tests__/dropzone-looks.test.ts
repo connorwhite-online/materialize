@@ -64,15 +64,16 @@ describe("DROPZONE_PRIMITIVES", () => {
     }
   });
 
-  it("parks oversized shapes on the frame so they clip the border", () => {
+  it("parks modest-scale shapes on the frame", () => {
     const [cube, sphere, triangle] = DROPZONE_PRIMITIVES;
     for (const spec of DROPZONE_PRIMITIVES) {
-      expect(spec.scale).toBeGreaterThanOrEqual(1.4);
+      expect(spec.scale).toBeGreaterThanOrEqual(1);
+      expect(spec.scale).toBeLessThan(1.2);
     }
     // Frustum-normalized: ±1 is the visible edge.
-    expect(cube.position[0]).toBeLessThan(-0.9);
-    expect(sphere.position[0]).toBeGreaterThan(0.9);
-    expect(triangle.position[1]).toBeLessThan(-0.7);
+    expect(cube.position[0]).toBeLessThan(-0.8);
+    expect(sphere.position[0]).toBeGreaterThan(0.8);
+    expect(triangle.position[1]).toBeLessThan(-0.5);
     // Triangle keeps the bottom slot, not a nest under the sphere.
     expect(triangle.position[0]).toBeGreaterThan(0.1);
     expect(triangle.position[0]).toBeLessThan(0.5);
