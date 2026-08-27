@@ -63,7 +63,7 @@ test.describe("library tab", () => {
     });
     await expect(
       page.getByRole("heading", { name: "Library", exact: true })
-    ).toBeHidden();
+    ).toHaveClass(/sr-only/);
     await expect(page.getByRole("button", { name: /^add$/i })).toHaveCount(0);
     await expect(page.getByText(/^\d+ items?$/)).toHaveCount(0);
 
