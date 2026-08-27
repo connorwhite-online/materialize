@@ -128,18 +128,42 @@ export function rescore<T>(
   candidates: readonly Candidate<T>[],
   rescorers: readonly Rescorer<T>[]
 ): Candidate<T>[] {
+  return rescoreWithFactors(candidates, rescorers).map(
+    ({ id, item, score }) => ({ id, item, score })
+  );
+}
+
+/** A rescored candidate with the arithmetic that produced it kept. */
+export interface RescoredCandidate<T> extends Candidate<T> {
+  /** The score before any rescoring, after clamping. */
+  baseScore: number;
+  /** One factor per rescorer, in the order they were passed. */
+  factors: number[];
+}
+
+/**
+ * `rescore`, retaining each candidate's base score and per-rescorer
+ * factors so the ranking inspector can show why a row landed where it
+ * did. `rescore` is defined as this with the extra fields dropped —
+ * same reason as `popularityBreakdown`: an inspector computing its own
+ * version of the ranking would eventually explain a different one.
+ */
+export function rescoreWithFactors<T>(
+  candidates: readonly Candidate<T>[],
+  rescorers: readonly Rescorer<T>[]
+): RescoredCandidate<T>[] {
   // Every rescorer sees the same untouched input — see the note above.
   const factorMaps = rescorers.map((rescorer) => rescorer(candidates));
 
   return candidates
     .map((candidate) => {
-      const base =
+      const baseScore =
         Number.isFinite(candidate.score) && candidate.score > 0
           ? candidate.score
           : 0;
-      let factor = 1;
-      for (const map of factorMaps) factor *= map.get(candidate.id) ?? 1;
-      return { ...candidate, score: base * factor };
+      const factors = factorMaps.map((map) => map.get(candidate.id) ?? 1);
+      const score = factors.reduce((acc, factor) => acc * factor, baseScore);
+      return { ...candidate, baseScore, factors, score };
     })
     .sort(
       (a, b) => b.score - a.score || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)

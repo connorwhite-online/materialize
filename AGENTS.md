@@ -194,6 +194,20 @@ Diversity params differ per surface on purpose: the browse grid runs X's own aut
 
 **Not built yet, and the reason it matters:** impression decay (X's `ImpressedAuthorDecayRescoringProvider` — "seen it, show me something else") needs served-impression logging, and we have none: `files.viewCount` / `projects.viewCount` are read in one loader and **never incremented by anything**. That's the gating dependency for the next rescorer, not a missing function.
 
+## Internal tools (`/internal`)
+
+Owner-only operator surfaces. Today: `/internal/discovery`, a read-only inspector for the browse ranking.
+
+**The gate is `resolveInternalToolsAccess()` (`lib/features.ts`), and every entry point calls it itself.** Not a layout — Next's own auth guidance is explicit that layouts don't re-render on navigation (so the session isn't re-checked on a route change) and don't cover nested segments, route handlers or server actions. A page, a route handler and a server action under `/internal` each need the call. Fail-closed like the text-to-CAD gate: `INTERNAL_TOOLS_ENABLED=true` **plus** either an email on `INTERNAL_TOOLS_ALLOWED_EMAILS` or Clerk `publicMetadata.internal === true` (the metadata path rides on the `currentUser()` call the email already needs, so grants and revokes don't need a redeploy). Deliberately a separate grant from `canUseTextToCad` — they will diverge.
+
+**Internal routes must be listed in `PUBLIC_ROUTES` (`lib/auth/public-routes.ts`).** That reads backwards and isn't: "public" there means public *at the proxy layer only*, which is what lets the page's own gate run and `notFound()`. Reaching `auth.protect()` instead redirects an anonymous visitor to sign-in, which tells them the route exists. This has already gone wrong once — the list named `/text-to-cad(.*)` for months after that route was renamed to `/prometheus`, so `/prometheus` stayed public only by accident (a single root segment matches the vanity-profile pattern) while `/prometheus/eval` and `/prometheus/exemplars` disclosed themselves. The list is extracted from `proxy.ts` and pinned by `lib/auth/__tests__/public-routes.test.ts` against Clerk's real matcher.
+
+Two consequences of that vanity-profile pattern worth knowing: **any single-segment route is proxy-public unless explicitly excluded** (`/notifications` is, and self-gates with a redirect — that's required, not incidental), and a **sub-route is not**, so a new internal tool with children needs its own `(.*)` entry.
+
+**The inspector shares the grid's code, it does not re-implement it.** `fetchFileCandidatePool()` (`lib/discovery/browse-pool.ts`) is the one definition of the browse pool, `explainBrowseRanking()` and `rankBrowseRows()` are both projections of one `runBrowseRanking()` call, `popularityScore()` is defined as `popularityBreakdown().total`, and `rescore()` is `rescoreWithFactors()` with fields dropped. Tests pin each equivalence. An inspector that can drift explains a ranking nobody is served, which is worse than having none because you'd believe it.
+
+**It is read-only on purpose.** A param editor needs runtime-mutable `DISCOVERY_PARAMS` — a store, a cached read on every ranking call, and a second DB-touching path through a layer that has exactly one (`signals.ts`). It is also premature while there is no impression logging: with no signal saying whether a change helped, sliders only produce wrong changes faster. Tuning stays a one-file diff in `params.ts`.
+
 ## Categories — CON-165
 
 `lib/categories/index.ts` — curated browse taxonomy (flat, ~21 slugs). Plain-text slugs stored on `files`, `projects`, and `collections` (indexed `category` columns). Validation is app-layer via `isCategoryId` / the Zod helper exported from the same file — an unknown slug from a stale client is rejected on write and silently dropped on read (e.g. invalid `?category=` on `/files`). `keywords` feed search: a query matching a category's label, id, or keywords surfaces every item in that category (`categoryIdsMatchingQuery`), so "drone" or "gps" pulls the Hobby & RC shelf even when no item spells it out. Category filter chips: `components/files/category-filter-bar.tsx`.

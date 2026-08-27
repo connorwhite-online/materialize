@@ -1,72 +1,9 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import * as Sentry from "@sentry/nextjs";
 
-const isPublicRoute = createRouteMatcher([
-  "/",
-  "/sign-in(.*)",
-  "/sign-up(.*)",
-  "/sso-callback",
-  "/files(.*)",
-  "/materials(.*)",
-  "/print(.*)",
-  "/collections(.*)",
-  "/projects(.*)",
-  // Experimental owner-only text-to-CAD studio + scorecard. Public at the
-  // middleware layer so the pages run their own canUseTextToCad gate and
-  // notFound() for everyone else. The single-segment matcher below already
-  // lets `/text-to-cad` through; this entry also covers `/text-to-cad/eval`
-  // (and any future sub-routes), which would otherwise hit auth.protect()
-  // and redirect to sign-in — revealing the route instead of 404ing.
-  "/text-to-cad(.*)",
-  // Two-step checkout's post-payment landing. Public at the middleware
-  // layer because Stripe's success redirect can arrive in a browser
-  // context with no Clerk session (iOS PWA in-app overlay has an
-  // isolated cookie jar) — auth.protect() there triggers Clerk's
-  // redirect handshake, which fails inside the webview. The page does
-  // its own gate: a signed per-order token (minted into the success
-  // URL) or the normal signed-in ownership check. Other /orders/[id]/*
-  // pages (confirm, cancel) stay protected.
-  "/orders/:orderId/pay-production",
-  "/u/(.*)",
-  "/api/webhooks(.*)",
-  "/api/craftcloud/(.*)",
-  // Anon home-bar search hits this; protecting it breaks the search
-  // panel for signed-out visitors.
-  "/api/search(.*)",
-  // Vercel cron calls authenticate via the CRON_SECRET header — they
-  // arrive without a Clerk session and would otherwise rewrite to /404.
-  "/api/cron/(.*)",
-  // Public thumbnails for marketplace listings.
-  "/api/thumbnails(.*)",
-  // Same-origin proxy for the 3D model preview on published file
-  // pages. The route itself enforces published-or-owner access.
-  "/api/files/preview/(.*)",
-  // MCP server. The transport route (app/api/[transport]/route.ts)
-  // does its own bearer-token auth via withMcpAuth — Clerk session
-  // cookies are not relevant here.
-  "/api/mcp(.*)",
-  // Sentry SDK tunnels client error reports through this same-
-  // origin route so ad-blockers don't drop them. No Clerk session
-  // expected. Configured in next.config.ts → tunnelRoute.
-  "/api/monitoring/(.*)",
-  // Sentry wiring smoke probe. The route itself enforces a
-  // secret-header check + non-production gate.
-  "/api/internal/sentry-test",
-  // Sentry-fixer webhook. Posts arrive without a Clerk session;
-  // the route validates a shared secret header.
-  "/api/internal/sentry-trigger",
-  // Discovery surfaces for crawlers + AI agents.
-  "/llms.txt",
-  "/llms-full.txt",
-  "/robots.txt",
-  "/sitemap.xml",
-  // Public user / org vanity profiles live at the root: `/[handle]`
-  // (the canonical target the old `/u/[username]` + `/o/[slug]` routes
-  // now redirect to). A profile is a single root segment, so match
-  // exactly one segment and exclude the authed root routes
-  // (dashboard / checkout / orders / onboarding) so they stay gated.
-  /^\/(?!(?:dashboard|checkout|orders|onboarding|sign-in|sign-up|sso-callback|api)(?:[/?#]|$))[^/?#]+\/?$/,
-]);
+import { PUBLIC_ROUTES } from "@/lib/auth/public-routes";
+
+const isPublicRoute = createRouteMatcher([...PUBLIC_ROUTES]);
 
 export default clerkMiddleware(async (auth, req) => {
   // Tag the Sentry scope with the authed Clerk userId so any
