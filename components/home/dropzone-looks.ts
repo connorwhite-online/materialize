@@ -126,39 +126,40 @@ export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
   {
     look: "steel",
     kind: "roundedBox",
-    position: [-2.42, 0.5, -0.15],
-    scale: 0.84,
+    position: [-2.38, 0.06, -0.15],
+    scale: 0.9,
     rotSpeed: [0.035, 0.08, 0.018],
     floatAmp: 0.08,
     floatSpeed: 0.7,
     phase: 0.4,
     fallbackClass:
-      "left-[3%] top-[6%] size-16 rounded-3xl sm:size-[4.25rem]",
+      "left-[3%] top-[22%] size-16 rounded-3xl sm:size-[4.5rem]",
   },
   {
     look: "resin",
     kind: "sphere",
-    position: [2.28, 0.18, 0.05],
+    position: [2.4, 0.16, 0.05],
     scale: 0.84,
     rotSpeed: [0.025, 0.055, 0.012],
     floatAmp: 0.1,
     floatSpeed: 0.85,
     phase: 1.2,
-    fallbackClass: "right-[5%] top-[14%] size-16 rounded-full sm:size-[4.25rem]",
+    fallbackClass: "right-[4%] top-[16%] size-16 rounded-full sm:size-[4.25rem]",
   },
   {
     look: "pla",
     kind: "roundedTriangle",
-    // Far lower-left — its own corner, not a nest under the cube or
-    // a crowd against the copy.
-    position: [-2.38, -0.72, 0.1],
-    scale: 0.86,
-    rotSpeed: [0.01, 0.045, 0.008],
+    // Bottom edge, between the copy and the sphere — the dropzone is
+    // too short to stack anything under the cube, so this is the
+    // triangle's own slot.
+    position: [1.05, -0.78, 0.12],
+    scale: 0.72,
+    rotSpeed: [0.01, 0.04, 0.006],
     floatAmp: 0.05,
     floatSpeed: 0.55,
     phase: 0.2,
-    restRotation: [0.22, 0.4, -0.08],
+    restRotation: [0.16, 0.28, -0.05],
     fallbackClass:
-      "left-[3%] bottom-[6%] h-[4.25rem] w-[3.75rem] [clip-path:polygon(50%_2%,56%_8%,97%_88%,90%_100%,10%_100%,3%_88%,44%_8%)]",
+      "right-[28%] bottom-[6%] h-[3.5rem] w-[3.15rem] [clip-path:polygon(50%_2%,56%_8%,97%_88%,90%_100%,10%_100%,3%_88%,44%_8%)]",
   },
 ];
