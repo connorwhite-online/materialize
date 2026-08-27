@@ -22,6 +22,7 @@ function ToonSkin({ lookId }: { lookId: DropzoneLookId }) {
     <>
       <meshBasicMaterial color={look.color} toneMapped={false} />
       <Outlines
+        screenspace
         thickness={TOON_OUTLINE_THICKNESS}
         color={TOON_INK}
         angle={Math.PI}

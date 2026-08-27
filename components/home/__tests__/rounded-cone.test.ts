@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { roundedConeProfile } from "../rounded-cone";
+import { roundedConeProfile, makeRoundedConeGeometry } from "../rounded-cone";
 
 describe("roundedConeProfile", () => {
   const points = roundedConeProfile();
@@ -21,5 +21,26 @@ describe("roundedConeProfile", () => {
     expect(maxRadius).toBeGreaterThan(0.4);
     expect(maxAt.y).toBeLessThan((tipY + baseY) / 2);
     expect(tipY).toBeGreaterThan(baseY);
+  });
+});
+
+describe("makeRoundedConeGeometry", () => {
+  it("winds with outward normals so the FrontSide fill is visible", () => {
+    const geometry = makeRoundedConeGeometry();
+    const pos = geometry.getAttribute("position");
+    const nrm = geometry.getAttribute("normal");
+    let outward = 0;
+    let inward = 0;
+    for (let i = 0; i < pos.count; i++) {
+      const d =
+        pos.getX(i) * nrm.getX(i) +
+        pos.getY(i) * nrm.getY(i) +
+        pos.getZ(i) * nrm.getZ(i);
+      if (d > 0.01) outward++;
+      else if (d < -0.01) inward++;
+    }
+    geometry.dispose();
+    expect(outward).toBeGreaterThan(inward);
+    expect(outward).toBeGreaterThan(pos.count * 0.8);
   });
 });

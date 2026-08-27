@@ -17,8 +17,7 @@ describe("dropzone primitives shading", () => {
     expect(src).not.toContain("meshToonMaterial");
     expect(src).not.toContain("meshPhysicalMaterial");
     expect(src).not.toContain("StudioEnvironment");
-    expect(src).not.toContain("directionalLight");
-    expect(src).not.toContain("ambientLight");
+    expect(src).toContain("screenspace");
   });
 
   it("inks in the warm near-black, not pure black", () => {

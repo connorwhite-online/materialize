@@ -58,7 +58,13 @@ export function roundedConeProfile(): THREE.Vector2[] {
 }
 
 export function makeRoundedConeGeometry(): THREE.LatheGeometry {
-  const geometry = new THREE.LatheGeometry(roundedConeProfile(), 48);
+  // Lathe winds the profile as given. Tip→base (decreasing Y) produces
+  // inward normals, which culls the FrontSide fill and leaves only the
+  // BackSide ink hull — a solid black blob. Reverse so normals point out.
+  const geometry = new THREE.LatheGeometry(
+    [...roundedConeProfile()].reverse(),
+    48
+  );
   geometry.computeVertexNormals();
   return geometry;
 }
