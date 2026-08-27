@@ -24,8 +24,10 @@ describe("FileUploader", () => {
       screen.getByText("click here or drag in a file (max 200mb)")
     ).toBeTruthy();
     expect(screen.queryByText("Drag and drop or click to upload")).toBeNull();
-    // Copy sits on a frosted plate instead of a full-area wash.
-    expect(container.innerHTML).toMatch(/color-mix\(in_oklab,var\(--background\)_92%/);
+    // Copy sits on the design-system `.glass` plate (token + blur).
+    const plate = container.querySelector(".glass");
+    expect(plate).toBeTruthy();
+    expect(plate?.className).not.toMatch(/(?:^|\s)bg-/);
     expect(container.innerHTML).not.toMatch(/radial-gradient\(ellipse_at_center/);
   });
 
