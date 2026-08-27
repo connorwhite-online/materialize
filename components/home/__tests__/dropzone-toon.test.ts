@@ -5,9 +5,9 @@ import * as THREE from "three";
 import { makeToonRamp, TOON_INK } from "../dropzone-toon";
 
 describe("makeToonRamp", () => {
-  it("is a 4-stop nearest-filtered grayscale ramp", () => {
+  it("is a 3-stop nearest-filtered grayscale ramp", () => {
     const tex = makeToonRamp();
-    expect(tex.image.width).toBe(4);
+    expect(tex.image.width).toBe(3);
     expect(tex.image.height).toBe(1);
     expect(tex.minFilter).toBe(THREE.NearestFilter);
     expect(tex.magFilter).toBe(THREE.NearestFilter);

@@ -28,9 +28,8 @@ function ToonSkin({ lookId }: { lookId: DropzoneLookId }) {
         toneMapped={false}
       />
       <Outlines
-        thickness={2.2}
+        thickness={0.045}
         color={TOON_INK}
-        screenspace
         angle={Math.PI}
         toneMapped={false}
       />

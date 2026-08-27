@@ -6,10 +6,9 @@ import * as THREE from "three";
  */
 export function makeToonRamp(): THREE.DataTexture {
   const data = new Uint8Array([
-    88, 88, 88, 255, 140, 140, 140, 255, 196, 196, 196, 255, 255, 255, 255,
-    255,
+    72, 72, 72, 255, 168, 168, 168, 255, 255, 255, 255, 255,
   ]);
-  const tex = new THREE.DataTexture(data, 4, 1, THREE.RGBAFormat);
+  const tex = new THREE.DataTexture(data, 3, 1, THREE.RGBAFormat);
   tex.minFilter = THREE.NearestFilter;
   tex.magFilter = THREE.NearestFilter;
   tex.needsUpdate = true;
