@@ -196,6 +196,21 @@ export async function seedAppUserForClerkId(
   return { username };
 }
 
+/**
+ * Authed `/` gates on Clerk `currentUser().username`, not our `users.username`
+ * row. A seeded app user without this still lands on `/onboarding`.
+ */
+export async function setClerkUsername(
+  clerkUserId: string,
+  username: string
+): Promise<void> {
+  ensureEnv();
+  const secretKey = process.env.CLERK_SECRET_KEY;
+  if (!secretKey) throw new Error("CLERK_SECRET_KEY not set");
+  const clerk = createClerkClient({ secretKey });
+  await clerk.users.updateUser(clerkUserId, { username });
+}
+
 export interface OwnedFileFixture {
   ownerId: string;
   fileId: string;

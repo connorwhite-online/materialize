@@ -4,6 +4,7 @@ import {
   createClerkTestUser,
   deleteClerkTestUser,
   seedAppUserForClerkId,
+  setClerkUsername,
   createOwnedFileFixture,
   deleteOwnedFileFixture,
   deleteAppUserRow,
@@ -30,6 +31,7 @@ test.describe("library tab", () => {
     user = await createClerkTestUser();
     const seed = await seedAppUserForClerkId(user.userId);
     username = seed.username;
+    await setClerkUsername(user.userId, username);
     file = await createOwnedFileFixture(user.userId);
   });
 
@@ -73,5 +75,54 @@ test.describe("library tab", () => {
     await expect(page.getByText(file.name)).toBeVisible({
       timeout: 10_000,
     });
+  });
+});
+
+test.describe("library tab — empty authed home", () => {
+  let user: ClerkTestUserFixture;
+
+  test.beforeAll(async () => {
+    user = await createClerkTestUser();
+    const seed = await seedAppUserForClerkId(user.userId);
+    await setClerkUsername(user.userId, seed.username);
+  });
+
+  test.afterAll(async () => {
+    if (user) {
+      await deleteAppUserRow(user.userId);
+      await deleteClerkTestUser(user);
+    }
+  });
+
+  test("does not render the library empty explainer", async ({ page }) => {
+    await page.goto("/");
+    await clerk.signIn({
+      page,
+      signInParams: {
+        strategy: "email_code",
+        identifier: user.email,
+      },
+    });
+    await page.goto("/");
+
+    await expect(page.getByText("Add a File")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.getByRole("button", { name: /new project/i })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /new collection/i })
+    ).toBeVisible();
+
+    // Compact empty library returns null. The File / Project / Collection
+    // cards under “Your library is empty” are redundant with the create
+    // cluster and will come back in a dedicated empty-state pass.
+    await expect(page.getByText("Your library is empty")).toHaveCount(0);
+    await expect(
+      page.getByText("Everything starts with a file.")
+    ).toHaveCount(0);
+    await expect(page.getByText("Nothing to show.")).toHaveCount(0);
+    await expect(
+      page.getByRole("heading", { name: "Library", exact: true })
+    ).toHaveCount(0);
   });
 });
