@@ -32,8 +32,8 @@ export const DROPZONE_MOBILE_MAX_WIDTH = 520;
 /** Multiplier applied to each primitive's `scale` on narrow canvases. */
 export const DROPZONE_MOBILE_SCALE = 0.68;
 
-/** Corner radius on the unit rounded square — chubby, not a sharp cube. */
-export const DROPZONE_SQUARE_RADIUS = 0.42;
+/** Corner radius on the unit rounded square — chubby, still a square. */
+export const DROPZONE_SQUARE_RADIUS = 0.36;
 
 /**
  * Pull frustum positions slightly inward on mobile so chubby shapes

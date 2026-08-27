@@ -87,8 +87,8 @@ describe("dropzone primitives shading", () => {
   });
 
   it("keeps the square chubby-round", () => {
-    expect(DROPZONE_SQUARE_RADIUS).toBeGreaterThanOrEqual(0.38);
-    expect(DROPZONE_SQUARE_RADIUS).toBeLessThan(0.5);
+    expect(DROPZONE_SQUARE_RADIUS).toBeGreaterThanOrEqual(0.3);
+    expect(DROPZONE_SQUARE_RADIUS).toBeLessThan(0.45);
     expect(src).toContain("DROPZONE_SQUARE_RADIUS");
   });
 

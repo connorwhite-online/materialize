@@ -126,12 +126,14 @@ export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
     kind: "roundedBox",
     position: [-0.88, 0.06, -0.15],
     scale: 1.0,
-    rotSpeed: [0.03, 0.07, 0.015],
+    // 3/4 view so the chubby square reads as a square, not a ball.
+    restRotation: [0.32, 0.52, 0.08],
+    rotSpeed: [0.02, 0.045, 0.01],
     floatAmp: 0.07,
     floatSpeed: 0.65,
     phase: 0.4,
     fallbackClass:
-      "-left-2 top-[20%] size-14 rounded-[1.35rem] sm:size-20 sm:rounded-3xl",
+      "-left-2 top-[20%] size-14 rounded-[1.15rem] sm:size-20 sm:rounded-[1.4rem]",
   },
   {
     look: "resin",
@@ -153,8 +155,9 @@ export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
     floatAmp: 0.035,
     floatSpeed: 0.5,
     phase: 0.2,
-    restRotation: [0.06, 0.16, 0],
+    // Face-on enough that the chubby triangle still reads as a triangle.
+    restRotation: [0.04, 0.12, 0],
     fallbackClass:
-      "-bottom-2 right-[26%] h-14 w-12 [clip-path:polygon(50%_4%,58%_12%,96%_86%,88%_100%,12%_100%,4%_86%,42%_12%)] sm:h-20 sm:w-[4.5rem]",
+      "-bottom-2 right-[26%] h-14 w-12 [clip-path:polygon(50%_2%,55%_10%,97%_88%,90%_100%,10%_100%,3%_88%,45%_10%)] sm:h-20 sm:w-[4.5rem]",
   },
 ];

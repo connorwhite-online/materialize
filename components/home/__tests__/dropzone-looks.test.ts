@@ -78,6 +78,7 @@ describe("DROPZONE_PRIMITIVES", () => {
     expect(triangle.position[0]).toBeGreaterThan(0.1);
     expect(triangle.position[0]).toBeLessThan(0.5);
     expect(triangle.restRotation).toBeDefined();
+    expect(square.restRotation).toBeDefined();
     // Mobile fallback sizes stay smaller than the sm: bump.
     expect(square.fallbackClass).toMatch(/size-14/);
     expect(sphere.fallbackClass).toMatch(/size-14/);

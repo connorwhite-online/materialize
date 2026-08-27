@@ -9,10 +9,10 @@ import {
 describe("roundedTriangleShape", () => {
   it("uses a chubby fillet so corners feel pillowy, not sharp", () => {
     expect(ROUNDED_TRIANGLE_CORNER_RADIUS / ROUNDED_TRIANGLE_SIDE).toBeGreaterThan(
-      0.18
+      0.14
     );
     expect(ROUNDED_TRIANGLE_CORNER_RADIUS / ROUNDED_TRIANGLE_SIDE).toBeLessThan(
-      0.28
+      0.24
     );
   });
 

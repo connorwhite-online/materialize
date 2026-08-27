@@ -5,8 +5,8 @@ import * as THREE from "three";
  * vertex makes a chubby, pillowy triangle — still a triangle in
  * silhouette, not a Reuleaux blob.
  */
-export const ROUNDED_TRIANGLE_SIDE = 1.28;
-export const ROUNDED_TRIANGLE_CORNER_RADIUS = 0.28;
+export const ROUNDED_TRIANGLE_SIDE = 1.3;
+export const ROUNDED_TRIANGLE_CORNER_RADIUS = 0.22;
 
 export function roundedTriangleShape(
   side = ROUNDED_TRIANGLE_SIDE,
@@ -59,10 +59,10 @@ export function roundedTriangleShape(
  */
 export function makeRoundedTriangleGeometry(): THREE.ExtrudeGeometry {
   const geometry = new THREE.ExtrudeGeometry(roundedTriangleShape(), {
-    depth: 0.34,
+    depth: 0.28,
     bevelEnabled: true,
-    bevelThickness: 0.07,
-    bevelSize: 0.07,
+    bevelThickness: 0.06,
+    bevelSize: 0.06,
     bevelSegments: 4,
     curveSegments: 28,
   });
