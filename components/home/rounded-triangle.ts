@@ -1,13 +1,16 @@
 import * as THREE from "three";
 
 /**
- * Equilateral triangle in XY, pointing +Y, with circular fillets at
- * each corner. Used as the extrude profile for the dropzone's chunky
- * rounded-triangle primitive.
+ * Equilateral triangle in XY, pointing +Y. The fillet is a small
+ * bite off each vertex so the sides stay long and straight — a
+ * literal triangle with rounded corners, not a Reuleaux blob.
  */
+export const ROUNDED_TRIANGLE_SIDE = 1.32;
+export const ROUNDED_TRIANGLE_CORNER_RADIUS = 0.11;
+
 export function roundedTriangleShape(
-  side = 1.18,
-  cornerRadius = 0.26
+  side = ROUNDED_TRIANGLE_SIDE,
+  cornerRadius = ROUNDED_TRIANGLE_CORNER_RADIUS
 ): THREE.Shape {
   const h = (side * Math.sqrt(3)) / 2;
   const verts = [
@@ -42,7 +45,9 @@ export function roundedTriangleShape(
 
     if (i === 0) shape.moveTo(pStart.x, pStart.y);
     else shape.lineTo(pStart.x, pStart.y);
-    shape.absarc(center.x, center.y, cornerRadius, a0, a1, false);
+    // Convex CCW outline: a0→a1 CCW is the long interior sweep (a
+    // circular lobe). Clockwise is the short outward fillet.
+    shape.absarc(center.x, center.y, cornerRadius, a0, a1, true);
   }
 
   shape.closePath();
@@ -50,18 +55,17 @@ export function roundedTriangleShape(
 }
 
 /**
- * Chunky rounded triangle — an extruded, bevelled token. Sits in XY
- * facing the camera (same plane as a play-button glyph) with enough
- * thickness that a slow tumble still reads as 3D.
+ * Extruded triangle token. A small bevel rounds the rim (the
+ * edges) without eating the silhouette the way a chunky bevel does.
  */
 export function makeRoundedTriangleGeometry(): THREE.ExtrudeGeometry {
   const geometry = new THREE.ExtrudeGeometry(roundedTriangleShape(), {
-    depth: 0.32,
+    depth: 0.3,
     bevelEnabled: true,
-    bevelThickness: 0.1,
-    bevelSize: 0.1,
-    bevelSegments: 4,
-    curveSegments: 16,
+    bevelThickness: 0.045,
+    bevelSize: 0.045,
+    bevelSegments: 3,
+    curveSegments: 20,
   });
   geometry.center();
   geometry.computeVertexNormals();

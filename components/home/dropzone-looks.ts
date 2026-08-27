@@ -110,8 +110,8 @@ export interface DropzonePrimitive {
 }
 
 /**
- * Three chunky primitives parked on the edges so the copy in the
- * middle stays clear: steel cube, resin sphere, PLA rounded triangle.
+ * Three chunky primitives, each in its own corner so they don't nest:
+ * steel cube upper-left, PLA triangle lower-left, resin sphere right.
  * Tuned for a wide, short dropzone (~2:1) with the camera at z ≈ 6.5,
  * fov 28. Rotation is slow on purpose — a leisurely turn, not a
  * tumble (`rotSpeed` is rad/s).
@@ -120,19 +120,19 @@ export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
   {
     look: "steel",
     kind: "roundedBox",
-    position: [-2.2, 0.08, -0.15],
-    scale: 0.92,
+    position: [-2.3, 0.42, -0.15],
+    scale: 0.88,
     rotSpeed: [0.035, 0.08, 0.018],
     floatAmp: 0.08,
     floatSpeed: 0.7,
     phase: 0.4,
     fallbackClass:
-      "left-[4%] top-[18%] size-16 rounded-3xl sm:size-[4.5rem]",
+      "left-[3%] top-[8%] size-16 rounded-3xl sm:size-[4.5rem]",
   },
   {
     look: "resin",
     kind: "sphere",
-    position: [2.25, 0.14, 0.05],
+    position: [2.28, 0.18, 0.05],
     scale: 0.84,
     rotSpeed: [0.025, 0.055, 0.012],
     floatAmp: 0.1,
@@ -143,13 +143,14 @@ export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
   {
     look: "pla",
     kind: "roundedTriangle",
-    position: [1.9, -0.48, 0.12],
-    scale: 0.82,
-    rotSpeed: [0.04, 0.07, 0.02],
+    // Own pocket, lower-left — not tucked under the sphere.
+    position: [-1.4, -0.66, 0.12],
+    scale: 0.98,
+    rotSpeed: [0.016, 0.05, 0.01],
     floatAmp: 0.06,
     floatSpeed: 0.55,
-    phase: 0.9,
+    phase: 0.5,
     fallbackClass:
-      "right-[6%] bottom-[5%] h-[3.5rem] w-12 [clip-path:polygon(50%_0%,62%_8%,96%_86%,86%_100%,14%_100%,4%_86%,38%_8%)]",
+      "left-[8%] bottom-[6%] h-[4.5rem] w-[4rem] [clip-path:polygon(50%_2%,56%_8%,97%_88%,90%_100%,10%_100%,3%_88%,44%_8%)]",
   },
 ];
