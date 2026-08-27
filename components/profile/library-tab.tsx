@@ -599,7 +599,10 @@ export async function LibraryTab({
 
   return (
     <div className="space-y-6">
-      {isOwner && (
+      {/* Authed home already has Add a File / New Project / New Collection
+          at the top, so the item-count + Add row is redundant there.
+          Profile library (not compact) keeps it. */}
+      {isOwner && !compact && (
         <div className="flex items-center justify-between">
           <p className="text-sm text-muted-foreground">
             {totalItems} {totalItems === 1 ? "item" : "items"}

@@ -10,11 +10,20 @@ const fileCard = readFileSync(
   resolve(__dirname, "../../profile/library-file-card.tsx"),
   "utf8"
 );
+const libraryTab = readFileSync(
+  resolve(__dirname, "../../profile/library-tab.tsx"),
+  "utf8"
+);
 
 describe("HomeDashboard authed create cluster", () => {
   it("no longer shows a visible Upload a file heading", () => {
     expect(dashboard).not.toMatch(/Upload a file/);
     expect(dashboard).toMatch(/sr-only">Add to your library/);
+  });
+
+  it("does not show a visible Library heading", () => {
+    expect(dashboard).not.toMatch(/mb-4 text-sm font-medium">Library/);
+    expect(dashboard).toMatch(/sr-only">Library/);
   });
 });
 
@@ -28,5 +37,11 @@ describe("HomeDashboard recent files", () => {
     expect(dashboard).not.toMatch(
       /bg-muted transition-colors group-hover:border-primary\/40/
     );
+  });
+});
+
+describe("authed-home library chrome", () => {
+  it("hides the item-count and Add row on the compact home library", () => {
+    expect(libraryTab).toMatch(/isOwner && !compact/);
   });
 });

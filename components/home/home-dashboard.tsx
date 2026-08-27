@@ -92,7 +92,7 @@ export async function HomeDashboard({ userId }: { userId: string }) {
       )}
 
       <section>
-        <h2 className="mb-4 text-sm font-medium">Library</h2>
+        <h2 className="sr-only">Library</h2>
         <LibraryTab userId={userId} isOwner compact />
       </section>
     </div>
