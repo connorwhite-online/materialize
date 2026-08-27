@@ -65,20 +65,6 @@ function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
           {material}
         </mesh>
       );
-    case "torus":
-      return (
-        <mesh>
-          <torusGeometry args={[0.4, 0.22, 28, 56]} />
-          {material}
-        </mesh>
-      );
-    case "capsule":
-      return (
-        <mesh>
-          <capsuleGeometry args={[0.34, 0.46, 10, 24]} />
-          {material}
-        </mesh>
-      );
   }
 }
 

@@ -62,12 +62,7 @@ export const DROPZONE_LOOKS: Record<
 
 export type DropzoneLookId = keyof typeof DROPZONE_LOOKS;
 
-export type DropzonePrimitiveKind =
-  | "roundedBox"
-  | "sphere"
-  | "torus"
-  | "capsule"
-  | "roundedSlab";
+export type DropzonePrimitiveKind = "roundedBox" | "sphere" | "roundedSlab";
 
 export interface DropzonePrimitive {
   look: DropzoneLookId;
@@ -87,67 +82,45 @@ export interface DropzonePrimitive {
 }
 
 /**
- * Five chunky, round-cornered primitives around the copy. Tuned for a
- * wide, short dropzone (~2:1) with the camera at z ≈ 6.5, fov 28.
+ * Three chunky primitives parked on the edges so the copy in the
+ * middle stays clear. Tuned for a wide, short dropzone (~2:1) with
+ * the camera at z ≈ 6.5, fov 28. Rotation is slow on purpose —
+ * a leisurely turn, not a tumble (`rotSpeed` is rad/s).
  */
 export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
   {
     look: "steel",
     kind: "roundedBox",
-    position: [-2.05, 0.22, -0.2],
-    scale: 0.86,
-    rotSpeed: [0.16, 0.28, 0.07],
+    position: [-2.2, 0.08, -0.15],
+    scale: 0.92,
+    rotSpeed: [0.035, 0.08, 0.018],
     floatAmp: 0.08,
     floatSpeed: 0.7,
     phase: 0.4,
     fallbackClass:
-      "left-[5%] top-[16%] size-16 rounded-3xl sm:size-[4.5rem]",
+      "left-[4%] top-[18%] size-16 rounded-3xl sm:size-[4.5rem]",
   },
   {
     look: "resin",
     kind: "sphere",
-    position: [2.1, 0.28, 0.05],
-    scale: 0.78,
-    rotSpeed: [0.1, 0.18, 0.04],
+    position: [2.25, 0.14, 0.05],
+    scale: 0.84,
+    rotSpeed: [0.025, 0.055, 0.012],
     floatAmp: 0.1,
     floatSpeed: 0.85,
     phase: 1.2,
-    fallbackClass: "right-[6%] top-[12%] size-16 rounded-full sm:size-[4.25rem]",
+    fallbackClass: "right-[5%] top-[14%] size-16 rounded-full sm:size-[4.25rem]",
   },
   {
     look: "gold",
-    kind: "torus",
-    position: [-1.75, -0.42, 0.35],
-    scale: 0.7,
-    rotSpeed: [0.24, 0.14, 0.18],
-    floatAmp: 0.07,
-    floatSpeed: 0.6,
-    phase: 2.1,
-    fallbackClass:
-      "left-[11%] bottom-[10%] size-14 rounded-full sm:size-16",
-  },
-  {
-    look: "pla",
-    kind: "capsule",
-    position: [1.85, -0.4, 0.28],
-    scale: 0.72,
-    rotSpeed: [0.12, 0.32, 0.05],
-    floatAmp: 0.09,
-    floatSpeed: 0.75,
-    phase: 2.8,
-    fallbackClass:
-      "right-[10%] bottom-[8%] h-16 w-10 rounded-full sm:h-[4.5rem] sm:w-11",
-  },
-  {
-    look: "aluminum",
     kind: "roundedSlab",
-    position: [0.08, 0.58, -0.5],
-    scale: 0.52,
-    rotSpeed: [0.2, 0.3, 0.1],
+    position: [-0.15, -0.82, -0.35],
+    scale: 0.55,
+    rotSpeed: [0.04, 0.07, 0.02],
     floatAmp: 0.06,
-    floatSpeed: 0.95,
+    floatSpeed: 0.55,
     phase: 0.9,
     fallbackClass:
-      "left-1/2 top-[7%] h-9 w-14 -translate-x-1/2 rotate-12 rounded-2xl sm:h-10 sm:w-16",
+      "bottom-[6%] left-[18%] h-9 w-14 rotate-12 rounded-2xl sm:h-10 sm:w-16",
   },
 ];

@@ -41,16 +41,28 @@ describe("DROPZONE_LOOKS", () => {
 });
 
 describe("DROPZONE_PRIMITIVES", () => {
-  it("uses only chunky rounded kinds", () => {
+  it("uses only the three remaining chunky kinds — no torus or capsule", () => {
     const kinds = new Set(DROPZONE_PRIMITIVES.map((p) => p.kind));
-    expect(kinds).toEqual(
-      new Set(["roundedBox", "sphere", "torus", "capsule", "roundedSlab"])
-    );
+    expect(kinds).toEqual(new Set(["roundedBox", "sphere", "roundedSlab"]));
   });
 
-  it("covers every look exactly once", () => {
-    expect(DROPZONE_PRIMITIVES.map((p) => p.look).sort()).toEqual(
-      Object.keys(DROPZONE_LOOKS).sort()
-    );
+  it("keeps each used look unique", () => {
+    const looks = DROPZONE_PRIMITIVES.map((p) => p.look);
+    expect(looks).toEqual([...new Set(looks)]);
+  });
+
+  it("rotates slowly so the backdrop does not tumble", () => {
+    for (const spec of DROPZONE_PRIMITIVES) {
+      for (const speed of spec.rotSpeed) {
+        expect(Math.abs(speed)).toBeLessThanOrEqual(0.1);
+      }
+    }
+  });
+
+  it("parks shapes on the edges so the copy stays clear", () => {
+    const [cube, sphere, slab] = DROPZONE_PRIMITIVES;
+    expect(cube.position[0]).toBeLessThan(-1.5);
+    expect(sphere.position[0]).toBeGreaterThan(1.5);
+    expect(slab.position[1]).toBeLessThan(-0.5);
   });
 });

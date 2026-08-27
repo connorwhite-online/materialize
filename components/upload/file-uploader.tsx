@@ -97,29 +97,26 @@ export function FileUploader({
         )}
       >
         {backdrop}
-        {featured && (
-          <span
-            aria-hidden
-            className="pointer-events-none absolute inset-0 z-[1] bg-[radial-gradient(ellipse_at_center,var(--background)_0%,transparent_72%)] opacity-80"
-          />
-        )}
         <input
           type="file"
           className="sr-only"
           accept={acceptExtensions}
           onChange={handleChange}
         />
-        <p
-          className={cn(
-            "relative z-[2] font-medium",
-            featured ? "text-base tracking-tight" : "text-sm"
-          )}
-        >
-          {title}
-        </p>
-        <p className="relative z-[2] mt-1 text-xs text-muted-foreground">
-          {subtitle}
-        </p>
+        {featured ? (
+          // Frosted plate around the copy only — a full-area scrim
+          // washed the primitives and still lost the letters to
+          // highlights. `.glass-surface` must not sit next to a `bg-*`.
+          <span className="relative z-[2] flex flex-col items-center rounded-2xl px-5 py-3 text-popover-foreground glass-surface ring-1 ring-foreground/10">
+            <p className="text-base font-medium tracking-tight">{title}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>
+          </span>
+        ) : (
+          <>
+            <p className="text-sm font-medium">{title}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>
+          </>
+        )}
       </label>
       {error && (
         <p role="alert" className="mt-2 text-sm text-destructive">

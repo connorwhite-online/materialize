@@ -11,7 +11,7 @@ describe("FileUploader", () => {
   });
 
   it("accepts featured home copy", () => {
-    render(
+    const { container } = render(
       <FileUploader
         featured
         title="Add a File"
@@ -24,6 +24,10 @@ describe("FileUploader", () => {
       screen.getByText("click here or drag in a file (max 200mb)")
     ).toBeTruthy();
     expect(screen.queryByText("Drag and drop or click to upload")).toBeNull();
+    // Copy sits on a glass plate instead of a full-area wash, so the
+    // letters stay readable over the 3D backdrop.
+    expect(container.querySelector(".glass-surface")).toBeTruthy();
+    expect(container.innerHTML).not.toMatch(/radial-gradient\(ellipse_at_center/);
   });
 
   it("rejects an oversized file", () => {
