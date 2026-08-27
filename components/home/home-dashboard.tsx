@@ -48,7 +48,7 @@ export async function HomeDashboard({ userId }: { userId: string }) {
       )}
 
       <section>
-        <h2 className="mb-3 text-sm font-medium">Upload a file</h2>
+        <h2 className="sr-only">Add to your library</h2>
         <HomeDropzone />
       </section>
 
