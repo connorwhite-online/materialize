@@ -1,9 +1,9 @@
 /**
- * Flat sketch treatment for the authed-home dropzone primitives.
+ * Colored-pencil treatment for the authed-home dropzone primitives.
  *
- * Fill is almost flat pastel with a soft pencil shade on the dark
- * side — no cel bands, no specular coin. Form comes from the ink
- * silhouette (world-space outline hull) rather than lighting tricks.
+ * Lighting rolls through a soft same-family gradient (shadow → mid →
+ * highlight) with paper tooth — evident shading, no hard cel bands.
+ * The ink silhouette is a world-space outline hull.
  *
  * drei's `<Outlines screenspace>` flag is named backwards relative
  * to CSS: `true` extrudes along normals in world units (the inverted
@@ -16,15 +16,15 @@ export const TOON_INK = "#2a241c";
 
 /**
  * World-space outline extrusion (`screenspace` on `<Outlines>`).
- * A chunky pen stroke so the silhouette reads like a doodle.
+ * A pen stroke that frames the colored-pencil fill.
  */
-export const TOON_OUTLINE_THICKNESS = 0.045;
+export const TOON_OUTLINE_THICKNESS = 0.042;
 
 /**
- * How hard the soft pencil shade leans into the dark side.
- * 0 = pure flat fill; 1 = full shadow tint. Kept quiet on purpose.
+ * How much the soft specular tip leans into the family highlight.
+ * Colored pencil, not a hard anime coin.
  */
-export const TOON_PENCIL_STRENGTH = 0.22;
+export const TOON_PENCIL_SPEC = 0.42;
 
 /** Canvas CSS width (px) below which shapes shrink to fit the well. */
 export const DROPZONE_MOBILE_MAX_WIDTH = 520;

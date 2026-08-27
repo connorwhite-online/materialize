@@ -4,20 +4,21 @@
  * Inlined (rather than imported from `lib/materials`) so the home
  * client chunk doesn't pull the full editorial preset library. A test
  * pins each `catalogId` + colour against the real catalog / hero
- * overrides so these can't drift silently. Shade is a flat sketch
- * fill (`toonColor`) with a soft pencil tint (`toonShadow`). Metalness
- * and transmission stay on the object so the catalog pin still
- * matches the row, but they are not used at draw time.
+ * overrides so these can't drift silently. Shade is a same-family
+ * colored-pencil ramp (`toonShadow` / `toonColor` / `toonHighlight`).
+ * Metalness and transmission stay on the object so the catalog pin
+ * still matches the row, but they are not used at draw time.
  */
 export type DropzoneLook = {
   catalogId: string;
   color: string;
   /**
-   * Flat sketch fill + soft pencil shade — purplish blue, pinkish
-   * red, yellowish green. Quiet pastels, still clearly coloured.
+   * Same-family pencil ramp — periwinkle, rose, chartreuse.
+   * Mids are value-aligned so the three shapes feel like one set.
    */
   toonColor: string;
   toonShadow: string;
+  toonHighlight: string;
   metalness: number;
   roughness: number;
   clearcoat?: number;
@@ -33,9 +34,10 @@ export const DROPZONE_LOOKS: Record<
   steel: {
     catalogId: "steel-316l",
     color: "#8a8a8a",
-    // Square — sketch periwinkle.
-    toonColor: "#8b84d8",
-    toonShadow: "#5c56a0",
+    // Square — periwinkle pencil (aligned mid value with the set).
+    toonColor: "#9088d2",
+    toonShadow: "#58529c",
+    toonHighlight: "#ccc8ef",
     metalness: 1,
     roughness: 0.35,
   },
@@ -43,9 +45,10 @@ export const DROPZONE_LOOKS: Record<
     catalogId: "resin-standard",
     // Hero override — translucent cream, not the stock opaque resin.
     color: "#e6dfcc",
-    // Sphere — sketch rose.
-    toonColor: "#e89096",
-    toonShadow: "#b85862",
+    // Sphere — rose pencil.
+    toonColor: "#d2909a",
+    toonShadow: "#9c5664",
+    toonHighlight: "#efc9cf",
     metalness: 0,
     roughness: 0.08,
     clearcoat: 0.9,
@@ -58,6 +61,7 @@ export const DROPZONE_LOOKS: Record<
     color: "#d4a94a",
     toonColor: "#d4a94a",
     toonShadow: "#9a6e22",
+    toonHighlight: "#f6e3a4",
     metalness: 1,
     roughness: 0.15,
   },
@@ -65,9 +69,10 @@ export const DROPZONE_LOOKS: Record<
     catalogId: "pla-white",
     // Hero override — warmer off-white so it holds a silhouette.
     color: "#c4bca8",
-    // Triangle — sketch yellow-green.
-    toonColor: "#c5d66e",
-    toonShadow: "#8aa03c",
+    // Triangle — chartreuse pencil.
+    toonColor: "#b0d290",
+    toonShadow: "#6e9c56",
+    toonHighlight: "#dff0c9",
     metalness: 0,
     roughness: 0.42,
     clearcoat: 0.25,
@@ -77,6 +82,7 @@ export const DROPZONE_LOOKS: Record<
     color: "#b0b0b0",
     toonColor: "#b0b0b0",
     toonShadow: "#6a7886",
+    toonHighlight: "#eef2f5",
     metalness: 1,
     roughness: 0.42,
   },

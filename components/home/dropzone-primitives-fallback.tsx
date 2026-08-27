@@ -7,7 +7,7 @@ import { TOON_INK } from "./dropzone-toon";
  * context still leaves the dropzone looking designed, not empty.
  *
  * Decorative only (`aria-hidden`); the file input remains the control.
- * Flat fill + ink ring matches the sketch look on the canvas.
+ * Soft same-family gradient + ink ring matches the colored-pencil look.
  */
 export function DropzonePrimitivesFallback() {
   return (
@@ -22,7 +22,7 @@ export function DropzonePrimitivesFallback() {
             key={primitive.look}
             className={`absolute ${primitive.fallbackClass}`}
             style={{
-              background: look.toonColor,
+              background: `linear-gradient(145deg, ${look.toonHighlight} 0%, ${look.toonColor} 48%, ${look.toonShadow} 100%)`,
               boxShadow: `0 0 0 2.5px ${TOON_INK}`,
             }}
           />
