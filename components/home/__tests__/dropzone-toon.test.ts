@@ -52,20 +52,27 @@ describe("dropzone primitives shading", () => {
   });
 });
 
+function chroma({ r, g, b }: { r: number; g: number; b: number }) {
+  return Math.max(r, g, b) - Math.min(r, g, b);
+}
+
 describe("toon gradient tints", () => {
-  it("tints the three live primitives as quiet hue blends", () => {
+  it("tints the three live primitives as pastel hues, not grey", () => {
     const steel = rgb(DROPZONE_LOOKS.steel.toonColor);
     expect(steel.b).toBeGreaterThan(steel.r);
     expect(steel.r).toBeGreaterThanOrEqual(steel.g);
+    expect(chroma(steel)).toBeGreaterThan(50);
 
     const resin = rgb(DROPZONE_LOOKS.resin.toonColor);
     expect(resin.r).toBeGreaterThan(resin.g);
     expect(resin.g).toBeGreaterThanOrEqual(resin.b);
+    expect(chroma(resin)).toBeGreaterThan(50);
 
     const pla = rgb(DROPZONE_LOOKS.pla.toonColor);
     expect(pla.g).toBeGreaterThan(pla.r);
     expect(pla.g).toBeGreaterThan(pla.b);
     expect(pla.r).toBeGreaterThan(pla.b);
+    expect(chroma(pla)).toBeGreaterThan(50);
   });
 
   it("keeps the highlight lighter than the toon mid on every look", () => {

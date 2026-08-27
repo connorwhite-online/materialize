@@ -13,9 +13,8 @@ export type DropzoneLook = {
   catalogId: string;
   color: string;
   /**
-   * Soft toon-gradient tints. Very quiet hue blends — purplish blue,
-   * pinkish red, yellowish green on the three live primitives — not
-   * a multiply-toward-black cel ramp.
+   * Pastel toon-gradient tints — purplish blue, pinkish red, yellowish
+   * green. Quiet, but they have to read as colour, not grey.
    */
   toonColor: string;
   toonShadow: string;
@@ -35,10 +34,10 @@ export const DROPZONE_LOOKS: Record<
   steel: {
     catalogId: "steel-316l",
     color: "#8a8a8a",
-    // Cube — purplish blue, barely.
-    toonColor: "#8c88a2",
-    toonShadow: "#5c5678",
-    toonHighlight: "#e4e0f2",
+    // Cube — pastel purplish blue.
+    toonColor: "#8a86d4",
+    toonShadow: "#5a54a8",
+    toonHighlight: "#dcd8fa",
     metalness: 1,
     roughness: 0.35,
   },
@@ -46,10 +45,10 @@ export const DROPZONE_LOOKS: Record<
     catalogId: "resin-standard",
     // Hero override — translucent cream, not the stock opaque resin.
     color: "#e6dfcc",
-    // Sphere — pinkish red, barely.
-    toonColor: "#e2c8c4",
-    toonShadow: "#c49a96",
-    toonHighlight: "#f8e8e6",
+    // Sphere — pastel pinkish red.
+    toonColor: "#e89490",
+    toonShadow: "#c06068",
+    toonHighlight: "#f8d4d6",
     metalness: 0,
     roughness: 0.08,
     clearcoat: 0.9,
@@ -70,10 +69,10 @@ export const DROPZONE_LOOKS: Record<
     catalogId: "pla-white",
     // Hero override — warmer off-white so it holds a silhouette.
     color: "#c4bca8",
-    // Cone — yellowish green, barely.
-    toonColor: "#c0c8a4",
-    toonShadow: "#8e9668",
-    toonHighlight: "#e8eed6",
+    // Cone — pastel yellowish green.
+    toonColor: "#c8d878",
+    toonShadow: "#8aaa48",
+    toonHighlight: "#eaf4c4",
     metalness: 0,
     roughness: 0.42,
     clearcoat: 0.25,

@@ -4,7 +4,7 @@
  * Flat unlit fills read as stickers with no form. A grayscale cel ramp
  * just muddy-darkens them. The dropzone shader mixes the catalog mid
  * toward a hue-shifted shadow and highlight over a wrapped Lambert
- * term — quiet color blends (purplish blue, pinkish red, yellowish
+ * term — pastel blends (purplish blue, pinkish red, yellowish
  * green), still graphic, plus the ink outline.
  *
  * drei's `<Outlines screenspace>` flag is named backwards relative
