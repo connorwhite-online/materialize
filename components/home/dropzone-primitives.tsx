@@ -12,7 +12,7 @@ import {
   type DropzoneLookId,
   type DropzonePrimitive,
 } from "./dropzone-looks";
-import { makeRoundedConeGeometry } from "./rounded-cone";
+import { makeRoundedTriangleGeometry } from "./rounded-triangle";
 import { TOON_INK, TOON_OUTLINE_THICKNESS } from "./dropzone-toon";
 import { DropzoneToonMaterial } from "./dropzone-toon-material";
 
@@ -45,8 +45,8 @@ function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
           {skin}
         </RoundedBox>
       );
-    case "roundedCone":
-      return <RoundedCone>{skin}</RoundedCone>;
+    case "roundedTriangle":
+      return <RoundedTriangle>{skin}</RoundedTriangle>;
     case "sphere":
       return (
         <mesh>
@@ -57,8 +57,8 @@ function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
   }
 }
 
-function RoundedCone({ children }: { children: React.ReactNode }) {
-  const geometry = useMemo(() => makeRoundedConeGeometry(), []);
+function RoundedTriangle({ children }: { children: React.ReactNode }) {
+  const geometry = useMemo(() => makeRoundedTriangleGeometry(), []);
   useEffect(() => () => geometry.dispose(), [geometry]);
   return <mesh geometry={geometry}>{children}</mesh>;
 }
