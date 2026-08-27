@@ -2,10 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { RoundedBox } from "@react-three/drei";
+import { Outlines, RoundedBox } from "@react-three/drei";
 import { useReducedMotion } from "motion/react";
 import * as THREE from "three";
-import { StudioEnvironment } from "@/components/viewer/studio-environment";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { DropzonePrimitivesFallback } from "./dropzone-primitives-fallback";
 import {
@@ -15,27 +14,32 @@ import {
   type DropzonePrimitive,
 } from "./dropzone-looks";
 import { makeRoundedConeGeometry } from "./rounded-cone";
+import { makeToonRamp, TOON_INK } from "./dropzone-toon";
 
-function LookMaterial({ lookId }: { lookId: DropzoneLookId }) {
+function ToonSkin({ lookId }: { lookId: DropzoneLookId }) {
   const look = DROPZONE_LOOKS[lookId];
-  const transmissive = (look.transmission ?? 0) > 0;
+  const ramp = useMemo(() => makeToonRamp(), []);
+  useEffect(() => () => ramp.dispose(), [ramp]);
   return (
-    <meshPhysicalMaterial
-      color={look.color}
-      metalness={look.metalness}
-      roughness={look.roughness}
-      clearcoat={look.clearcoat ?? 0}
-      clearcoatRoughness={0.12}
-      transmission={look.transmission ?? 0}
-      ior={look.ior ?? 1.5}
-      thickness={look.thickness ?? 0.4}
-      transparent={transmissive}
-    />
+    <>
+      <meshToonMaterial
+        color={look.color}
+        gradientMap={ramp}
+        toneMapped={false}
+      />
+      <Outlines
+        thickness={2.2}
+        color={TOON_INK}
+        screenspace
+        angle={Math.PI}
+        toneMapped={false}
+      />
+    </>
   );
 }
 
 function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
-  const material = <LookMaterial lookId={spec.look} />;
+  const skin = <ToonSkin lookId={spec.look} />;
   switch (spec.kind) {
     case "roundedBox":
       return (
@@ -45,16 +49,16 @@ function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
           smoothness={8}
           bevelSegments={6}
         >
-          {material}
+          {skin}
         </RoundedBox>
       );
     case "roundedCone":
-      return <RoundedCone>{material}</RoundedCone>;
+      return <RoundedCone>{skin}</RoundedCone>;
     case "sphere":
       return (
         <mesh>
           <sphereGeometry args={[0.58, 48, 48]} />
-          {material}
+          {skin}
         </mesh>
       );
   }
@@ -101,11 +105,8 @@ function PrimitiveMesh({
 function Scene({ paused }: { paused: boolean }) {
   return (
     <>
-      <ambientLight intensity={0.45} />
-      <directionalLight position={[4, 5, 6]} intensity={1.15} />
-      <directionalLight position={[-5, -2, -4]} intensity={0.4} />
-      <directionalLight position={[0, -4, 3]} intensity={0.25} />
-      <StudioEnvironment />
+      <ambientLight intensity={0.7} />
+      <directionalLight position={[4, 5, 6]} intensity={1.85} />
       {DROPZONE_PRIMITIVES.map((spec) => (
         <PrimitiveMesh key={spec.look} spec={spec} paused={paused} />
       ))}
@@ -114,10 +115,10 @@ function Scene({ paused }: { paused: boolean }) {
 }
 
 /**
- * Floating catalog-material primitives behind the authed-home file
- * dropzone. Decorative — `pointer-events` stay off so the file input
- * remains the only control. Pauses when scrolled off-screen or when
- * the user prefers reduced motion.
+ * Floating toon-ink primitives behind the authed-home file dropzone.
+ * Decorative — `pointer-events` stay off so the file input remains
+ * the only control. Pauses when scrolled off-screen or when the user
+ * prefers reduced motion.
  */
 export function DropzonePrimitives() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -150,6 +151,7 @@ export function DropzonePrimitives() {
             antialias: true,
             alpha: true,
             powerPreference: "low-power",
+            toneMapping: THREE.NoToneMapping,
           }}
           frameloop={paused ? "demand" : "always"}
         >
