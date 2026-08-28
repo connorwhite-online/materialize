@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { RoundedBox } from "@react-three/drei";
+import { ContactShadows, RoundedBox } from "@react-three/drei";
 import { useReducedMotion } from "motion/react";
 import * as THREE from "three";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
@@ -19,6 +19,10 @@ import {
   type DropzonePrimitive,
 } from "./dropzone-looks";
 import { makeRoundedPyramidGeometry } from "./rounded-pyramid";
+
+/** Warm near-black matched to the brand hue so soft contact blobs
+ *  read on both light and dark card fills without a blue cast. */
+const SHADOW_COLOR = "#1a1814";
 
 function PhysicalSkin({ lookId }: { lookId: DropzoneLookId }) {
   const look = DROPZONE_LOOKS[lookId];
@@ -41,7 +45,11 @@ function PhysicalSkin({ lookId }: { lookId: DropzoneLookId }) {
 function RoundedPyramid({ children }: { children: React.ReactNode }) {
   const geometry = useMemo(() => makeRoundedPyramidGeometry(), []);
   useEffect(() => () => geometry.dispose(), [geometry]);
-  return <mesh geometry={geometry}>{children}</mesh>;
+  return (
+    <mesh castShadow geometry={geometry}>
+      {children}
+    </mesh>
+  );
 }
 
 function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
@@ -50,6 +58,7 @@ function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
     case "roundedBox":
       return (
         <RoundedBox
+          castShadow
           args={[1, 1, 1]}
           radius={DROPZONE_SQUARE_RADIUS}
           smoothness={6}
@@ -62,7 +71,7 @@ function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
       return <RoundedPyramid>{skin}</RoundedPyramid>;
     case "sphere":
       return (
-        <mesh>
+        <mesh castShadow>
           <sphereGeometry args={[0.56, 48, 48]} />
           {skin}
         </mesh>
@@ -129,20 +138,77 @@ function PrimitiveMesh({
   );
 }
 
+/**
+ * Invisible plane parallel to the well. Receives directional shadow maps
+ * so silhouettes darken the transparent canvas — and therefore the card
+ * fill underneath. Paired with soft ContactShadows for a fuller pool.
+ */
+function CardShadowCatcher() {
+  const { viewport } = useThree();
+  return (
+    <mesh receiveShadow position={[0, 0, -0.75]} renderOrder={-1}>
+      <planeGeometry args={[viewport.width * 1.7, viewport.height * 1.7]} />
+      <shadowMaterial
+        transparent
+        opacity={0.42}
+        color={SHADOW_COLOR}
+        depthWrite={false}
+      />
+    </mesh>
+  );
+}
+
+/**
+ * Soft contact pool under the set — fills in where the hard shadow map
+ * is thin, still drawn into the transparent canvas over the card.
+ */
+function CardContactShadows() {
+  const { viewport } = useThree();
+  return (
+    <ContactShadows
+      position={[0, -viewport.height * 0.34, 0]}
+      scale={Math.max(viewport.width * 1.55, 5)}
+      far={3.8}
+      near={0}
+      opacity={0.55}
+      blur={2.2}
+      resolution={512}
+      color={SHADOW_COLOR}
+      frames={Infinity}
+      smooth
+    />
+  );
+}
+
 function Scene({ paused }: { paused: boolean }) {
   return (
     <>
       {/* Same key/fill/rim as the marketing hero so stainless, resin,
           and nylon read the way they do on the torus, not as unlit
-          gray blobs. */}
-      <ambientLight intensity={0.5} />
-      <directionalLight position={[5, 5, 5]} intensity={1.2} />
-      <directionalLight position={[-5, -3, -5]} intensity={0.5} />
-      <directionalLight position={[0, -5, 2]} intensity={0.3} />
+          gray blobs. Key light also casts onto the card catcher. */}
+      <ambientLight intensity={0.45} />
+      <directionalLight
+        castShadow
+        position={[3.2, 4.2, 5.5]}
+        intensity={1.25}
+        shadow-mapSize={[1024, 1024]}
+        shadow-bias={-0.00025}
+        shadow-normalBias={0.02}
+        shadow-camera-near={1}
+        shadow-camera-far={18}
+        shadow-camera-left={-5}
+        shadow-camera-right={5}
+        shadow-camera-top={4}
+        shadow-camera-bottom={-4}
+      />
+      <directionalLight position={[-5, -3, -5]} intensity={0.45} />
+      <directionalLight position={[0, -5, 2]} intensity={0.25} />
       <StudioEnvironment />
       {DROPZONE_PRIMITIVES.map((spec) => (
         <PrimitiveMesh key={spec.look} spec={spec} paused={paused} />
       ))}
+      <CardShadowCatcher />
+      <CardContactShadows />
     </>
   );
 }
@@ -179,6 +245,7 @@ export function DropzonePrimitives() {
     >
       <ErrorBoundary fallback={<DropzonePrimitivesFallback />}>
         <Canvas
+          shadows
           camera={{ position: [0, 0.12, 6.5], fov: 28 }}
           dpr={[1, 1.5]}
           gl={{

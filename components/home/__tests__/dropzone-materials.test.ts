@@ -29,6 +29,16 @@ describe("dropzone primitives materials", () => {
     expect(src).not.toContain("flatShading");
   });
 
+  it("casts contact shadows onto the card through the transparent canvas", () => {
+    expect(src).toContain("ContactShadows");
+    expect(src).toContain("CardContactShadows");
+    expect(src).toContain("CardShadowCatcher");
+    expect(src).toContain("shadowMaterial");
+    expect(src).toContain("castShadow");
+    expect(src).toMatch(/shadows\b/);
+    expect(src).toMatch(/opacity=\{0\.[3-9]/);
+  });
+
   it("wires stainless / resin / nylon PBR fields onto the physical material", () => {
     expect(src).toContain("look.metalness");
     expect(src).toContain("look.roughness");
@@ -70,6 +80,7 @@ describe("dropzone primitives materials", () => {
     expect(fallback).toContain("look.color");
     expect(fallback).toContain("look.metalness");
     expect(fallback).toContain("linear-gradient");
+    expect(fallback).toContain("boxShadow");
     expect(fallback).not.toContain("toonColor");
     expect(fallback).not.toContain("TOON_INK");
   });

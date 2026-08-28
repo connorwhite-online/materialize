@@ -109,40 +109,41 @@ export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
   {
     look: "steel",
     kind: "roundedBox",
-    position: [-0.88, 0.06, -0.15],
-    scale: 1.0,
+    // Parked close to the title so the set reads as one cluster.
+    position: [-0.52, 0.04, -0.1],
+    scale: 0.92,
     restRotation: [0.32, 0.52, 0.08],
     rotSpeed: [0.02, 0.045, 0.01],
-    floatAmp: 0.07,
+    floatAmp: 0.05,
     floatSpeed: 0.65,
     phase: 0.4,
     fallbackClass:
-      "-left-2 top-[20%] size-14 rounded-[1.15rem] sm:size-20 sm:rounded-[1.4rem]",
+      "left-[12%] top-[22%] size-12 rounded-[1rem] sm:size-14 sm:rounded-[1.15rem]",
   },
   {
     look: "resin",
     kind: "sphere",
-    position: [0.88, 0.1, 0.05],
-    scale: 0.96,
+    position: [0.52, 0.06, 0.05],
+    scale: 0.88,
     rotSpeed: [0.022, 0.05, 0.01],
-    floatAmp: 0.09,
+    floatAmp: 0.06,
     floatSpeed: 0.8,
     phase: 1.2,
-    fallbackClass: "-right-2 top-[16%] size-14 rounded-full sm:size-20",
+    fallbackClass: "right-[12%] top-[18%] size-12 rounded-full sm:size-14",
   },
   {
     look: "nylon",
     kind: "pyramid",
-    position: [0.18, -0.58, 0.12],
-    scale: 1.05,
+    position: [0.06, -0.38, 0.1],
+    scale: 0.9,
     // Slow tumble so the chubby ridges catch light.
     rotSpeed: [0.014, 0.048, 0.01],
-    floatAmp: 0.04,
+    floatAmp: 0.03,
     floatSpeed: 0.55,
     phase: 0.2,
     // Tip + 45° yaw so two faces meet at a ridge toward the camera.
     restRotation: [0.38, Math.PI / 4, 0.08],
     fallbackClass:
-      "-bottom-2 right-[24%] h-14 w-14 [clip-path:polygon(50%_6%,94%_72%,78%_96%,22%_96%,6%_72%)] sm:h-20 sm:w-20",
+      "bottom-[10%] left-1/2 h-12 w-12 -translate-x-1/2 [clip-path:polygon(50%_6%,94%_72%,78%_96%,22%_96%,6%_72%)] sm:h-14 sm:w-14",
   },
 ];

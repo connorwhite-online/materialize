@@ -7,6 +7,7 @@ import {
   MAX_FILE_SIZE,
   fileExtensionToFormat,
 } from "@/lib/validations/file";
+import { DropzonePrimitives } from "@/components/home/dropzone-primitives-lazy";
 
 interface FileUploaderProps {
   /**
@@ -17,17 +18,22 @@ interface FileUploaderProps {
     file: File,
     format: "stl" | "obj" | "3mf" | "step" | "amf"
   ) => void;
-  /** Headline inside the drop area. */
+  /** Headline inside the drop area. Featured default: "Add a File". */
   title?: string;
-  /** Muted line under the headline. */
+  /** Muted line under the headline (compact variant only). */
   subtitle?: string;
   /**
-   * Authed-home treatment: taller rounded well with room for a
-   * decorative backdrop. Other surfaces keep the compact dashed box.
+   * Featured well with material backdrop + button-style title.
+   * Default for every general file drop (home, /print, dialogs).
+   * Pass `false` for a dense compact box without WebGL.
    */
   featured?: boolean;
-  /** Absolutely positioned behind the copy. Decorative only. */
-  backdrop?: ReactNode;
+  /**
+   * Absolutely positioned behind the copy. Decorative only.
+   * Featured defaults to the floating print-material primitives;
+   * pass `null` to suppress them while keeping the featured well.
+   */
+  backdrop?: ReactNode | null;
 }
 
 /**
@@ -38,12 +44,15 @@ interface FileUploaderProps {
  */
 export function FileUploader({
   onFileSelected,
-  title = "Drag and drop or click to upload",
+  title,
   subtitle = "STL, OBJ, 3MF, STEP, AMF — Max 200MB",
-  featured = false,
+  featured = true,
   backdrop,
 }: FileUploaderProps) {
   const [error, setError] = useState<string | null>(null);
+  const resolvedTitle = title ?? (featured ? "Add a File" : "Drag and drop or click to upload");
+  const resolvedBackdrop =
+    featured && backdrop === undefined ? <DropzonePrimitives /> : backdrop;
 
   const handleFile = useCallback(
     (file: File) => {
@@ -92,11 +101,11 @@ export function FileUploader({
         className={cn(
           "group/drop flex cursor-pointer flex-col items-center justify-center border-2 border-dashed text-center transition-colors focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2",
           featured
-            ? "relative min-h-[11.5rem] overflow-hidden rounded-2xl border-foreground/15 bg-foreground/[0.03] px-6 py-10 hover:border-primary/50 dark:border-foreground/20 dark:bg-foreground/[0.035] dark:hover:border-primary/40 sm:min-h-[12.5rem]"
+            ? "relative min-h-[7.5rem] overflow-hidden rounded-2xl border-foreground/15 bg-foreground/[0.03] px-5 py-6 hover:border-primary/50 dark:border-foreground/20 dark:bg-foreground/[0.035] dark:hover:border-primary/40 sm:min-h-[8rem] sm:py-7"
             : "rounded-xl border-foreground/15 bg-foreground/[0.03] p-12 hover:border-primary/50 hover:bg-foreground/[0.06] dark:border-foreground/20 dark:bg-foreground/[0.04] dark:hover:bg-foreground/[0.08]"
         )}
       >
-        {backdrop}
+        {resolvedBackdrop}
         <input
           type="file"
           className="sr-only"
@@ -104,12 +113,21 @@ export function FileUploader({
           onChange={handleChange}
         />
         {featured ? (
-          <p className="relative z-[2] text-lg font-semibold tracking-tight">
-            {title}
-          </p>
+          <span
+            className={cn(
+              "relative z-[2] inline-flex items-center justify-center rounded-full",
+              // Outline-style chip: card fill + border so it reads against
+              // the light well (muted alone is nearly the same tone).
+              "border border-border bg-card px-4 py-2 text-sm font-semibold tracking-tight text-foreground",
+              "shadow-sm",
+              "transition-[background-color,box-shadow,border-color] group-hover/drop:bg-muted/50 group-hover/drop:shadow"
+            )}
+          >
+            {resolvedTitle}
+          </span>
         ) : (
           <>
-            <p className="text-sm font-medium">{title}</p>
+            <p className="text-sm font-medium">{resolvedTitle}</p>
             <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>
           </>
         )}
