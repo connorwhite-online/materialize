@@ -67,17 +67,19 @@ describe("PaymentCardFallback", () => {
     ).toBe(false);
   });
 
-  it("prints the service fee and the saved pan without a mid-face Materialize", () => {
-    render(
+  it("prints the left-aligned pan and no Materialize word on the face", () => {
+    const { container } = render(
       <PaymentCardFallback brand="visa" last4="4242" saved />
     );
-    // No amount → no mid-body kicker. The issuer name at the bottom
-    // stays; a second "Materialize" in the body was redundant.
+    // No amount → no mid-body kicker. The mark stands alone; the
+    // bottom row is just the brand + pan, left-aligned.
     expect(screen.queryByText("Service fee")).toBeNull();
-    const materialize = screen.getAllByText(/Materialize/i);
-    expect(materialize).toHaveLength(1);
+    expect(screen.queryByText(/Materialize/i)).toBeNull();
+    expect(container.querySelector(".mz-pay-card-name")).toBeNull();
     expect(screen.getByText(/Visa/)).toBeTruthy();
     expect(screen.getByText(/4242/)).toBeTruthy();
+    const bottom = container.querySelector(".mz-pay-card-bottom");
+    expect(bottom?.className).not.toMatch(/space-between|justify-between/);
   });
 
   it("still prints the fee on the face when an amount is provided", () => {
@@ -149,5 +151,16 @@ describe("3D card composition", () => {
     expect(css).toContain("mz-pay-card-enter");
     expect(css).toMatch(/rotateY\(10[0-9]deg\)/);
     expect(css).toContain("scale(0.82)");
+  });
+
+  it("left-aligns the pan and omits the Materialize face word", () => {
+    // The extruded mark is the brand — a second MATERIALIZE string
+    // on the face was redundant and fought the pan for the bottom row.
+    expect(src).not.toMatch(/>\s*MATERIALIZE\s*</);
+    expect(src).toContain('anchorX="left"');
+    expect(src).not.toContain('anchorX="right"');
+    expect(css).toMatch(
+      /\.mz-pay-card-bottom\s*\{[^}]*justify-content:\s*flex-start/
+    );
   });
 });

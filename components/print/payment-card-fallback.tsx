@@ -85,7 +85,8 @@ export function PaymentCardFallback({
           <div className="mz-pay-card-body" />
         )}
         <div className="mz-pay-card-bottom">
-          <span className="mz-pay-card-name">Materialize</span>
+          {/* Brand + pan only — the mark already says Materialize.
+              Left-aligned so it reads as the cardholder line. */}
           <span className="mz-pay-card-pan">
             {last4
               ? `${brandLabel ? `${brandLabel} ` : ""}•••• ${last4}`

@@ -177,22 +177,12 @@ function CardFaceCopy({
           </Text>
         </>
       ) : null}
-      <Text
-        position={[-0.64, -0.38, faceZ]}
-        fontSize={0.048}
-        color="#e4e4e7"
-        anchorX="left"
-        anchorY="middle"
-        letterSpacing={0.16}
-      >
-        MATERIALIZE
-      </Text>
       {pan ? (
         <Text
-          position={[0.64, -0.38, faceZ]}
+          position={[-0.64, -0.38, faceZ]}
           fontSize={0.048}
           color="#e4e4e7"
-          anchorX="right"
+          anchorX="left"
           anchorY="middle"
           letterSpacing={0.04}
         >
