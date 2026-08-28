@@ -131,7 +131,7 @@ function PrimitiveMesh({
       ref={groupRef}
       position={[x, y, spec.position[2]]}
       scale={scale}
-      rotation={[rest[0], rest[1], rest[2]]]
+      rotation={[rest[0], rest[1], rest[2]]}
     >
       <PrimitiveBody spec={spec} />
     </group>
