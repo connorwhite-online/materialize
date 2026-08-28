@@ -393,11 +393,6 @@ export function PrintPageContent({
               linkSuffix={linkSuffix}
               onFilePicked={handleFilePicked}
               uploadError={draft?.status === "error" ? draft.message : error}
-              uploaderLabel={
-                preselectMaterialId
-                  ? "Choose a file to print with this material"
-                  : "Upload a file"
-              }
               tilesLabel={tilesLabel}
               tilesDefaultExpanded={tilesDefaultExpanded}
             />

@@ -67,7 +67,7 @@ test.describe("abort-handling regression (Sentry 7483761588)", () => {
     // file was accepted and an upload/quote was initiated server-side.
     // Navigate away immediately to abort the in-flight request; this is
     // the event sequence that triggers node:_http_server abortIncoming.
-    await expect(page.getByText(/Drag and drop or click to upload/i)).toBeHidden({
+    await expect(page.getByText("Add a File")).toBeHidden({
       timeout: 15_000,
     });
     await page.goto("/");
@@ -76,7 +76,7 @@ test.describe("abort-handling regression (Sentry 7483761588)", () => {
     // uploader — not an error page or an empty blank.
     const response = await page.goto("/print");
     expect(response?.status()).toBe(200);
-    await expect(page.getByText(/Drag and drop or click to upload/i)).toBeVisible();
+    await expect(page.getByText("Add a File")).toBeVisible();
   });
 
   test("no unhandled error console message on rapid navigation away from print", async ({
@@ -110,17 +110,8 @@ test.describe("print flow", () => {
     const response = await page.goto("/print");
     expect(response?.status()).toBe(200);
 
-    // FileUploader headline copy — proves the uploader rendered
-    // and the page didn't fall back to an error state.
-    await expect(page.getByText(/Drag and drop or click to upload/i))
-      .toBeVisible();
-
-    // Format hint copy — confirms the right uploader variant
-    // (not the project / asset variants which have different
-    // supported-formats lists).
-    await expect(
-      page.getByText(/STL, OBJ, 3MF, STEP, AMF/i)
-    ).toBeVisible();
+    // Featured FileUploader — same Add a File well as authed home.
+    await expect(page.getByText("Add a File")).toBeVisible();
   });
 
   test("dropping a file moves the page past the empty state", async ({
@@ -140,7 +131,8 @@ test.describe("print flow", () => {
     // (FileContextBar + QuoteConfigurator). We don't assert on
     // quote rendering because the mock catalog mismatch means
     // those drop; we assert on the *transition* itself.
-    await expect(page.getByText(/Drag and drop or click to upload/i))
-      .toBeHidden({ timeout: 15_000 });
+    await expect(page.getByText("Add a File")).toBeHidden({
+      timeout: 15_000,
+    });
   });
 });

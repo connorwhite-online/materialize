@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Badge } from "@/components/ui/badge";
 import { FileUploader } from "@/components/upload/file-uploader";
 
 const FEATHER_PX = 28;
@@ -22,8 +21,6 @@ interface WhatNextPaneProps {
   linkSuffix: string;
   onFilePicked: (file: File, format: Format) => void;
   uploadError?: string | null;
-  /** Label above the uploader section. Defaults to "Upload a file". */
-  uploaderLabel?: string;
   /** Heading for the tile carousel. Defaults to "Your recent files". */
   tilesLabel?: string;
   /**
@@ -45,7 +42,6 @@ export function WhatNextPane({
   linkSuffix,
   onFilePicked,
   uploadError,
-  uploaderLabel = "Upload a file",
   tilesLabel = "Your recent files",
 }: WhatNextPaneProps) {
   // Scroll-aware edge feathering: only fade an edge when there's
@@ -85,17 +81,12 @@ export function WhatNextPane({
 
   return (
     <div className="space-y-5">
-      {/* Uploader */}
-      <div>
-        <h2 className="text-sm font-medium text-muted-foreground">
-          {uploaderLabel}
-        </h2>
-        <div className="mt-3 space-y-3">
-          <FileUploader onFileSelected={onFilePicked} />
-          {uploadError && (
-            <p className="text-xs text-destructive">{uploadError}</p>
-          )}
-        </div>
+      {/* Uploader — same featured Add a File well as authed home */}
+      <div className="space-y-3">
+        <FileUploader onFileSelected={onFilePicked} />
+        {uploadError && (
+          <p className="text-xs text-destructive">{uploadError}</p>
+        )}
       </div>
 
       {/* Horizontal tile carousel */}

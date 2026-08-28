@@ -7,7 +7,6 @@ import { FileUploader } from "@/components/upload/file-uploader";
 import { useStartPrintFlow } from "@/components/upload/use-start-print-flow";
 import { Button } from "@/components/ui/button";
 import { NewCollectionDialog } from "@/components/profile/new-collection-dialog";
-import { DropzonePrimitives } from "@/components/home/dropzone-primitives-lazy";
 
 /**
  * Authed-home create cluster: a featured file dropzone (uploads to R2,
@@ -23,12 +22,7 @@ export function HomeDropzone() {
   return (
     <div>
       <div className="relative">
-        <FileUploader
-          featured
-          title="Add a File"
-          backdrop={<DropzonePrimitives />}
-          onFileSelected={(file, format) => start(file, format)}
-        />
+        <FileUploader onFileSelected={(file, format) => start(file, format)} />
         {busy && (
           <div className="absolute inset-0 z-[3] flex flex-col items-center justify-center rounded-2xl bg-background/80 text-sm">
             <p className="font-medium">

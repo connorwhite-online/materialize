@@ -57,23 +57,26 @@ describe("DROPZONE_PRIMITIVES", () => {
     }
   });
 
-  it("parks modest-scale chubby shapes on the frame", () => {
+  it("parks modest-scale chubby shapes close to the title", () => {
     const [square, sphere, pyramid] = DROPZONE_PRIMITIVES;
     for (const spec of DROPZONE_PRIMITIVES) {
-      expect(spec.scale).toBeGreaterThanOrEqual(0.9);
-      expect(spec.scale).toBeLessThanOrEqual(1.1);
+      expect(spec.scale).toBeGreaterThanOrEqual(0.8);
+      expect(spec.scale).toBeLessThanOrEqual(1.05);
     }
-    expect(square.position[0]).toBeLessThan(-0.8);
-    expect(sphere.position[0]).toBeGreaterThan(0.8);
-    expect(pyramid.position[1]).toBeLessThan(-0.5);
-    expect(pyramid.position[0]).toBeGreaterThan(0.1);
-    expect(pyramid.position[0]).toBeLessThan(0.5);
+    // Inset from the frame edges so they hug the button label.
+    expect(square.position[0]).toBeGreaterThan(-0.7);
+    expect(square.position[0]).toBeLessThan(-0.35);
+    expect(sphere.position[0]).toBeLessThan(0.7);
+    expect(sphere.position[0]).toBeGreaterThan(0.35);
+    expect(pyramid.position[1]).toBeGreaterThan(-0.5);
+    expect(pyramid.position[1]).toBeLessThan(-0.25);
+    expect(Math.abs(pyramid.position[0])).toBeLessThan(0.2);
     expect(pyramid.restRotation).toBeDefined();
     // Tip it enough that the chubby ridges read in 3D.
     expect(Math.abs(pyramid.restRotation![0])).toBeGreaterThan(0.15);
     expect(Math.abs(pyramid.restRotation![1])).toBeGreaterThan(0.3);
     expect(square.restRotation).toBeDefined();
-    expect(square.fallbackClass).toMatch(/size-14/);
-    expect(sphere.fallbackClass).toMatch(/size-14/);
+    expect(square.fallbackClass).toMatch(/size-12/);
+    expect(sphere.fallbackClass).toMatch(/size-12/);
   });
 });
