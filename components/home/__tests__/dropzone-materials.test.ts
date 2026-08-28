@@ -32,8 +32,10 @@ describe("dropzone primitives materials", () => {
   it("casts contact shadows onto the card through the transparent canvas", () => {
     expect(src).toContain("ContactShadows");
     expect(src).toContain("CardContactShadows");
-    // Backdrop orientation — plane parallel to the well, not a floor.
-    expect(src).toMatch(/rotation=\{\[Math\.PI \/ 2/);
+    expect(src).toContain("CardShadowCatcher");
+    expect(src).toContain("shadowMaterial");
+    expect(src).toContain("castShadow");
+    expect(src).toMatch(/shadows\b/);
     expect(src).toMatch(/opacity=\{0\.[3-9]/);
   });
 
