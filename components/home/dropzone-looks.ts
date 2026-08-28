@@ -6,7 +6,7 @@
  * pins each `catalogId` + PBR against the real catalog / hero
  * overrides so these can't drift silently.
  *
- * Live set: stainless 316L, translucent resin, Nylon PA12 Black — the
+ * Live set: stainless 316L, translucent resin, Nylon PA11 — the
  * three shapes read as real print materials under studio IBL.
  */
 
@@ -45,13 +45,12 @@ export const DROPZONE_LOOKS: Record<"steel" | "resin" | "nylon", DropzoneLook> =
       thickness: 1.2,
     },
     nylon: {
-      // Nylon PA12 Black — same SLS family as natural PA12, but the
-      // matte dark dye reads on the light dropzone (natural `#d4cfc7`
-      // washes out to chalk under studio IBL).
-      catalogId: "nylon-pa12-black",
-      color: "#2a2a2a",
+      // Nylon PA11 — warm sand SLS nylon. Natural PA12 chalks out on
+      // the light well; black dyes the set too heavy next to steel.
+      catalogId: "nylon-pa11",
+      color: "#b8a88a",
       metalness: 0,
-      roughness: 0.82,
+      roughness: 0.75,
     },
   };
 
@@ -103,7 +102,7 @@ export const DROPZONE_MOBILE_POSITION = 0.86;
 
 /**
  * Three chubby print-material shapes: stainless square left, resin
- * sphere right, black nylon rounded pyramid along the bottom. Desktop
+ * sphere right, sand nylon rounded pyramid along the bottom. Desktop
  * scale is modest; the scene shrinks them further on narrow canvases.
  */
 export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [

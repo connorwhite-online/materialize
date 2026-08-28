@@ -24,9 +24,9 @@ describe("DROPZONE_LOOKS", () => {
     expect(DROPZONE_LOOKS.resin.roughness).toBe(resin.pbr.roughness);
   });
 
-  it("nylon matches the PA12 Black catalog row", () => {
-    const nylon = getMaterialById("nylon-pa12-black")!;
-    expect(DROPZONE_LOOKS.nylon.catalogId).toBe("nylon-pa12-black");
+  it("nylon matches the PA11 catalog row", () => {
+    const nylon = getMaterialById("nylon-pa11")!;
+    expect(DROPZONE_LOOKS.nylon.catalogId).toBe("nylon-pa11");
     expect(DROPZONE_LOOKS.nylon.color).toBe(nylon.color);
     expect(DROPZONE_LOOKS.nylon.metalness).toBe(nylon.pbr.metalness);
     expect(DROPZONE_LOOKS.nylon.roughness).toBe(nylon.pbr.roughness);
