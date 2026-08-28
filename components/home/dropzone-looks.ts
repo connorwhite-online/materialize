@@ -96,12 +96,13 @@ export const DROPZONE_MOBILE_SCALE = 0.68;
 export const DROPZONE_SQUARE_RADIUS = 0.36;
 
 /**
- * Triangular pyramid (cone with 3 radial segments): base radius and
- * height in local units. Four faces — three sides + base.
+ * Square pyramid (cone with 4 radial segments): base radius and height
+ * in local units. Four triangular sides + square base — the classic
+ * “4-sided pyramid” silhouette, not a △ sticker.
  */
-export const DROPZONE_PYRAMID_RADIUS = 0.62;
-export const DROPZONE_PYRAMID_HEIGHT = 0.9;
-export const DROPZONE_PYRAMID_SIDES = 3;
+export const DROPZONE_PYRAMID_RADIUS = 0.68;
+export const DROPZONE_PYRAMID_HEIGHT = 0.95;
+export const DROPZONE_PYRAMID_SIDES = 4;
 
 /**
  * Pull frustum positions slightly inward on mobile so chubby shapes
@@ -111,8 +112,8 @@ export const DROPZONE_MOBILE_POSITION = 0.86;
 
 /**
  * Three chubby print-material shapes: stainless square left, resin
- * sphere right, black nylon pyramid along the bottom. Desktop scale
- * is modest; the scene shrinks them further on narrow canvases.
+ * sphere right, black nylon square-pyramid along the bottom. Desktop
+ * scale is modest; the scene shrinks them further on narrow canvases.
  */
 export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
   {
@@ -143,16 +144,16 @@ export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
     look: "nylon",
     kind: "pyramid",
     position: [0.18, -0.58, 0.12],
-    scale: 1.05,
+    scale: 1.08,
     // Slow tumble so hard facets catch light and the form reads as a
-    // 3D pyramid (4 faces), not a flat △ sticker.
-    rotSpeed: [0.012, 0.045, 0.008],
+    // square pyramid, not a flat △ sticker.
+    rotSpeed: [0.014, 0.048, 0.01],
     floatAmp: 0.04,
     floatSpeed: 0.55,
     phase: 0.2,
-    // Tip + yaw so two side faces stay in view at rest.
-    restRotation: [0.35, 0.72, 0.12],
+    // Tip + 45° yaw so two faces meet at a ridge toward the camera.
+    restRotation: [0.4, Math.PI / 4, 0.08],
     fallbackClass:
-      "-bottom-2 right-[26%] h-14 w-12 [clip-path:polygon(50%_4%,96%_92%,4%_92%)] sm:h-20 sm:w-[4.5rem]",
+      "-bottom-2 right-[24%] h-14 w-14 [clip-path:polygon(50%_2%,98%_78%,78%_100%,22%_100%,2%_78%)] sm:h-20 sm:w-20",
   },
 ];

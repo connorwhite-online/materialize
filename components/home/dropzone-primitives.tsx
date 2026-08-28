@@ -62,7 +62,7 @@ function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
         </RoundedBox>
       );
     case "pyramid":
-      // 3 radial segments → triangular pyramid (3 sides + base = 4 faces).
+      // 4 radial segments → square pyramid (4 triangular sides + base).
       // flatShading keeps facet edges hard so it doesn't shade into a cone.
       return (
         <mesh>

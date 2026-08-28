@@ -50,8 +50,8 @@ describe("DROPZONE_PRIMITIVES", () => {
     ]);
   });
 
-  it("builds the pyramid as a 3-sided cone (4 faces)", () => {
-    expect(DROPZONE_PYRAMID_SIDES).toBe(3);
+  it("builds the pyramid as a 4-sided square pyramid", () => {
+    expect(DROPZONE_PYRAMID_SIDES).toBe(4);
     expect(DROPZONE_PYRAMID_HEIGHT).toBeGreaterThan(DROPZONE_PYRAMID_RADIUS);
     expect(DROPZONE_PYRAMID_RADIUS).toBeGreaterThan(0.4);
   });
