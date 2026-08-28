@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BadgeCheckIcon } from "lucide-react";
 import {
   Elements,
   ExpressCheckoutElement,
@@ -15,7 +14,7 @@ import type {
 } from "@stripe/stripe-js";
 import { useTheme } from "next-themes";
 import { NativeSheet } from "@/components/ui/native-sheet";
-import { Logomark } from "@/components/brand/logo";
+import { PaymentCard } from "@/components/print/payment-card";
 import { getStripeBrowser } from "@/lib/stripe/browser";
 import { finalizeFeeAuthorization } from "@/app/actions/print";
 
@@ -121,25 +120,11 @@ export function FeePaymentSheet({ sheet, onClose }: FeePaymentSheetProps) {
       ariaLabel="Pay service fee"
     >
       <div className="px-6 pt-1">
-        <div className="flex items-center gap-3">
-          {/* The mark, not a generic card icon — this sheet is where we
-              actually take money, so it should be unmistakably ours. */}
-          <div
-            aria-hidden="true"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-100 text-violet-600 dark:bg-violet-950 dark:text-violet-400"
-          >
-            <Logomark height={18} />
-          </div>
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Service fee
-            </p>
-            <p className="text-3xl font-bold tabular-nums">
-              {fmt(sheet.amountCents)}
-            </p>
-          </div>
-        </div>
-        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+        {/* Physical Materialize card — the mark and the metal chip are
+            the whole point of this sheet's chrome. Amount lives on the
+            card face so the number and the object are one thing. */}
+        <PaymentCard amountCents={sheet.amountCents} />
+        <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
           Held now, charged only when your order is placed. Production and
           shipping are paid to CraftCloud in the next step.
         </p>
@@ -438,39 +423,28 @@ export function SavedCardFeeSheet({
       ariaLabel="Confirm service fee"
     >
       <div className="px-6 pt-1">
-        <div className="flex items-center gap-3">
-          {/* The mark, not a generic card icon — this sheet is where we
-              actually take money, so it should be unmistakably ours. */}
-          <div
-            aria-hidden="true"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-violet-100 text-violet-600 dark:bg-violet-950 dark:text-violet-400"
-          >
-            <Logomark height={18} />
-          </div>
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Service fee
-            </p>
-            <p className="text-3xl font-bold tabular-nums">
-              {fmt(confirm.amountCents)}
-            </p>
-          </div>
+        {/* Amount stays as the sheet header; the 3D card replaces the
+            old "Mastercard •••• 4444 / Saved" row — logo top-left,
+            metal chip top-right, pan on the face. */}
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Service fee
+          </p>
+          <p className="text-3xl font-bold tabular-nums">
+            {fmt(confirm.amountCents)}
+          </p>
         </div>
         <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
           Held now, charged only when your order is placed. Production and
           shipping are paid to CraftCloud in the next step.
         </p>
 
-        <div className="mt-4 flex items-center gap-3 rounded-2xl border border-border/60 px-4 py-3.5">
-          <BadgeCheckIcon
-            aria-hidden="true"
-            className="h-5 w-5 shrink-0 text-green-600 dark:text-green-400"
-            strokeWidth={2.5}
+        <div className="mt-4">
+          <PaymentCard
+            brand={confirm.brand}
+            last4={confirm.last4}
+            saved
           />
-          <span className="text-[15px] font-medium">
-            {savedMethodLabel(confirm)}
-          </span>
-          <span className="ml-auto text-xs text-muted-foreground">Saved</span>
         </div>
 
         <div className="mt-4 space-y-3">
@@ -503,15 +477,4 @@ export function SavedCardFeeSheet({
       </div>
     </NativeSheet>
   );
-}
-
-function savedMethodLabel({
-  brand,
-  last4,
-}: Pick<SavedCardConfirmPayload, "brand" | "last4">): string {
-  const name =
-    brand === "link"
-      ? "Link"
-      : brand.charAt(0).toUpperCase() + brand.slice(1);
-  return last4 ? `${name} •••• ${last4}` : name;
 }
