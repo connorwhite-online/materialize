@@ -20,11 +20,11 @@ export function FeeSheetSandbox() {
         // Resolve with an error so the sheet unlocks — live parents
         // navigate away on success and leave the phase locked.
         onAuthorize={async () => {
-          await new Promise((r) => setTimeout(r, 500));
+          await new Promise((r) => setTimeout(r, 900));
           return { error: "Sandbox only — nothing was charged." };
         }}
         onUseDifferentCard={async () => {
-          await new Promise((r) => setTimeout(r, 400));
+          await new Promise((r) => setTimeout(r, 700));
           return { error: "Sandbox only — no card form here." };
         }}
         onClose={() => {}}
