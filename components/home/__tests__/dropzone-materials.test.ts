@@ -22,6 +22,7 @@ describe("dropzone primitives materials", () => {
     expect(src).toContain("PhysicalSkin");
     expect(src).toContain("coneGeometry");
     expect(src).toContain("DROPZONE_PYRAMID_SIDES");
+    expect(src).toContain("flatShading");
     expect(src).not.toContain("DropzoneToonMaterial");
     expect(src).not.toContain("Outlines");
     expect(src).not.toContain("meshBasicMaterial");

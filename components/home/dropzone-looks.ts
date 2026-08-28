@@ -144,13 +144,14 @@ export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
     kind: "pyramid",
     position: [0.18, -0.58, 0.12],
     scale: 1.05,
-    // Slow tumble so facets catch light and the form reads as a
+    // Slow tumble so hard facets catch light and the form reads as a
     // 3D pyramid (4 faces), not a flat △ sticker.
-    rotSpeed: [0.012, 0.04, 0.008],
+    rotSpeed: [0.012, 0.045, 0.008],
     floatAmp: 0.04,
     floatSpeed: 0.55,
     phase: 0.2,
-    restRotation: [0.28, 0.55, 0.1],
+    // Tip + yaw so two side faces stay in view at rest.
+    restRotation: [0.35, 0.72, 0.12],
     fallbackClass:
       "-bottom-2 right-[26%] h-14 w-12 [clip-path:polygon(50%_4%,96%_92%,4%_92%)] sm:h-20 sm:w-[4.5rem]",
   },

@@ -22,7 +22,14 @@ import {
   type DropzonePrimitive,
 } from "./dropzone-looks";
 
-function PhysicalSkin({ lookId }: { lookId: DropzoneLookId }) {
+function PhysicalSkin({
+  lookId,
+  flatShading = false,
+}: {
+  lookId: DropzoneLookId;
+  /** Hard facets so the pyramid reads as a solid, not a soft cone. */
+  flatShading?: boolean;
+}) {
   const look = DROPZONE_LOOKS[lookId];
   const transmitting = (look.transmission ?? 0) > 0;
   return (
@@ -36,12 +43,12 @@ function PhysicalSkin({ lookId }: { lookId: DropzoneLookId }) {
       ior={look.ior ?? 1.5}
       thickness={look.thickness ?? 0.5}
       transparent={transmitting}
+      flatShading={flatShading}
     />
   );
 }
 
 function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
-  const skin = <PhysicalSkin lookId={spec.look} />;
   switch (spec.kind) {
     case "roundedBox":
       return (
@@ -51,11 +58,12 @@ function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
           smoothness={6}
           bevelSegments={4}
         >
-          {skin}
+          <PhysicalSkin lookId={spec.look} />
         </RoundedBox>
       );
     case "pyramid":
       // 3 radial segments → triangular pyramid (3 sides + base = 4 faces).
+      // flatShading keeps facet edges hard so it doesn't shade into a cone.
       return (
         <mesh>
           <coneGeometry
@@ -65,14 +73,14 @@ function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
               DROPZONE_PYRAMID_SIDES,
             ]}
           />
-          {skin}
+          <PhysicalSkin lookId={spec.look} flatShading />
         </mesh>
       );
     case "sphere":
       return (
         <mesh>
           <sphereGeometry args={[0.56, 48, 48]} />
-          {skin}
+          <PhysicalSkin lookId={spec.look} />
         </mesh>
       );
   }
