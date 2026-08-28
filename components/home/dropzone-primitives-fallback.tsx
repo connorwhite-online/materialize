@@ -1,5 +1,4 @@
 import { DROPZONE_LOOKS, DROPZONE_PRIMITIVES } from "./dropzone-looks";
-import { TOON_INK } from "./dropzone-toon";
 
 /**
  * CSS stand-in for the WebGL primitives — used as the lazy-load
@@ -7,9 +6,7 @@ import { TOON_INK } from "./dropzone-toon";
  * context still leaves the dropzone looking designed, not empty.
  *
  * Decorative only (`aria-hidden`); the file input remains the control.
- * Flat fill + ink ring is the no-WebGL stand-in; the canvas shades
- * a colored cel ramp. The CSS gradient uses the same four chips as
- * hard stops so the stand-in still reads as cartoon paint.
+ * Soft material-colored gradients stand in for stainless / resin / nylon.
  */
 export function DropzonePrimitivesFallback() {
   return (
@@ -19,13 +16,25 @@ export function DropzonePrimitivesFallback() {
     >
       {DROPZONE_PRIMITIVES.map((primitive) => {
         const look = DROPZONE_LOOKS[primitive.look];
+        // Soft material stand-ins: metal flash, cream resin, sand nylon.
+        const highlight =
+          look.metalness > 0.5
+            ? "#d8d8d8"
+            : look.transmission
+              ? "#f4f0e6"
+              : "#e8dfd0";
+        const shadow =
+          look.metalness > 0.5
+            ? "#5a5a5a"
+            : look.transmission
+              ? "#b8ad96"
+              : "#8a7a62";
         return (
           <span
             key={primitive.look}
             className={`absolute ${primitive.fallbackClass}`}
             style={{
-              background: `linear-gradient(145deg, ${look.toonHighlight} 0%, ${look.toonHighlight} 22%, ${look.toonColor} 22%, ${look.toonColor} 48%, ${look.toonShadow} 48%, ${look.toonShadow} 72%, ${look.toonDeep} 72%, ${look.toonDeep} 100%)`,
-              boxShadow: `0 0 0 2.5px ${TOON_INK}`,
+              background: `linear-gradient(145deg, ${highlight} 0%, ${look.color} 45%, ${shadow} 100%)`,
             }}
           />
         );
