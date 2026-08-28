@@ -116,10 +116,11 @@ export function FileUploader({
           <span
             className={cn(
               "relative z-[2] inline-flex items-center justify-center rounded-full",
-              "bg-blue-500/15 px-4 py-2 text-sm font-semibold tracking-tight text-foreground",
-              "ring-1 ring-inset ring-blue-500/25",
-              "transition-colors group-hover/drop:bg-blue-500/20 group-hover/drop:ring-blue-500/35",
-              "dark:bg-blue-400/15 dark:ring-blue-400/30 dark:group-hover/drop:bg-blue-400/25"
+              // Soft secondary pill — same family as Button `secondary`,
+              // kept translucent so the material backdrop still peeks through.
+              "bg-secondary/75 px-4 py-2 text-sm font-semibold tracking-tight text-secondary-foreground",
+              "ring-1 ring-inset ring-border/70",
+              "transition-colors group-hover/drop:bg-secondary group-hover/drop:ring-border"
             )}
           >
             {resolvedTitle}

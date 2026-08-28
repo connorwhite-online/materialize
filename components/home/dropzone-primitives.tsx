@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { RoundedBox } from "@react-three/drei";
+import { ContactShadows, RoundedBox } from "@react-three/drei";
 import { useReducedMotion } from "motion/react";
 import * as THREE from "three";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
@@ -19,6 +19,10 @@ import {
   type DropzonePrimitive,
 } from "./dropzone-looks";
 import { makeRoundedPyramidGeometry } from "./rounded-pyramid";
+
+/** Warm near-black matched to the brand hue so soft contact blobs
+ *  read on both light and dark card fills without a blue cast. */
+const SHADOW_COLOR = "#1a1814";
 
 function PhysicalSkin({ lookId }: { lookId: DropzoneLookId }) {
   const look = DROPZONE_LOOKS[lookId];
@@ -129,6 +133,33 @@ function PrimitiveMesh({
   );
 }
 
+/**
+ * Soft contact blobs on a plane parallel to the card. The canvas is
+ * transparent, so these darken the well fill behind the shapes —
+ * shadows you can actually see on the card, not just on a 3D floor.
+ */
+function CardContactShadows() {
+  const { viewport } = useThree();
+  const extent = Math.max(viewport.width, viewport.height) * 1.45;
+  return (
+    <ContactShadows
+      position={[0, 0, -0.55]}
+      rotation={[Math.PI / 2, 0, 0]}
+      scale={extent}
+      width={1}
+      height={1}
+      far={2.6}
+      near={0}
+      opacity={0.48}
+      blur={2.6}
+      resolution={512}
+      color={SHADOW_COLOR}
+      frames={Infinity}
+      smooth
+    />
+  );
+}
+
 function Scene({ paused }: { paused: boolean }) {
   return (
     <>
@@ -143,6 +174,7 @@ function Scene({ paused }: { paused: boolean }) {
       {DROPZONE_PRIMITIVES.map((spec) => (
         <PrimitiveMesh key={spec.look} spec={spec} paused={paused} />
       ))}
+      <CardContactShadows />
     </>
   );
 }

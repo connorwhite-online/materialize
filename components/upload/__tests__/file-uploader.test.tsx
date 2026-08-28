@@ -15,8 +15,9 @@ describe("FileUploader", () => {
     );
     const title = screen.getByText("Add a File");
     expect(title).toBeTruthy();
-    expect(title.className).toMatch(/bg-blue-500\/15/);
+    expect(title.className).toMatch(/bg-secondary\/75/);
     expect(title.className).toMatch(/rounded-full/);
+    expect(title.className).not.toMatch(/blue-/);
     expect(screen.getByTestId("dropzone-primitives")).toBeTruthy();
     expect(
       screen.queryByText("STL, OBJ, 3MF, STEP, AMF — Max 200MB")
