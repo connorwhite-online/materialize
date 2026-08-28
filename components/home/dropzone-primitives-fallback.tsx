@@ -35,9 +35,8 @@ export function DropzonePrimitivesFallback() {
             className={`absolute ${primitive.fallbackClass}`}
             style={{
               background: `linear-gradient(145deg, ${highlight} 0%, ${look.color} 45%, ${shadow} 100%)`,
-              // Soft oval under each stand-in so the no-WebGL path still
-              // reads as casting on the card, matching ContactShadows.
-              boxShadow: "0 10px 18px -6px rgba(26, 24, 20, 0.38)",
+              // Soft contact stand-in matching the WebGL ContactShadows pool.
+              boxShadow: "0 14px 22px -10px rgba(28, 25, 22, 0.32)",
             }}
           />
         );
