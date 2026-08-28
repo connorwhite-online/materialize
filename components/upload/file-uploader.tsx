@@ -116,11 +116,12 @@ export function FileUploader({
           <span
             className={cn(
               "relative z-[2] inline-flex items-center justify-center rounded-full",
-              // Soft secondary pill — same family as Button `secondary`,
-              // kept translucent so the material backdrop still peeks through.
-              "bg-secondary/75 px-4 py-2 text-sm font-semibold tracking-tight text-secondary-foreground",
-              "ring-1 ring-inset ring-border/70",
-              "transition-colors group-hover/drop:bg-secondary group-hover/drop:ring-border"
+              // Muted chip — design-system fill that still reads against
+              // the light well (secondary/75 washed out on the dashed card).
+              "bg-muted px-4 py-2 text-sm font-semibold tracking-tight text-foreground",
+              "ring-1 ring-inset ring-border",
+              "shadow-sm",
+              "transition-colors group-hover/drop:bg-muted/80 group-hover/drop:shadow"
             )}
           >
             {resolvedTitle}
