@@ -20,6 +20,7 @@ describe("dropzone primitives materials", () => {
     expect(src).toContain("StudioEnvironment");
     expect(src).toContain("directionalLight");
     expect(src).toContain("PhysicalSkin");
+    expect(src).toContain("DoubleSide");
     expect(src).not.toContain("DropzoneToonMaterial");
     expect(src).not.toContain("Outlines");
     expect(src).not.toContain("meshBasicMaterial");

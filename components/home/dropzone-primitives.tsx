@@ -20,7 +20,14 @@ import {
 } from "./dropzone-looks";
 import { makeRoundedTriangleGeometry } from "./rounded-triangle";
 
-function PhysicalSkin({ lookId }: { lookId: DropzoneLookId }) {
+function PhysicalSkin({
+  lookId,
+  doubleSided = false,
+}: {
+  lookId: DropzoneLookId;
+  /** Flat ShapeGeometry plates need both faces lit. */
+  doubleSided?: boolean;
+}) {
   const look = DROPZONE_LOOKS[lookId];
   const transmitting = (look.transmission ?? 0) > 0;
   return (
@@ -34,12 +41,12 @@ function PhysicalSkin({ lookId }: { lookId: DropzoneLookId }) {
       ior={look.ior ?? 1.5}
       thickness={look.thickness ?? 0.5}
       transparent={transmitting}
+      side={doubleSided ? THREE.DoubleSide : THREE.FrontSide}
     />
   );
 }
 
 function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
-  const skin = <PhysicalSkin lookId={spec.look} />;
   switch (spec.kind) {
     case "roundedBox":
       return (
@@ -49,16 +56,20 @@ function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
           smoothness={6}
           bevelSegments={4}
         >
-          {skin}
+          <PhysicalSkin lookId={spec.look} />
         </RoundedBox>
       );
     case "roundedTriangle":
-      return <RoundedTriangle>{skin}</RoundedTriangle>;
+      return (
+        <RoundedTriangle>
+          <PhysicalSkin lookId={spec.look} doubleSided />
+        </RoundedTriangle>
+      );
     case "sphere":
       return (
         <mesh>
           <sphereGeometry args={[0.56, 48, 48]} />
-          {skin}
+          <PhysicalSkin lookId={spec.look} />
         </mesh>
       );
   }

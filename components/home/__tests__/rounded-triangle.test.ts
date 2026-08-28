@@ -1,8 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  ROUNDED_TRIANGLE_BEVEL,
   ROUNDED_TRIANGLE_CORNER_RADIUS,
-  ROUNDED_TRIANGLE_DEPTH,
   ROUNDED_TRIANGLE_SIDE,
   roundedTriangleShape,
   makeRoundedTriangleGeometry,
@@ -76,35 +74,29 @@ describe("roundedTriangleShape", () => {
 });
 
 describe("makeRoundedTriangleGeometry", () => {
-  it("is a thin plate, not a chunky extruded token", () => {
-    expect(ROUNDED_TRIANGLE_DEPTH).toBeLessThan(ROUNDED_TRIANGLE_SIDE * 0.1);
-    expect(ROUNDED_TRIANGLE_BEVEL).toBeLessThan(ROUNDED_TRIANGLE_DEPTH * 0.4);
+  it("is a flat face, not an extruded prism", () => {
     const geometry = makeRoundedTriangleGeometry();
+    expect(geometry.type).toBe("ShapeGeometry");
     geometry.computeBoundingBox();
     const box = geometry.boundingBox!;
     const depth = box.max.z - box.min.z;
     const width = box.max.x - box.min.x;
+    const height = box.max.y - box.min.y;
     geometry.dispose();
-    expect(depth).toBeLessThan(width * 0.2);
-    expect(depth).toBeLessThan(0.14);
+    // Planar in XY — zero Z extent, and the face is clearly triangular.
+    expect(depth).toBeLessThan(1e-6);
+    expect(height).toBeGreaterThan(width * 0.7);
+    expect(height).toBeLessThan(width * 0.98);
   });
 
-  it("winds with outward normals so the FrontSide fill is visible", () => {
+  it("faces +Z so the FrontSide fill is visible", () => {
     const geometry = makeRoundedTriangleGeometry();
-    const pos = geometry.getAttribute("position");
     const nrm = geometry.getAttribute("normal");
-    let outward = 0;
-    let inward = 0;
-    for (let i = 0; i < pos.count; i++) {
-      const d =
-        pos.getX(i) * nrm.getX(i) +
-        pos.getY(i) * nrm.getY(i) +
-        pos.getZ(i) * nrm.getZ(i);
-      if (d > 0.01) outward++;
-      else if (d < -0.01) inward++;
+    let facing = 0;
+    for (let i = 0; i < nrm.count; i++) {
+      if (nrm.getZ(i) > 0.5) facing++;
     }
     geometry.dispose();
-    expect(outward).toBeGreaterThan(inward);
-    expect(outward).toBeGreaterThan(pos.count * 0.7);
+    expect(facing).toBeGreaterThan(nrm.count * 0.9);
   });
 });
