@@ -29,14 +29,17 @@ describe("dropzone primitives materials", () => {
     expect(src).not.toContain("flatShading");
   });
 
-  it("casts contact shadows onto the card through the transparent canvas", () => {
+  it("casts soft contact shadows onto the card (no hard shadow maps)", () => {
     expect(src).toContain("ContactShadows");
     expect(src).toContain("CardContactShadows");
-    expect(src).toContain("CardShadowCatcher");
-    expect(src).toContain("shadowMaterial");
-    expect(src).toContain("castShadow");
-    expect(src).toMatch(/shadows\b/);
-    expect(src).toMatch(/opacity=\{0\.[3-9]/);
+    expect(src).toContain("envMapIntensity");
+    // Hard shadow-map catchers looked aliased — keep them out.
+    expect(src).not.toContain("CardShadowCatcher");
+    expect(src).not.toContain("shadowMaterial");
+    expect(src).not.toContain("castShadow");
+    expect(src).toMatch(/opacity=\{0\.[2-4]/);
+    expect(src).toMatch(/blur=\{3/);
+    expect(src).toMatch(/resolution=\{1024\}/);
   });
 
   it("wires stainless / resin / nylon PBR fields onto the physical material", () => {

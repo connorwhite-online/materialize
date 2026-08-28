@@ -20,9 +20,9 @@ import {
 } from "./dropzone-looks";
 import { makeRoundedPyramidGeometry } from "./rounded-pyramid";
 
-/** Warm near-black matched to the brand hue so soft contact blobs
- *  read on both light and dark card fills without a blue cast. */
-const SHADOW_COLOR = "#1a1814";
+/** Warm near-black so soft contact pools read on light and dark wells
+ *  without a cool cast. */
+const SHADOW_COLOR = "#1c1916";
 
 function PhysicalSkin({ lookId }: { lookId: DropzoneLookId }) {
   const look = DROPZONE_LOOKS[lookId];
@@ -38,6 +38,9 @@ function PhysicalSkin({ lookId }: { lookId: DropzoneLookId }) {
       ior={look.ior ?? 1.5}
       thickness={look.thickness ?? 0.5}
       transparent={transmitting}
+      // Pull a bit more studio IBL so stainless/resin don't go chalky
+      // in the small well.
+      envMapIntensity={1.15}
     />
   );
 }
@@ -45,11 +48,7 @@ function PhysicalSkin({ lookId }: { lookId: DropzoneLookId }) {
 function RoundedPyramid({ children }: { children: React.ReactNode }) {
   const geometry = useMemo(() => makeRoundedPyramidGeometry(), []);
   useEffect(() => () => geometry.dispose(), [geometry]);
-  return (
-    <mesh castShadow geometry={geometry}>
-      {children}
-    </mesh>
-  );
+  return <mesh geometry={geometry}>{children}</mesh>;
 }
 
 function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
@@ -58,11 +57,12 @@ function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
     case "roundedBox":
       return (
         <RoundedBox
-          castShadow
           args={[1, 1, 1]}
           radius={DROPZONE_SQUARE_RADIUS}
-          smoothness={6}
-          bevelSegments={4}
+          // Higher tessellation — low smoothness reads as faceted plastic
+          // next to the resin sphere.
+          smoothness={8}
+          bevelSegments={6}
         >
           {skin}
         </RoundedBox>
@@ -71,8 +71,8 @@ function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
       return <RoundedPyramid>{skin}</RoundedPyramid>;
     case "sphere":
       return (
-        <mesh castShadow>
-          <sphereGeometry args={[0.56, 48, 48]} />
+        <mesh>
+          <sphereGeometry args={[0.56, 64, 64]} />
           {skin}
         </mesh>
       );
@@ -139,40 +139,25 @@ function PrimitiveMesh({
 }
 
 /**
- * Invisible plane parallel to the well. Receives directional shadow maps
- * so silhouettes darken the transparent canvas — and therefore the card
- * fill underneath. Paired with soft ContactShadows for a fuller pool.
- */
-function CardShadowCatcher() {
-  const { viewport } = useThree();
-  return (
-    <mesh receiveShadow position={[0, 0, -0.75]} renderOrder={-1}>
-      <planeGeometry args={[viewport.width * 1.7, viewport.height * 1.7]} />
-      <shadowMaterial
-        transparent
-        opacity={0.42}
-        color={SHADOW_COLOR}
-        depthWrite={false}
-      />
-    </mesh>
-  );
-}
-
-/**
- * Soft contact pool under the set — fills in where the hard shadow map
- * is thin, still drawn into the transparent canvas over the card.
+ * Single soft contact pass under the set. Hard shadow-maps on a
+ * transparent catcher read as aliased silhouettes; ContactShadows
+ * alone darkens the card fill through the alpha canvas as clean
+ * elliptical pools.
  */
 function CardContactShadows() {
   const { viewport } = useThree();
+  // Sit just under the lowest parked shape so each object gets a
+  // tight pool without a giant floor slab across the well.
+  const y = -viewport.height * 0.42;
   return (
     <ContactShadows
-      position={[0, -viewport.height * 0.34, 0]}
-      scale={Math.max(viewport.width * 1.55, 5)}
-      far={3.8}
+      position={[0, y, 0]}
+      scale={Math.max(viewport.width * 1.35, 4.5)}
+      far={2.4}
       near={0}
-      opacity={0.55}
-      blur={2.2}
-      resolution={512}
+      opacity={0.38}
+      blur={3.4}
+      resolution={1024}
       color={SHADOW_COLOR}
       frames={Infinity}
       smooth
@@ -183,38 +168,23 @@ function CardContactShadows() {
 function Scene({ paused }: { paused: boolean }) {
   return (
     <>
-      {/* Same key/fill/rim as the marketing hero so stainless, resin,
-          and nylon read the way they do on the torus, not as unlit
-          gray blobs. Key light also casts onto the card catcher. */}
-      <ambientLight intensity={0.45} />
-      <directionalLight
-        castShadow
-        position={[3.2, 4.2, 5.5]}
-        intensity={1.25}
-        shadow-mapSize={[1024, 1024]}
-        shadow-bias={-0.00025}
-        shadow-normalBias={0.02}
-        shadow-camera-near={1}
-        shadow-camera-far={18}
-        shadow-camera-left={-5}
-        shadow-camera-right={5}
-        shadow-camera-top={4}
-        shadow-camera-bottom={-4}
-      />
-      <directionalLight position={[-5, -3, -5]} intensity={0.45} />
-      <directionalLight position={[0, -5, 2]} intensity={0.25} />
+      {/* Same key/fill/rim as the marketing hero — IBL carries the
+          materials; directionals are fill only (no shadow maps). */}
+      <ambientLight intensity={0.5} />
+      <directionalLight position={[5, 5, 5]} intensity={1.2} />
+      <directionalLight position={[-5, -3, -5]} intensity={0.5} />
+      <directionalLight position={[0, -5, 2]} intensity={0.3} />
       <StudioEnvironment />
       {DROPZONE_PRIMITIVES.map((spec) => (
         <PrimitiveMesh key={spec.look} spec={spec} paused={paused} />
       ))}
-      <CardShadowCatcher />
       <CardContactShadows />
     </>
   );
 }
 
 /**
- * Floating print-material primitives behind the authed-home file
+ * Floating print-material primitives behind the featured file
  * dropzone — stainless, resin, nylon under studio IBL. Decorative;
  * `pointer-events` stay off so the file input remains the only
  * control. Pauses when scrolled off-screen or when the user prefers
@@ -245,14 +215,16 @@ export function DropzonePrimitives() {
     >
       <ErrorBoundary fallback={<DropzonePrimitivesFallback />}>
         <Canvas
-          shadows
           camera={{ position: [0, 0.12, 6.5], fov: 28 }}
-          dpr={[1, 1.5]}
+          dpr={[1, 2]}
           gl={{
             antialias: true,
             alpha: true,
-            powerPreference: "low-power",
+            powerPreference: "high-performance",
             toneMapping: THREE.ACESFilmicToneMapping,
+          }}
+          onCreated={({ gl }) => {
+            gl.toneMappingExposure = 1.05;
           }}
           frameloop={paused ? "demand" : "always"}
         >
