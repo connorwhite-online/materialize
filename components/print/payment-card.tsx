@@ -24,8 +24,8 @@ import {
  * it after the canvas reports a live, non-lost context — otherwise a
  * SwiftShader context-lost leaves a blank hole in the fee sheet.
  *
- * Entrance (spin / fade / scale) lives on `.mz-pay-card-enter` in
- * globals.css so both the fallback and the canvas share one motion.
+ * Entrance (soft fade / lift / scale) lives on `.mz-pay-card-enter`
+ * in globals.css so both the fallback and the canvas share one motion.
  */
 
 const PaymentCardScene = dynamic(

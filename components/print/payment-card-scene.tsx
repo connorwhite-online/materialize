@@ -22,28 +22,25 @@ import {
   LOGO_POSITION,
   LOGO_WIDTH,
 } from "./payment-card-layout";
-import { makeBrushedTitaniumMaps } from "./payment-card-brushed";
 
 /**
  * Studio-lit 3D Materialize payment card.
  *
  * Same lighting stack as the dropzone primitives (physical metal +
- * in-memory IBL) so the card reads as a printed titanium object, not
- * a CSS illustration. Body is brushed: catalog titanium color + a
- * procedural roughness map + anisotropy so the softbox stretches
- * along the grain. Logo is the real mark path, extruded. Chip is a
- * gold contact plate on the RIGHT — the user-facing composition.
+ * in-memory IBL) so the card reads as a titanium object, not a CSS
+ * illustration. Body is clean catalog titanium — metalness 1, light
+ * clearcoat, no brush maps. Logo is the real mark path, extruded.
+ * Chip is a gold contact plate on the RIGHT.
  *
  * ISO ID-1 proportion (85.60 × 53.98). Thickness is exaggerated so
  * the volume reads at the sheet's small canvas size.
  */
 
-/** Titanium Ti6Al4V catalog color — body is brushed on top of this. */
+/** Titanium Ti6Al4V catalog row — the card body. */
 const TITANIUM = {
   color: "#6e6e72",
   metalness: 1,
-  // Satin base; the roughnessMap pushes individual streaks brighter.
-  roughness: 0.38,
+  roughness: 0.28,
 } as const;
 
 const CHIP_GOLD = {
@@ -100,27 +97,6 @@ function LogoMark() {
         clearcoatRoughness={0.15}
       />
     </mesh>
-  );
-}
-
-function BrushedTitaniumMaterial() {
-  const { roughnessMap } = useMemo(() => makeBrushedTitaniumMaps(), []);
-  useEffect(() => () => roughnessMap.dispose(), [roughnessMap]);
-  return (
-    <meshPhysicalMaterial
-      color={TITANIUM.color}
-      metalness={TITANIUM.metalness}
-      roughness={TITANIUM.roughness}
-      roughnessMap={roughnessMap}
-      // Stretch the specular lobe along the brush grain — this is
-      // what makes it read as brushed plate rather than matte paint.
-      anisotropy={0.92}
-      anisotropyRotation={0}
-      // Soft satin clearcoat; a hard coat fights the brush.
-      clearcoat={0.1}
-      clearcoatRoughness={0.55}
-      envMapIntensity={1.2}
-    />
   );
 }
 
@@ -280,7 +256,14 @@ function Scene({
           smoothness={6}
           bevelSegments={4}
         >
-          <BrushedTitaniumMaterial />
+          <meshPhysicalMaterial
+            color={TITANIUM.color}
+            metalness={TITANIUM.metalness}
+            roughness={TITANIUM.roughness}
+            clearcoat={0.35}
+            clearcoatRoughness={0.28}
+            envMapIntensity={1.15}
+          />
         </RoundedBox>
         <LogoMark />
         <EmvChip />

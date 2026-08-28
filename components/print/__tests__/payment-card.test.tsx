@@ -146,24 +146,28 @@ describe("3D card composition", () => {
     expect(src).toContain("CHIP_GOLD");
   });
 
-  it("brushes the titanium body with grain + anisotropy", () => {
-    expect(src).toContain("makeBrushedTitaniumMaps");
-    expect(src).toContain("anisotropy");
-    expect(src).toContain("roughnessMap");
-    expect(src).toContain("BrushedTitaniumMaterial");
-    // CSS fallback mirrors the brush with repeating streaks under
-    // the face chrome (not an overlay that would mute the chip).
-    expect(css).toContain("repeating-linear-gradient");
-    expect(css).toMatch(
+  it("paints a clean metallic body — no brush maps or anisotropy", () => {
+    expect(src).toContain("clearcoat");
+    expect(src).toContain("envMapIntensity");
+    expect(src).not.toContain("makeBrushedTitaniumMaps");
+    expect(src).not.toContain("anisotropy");
+    expect(src).not.toContain("roughnessMap");
+    expect(src).not.toContain("BrushedTitaniumMaterial");
+    expect(css).not.toMatch(
       /\.mz-pay-card-face\s*\{[^}]*repeating-linear-gradient/
     );
   });
 
-  it("spins / fades / scales in on appear", () => {
+  it("soft-fades / lifts / scales in on appear (no hard spin)", () => {
     expect(css).toContain("@keyframes mz-pay-card-enter");
     expect(css).toContain("mz-pay-card-enter");
-    expect(css).toMatch(/rotateY\(10[0-9]deg\)/);
-    expect(css).toContain("scale(0.82)");
+    // Gentle arc — the old 105° spring-overshoot fought the sheet.
+    expect(css).toMatch(/rotateY\(-?2[0-9]deg\)/);
+    expect(css).toContain("scale(0.94)");
+    expect(css).toContain("translateY(10px)");
+    expect(css).toContain("--ease-out-soft");
+    expect(css).not.toMatch(/rotateY\(10[0-9]deg\)/);
+    expect(css).not.toContain("scale(0.82)");
   });
 
   it("left-aligns the pan and omits the Materialize face word", () => {
