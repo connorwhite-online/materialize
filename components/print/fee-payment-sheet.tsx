@@ -14,6 +14,7 @@ import type {
 } from "@stripe/stripe-js";
 import { useTheme } from "next-themes";
 import { NativeSheet } from "@/components/ui/native-sheet";
+import { Button } from "@/components/ui/button";
 import { PaymentCard } from "@/components/print/payment-card";
 import { getStripeBrowser } from "@/lib/stripe/browser";
 import { finalizeFeeAuthorization } from "@/app/actions/print";
@@ -123,7 +124,10 @@ export function FeePaymentSheet({ sheet, onClose }: FeePaymentSheetProps) {
         {/* Physical Materialize card — the mark and the metal chip are
             the whole point of this sheet's chrome. Amount lives on the
             card face so the number and the object are one thing. */}
-        <PaymentCard amountCents={sheet.amountCents} />
+        <PaymentCard
+          amountCents={sheet.amountCents}
+          className="max-w-[16rem]"
+        />
         <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
           Held now, charged only when your order is placed. Production and
           shipping are paid to CraftCloud in the next step.
@@ -314,20 +318,21 @@ function FeeForm({
         </p>
       )}
 
-      <button
+      <Button
         type="button"
+        size="lg"
+        className="w-full"
         onClick={submit}
-        disabled={!elementReady || busy}
-        className="w-full rounded-2xl bg-primary px-4 py-3.5 text-center text-[15px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+        disabled={!elementReady}
+        loading={busy}
       >
-        {phase === "confirming" && "Authorizing…"}
         {phase === "finalizing" && "Confirming…"}
         {phase === "redirecting" && "Continuing to CraftCloud…"}
-        {phase === "idle" &&
+        {(phase === "idle" || phase === "confirming") &&
           (confirmedRef.current
             ? "Continue"
             : `Authorize ${fmt(amountCents)}`)}
-      </button>
+      </Button>
 
       <p className="text-center text-[11px] text-muted-foreground">
         Your card details are handled by Stripe and saved for one-tap
@@ -425,7 +430,7 @@ export function SavedCardFeeSheet({
       <div className="px-6 pt-1">
         {/* Amount stays as the sheet header; the 3D card replaces the
             old "Mastercard •••• 4444 / Saved" row — logo top-left,
-            metal chip top-right, pan on the face. */}
+            metal chip on the right midline, pan on the face. */}
         <div>
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Service fee
@@ -444,6 +449,7 @@ export function SavedCardFeeSheet({
             brand={confirm.brand}
             last4={confirm.last4}
             saved
+            className="max-w-[16rem]"
           />
         </div>
 
@@ -454,25 +460,27 @@ export function SavedCardFeeSheet({
             </p>
           )}
 
-          <button
+          <Button
             type="button"
+            size="lg"
+            className="w-full"
             onClick={() => run("authorize")}
-            disabled={phase !== "idle"}
-            className="w-full rounded-2xl bg-primary px-4 py-3.5 text-center text-[15px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+            loading={phase === "authorizing"}
+            disabled={phase !== "idle" && phase !== "authorizing"}
           >
-            {phase === "authorizing"
-              ? "Authorizing…"
-              : `Authorize ${fmt(confirm.amountCents)}`}
-          </button>
+            {`Authorize ${fmt(confirm.amountCents)}`}
+          </Button>
 
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            className="w-full text-muted-foreground"
             onClick={() => run("switch")}
-            disabled={phase !== "idle"}
-            className="w-full rounded-2xl px-4 py-2.5 text-center text-sm font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+            loading={phase === "switching"}
+            disabled={phase !== "idle" && phase !== "switching"}
           >
-            {phase === "switching" ? "One moment…" : "Use a different card"}
-          </button>
+            Use a different card
+          </Button>
         </div>
       </div>
     </NativeSheet>
