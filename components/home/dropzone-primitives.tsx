@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { RoundedBox } from "@react-three/drei";
 import { useReducedMotion } from "motion/react";
@@ -13,23 +13,14 @@ import {
   DROPZONE_MOBILE_POSITION,
   DROPZONE_MOBILE_SCALE,
   DROPZONE_PRIMITIVES,
-  DROPZONE_PYRAMID_HEIGHT,
-  DROPZONE_PYRAMID_RADIUS,
-  DROPZONE_PYRAMID_SIDES,
   DROPZONE_SQUARE_RADIUS,
   DROPZONE_LOOKS,
   type DropzoneLookId,
   type DropzonePrimitive,
 } from "./dropzone-looks";
+import { makeRoundedPyramidGeometry } from "./rounded-pyramid";
 
-function PhysicalSkin({
-  lookId,
-  flatShading = false,
-}: {
-  lookId: DropzoneLookId;
-  /** Hard facets so the pyramid reads as a solid, not a soft cone. */
-  flatShading?: boolean;
-}) {
+function PhysicalSkin({ lookId }: { lookId: DropzoneLookId }) {
   const look = DROPZONE_LOOKS[lookId];
   const transmitting = (look.transmission ?? 0) > 0;
   return (
@@ -43,12 +34,18 @@ function PhysicalSkin({
       ior={look.ior ?? 1.5}
       thickness={look.thickness ?? 0.5}
       transparent={transmitting}
-      flatShading={flatShading}
     />
   );
 }
 
+function RoundedPyramid({ children }: { children: React.ReactNode }) {
+  const geometry = useMemo(() => makeRoundedPyramidGeometry(), []);
+  useEffect(() => () => geometry.dispose(), [geometry]);
+  return <mesh geometry={geometry}>{children}</mesh>;
+}
+
 function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
+  const skin = <PhysicalSkin lookId={spec.look} />;
   switch (spec.kind) {
     case "roundedBox":
       return (
@@ -58,29 +55,16 @@ function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
           smoothness={6}
           bevelSegments={4}
         >
-          <PhysicalSkin lookId={spec.look} />
+          {skin}
         </RoundedBox>
       );
     case "pyramid":
-      // 4 radial segments → square pyramid (4 triangular sides + base).
-      // flatShading keeps facet edges hard so it doesn't shade into a cone.
-      return (
-        <mesh>
-          <coneGeometry
-            args={[
-              DROPZONE_PYRAMID_RADIUS,
-              DROPZONE_PYRAMID_HEIGHT,
-              DROPZONE_PYRAMID_SIDES,
-            ]}
-          />
-          <PhysicalSkin lookId={spec.look} flatShading />
-        </mesh>
-      );
+      return <RoundedPyramid>{skin}</RoundedPyramid>;
     case "sphere":
       return (
         <mesh>
           <sphereGeometry args={[0.56, 48, 48]} />
-          <PhysicalSkin lookId={spec.look} />
+          {skin}
         </mesh>
       );
   }

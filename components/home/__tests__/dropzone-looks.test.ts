@@ -1,11 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  DROPZONE_LOOKS,
-  DROPZONE_PRIMITIVES,
-  DROPZONE_PYRAMID_HEIGHT,
-  DROPZONE_PYRAMID_RADIUS,
-  DROPZONE_PYRAMID_SIDES,
-} from "../dropzone-looks";
+import { DROPZONE_LOOKS, DROPZONE_PRIMITIVES } from "../dropzone-looks";
 import { HERO_MATERIALS, getMaterialById } from "@/lib/materials";
 
 function heroLook(catalogId: string) {
@@ -50,12 +44,6 @@ describe("DROPZONE_PRIMITIVES", () => {
     ]);
   });
 
-  it("builds the pyramid as a 4-sided square pyramid", () => {
-    expect(DROPZONE_PYRAMID_SIDES).toBe(4);
-    expect(DROPZONE_PYRAMID_HEIGHT).toBeGreaterThan(DROPZONE_PYRAMID_RADIUS);
-    expect(DROPZONE_PYRAMID_RADIUS).toBeGreaterThan(0.4);
-  });
-
   it("keeps each used look unique", () => {
     const looks = DROPZONE_PRIMITIVES.map((p) => p.look);
     expect(looks).toEqual([...new Set(looks)]);
@@ -81,7 +69,7 @@ describe("DROPZONE_PRIMITIVES", () => {
     expect(pyramid.position[0]).toBeGreaterThan(0.1);
     expect(pyramid.position[0]).toBeLessThan(0.5);
     expect(pyramid.restRotation).toBeDefined();
-    // Tip it enough that facets read in 3D (not a face-on sticker).
+    // Tip it enough that the chubby ridges read in 3D.
     expect(Math.abs(pyramid.restRotation![0])).toBeGreaterThan(0.15);
     expect(Math.abs(pyramid.restRotation![1])).toBeGreaterThan(0.3);
     expect(square.restRotation).toBeDefined();
