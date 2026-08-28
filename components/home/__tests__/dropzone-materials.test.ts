@@ -20,11 +20,14 @@ describe("dropzone primitives materials", () => {
     expect(src).toContain("StudioEnvironment");
     expect(src).toContain("directionalLight");
     expect(src).toContain("PhysicalSkin");
-    expect(src).toContain("DoubleSide");
+    expect(src).toContain("coneGeometry");
+    expect(src).toContain("DROPZONE_PYRAMID_SIDES");
     expect(src).not.toContain("DropzoneToonMaterial");
     expect(src).not.toContain("Outlines");
     expect(src).not.toContain("meshBasicMaterial");
     expect(src).not.toContain("meshToonMaterial");
+    expect(src).not.toContain("ShapeGeometry");
+    expect(src).not.toContain("ExtrudeGeometry");
   });
 
   it("wires stainless / resin / nylon PBR fields onto the physical material", () => {

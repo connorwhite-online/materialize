@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { DROPZONE_LOOKS, DROPZONE_PRIMITIVES } from "../dropzone-looks";
+import {
+  DROPZONE_LOOKS,
+  DROPZONE_PRIMITIVES,
+  DROPZONE_PYRAMID_HEIGHT,
+  DROPZONE_PYRAMID_RADIUS,
+  DROPZONE_PYRAMID_SIDES,
+} from "../dropzone-looks";
 import { HERO_MATERIALS, getMaterialById } from "@/lib/materials";
 
 function heroLook(catalogId: string) {
@@ -34,14 +40,20 @@ describe("DROPZONE_LOOKS", () => {
 });
 
 describe("DROPZONE_PRIMITIVES", () => {
-  it("uses a stainless square, resin sphere, and nylon triangle", () => {
+  it("uses a stainless square, resin sphere, and nylon pyramid", () => {
     const kinds = DROPZONE_PRIMITIVES.map((p) => p.kind);
-    expect(kinds).toEqual(["roundedBox", "sphere", "roundedTriangle"]);
+    expect(kinds).toEqual(["roundedBox", "sphere", "pyramid"]);
     expect(DROPZONE_PRIMITIVES.map((p) => p.look)).toEqual([
       "steel",
       "resin",
       "nylon",
     ]);
+  });
+
+  it("builds the pyramid as a 3-sided cone (4 faces)", () => {
+    expect(DROPZONE_PYRAMID_SIDES).toBe(3);
+    expect(DROPZONE_PYRAMID_HEIGHT).toBeGreaterThan(DROPZONE_PYRAMID_RADIUS);
+    expect(DROPZONE_PYRAMID_RADIUS).toBeGreaterThan(0.4);
   });
 
   it("keeps each used look unique", () => {
@@ -58,22 +70,20 @@ describe("DROPZONE_PRIMITIVES", () => {
   });
 
   it("parks modest-scale chubby shapes on the frame", () => {
-    const [square, sphere, triangle] = DROPZONE_PRIMITIVES;
+    const [square, sphere, pyramid] = DROPZONE_PRIMITIVES;
     for (const spec of DROPZONE_PRIMITIVES) {
       expect(spec.scale).toBeGreaterThanOrEqual(0.9);
       expect(spec.scale).toBeLessThanOrEqual(1.1);
     }
     expect(square.position[0]).toBeLessThan(-0.8);
     expect(sphere.position[0]).toBeGreaterThan(0.8);
-    expect(triangle.position[1]).toBeLessThan(-0.5);
-    expect(triangle.position[0]).toBeGreaterThan(0.1);
-    expect(triangle.position[0]).toBeLessThan(0.5);
-    expect(triangle.restRotation).toBeDefined();
-    // Keep the triangular face camera-facing — large Y tumble would
-    // flash the thin edge and read as an extrusion again.
-    expect(Math.abs(triangle.rotSpeed[1])).toBeLessThanOrEqual(0.025);
-    expect(Math.abs(triangle.restRotation![0])).toBeLessThan(0.35);
-    expect(Math.abs(triangle.restRotation![1])).toBeLessThan(0.35);
+    expect(pyramid.position[1]).toBeLessThan(-0.5);
+    expect(pyramid.position[0]).toBeGreaterThan(0.1);
+    expect(pyramid.position[0]).toBeLessThan(0.5);
+    expect(pyramid.restRotation).toBeDefined();
+    // Tip it enough that facets read in 3D (not a face-on sticker).
+    expect(Math.abs(pyramid.restRotation![0])).toBeGreaterThan(0.15);
+    expect(Math.abs(pyramid.restRotation![1])).toBeGreaterThan(0.3);
     expect(square.restRotation).toBeDefined();
     expect(square.fallbackClass).toMatch(/size-14/);
     expect(sphere.fallbackClass).toMatch(/size-14/);

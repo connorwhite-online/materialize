@@ -57,7 +57,7 @@ export const DROPZONE_LOOKS: Record<"steel" | "resin" | "nylon", DropzoneLook> =
 
 export type DropzoneLookId = keyof typeof DROPZONE_LOOKS;
 
-export type DropzonePrimitiveKind = "roundedBox" | "sphere" | "roundedTriangle";
+export type DropzonePrimitiveKind = "roundedBox" | "sphere" | "pyramid";
 
 export interface DropzonePrimitive {
   look: DropzoneLookId;
@@ -76,7 +76,7 @@ export interface DropzonePrimitive {
   floatSpeed: number;
   phase: number;
   /**
-   * Starting Euler tilt. Omitted → derived from `phase`. The triangle
+   * Starting Euler tilt. Omitted → derived from `phase`. The pyramid
    * and square set this so their silhouettes stay readable.
    */
   restRotation?: readonly [number, number, number];
@@ -96,6 +96,14 @@ export const DROPZONE_MOBILE_SCALE = 0.68;
 export const DROPZONE_SQUARE_RADIUS = 0.36;
 
 /**
+ * Triangular pyramid (cone with 3 radial segments): base radius and
+ * height in local units. Four faces — three sides + base.
+ */
+export const DROPZONE_PYRAMID_RADIUS = 0.62;
+export const DROPZONE_PYRAMID_HEIGHT = 0.9;
+export const DROPZONE_PYRAMID_SIDES = 3;
+
+/**
  * Pull frustum positions slightly inward on mobile so chubby shapes
  * sit inside the dashed well instead of clipping past the frame.
  */
@@ -103,7 +111,7 @@ export const DROPZONE_MOBILE_POSITION = 0.86;
 
 /**
  * Three chubby print-material shapes: stainless square left, resin
- * sphere right, black nylon triangle along the bottom. Desktop scale
+ * sphere right, black nylon pyramid along the bottom. Desktop scale
  * is modest; the scene shrinks them further on narrow canvases.
  */
 export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
@@ -133,17 +141,17 @@ export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
   },
   {
     look: "nylon",
-    kind: "roundedTriangle",
+    kind: "pyramid",
     position: [0.18, -0.58, 0.12],
     scale: 1.05,
-    // Barely tumble — keep the triangular face toward the camera so
-    // it reads as a △ plate, not a spinning extrusion.
-    rotSpeed: [0.004, 0.018, 0.003],
-    floatAmp: 0.035,
-    floatSpeed: 0.5,
+    // Slow tumble so facets catch light and the form reads as a
+    // 3D pyramid (4 faces), not a flat △ sticker.
+    rotSpeed: [0.012, 0.04, 0.008],
+    floatAmp: 0.04,
+    floatSpeed: 0.55,
     phase: 0.2,
-    restRotation: [0.12, 0.18, 0.02],
+    restRotation: [0.28, 0.55, 0.1],
     fallbackClass:
-      "-bottom-2 right-[26%] h-14 w-12 [clip-path:polygon(50%_2%,55%_10%,97%_88%,90%_100%,10%_100%,3%_88%,45%_10%)] sm:h-20 sm:w-[4.5rem]",
+      "-bottom-2 right-[26%] h-14 w-12 [clip-path:polygon(50%_4%,96%_92%,4%_92%)] sm:h-20 sm:w-[4.5rem]",
   },
 ];

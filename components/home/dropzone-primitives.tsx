@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { RoundedBox } from "@react-three/drei";
 import { useReducedMotion } from "motion/react";
@@ -13,21 +13,16 @@ import {
   DROPZONE_MOBILE_POSITION,
   DROPZONE_MOBILE_SCALE,
   DROPZONE_PRIMITIVES,
+  DROPZONE_PYRAMID_HEIGHT,
+  DROPZONE_PYRAMID_RADIUS,
+  DROPZONE_PYRAMID_SIDES,
   DROPZONE_SQUARE_RADIUS,
   DROPZONE_LOOKS,
   type DropzoneLookId,
   type DropzonePrimitive,
 } from "./dropzone-looks";
-import { makeRoundedTriangleGeometry } from "./rounded-triangle";
 
-function PhysicalSkin({
-  lookId,
-  doubleSided = false,
-}: {
-  lookId: DropzoneLookId;
-  /** Flat ShapeGeometry plates need both faces lit. */
-  doubleSided?: boolean;
-}) {
+function PhysicalSkin({ lookId }: { lookId: DropzoneLookId }) {
   const look = DROPZONE_LOOKS[lookId];
   const transmitting = (look.transmission ?? 0) > 0;
   return (
@@ -41,12 +36,12 @@ function PhysicalSkin({
       ior={look.ior ?? 1.5}
       thickness={look.thickness ?? 0.5}
       transparent={transmitting}
-      side={doubleSided ? THREE.DoubleSide : THREE.FrontSide}
     />
   );
 }
 
 function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
+  const skin = <PhysicalSkin lookId={spec.look} />;
   switch (spec.kind) {
     case "roundedBox":
       return (
@@ -56,29 +51,31 @@ function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
           smoothness={6}
           bevelSegments={4}
         >
-          <PhysicalSkin lookId={spec.look} />
+          {skin}
         </RoundedBox>
       );
-    case "roundedTriangle":
+    case "pyramid":
+      // 3 radial segments → triangular pyramid (3 sides + base = 4 faces).
       return (
-        <RoundedTriangle>
-          <PhysicalSkin lookId={spec.look} doubleSided />
-        </RoundedTriangle>
+        <mesh>
+          <coneGeometry
+            args={[
+              DROPZONE_PYRAMID_RADIUS,
+              DROPZONE_PYRAMID_HEIGHT,
+              DROPZONE_PYRAMID_SIDES,
+            ]}
+          />
+          {skin}
+        </mesh>
       );
     case "sphere":
       return (
         <mesh>
           <sphereGeometry args={[0.56, 48, 48]} />
-          <PhysicalSkin lookId={spec.look} />
+          {skin}
         </mesh>
       );
   }
-}
-
-function RoundedTriangle({ children }: { children: React.ReactNode }) {
-  const geometry = useMemo(() => makeRoundedTriangleGeometry(), []);
-  useEffect(() => () => geometry.dispose(), [geometry]);
-  return <mesh geometry={geometry}>{children}</mesh>;
 }
 
 function useDropzoneLayout() {
