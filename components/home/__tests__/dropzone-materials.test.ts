@@ -17,7 +17,9 @@ describe("dropzone primitives materials", () => {
 
   it("renders printable PBR materials under studio IBL, not toon/cel", () => {
     expect(src).toContain("meshPhysicalMaterial");
-    expect(src).toContain("StudioEnvironment");
+    expect(src).toContain("DropzoneEnvironment");
+    expect(src).toContain("Environment");
+    expect(src).toContain("Lightformer");
     expect(src).toContain("directionalLight");
     expect(src).toContain("PhysicalSkin");
     expect(src).toContain("makeRoundedPyramidGeometry");
@@ -29,17 +31,16 @@ describe("dropzone primitives materials", () => {
     expect(src).not.toContain("flatShading");
   });
 
-  it("casts soft contact shadows onto the card (no hard shadow maps)", () => {
+  it("uses per-shape soft contact shadows (no hard shadow maps)", () => {
     expect(src).toContain("ContactShadows");
-    expect(src).toContain("CardContactShadows");
+    expect(src).toContain("PrimitiveContactShadow");
     expect(src).toContain("envMapIntensity");
-    // Hard shadow-map catchers looked aliased — keep them out.
+    expect(src).toMatch(/resolution=\{512\}/);
+    // One floor catcher + hard maps looked noisy on the short well.
     expect(src).not.toContain("CardShadowCatcher");
+    expect(src).not.toContain("CardContactShadows");
     expect(src).not.toContain("shadowMaterial");
     expect(src).not.toContain("castShadow");
-    expect(src).toMatch(/opacity=\{0\.[2-4]/);
-    expect(src).toMatch(/blur=\{3/);
-    expect(src).toMatch(/resolution=\{1024\}/);
   });
 
   it("wires stainless / resin / nylon PBR fields onto the physical material", () => {
