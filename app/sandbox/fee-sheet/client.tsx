@@ -17,8 +17,16 @@ export function FeeSheetSandbox() {
           brand: "mastercard",
           last4: "4444",
         }}
-        onAuthorize={async () => {}}
-        onUseDifferentCard={async () => {}}
+        // Resolve with an error so the sheet unlocks — live parents
+        // navigate away on success and leave the phase locked.
+        onAuthorize={async () => {
+          await new Promise((r) => setTimeout(r, 500));
+          return { error: "Sandbox only — nothing was charged." };
+        }}
+        onUseDifferentCard={async () => {
+          await new Promise((r) => setTimeout(r, 400));
+          return { error: "Sandbox only — no card form here." };
+        }}
         onClose={() => {}}
       />
     </div>
