@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import dynamic from "next/dynamic";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import {
@@ -18,8 +18,10 @@ import {
  * node_modules/next/dist/docs/01-app/02-guides/lazy-loading.md —
  * `ssr: false` is only legal in a Client Component).
  *
- * The CSS fallback is the first paint and the ErrorBoundary stand-in,
- * so a missing WebGL context still shows logo-left / chip-right.
+ * The CSS fallback is the first paint and the stand-in whenever WebGL
+ * isn't available (context lost, no GPU, ErrorBoundary). We only hide
+ * it after the canvas reports a live, non-lost context — otherwise a
+ * SwiftShader context-lost leaves a blank hole in the fee sheet.
  */
 
 const PaymentCardScene = dynamic(
@@ -31,6 +33,8 @@ export type { PaymentCardProps };
 
 export function PaymentCard(props: PaymentCardProps) {
   const [live, setLive] = useState(false);
+  const onReady = useCallback(() => setLive(true), []);
+  const onFail = useCallback(() => setLive(false), []);
 
   return (
     <div
@@ -51,8 +55,18 @@ export function PaymentCard(props: PaymentCardProps) {
             </div>
           }
         >
-          <div className="absolute inset-0">
-            <PaymentCardScene {...props} onCreated={() => setLive(true)} />
+          <div
+            className={
+              live
+                ? "absolute inset-0"
+                : "pointer-events-none absolute inset-0 opacity-0"
+            }
+          >
+            <PaymentCardScene
+              {...props}
+              onReady={onReady}
+              onFail={onFail}
+            />
           </div>
         </ErrorBoundary>
       </div>

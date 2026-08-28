@@ -291,8 +291,14 @@ export function PaymentCardScene({
   amountCents,
   brand,
   last4,
-  onCreated,
-}: PaymentCardProps & { onCreated?: () => void }) {
+  onReady,
+  onFail,
+}: PaymentCardProps & {
+  /** Canvas has a live, non-lost WebGL context and painted a frame. */
+  onReady?: () => void;
+  /** Context lost / failed — parent should show the CSS fallback. */
+  onFail?: () => void;
+}) {
   const reducedMotion = useReducedMotion();
   const paused = Boolean(reducedMotion);
   return (
@@ -306,7 +312,26 @@ export function PaymentCardScene({
         toneMapping: THREE.ACESFilmicToneMapping,
       }}
       frameloop={paused ? "demand" : "always"}
-      onCreated={() => onCreated?.()}
+      onCreated={({ gl }) => {
+        const el = gl.domElement;
+        el.addEventListener(
+          "webglcontextlost",
+          (event) => {
+            event.preventDefault();
+            onFail?.();
+          },
+          false
+        );
+        // Defer past a synchronous context-lost so SwiftShader /
+        // headless GPUs don't flash the canvas over the fallback.
+        requestAnimationFrame(() => {
+          if (gl.getContext().isContextLost()) {
+            onFail?.();
+            return;
+          }
+          onReady?.();
+        });
+      }}
     >
       <Scene
         paused={paused}
