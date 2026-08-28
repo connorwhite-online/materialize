@@ -35,7 +35,8 @@ describe("dropzone primitives materials", () => {
     expect(src).toContain("ContactShadows");
     expect(src).toContain("PrimitiveContactShadow");
     expect(src).toContain("envMapIntensity");
-    expect(src).toMatch(/resolution=\{512\}/);
+    expect(src).toMatch(/PrimitiveContactShadow[\s\S]*?resolution=\{768\}/);
+    expect(src).toMatch(/Environment resolution=\{512\}/);
     // One floor catcher + hard maps looked noisy on the short well.
     expect(src).not.toContain("CardShadowCatcher");
     expect(src).not.toContain("CardContactShadows");

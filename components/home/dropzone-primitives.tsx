@@ -90,7 +90,7 @@ function PhysicalSkin({ lookId }: { lookId: DropzoneLookId }) {
       ior={look.ior ?? 1.5}
       thickness={look.thickness ?? 0.5}
       transparent={transmitting}
-      envMapIntensity={1.25}
+      envMapIntensity={1.4}
     />
   );
 }
@@ -135,13 +135,13 @@ function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
 function PrimitiveContactShadow() {
   return (
     <ContactShadows
-      position={[0, -0.58, 0]}
-      scale={2.05}
-      far={1.55}
+      position={[0, -0.55, 0]}
+      scale={1.75}
+      far={1.35}
       near={0}
-      opacity={0.3}
-      blur={2.5}
-      resolution={512}
+      opacity={0.42}
+      blur={2.1}
+      resolution={768}
       color={SHADOW_COLOR}
       frames={Infinity}
       smooth
