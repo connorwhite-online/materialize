@@ -116,12 +116,11 @@ export function FileUploader({
           <span
             className={cn(
               "relative z-[2] inline-flex items-center justify-center rounded-full",
-              // Muted chip — design-system fill that still reads against
-              // the light well (secondary/75 washed out on the dashed card).
-              "bg-muted px-4 py-2 text-sm font-semibold tracking-tight text-foreground",
-              "ring-1 ring-inset ring-border",
+              // Outline-style chip: card fill + border so it reads against
+              // the light well (muted alone is nearly the same tone).
+              "border border-border bg-card px-4 py-2 text-sm font-semibold tracking-tight text-foreground",
               "shadow-sm",
-              "transition-colors group-hover/drop:bg-muted/80 group-hover/drop:shadow"
+              "transition-[background-color,box-shadow,border-color] group-hover/drop:bg-muted/50 group-hover/drop:shadow"
             )}
           >
             {resolvedTitle}

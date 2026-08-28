@@ -15,9 +15,9 @@ describe("FileUploader", () => {
     );
     const title = screen.getByText("Add a File");
     expect(title).toBeTruthy();
-    expect(title.className).toMatch(/bg-muted/);
+    expect(title.className).toMatch(/bg-card/);
+    expect(title.className).toMatch(/border-border/);
     expect(title.className).toMatch(/rounded-full/);
-    expect(title.className).toMatch(/ring-border/);
     expect(title.className).not.toMatch(/blue-/);
     expect(screen.getByTestId("dropzone-primitives")).toBeTruthy();
     expect(
