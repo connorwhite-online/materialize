@@ -173,9 +173,9 @@ function CardFaceCopy({
             color="#d4d4d8"
             anchorX="left"
             anchorY="middle"
-            letterSpacing={0.12}
+            letterSpacing={0.02}
           >
-            SERVICE FEE
+            Service fee
           </Text>
           <Text
             position={[-0.64, -0.16, faceZ]}

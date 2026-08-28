@@ -434,7 +434,7 @@ export function SavedCardFeeSheet({
             old "Mastercard •••• 4444 / Saved" row — logo top-left,
             metal chip on the right midline, pan on the face. */}
         <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <p className="text-xs font-medium text-muted-foreground">
             Service fee
           </p>
           <p className="text-3xl font-bold tabular-nums">
