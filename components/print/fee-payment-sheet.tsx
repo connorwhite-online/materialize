@@ -124,11 +124,13 @@ export function FeePaymentSheet({ sheet, onClose }: FeePaymentSheetProps) {
         {/* Physical Materialize card — the mark and the metal chip are
             the whole point of this sheet's chrome. Amount lives on the
             card face so the number and the object are one thing. */}
-        <PaymentCard
-          amountCents={sheet.amountCents}
-          className="max-w-[16rem]"
-        />
-        <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+        <div className="my-5">
+          <PaymentCard
+            amountCents={sheet.amountCents}
+            className="max-w-[16rem]"
+          />
+        </div>
+        <p className="text-xs leading-relaxed text-muted-foreground">
           Held now, charged only when your order is placed. Production and
           shipping are paid to CraftCloud in the next step.
         </p>
@@ -444,7 +446,9 @@ export function SavedCardFeeSheet({
           shipping are paid to CraftCloud in the next step.
         </p>
 
-        <div className="mt-4">
+        {/* my-5 gives the card a little air above the disclosure and
+            below before Authorize — mt-4 left it tight against both. */}
+        <div className="my-5">
           <PaymentCard
             brand={confirm.brand}
             last4={confirm.last4}
@@ -453,7 +457,7 @@ export function SavedCardFeeSheet({
           />
         </div>
 
-        <div className="mt-4 space-y-3">
+        <div className="space-y-3">
           {error && (
             <p role="alert" className="text-sm text-destructive">
               {error}

@@ -136,6 +136,16 @@ describe("fee sheet primary CTA", () => {
       "rounded-2xl bg-primary px-4 py-3.5 text-center text-[15px] font-semibold"
     );
   });
+
+  it("gives the card vertical breathing room on both fee sheets", () => {
+    const src = readFileSync(
+      resolve(__dirname, "../fee-payment-sheet.tsx"),
+      "utf8"
+    );
+    // Both SavedCardFeeSheet and FeePaymentSheet wrap PaymentCard in
+    // my-5 so it isn't tight against the copy above / CTA below.
+    expect(src.match(/my-5/g)?.length).toBeGreaterThanOrEqual(2);
+  });
 });
 
 function expectPrimaryButton(button: HTMLElement) {
