@@ -7,7 +7,8 @@ import { Logomark } from "@/components/brand/logo";
  * CSS stand-in for the WebGL payment card — lazy-load placeholder
  * and ErrorBoundary fallback so a missing WebGL context still shows
  * the same composition: Materialize mark top-left, metal chip
- * top-right. The 3D scene paints over this once the canvas is ready.
+ * vertically centered on the right. The 3D scene paints over this
+ * once the canvas is ready.
  */
 
 export interface PaymentCardProps {
@@ -69,20 +70,20 @@ export function PaymentCardFallback({
       <div className="mz-pay-card-face">
         <div className="mz-pay-card-top">
           <span className="mz-pay-card-logo text-white">
-            <Logomark height={18} />
+            <Logomark height={26} />
           </span>
-          <EmvChipMark />
         </div>
-        <div className="mz-pay-card-body">
-          {amount ? (
-            <>
-              <p className="mz-pay-card-kicker">Service fee</p>
-              <p className="mz-pay-card-amount">{amount}</p>
-            </>
-          ) : (
-            <p className="mz-pay-card-kicker">Materialize</p>
-          )}
-        </div>
+        {/* Absolutely positioned on the right midline — not in the
+            top row — so it reads as a real EMV plate. */}
+        <EmvChipMark />
+        {amount ? (
+          <div className="mz-pay-card-body">
+            <p className="mz-pay-card-kicker">Service fee</p>
+            <p className="mz-pay-card-amount">{amount}</p>
+          </div>
+        ) : (
+          <div className="mz-pay-card-body" />
+        )}
         <div className="mz-pay-card-bottom">
           <span className="mz-pay-card-name">Materialize</span>
           <span className="mz-pay-card-pan">

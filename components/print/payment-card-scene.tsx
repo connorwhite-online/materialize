@@ -20,6 +20,7 @@ import {
   CARD_W,
   CHIP_POSITION,
   LOGO_POSITION,
+  LOGO_WIDTH,
 } from "./payment-card-layout";
 
 /**
@@ -73,7 +74,7 @@ function makeLogoGeometry(): THREE.ExtrudeGeometry {
   geom.computeBoundingBox();
   const size = new THREE.Vector3();
   geom.boundingBox!.getSize(size);
-  const s = 0.3 / size.x;
+  const s = LOGO_WIDTH / size.x;
   geom.scale(s, s, s * 0.28);
   geom.center();
   geom.computeBoundingBox();

@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import dynamic from "next/dynamic";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
+import { cn } from "@/lib/utils";
 import {
   PaymentCardFallback,
   paymentCardAriaLabel,
@@ -22,6 +23,9 @@ import {
  * isn't available (context lost, no GPU, ErrorBoundary). We only hide
  * it after the canvas reports a live, non-lost context — otherwise a
  * SwiftShader context-lost leaves a blank hole in the fee sheet.
+ *
+ * Entrance (spin / fade / scale) lives on `.mz-pay-card-enter` in
+ * globals.css so both the fallback and the canvas share one motion.
  */
 
 const PaymentCardScene = dynamic(
@@ -31,14 +35,20 @@ const PaymentCardScene = dynamic(
 
 export type { PaymentCardProps };
 
-export function PaymentCard(props: PaymentCardProps) {
+export function PaymentCard({
+  className,
+  ...props
+}: PaymentCardProps & { className?: string }) {
   const [live, setLive] = useState(false);
   const onReady = useCallback(() => setLive(true), []);
   const onFail = useCallback(() => setLive(false), []);
 
   return (
     <div
-      className="relative mx-auto w-full max-w-[22rem]"
+      className={cn(
+        "mz-pay-card-enter relative mx-auto w-full max-w-[22rem]",
+        className
+      )}
       role="img"
       aria-label={paymentCardAriaLabel(props)}
     >

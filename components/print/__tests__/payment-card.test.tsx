@@ -16,6 +16,7 @@ import {
   CARD_W,
   CHIP_POSITION,
   LOGO_POSITION,
+  LOGO_WIDTH,
 } from "../payment-card-layout";
 
 vi.mock("../payment-card-scene", () => ({
@@ -53,23 +54,38 @@ describe("PaymentCardFallback", () => {
     const { container } = render(
       <PaymentCardFallback amountCents={99} brand="visa" last4="4242" />
     );
-    const top = container.querySelector(".mz-pay-card-top");
-    expect(top).not.toBeNull();
-    const children = Array.from(top!.children);
-    expect(children).toHaveLength(2);
-    expect(children[0].classList.contains("mz-pay-card-logo")).toBe(true);
-    expect(children[0].querySelector("svg")?.innerHTML).toContain(MARK_PATH);
-    expect(children[1].getAttribute("data-testid")).toBe("payment-card-chip");
+    const logo = container.querySelector(".mz-pay-card-logo");
+    expect(logo).not.toBeNull();
+    expect(logo!.querySelector("svg")?.innerHTML).toContain(MARK_PATH);
+    // Chip is absolutely positioned on the right midline — a sibling of
+    // the top row, not nested inside it.
+    expect(screen.getByTestId("payment-card-chip")).toBeTruthy();
+    expect(
+      container.querySelector(".mz-pay-card-top")?.contains(
+        screen.getByTestId("payment-card-chip")
+      )
+    ).toBe(false);
   });
 
-  it("prints the service fee and the saved pan", () => {
+  it("prints the service fee and the saved pan without a mid-face Materialize", () => {
+    render(
+      <PaymentCardFallback brand="visa" last4="4242" saved />
+    );
+    // No amount → no mid-body kicker. The issuer name at the bottom
+    // stays; a second "Materialize" in the body was redundant.
+    expect(screen.queryByText("Service fee")).toBeNull();
+    const materialize = screen.getAllByText(/Materialize/i);
+    expect(materialize).toHaveLength(1);
+    expect(screen.getByText(/Visa/)).toBeTruthy();
+    expect(screen.getByText(/4242/)).toBeTruthy();
+  });
+
+  it("still prints the fee on the face when an amount is provided", () => {
     render(
       <PaymentCardFallback amountCents={99} brand="visa" last4="4242" saved />
     );
     expect(screen.getByText("Service fee")).toBeTruthy();
     expect(screen.getByText("$0.99")).toBeTruthy();
-    expect(screen.getByText(/Visa/)).toBeTruthy();
-    expect(screen.getByText(/4242/)).toBeTruthy();
   });
 });
 
@@ -81,11 +97,20 @@ describe("PaymentCard", () => {
     ).toBeTruthy();
     expect(screen.getByTestId("payment-card-chip")).toBeTruthy();
   });
+
+  it("runs the enter animation class on the wrapper", () => {
+    const { container } = render(<PaymentCard amountCents={99} />);
+    expect(container.querySelector(".mz-pay-card-enter")).not.toBeNull();
+  });
 });
 
 describe("3D card composition", () => {
   const src = readFileSync(
     resolve(__dirname, "../payment-card-scene.tsx"),
+    "utf8"
+  );
+  const css = readFileSync(
+    resolve(__dirname, "../../../app/globals.css"),
     "utf8"
   );
 
@@ -102,12 +127,14 @@ describe("3D card composition", () => {
     expect(src).not.toContain("meshToonMaterial");
   });
 
-  it("keeps the mark on the left and the chip on the right", () => {
+  it("keeps the mark on the left and the chip centered on the right", () => {
     expect(LOGO_POSITION[0]).toBeLessThan(0);
     expect(CHIP_POSITION[0]).toBeGreaterThan(0);
     expect(LOGO_POSITION[1]).toBeGreaterThan(0);
-    expect(CHIP_POSITION[1]).toBeGreaterThan(0);
+    // Vertically centered — not parked in the top-right corner.
+    expect(CHIP_POSITION[1]).toBe(0);
     expect(CARD_W / CARD_H).toBeCloseTo(85.6 / 53.98, 2);
+    expect(LOGO_WIDTH).toBeGreaterThan(0.35);
   });
 
   it("paints the body as catalog titanium, chip as gold metal", () => {
@@ -115,5 +142,12 @@ describe("3D card composition", () => {
     expect(src).toContain("metalness: 1");
     expect(src).toContain("#c9a227");
     expect(src).toContain("CHIP_GOLD");
+  });
+
+  it("spins / fades / scales in on appear", () => {
+    expect(css).toContain("@keyframes mz-pay-card-enter");
+    expect(css).toContain("mz-pay-card-enter");
+    expect(css).toMatch(/rotateY\(10[0-9]deg\)/);
+    expect(css).toContain("scale(0.82)");
   });
 });

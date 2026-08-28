@@ -17,14 +17,20 @@ export const CARD_RADIUS = 0.07;
 
 /** Top-left of the face. */
 export const LOGO_POSITION: [number, number, number] = [
-  -0.54,
-  0.31,
+  -0.52,
+  0.30,
   CARD_T / 2,
 ];
 
-/** Top-right of the face — chip on the right on purpose. */
+/**
+ * Vertically centered on the right edge. x > 0 is right; y = 0 is
+ * the face midline (not the top corner — that read as a sticker).
+ */
 export const CHIP_POSITION: [number, number, number] = [
   0.54,
-  0.31,
+  0,
   CARD_T / 2,
 ];
+
+/** Target width of the extruded mark, in card-height units. */
+export const LOGO_WIDTH = 0.42;
