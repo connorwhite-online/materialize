@@ -13,8 +13,10 @@ import { MARK_PATH } from "@/components/brand/logo-paths";
 import { getMaterialById } from "@/lib/materials";
 import {
   CARD_H,
+  CARD_T,
   CARD_W,
   CHIP_POSITION,
+  FACE_LIFT,
   LOGO_POSITION,
   LOGO_WIDTH,
 } from "../payment-card-layout";
@@ -137,6 +139,16 @@ describe("3D card composition", () => {
     expect(CHIP_POSITION[1]).toBe(0);
     expect(CARD_W / CARD_H).toBeCloseTo(85.6 / 53.98, 2);
     expect(LOGO_WIDTH).toBeGreaterThan(0.35);
+  });
+
+  it("lifts face chrome above the body so the logo can't z-fight", () => {
+    // Coplanar mark + body (LOGO_POSITION.z === CARD_T/2) shimmered
+    // under IBL during idle tilt. FACE_LIFT keeps a clear gap.
+    expect(FACE_LIFT).toBeGreaterThan(0);
+    expect(LOGO_POSITION[2]).toBeGreaterThan(CARD_T / 2);
+    expect(CHIP_POSITION[2]).toBeGreaterThan(CARD_T / 2);
+    expect(src).toContain("polygonOffset");
+    expect(src).toContain("FACE_LIFT");
   });
 
   it("paints the body as catalog titanium, chip as gold metal", () => {

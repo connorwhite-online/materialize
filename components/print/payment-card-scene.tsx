@@ -19,6 +19,7 @@ import {
   CARD_T,
   CARD_W,
   CHIP_POSITION,
+  FACE_LIFT,
   LOGO_POSITION,
   LOGO_WIDTH,
 } from "./payment-card-layout";
@@ -79,7 +80,9 @@ function makeLogoGeometry(): THREE.ExtrudeGeometry {
   geom.scale(s, s, s * 0.28);
   geom.center();
   geom.computeBoundingBox();
-  // Sit the back of the extrusion on the card face (z = 0).
+  // Sit the back of the extrusion at local z = 0. LOGO_POSITION.z
+  // then lifts the whole mesh FACE_LIFT above the card face so the
+  // mark never shares a depth with the body (z-fighting shimmer).
   geom.translate(0, 0, -geom.boundingBox!.min.z);
   return geom;
 }
@@ -88,13 +91,18 @@ function LogoMark() {
   const geometry = useMemo(() => makeLogoGeometry(), []);
   useEffect(() => () => geometry.dispose(), [geometry]);
   return (
-    <mesh geometry={geometry} position={LOGO_POSITION}>
+    <mesh geometry={geometry} position={LOGO_POSITION} renderOrder={1}>
       <meshPhysicalMaterial
         color="#f5f5f7"
         metalness={1}
         roughness={0.18}
         clearcoat={0.6}
         clearcoatRoughness={0.15}
+        // Belt-and-suspenders with FACE_LIFT — pulls the mark forward
+        // in the depth buffer if a bevel still grazes the face.
+        polygonOffset
+        polygonOffsetFactor={-2}
+        polygonOffsetUnits={-2}
       />
     </mesh>
   );
@@ -151,7 +159,9 @@ function CardFaceCopy({
   const pan = last4
     ? `${cardBrandLabel(brand) ? `${cardBrandLabel(brand)}  ` : ""}•••• ${last4}`
     : cardBrandLabel(brand) ?? "";
-  const faceZ = CARD_T / 2 + 0.002;
+  // Same lift as the mark — Text coplanar with the body shimmered
+  // under idle tilt the same way the extruded logo did.
+  const faceZ = CARD_T / 2 + FACE_LIFT;
 
   return (
     <>
