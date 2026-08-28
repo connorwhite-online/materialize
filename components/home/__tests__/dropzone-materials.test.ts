@@ -17,26 +17,34 @@ describe("dropzone primitives materials", () => {
 
   it("renders printable PBR materials under studio IBL, not toon/cel", () => {
     expect(src).toContain("meshPhysicalMaterial");
-    expect(src).toContain("StudioEnvironment");
+    expect(src).toContain("DropzoneEnvironment");
+    expect(src).toContain("Environment");
+    expect(src).toContain("Lightformer");
     expect(src).toContain("directionalLight");
     expect(src).toContain("PhysicalSkin");
     expect(src).toContain("makeRoundedPyramidGeometry");
     expect(src).not.toContain("DropzoneToonMaterial");
     expect(src).not.toContain("Outlines");
-    expect(src).not.toContain("meshBasicMaterial");
+    // Soft backdrop halo uses meshBasicMaterial; shapes stay physical.
     expect(src).not.toContain("meshToonMaterial");
     expect(src).not.toContain("coneGeometry");
     expect(src).not.toContain("flatShading");
   });
 
-  it("casts contact shadows onto the card through the transparent canvas", () => {
-    expect(src).toContain("ContactShadows");
-    expect(src).toContain("CardContactShadows");
-    expect(src).toContain("CardShadowCatcher");
-    expect(src).toContain("shadowMaterial");
-    expect(src).toContain("castShadow");
-    expect(src).toMatch(/shadows\b/);
-    expect(src).toMatch(/opacity=\{0\.[3-9]/);
+  it("casts soft backdrop halos onto the card (camera is front-facing)", () => {
+    expect(src).toContain("BackdropHalo");
+    expect(src).toContain("envMapIntensity");
+    expect(src).toContain("createRadialGradient");
+    expect(src).toMatch(/Environment resolution=\{512\}/);
+    // Floor contact pools are invisible from this camera; hard maps
+    // looked aliased. Halos sit behind each shape on the card plane.
+    expect(src).not.toMatch(/\bimport\b[\s\S]*\bContactShadows\b/);
+    expect(src).not.toContain("<ContactShadows");
+    expect(src).not.toContain("CardBackdropShadows");
+    expect(src).not.toContain("PrimitiveContactShadow");
+    expect(src).not.toContain("CardShadowCatcher");
+    expect(src).not.toContain("shadowMaterial");
+    expect(src).not.toContain("castShadow");
   });
 
   it("wires stainless / resin / nylon PBR fields onto the physical material", () => {
