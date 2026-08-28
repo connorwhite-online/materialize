@@ -31,15 +31,16 @@ describe("dropzone primitives materials", () => {
     expect(src).not.toContain("flatShading");
   });
 
-  it("uses per-shape soft contact shadows (no hard shadow maps)", () => {
+  it("casts soft backdrop shadows onto the card (camera is front-facing)", () => {
     expect(src).toContain("ContactShadows");
-    expect(src).toContain("PrimitiveContactShadow");
+    expect(src).toContain("CardBackdropShadows");
     expect(src).toContain("envMapIntensity");
-    expect(src).toMatch(/PrimitiveContactShadow[\s\S]*?resolution=\{768\}/);
+    // Plane parallel to the well — not a floor under the shapes.
+    expect(src).toMatch(/rotation=\{\[Math\.PI \/ 2/);
+    expect(src).toMatch(/resolution=\{1024\}/);
     expect(src).toMatch(/Environment resolution=\{512\}/);
-    // One floor catcher + hard maps looked noisy on the short well.
+    expect(src).not.toContain("PrimitiveContactShadow");
     expect(src).not.toContain("CardShadowCatcher");
-    expect(src).not.toContain("CardContactShadows");
     expect(src).not.toContain("shadowMaterial");
     expect(src).not.toContain("castShadow");
   });

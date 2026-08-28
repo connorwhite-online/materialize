@@ -127,28 +127,6 @@ function PrimitiveBody({ spec }: { spec: DropzonePrimitive }) {
   }
 }
 
-/**
- * Tight soft pool under one shape. Parent is translation-only so the
- * disc stays upright while the mesh tumbles — cleaner than one noisy
- * floor across the short well.
- */
-function PrimitiveContactShadow() {
-  return (
-    <ContactShadows
-      position={[0, -0.55, 0]}
-      scale={1.75}
-      far={1.35}
-      near={0}
-      opacity={0.42}
-      blur={2.1}
-      resolution={768}
-      color={SHADOW_COLOR}
-      frames={Infinity}
-      smooth
-    />
-  );
-}
-
 function useDropzoneLayout() {
   const { size } = useThree();
   const mobile = size.width < DROPZONE_MOBILE_MAX_WIDTH;
@@ -165,10 +143,12 @@ function PrimitiveMesh({
   spec: DropzonePrimitive;
   paused: boolean;
 }) {
-  const rootRef = useRef<THREE.Group>(null);
-  const meshRef = useRef<THREE.Group>(null);
+  const groupRef = useRef<THREE.Group>(null);
   const { viewport } = useThree();
   const { scaleMul, posMul } = useDropzoneLayout();
+  // Keep shapes slightly in front of the backdrop shadow plane so
+  // silhouettes cast onto the card (camera is front-facing, not top-down).
+  const z = Math.max(spec.position[2], 0.05) + 0.15;
   const x = spec.position[0] * posMul * (viewport.width / 2);
   const y = spec.position[1] * posMul * (viewport.height / 2);
   const scale = spec.scale * scaleMul;
@@ -180,30 +160,54 @@ function PrimitiveMesh({
   ];
 
   useFrame(({ clock }) => {
-    const root = rootRef.current;
-    const mesh = meshRef.current;
-    if (!root || !mesh || paused) return;
+    const group = groupRef.current;
+    if (!group || paused) return;
     const t = clock.elapsedTime;
-    root.position.x = spec.position[0] * posMul * (viewport.width / 2);
-    root.position.y =
+    group.position.x = spec.position[0] * posMul * (viewport.width / 2);
+    group.position.y =
       spec.position[1] * posMul * (viewport.height / 2) +
       Math.sin(t * spec.floatSpeed + spec.phase) * spec.floatAmp * scaleMul;
-    mesh.rotation.x = rest[0] + t * spec.rotSpeed[0];
-    mesh.rotation.y = rest[1] + t * spec.rotSpeed[1];
-    mesh.rotation.z = rest[2] + t * spec.rotSpeed[2];
+    group.rotation.x = rest[0] + t * spec.rotSpeed[0];
+    group.rotation.y = rest[1] + t * spec.rotSpeed[1];
+    group.rotation.z = rest[2] + t * spec.rotSpeed[2];
   });
 
   return (
     <group
-      ref={rootRef}
-      position={[x, y, spec.position[2]]}
+      ref={groupRef}
+      position={[x, y, z]}
       scale={scale}
+      rotation={[rest[0], rest[1], rest[2]]}
     >
-      <group ref={meshRef} rotation={[rest[0], rest[1], rest[2]]}>
-        <PrimitiveBody spec={spec} />
-      </group>
-      <PrimitiveContactShadow />
+      <PrimitiveBody spec={spec} />
     </group>
+  );
+}
+
+/**
+ * Soft contact pass on a plane parallel to the card. The camera looks
+ * straight at the well (not down on it) — floor pools sat under the
+ * shapes and barely read. Rotating ContactShadows onto XY puts the
+ * receiving plane behind the set so silhouettes darken the transparent
+ * canvas, and therefore the card fill.
+ */
+function CardBackdropShadows() {
+  const { viewport } = useThree();
+  const extent = Math.max(viewport.width, viewport.height) * 1.45;
+  return (
+    <ContactShadows
+      position={[0, 0, -0.7]}
+      rotation={[Math.PI / 2, 0, 0]}
+      scale={extent}
+      far={2.4}
+      near={0}
+      opacity={0.48}
+      blur={2.6}
+      resolution={1024}
+      color={SHADOW_COLOR}
+      frames={Infinity}
+      smooth
+    />
   );
 }
 
@@ -218,6 +222,7 @@ function Scene({ paused }: { paused: boolean }) {
       {DROPZONE_PRIMITIVES.map((spec) => (
         <PrimitiveMesh key={spec.look} spec={spec} paused={paused} />
       ))}
+      <CardBackdropShadows />
     </>
   );
 }

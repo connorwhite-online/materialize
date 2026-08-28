@@ -15,7 +15,8 @@ describe("FileUploader", () => {
     );
     const title = screen.getByText("Add a File");
     expect(title).toBeTruthy();
-    expect(title.className).toMatch(/bg-card/);
+    expect(title.className).toMatch(/bg-card\/55/);
+    expect(title.className).toMatch(/backdrop-blur/);
     expect(title.className).toMatch(/border-border/);
     expect(title.className).toMatch(/rounded-full/);
     expect(title.className).not.toMatch(/blue-/);

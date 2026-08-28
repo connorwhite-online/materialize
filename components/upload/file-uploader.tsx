@@ -116,11 +116,11 @@ export function FileUploader({
           <span
             className={cn(
               "relative z-[2] inline-flex items-center justify-center rounded-full",
-              // Outline-style chip: card fill + border so it reads against
-              // the light well (muted alone is nearly the same tone).
-              "border border-border bg-card px-4 py-2 text-sm font-semibold tracking-tight text-foreground",
-              "shadow-sm",
-              "transition-[background-color,box-shadow,border-color] group-hover/drop:bg-muted/50 group-hover/drop:shadow"
+              // Translucent chip so the material backdrop still peeks
+              // through — solid bg-card was reading as a sticker.
+              "border border-border/70 bg-card/55 px-4 py-2 text-sm font-semibold tracking-tight text-foreground",
+              "shadow-sm backdrop-blur-md",
+              "transition-[background-color,box-shadow,border-color] group-hover/drop:bg-card/75 group-hover/drop:shadow"
             )}
           >
             {resolvedTitle}
