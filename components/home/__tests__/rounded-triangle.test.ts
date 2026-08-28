@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
+  ROUNDED_TRIANGLE_BEVEL,
   ROUNDED_TRIANGLE_CORNER_RADIUS,
+  ROUNDED_TRIANGLE_DEPTH,
   ROUNDED_TRIANGLE_SIDE,
   roundedTriangleShape,
   makeRoundedTriangleGeometry,
@@ -74,6 +76,19 @@ describe("roundedTriangleShape", () => {
 });
 
 describe("makeRoundedTriangleGeometry", () => {
+  it("is a thin plate, not a chunky extruded token", () => {
+    expect(ROUNDED_TRIANGLE_DEPTH).toBeLessThan(ROUNDED_TRIANGLE_SIDE * 0.1);
+    expect(ROUNDED_TRIANGLE_BEVEL).toBeLessThan(ROUNDED_TRIANGLE_DEPTH * 0.4);
+    const geometry = makeRoundedTriangleGeometry();
+    geometry.computeBoundingBox();
+    const box = geometry.boundingBox!;
+    const depth = box.max.z - box.min.z;
+    const width = box.max.x - box.min.x;
+    geometry.dispose();
+    expect(depth).toBeLessThan(width * 0.2);
+    expect(depth).toBeLessThan(0.14);
+  });
+
   it("winds with outward normals so the FrontSide fill is visible", () => {
     const geometry = makeRoundedTriangleGeometry();
     const pos = geometry.getAttribute("position");

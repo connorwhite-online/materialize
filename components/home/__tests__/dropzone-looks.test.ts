@@ -69,6 +69,11 @@ describe("DROPZONE_PRIMITIVES", () => {
     expect(triangle.position[0]).toBeGreaterThan(0.1);
     expect(triangle.position[0]).toBeLessThan(0.5);
     expect(triangle.restRotation).toBeDefined();
+    // Keep the triangular face camera-facing — large Y tumble would
+    // flash the thin edge and read as an extrusion again.
+    expect(Math.abs(triangle.rotSpeed[1])).toBeLessThanOrEqual(0.025);
+    expect(Math.abs(triangle.restRotation![0])).toBeLessThan(0.35);
+    expect(Math.abs(triangle.restRotation![1])).toBeLessThan(0.35);
     expect(square.restRotation).toBeDefined();
     expect(square.fallbackClass).toMatch(/size-14/);
     expect(sphere.fallbackClass).toMatch(/size-14/);

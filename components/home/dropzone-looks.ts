@@ -135,12 +135,14 @@ export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
     look: "nylon",
     kind: "roundedTriangle",
     position: [0.18, -0.58, 0.12],
-    scale: 0.98,
-    rotSpeed: [0.005, 0.03, 0.004],
+    scale: 1.05,
+    // Barely tumble — keep the triangular face toward the camera so
+    // it reads as a △ plate, not a spinning extrusion.
+    rotSpeed: [0.004, 0.018, 0.003],
     floatAmp: 0.035,
     floatSpeed: 0.5,
     phase: 0.2,
-    restRotation: [0.04, 0.12, 0],
+    restRotation: [0.12, 0.18, 0.02],
     fallbackClass:
       "-bottom-2 right-[26%] h-14 w-12 [clip-path:polygon(50%_2%,55%_10%,97%_88%,90%_100%,10%_100%,3%_88%,45%_10%)] sm:h-20 sm:w-[4.5rem]",
   },

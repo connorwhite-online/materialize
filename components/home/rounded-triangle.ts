@@ -7,6 +7,9 @@ import * as THREE from "three";
  */
 export const ROUNDED_TRIANGLE_SIDE = 1.3;
 export const ROUNDED_TRIANGLE_CORNER_RADIUS = 0.22;
+/** Plate thickness — thin enough to read as a △, not a prism token. */
+export const ROUNDED_TRIANGLE_DEPTH = 0.07;
+export const ROUNDED_TRIANGLE_BEVEL = 0.018;
 
 export function roundedTriangleShape(
   side = ROUNDED_TRIANGLE_SIDE,
@@ -54,16 +57,17 @@ export function roundedTriangleShape(
 }
 
 /**
- * Extruded chubby triangle token. A generous bevel rounds the rim
- * so the edges feel soft like a sketch sticker.
+ * Thin chubby triangular plate. Depth stays well under the face size
+ * so the silhouette reads as a triangle, not a chunky extrusion.
+ * A tiny bevel softens the rim without turning it into a token.
  */
 export function makeRoundedTriangleGeometry(): THREE.ExtrudeGeometry {
   const geometry = new THREE.ExtrudeGeometry(roundedTriangleShape(), {
-    depth: 0.28,
+    depth: ROUNDED_TRIANGLE_DEPTH,
     bevelEnabled: true,
-    bevelThickness: 0.06,
-    bevelSize: 0.06,
-    bevelSegments: 4,
+    bevelThickness: ROUNDED_TRIANGLE_BEVEL,
+    bevelSize: ROUNDED_TRIANGLE_BEVEL,
+    bevelSegments: 3,
     curveSegments: 28,
   });
   geometry.center();
