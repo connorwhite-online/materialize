@@ -146,6 +146,19 @@ describe("3D card composition", () => {
     expect(src).toContain("CHIP_GOLD");
   });
 
+  it("brushes the titanium body with grain + anisotropy", () => {
+    expect(src).toContain("makeBrushedTitaniumMaps");
+    expect(src).toContain("anisotropy");
+    expect(src).toContain("roughnessMap");
+    expect(src).toContain("BrushedTitaniumMaterial");
+    // CSS fallback mirrors the brush with repeating streaks under
+    // the face chrome (not an overlay that would mute the chip).
+    expect(css).toContain("repeating-linear-gradient");
+    expect(css).toMatch(
+      /\.mz-pay-card-face\s*\{[^}]*repeating-linear-gradient/
+    );
+  });
+
   it("spins / fades / scales in on appear", () => {
     expect(css).toContain("@keyframes mz-pay-card-enter");
     expect(css).toContain("mz-pay-card-enter");
