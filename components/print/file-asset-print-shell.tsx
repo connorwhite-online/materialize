@@ -5,6 +5,7 @@ import { type ReactNode } from "react";
 import { QuoteConfigurator } from "@/components/print/quote-configurator";
 import { CartSlotStack } from "@/components/print/cart-slot-stack";
 import type { CheckoutModel } from "@/lib/env";
+import type { PreviewView } from "@/components/viewer/preview-camera";
 
 interface FileAssetPrintShellProps {
   fileAssetId: string;
@@ -39,6 +40,12 @@ interface FileAssetPrintShellProps {
    * two-charge disclosure under "two_step". Defaults to "single".
    */
   checkoutModel?: CheckoutModel;
+  /**
+   * Owner-chosen snapshot angle from the listing. Forwarded to the
+   * configurator so the print-page viewer opens on the same view as
+   * `/files/[slug]` and the OG card, not the viewer's head-on default.
+   */
+  initialView?: PreviewView | null;
 }
 
 /**
@@ -60,6 +67,7 @@ export function FileAssetPrintShell({
   configureHeader,
   projectSlug,
   checkoutModel = "single",
+  initialView,
 }: FileAssetPrintShellProps) {
   const router = useRouter();
 
@@ -88,6 +96,7 @@ export function FileAssetPrintShell({
       preselectMaterialId={preselectMaterialId}
       preselectFinishGroupId={preselectFinishGroupId}
       checkoutModel={checkoutModel}
+      initialView={initialView}
       onAddedToCart={handleAddedToCart}
       headerSlot={configureHeader}
       rightAnnex={({ pendingItem }) => (
