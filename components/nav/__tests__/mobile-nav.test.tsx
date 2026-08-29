@@ -414,6 +414,9 @@ describe("MobileNav back button", () => {
 
     const button = back();
     expect(button).toBeTruthy();
+    // Same height as the identity row (`ROW_HEIGHT` = 56). A shorter
+    // chip sat as a satellite next to the pill.
+    expect(button!.style.height).toBe("56px");
     fireEvent.click(button!);
     expect(routerBack).toHaveBeenCalled();
     expect(routerPush).not.toHaveBeenCalled();
@@ -506,7 +509,47 @@ describe("MobileNav back button ooze", () => {
   it("clips the glyph as it grows instead of squashing it", () => {
     expect(button).toContain("overflow-hidden");
   });
+
+  it("matches the collapsed pill's height so the two sit flush", () => {
+    // A 44px chip next to the 56px row read as a satellite. Sharing
+    // ROW_HEIGHT makes the button a circle the diameter of the pill.
+    expect(src).toMatch(/const BACK_SIZE = ROW_HEIGHT/);
+    expect(button).toContain("height: BACK_SIZE");
+    expect(button).toContain("bottom: 0");
+    expect(button).not.toContain("ROW_HEIGHT - BACK_SIZE");
+  });
+
+  it("scales and fades out of the menu, origin on the shared edge", () => {
+    expect(src).toMatch(/const BACK_SCALE_FROM = 0\.86;/);
+    expect(button).toMatch(/initial=\{\{[\s\S]*?scale: BACK_SCALE_FROM/);
+    expect(button).toMatch(/initial=\{\{[\s\S]*?opacity: 0/);
+    expect(button).toMatch(/animate=\{\{[\s\S]*?scale: 1/);
+    expect(button).toMatch(/animate=\{\{[\s\S]*?opacity: 1/);
+    expect(button).toMatch(/exit=\{\{[\s\S]*?scale: BACK_SCALE_FROM/);
+    expect(button).toMatch(/exit=\{\{[\s\S]*?opacity: 0/);
+    // CSS transform-origin on the shared edge — Motion's originX was
+    // easy to drop when width is also animating.
+    expect(button).toContain('transformOrigin: "right center"');
+  });
+
+  it("clears opacity early so the width ooze can be seen", () => {
+    // Fading opacity for the whole width tween hid the detach and left
+    // only a mid-air scale of an already-round chip.
+    const block =
+      src.match(/const BACK_OOZE_IN[^=]*=\s*\{([\s\S]*?)\n\};/)?.[1] ?? "";
+    expect(block).toMatch(/opacity:\s*\{\s*duration:\s*0\.1/);
+    expect(numFrom("BACK_OOZE_IN", "duration")).toBeGreaterThan(0.1);
+  });
 });
+
+function numFrom(name: string, field: string) {
+  const src = readFileSync(resolve(__dirname, "../mobile-nav.tsx"), "utf8");
+  return Number(
+    src
+      .match(new RegExp(`const ${name}[^=]*=\\s*\\{([^}]*)\\}`))?.[1]
+      .match(new RegExp(`${field}:\\s*([\\d.]+)`))?.[1]
+  );
+}
 
 /**
  * Timing. Nothing else in this navigation animates — the page swaps in
@@ -528,7 +571,7 @@ describe("MobileNav back button timing", () => {
     src.match(new RegExp(`const ${name}[^=]*=\\s*\\{[^}]*ease:\\s*(\\[[^\\]]*\\])`))?.[1];
 
   it("lands inside the card's own morph", () => {
-    // The chip is one 44px element, not a container. Filmed at 320ms it
+    // The chip is one element, not a container. Filmed at 320ms it
     // was still creeping ~200ms after the page and the title had cut.
     const cardIn = num("CARD_IN", "duration");
     expect(cardIn).toBeGreaterThan(0);
