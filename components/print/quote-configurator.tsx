@@ -42,6 +42,7 @@ import { useUser } from "@clerk/nextjs";
 import { checkGeometry } from "@/lib/geometry-checks";
 import { REGIONS, DEFAULT_REGION } from "@/lib/craftcloud/regions";
 import { MaterialPreview } from "@/components/viewer/material-preview";
+import type { PreviewView } from "@/components/viewer/preview-camera";
 import { Label } from "@/components/ui/label";
 import { Alert } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -157,6 +158,13 @@ interface QuoteConfiguratorProps {
    * "single" so existing call sites/tests are unaffected.
    */
   checkoutModel?: CheckoutModel;
+  /**
+   * Owner-chosen snapshot angle, loaded by the server page via
+   * `loadPreviewView`. Applied once the viewer's automatic fit
+   * settles. Omit / null for draft uploads (no listing row yet) and
+   * for files still on the automatic head-on capture.
+   */
+  initialView?: PreviewView | null;
 }
 
 type CheckoutStep = "configure" | "processing";
@@ -185,6 +193,7 @@ export function QuoteConfigurator({
   rightAnnex,
   headerSlot,
   checkoutModel = "single",
+  initialView,
 }: QuoteConfiguratorProps) {
   const isDraft = !!draftMode;
 
@@ -1399,6 +1408,7 @@ export function QuoteConfigurator({
                   className="h-full w-full"
                   enableWheelZoom={false}
                   showZoomControls
+                  initialView={initialView}
                 />
               </div>
             )}
