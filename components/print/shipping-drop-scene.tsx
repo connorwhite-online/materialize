@@ -5,7 +5,6 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { ContactShadows, RoundedBox } from "@react-three/drei";
 import { useReducedMotion } from "motion/react";
 import * as THREE from "three";
-import { StudioEnvironment } from "@/components/viewer/studio-environment";
 
 /**
  * Fire onReady only after the first successful painted frame.
@@ -36,45 +35,34 @@ function ReadySignal({
 /**
  * Playmobil-scale drop: one fat hemisphere, three cords, one round
  * box. A single canopy reads as a toy; sliced gores read as a drawing.
+ *
+ * Local lights only — see address-home-scene for why we skip
+ * studio IBL on these sheet toys.
  */
 
-const CARDBOARD = {
-  color: "#c89655",
-  metalness: 0,
-  roughness: 0.82,
-  clearcoat: 0.1,
-  clearcoatRoughness: 0.6,
-} as const;
-
-const TAPE = {
-  color: "#f0e2c0",
-  metalness: 0,
-  roughness: 0.55,
-} as const;
-
+const CARDBOARD = "#c89655";
+const TAPE = "#f0e2c0";
 const CANOPY = "#e24b4b";
+const RIM = "#f4efe6";
+const STRING = "#8a7355";
 
 function ChunkyCanopy() {
+  // Sit the dome just above the box so the whole toy fits the sheet
+  // hero frame — a taller stack clipped the canopy out of view.
   return (
-    <group position={[0, 0.92, 0]}>
+    <group position={[0, 0.55, 0]}>
       <mesh>
-        <sphereGeometry args={[0.82, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2]} />
-        <meshPhysicalMaterial
+        <sphereGeometry args={[0.72, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2]} />
+        <meshStandardMaterial
           color={CANOPY}
-          roughness={0.45}
+          roughness={0.5}
           metalness={0}
           side={THREE.DoubleSide}
-          clearcoat={0.15}
-          clearcoatRoughness={0.45}
         />
       </mesh>
       <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
-        <torusGeometry args={[0.8, 0.07, 8, 20]} />
-        <meshPhysicalMaterial
-          color="#f4efe6"
-          roughness={0.5}
-          metalness={0}
-        />
+        <torusGeometry args={[0.7, 0.065, 8, 20]} />
+        <meshStandardMaterial color={RIM} roughness={0.55} metalness={0} />
       </mesh>
     </group>
   );
@@ -82,15 +70,15 @@ function ChunkyCanopy() {
 
 function ChunkyStrings() {
   const anchors: Array<[number, number]> = [
-    [0, -0.62],
-    [-0.54, 0.32],
-    [0.54, 0.32],
+    [0, -0.55],
+    [-0.48, 0.28],
+    [0.48, 0.28],
   ];
   return (
     <group>
       {anchors.map(([x, z], i) => {
-        const start = new THREE.Vector3(x, 0.92, z);
-        const end = new THREE.Vector3(x * 0.4, 0.28, z * 0.4);
+        const start = new THREE.Vector3(x, 0.55, z);
+        const end = new THREE.Vector3(x * 0.35, 0.18, z * 0.35);
         const mid = start.clone().lerp(end, 0.5);
         const len = start.distanceTo(end);
         const dir = end.clone().sub(start).normalize();
@@ -100,12 +88,8 @@ function ChunkyStrings() {
         );
         return (
           <mesh key={i} position={mid.toArray()} quaternion={quat}>
-            <cylinderGeometry args={[0.03, 0.03, len, 8]} />
-            <meshPhysicalMaterial
-              color="#8a7355"
-              roughness={0.75}
-              metalness={0}
-            />
+            <cylinderGeometry args={[0.028, 0.028, len, 8]} />
+            <meshStandardMaterial color={STRING} roughness={0.8} metalness={0} />
           </mesh>
         );
       })}
@@ -115,28 +99,17 @@ function ChunkyStrings() {
 
 function ChunkyBox() {
   return (
-    <group position={[0, -0.08, 0]}>
-      <RoundedBox args={[1.15, 0.88, 1.15]} radius={0.22} smoothness={3}>
-        <meshPhysicalMaterial
-          color={CARDBOARD.color}
-          metalness={CARDBOARD.metalness}
-          roughness={CARDBOARD.roughness}
-          clearcoat={CARDBOARD.clearcoat}
-          clearcoatRoughness={CARDBOARD.clearcoatRoughness}
-          envMapIntensity={0.8}
-        />
+    <group position={[0, -0.22, 0]}>
+      <RoundedBox args={[1.05, 0.8, 1.05]} radius={0.2} smoothness={3}>
+        <meshStandardMaterial color={CARDBOARD} roughness={0.85} metalness={0} />
       </RoundedBox>
       <RoundedBox
-        args={[0.26, 0.9, 1.17]}
+        args={[0.24, 0.82, 1.07]}
         radius={0.05}
         smoothness={2}
         position={[0, 0.01, 0]}
       >
-        <meshPhysicalMaterial
-          color={TAPE.color}
-          metalness={TAPE.metalness}
-          roughness={TAPE.roughness}
-        />
+        <meshStandardMaterial color={TAPE} roughness={0.55} metalness={0} />
       </RoundedBox>
     </group>
   );
@@ -190,11 +163,10 @@ function Scene({ paused }: { paused: boolean }) {
 
   return (
     <>
-      <ambientLight intensity={0.7} />
-      <directionalLight position={[5, 6, 4]} intensity={1.3} />
-      <directionalLight position={[-4, -2, -4]} intensity={0.5} />
-      <directionalLight position={[0, -4, 2]} intensity={0.3} />
-      <StudioEnvironment />
+      <ambientLight intensity={0.85} />
+      <directionalLight position={[4, 6, 5]} intensity={1.55} />
+      <directionalLight position={[-5, 2, -4]} intensity={0.55} />
+      <directionalLight position={[0, -3, 3]} intensity={0.35} />
       <DropRig paused={paused}>
         <ChunkyCanopy />
         <ChunkyStrings />
@@ -202,9 +174,9 @@ function Scene({ paused }: { paused: boolean }) {
       </DropRig>
       <ContactShadows
         position={[0, -0.72, 0]}
-        opacity={0.28}
+        opacity={0.26}
         scale={3.6}
-        blur={2.8}
+        blur={2.6}
         far={1.7}
       />
     </>
@@ -222,18 +194,22 @@ export function ShippingDropScene({
   const paused = Boolean(reducedMotion);
   return (
     <Canvas
-      camera={{ position: [0, 0.15, 2.45], fov: 32 }}
-      dpr={[1, 1.75]}
+      camera={{ position: [0, 0.05, 2.7], fov: 34 }}
+      dpr={1}
       gl={{
         antialias: true,
         alpha: true,
         preserveDrawingBuffer: true,
-        powerPreference: "low-power",
+        powerPreference: "default",
         toneMapping: THREE.ACESFilmicToneMapping,
       }}
-      frameloop={paused ? "demand" : "always"}
+      frameloop="always"
+      style={{ width: "100%", height: "100%" }}
       onCreated={({ gl }) => {
+        gl.setClearColor(0x000000, 0);
         const el = gl.domElement;
+        el.style.width = "100%";
+        el.style.height = "100%";
         el.addEventListener(
           "webglcontextlost",
           (event) => {

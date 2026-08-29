@@ -55,9 +55,8 @@ describe("3D parachute-box composition", () => {
     "utf8"
   );
 
-  it("is a chunky physical cardboard box + one-hemisphere canopy under studio IBL", () => {
-    expect(src).toContain("meshPhysicalMaterial");
-    expect(src).toContain("StudioEnvironment");
+  it("is a chunky physical cardboard box + one-hemisphere canopy under local lights", () => {
+    expect(src).toContain("meshStandardMaterial");
     expect(src).toContain("ContactShadows");
     expect(src).toContain("ReadySignal");
     expect(src).toContain("ChunkyCanopy");
@@ -65,7 +64,9 @@ describe("3D parachute-box composition", () => {
     expect(src).toContain("CARDBOARD");
     expect(src).toContain("sphereGeometry");
     expect(src).toContain("torusGeometry");
+    expect(src).toContain('frameloop="always"');
     expect(src).not.toContain("meshToonMaterial");
+    expect(src).not.toMatch(/from ["']@\/components\/viewer\/studio-environment["']/);
     expect(src).not.toContain("GORE_COLORS");
   });
 });

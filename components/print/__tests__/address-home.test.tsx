@@ -70,16 +70,18 @@ describe("3D cartoon house composition", () => {
     "utf8"
   );
 
-  it("is a chunky physical toy under studio IBL, not a flat illustration", () => {
-    expect(src).toContain("meshPhysicalMaterial");
-    expect(src).toContain("StudioEnvironment");
+  it("is a chunky physical toy under local lights, not a flat illustration", () => {
+    expect(src).toContain("meshStandardMaterial");
     expect(src).toContain("ContactShadows");
     expect(src).toContain("ReadySignal");
     expect(src).toContain("ChunkyHouse");
     expect(src).toContain("coneGeometry");
     expect(src).toContain("RoundedBox");
+    expect(src).toContain('frameloop="always"');
     expect(src).not.toContain("meshBasicMaterial");
     expect(src).not.toContain("meshToonMaterial");
+    // Sheet toys skip PMREM — fee-card IBL has blanked software GL.
+    expect(src).not.toMatch(/from ["']@\/components\/viewer\/studio-environment["']/);
     // Keep the part count low — no mailbox / flowerboxes / smoke.
     expect(src).not.toContain("Mailbox");
     expect(src).not.toContain("Smoke");

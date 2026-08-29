@@ -5,7 +5,6 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { ContactShadows, RoundedBox } from "@react-three/drei";
 import { useReducedMotion } from "motion/react";
 import * as THREE from "three";
-import { StudioEnvironment } from "@/components/viewer/studio-environment";
 
 /**
  * Fire onReady only after the first successful painted frame —
@@ -36,111 +35,69 @@ function ReadySignal({
  * Playmobil-scale house: five fat parts. Body, 4-sided roof,
  * chimney stub, red door, two window pads. No mailbox / smoke /
  * stoop — those read as illustration, not a toy.
+ *
+ * Lit with local lights only (no in-memory PMREM / studio IBL). The
+ * fee card needs IBL for titanium; these toys read as volume from fat
+ * geometry + hard key light, and the Environment path has been a
+ * blank-canvas failure mode on software GL.
  */
 
-const WALL = {
-  color: "#fff8f0",
-  metalness: 0,
-  roughness: 0.7,
-  clearcoat: 0.15,
-  clearcoatRoughness: 0.5,
-} as const;
-
-const ROOF = {
-  color: "#6b4a3a",
-  metalness: 0.04,
-  roughness: 0.6,
-} as const;
-
-const DOOR = {
-  color: "#d62828",
-  metalness: 0.06,
-  roughness: 0.45,
-  clearcoat: 0.3,
-  clearcoatRoughness: 0.35,
-} as const;
+const WALL = "#fff8f0";
+const ROOF = "#6b4a3a";
+const DOOR = "#d62828";
+const CHIMNEY = "#8a5a48";
+const WINDOW = "#b8d4e8";
+const KNOB = "#f0d78c";
 
 function ChunkyHouse() {
   return (
     <group>
-      <RoundedBox args={[1.4, 1.05, 1.2]} radius={0.22} smoothness={3}>
-        <meshPhysicalMaterial
-          color={WALL.color}
-          metalness={WALL.metalness}
-          roughness={WALL.roughness}
-          clearcoat={WALL.clearcoat}
-          clearcoatRoughness={WALL.clearcoatRoughness}
-          envMapIntensity={0.9}
-        />
+      <RoundedBox args={[1.25, 0.95, 1.1]} radius={0.2} smoothness={3}>
+        <meshStandardMaterial color={WALL} roughness={0.7} metalness={0} />
       </RoundedBox>
 
-      <mesh position={[0, 0.88, 0]} rotation={[0, Math.PI / 4, 0]}>
-        <coneGeometry args={[1.1, 0.78, 4]} />
-        <meshPhysicalMaterial
-          color={ROOF.color}
-          metalness={ROOF.metalness}
-          roughness={ROOF.roughness}
-          flatShading
-        />
+      <mesh position={[0, 0.78, 0]} rotation={[0, Math.PI / 4, 0]}>
+        <coneGeometry args={[1.0, 0.7, 4]} />
+        <meshStandardMaterial color={ROOF} roughness={0.65} metalness={0} flatShading />
       </mesh>
 
       <RoundedBox
-        args={[0.34, 0.48, 0.34]}
-        radius={0.07}
+        args={[0.3, 0.42, 0.3]}
+        radius={0.06}
         smoothness={2}
-        position={[0.42, 1.05, -0.1]}
+        position={[0.38, 0.95, -0.08]}
       >
-        <meshPhysicalMaterial color="#8a5a48" roughness={0.7} metalness={0} />
+        <meshStandardMaterial color={CHIMNEY} roughness={0.75} metalness={0} />
       </RoundedBox>
 
       <RoundedBox
-        args={[0.42, 0.64, 0.16]}
-        radius={0.1}
+        args={[0.38, 0.58, 0.14]}
+        radius={0.09}
         smoothness={2}
-        position={[0, -0.16, 0.6]}
+        position={[0, -0.14, 0.56]}
       >
-        <meshPhysicalMaterial
-          color={DOOR.color}
-          metalness={DOOR.metalness}
-          roughness={DOOR.roughness}
-          clearcoat={DOOR.clearcoat}
-          clearcoatRoughness={DOOR.clearcoatRoughness}
-        />
+        <meshStandardMaterial color={DOOR} roughness={0.45} metalness={0.05} />
       </RoundedBox>
-      <mesh position={[0.12, -0.16, 0.7]}>
-        <sphereGeometry args={[0.06, 12, 12]} />
-        <meshPhysicalMaterial
-          color="#f0d78c"
-          metalness={0.8}
-          roughness={0.3}
-        />
+      <mesh position={[0.11, -0.14, 0.65]}>
+        <sphereGeometry args={[0.055, 12, 12]} />
+        <meshStandardMaterial color={KNOB} roughness={0.3} metalness={0.7} />
       </mesh>
 
       <RoundedBox
-        args={[0.3, 0.3, 0.12]}
-        radius={0.07}
+        args={[0.28, 0.28, 0.1]}
+        radius={0.06}
         smoothness={2}
-        position={[-0.4, 0.14, 0.6]}
+        position={[-0.36, 0.12, 0.56]}
       >
-        <meshPhysicalMaterial
-          color="#b8d4e8"
-          metalness={0.12}
-          roughness={0.25}
-          clearcoat={0.4}
-        />
+        <meshStandardMaterial color={WINDOW} roughness={0.25} metalness={0.1} />
       </RoundedBox>
       <RoundedBox
-        args={[0.3, 0.3, 0.12]}
-        radius={0.07}
+        args={[0.28, 0.28, 0.1]}
+        radius={0.06}
         smoothness={2}
-        position={[0.4, 0.14, 0.6]}
+        position={[0.36, 0.12, 0.56]}
       >
-        <meshPhysicalMaterial
-          color="#b8d4e8"
-          metalness={0.12}
-          roughness={0.25}
-          clearcoat={0.4}
-        />
+        <meshStandardMaterial color={WINDOW} roughness={0.25} metalness={0.1} />
       </RoundedBox>
     </group>
   );
@@ -177,7 +134,7 @@ function HomeRig({
   });
 
   return (
-    <group ref={group} rotation={[restX, restY, 0.03]} position={[0, -0.12, 0]}>
+    <group ref={group} rotation={[restX, restY, 0.03]} position={[0, -0.22, 0]}>
       {children}
     </group>
   );
@@ -191,19 +148,18 @@ function Scene({ paused }: { paused: boolean }) {
 
   return (
     <>
-      <ambientLight intensity={0.7} />
-      <directionalLight position={[5, 6, 4]} intensity={1.35} />
-      <directionalLight position={[-4, -2, -3]} intensity={0.45} />
-      <directionalLight position={[0, -3, 3]} intensity={0.3} />
-      <StudioEnvironment />
+      <ambientLight intensity={0.85} />
+      <directionalLight position={[4, 6, 5]} intensity={1.6} />
+      <directionalLight position={[-5, 2, -3]} intensity={0.55} />
+      <directionalLight position={[0, -2, 4]} intensity={0.35} />
       <HomeRig paused={paused}>
         <ChunkyHouse />
       </HomeRig>
       <ContactShadows
         position={[0, -0.78, 0]}
-        opacity={0.3}
+        opacity={0.28}
         scale={3.4}
-        blur={2.6}
+        blur={2.4}
         far={1.6}
       />
     </>
@@ -221,18 +177,24 @@ export function AddressHomeScene({
   const paused = Boolean(reducedMotion);
   return (
     <Canvas
-      camera={{ position: [0, 0.2, 2.35], fov: 32 }}
-      dpr={[1, 1.75]}
+      camera={{ position: [0, 0.15, 2.85], fov: 34 }}
+      dpr={1}
       gl={{
         antialias: true,
         alpha: true,
         preserveDrawingBuffer: true,
-        powerPreference: "low-power",
+        powerPreference: "default",
         toneMapping: THREE.ACESFilmicToneMapping,
       }}
-      frameloop={paused ? "demand" : "always"}
+      // Always pump frames — `demand` + reduced-motion can leave the
+      // first paint stuck before ContactShadows settles.
+      frameloop="always"
+      style={{ width: "100%", height: "100%" }}
       onCreated={({ gl }) => {
+        gl.setClearColor(0x000000, 0);
         const el = gl.domElement;
+        el.style.width = "100%";
+        el.style.height = "100%";
         el.addEventListener(
           "webglcontextlost",
           (event) => {
