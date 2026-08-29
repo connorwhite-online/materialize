@@ -128,4 +128,9 @@ describe("payment card CSS face", () => {
       /\.mz-pay-card-face\s*\{[^}]*repeating-linear-gradient/
     );
   });
+
+  it("lifts the card with a soft drop shadow under the tilted face", () => {
+    expect(css).toContain(".mz-pay-card::before");
+    expect(css).toMatch(/\.mz-pay-card::before\s*\{[^}]*blur\(/s);
+  });
 });
