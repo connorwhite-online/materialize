@@ -15,6 +15,11 @@ import {
  * permanent CSS fallback under a lazy WebGL scene, shared enter
  * animation via `.mz-pay-card-enter`.
  *
+ * The canvas layer stays painted (not faded out until ready).
+ * Hiding WebGL until the first frame can skip that frame on some
+ * GPUs and leave only the SVG underlay — which reads as "not a
+ * 3D model." Fallback stays underneath for a lost context.
+ *
  * `next/dynamic` with `ssr: false` keeps three.js off the print
  * critical path (see
  * node_modules/next/dist/docs/01-app/02-guides/lazy-loading.md).
@@ -26,9 +31,8 @@ const AddressHomeScene = dynamic(
 );
 
 export function AddressHome({ className }: { className?: string }) {
-  const [live, setLive] = useState(false);
-  const onReady = useCallback(() => setLive(true), []);
-  const onFail = useCallback(() => setLive(false), []);
+  const [failed, setFailed] = useState(false);
+  const onFail = useCallback(() => setFailed(true), []);
 
   return (
     <div
@@ -46,14 +50,11 @@ export function AddressHome({ className }: { className?: string }) {
         </div>
         <ErrorBoundary fallback={null}>
           <div
-            className={
-              live
-                ? "absolute inset-0"
-                : "pointer-events-none absolute inset-0 opacity-0"
-            }
-            aria-hidden={!live}
+            className={failed ? "hidden" : "absolute inset-0"}
+            data-testid="address-home-webgl"
+            aria-hidden
           >
-            <AddressHomeScene onReady={onReady} onFail={onFail} />
+            <AddressHomeScene onFail={onFail} />
           </div>
         </ErrorBoundary>
       </div>

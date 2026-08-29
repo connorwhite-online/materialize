@@ -1,10 +1,9 @@
 "use client";
 
 /**
- * CSS stand-in for the WebGL parachute-box — lazy-load placeholder
- * and ErrorBoundary fallback so a missing WebGL context still shows
- * the same composition: canopy above, strings, chubby cardboard box.
- * The 3D scene paints over this once the canvas is ready.
+ * CSS stand-in for the WebGL chunky parachute box — lazy-load
+ * placeholder and ErrorBoundary fallback. Matches the 3D: one fat
+ * hemisphere, thick strings, very round cardboard box.
  */
 
 export function shippingDropAriaLabel(): string {
@@ -22,69 +21,70 @@ export function ShippingDropFallback() {
           className="mz-ship-drop-svg"
           data-testid="shipping-drop-fallback-svg"
         >
-          {/* Canopy gores */}
           <path
-            d="M40 62 C48 28, 72 18, 80 18 C78 34, 62 52, 52 62 Z"
+            d="M28 86 A52 52 0 0 1 132 86 Z"
             fill="#e24b4b"
           />
           <path
-            d="M52 62 C62 40, 74 24, 80 18 C86 24, 98 40, 108 62 Z"
-            fill="#f4efe6"
-          />
-          <path
-            d="M108 62 C98 52, 82 34, 80 18 C88 18, 112 28, 120 62 Z"
-            fill="#3d6b9a"
-          />
-          {/* Canopy rim */}
-          <ellipse
-            cx="80"
-            cy="62"
-            rx="40"
-            ry="8"
-            fill="#c9a06a"
-            fillOpacity="0.55"
-          />
-          {/* Strings */}
-          <g
-            stroke="#8a7355"
-            strokeWidth="1.4"
-            strokeLinecap="round"
+            d="M30 86 A50 8 0 0 0 130 86"
             fill="none"
-          >
-            <line x1="48" y1="64" x2="62" y2="108" />
-            <line x1="68" y1="64" x2="72" y2="108" />
-            <line x1="92" y1="64" x2="88" y2="108" />
-            <line x1="112" y1="64" x2="98" y2="108" />
-          </g>
-          {/* Chubby box */}
+            stroke="#f4efe6"
+            strokeWidth="10"
+            strokeLinecap="round"
+          />
+          <line
+            x1="48"
+            y1="86"
+            x2="64"
+            y2="114"
+            stroke="#8a7355"
+            strokeWidth="4"
+            strokeLinecap="round"
+          />
+          <line
+            x1="80"
+            y1="86"
+            x2="80"
+            y2="114"
+            stroke="#8a7355"
+            strokeWidth="4"
+            strokeLinecap="round"
+          />
+          <line
+            x1="112"
+            y1="86"
+            x2="96"
+            y2="114"
+            stroke="#8a7355"
+            strokeWidth="4"
+            strokeLinecap="round"
+          />
           <rect
-            x="48"
-            y="104"
-            width="64"
-            height="52"
-            rx="12"
+            x="42"
+            y="108"
+            width="76"
+            height="54"
+            rx="18"
             fill="url(#mz-box-grad)"
             stroke="#9a7342"
             strokeWidth="1.2"
           />
-          {/* Tape */}
           <rect
-            x="74"
-            y="104"
-            width="12"
-            height="52"
+            x="70"
+            y="108"
+            width="20"
+            height="54"
+            rx="4"
             fill="#f0e2c0"
-            fillOpacity="0.9"
+            fillOpacity="0.95"
           />
-          {/* Flap crease */}
-          <line
-            x1="52"
-            y1="118"
-            x2="108"
-            y2="118"
-            stroke="#9a7342"
-            strokeOpacity="0.45"
-            strokeWidth="1.2"
+          <ellipse
+            cx="80"
+            cy="170"
+            rx="42"
+            ry="7"
+            fill="#000"
+            fillOpacity="0.12"
           />
           <defs>
             <linearGradient id="mz-box-grad" x1="0" y1="0" x2="1" y2="1">

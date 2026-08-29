@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { ContactShadows, RoundedBox } from "@react-three/drei";
 import { useReducedMotion } from "motion/react";
@@ -33,13 +33,17 @@ function ReadySignal({
   return null;
 }
 
-/** Warm corrugated cardboard — matte, a little clearcoat for studio catch. */
+/**
+ * Playmobil-scale drop: one fat hemisphere, three cords, one round
+ * box. A single canopy reads as a toy; sliced gores read as a drawing.
+ */
+
 const CARDBOARD = {
   color: "#c89655",
   metalness: 0,
   roughness: 0.82,
-  clearcoat: 0.12,
-  clearcoatRoughness: 0.55,
+  clearcoat: 0.1,
+  clearcoatRoughness: 0.6,
 } as const;
 
 const TAPE = {
@@ -48,60 +52,45 @@ const TAPE = {
   roughness: 0.55,
 } as const;
 
-const GORE_COLORS = ["#e24b4b", "#f4efe6", "#3d6b9a", "#e24b4b", "#f4efe6", "#3d6b9a"];
+const CANOPY = "#e24b4b";
 
-function ParachuteCanopy() {
+function ChunkyCanopy() {
   return (
-    <group position={[0, 0.95, 0]}>
-      {GORE_COLORS.map((color, i) => (
-        <mesh key={i} castShadow={false}>
-          <sphereGeometry
-            args={[
-              0.72,
-              10,
-              14,
-              (i * Math.PI * 2) / GORE_COLORS.length,
-              (Math.PI * 2) / GORE_COLORS.length,
-              0,
-              Math.PI / 2,
-            ]}
-          />
-          <meshPhysicalMaterial
-            color={color}
-            roughness={0.42}
-            metalness={0}
-            side={THREE.DoubleSide}
-            clearcoat={0.2}
-            clearcoatRoughness={0.4}
-          />
-        </mesh>
-      ))}
-      {/* Soft rim ring so the canopy edge reads against the background. */}
-      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
-        <torusGeometry args={[0.7, 0.018, 8, 48]} />
+    <group position={[0, 0.92, 0]}>
+      <mesh>
+        <sphereGeometry args={[0.82, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2]} />
         <meshPhysicalMaterial
-          color="#c9a06a"
+          color={CANOPY}
+          roughness={0.45}
+          metalness={0}
+          side={THREE.DoubleSide}
+          clearcoat={0.15}
+          clearcoatRoughness={0.45}
+        />
+      </mesh>
+      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
+        <torusGeometry args={[0.8, 0.07, 8, 20]} />
+        <meshPhysicalMaterial
+          color="#f4efe6"
           roughness={0.5}
-          metalness={0.05}
+          metalness={0}
         />
       </mesh>
     </group>
   );
 }
 
-function ParachuteStrings() {
-  // Four strings from canopy rim down to the box top corners.
+function ChunkyStrings() {
   const anchors: Array<[number, number]> = [
-    [-0.48, -0.48],
-    [-0.48, 0.48],
-    [0.48, -0.48],
-    [0.48, 0.48],
+    [0, -0.62],
+    [-0.54, 0.32],
+    [0.54, 0.32],
   ];
   return (
     <group>
       {anchors.map(([x, z], i) => {
-        const start = new THREE.Vector3(x * 1.1, 0.95, z * 1.1);
-        const end = new THREE.Vector3(x * 0.55, 0.28, z * 0.55);
+        const start = new THREE.Vector3(x, 0.92, z);
+        const end = new THREE.Vector3(x * 0.4, 0.28, z * 0.4);
         const mid = start.clone().lerp(end, 0.5);
         const len = start.distanceTo(end);
         const dir = end.clone().sub(start).normalize();
@@ -110,15 +99,11 @@ function ParachuteStrings() {
           dir
         );
         return (
-          <mesh
-            key={i}
-            position={mid.toArray()}
-            quaternion={quat}
-          >
-            <cylinderGeometry args={[0.008, 0.008, len, 6]} />
+          <mesh key={i} position={mid.toArray()} quaternion={quat}>
+            <cylinderGeometry args={[0.03, 0.03, len, 8]} />
             <meshPhysicalMaterial
               color="#8a7355"
-              roughness={0.7}
+              roughness={0.75}
               metalness={0}
             />
           </mesh>
@@ -128,28 +113,22 @@ function ParachuteStrings() {
   );
 }
 
-function CardboardBox() {
+function ChunkyBox() {
   return (
-    <group position={[0, -0.05, 0]}>
-      <RoundedBox
-        args={[0.95, 0.72, 0.95]}
-        radius={0.14}
-        smoothness={5}
-        bevelSegments={3}
-      >
+    <group position={[0, -0.08, 0]}>
+      <RoundedBox args={[1.15, 0.88, 1.15]} radius={0.22} smoothness={3}>
         <meshPhysicalMaterial
           color={CARDBOARD.color}
           metalness={CARDBOARD.metalness}
           roughness={CARDBOARD.roughness}
           clearcoat={CARDBOARD.clearcoat}
           clearcoatRoughness={CARDBOARD.clearcoatRoughness}
-          envMapIntensity={0.85}
+          envMapIntensity={0.8}
         />
       </RoundedBox>
-      {/* Packing tape down the middle of the top face. */}
       <RoundedBox
-        args={[0.16, 0.74, 0.96]}
-        radius={0.02}
+        args={[0.26, 0.9, 1.17]}
+        radius={0.05}
         smoothness={2}
         position={[0, 0.01, 0]}
       >
@@ -157,19 +136,6 @@ function CardboardBox() {
           color={TAPE.color}
           metalness={TAPE.metalness}
           roughness={TAPE.roughness}
-        />
-      </RoundedBox>
-      {/* Soft label sticker */}
-      <RoundedBox
-        args={[0.42, 0.28, 0.02]}
-        radius={0.03}
-        smoothness={2}
-        position={[0, 0.02, 0.485]}
-      >
-        <meshPhysicalMaterial
-          color="#f7f1e4"
-          roughness={0.65}
-          metalness={0}
         />
       </RoundedBox>
     </group>
@@ -181,11 +147,11 @@ function DropRig({
   children,
 }: {
   paused: boolean;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   const group = useRef<THREE.Group>(null);
   const restX = 0.18;
-  const restY = -0.35;
+  const restY = -0.38;
 
   useFrame((state) => {
     const g = group.current;
@@ -194,24 +160,23 @@ function DropRig({
       g.rotation.x = restX;
       g.rotation.y = restY;
       g.rotation.z = 0.04;
-      g.position.y = 0.02;
+      g.position.y = 0;
       return;
     }
     const t = state.clock.elapsedTime;
-    // Gentle parachute bob + sway; pointer nudges the tilt.
-    const hoverX = restX - state.pointer.y * 0.14;
-    const hoverY = restY + state.pointer.x * 0.22;
-    const idleX = Math.sin(t * 0.7) * 0.05;
-    const idleY = Math.sin(t * 0.45) * 0.08;
-    const bob = Math.sin(t * 1.15) * 0.045;
+    const hoverX = restX - state.pointer.y * 0.12;
+    const hoverY = restY + state.pointer.x * 0.2;
+    const idleX = Math.sin(t * 0.7) * 0.04;
+    const idleY = Math.sin(t * 0.45) * 0.07;
+    const bob = Math.sin(t * 1.1) * 0.04;
     g.rotation.x = THREE.MathUtils.lerp(g.rotation.x, hoverX + idleX, 0.08);
     g.rotation.y = THREE.MathUtils.lerp(g.rotation.y, hoverY + idleY, 0.08);
-    g.rotation.z = Math.sin(t * 0.6) * 0.05;
-    g.position.y = THREE.MathUtils.lerp(g.position.y, 0.02 + bob, 0.1);
+    g.rotation.z = Math.sin(t * 0.6) * 0.045;
+    g.position.y = THREE.MathUtils.lerp(g.position.y, bob, 0.1);
   });
 
   return (
-    <group ref={group} rotation={[restX, restY, 0.04]} position={[0, 0.02, 0]}>
+    <group ref={group} rotation={[restX, restY, 0.04]} position={[0, 0, 0]}>
       {children}
     </group>
   );
@@ -225,22 +190,22 @@ function Scene({ paused }: { paused: boolean }) {
 
   return (
     <>
-      <ambientLight intensity={0.55} />
-      <directionalLight position={[5, 6, 4]} intensity={1.15} />
-      <directionalLight position={[-4, -2, -4]} intensity={0.45} />
-      <directionalLight position={[0, -4, 2]} intensity={0.28} />
+      <ambientLight intensity={0.7} />
+      <directionalLight position={[5, 6, 4]} intensity={1.3} />
+      <directionalLight position={[-4, -2, -4]} intensity={0.5} />
+      <directionalLight position={[0, -4, 2]} intensity={0.3} />
       <StudioEnvironment />
       <DropRig paused={paused}>
-        <ParachuteCanopy />
-        <ParachuteStrings />
-        <CardboardBox />
+        <ChunkyCanopy />
+        <ChunkyStrings />
+        <ChunkyBox />
       </DropRig>
       <ContactShadows
         position={[0, -0.72, 0]}
-        opacity={0.3}
-        scale={3.4}
-        blur={2.6}
-        far={1.6}
+        opacity={0.28}
+        scale={3.6}
+        blur={2.8}
+        far={1.7}
       />
     </>
   );
@@ -257,11 +222,12 @@ export function ShippingDropScene({
   const paused = Boolean(reducedMotion);
   return (
     <Canvas
-      camera={{ position: [0, 0.15, 2.6], fov: 32 }}
+      camera={{ position: [0, 0.15, 2.45], fov: 32 }}
       dpr={[1, 1.75]}
       gl={{
         antialias: true,
         alpha: true,
+        preserveDrawingBuffer: true,
         powerPreference: "low-power",
         toneMapping: THREE.ACESFilmicToneMapping,
       }}

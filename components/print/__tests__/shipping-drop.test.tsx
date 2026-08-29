@@ -44,6 +44,8 @@ describe("ShippingDrop", () => {
     const src = readFileSync(resolve(__dirname, "../shipping-drop.tsx"), "utf8");
     expect(src).toContain("Permanent underlay");
     expect(src).not.toContain("{!live && (");
+    expect(src).not.toMatch(/className=\{[\s\S]*opacity-0/);
+    expect(screen.getByTestId("shipping-drop-webgl")).toBeTruthy();
   });
 });
 
@@ -53,14 +55,18 @@ describe("3D parachute-box composition", () => {
     "utf8"
   );
 
-  it("is a physical cardboard box + canopy under studio IBL", () => {
+  it("is a chunky physical cardboard box + one-hemisphere canopy under studio IBL", () => {
     expect(src).toContain("meshPhysicalMaterial");
     expect(src).toContain("StudioEnvironment");
     expect(src).toContain("ContactShadows");
     expect(src).toContain("ReadySignal");
-    expect(src).toContain("ParachuteCanopy");
+    expect(src).toContain("ChunkyCanopy");
+    expect(src).toContain("ChunkyBox");
     expect(src).toContain("CARDBOARD");
+    expect(src).toContain("sphereGeometry");
+    expect(src).toContain("torusGeometry");
     expect(src).not.toContain("meshToonMaterial");
+    expect(src).not.toContain("GORE_COLORS");
   });
 });
 

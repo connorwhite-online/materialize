@@ -6,8 +6,8 @@ import {
   ShippingSheet,
   type CheckoutSheetStep,
 } from "@/components/print/shipping-sheet";
-import { ShippingDrop } from "@/components/print/shipping-drop";
-import { AddressHome } from "@/components/print/address-home";
+import { AddressHomeScene } from "@/components/print/address-home-scene";
+import { ShippingDropScene } from "@/components/print/shipping-drop-scene";
 import type { ShippingOption } from "@/components/print/shipping-options";
 
 const QUOTE = {
@@ -38,9 +38,12 @@ const SHIPPING: ShippingOption[] = [
 ];
 
 /**
- * Fixture matching the live vendor checkout sheet so the 3D
- * parachute-box and cartoon house can be reviewed without walking
- * a full quote → vendor → checkout path.
+ * Fixture matching the live vendor checkout sheet so the chunky 3D
+ * parachute-box and cartoon house can be reviewed without walking a
+ * full quote → vendor → checkout path.
+ *
+ * Heroes are mounted as the real R3F scenes (not the CSS underlay) so
+ * this page is a WebGL review surface — same meshes the sheet uses.
  */
 export function CheckoutSheetSandbox() {
   const [step, setStep] = useState<CheckoutSheetStep>("shipping");
@@ -49,8 +52,6 @@ export function CheckoutSheetSandbox() {
     SHIPPING[0]
   );
 
-  // Open after mount so NativeSheet's portal and the sheet's own
-  // enter animation run as a client transition, same as a vendor tap.
   useEffect(() => {
     setOpen(true);
   }, []);
@@ -59,20 +60,34 @@ export function CheckoutSheetSandbox() {
     <SandboxProvider sandbox>
       <div className="min-h-svh bg-background px-6 py-8">
         <p className="text-sm text-muted-foreground">
-          Sandbox — checkout sheet heroes
+          Sandbox — checkout sheet heroes (WebGL)
         </p>
         <div className="mt-6 grid max-w-xl grid-cols-2 gap-6">
           <div>
             <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Shipping
             </p>
-            <ShippingDrop />
+            <div
+              className="mz-pay-card-enter relative aspect-square w-full"
+              role="img"
+              aria-label="Cardboard package descending on a parachute"
+              data-testid="sandbox-shipping-webgl"
+            >
+              <ShippingDropScene />
+            </div>
           </div>
           <div>
             <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Address
             </p>
-            <AddressHome />
+            <div
+              className="mz-pay-card-enter relative aspect-square w-full"
+              role="img"
+              aria-label="Cartoon house with a red front door"
+              data-testid="sandbox-address-webgl"
+            >
+              <AddressHomeScene />
+            </div>
           </div>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">

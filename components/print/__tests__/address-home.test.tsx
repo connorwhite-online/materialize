@@ -21,12 +21,10 @@ describe("address home labels", () => {
 });
 
 describe("AddressHomeFallback", () => {
-  it("paints white walls, a red door, a chimney, and a mailbox", () => {
+  it("paints a chunky white house with a red door and chimney", () => {
     render(<AddressHomeFallback />);
     expect(screen.getByTestId("address-home-door")).toBeTruthy();
     expect(screen.getByTestId("address-home-chimney")).toBeTruthy();
-    expect(screen.getByTestId("address-home-mailbox")).toBeTruthy();
-    expect(screen.getByTestId("address-home-lawn")).toBeTruthy();
     const svg = screen.getByTestId("address-home-fallback-svg");
     expect(svg.innerHTML).toContain("#d62828");
     expect(svg.innerHTML).toContain("#ffffff");
@@ -55,6 +53,10 @@ describe("AddressHome", () => {
     const src = readFileSync(resolve(__dirname, "../address-home.tsx"), "utf8");
     expect(src).toContain("Permanent underlay");
     expect(src).not.toContain("{!live && (");
+    // Canvas stays painted — fading it out until ready can skip the
+    // first WebGL frame and leave only the SVG underlay.
+    expect(src).not.toMatch(/className=\{[\s\S]*opacity-0/);
+    expect(screen.getByTestId("address-home-webgl")).toBeTruthy();
   });
 });
 
@@ -68,25 +70,26 @@ describe("3D cartoon house composition", () => {
     "utf8"
   );
 
-  it("is a physical toy house under studio IBL, not a toon illustration", () => {
+  it("is a chunky physical toy under studio IBL, not a flat illustration", () => {
     expect(src).toContain("meshPhysicalMaterial");
     expect(src).toContain("StudioEnvironment");
     expect(src).toContain("ContactShadows");
     expect(src).toContain("ReadySignal");
-    expect(src).toContain("FrontDoor");
-    expect(src).toContain("Chimney");
-    expect(src).toContain("Smoke");
-    expect(src).toContain("Mailbox");
+    expect(src).toContain("ChunkyHouse");
+    expect(src).toContain("coneGeometry");
+    expect(src).toContain("RoundedBox");
     expect(src).not.toContain("meshBasicMaterial");
     expect(src).not.toContain("meshToonMaterial");
+    // Keep the part count low — no mailbox / flowerboxes / smoke.
+    expect(src).not.toContain("Mailbox");
+    expect(src).not.toContain("Smoke");
+    expect(src).not.toContain("FlowerBox");
   });
 
   it("keeps the white paint, saturated red door, and chimney", () => {
     expect(src).toContain("#fff8f0");
     expect(src).toContain("#d62828");
     expect(src).toContain("#8a5a48");
-    expect(src).toContain("function Chimney");
-    expect(src).toContain("function FrontDoor");
   });
 
   it("reuses the fee-sheet enter so the house settles the same way", () => {
