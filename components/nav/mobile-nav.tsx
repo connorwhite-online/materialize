@@ -149,20 +149,28 @@ const IDENTITY_OUT_CLOSE: Transition = {
  * for the radius, and let `backdrop-filter: blur(calc(var * 1px))`
  * track it. Opacity and blur then ease on the same open curve.
  */
-const SCRIM_BLUR_PX = 8;
+const SCRIM_BLUR_PX = 10;
 /** Unitless px radius — Motion interpolates numbers; `calc` adds the unit. */
 const SCRIM_BLUR_VAR = "--mz-scrim-blur";
+/**
+ * Deliberately NOT the card's expo-out `[0.22, 1, 0.36, 1]`. That curve
+ * dumps ~70% of the blur in the first ~50ms, so even a correct
+ * interpolation reads as a snap on a 10–15fps screencast (and on
+ * device, to the eye). A standard-ease cubic keeps mid-transition
+ * softness on screen long enough to read as a fade.
+ */
+const SCRIM_EASE = [0.4, 0, 0.2, 1] as const;
 const SCRIM_IN: Transition = {
-  duration: 0.28,
-  ease: [0.22, 1, 0.36, 1],
-  opacity: { duration: 0.24, ease: EASE_OUT_SOFT },
-  [SCRIM_BLUR_VAR]: { duration: 0.28, ease: EASE_OUT_SOFT },
+  duration: 0.4,
+  ease: SCRIM_EASE,
+  opacity: { duration: 0.36, ease: SCRIM_EASE },
+  [SCRIM_BLUR_VAR]: { duration: 0.4, ease: SCRIM_EASE },
 };
 const SCRIM_OUT: Transition = {
-  duration: 0.22,
-  ease: [0.4, 0, 1, 1],
-  opacity: { duration: 0.18, ease: "easeIn" },
-  [SCRIM_BLUR_VAR]: { duration: 0.22, ease: "easeIn" },
+  duration: 0.32,
+  ease: SCRIM_EASE,
+  opacity: { duration: 0.28, ease: SCRIM_EASE },
+  [SCRIM_BLUR_VAR]: { duration: 0.32, ease: SCRIM_EASE },
 };
 
 const DRAG_CLOSE_OFFSET = 64;

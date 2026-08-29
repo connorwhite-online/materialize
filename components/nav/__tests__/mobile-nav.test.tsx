@@ -583,14 +583,24 @@ describe("MobileNav open/close fade", () => {
     expect(src).not.toMatch(/backdrop-blur-\[/);
   });
 
-  it("keeps the scrim on the card's open curve", () => {
-    const cardIn = Number(
-      src.match(/const CARD_IN[^=]*=\s*\{\s*duration:\s*([\d.]+)/)?.[1]
-    );
+  it("uses a readable ease, not the card's front-loaded expo-out", () => {
+    // The card's `[0.22, 1, 0.36, 1]` dumps most of the travel in the
+    // first frames — fine for a morphing pill, fatal for a fade that
+    // has to read as a fade. Scrim duration can exceed CARD_IN; the
+    // ease must not match CARD_IN's.
+    const cardEase = src.match(
+      /const CARD_IN[^=]*=\s*\{[^}]*ease:\s*(\[[^\]]*\])/
+    )?.[1];
+    const scrimEase = src.match(
+      /const SCRIM_EASE\s*=\s*(\[[^\]]*\])/
+    )?.[1];
+    expect(cardEase).toBe("[0.22, 1, 0.36, 1]");
+    expect(scrimEase).toBeTruthy();
+    expect(scrimEase).not.toBe(cardEase);
     const scrimIn = Number(
       src.match(/const SCRIM_IN[^=]*=\s*\{\s*duration:\s*([\d.]+)/)?.[1]
     );
-    expect(scrimIn).toBe(cardIn);
+    expect(scrimIn).toBeGreaterThanOrEqual(0.35);
   });
 
   it("crossfades the identity with blur, not opacity alone", () => {
