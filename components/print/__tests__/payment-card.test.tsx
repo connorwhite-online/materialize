@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { act, render, screen } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -25,7 +25,7 @@ vi.mock("../payment-card-scene", () => ({
   PaymentCardScene: () => null,
 }));
 
-import { PaymentCard } from "../payment-card";
+import { PaymentCard, WEBGL_FALLBACK_MS } from "../payment-card";
 
 describe("payment card labels", () => {
   it("formats the fee in USD", () => {
@@ -94,32 +94,50 @@ describe("PaymentCardFallback", () => {
 });
 
 describe("PaymentCard", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("exposes the fee on an img role while the canvas is loading", () => {
     render(<PaymentCard amountCents={99} />);
     expect(
       screen.getByRole("img", { name: /Materialize card, service fee \$0\.99/ })
     ).toBeTruthy();
-    expect(screen.getByTestId("payment-card-chip")).toBeTruthy();
+    // Pending: no CSS face yet — that was the dual-model flash.
+    expect(screen.queryByTestId("payment-card-fallback")).toBeNull();
   });
 
-  it("runs the enter animation class on the wrapper", () => {
-    const { container } = render(<PaymentCard amountCents={99} />);
+  it("holds an empty slot until WebGL times out, then shows CSS alone", () => {
+    vi.useFakeTimers();
+    const { container } = render(
+      <PaymentCard amountCents={99} brand="visa" last4="4242" />
+    );
+    expect(container.querySelector("[data-surface='pending']")).not.toBeNull();
+    expect(screen.queryByTestId("payment-card-fallback")).toBeNull();
+    expect(container.querySelector(".mz-pay-card-enter")).toBeNull();
+
+    act(() => {
+      vi.advanceTimersByTime(WEBGL_FALLBACK_MS);
+    });
+
+    expect(container.querySelector("[data-surface='fallback']")).not.toBeNull();
+    expect(screen.getByTestId("payment-card-fallback")).toBeTruthy();
+    expect(screen.getByTestId("payment-card-chip")).toBeTruthy();
     expect(container.querySelector(".mz-pay-card-enter")).not.toBeNull();
   });
 
-  it("keeps the CSS fallback mounted so a dead WebGL context can't blank the card", () => {
-    // Regression: unmounting on ready left a blank hole when SwiftShader
-    // then lost the context. Mount always; hide only while live.
-    render(<PaymentCard amountCents={99} brand="visa" last4="4242" />);
-    expect(screen.getByTestId("payment-card-fallback")).toBeTruthy();
-    expect(screen.getByTestId("payment-card-chip")).toBeTruthy();
+  it("never crossfades CSS and WebGL — one surface wins", () => {
+    // Regression: CSS underlay during pending + live canvas = two models
+    // flashing (flat titanium then dark tilted WebGL).
     const src = readFileSync(
       resolve(__dirname, "../payment-card.tsx"),
       "utf8"
     );
-    expect(src).toContain("Mounted always");
-    expect(src).toContain("opacity-0");
-    expect(src).not.toContain("{!live && (");
+    expect(src).toContain('CardSurface = "pending" | "live" | "fallback"');
+    expect(src).toContain("WEBGL_FALLBACK_MS");
+    expect(src).toContain('surface === "fallback"');
+    expect(src).toContain('surface === "live"');
+    expect(src).not.toContain("Mounted always");
   });
 });
 
