@@ -34,10 +34,12 @@ import {
 export const WEBGL_STABLE_MS = 500;
 
 function isSoftwareRenderer(gl: THREE.WebGLRenderer): boolean {
-  const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+  // `getExtension` lives on the WebGL *context*, not the Three renderer.
+  const ctx = gl.getContext();
+  const dbg = ctx.getExtension("WEBGL_debug_renderer_info");
   if (!dbg) return false;
   const renderer = String(
-    gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) ?? ""
+    ctx.getParameter(dbg.UNMASKED_RENDERER_WEBGL) ?? ""
   );
   return /swiftshader|llvmpipe|softpipe|software|microsoft basic render/i.test(
     renderer
