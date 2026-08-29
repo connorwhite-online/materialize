@@ -872,13 +872,33 @@
 }
 
 .mz-pay-card {
+  position: relative;
   width: 100%;
   height: 100%;
   perspective: 900px;
 }
 
+/* Soft ground drop behind the tilted face. Lives on a pseudo so we
+   don't put `filter` on an ancestor of the preserve-3d face (that
+   flattens the chip's translateZ). */
+.mz-pay-card::before {
+  content: "";
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  top: 18%;
+  bottom: -2%;
+  z-index: 0;
+  border-radius: 0.85rem;
+  background: rgb(0 0 0 / 0.38);
+  filter: blur(22px);
+  transform: translateY(14px) scale(0.96);
+  pointer-events: none;
+}
+
 .mz-pay-card-face {
   position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -888,13 +908,14 @@
   border-radius: 0.85rem;
   color: #f5f5f7;
   /* Clean metallic titanium — catalog Ti6Al4V stops + a soft specular
-     catch. No brush streaks; the WebGL body is the same idea via
-     metalness/clearcoat under studio IBL. */
+     catch. No brush streaks. This CSS face is the only card model on
+     the fee sheet (WebGL twin removed — looked worse on device). */
   background:
     radial-gradient(120% 90% at 0% 0%, rgb(140 140 160 / 0.38), transparent 55%),
     linear-gradient(145deg, #9a9aa0 0%, #6e6e72 42%, #3f3f44 100%);
   box-shadow:
-    0 18px 40px -18px rgb(0 0 0 / 0.45),
+    0 14px 28px -10px rgb(0 0 0 / 0.4),
+    0 4px 10px -4px rgb(0 0 0 / 0.22),
     inset 0 1px 0 rgb(255 255 255 / 0.34),
     inset 0 -1px 0 rgb(0 0 0 / 0.22);
   transform: rotateX(12deg) rotateY(-16deg);

@@ -4,11 +4,9 @@ import { useId } from "react";
 import { Logomark } from "@/components/brand/logo";
 
 /**
- * CSS stand-in for the WebGL payment card — lazy-load placeholder
- * and ErrorBoundary fallback so a missing WebGL context still shows
- * the same composition: Materialize mark top-left, metal chip
- * vertically centered on the right. The 3D scene paints over this
- * once the canvas is ready.
+ * Flat Materialize payment card — mark top-left, metal chip
+ * vertically centered on the right. This is the fee-sheet card
+ * (not a WebGL underlay).
  */
 
 export interface PaymentCardProps {
