@@ -67,7 +67,7 @@ interface ShippingAddressFormProps {
   savedAddress?: SavedCheckoutAddress | null;
   /**
    * Sheet chrome: drop the Card wrappers / icon tiles (the parent
-   * sheet already provides the surface + 3D hero) and rename Back
+   * sheet already provides the surface) and rename Back
    * to "Change shipping". Used by ShippingSheet's address step.
    */
   embedded?: boolean;

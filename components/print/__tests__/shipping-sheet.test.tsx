@@ -26,14 +26,6 @@ vi.mock("@/components/ui/native-sheet", () => ({
     ) : null,
 }));
 
-vi.mock("../shipping-drop", () => ({
-  ShippingDrop: () => <div data-testid="shipping-drop-hero" />,
-}));
-
-vi.mock("../address-home", () => ({
-  AddressHome: () => <div data-testid="address-home-hero" />,
-}));
-
 vi.mock("../shipping-address-form", () => ({
   ShippingAddressForm: ({
     embedded,
@@ -116,24 +108,21 @@ describe("ShippingSheet", () => {
     vi.useRealTimers();
   });
 
-  it("opens on shipping with the parachute hero and vendor name", () => {
+  it("opens on shipping with the vendor name and checkout CTAs", () => {
     renderSheet();
     expect(
       screen.getByRole("dialog", { name: "Choose shipping" })
     ).toBeTruthy();
-    expect(screen.getByTestId("shipping-drop-hero")).toBeTruthy();
     expect(screen.getByText("Acme Prints")).toBeTruthy();
     expect(screen.getByText("Proceed to checkout")).toBeTruthy();
   });
 
-  it("shows the cartoon house and embedded address form on the address step", () => {
+  it("shows the embedded address form on the address step", () => {
     renderSheet({ step: "address" });
     expect(
       screen.getByRole("dialog", { name: "Shipping address" })
     ).toBeTruthy();
-    expect(screen.getByTestId("address-home-hero")).toBeTruthy();
     expect(screen.getByText("embedded-address")).toBeTruthy();
-    expect(screen.queryByTestId("shipping-drop-hero")).toBeNull();
   });
 
   it("Change shipping returns to the shipping step", () => {

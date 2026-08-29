@@ -16,8 +16,6 @@ import {
 import { SandboxBadge } from "@/components/sandbox-badge";
 import { useSandbox } from "@/components/sandbox-context";
 import { calcServiceFee } from "@/lib/fees";
-import { ShippingDrop } from "./shipping-drop";
-import { AddressHome } from "./address-home";
 import {
   ShippingAddressForm,
   type SavedCheckoutAddress,
@@ -32,16 +30,18 @@ import type { MinimumFeeInfo } from "./price-display";
  * Dynamic checkout sheet opened by tapping a vendor quote.
  *
  * Steps:
- *   shipping — parachute-box hero, delivery dropdown (cheapest
- *              pre-selected by the parent), summary, Add to Cart /
- *              Proceed to checkout
- *   address  — cartoon-home hero + saved-address / address form
- *              (anon OTP lives inside the form)
+ *   shipping — delivery dropdown (cheapest pre-selected by the
+ *              parent), summary, Add to Cart / Proceed to checkout
+ *   address  — saved-address / address form (anon OTP lives inside
+ *              the form)
  *
  * Closing the sheet at any step cancels the pick — parent clears
  * selectedQuote + selectedShipping so the buyer is back on the
  * vendor list with nothing selected. Fee / saved-card sheets still
  * stack on top after address submit (existing payment chrome).
+ *
+ * Sheet 3D heroes were cut — reintroduce later when the models are
+ * ready; keep the fee-sheet PaymentCard as the pattern to follow.
  */
 
 export type CheckoutSheetStep = "shipping" | "address";
@@ -159,10 +159,6 @@ export function ShippingSheet({
       <div className="px-6 pt-1 pb-1">
         {step === "shipping" ? (
           <>
-            <div className="my-4">
-              <ShippingDrop />
-            </div>
-
             <div className="flex items-center gap-2">
               <div>
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -358,19 +354,14 @@ export function ShippingSheet({
             </div>
           </>
         ) : (
-          <>
-            <div className="my-4">
-              <AddressHome />
-            </div>
-            <ShippingAddressForm
-              embedded
-              onSubmit={onAddressSubmit}
-              onBack={() => onStepChange("shipping")}
-              isSubmitting={isSubmittingAddress}
-              anonMode={anonMode}
-              savedAddress={anonMode ? null : savedAddress}
-            />
-          </>
+          <ShippingAddressForm
+            embedded
+            onSubmit={onAddressSubmit}
+            onBack={() => onStepChange("shipping")}
+            isSubmitting={isSubmittingAddress}
+            anonMode={anonMode}
+            savedAddress={anonMode ? null : savedAddress}
+          />
         )}
       </div>
     </NativeSheet>
