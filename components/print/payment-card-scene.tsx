@@ -64,11 +64,16 @@ function ReadySignal({
  * the volume reads at the sheet's small canvas size.
  */
 
-/** Titanium Ti6Al4V catalog row — the card body. */
+/**
+ * Titanium Ti6Al4V catalog row — the card body.
+ * Bias a shade lighter than the raw #6e6e72 stop: ACES + studio IBL
+ * crush a mid-gray metal toward near-black on phone GPUs, while the
+ * CSS face reads as the lighter #9a9aa0→#6e6e72 plate. Match that.
+ */
 const TITANIUM = {
-  color: "#6e6e72",
-  metalness: 1,
-  roughness: 0.28,
+  color: "#8e8e96",
+  metalness: 0.92,
+  roughness: 0.32,
 } as const;
 
 const CHIP_GOLD = {
@@ -281,10 +286,10 @@ function Scene({
 
   return (
     <>
-      <ambientLight intensity={0.5} />
-      <directionalLight position={[5, 5, 5]} intensity={1.2} />
-      <directionalLight position={[-5, -3, -5]} intensity={0.5} />
-      <directionalLight position={[0, -5, 2]} intensity={0.3} />
+      <ambientLight intensity={0.72} />
+      <directionalLight position={[5, 5, 5]} intensity={1.35} />
+      <directionalLight position={[-5, -3, -5]} intensity={0.55} />
+      <directionalLight position={[0, -5, 2]} intensity={0.4} />
       <StudioEnvironment />
       <CardRig paused={paused}>
         <RoundedBox
@@ -297,9 +302,9 @@ function Scene({
             color={TITANIUM.color}
             metalness={TITANIUM.metalness}
             roughness={TITANIUM.roughness}
-            clearcoat={0.35}
-            clearcoatRoughness={0.28}
-            envMapIntensity={1.15}
+            clearcoat={0.28}
+            clearcoatRoughness={0.32}
+            envMapIntensity={1.35}
           />
         </RoundedBox>
         <LogoMark />
