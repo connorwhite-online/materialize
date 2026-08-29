@@ -1,14 +1,12 @@
 "use client";
 
 import type { CheckoutModel } from "@/lib/env";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { calcServiceFee } from "@/lib/fees";
 import { SandboxBadge } from "@/components/sandbox-badge";
 import { useSandbox } from "@/components/sandbox-context";
+import type { ShippingOption } from "./shipping-options";
 
 interface Quote {
   quoteId: string;
@@ -16,15 +14,6 @@ interface Quote {
   materialConfigId: string;
   price: number;
   currency: string;
-}
-
-interface ShippingOption {
-  shippingId: string;
-  vendorId: string;
-  name: string;
-  deliveryTime: number;
-  price: number;
-  type: "standard" | "express";
 }
 
 export interface MinimumFeeInfo {
@@ -36,23 +25,17 @@ export interface MinimumFeeInfo {
 
 interface PriceDisplayProps {
   selectedQuote: Quote | null;
-  shipping: ShippingOption[];
   selectedShipping: ShippingOption | null;
-  onSelectShipping: (option: ShippingOption) => void;
   quantity: number;
-  onCheckout: () => void;
-  isCheckingOut: boolean;
   checkoutError?: string | null;
-  onAddToCart?: () => void;
-  isAddingToCart?: boolean;
   /** Vendor minimum production fee info from checkCartPricing. */
   minimumFeeInfo?: MinimumFeeInfo | null;
   /** True while checkCartPricing is in flight. */
   checkingMinimum?: boolean;
   /**
    * When the configured vendor already has a cart, shipping is fixed
-   * to that cart's choice (one shipping option per vendor order). The
-   * picker renders read-only with an explanatory notice.
+   * to that cart's choice. Shown as a read-only line here; the
+   * shipping sheet owns the locked picker UI.
    */
   shippingLocked?: boolean;
   shippingLockedNotice?: string | null;
@@ -60,25 +43,23 @@ interface PriceDisplayProps {
    * Which checkout architecture the order will be created under.
    * Server-derived (getCheckoutModel() in the page component) and
    * threaded down as a prop — lib/env reads process.env, so the
-   * VALUE can't be computed in a client component. Under "two_step"
-   * we owe the customer a heads-up that their card will see two
-   * separate charges (our fee hold + CraftCloud's production
-   * charge) before they hit the button.
+   * VALUE can't be computed in a client component.
    */
   checkoutModel?: CheckoutModel;
 }
 
+/**
+ * Sticky order-summary card. Shipping selection and Add to Cart /
+ * Proceed to checkout live on ShippingSheet (opened by tapping a
+ * vendor) — this surface only mirrors the live totals while a
+ * quote is selected, and prompts the buyer to pick a vendor when
+ * nothing is.
+ */
 export function PriceDisplay({
   selectedQuote,
-  shipping,
   selectedShipping,
-  onSelectShipping,
   quantity,
-  onCheckout,
-  isCheckingOut,
   checkoutError,
-  onAddToCart,
-  isAddingToCart,
   minimumFeeInfo,
   checkingMinimum,
   shippingLocked,
@@ -86,7 +67,8 @@ export function PriceDisplay({
   checkoutModel = "single",
 }: PriceDisplayProps) {
   // Sandbox mode is worth exactly one callout, and this is it: the card
-  // with the checkout button on it.
+  // with the checkout totals on it. The shipping sheet also wears the
+  // chip (that's where the buttons are).
   const sandbox = useSandbox();
 
   if (!selectedQuote) {
@@ -94,16 +76,12 @@ export function PriceDisplay({
       <Card>
         <CardContent className="py-8">
           <p className="text-muted-foreground text-center">
-            Select a material to see pricing.
+            Pick a vendor to choose shipping and check out.
           </p>
         </CardContent>
       </Card>
     );
   }
-
-  const vendorShipping = shipping.filter(
-    (s) => s.vendorId === selectedQuote.vendorId
-  );
 
   const materialCost = selectedQuote.price * quantity;
   const minimumFee = minimumFeeInfo?.minimumProductionFee ?? 0;
@@ -156,68 +134,27 @@ export function PriceDisplay({
           </div>
         )}
 
-        <div className="pt-1">
-          <p className="text-xs font-medium text-muted-foreground mb-2">
+        <div className="flex justify-between text-sm">
+          <span className="text-muted-foreground">
             Shipping
-          </p>
-          {shippingLocked && selectedShipping ? (
-            // One shipping option per vendor cart — render the inherited
-            // choice read-only so the user isn't asked to re-pick (and
-            // can't split the vendor group across two shipping methods).
-            <div>
-              <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 p-3">
-                <div>
-                  <span className="text-sm">{selectedShipping.name}</span>
-                  <span className="ml-1 text-xs text-muted-foreground">
-                    ({selectedShipping.deliveryTime} days)
-                  </span>
-                </div>
-                <span className="text-sm font-medium">
-                  ${selectedShipping.price.toFixed(2)}
-                </span>
-              </div>
-              {shippingLockedNotice && (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {shippingLockedNotice}
-                </p>
-              )}
-            </div>
-          ) : (
-            <RadioGroup
-              value={selectedShipping?.shippingId ?? ""}
-              onValueChange={(value) => {
-                const option = vendorShipping.find(
-                  (s) => s.shippingId === value
-                );
-                if (option) onSelectShipping(option);
-              }}
-            >
-              {vendorShipping.map((option) => (
-                <Label
-                  key={option.shippingId}
-                  htmlFor={option.shippingId}
-                  className="flex cursor-pointer items-center justify-between rounded-lg border border-border p-3 transition-colors has-[[data-state=checked]]:border-primary"
-                >
-                  <div className="flex items-center gap-2">
-                    <RadioGroupItem
-                      value={option.shippingId}
-                      id={option.shippingId}
-                    />
-                    <div>
-                      <span className="text-sm">{option.name}</span>
-                      <span className="ml-1 text-xs text-muted-foreground">
-                        ({option.deliveryTime} days)
-                      </span>
-                    </div>
-                  </div>
-                  <span className="text-sm font-medium">
-                    ${option.price.toFixed(2)}
-                  </span>
-                </Label>
-              ))}
-            </RadioGroup>
-          )}
+            {shippingLocked ? " (locked)" : ""}
+          </span>
+          <span>
+            {selectedShipping
+              ? `$${shippingCost.toFixed(2)}`
+              : "—"}
+          </span>
         </div>
+        {shippingLocked && shippingLockedNotice && (
+          <p className="text-xs text-muted-foreground">
+            {shippingLockedNotice}
+          </p>
+        )}
+        {selectedShipping && (
+          <p className="text-xs text-muted-foreground">
+            {selectedShipping.name} · {selectedShipping.deliveryTime} days
+          </p>
+        )}
 
         <Separator />
 
@@ -249,27 +186,6 @@ export function PriceDisplay({
             CraftCloud&apos;s charge for production + shipping.
           </p>
         )}
-
-        {onAddToCart && (
-          <Button
-            variant="outline"
-            onClick={onAddToCart}
-            disabled={!selectedShipping || isAddingToCart}
-            className="w-full mt-2"
-            size="lg"
-          >
-            {isAddingToCart ? "Adding..." : "Add to Cart"}
-          </Button>
-        )}
-
-        <Button
-          onClick={onCheckout}
-          disabled={!selectedShipping || isCheckingOut}
-          className="w-full mt-2"
-          size="lg"
-        >
-          {isCheckingOut ? "Processing..." : "Proceed to checkout"}
-        </Button>
       </CardContent>
     </Card>
   );

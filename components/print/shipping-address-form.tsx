@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CheckboxField } from "@/components/ui/checkbox";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   InputOTP,
   InputOTPGroup,
@@ -65,6 +65,12 @@ interface ShippingAddressFormProps {
    * passed in anon mode — there's no history to draw from.
    */
   savedAddress?: SavedCheckoutAddress | null;
+  /**
+   * Sheet chrome: drop the Card wrappers / icon tiles (the parent
+   * sheet already provides the surface) and rename Back
+   * to "Change shipping". Used by ShippingSheet's address step.
+   */
+  embedded?: boolean;
 }
 
 const COUNTRIES = [
@@ -97,6 +103,7 @@ export function ShippingAddressForm({
   isSubmitting,
   anonMode = false,
   savedAddress = null,
+  embedded = false,
 }: ShippingAddressFormProps) {
   const {
     isLoaded: signUpLoaded,
@@ -359,72 +366,107 @@ export function ShippingAddressForm({
   // getSavedShippingAddress re-checks the required fields).
   if (stage === "saved" && savedAddress) {
     const { shipping: saved } = savedAddress;
-    return (
-      <div>
-        <Card>
-          <CardHeader className="flex flex-row items-center gap-3">
+    const body = (
+      <div className="space-y-4">
+        {!embedded && (
+          <div className="flex flex-row items-center gap-3">
             <IconTile tone="bg-green-100 text-green-600 dark:bg-green-950 dark:text-green-400">
               <PackageIcon className="h-6 w-6" strokeWidth={2.5} />
             </IconTile>
             <div>
-              <CardTitle ref={titleRef} tabIndex={-1} className="outline-none">
+              <h2
+                ref={titleRef}
+                tabIndex={-1}
+                className="text-base font-semibold outline-none"
+              >
                 Ship it to the usual?
-              </CardTitle>
+              </h2>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 We kept your address from last time.
               </p>
             </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-start gap-3 rounded-2xl border border-border/60 p-4">
-              <IconTile tone="bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-400">
-                <MapPinIcon className="h-5 w-5" strokeWidth={2.5} />
-              </IconTile>
-              <div className="min-w-0 text-sm">
-                <p className="font-medium">
-                  {saved.firstName} {saved.lastName}
-                </p>
-                <p className="text-muted-foreground">
-                  {saved.address}
-                  {saved.addressLine2 ? `, ${saved.addressLine2}` : ""}
-                </p>
-                <p className="text-muted-foreground">
-                  {saved.city}
-                  {saved.stateCode ? `, ${saved.stateCode}` : ""}{" "}
-                  {saved.zipCode} · {saved.countryCode}
-                </p>
-                <p className="mt-1 truncate text-xs text-muted-foreground">
-                  {savedAddress.email}
-                </p>
-              </div>
-            </div>
+          </div>
+        )}
+        {embedded && (
+          <div>
+            <h2
+              ref={titleRef}
+              tabIndex={-1}
+              className="text-lg font-semibold outline-none"
+            >
+              Ship it to the usual?
+            </h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              We kept your address from last time.
+            </p>
+          </div>
+        )}
+        <div className="flex items-start gap-3 rounded-2xl border border-border/60 p-4">
+          <IconTile tone="bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-400">
+            <MapPinIcon className="h-5 w-5" strokeWidth={2.5} />
+          </IconTile>
+          <div className="min-w-0 text-sm">
+            <p className="font-medium">
+              {saved.firstName} {saved.lastName}
+            </p>
+            <p className="text-muted-foreground">
+              {saved.address}
+              {saved.addressLine2 ? `, ${saved.addressLine2}` : ""}
+            </p>
+            <p className="text-muted-foreground">
+              {saved.city}
+              {saved.stateCode ? `, ${saved.stateCode}` : ""} {saved.zipCode} ·{" "}
+              {saved.countryCode}
+            </p>
+            <p className="mt-1 truncate text-xs text-muted-foreground">
+              {savedAddress.email}
+            </p>
+          </div>
+        </div>
 
-            <div className="space-y-3">
-              <Button
-                type="button"
-                className="w-full"
-                disabled={isSubmitting}
-                onClick={() => onSubmit(savedAddress)}
-              >
-                <TruckIcon
-                  className="mr-2 h-4 w-4"
-                  strokeWidth={2.5}
-                  aria-hidden="true"
-                />
-                {isSubmitting ? "Processing..." : "Deliver to this address"}
-              </Button>
-              <button
-                type="button"
-                onClick={() => setStage("form")}
-                disabled={isSubmitting}
-                className="block w-full text-center text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-              >
-                Use a different address
-              </button>
-            </div>
-          </CardContent>
+        <div className="space-y-3">
+          <Button
+            type="button"
+            className="w-full"
+            disabled={isSubmitting}
+            onClick={() => onSubmit(savedAddress)}
+          >
+            <TruckIcon
+              className="mr-2 h-4 w-4"
+              strokeWidth={2.5}
+              aria-hidden="true"
+            />
+            {isSubmitting ? "Processing..." : "Deliver to this address"}
+          </Button>
+          <button
+            type="button"
+            onClick={() => setStage("form")}
+            disabled={isSubmitting}
+            className="block w-full text-center text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+          >
+            Use a different address
+          </button>
+          {embedded && (
+            <button
+              type="button"
+              onClick={onBack}
+              disabled={isSubmitting}
+              className="block w-full text-center text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+            >
+              Change shipping
+            </button>
+          )}
+        </div>
+      </div>
+    );
+
+    if (embedded) return <div>{body}</div>;
+
+    return (
+      <div>
+        <Card>
+          <CardContent className="pt-6">{body}</CardContent>
         </Card>
-
         <div className="mt-6">
           <Button
             type="button"
@@ -440,91 +482,122 @@ export function ShippingAddressForm({
   }
 
   if (stage === "code") {
+    const codeBody = (
+      <div className="space-y-4">
+        {embedded ? (
+          <h2
+            ref={titleRef}
+            tabIndex={-1}
+            className="text-lg font-semibold outline-none"
+          >
+            Verify your email
+          </h2>
+        ) : (
+          <div className="flex flex-row items-center gap-3">
+            <IconTile tone="bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400">
+              <MailOpenIcon className="h-6 w-6" strokeWidth={2.5} />
+            </IconTile>
+            <h2
+              ref={titleRef}
+              tabIndex={-1}
+              className="text-base font-semibold outline-none"
+            >
+              Verify your email
+            </h2>
+          </div>
+        )}
+        <p className="text-sm text-muted-foreground">
+          We sent a 6-digit code to{" "}
+          <span className="font-medium text-foreground">{email}</span>.{" "}
+          {authFlow === "sign-up"
+            ? "Enter it to finish setting up your account and place your order."
+            : "Looks like you already have an account — enter the code to sign in and place your order."}
+        </p>
+        <div className="flex justify-center">
+          <InputOTP
+            maxLength={6}
+            value={otpCode}
+            onChange={(val) => {
+              setOtpCode(val);
+              if (val.length === 6) handleVerifyOtp(val);
+            }}
+            autoFocus
+            disabled={otpVerifying || isSubmitting}
+            aria-label="6-digit verification code"
+            aria-invalid={!!otpError}
+            aria-describedby={otpError ? "otp-error" : undefined}
+          >
+            <InputOTPGroup>
+              <InputOTPSlot index={0} />
+              <InputOTPSlot index={1} />
+              <InputOTPSlot index={2} />
+              <InputOTPSlot index={3} />
+              <InputOTPSlot index={4} />
+              <InputOTPSlot index={5} />
+            </InputOTPGroup>
+          </InputOTP>
+        </div>
+        {otpError && (
+          <p
+            id="otp-error"
+            role="alert"
+            className="text-center text-xs text-destructive"
+          >
+            {otpError}
+          </p>
+        )}
+        {(otpVerifying || isSubmitting) && (
+          <p role="status" className="text-center text-xs text-muted-foreground">
+            {isSubmitting ? "Placing your order…" : "Verifying…"}
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={() => {
+            setStage("form");
+            setOtpCode("");
+            setOtpError("");
+            setPendingSubmission(null);
+          }}
+          disabled={otpVerifying || isSubmitting}
+          className="block w-full text-center text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+        >
+          Use a different email
+        </button>
+      </div>
+    );
+    if (embedded) return <div>{codeBody}</div>;
     return (
       <Card>
-        <CardHeader className="flex flex-row items-center gap-3">
-          <IconTile tone="bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400">
-            <MailOpenIcon className="h-6 w-6" strokeWidth={2.5} />
-          </IconTile>
-          <CardTitle ref={titleRef} tabIndex={-1} className="outline-none">
-            Verify your email
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            We sent a 6-digit code to{" "}
-            <span className="font-medium text-foreground">{email}</span>.{" "}
-            {authFlow === "sign-up"
-              ? "Enter it to finish setting up your account and place your order."
-              : "Looks like you already have an account — enter the code to sign in and place your order."}
-          </p>
-          <div className="flex justify-center">
-            <InputOTP
-              maxLength={6}
-              value={otpCode}
-              onChange={(val) => {
-                setOtpCode(val);
-                if (val.length === 6) handleVerifyOtp(val);
-              }}
-              autoFocus
-              disabled={otpVerifying || isSubmitting}
-              aria-label="6-digit verification code"
-              aria-invalid={!!otpError}
-              aria-describedby={otpError ? "otp-error" : undefined}
-            >
-              <InputOTPGroup>
-                <InputOTPSlot index={0} />
-                <InputOTPSlot index={1} />
-                <InputOTPSlot index={2} />
-                <InputOTPSlot index={3} />
-                <InputOTPSlot index={4} />
-                <InputOTPSlot index={5} />
-              </InputOTPGroup>
-            </InputOTP>
-          </div>
-          {otpError && (
-            <p id="otp-error" role="alert" className="text-xs text-destructive text-center">
-              {otpError}
-            </p>
-          )}
-          {(otpVerifying || isSubmitting) && (
-            <p
-              role="status"
-              className="text-xs text-muted-foreground text-center"
-            >
-              {isSubmitting ? "Placing your order…" : "Verifying…"}
-            </p>
-          )}
-          <button
-            type="button"
-            onClick={() => {
-              setStage("form");
-              setOtpCode("");
-              setOtpError("");
-              setPendingSubmission(null);
-            }}
-            disabled={otpVerifying || isSubmitting}
-            className="block w-full text-center text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-          >
-            Use a different email
-          </button>
-        </CardContent>
+        <CardContent className="pt-6">{codeBody}</CardContent>
       </Card>
     );
   }
 
-  return (
-    <form ref={formRef} onSubmit={handleSubmit}>
-      <Card>
-        <CardHeader className="flex flex-row items-center gap-3">
-          <IconTile tone="bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-400">
-            <TruckIcon className="h-6 w-6" strokeWidth={2.5} />
-          </IconTile>
-          <CardTitle ref={titleRef} tabIndex={-1} className="outline-none">
-            Shipping Address
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
+  const formFields = (
+          <div className="space-y-4">
+        {embedded ? (
+          <h2
+            ref={titleRef}
+            tabIndex={-1}
+            className="text-lg font-semibold outline-none"
+          >
+            Where should we ship?
+          </h2>
+        ) : (
+          <div className="flex flex-row items-center gap-3">
+            <IconTile tone="bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-400">
+              <TruckIcon className="h-6 w-6" strokeWidth={2.5} />
+            </IconTile>
+            <h2
+              ref={titleRef}
+              tabIndex={-1}
+              className="text-base font-semibold outline-none"
+            >
+              Shipping Address
+            </h2>
+          </div>
+        )}
           <div>
             <Label htmlFor="email">Email</Label>
             <Input
@@ -674,8 +747,18 @@ export function ShippingAddressForm({
               label="Billing address same as shipping"
             />
           </div>
-        </CardContent>
-      </Card>
+          </div>
+  );
+
+  return (
+    <form ref={formRef} onSubmit={handleSubmit}>
+      {embedded ? (
+        formFields
+      ) : (
+        <Card>
+          <CardContent className="pt-6">{formFields}</CardContent>
+        </Card>
+      )}
 
       {anonMode && otpError && stage === "form" && (
         <p role="alert" className="mt-3 text-xs text-destructive">
@@ -686,11 +769,12 @@ export function ShippingAddressForm({
       <div className="mt-6 flex gap-3">
         <Button
           type="button"
-          variant="outline"
+          variant={embedded ? "ghost" : "outline"}
           onClick={onBack}
           disabled={isSubmitting || otpSending}
+          className={embedded ? "text-muted-foreground" : undefined}
         >
-          Back
+          {embedded ? "Change shipping" : "Back"}
         </Button>
         <Button
           type="submit"

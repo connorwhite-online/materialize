@@ -27,10 +27,12 @@ export const PUBLIC_ROUTES = [
   "/print(.*)",
   "/collections(.*)",
   "/projects(.*)",
-  // Mock-only payment chrome preview (3D fee card). The page itself
-  // notFound()s when CraftCloud mock mode is off — listed here so that
-  // gate can run instead of auth.protect() disclosing the route.
+  // Mock-only payment / checkout chrome previews (3D fee card,
+  // vendor checkout sheet). Each page notFound()s when CraftCloud
+  // mock mode is off — listed here so that gate can run instead of
+  // auth.protect() disclosing the route.
   "/sandbox/fee-sheet",
+  "/sandbox/checkout-sheet",
   // Owner-gated surfaces: the Prometheus studio + scorecard, and the
   // operator tools under /internal. Public at the proxy layer so each
   // page runs its own gate and notFound()s for everyone else — reaching

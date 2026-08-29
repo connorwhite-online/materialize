@@ -87,7 +87,9 @@ function SelectContent({
         align={align}
         alignOffset={alignOffset}
         alignItemWithTrigger={alignItemWithTrigger}
-        className="isolate z-50"
+        // Above NativeSheet (z-[70]) so dropdowns inside sheets aren't
+        // painted under the sheet panel / backdrop.
+        className="isolate z-[80]"
       >
         <SelectPrimitive.Popup
           data-slot="select-content"

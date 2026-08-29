@@ -38,16 +38,6 @@ describe("PriceDisplay — service fee matches calcServiceFee (MTR-134)", () => 
             price: 10, // dollars — materialCost = price * quantity = $10
             currency: "USD",
           }}
-          shipping={[
-            {
-              shippingId: "ship-1",
-              vendorId: "vendor-1",
-              name: "Standard",
-              deliveryTime: 5,
-              price: 5,
-              type: "standard",
-            },
-          ]}
           selectedShipping={{
             shippingId: "ship-1",
             vendorId: "vendor-1",
@@ -56,10 +46,7 @@ describe("PriceDisplay — service fee matches calcServiceFee (MTR-134)", () => 
             price: 5,
             type: "standard",
           }}
-          onSelectShipping={() => {}}
           quantity={1}
-          onCheckout={() => {}}
-          isCheckingOut={false}
           checkoutModel={checkoutModel}
         />
       );
