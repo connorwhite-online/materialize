@@ -25,8 +25,27 @@ import {
 } from "./payment-card-layout";
 
 /**
- * Fire onReady only after the first successful painted frame.
- * onCreated's rAF is too early on SwiftShader.
+ * How long the context must stay healthy before we promote to `live`.
+ * SwiftShader (and flaky mobile GPUs) often paint one frame, we used
+ * to call onReady, then lose the context — fee sheet flashed WebGL
+ * then snapped to CSS. Hold the canvas at opacity-0 until this gate
+ * passes; if it dies first, onFail and the user never saw WebGL.
+ */
+export const WEBGL_STABLE_MS = 500;
+
+function isSoftwareRenderer(gl: THREE.WebGLRenderer): boolean {
+  const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+  if (!dbg) return false;
+  const renderer = String(
+    gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) ?? ""
+  );
+  return /swiftshader|llvmpipe|softpipe|software|microsoft basic render/i.test(
+    renderer
+  );
+}
+
+/**
+ * Promote only after a healthy stretch — never on the first frame.
  */
 function ReadySignal({
   onReady,
@@ -35,16 +54,21 @@ function ReadySignal({
   onReady?: () => void;
   onFail?: () => void;
 }) {
-  const signaled = useRef(false);
+  const decided = useRef(false);
+  const goodSince = useRef<number | null>(null);
   useFrame(({ gl }) => {
-    if (signaled.current) return;
+    if (decided.current) return;
     if (gl.getContext().isContextLost()) {
-      signaled.current = true;
+      decided.current = true;
       onFail?.();
       return;
     }
-    signaled.current = true;
-    onReady?.();
+    const now = performance.now();
+    if (goodSince.current == null) goodSince.current = now;
+    if (now - goodSince.current >= WEBGL_STABLE_MS) {
+      decided.current = true;
+      onReady?.();
+    }
   });
   return null;
 }
@@ -324,6 +348,12 @@ export function PaymentCardScene({
       }}
       frameloop={paused ? "demand" : "always"}
       onCreated={({ gl }) => {
+        // Software GL will paint a frame then die (or look wrong).
+        // Bail before ReadySignal can ever promote to `live`.
+        if (isSoftwareRenderer(gl)) {
+          onFail?.();
+          return;
+        }
         const el = gl.domElement;
         el.addEventListener(
           "webglcontextlost",

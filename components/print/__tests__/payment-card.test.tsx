@@ -171,6 +171,19 @@ describe("thin WebGL plate", () => {
     expect(src).toMatch(/-16\s*\*\s*Math\.PI/);
   });
 
+  it("does not promote WebGL on the first frame (no live→CSS flash)", () => {
+    // Regression: ReadySignal called onReady on frame 1; SwiftShader
+    // then lost the context and the fee sheet flashed 3D → CSS.
+    expect(src).toContain("WEBGL_STABLE_MS");
+    expect(src).toContain("isSoftwareRenderer");
+    expect(src).toMatch(/WEBGL_STABLE_MS\s*=\s*[5-9]\d{2}/);
+    const wrapper = readFileSync(
+      resolve(__dirname, "../payment-card.tsx"),
+      "utf8"
+    );
+    expect(wrapper).toContain("failedRef");
+  });
+
   it("soft-fades the wrapper once a surface wins", () => {
     expect(css).toContain("@keyframes mz-pay-card-enter");
     expect(css).toContain("--ease-out-soft");
