@@ -19,13 +19,15 @@ import {
  * node_modules/next/dist/docs/01-app/02-guides/lazy-loading.md —
  * `ssr: false` is only legal in a Client Component).
  *
- * The CSS fallback is the first paint and the stand-in whenever WebGL
- * isn't available (context lost, no GPU, ErrorBoundary). We only hide
- * it after the canvas reports a live, non-lost context — otherwise a
- * SwiftShader context-lost leaves a blank hole in the fee sheet.
+ * The CSS fallback is ALWAYS mounted underneath the canvas. We used
+ * to unmount it once WebGL reported ready — on SwiftShader / flaky
+ * GPUs the context then dies and leaves a blank hole the size of the
+ * card (the fee-sheet "where did the card go?" bug). Keeping the
+ * fallback under the canvas means a lost/blank GL surface still
+ * shows the metal card. The canvas only paints on top when `live`.
  *
  * Entrance (soft fade / lift / scale) lives on `.mz-pay-card-enter`
- * in globals.css so both the fallback and the canvas share one motion.
+ * in globals.css so both layers share one motion.
  */
 
 const PaymentCardScene = dynamic(
@@ -53,17 +55,12 @@ export function PaymentCard({
       aria-label={paymentCardAriaLabel(props)}
     >
       <div className="relative aspect-[1.586] w-full">
-        {!live && (
-          <div className="absolute inset-0">
-            <PaymentCardFallback {...props} />
-          </div>
-        )}
+        {/* Permanent underlay — never unmount. */}
+        <div className="absolute inset-0" data-testid="payment-card-fallback">
+          <PaymentCardFallback {...props} />
+        </div>
         <ErrorBoundary
-          fallback={
-            <div className="absolute inset-0">
-              <PaymentCardFallback {...props} />
-            </div>
-          }
+          fallback={null}
         >
           <div
             className={
@@ -71,6 +68,7 @@ export function PaymentCard({
                 ? "absolute inset-0"
                 : "pointer-events-none absolute inset-0 opacity-0"
             }
+            aria-hidden={!live}
           >
             <PaymentCardScene
               {...props}

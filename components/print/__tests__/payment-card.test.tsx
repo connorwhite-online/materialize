@@ -106,6 +106,20 @@ describe("PaymentCard", () => {
     const { container } = render(<PaymentCard amountCents={99} />);
     expect(container.querySelector(".mz-pay-card-enter")).not.toBeNull();
   });
+
+  it("keeps the CSS fallback mounted so a dead WebGL context can't blank the card", () => {
+    // Regression: onReady hid the fallback, then SwiftShader lost the
+    // context and the fee sheet showed a card-sized empty hole.
+    render(<PaymentCard amountCents={99} brand="visa" last4="4242" />);
+    expect(screen.getByTestId("payment-card-fallback")).toBeTruthy();
+    expect(screen.getByTestId("payment-card-chip")).toBeTruthy();
+    const src = readFileSync(
+      resolve(__dirname, "../payment-card.tsx"),
+      "utf8"
+    );
+    expect(src).toContain("Permanent underlay");
+    expect(src).not.toContain("{!live && (");
+  });
 });
 
 describe("3D card composition", () => {
@@ -127,6 +141,7 @@ describe("3D card composition", () => {
     expect(src).toContain("LOGO_POSITION");
     expect(src).toContain("CHIP_POSITION");
     expect(src).toContain("ContactShadows");
+    expect(src).toContain("ReadySignal");
     expect(src).not.toContain("meshBasicMaterial");
     expect(src).not.toContain("meshToonMaterial");
   });

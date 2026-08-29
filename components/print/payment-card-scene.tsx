@@ -25,6 +25,33 @@ import {
 } from "./payment-card-layout";
 
 /**
+ * Fire onReady only after the first successful painted frame.
+ * onCreated's rAF is too early on SwiftShader — it reports a live
+ * context, we hide the CSS underlay, then the context dies and the
+ * fee sheet shows a blank card-sized hole.
+ */
+function ReadySignal({
+  onReady,
+  onFail,
+}: {
+  onReady?: () => void;
+  onFail?: () => void;
+}) {
+  const signaled = useRef(false);
+  useFrame(({ gl }) => {
+    if (signaled.current) return;
+    if (gl.getContext().isContextLost()) {
+      signaled.current = true;
+      onFail?.();
+      return;
+    }
+    signaled.current = true;
+    onReady?.();
+  });
+  return null;
+}
+
+/**
  * Studio-lit 3D Materialize payment card.
  *
  * Same lighting stack as the dropzone primitives (physical metal +
@@ -325,17 +352,9 @@ export function PaymentCardScene({
           },
           false
         );
-        // Defer past a synchronous context-lost so SwiftShader /
-        // headless GPUs don't flash the canvas over the fallback.
-        requestAnimationFrame(() => {
-          if (gl.getContext().isContextLost()) {
-            onFail?.();
-            return;
-          }
-          onReady?.();
-        });
       }}
     >
+      <ReadySignal onReady={onReady} onFail={onFail} />
       <Scene
         paused={paused}
         amountCents={amountCents}
