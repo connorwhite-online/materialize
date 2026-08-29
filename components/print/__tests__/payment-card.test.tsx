@@ -108,8 +108,8 @@ describe("PaymentCard", () => {
   });
 
   it("keeps the CSS fallback mounted so a dead WebGL context can't blank the card", () => {
-    // Regression: onReady hid the fallback, then SwiftShader lost the
-    // context and the fee sheet showed a card-sized empty hole.
+    // Regression: unmounting on ready left a blank hole when SwiftShader
+    // then lost the context. Mount always; hide only while live.
     render(<PaymentCard amountCents={99} brand="visa" last4="4242" />);
     expect(screen.getByTestId("payment-card-fallback")).toBeTruthy();
     expect(screen.getByTestId("payment-card-chip")).toBeTruthy();
@@ -117,7 +117,8 @@ describe("PaymentCard", () => {
       resolve(__dirname, "../payment-card.tsx"),
       "utf8"
     );
-    expect(src).toContain("Permanent underlay");
+    expect(src).toContain("Mounted always");
+    expect(src).toContain("opacity-0");
     expect(src).not.toContain("{!live && (");
   });
 });
@@ -167,8 +168,11 @@ describe("3D card composition", () => {
   });
 
   it("paints the body as catalog titanium, chip as gold metal", () => {
-    expect(src).toContain(getMaterialById("titanium")!.color);
-    expect(src).toContain("metalness: 1");
+    // Bias lighter than the raw catalog stop — ACES + IBL crush mid
+    // gray metal toward black on phone GPUs. Still the titanium row.
+    expect(getMaterialById("titanium")!.color).toBe("#6e6e72");
+    expect(src).toContain("#8e8e96");
+    expect(src).toMatch(/metalness:\s*0\.9/);
     expect(src).toContain("#c9a227");
     expect(src).toContain("CHIP_GOLD");
   });

@@ -19,12 +19,14 @@ import {
  * node_modules/next/dist/docs/01-app/02-guides/lazy-loading.md —
  * `ssr: false` is only legal in a Client Component).
  *
- * The CSS fallback is ALWAYS mounted underneath the canvas. We used
- * to unmount it once WebGL reported ready — on SwiftShader / flaky
- * GPUs the context then dies and leaves a blank hole the size of the
- * card (the fee-sheet "where did the card go?" bug). Keeping the
- * fallback under the canvas means a lost/blank GL surface still
- * shows the metal card. The canvas only paints on top when `live`.
+ * The CSS fallback stays mounted under the canvas for the whole
+ * life of the component — unmounting it on ready was the blank-hole
+ * bug (SwiftShader reports ready, then loses the context). While
+ * WebGL is live we only *hide* the underlay (opacity-0); otherwise
+ * the tilted 3D card and the flat CSS face both show through the
+ * transparent canvas and read as a duplicated stack. On context
+ * lost / ErrorBoundary we flip `live` off and the underlay is
+ * visible again with no remount flash.
  *
  * Entrance (soft fade / lift / scale) lives on `.mz-pay-card-enter`
  * in globals.css so both layers share one motion.
@@ -55,13 +57,19 @@ export function PaymentCard({
       aria-label={paymentCardAriaLabel(props)}
     >
       <div className="relative aspect-[1.586] w-full">
-        {/* Permanent underlay — never unmount. */}
-        <div className="absolute inset-0" data-testid="payment-card-fallback">
+        {/* Mounted always; visually hidden while the canvas is live. */}
+        <div
+          className={
+            live
+              ? "pointer-events-none absolute inset-0 opacity-0"
+              : "absolute inset-0"
+          }
+          data-testid="payment-card-fallback"
+          aria-hidden={live}
+        >
           <PaymentCardFallback {...props} />
         </div>
-        <ErrorBoundary
-          fallback={null}
-        >
+        <ErrorBoundary fallback={null}>
           <div
             className={
               live
