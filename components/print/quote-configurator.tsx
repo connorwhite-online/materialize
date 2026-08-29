@@ -12,10 +12,15 @@ import type { MaterialsManifestResponse } from "@/app/api/craftcloud/materials-m
 import { PriceDisplay, type MinimumFeeInfo } from "./price-display";
 import type { CheckoutModel } from "@/lib/env";
 import type { Currency } from "@/lib/craftcloud/types";
+import { type SavedCheckoutAddress } from "./shipping-address-form";
 import {
-  ShippingAddressForm,
-  type SavedCheckoutAddress,
-} from "./shipping-address-form";
+  ShippingSheet,
+  type CheckoutSheetStep,
+} from "./shipping-sheet";
+import {
+  cheapestShippingForVendor,
+  type ShippingOption,
+} from "./shipping-options";
 import { pollQuotes } from "./poll-quotes";
 import { runAnonCheckout } from "./run-anon-checkout";
 import {
@@ -81,15 +86,6 @@ type CheckoutAddressData = {
     vatId?: string;
   };
 };
-
-interface ShippingOption {
-  shippingId: string;
-  vendorId: string;
-  name: string;
-  deliveryTime: number;
-  price: number;
-  type: "standard" | "express";
-}
 
 export interface DraftModeConfig {
   /** CraftCloud model id — the client already uploaded the file. */
@@ -163,7 +159,7 @@ interface QuoteConfiguratorProps {
   checkoutModel?: CheckoutModel;
 }
 
-type CheckoutStep = "configure" | "address" | "processing";
+type CheckoutStep = "configure" | "processing";
 type LoadingPhase = "uploading" | "quoting" | "done" | "timeout";
 
 // Sort anchor threshold — the picker re-ranks vendor/finish/material
@@ -235,6 +231,11 @@ export function QuoteConfigurator({
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
   const [selectedShipping, setSelectedShipping] =
     useState<ShippingOption | null>(null);
+  // Vendor-tap opens the checkout sheet (shipping → address). Dismiss
+  // clears the pick so the buyer is back on the vendor list.
+  const [shippingSheetOpen, setShippingSheetOpen] = useState(false);
+  const [checkoutSheetStep, setCheckoutSheetStep] =
+    useState<CheckoutSheetStep>("shipping");
   // Live mirrors of the current selection, used by the cart-pricing
   // effect to discard a stale (slow) checkCartPricing response whose
   // quote/vendor/shipping no longer matches what the user has picked.
@@ -255,10 +256,8 @@ export function QuoteConfigurator({
     }
   }, [quantity, sortQuantity]);
   // Drop a shipping option that belonged to a previously-selected vendor
-  // when the user switches quotes. PriceDisplay only *hides* the stale
-  // option (it filters by selectedQuote.vendorId), but the state stays
-  // truthy and keeps checkout enabled — so without this, checkout could
-  // fire with a shippingId/price from the wrong vendor. See CON-53.
+  // when the user switches quotes. Without this, checkout could fire
+  // with a shippingId/price from the wrong vendor. See CON-53.
   useEffect(() => {
     if (
       selectedShipping &&
@@ -460,7 +459,7 @@ export function QuoteConfigurator({
   // EXCLUDED.quantity) and silently double the quantity (MTR-232).
   // The ref is the synchronous reentry guard (state updates aren't
   // visible until the next render, same reason cart-context.tsx's
-  // materializingRef exists); isCheckingOut is the state PriceDisplay
+  // materializingRef exists); isCheckingOut is the state ShippingSheet
   // reads to disable the button and show "Processing...".
   const checkoutButtonInFlightRef = useRef(false);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
@@ -530,6 +529,50 @@ export function QuoteConfigurator({
       setSelectedShipping(lockedShippingOption);
     }
   }, [lockedShippingOption, selectedShipping]);
+
+  // If shipping for the open vendor arrives after the sheet opened
+  // (late poll snapshot) and nothing is selected yet, preselect the
+  // cheapest — same as the initial tap. Locked carts win via the
+  // effect above.
+  useEffect(() => {
+    if (!shippingSheetOpen || !selectedQuote || selectedShipping) return;
+    if (lockedShippingOption) return;
+    const cheapest = cheapestShippingForVendor(
+      shipping,
+      selectedQuote.vendorId
+    );
+    if (cheapest) setSelectedShipping(cheapest);
+  }, [
+    shipping,
+    shippingSheetOpen,
+    selectedQuote,
+    selectedShipping,
+    lockedShippingOption,
+  ]);
+
+  const handleSelectQuote = useCallback(
+    (quote: Quote) => {
+      setSelectedQuote(quote);
+      const existingId = cart?.items.find((i) => i.vendorId === quote.vendorId)
+        ?.shippingId;
+      const locked = existingId
+        ? shipping.find((s) => s.shippingId === existingId) ?? null
+        : null;
+      const cheapest = cheapestShippingForVendor(shipping, quote.vendorId);
+      setSelectedShipping(locked ?? cheapest);
+      setCheckoutSheetStep("shipping");
+      setShippingSheetOpen(true);
+    },
+    [cart, shipping]
+  );
+
+  const dismissCheckoutSheet = useCallback(() => {
+    setShippingSheetOpen(false);
+    setCheckoutSheetStep("shipping");
+    setSelectedQuote(null);
+    setSelectedShipping(null);
+    setCheckoutError(null);
+  }, []);
 
   // Single polite live region message for the quote pipeline + the
   // quantity clamp (CON-62 / CON-64). Screen readers announce this on
@@ -666,6 +709,7 @@ export function QuoteConfigurator({
         if ("error" in localResult) {
           setCheckoutError(localResult.error);
         } else {
+          dismissCheckoutSheet();
           onAddedToCart?.(selectedQuote.vendorId);
         }
       } else if (fileAssetId) {
@@ -686,13 +730,14 @@ export function QuoteConfigurator({
         if ("error" in result) {
           setCheckoutError(result.error);
         } else {
+          dismissCheckoutSheet();
           onAddedToCart?.(selectedQuote.vendorId);
         }
       }
     } finally {
       setIsAddingToCart(false);
     }
-  }, [selectedQuote, selectedShipping, priceId, fileAssetId, draftMode, cart, quantity, region.code, filename, onAddedToCart]);
+  }, [selectedQuote, selectedShipping, priceId, fileAssetId, draftMode, cart, quantity, region.code, filename, onAddedToCart, dismissCheckoutSheet]);
 
   // Active material scope for the CraftCloud price request. Starts
   // as the preselectMaterialId (from /materials/[slug] → Print with
@@ -725,6 +770,8 @@ export function QuoteConfigurator({
     // quoteId is no longer valid against the new quote set.
     setSelectedQuote(null);
     setSelectedShipping(null);
+    setShippingSheetOpen(false);
+    setCheckoutSheetStep("shipping");
     setPriceId(null);
     // Don't wipe the existing cards — they'll repopulate as new
     // poll snapshots come in, and keeping them avoids a flash of
@@ -936,7 +983,9 @@ export function QuoteConfigurator({
       // The heavy chain runs in handleAddressSubmit once the session is
       // live.
       if (draftMode || !fileAssetId || isAnon) {
-        setStep("address");
+        // Address lives in the checkout sheet now — advance the
+        // sheet instead of swapping the whole page.
+        setCheckoutSheetStep("address");
         return;
       }
 
@@ -982,7 +1031,7 @@ export function QuoteConfigurator({
         }
         await cart.refresh();
         setPrintOrderId(grouped.orderId);
-        setStep("address");
+        setCheckoutSheetStep("address");
         return;
       }
 
@@ -1006,7 +1055,7 @@ export function QuoteConfigurator({
       }
 
       setPrintOrderId(result.orderId);
-      setStep("address");
+      setCheckoutSheetStep("address");
     } finally {
       // Covers every exit path above — the early-return branches
       // (draft/anon handoff, vendor-group checkout, single-order
@@ -1038,7 +1087,9 @@ export function QuoteConfigurator({
     if (draftMode) {
       if (!selectedQuote || !selectedShipping || !priceId) {
         setCheckoutError("Please pick a material and a shipping option.");
-        setStep("address");
+        setCheckoutSheetStep("address");
+        setShippingSheetOpen(true);
+        setStep("configure");
         checkoutInFlightRef.current = false;
         return;
       }
@@ -1064,7 +1115,9 @@ export function QuoteConfigurator({
 
       if (!result.ok) {
         setCheckoutError(result.error);
-        setStep("address");
+        setStep("configure");
+        setCheckoutSheetStep("address");
+        setShippingSheetOpen(true);
         checkoutInFlightRef.current = false;
         return;
       }
@@ -1073,6 +1126,7 @@ export function QuoteConfigurator({
         // In-page fee sheet: the flow pauses for user input, so the
         // double-fire guard must release — closing the sheet returns
         // to the address step for another attempt.
+        setShippingSheetOpen(false);
         setFeeSheet(result.feeSheet);
         checkoutInFlightRef.current = false;
         return;
@@ -1082,6 +1136,7 @@ export function QuoteConfigurator({
         // Existing account with a saved card (sign-in pivot):
         // confirm before charging. Same pause-for-input release as
         // the fee sheet.
+        setShippingSheetOpen(false);
         setSavedCardConfirm({
           payload: result.savedCardConfirm,
           address: addressData,
@@ -1103,7 +1158,9 @@ export function QuoteConfigurator({
     if (!orderId) {
       if (!fileAssetId || !selectedQuote || !selectedShipping || !priceId) {
         setCheckoutError("Please pick a material and a shipping option.");
-        setStep("address");
+        setStep("configure");
+        setCheckoutSheetStep("address");
+        setShippingSheetOpen(true);
         checkoutInFlightRef.current = false;
         return;
       }
@@ -1122,7 +1179,9 @@ export function QuoteConfigurator({
       });
       if ("error" in created) {
         setCheckoutError(created.error);
-        setStep("address");
+        setStep("configure");
+        setCheckoutSheetStep("address");
+        setShippingSheetOpen(true);
         checkoutInFlightRef.current = false;
         return;
       }
@@ -1142,18 +1201,22 @@ export function QuoteConfigurator({
 
     if ("error" in result) {
       setCheckoutError(result.error);
-      setStep("address");
+      setStep("configure");
+      setCheckoutSheetStep("address");
+      setShippingSheetOpen(true);
       checkoutInFlightRef.current = false;
       return;
     }
 
     if ("feeSheet" in result) {
+      setShippingSheetOpen(false);
       setFeeSheet(result.feeSheet);
       checkoutInFlightRef.current = false;
       return;
     }
 
     if ("savedCardConfirm" in result) {
+      setShippingSheetOpen(false);
       setSavedCardConfirm({
         payload: result.savedCardConfirm,
         address: addressData,
@@ -1234,35 +1297,34 @@ export function QuoteConfigurator({
       }
     : null;
 
-  if (step === "address" || step === "processing") {
+  // Address now lives in ShippingSheet. This branch is the brief
+  // processing / fee-sheet pause after address submit — no full-page
+  // address form.
+  if (step === "processing" || feeSheet || savedCardConfirm) {
+    const reopenAddressInSheet = () => {
+      setStep("configure");
+      setCheckoutSheetStep("address");
+      setShippingSheetOpen(true);
+    };
     return (
-      <div className="max-w-lg mx-auto">
+      <div className="mx-auto max-w-lg py-16 text-center">
         {checkoutError && (
-          <Alert variant="destructive" className="mb-4">
+          <Alert variant="destructive" className="mb-4 text-left">
             <p className="text-sm">{checkoutError}</p>
           </Alert>
         )}
-        {/* Authed path: announce processing state to SR (anon path
-            already has its own role="status" inside ShippingAddressForm). */}
-        {step === "processing" && !isAnon && (
-          <p role="status" className="sr-only">
+        {step === "processing" && !feeSheet && !savedCardConfirm && (
+          <p role="status" className="text-sm text-muted-foreground">
             Placing your order…
           </p>
         )}
-        <ShippingAddressForm
-          onSubmit={handleAddressSubmit}
-          onBack={() => setStep("configure")}
-          isSubmitting={step === "processing"}
-          anonMode={isAnon}
-          savedAddress={isAnon ? null : savedAddress}
-        />
         <FeePaymentSheet
           sheet={feeSheet}
           onClose={() => {
-            // Dismissed without paying — back to the address step so
-            // resubmitting reopens the sheet (same PI via idempotency).
+            // Dismissed without paying — reopen the address step in
+            // the checkout sheet so resubmitting reopens the same PI.
             setFeeSheet(null);
-            setStep("address");
+            reopenAddressInSheet();
           }}
         />
         <SavedCardFeeSheet
@@ -1271,7 +1333,7 @@ export function QuoteConfigurator({
           onUseDifferentCard={() => resumeWithFeePayment("new_card")}
           onClose={() => {
             setSavedCardConfirm(null);
-            setStep("address");
+            reopenAddressInSheet();
           }}
         />
       </div>
@@ -1491,7 +1553,7 @@ export function QuoteConfigurator({
               });
             }}
             selectedQuote={selectedQuote}
-            onSelectQuote={setSelectedQuote}
+            onSelectQuote={handleSelectQuote}
             preselectMaterialId={preselectMaterialId}
             preselectFinishGroupId={preselectFinishGroupId}
             onClearPreselectScope={() => setScopedMaterialId(null)}
@@ -1501,6 +1563,24 @@ export function QuoteConfigurator({
         <div className="lg:sticky lg:top-6 space-y-4">
           <PriceDisplay
             selectedQuote={selectedQuote}
+            selectedShipping={selectedShipping}
+            quantity={quantity}
+            checkoutError={checkoutError}
+            minimumFeeInfo={minimumFeeInfo}
+            checkingMinimum={checkingMinimum}
+            shippingLocked={!!lockedShippingOption}
+            shippingLockedNotice={
+              lockedShippingOption && selectedQuote
+                ? `Shipping matches your ${selectedQuote.vendorName} cart`
+                : null
+            }
+            checkoutModel={checkoutModel}
+          />
+          <ShippingSheet
+            open={shippingSheetOpen}
+            step={checkoutSheetStep}
+            onStepChange={setCheckoutSheetStep}
+            quote={selectedQuote}
             shipping={shipping}
             selectedShipping={selectedShipping}
             onSelectShipping={setSelectedShipping}
@@ -1528,6 +1608,11 @@ export function QuoteConfigurator({
                 : null
             }
             checkoutModel={checkoutModel}
+            onAddressSubmit={handleAddressSubmit}
+            isSubmittingAddress={false}
+            anonMode={isAnon}
+            savedAddress={isAnon ? null : savedAddress}
+            onDismiss={dismissCheckoutSheet}
           />
           {rightAnnex?.({ pendingItem })}
         </div>

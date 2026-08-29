@@ -31,12 +31,8 @@ function renderSummary() {
   return (
     <PriceDisplay
       selectedQuote={QUOTE}
-      shipping={[SHIPPING]}
       selectedShipping={SHIPPING}
-      onSelectShipping={() => {}}
       quantity={1}
-      onCheckout={() => {}}
-      isCheckingOut={false}
     />
   );
 }
@@ -63,5 +59,12 @@ describe("PriceDisplay sandbox chip", () => {
   it("defaults to live with no provider above it", () => {
     render(renderSummary());
     expect(chip()).toBeNull();
+  });
+
+  it("prompts the buyer to pick a vendor when nothing is selected", () => {
+    render(<PriceDisplay selectedQuote={null} selectedShipping={null} quantity={1} />);
+    expect(
+      screen.getByText("Pick a vendor to choose shipping and check out.")
+    ).toBeTruthy();
   });
 });

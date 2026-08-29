@@ -47,35 +47,64 @@ vi.mock("../material-picker", () => ({
 }));
 
 vi.mock("../price-display", () => ({
-  PriceDisplay: (props: {
-    onSelectShipping: (s: unknown) => void;
+  PriceDisplay: () => <div>Order Summary</div>,
+}));
+
+// Checkout CTAs + address submit live on ShippingSheet now. The mock
+// mirrors the real sheet's step split and the isCheckingOut disable
+// so MTR-232's guard test can assert without mounting NativeSheet /
+// three.js heroes.
+vi.mock("../shipping-sheet", () => ({
+  ShippingSheet: (props: {
+    open: boolean;
+    step: string;
+    selectedShipping: { name?: string } | null;
     onCheckout: () => void;
+    onAddressSubmit: (data: unknown) => void;
     isCheckingOut?: boolean;
-  }) => (
-    <div>
-      <button
-        onClick={() =>
-          props.onSelectShipping({
-            shippingId: "s1",
-            vendorId: "v1",
-            name: "Std",
-            deliveryTime: 5,
-            price: 3,
-            type: "standard",
-          })
-        }
-      >
-        select shipping
-      </button>
-      {/* Mirrors the real PriceDisplay's disabled + label behavior off
-          isCheckingOut (price-display.tsx:258,262) so MTR-232's guard
-          test below can assert on it without needing the real
-          component (which needs a live selectedShipping etc). */}
-      <button onClick={props.onCheckout} disabled={props.isCheckingOut}>
-        {props.isCheckingOut ? "Processing..." : "checkout"}
-      </button>
-    </div>
-  ),
+  }) => {
+    if (!props.open) return null;
+    if (props.step === "address") {
+      return (
+        <button
+          onClick={() =>
+            props.onAddressSubmit({
+              email: "ada@example.com",
+              shipping: {
+                firstName: "Ada",
+                lastName: "L",
+                address: "1 St",
+                city: "London",
+                zipCode: "NW1",
+                countryCode: "US",
+              },
+              billing: {
+                firstName: "Ada",
+                lastName: "L",
+                address: "1 St",
+                city: "London",
+                zipCode: "NW1",
+                countryCode: "US",
+                isCompany: false,
+              },
+            })
+          }
+        >
+          submit address
+        </button>
+      );
+    }
+    return (
+      <div>
+        <span data-testid="sheet-shipping">
+          {props.selectedShipping?.name ?? "no shipping"}
+        </span>
+        <button onClick={props.onCheckout} disabled={props.isCheckingOut}>
+          {props.isCheckingOut ? "Processing..." : "checkout"}
+        </button>
+      </div>
+    );
+  },
 }));
 
 vi.mock("../shipping-address-form", () => ({
@@ -317,7 +346,9 @@ describe("QuoteConfigurator wiring (CON-38)", () => {
     render(<QuoteConfigurator {...draftProps()} />);
 
     fireEvent.click(await screen.findByText("select quote"));
-    fireEvent.click(await screen.findByText("select shipping"));
+    expect((await screen.findByTestId("sheet-shipping")).textContent).toBe(
+      "Std"
+    );
     fireEvent.click(screen.getByText("checkout"));
 
     const submit = await screen.findByText("submit address");
@@ -369,7 +400,9 @@ describe("QuoteConfigurator wiring (CON-38)", () => {
     );
 
     fireEvent.click(await screen.findByText("select quote"));
-    fireEvent.click(await screen.findByText("select shipping"));
+    expect((await screen.findByTestId("sheet-shipping")).textContent).toBe(
+      "Std"
+    );
 
     await act(async () => {
       fireEvent.click(screen.getByText("checkout"));
@@ -557,12 +590,14 @@ describe("QuoteConfigurator wiring (CON-38)", () => {
     );
 
     fireEvent.click(await screen.findByText("select quote"));
-    fireEvent.click(await screen.findByText("select shipping"));
+    expect((await screen.findByTestId("sheet-shipping")).textContent).toBe(
+      "Std"
+    );
 
     const checkoutButton = screen.getByText("checkout");
     fireEvent.click(checkoutButton);
     // Second click while createPrintOrder is still pending — the real
-    // PriceDisplay would already have this button disabled
+    // ShippingSheet would already have this button disabled
     // (disabled={isCheckingOut}), but fire it anyway to prove the ref
     // guard — not just the disabled prop — is what stops the second
     // invocation.
