@@ -32,6 +32,7 @@ describe("PUBLIC_ROUTES — owner-gated surfaces", () => {
     "/prometheus/exemplars",
     "/internal",
     "/internal/discovery",
+    "/sandbox/fee-sheet",
   ])("%s reaches its own gate", (path) => {
     expect(at(path)).toBe(true);
   });

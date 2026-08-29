@@ -837,3 +837,141 @@
   }
 }
 
+/* -------------------------------------------------------------------------
+   Payment card (CSS fallback for the WebGL Materialize card).
+   Composition matches the 3D scene: mark top-left, EMV chip vertically
+   centered on the right, ISO ID-1 proportion, clean metallic titanium
+   (catalog Ti6Al4V stops — no brush grain). The slight perspective is
+   the stand-in's 3D; prefers-reduced-motion flattens it. Motion lives
+   here so the fallback can be retuned without touching the canvas.
+
+   Entrance lives on `.mz-pay-card-enter` (the PaymentCard wrapper) so
+   the WebGL canvas and the CSS face share one settle. Rest pose stays
+   on the face itself. Keep this gentle: the NativeSheet already
+   springs up, and a 105° spin + spring-overshoot fought that motion
+   and read as a hard pop. Soft ease, short arc, short delay so the
+   sheet leads and the card softens in after.
+   ------------------------------------------------------------------------- */
+
+@keyframes mz-pay-card-enter {
+  from {
+    opacity: 0;
+    transform: perspective(900px) translateY(10px) rotateY(-22deg) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: perspective(900px) translateY(0) rotateY(0deg) scale(1);
+  }
+}
+
+.mz-pay-card-enter {
+  /* ease-out-soft (no overshoot) — spring overshoot made the settle
+     rubbery against the sheet's own spring. 90ms delay lets the
+     sheet's rise lead. */
+  animation: mz-pay-card-enter 680ms var(--ease-out-soft) 90ms both;
+}
+
+.mz-pay-card {
+  width: 100%;
+  height: 100%;
+  perspective: 900px;
+}
+
+.mz-pay-card-face {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 100%;
+  height: 100%;
+  padding: 0.95rem 1.05rem 0.85rem;
+  border-radius: 0.85rem;
+  color: #f5f5f7;
+  /* Clean metallic titanium — catalog Ti6Al4V stops + a soft specular
+     catch. No brush streaks; the WebGL body is the same idea via
+     metalness/clearcoat under studio IBL. */
+  background:
+    radial-gradient(120% 90% at 0% 0%, rgb(140 140 160 / 0.38), transparent 55%),
+    linear-gradient(145deg, #9a9aa0 0%, #6e6e72 42%, #3f3f44 100%);
+  box-shadow:
+    0 18px 40px -18px rgb(0 0 0 / 0.45),
+    inset 0 1px 0 rgb(255 255 255 / 0.34),
+    inset 0 -1px 0 rgb(0 0 0 / 0.22);
+  transform: rotateX(12deg) rotateY(-16deg);
+  transform-style: preserve-3d;
+}
+
+.mz-pay-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  /* Leave room on the right so the centered chip never overlaps the mark. */
+  padding-right: 3.25rem;
+}
+
+.mz-pay-card-logo {
+  display: inline-flex;
+  filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.35));
+}
+
+.mz-pay-card-chip {
+  position: absolute;
+  top: 50%;
+  right: 1.05rem;
+  display: block;
+  flex: none;
+  filter: drop-shadow(0 2px 2px rgb(0 0 0 / 0.35));
+  transform: translateY(-50%) translateZ(10px);
+}
+
+.mz-pay-card-body {
+  min-height: 1.5rem;
+  /* Keep body copy clear of the vertically-centered chip. */
+  padding-right: 3.25rem;
+}
+
+.mz-pay-card-kicker {
+  margin: 0;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgb(245 245 247 / 0.72);
+}
+
+.mz-pay-card-amount {
+  margin: 0.15rem 0 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+
+.mz-pay-card-bottom {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-start;
+  /* Leave room on the right so the pan never rides under the chip. */
+  padding-right: 3.25rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgb(245 245 247 / 0.88);
+}
+
+.mz-pay-card-pan {
+  letter-spacing: 0.08em;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mz-pay-card-enter {
+    animation: none;
+  }
+  .mz-pay-card-face {
+    transform: none;
+  }
+}
+

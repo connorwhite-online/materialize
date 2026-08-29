@@ -2,6 +2,7 @@ import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
 import { ChevronLeft } from "@/components/icons/chevron-left";
 import { getPaymentMethodSummary } from "@/app/actions/billing";
+import { PaymentCard } from "@/components/print/payment-card";
 import { BillingActions } from "./billing-actions";
 
 export default async function BillingSettingsPage({
@@ -46,24 +47,28 @@ export default async function BillingSettingsPage({
         </div>
       )}
 
-      <div className="rounded-lg border border-border p-4">
+      <div className="rounded-2xl border border-border p-5">
         <div className="text-sm font-medium">Payment method</div>
+        <div className="mt-4">
+          <PaymentCard
+            brand={summary?.brand}
+            last4={summary?.last4 ?? null}
+            saved={Boolean(summary)}
+          />
+        </div>
         {summary ? (
-          <div className="mt-2 flex items-center justify-between">
-            <div className="text-sm">
-              <span className="font-medium capitalize">{summary.brand}</span>
-              <span className="text-muted-foreground"> ending in </span>
-              <span className="font-medium">{summary.last4}</span>
-              <span className="text-muted-foreground">
-                {" "}
-                · expires {String(summary.expMonth).padStart(2, "0")}/
-                {summary.expYear}
-              </span>
-            </div>
+          <div className="mt-4 flex items-center justify-between gap-4">
+            <p className="text-sm text-muted-foreground">
+              <span className="font-medium capitalize text-foreground">
+                {summary.brand}
+              </span>{" "}
+              ending in {summary.last4} · expires{" "}
+              {String(summary.expMonth).padStart(2, "0")}/{summary.expYear}
+            </p>
             <BillingActions hasCard />
           </div>
         ) : (
-          <div className="mt-2 flex items-center justify-between gap-4">
+          <div className="mt-4 flex items-center justify-between gap-4">
             <p className="text-sm text-muted-foreground">
               No card on file. Agents will continue to need email confirmation
               for every order.
