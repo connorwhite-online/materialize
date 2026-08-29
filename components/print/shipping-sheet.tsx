@@ -119,17 +119,22 @@ export function ShippingSheet({
   onDismiss,
 }: ShippingSheetProps) {
   const sandbox = useSandbox();
-  const [sheetOpen, setSheetOpen] = useState(false);
+  // Local exiting flag lets the sheet animate out before the parent
+  // clears the vendor pick. Do not mirror `open` into another piece
+  // of state — a delayed copy can miss the first client open
+  // (sandbox SSR + hydration) and then ignore a no-op setOpen(true).
+  const [exiting, setExiting] = useState(false);
 
   useEffect(() => {
-    setSheetOpen(open && Boolean(quote));
-  }, [open, quote]);
+    if (open) setExiting(false);
+  }, [open]);
 
   const busy = isCheckingOut || !!isAddingToCart || isSubmittingAddress;
+  const visible = open && Boolean(quote) && !exiting;
 
   const dismiss = () => {
     if (busy) return;
-    setSheetOpen(false);
+    setExiting(true);
     setTimeout(onDismiss, EXIT_ANIMATION_MS);
   };
 
@@ -146,7 +151,7 @@ export function ShippingSheet({
 
   return (
     <NativeSheet
-      open={sheetOpen}
+      open={visible}
       onClose={dismiss}
       dismissible={!busy}
       ariaLabel={step === "address" ? "Shipping address" : "Choose shipping"}

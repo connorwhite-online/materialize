@@ -142,6 +142,11 @@ describe("ShippingSheet", () => {
     expect(onStepChange).toHaveBeenCalledWith("shipping");
   });
 
+  it("renders the sheet as soon as open is true (no delayed local open)", () => {
+    renderSheet({ open: true });
+    expect(screen.getByRole("dialog", { name: "Choose shipping" })).toBeTruthy();
+  });
+
   it("dismiss after the exit animation cancels the pick", async () => {
     vi.useFakeTimers();
     const { onDismiss } = renderSheet();

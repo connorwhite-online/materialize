@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   AnimatePresence,
@@ -63,6 +63,14 @@ export function NativeSheet({
   className,
 }: NativeSheetProps) {
   const reducedMotion = useReducedMotion();
+  // Client-only portal. `typeof document` on first render is a
+  // hydration trap: the server returns null, the client portals, and
+  // React can skip later updates — so a sheet that opens via useEffect
+  // never appears. Mount after paint so both passes agree on null.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
   // On-screen keyboard height (0 when closed / unsupported → no-op).
   const keyboardOverlap = useKeyboardOverlap();
   // Drag starts only from the grabber (dragListener={false} below):
@@ -109,7 +117,7 @@ export function NativeSheet({
 
   // Portal to <body> so the sheet escapes any transformed/overflow
   // ancestor (position:fixed is unreliable inside CSS transforms).
-  if (typeof document === "undefined") return null;
+  if (!mounted) return null;
 
   return createPortal(
     <AnimatePresence>
