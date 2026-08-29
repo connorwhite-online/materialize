@@ -361,10 +361,11 @@ describe("MobileNav measuring ghost", () => {
     // letterbox and only then dropped. Matching durations is not enough;
     // two curves of the same length still trace different paths. The
     // same constant for both is the only version that cannot drift.
+    // Exit may spread CARD_CROP to add an opacity soft-out — the height
+    // channel must still name CARD_CROP so the crop can't drift.
     expect(src).toMatch(/open \? CARD_IN : CARD_CROP/);
-    expect(src).toMatch(
-      /transition: reducedMotion \? \{ duration: 0 \} : CARD_CROP,/
-    );
+    expect(src).toMatch(/\.\.\.CARD_CROP/);
+    expect(src).toMatch(/opacity:\s*\{\s*duration:\s*0\.16/);
   });
 
   it("gives that shared close tween no delay", () => {
@@ -550,5 +551,50 @@ describe("MobileNav back button timing", () => {
     // missing icon, not as content arriving behind its container.
     expect(num("BACK_GLYPH_IN", "delay") + num("BACK_GLYPH_IN", "duration"))
       .toBeLessThanOrEqual(num("BACK_OOZE_IN", "duration"));
+  });
+});
+
+/**
+ * Open/close used to hard-cut: the scrim mounted with a classed
+ * `backdrop-blur` (iOS ignores opacity on backdrop-filter, so the
+ * page snapped soft), and the pill ↔ user identity swapped on
+ * opacity alone. Both now tween opacity with blur so the menu
+ * materialises rather than pops.
+ */
+describe("MobileNav open/close fade", () => {
+  const src = readFileSync(resolve(__dirname, "../mobile-nav.tsx"), "utf8");
+
+  it("tweens the scrim's blur radius with its opacity", () => {
+    expect(src).toMatch(/const SCRIM_BLUR_PX = \d+/);
+    expect(src).toMatch(/backdropFilter:\s*"blur\(0px\)"/);
+    expect(src).toMatch(/backdropFilter:\s*`blur\(\$\{SCRIM_BLUR_PX\}px\)`/);
+    // A static Tailwind blur fights the tween and snaps Safari back
+    // to full strength the moment opacity leaves 0.
+    expect(src).not.toMatch(/backdrop-blur-\[/);
+    expect(src).toMatch(/WebkitBackdropFilter/);
+  });
+
+  it("keeps the scrim on the card's open curve", () => {
+    const cardIn = Number(
+      src.match(/const CARD_IN[^=]*=\s*\{\s*duration:\s*([\d.]+)/)?.[1]
+    );
+    const scrimIn = Number(
+      src.match(/const SCRIM_IN[^=]*=\s*\{\s*duration:\s*([\d.]+)/)?.[1]
+    );
+    expect(scrimIn).toBe(cardIn);
+  });
+
+  it("crossfades the identity with blur, not opacity alone", () => {
+    expect(src).toMatch(/filter:\s*"blur\(6px\)"/);
+    expect(src).toMatch(/filter:\s*"blur\(0px\)"/);
+    // Both the open user-container and the closed page-pill.
+    const identityBlurIns = src.match(/filter:\s*"blur\(6px\)"/g) ?? [];
+    expect(identityBlurIns.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("materialises menu rows with opacity and blur", () => {
+    expect(src).toMatch(/ITEM_VARIANTS[\s\S]*filter:\s*"blur\(10px\)"/);
+    expect(src).toMatch(/ITEM_VARIANTS[\s\S]*filter:\s*"blur\(0px\)"/);
+    expect(src).toMatch(/function rowExit[\s\S]*filter:\s*"blur\(10px\)"/);
   });
 });

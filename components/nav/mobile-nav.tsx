@@ -93,16 +93,25 @@ const ROW_SETTLE: Transition = {
 };
 
 /**
- * The pill ↔ user-container swap on OPEN. Opacity-only (no y) — a
+ * The pill ↔ user-container swap on OPEN. Opacity + blur (no y) — a
  * slide fought the card's last height pixels and read as bottom-row
- * jitter. Incoming still waits out most of the outgoing fade.
+ * jitter; a bare opacity cut read as a hard swap. Incoming still waits
+ * out most of the outgoing fade, and the blur resolves as it lands —
+ * the same materialise the menu rows use.
  */
 const IDENTITY_IN: Transition = {
-  duration: 0.13,
+  duration: 0.18,
   delay: 0.05,
   ease: [0.32, 0.72, 0, 1],
+  opacity: { duration: 0.16, delay: 0.05, ease: EASE_OUT_SOFT },
+  filter: { duration: 0.18, delay: 0.05, ease: EASE_OUT_SOFT },
 };
-const IDENTITY_OUT: Transition = { duration: 0.07, ease: "easeIn" };
+const IDENTITY_OUT: Transition = {
+  duration: 0.12,
+  ease: "easeIn",
+  opacity: { duration: 0.1, ease: "easeIn" },
+  filter: { duration: 0.12, ease: "easeIn" },
+};
 /**
  * Closing: hold the open identity (Login / user) until the menu has
  * actually shrunk. Consecutive close frames showed "Search" printing
@@ -111,14 +120,41 @@ const IDENTITY_OUT: Transition = { duration: 0.07, ease: "easeIn" };
  * open; just later, so it lands as the card becomes a pill.
  */
 const IDENTITY_IN_CLOSE: Transition = {
-  duration: 0.13,
+  duration: 0.18,
   delay: 0.18,
   ease: [0.32, 0.72, 0, 1],
+  opacity: { duration: 0.16, delay: 0.18, ease: EASE_OUT_SOFT },
+  filter: { duration: 0.18, delay: 0.18, ease: EASE_OUT_SOFT },
 };
 const IDENTITY_OUT_CLOSE: Transition = {
-  duration: 0.07,
+  duration: 0.12,
   delay: 0.1,
   ease: "easeIn",
+  opacity: { duration: 0.1, delay: 0.1, ease: "easeIn" },
+  filter: { duration: 0.12, delay: 0.1, ease: "easeIn" },
+};
+
+/**
+ * Dim + blur the page while the menu is up. Opacity alone is not
+ * enough: on iOS, `backdrop-filter` ignores parent opacity and snaps
+ * on at full strength the frame the scrim mounts — which is exactly
+ * the jarring cut the open felt like. Tween the blur radius with the
+ * tint so both ease in/out together, on the card's own open curve.
+ */
+const SCRIM_BLUR_PX = 8;
+const SCRIM_IN: Transition = {
+  duration: 0.28,
+  ease: [0.22, 1, 0.36, 1],
+  opacity: { duration: 0.24, ease: EASE_OUT_SOFT },
+  backdropFilter: { duration: 0.28, ease: EASE_OUT_SOFT },
+  WebkitBackdropFilter: { duration: 0.28, ease: EASE_OUT_SOFT },
+};
+const SCRIM_OUT: Transition = {
+  duration: 0.2,
+  ease: [0.4, 0, 1, 1],
+  opacity: { duration: 0.16, ease: "easeIn" },
+  backdropFilter: { duration: 0.2, ease: "easeIn" },
+  WebkitBackdropFilter: { duration: 0.2, ease: "easeIn" },
 };
 
 const DRAG_CLOSE_OFFSET = 64;
@@ -375,11 +411,35 @@ export function MobileNav({
             tabIndex={-1}
             aria-hidden
             onClick={close}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: reducedMotion ? 0 : 0.2 }}
-            className="fixed inset-0 z-40 cursor-default bg-background/40 backdrop-blur-[2px] nav:hidden"
+            initial={
+              reducedMotion
+                ? false
+                : {
+                    opacity: 0,
+                    backdropFilter: "blur(0px)",
+                    WebkitBackdropFilter: "blur(0px)",
+                  }
+            }
+            animate={{
+              opacity: 1,
+              backdropFilter: `blur(${SCRIM_BLUR_PX}px)`,
+              WebkitBackdropFilter: `blur(${SCRIM_BLUR_PX}px)`,
+            }}
+            exit={
+              reducedMotion
+                ? { opacity: 0 }
+                : {
+                    opacity: 0,
+                    backdropFilter: "blur(0px)",
+                    WebkitBackdropFilter: "blur(0px)",
+                    transition: SCRIM_OUT,
+                  }
+            }
+            transition={reducedMotion ? { duration: 0 } : SCRIM_IN}
+            // No static `backdrop-blur-*` — a classed blur fights the
+            // tweened radius and snaps the filter back to full strength
+            // the moment opacity leaves 0 on Safari.
+            className="fixed inset-0 z-40 cursor-default bg-background/40 nav:hidden"
           />
         )}
       </AnimatePresence>
@@ -454,18 +514,29 @@ export function MobileNav({
                 <motion.div
                   key="menu"
                   // Opening, the block only animates height — the rows
-                  // own their own fade, so there is no phase where a
-                  // half-lit card sits on screen waiting for content.
-                  // Height is a measured px value (see menuHeight), not
-                  // `"auto"`, so the tween can rest without a snap.
-                  initial={{ height: 0 }}
-                  animate={{ height: menuHeight }}
+                  // own their own fade + blur, so there is no phase
+                  // where a half-lit card sits on screen waiting for
+                  // content. Closing, fade the whole block with the
+                  // crop so the divider and any mid-peel rows don't
+                  // hard-cut as height collapses. Height is a measured
+                  // px value (see menuHeight), not `"auto"`, so the
+                  // tween can rest without a snap.
+                  initial={{ height: 0, opacity: 1 }}
+                  animate={{ height: menuHeight, opacity: 1 }}
                   exit={{
                     height: 0,
+                    opacity: 0,
                     // The same tween the card's width is running — see
                     // CARD_CROP. Not merely the same duration: the same
-                    // object, so the two can never diverge.
-                    transition: reducedMotion ? { duration: 0 } : CARD_CROP,
+                    // object, so the two can never diverge. Opacity
+                    // rides a slightly shorter ease-in so the soft
+                    // exit leads the clip by a frame or two.
+                    transition: reducedMotion
+                      ? { duration: 0 }
+                      : {
+                          ...CARD_CROP,
+                          opacity: { duration: 0.16, ease: "easeIn" },
+                        },
                   }}
                   transition={reducedMotion ? { duration: 0 } : CARD_IN}
                   // Stick the list to the pill. Height shrinks the box
@@ -563,12 +634,20 @@ export function MobileNav({
                   {open ? (
                     <motion.div
                       key="user"
-                      initial={reducedMotion ? false : { opacity: 0 }}
-                      animate={{ opacity: 1 }}
+                      initial={
+                        reducedMotion
+                          ? false
+                          : { opacity: 0, filter: "blur(6px)" }
+                      }
+                      animate={{ opacity: 1, filter: "blur(0px)" }}
                       exit={
                         reducedMotion
                           ? { opacity: 0 }
-                          : { opacity: 0, transition: IDENTITY_OUT_CLOSE }
+                          : {
+                              opacity: 0,
+                              filter: "blur(6px)",
+                              transition: IDENTITY_OUT_CLOSE,
+                            }
                       }
                       transition={reducedMotion ? { duration: 0 } : IDENTITY_IN}
                       className="absolute inset-0 flex items-center"
@@ -623,14 +702,24 @@ export function MobileNav({
                       aria-expanded={false}
                       aria-controls={menuId}
                       aria-label={`${identity.label} — open navigation menu`}
-                      initial={reducedMotion ? false : { opacity: 0 }}
-                      animate={{ opacity: 1 }}
+                      initial={
+                        reducedMotion
+                          ? false
+                          : { opacity: 0, filter: "blur(6px)" }
+                      }
+                      animate={{ opacity: 1, filter: "blur(0px)" }}
                       exit={
                         reducedMotion
                           ? { opacity: 0 }
-                          : { opacity: 0, transition: IDENTITY_OUT }
+                          : {
+                              opacity: 0,
+                              filter: "blur(6px)",
+                              transition: IDENTITY_OUT,
+                            }
                       }
-                      transition={reducedMotion ? { duration: 0 } : IDENTITY_IN_CLOSE}
+                      transition={
+                        reducedMotion ? { duration: 0 } : IDENTITY_IN_CLOSE
+                      }
                       className="absolute inset-0 flex items-center text-left"
                     >
                       <PageIdentityContent
@@ -882,12 +971,12 @@ function rowExit(index: number) {
   return {
     opacity: 0,
     y: 6,
-    filter: "blur(8px)",
+    filter: "blur(10px)",
     transition: {
       ...ROW_LEAVE,
       delay,
-      opacity: { ...ROW_LEAVE, delay, duration: 0.16 },
-      filter: { ...ROW_LEAVE, delay, duration: 0.18 },
+      opacity: { ...ROW_LEAVE, delay, duration: 0.18 },
+      filter: { ...ROW_LEAVE, delay, duration: 0.2 },
     },
   };
 }
@@ -905,12 +994,12 @@ const ITEM_VARIANTS: Variants = {
   hidden: {
     opacity: 0,
     y: 8,
-    filter: "blur(8px)",
+    filter: "blur(10px)",
     transition: {
-      duration: 0.18,
+      duration: 0.2,
       ease: [0.4, 0, 1, 1],
-      opacity: { duration: 0.14, ease: "easeIn" },
-      filter: { duration: 0.16, ease: "easeIn" },
+      opacity: { duration: 0.16, ease: "easeIn" },
+      filter: { duration: 0.18, ease: "easeIn" },
     },
   },
   visible: {
@@ -919,8 +1008,8 @@ const ITEM_VARIANTS: Variants = {
     filter: "blur(0px)",
     transition: {
       y: ROW_SETTLE,
-      opacity: { duration: 0.22, ease: EASE_OUT_SOFT },
-      filter: { duration: 0.24, ease: EASE_OUT_SOFT },
+      opacity: { duration: 0.26, ease: EASE_OUT_SOFT },
+      filter: { duration: 0.3, ease: EASE_OUT_SOFT },
     },
   },
 };
