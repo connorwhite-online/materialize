@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { act, render, screen } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -9,8 +9,23 @@ import {
   formatUsdCents,
   paymentCardAriaLabel,
 } from "../payment-card-fallback";
-import { PaymentCard } from "../payment-card";
 import { MARK_PATH } from "@/components/brand/logo-paths";
+import {
+  CARD_H,
+  CARD_RADIUS,
+  CARD_T,
+  CARD_W,
+  CHIP_POSITION,
+  FACE_LIFT,
+  LOGO_POSITION,
+  LOGO_WIDTH,
+} from "../payment-card-layout";
+
+vi.mock("../payment-card-scene", () => ({
+  PaymentCardScene: () => null,
+}));
+
+import { PaymentCard, WEBGL_FALLBACK_MS } from "../payment-card";
 
 describe("payment card labels", () => {
   it("formats the fee in USD", () => {
@@ -75,61 +90,90 @@ describe("PaymentCardFallback", () => {
 });
 
 describe("PaymentCard", () => {
-  it("exposes the fee on an img role with the flat CSS face", () => {
-    render(<PaymentCard amountCents={99} brand="visa" last4="4242" />);
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("exposes the fee on an img role while WebGL is pending", () => {
+    render(<PaymentCard amountCents={99} />);
     expect(
       screen.getByRole("img", { name: /Materialize card, service fee \$0\.99/ })
     ).toBeTruthy();
-    expect(screen.getByTestId("payment-card-fallback")).toBeTruthy();
-    expect(screen.getByTestId("payment-card-chip")).toBeTruthy();
+    expect(screen.queryByTestId("payment-card-fallback")).toBeNull();
   });
 
-  it("runs the enter animation class on the wrapper", () => {
-    const { container } = render(<PaymentCard amountCents={99} />);
+  it("holds an empty slot until WebGL times out, then shows CSS alone", () => {
+    vi.useFakeTimers();
+    const { container } = render(
+      <PaymentCard amountCents={99} brand="visa" last4="4242" />
+    );
+    expect(container.querySelector("[data-surface='pending']")).not.toBeNull();
+    expect(screen.queryByTestId("payment-card-fallback")).toBeNull();
+
+    act(() => {
+      vi.advanceTimersByTime(WEBGL_FALLBACK_MS);
+    });
+
+    expect(container.querySelector("[data-surface='fallback']")).not.toBeNull();
+    expect(screen.getByTestId("payment-card-fallback")).toBeTruthy();
     expect(container.querySelector(".mz-pay-card-enter")).not.toBeNull();
   });
 
-  it("is CSS-only — no WebGL twin that can flash a second model", () => {
-    // Regression: R3F extruded/clearcoat card + CSS plate flashed as
-    // two different models on phone GPUs. PaymentCard must not pull
-    // three.js / the scene module at all.
+  it("never crossfades CSS and WebGL — one surface wins", () => {
     const src = readFileSync(
       resolve(__dirname, "../payment-card.tsx"),
       "utf8"
     );
-    expect(src).toContain("PaymentCardFallback");
-    expect(src).toContain("CSS only");
-    expect(src).not.toContain("next/dynamic");
-    expect(src).not.toContain("payment-card-scene");
-    expect(src).not.toContain("PaymentCardScene");
-    expect(src).not.toContain("@react-three/fiber");
+    expect(src).toContain('CardSurface = "pending" | "live" | "fallback"');
+    expect(src).toContain("WEBGL_FALLBACK_MS");
+    expect(src).toContain("payment-card-scene");
   });
 });
 
-describe("payment card CSS face", () => {
+describe("thin WebGL plate", () => {
+  const src = readFileSync(
+    resolve(__dirname, "../payment-card-scene.tsx"),
+    "utf8"
+  );
   const css = readFileSync(
     resolve(__dirname, "../../../app/globals.css"),
     "utf8"
   );
 
-  it("soft-fades / lifts / scales in on appear (no hard spin)", () => {
-    expect(css).toContain("@keyframes mz-pay-card-enter");
-    expect(css).toContain("mz-pay-card-enter");
-    expect(css).toMatch(/rotateY\(-?2[0-9]deg\)/);
-    expect(css).toContain("scale(0.94)");
-    expect(css).toContain("translateY(10px)");
-    expect(css).toContain("--ease-out-soft");
-    expect(css).not.toMatch(/rotateY\(10[0-9]deg\)/);
-    expect(css).not.toContain("scale(0.82)");
+  it("is a thin plate — not the old chunky slab", () => {
+    // Real ID-1 ≈ 0.014 card-heights; the bubbly pass used 0.05.
+    expect(CARD_T).toBeLessThanOrEqual(0.02);
+    expect(CARD_T).toBeGreaterThan(0.008);
+    expect(CARD_RADIUS).toBeLessThanOrEqual(0.05);
+    expect(CARD_W / CARD_H).toBeCloseTo(85.6 / 53.98, 2);
   });
 
-  it("left-aligns the pan and paints clean metallic titanium", () => {
-    expect(css).toMatch(
-      /\.mz-pay-card-bottom\s*\{[^}]*justify-content:\s*flex-start/
-    );
-    expect(css).toContain("#6e6e72");
-    expect(css).not.toMatch(
-      /\.mz-pay-card-face\s*\{[^}]*repeating-linear-gradient/
-    );
+  it("keeps the mark on the left and the chip on the right midline", () => {
+    expect(LOGO_POSITION[0]).toBeLessThan(0);
+    expect(CHIP_POSITION[0]).toBeGreaterThan(0);
+    expect(CHIP_POSITION[1]).toBe(0);
+    expect(LOGO_WIDTH).toBeGreaterThan(0.35);
+    expect(FACE_LIFT).toBeGreaterThan(0);
+    expect(LOGO_POSITION[2]).toBeGreaterThan(CARD_T / 2);
+  });
+
+  it("paints a flat mark decal — no bevelled extrusion", () => {
+    expect(src).toContain("bevelEnabled: false");
+    expect(src).toContain("StudioEnvironment");
+    expect(src).toContain("meshPhysicalMaterial");
+    expect(src).toContain("ReadySignal");
+    expect(src).not.toContain("bevelThickness");
+    expect(src).not.toContain("bevelSize");
+    // Rest pose matches the CSS face tilt (12° / −16°).
+    expect(src).toContain("REST_X");
+    expect(src).toContain("REST_Y");
+    expect(src).toMatch(/12\s*\*\s*Math\.PI/);
+    expect(src).toMatch(/-16\s*\*\s*Math\.PI/);
+  });
+
+  it("soft-fades the wrapper once a surface wins", () => {
+    expect(css).toContain("@keyframes mz-pay-card-enter");
+    expect(css).toContain("--ease-out-soft");
+    expect(css).not.toMatch(/rotateY\(10[0-9]deg\)/);
   });
 });
