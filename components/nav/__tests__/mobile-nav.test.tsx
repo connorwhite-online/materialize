@@ -564,14 +564,23 @@ describe("MobileNav back button timing", () => {
 describe("MobileNav open/close fade", () => {
   const src = readFileSync(resolve(__dirname, "../mobile-nav.tsx"), "utf8");
 
-  it("tweens the scrim's blur radius with its opacity", () => {
+  it("tweens the scrim's blur as a numeric CSS variable", () => {
+    // String `backdropFilter: "blur(Npx)"` does not interpolate
+    // reliably in Motion — the radius snapped while only opacity
+    // faded. A unitless var + `calc(... * 1px)` is what eases.
     expect(src).toMatch(/const SCRIM_BLUR_PX = \d+/);
-    expect(src).toMatch(/backdropFilter:\s*"blur\(0px\)"/);
-    expect(src).toMatch(/backdropFilter:\s*`blur\(\$\{SCRIM_BLUR_PX\}px\)`/);
-    // A static Tailwind blur fights the tween and snaps Safari back
-    // to full strength the moment opacity leaves 0.
-    expect(src).not.toMatch(/backdrop-blur-\[/);
+    expect(src).toMatch(/const SCRIM_BLUR_VAR = "--mz-scrim-blur"/);
+    expect(src).toMatch(
+      /backdropFilter:\s*`blur\(calc\(var\(\$\{SCRIM_BLUR_VAR\}, 0\) \* 1px\)\)`/
+    );
     expect(src).toMatch(/WebkitBackdropFilter/);
+    expect(src).toMatch(/\[SCRIM_BLUR_VAR\]:\s*SCRIM_BLUR_PX/);
+    expect(src).toMatch(/\[SCRIM_BLUR_VAR\]:\s*0/);
+    // Always mounted — unmounting via AnimatePresence remounted the
+    // filter at full strength even when the radius tween looked right.
+    expect(src).toMatch(/pointerEvents:\s*open \? "auto" : "none"/);
+    // A static Tailwind blur fights the tweened radius.
+    expect(src).not.toMatch(/backdrop-blur-\[/);
   });
 
   it("keeps the scrim on the card's open curve", () => {

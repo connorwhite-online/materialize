@@ -135,26 +135,34 @@ const IDENTITY_OUT_CLOSE: Transition = {
 };
 
 /**
- * Dim + blur the page while the menu is up. Opacity alone is not
- * enough: on iOS, `backdrop-filter` ignores parent opacity and snaps
- * on at full strength the frame the scrim mounts — which is exactly
- * the jarring cut the open felt like. Tween the blur radius with the
- * tint so both ease in/out together, on the card's own open curve.
+ * Dim + blur the page while the menu is up.
+ *
+ * Two things made this snap instead of fade:
+ * 1. Unmounting via AnimatePresence + a classed `backdrop-blur-*` —
+ *    iOS ignores opacity on backdrop-filter, so the page went soft
+ *    the frame the node mounted.
+ * 2. Tweening `backdropFilter: "blur(Npx)"` strings — Motion does
+ *    not interpolate that function reliably, so the radius still
+ *    jumped 0 → N in one frame while only the tint faded.
+ *
+ * The fix: keep the scrim mounted, tween a **numeric** CSS variable
+ * for the radius, and let `backdrop-filter: blur(calc(var * 1px))`
+ * track it. Opacity and blur then ease on the same open curve.
  */
 const SCRIM_BLUR_PX = 8;
+/** Unitless px radius — Motion interpolates numbers; `calc` adds the unit. */
+const SCRIM_BLUR_VAR = "--mz-scrim-blur";
 const SCRIM_IN: Transition = {
   duration: 0.28,
   ease: [0.22, 1, 0.36, 1],
   opacity: { duration: 0.24, ease: EASE_OUT_SOFT },
-  backdropFilter: { duration: 0.28, ease: EASE_OUT_SOFT },
-  WebkitBackdropFilter: { duration: 0.28, ease: EASE_OUT_SOFT },
+  [SCRIM_BLUR_VAR]: { duration: 0.28, ease: EASE_OUT_SOFT },
 };
 const SCRIM_OUT: Transition = {
-  duration: 0.2,
+  duration: 0.22,
   ease: [0.4, 0, 1, 1],
-  opacity: { duration: 0.16, ease: "easeIn" },
-  backdropFilter: { duration: 0.2, ease: "easeIn" },
-  WebkitBackdropFilter: { duration: 0.2, ease: "easeIn" },
+  opacity: { duration: 0.18, ease: "easeIn" },
+  [SCRIM_BLUR_VAR]: { duration: 0.22, ease: "easeIn" },
 };
 
 const DRAG_CLOSE_OFFSET = 64;
@@ -401,48 +409,37 @@ export function MobileNav({
 
   return (
     <>
-      <AnimatePresence>
-        {open && (
-          <motion.button
-            type="button"
-            // Redundant affordance: pointer users tap out, keyboard and
-            // screen-reader users get Escape and the chevron, so this
-            // stays out of the accessibility tree entirely.
-            tabIndex={-1}
-            aria-hidden
-            onClick={close}
-            initial={
-              reducedMotion
-                ? false
-                : {
-                    opacity: 0,
-                    backdropFilter: "blur(0px)",
-                    WebkitBackdropFilter: "blur(0px)",
-                  }
-            }
-            animate={{
-              opacity: 1,
-              backdropFilter: `blur(${SCRIM_BLUR_PX}px)`,
-              WebkitBackdropFilter: `blur(${SCRIM_BLUR_PX}px)`,
-            }}
-            exit={
-              reducedMotion
-                ? { opacity: 0 }
-                : {
-                    opacity: 0,
-                    backdropFilter: "blur(0px)",
-                    WebkitBackdropFilter: "blur(0px)",
-                    transition: SCRIM_OUT,
-                  }
-            }
-            transition={reducedMotion ? { duration: 0 } : SCRIM_IN}
-            // No static `backdrop-blur-*` — a classed blur fights the
-            // tweened radius and snaps the filter back to full strength
-            // the moment opacity leaves 0 on Safari.
-            className="fixed inset-0 z-40 cursor-default bg-background/40 nav:hidden"
-          />
-        )}
-      </AnimatePresence>
+      {/* Always mounted — see SCRIM_BLUR_VAR. Closed: opacity 0 +
+          pointer-events none, so it never steals taps from the page. */}
+      <motion.button
+        type="button"
+        // Redundant affordance: pointer users tap out, keyboard and
+        // screen-reader users get Escape and the chevron, so this
+        // stays out of the accessibility tree entirely.
+        tabIndex={-1}
+        aria-hidden
+        onClick={close}
+        initial={false}
+        animate={
+          open
+            ? { opacity: 1, [SCRIM_BLUR_VAR]: SCRIM_BLUR_PX }
+            : { opacity: 0, [SCRIM_BLUR_VAR]: 0 }
+        }
+        transition={
+          reducedMotion ? { duration: 0 } : open ? SCRIM_IN : SCRIM_OUT
+        }
+        style={{
+          // Numeric var → px. Motion tweens the number; the filter
+          // tracks it. Fallback 0 so the first paint before Motion
+          // writes the var is still sharp.
+          backdropFilter: `blur(calc(var(${SCRIM_BLUR_VAR}, 0) * 1px))`,
+          WebkitBackdropFilter: `blur(calc(var(${SCRIM_BLUR_VAR}, 0) * 1px))`,
+          pointerEvents: open ? "auto" : "none",
+        }}
+        // No static `backdrop-blur-*` — a classed blur fights the
+        // tweened radius and snaps the filter back to full strength.
+        className="fixed inset-0 z-40 cursor-default bg-background/40 nav:hidden"
+      />
 
       {/* pointer-events-none on the wrapper so the area beside the nav
           stays click-through to page content; the card re-enables it. */}
