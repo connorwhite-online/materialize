@@ -131,6 +131,7 @@ describe("payment card CSS face", () => {
 
   it("lifts the card with a soft drop shadow under the tilted face", () => {
     expect(css).toContain(".mz-pay-card::before");
-    expect(css).toMatch(/\.mz-pay-card::before\s*\{[^}]*blur\(/s);
+    // No `/s` — tsconfig targets ES2017; `[^}]*` already spans newlines.
+    expect(css).toMatch(/\.mz-pay-card::before\s*\{[^}]*blur\(/);
   });
 });

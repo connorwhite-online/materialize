@@ -24,7 +24,16 @@ import type { QuoteSnapshot } from "../poll-quotes";
 
 // The 3D viewer needs WebGL; the picker has its own suite. Stub both.
 vi.mock("@/components/viewer/material-preview", () => ({
-  MaterialPreview: () => null,
+  MaterialPreview: (props: {
+    initialView?: { direction: [number, number, number]; framing: number } | null;
+  }) => (
+    <div
+      data-testid="material-preview"
+      data-initial-view={
+        props.initialView ? JSON.stringify(props.initialView) : ""
+      }
+    />
+  ),
 }));
 
 vi.mock("../material-picker", () => ({
@@ -620,5 +629,60 @@ describe("QuoteConfigurator wiring (CON-38)", () => {
     expect(screen.queryByText("checkout")).toBeNull();
     expect(screen.queryByText("Processing...")).toBeNull();
     expect(createPrintOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("forwards the listing snapshot angle to MaterialPreview", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          json: async () => ({ priceId: "price-1" }),
+        }) as unknown as Response
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const initialView = {
+      direction: [0, 0.5, 0.866] as [number, number, number],
+      framing: 0.73,
+    };
+
+    render(
+      <QuoteConfigurator
+        fileAssetId="asset-1"
+        filename="part.stl"
+        format="stl"
+        hasCachedModel
+        geometryData={null}
+        initialView={initialView}
+      />
+    );
+
+    const preview = await screen.findByTestId("material-preview");
+    expect(preview.getAttribute("data-initial-view")).toBe(
+      JSON.stringify(initialView)
+    );
+  });
+
+  it("does not invent a snapshot angle in draft mode", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          json: async () => ({ priceId: "price-1" }),
+        }) as unknown as Response
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <QuoteConfigurator
+        {...draftProps()}
+        format="stl"
+      />
+    );
+
+    const preview = await screen.findByTestId("material-preview");
+    expect(preview.getAttribute("data-initial-view")).toBe("");
   });
 });

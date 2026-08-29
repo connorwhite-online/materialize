@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { fileAssets, files } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { FileAssetPrintShell } from "@/components/print/file-asset-print-shell";
+import { loadPreviewView } from "@/lib/files/load-preview-view";
 import { getMaterialById } from "@/lib/materials";
 import { resolveRecommendedCraftCloudMaterialId } from "@/lib/materials/craftcloud-resolver";
 import { getCheckoutModel } from "@/lib/env";
@@ -39,6 +40,7 @@ export default async function PrintConfigPage(props: {
       storageKey: fileAssets.storageKey,
       craftCloudModelId: fileAssets.craftCloudModelId,
       fileName: files.name,
+      listingFileId: files.id,
       fileUserId: files.userId,
       fileStatus: files.status,
       recommendedMaterialId: files.recommendedMaterialId,
@@ -86,6 +88,15 @@ export default async function PrintConfigPage(props: {
       ? (preselectFinishGroupId ?? asset.recommendedCcFinishGroupId ?? undefined)
       : undefined;
 
+  // Loaded separately from the asset row on purpose — see
+  // `loadPreviewView`. Null when the listing never set a snapshot
+  // (automatic head-on capture) and also when the read fails, so a
+  // schema that lags a deploy costs the camera angle rather than the
+  // quote page. Draft / unlinked assets have no listing row.
+  const previewView = asset.listingFileId
+    ? await loadPreviewView(asset.listingFileId)
+    : null;
+
   const configureHeader = (
     <div>
       <h1 className="text-2xl font-bold">
@@ -131,6 +142,7 @@ export default async function PrintConfigPage(props: {
         configureHeader={configureHeader}
         projectSlug={projectSlug}
         checkoutModel={getCheckoutModel()}
+        initialView={previewView}
       />
     </div>
   );

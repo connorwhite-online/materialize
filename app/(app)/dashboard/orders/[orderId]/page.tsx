@@ -11,6 +11,7 @@ import {
 import { eq, and, asc } from "drizzle-orm";
 import { OrderStatusTracker } from "@/components/print/order-status-tracker";
 import { OrderModelPreview } from "@/components/print/order-model-preview";
+import { loadPreviewView } from "@/lib/files/load-preview-view";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -59,6 +60,7 @@ export default async function OrderDetailPage(props: {
       craftCloudOrderId: printOrders.craftCloudOrderId,
       createdAt: printOrders.createdAt,
       filename: files.name,
+      listingFileId: files.id,
       originalFilename: fileAssets.originalFilename,
       fileAssetId: printOrders.fileAssetId,
       assetFormat: fileAssets.format,
@@ -96,6 +98,7 @@ export default async function OrderDetailPage(props: {
           quantity: printOrderItems.quantity,
           materialSubtotal: printOrderItems.materialSubtotal,
           fileName: files.name,
+          listingFileId: files.id,
           originalFilename: fileAssets.originalFilename,
           assetFormat: fileAssets.format,
         })
@@ -111,6 +114,13 @@ export default async function OrderDetailPage(props: {
   // multi-item orders just get no chip — acceptable soft degrade.
   const firstItem = items[0];
   const extraItemCount = Math.max(0, items.length - 1);
+  const previewFileId = order.listingFileId ?? firstItem?.listingFileId ?? null;
+  // Same fail-soft loader as /files/[slug] and /print/[fileAssetId]
+  // — a missing snapshot (or a schema that lags the deploy) costs
+  // the camera angle, not the order page.
+  const previewView = previewFileId
+    ? await loadPreviewView(previewFileId)
+    : null;
 
   const displayFilename =
     order.filename ??
@@ -205,6 +215,7 @@ export default async function OrderDetailPage(props: {
             fileAssetId={previewFileAssetId}
             format={previewFormat}
             materialColor={materialMeta?.color ?? "#a1a1aa"}
+            initialView={previewView}
           />
           {extraItemCount > 0 && (
             <div className="absolute right-3 top-3 rounded-full bg-background/85 px-2.5 py-1 text-xs font-medium backdrop-blur">

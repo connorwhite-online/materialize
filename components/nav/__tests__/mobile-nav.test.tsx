@@ -361,10 +361,11 @@ describe("MobileNav measuring ghost", () => {
     // letterbox and only then dropped. Matching durations is not enough;
     // two curves of the same length still trace different paths. The
     // same constant for both is the only version that cannot drift.
+    // Exit may spread CARD_CROP to add an opacity soft-out — the height
+    // channel must still name CARD_CROP so the crop can't drift.
     expect(src).toMatch(/open \? CARD_IN : CARD_CROP/);
-    expect(src).toMatch(
-      /transition: reducedMotion \? \{ duration: 0 \} : CARD_CROP,/
-    );
+    expect(src).toMatch(/\.\.\.CARD_CROP/);
+    expect(src).toMatch(/opacity:\s*\{\s*duration:\s*0\.16/);
   });
 
   it("gives that shared close tween no delay", () => {
@@ -593,5 +594,69 @@ describe("MobileNav back button timing", () => {
     // missing icon, not as content arriving behind its container.
     expect(num("BACK_GLYPH_IN", "delay") + num("BACK_GLYPH_IN", "duration"))
       .toBeLessThanOrEqual(num("BACK_OOZE_IN", "duration"));
+  });
+});
+
+/**
+ * Open/close used to hard-cut: the scrim mounted with a classed
+ * `backdrop-blur` (iOS ignores opacity on backdrop-filter, so the
+ * page snapped soft), and the pill ↔ user identity swapped on
+ * opacity alone. Both now tween opacity with blur so the menu
+ * materialises rather than pops.
+ */
+describe("MobileNav open/close fade", () => {
+  const src = readFileSync(resolve(__dirname, "../mobile-nav.tsx"), "utf8");
+
+  it("tweens the scrim's blur as a numeric CSS variable", () => {
+    // String `backdropFilter: "blur(Npx)"` does not interpolate
+    // reliably in Motion — the radius snapped while only opacity
+    // faded. A unitless var + `calc(... * 1px)` is what eases.
+    expect(src).toMatch(/const SCRIM_BLUR_PX = \d+/);
+    expect(src).toMatch(/const SCRIM_BLUR_VAR = "--mz-scrim-blur"/);
+    expect(src).toMatch(
+      /backdropFilter:\s*`blur\(calc\(var\(\$\{SCRIM_BLUR_VAR\}, 0\) \* 1px\)\)`/
+    );
+    expect(src).toMatch(/WebkitBackdropFilter/);
+    expect(src).toMatch(/\[SCRIM_BLUR_VAR\]:\s*SCRIM_BLUR_PX/);
+    expect(src).toMatch(/\[SCRIM_BLUR_VAR\]:\s*0/);
+    // Always mounted — unmounting via AnimatePresence remounted the
+    // filter at full strength even when the radius tween looked right.
+    expect(src).toMatch(/pointerEvents:\s*open \? "auto" : "none"/);
+    // A static Tailwind blur fights the tweened radius.
+    expect(src).not.toMatch(/backdrop-blur-\[/);
+  });
+
+  it("uses a readable ease, not the card's front-loaded expo-out", () => {
+    // The card's `[0.22, 1, 0.36, 1]` dumps most of the travel in the
+    // first frames — fine for a morphing pill, fatal for a fade that
+    // has to read as a fade. Scrim duration can exceed CARD_IN; the
+    // ease must not match CARD_IN's.
+    const cardEase = src.match(
+      /const CARD_IN[^=]*=\s*\{[^}]*ease:\s*(\[[^\]]*\])/
+    )?.[1];
+    const scrimEase = src.match(
+      /const SCRIM_EASE\s*=\s*(\[[^\]]*\])/
+    )?.[1];
+    expect(cardEase).toBe("[0.22, 1, 0.36, 1]");
+    expect(scrimEase).toBeTruthy();
+    expect(scrimEase).not.toBe(cardEase);
+    const scrimIn = Number(
+      src.match(/const SCRIM_IN[^=]*=\s*\{\s*duration:\s*([\d.]+)/)?.[1]
+    );
+    expect(scrimIn).toBeGreaterThanOrEqual(0.35);
+  });
+
+  it("crossfades the identity with blur, not opacity alone", () => {
+    expect(src).toMatch(/filter:\s*"blur\(6px\)"/);
+    expect(src).toMatch(/filter:\s*"blur\(0px\)"/);
+    // Both the open user-container and the closed page-pill.
+    const identityBlurIns = src.match(/filter:\s*"blur\(6px\)"/g) ?? [];
+    expect(identityBlurIns.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("materialises menu rows with opacity and blur", () => {
+    expect(src).toMatch(/ITEM_VARIANTS[\s\S]*filter:\s*"blur\(10px\)"/);
+    expect(src).toMatch(/ITEM_VARIANTS[\s\S]*filter:\s*"blur\(0px\)"/);
+    expect(src).toMatch(/function rowExit[\s\S]*filter:\s*"blur\(10px\)"/);
   });
 });
