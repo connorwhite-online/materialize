@@ -888,8 +888,8 @@
   border-radius: 0.85rem;
   color: #f5f5f7;
   /* Clean metallic titanium — catalog Ti6Al4V stops + a soft specular
-     catch. No brush streaks; the WebGL body is the same idea via
-     metalness/clearcoat under studio IBL. */
+     catch. No brush streaks. This face is the only card model; the
+     WebGL twin was removed after it flashed a bubbly extruded look. */
   background:
     radial-gradient(120% 90% at 0% 0%, rgb(140 140 160 / 0.38), transparent 55%),
     linear-gradient(145deg, #9a9aa0 0%, #6e6e72 42%, #3f3f44 100%);
