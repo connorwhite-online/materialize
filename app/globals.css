@@ -888,8 +888,8 @@
   border-radius: 0.85rem;
   color: #f5f5f7;
   /* Clean metallic titanium — catalog Ti6Al4V stops + a soft specular
-     catch. No brush streaks. CSS is the WebGL failure path; the live
-     scene is a thin plate with the same 12°/−16° rest tilt. */
+     catch. No brush streaks. This CSS face is the only card model on
+     the fee sheet (WebGL twin removed — looked worse on device). */
   background:
     radial-gradient(120% 90% at 0% 0%, rgb(140 140 160 / 0.38), transparent 55%),
     linear-gradient(145deg, #9a9aa0 0%, #6e6e72 42%, #3f3f44 100%);
