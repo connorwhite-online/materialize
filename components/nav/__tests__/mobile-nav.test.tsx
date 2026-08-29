@@ -519,17 +519,36 @@ describe("MobileNav back button ooze", () => {
   });
 
   it("scales and fades out of the menu, origin on the shared edge", () => {
-    expect(src).toMatch(/const BACK_SCALE_FROM = 0\.8;/);
+    expect(src).toMatch(/const BACK_SCALE_FROM = 0\.86;/);
     expect(button).toMatch(/initial=\{\{[\s\S]*?scale: BACK_SCALE_FROM/);
     expect(button).toMatch(/initial=\{\{[\s\S]*?opacity: 0/);
     expect(button).toMatch(/animate=\{\{[\s\S]*?scale: 1/);
     expect(button).toMatch(/animate=\{\{[\s\S]*?opacity: 1/);
     expect(button).toMatch(/exit=\{\{[\s\S]*?scale: BACK_SCALE_FROM/);
     expect(button).toMatch(/exit=\{\{[\s\S]*?opacity: 0/);
-    expect(button).toContain("originX: 1");
-    expect(button).toContain("originY: 0.5");
+    // CSS transform-origin on the shared edge — Motion's originX was
+    // easy to drop when width is also animating.
+    expect(button).toContain('transformOrigin: "right center"');
+  });
+
+  it("clears opacity early so the width ooze can be seen", () => {
+    // Fading opacity for the whole width tween hid the detach and left
+    // only a mid-air scale of an already-round chip.
+    const block =
+      src.match(/const BACK_OOZE_IN[^=]*=\s*\{([\s\S]*?)\n\};/)?.[1] ?? "";
+    expect(block).toMatch(/opacity:\s*\{\s*duration:\s*0\.1/);
+    expect(numFrom("BACK_OOZE_IN", "duration")).toBeGreaterThan(0.1);
   });
 });
+
+function numFrom(name: string, field: string) {
+  const src = readFileSync(resolve(__dirname, "../mobile-nav.tsx"), "utf8");
+  return Number(
+    src
+      .match(new RegExp(`const ${name}[^=]*=\\s*\\{([^}]*)\\}`))?.[1]
+      .match(new RegExp(`${field}:\\s*([\\d.]+)`))?.[1]
+  );
+}
 
 /**
  * Timing. Nothing else in this navigation animates — the page swaps in

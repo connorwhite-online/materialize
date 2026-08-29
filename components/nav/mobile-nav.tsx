@@ -153,21 +153,27 @@ const BACK_SIZE = ROW_HEIGHT;
 /** Gap it settles at, clear of the card's left edge. */
 const BACK_GAP = 8;
 /**
- * Enter/exit scale. Origin is the shared edge (`originX: 1`), so the
- * chip grows out of the pill and shrinks back into it rather than
- * popping in place. Kept well above 0.5 so it doesn't fight the width
- * ooze — the two motions are one "detach", not a grow-plus-a-grow.
+ * Enter/exit scale. Origin is the shared edge (`transformOrigin:
+ * "right center"`), so the chip grows out of the pill and shrinks back
+ * into it rather than popping in place. Kept close to 1 so it doesn't
+ * fight the width ooze — the two motions are one "detach".
  */
-const BACK_SCALE_FROM = 0.8;
+const BACK_SCALE_FROM = 0.86;
 /**
  * The ooze. The button is anchored to the card's left edge and grows
  * leftward out of it: width 0 → BACK_SIZE while its RIGHT corners round
  * from square to half the height, landing as a circle the height of
  * the pill. Square-right reads as a slice of the card itself, so the
- * rounding is what sells it detaching rather than appearing. Scale and
- * opacity ride the same tween, origin on that shared edge, so the
- * detach also fades and sizes up out of the menu (and the reverse on
- * the way back in — opening the menu absorbs the chip).
+ * rounding is what sells it detaching rather than appearing. Scale
+ * rides the same curve with origin on that shared edge, so the detach
+ * also sizes up out of the menu (and the reverse on the way back in —
+ * opening the menu absorbs the chip).
+ *
+ * Opacity is a SHORTER tween than the width: fading the whole 220ms
+ * from 0 hid the ooze entirely and left only a mid-air scale of an
+ * already-round chip. Opacity lands early on enter (so the growing
+ * slit is visible) and holds longer on exit (so the shrink-into-the-
+ * menu still reads before it vanishes).
  *
  * It is positioned absolutely against the card's shrink-wrapper, so
  * none of this moves the pill — the card stays centred in the viewport
@@ -192,8 +198,16 @@ const BACK_SCALE_FROM = 0.8;
  * the eye can catch trailing. Keep it under the card's own CARD_IN
  * (280ms); it is one chip, not a container.
  */
-const BACK_OOZE_IN: Transition = { duration: 0.22, ease: [0.4, 0, 0.2, 1] };
-const BACK_OOZE_OUT: Transition = { duration: 0.16, ease: [0.4, 0, 0.2, 1] };
+const BACK_OOZE_IN: Transition = {
+  duration: 0.22,
+  ease: [0.4, 0, 0.2, 1],
+  opacity: { duration: 0.1, ease: [0.4, 0, 0.2, 1] },
+};
+const BACK_OOZE_OUT: Transition = {
+  duration: 0.16,
+  ease: [0.4, 0, 0.2, 1],
+  opacity: { duration: 0.1, ease: "easeIn", delay: 0.04 },
+};
 /**
  * The glyph waits out the first third of the ooze rather than being
  * clipped in half, but lands INSIDE the container's tween — an empty
@@ -687,9 +701,9 @@ export function MobileNav({
               `overflow-hidden` is what makes the ooze read — the glyph is
               clipped by the growing width instead of squashing — and the
               left corners stay a static half-height while only the RIGHT
-              pair animates 0 → BACK_SIZE/2 inline. Scale + fade originate
-              on that shared edge (`originX: 1`) so the chip grows out of
-              the menu and shrinks back into it. */}
+              pair animates 0 → BACK_SIZE/2 inline. Scale originates on
+              that shared edge (`transformOrigin: "right center"`) so the
+              chip grows out of the menu and shrinks back into it. */}
           <AnimatePresence>
             {showBack && (
               <motion.button
@@ -727,8 +741,9 @@ export function MobileNav({
                   height: BACK_SIZE,
                   bottom: 0,
                   // Grow out of / shrink into the pill, not in place.
-                  originX: 1,
-                  originY: 0.5,
+                  // CSS transform-origin (not Motion's originX) so it
+                  // can't be dropped when width is also animating.
+                  transformOrigin: "right center",
                   // NOT `rounded-l-full`. Tailwind's `full` is an
                   // effectively infinite radius, and when the radii on
                   // one edge overrun the box CSS scales EVERY corner by
