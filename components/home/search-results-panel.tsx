@@ -13,6 +13,7 @@ import type {
   SearchHitUser,
   SearchResponse,
 } from "@/app/api/search/route";
+import { FileCard } from "@/components/files/file-card";
 
 interface SearchResultsPanelProps {
   results: SearchResponse | null;
@@ -98,7 +99,7 @@ export function SearchResultsPanel({
       {results.files.length > 0 && (
         <Section title="Files">
           {results.files.map((hit) => (
-            <FileCard key={hit.id} hit={hit} onNavigate={onNavigate} />
+            <SearchFileCard key={hit.id} hit={hit} onNavigate={onNavigate} />
           ))}
         </Section>
       )}
@@ -164,7 +165,7 @@ function Section({
   );
 }
 
-function FileCard({
+function SearchFileCard({
   hit,
   onNavigate,
 }: {
@@ -172,31 +173,14 @@ function FileCard({
   onNavigate: () => void;
 }) {
   return (
-    <Link
+    <FileCard
+      compact
       href={`/files/${hit.slug}`}
-      onClick={onNavigate}
-      className="group flex w-28 shrink-0 flex-col gap-1.5"
-    >
-      <div className="relative aspect-square overflow-hidden rounded-lg border border-border bg-muted/60">
-        {hit.thumbnailUrl && (
-          <Image
-            src={hit.thumbnailUrl}
-            alt=""
-            fill
-            sizes="112px"
-            className="object-cover transition-transform group-hover:scale-105"
-          />
-        )}
-      </div>
-      <div className="min-w-0 px-0.5">
-        <p className="truncate text-xs font-medium group-hover:text-primary">
-          {hit.name}
-        </p>
-        <p className="truncate text-[10px] text-muted-foreground">
-          {hit.creatorDisplayName || hit.creatorUsername || ""}
-        </p>
-      </div>
-    </Link>
+      onNavigate={onNavigate}
+      title={hit.name}
+      thumbnailUrl={hit.thumbnailUrl}
+      subtitle={hit.creatorDisplayName || hit.creatorUsername || ""}
+    />
   );
 }
 

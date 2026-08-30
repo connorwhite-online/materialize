@@ -93,45 +93,56 @@ const ROW_SETTLE: Transition = {
 };
 
 /**
- * The pill ↔ user-container swap on OPEN. Opacity + blur (no y) — a
- * slide fought the card's last height pixels and read as bottom-row
- * jitter; a bare opacity cut read as a hard swap. Incoming still waits
- * out most of the outgoing fade, and the blur resolves as it lands —
- * the same materialise the menu rows use.
+ * Pill ↔ user-container swap. Opacity + blur (no y) — a slide fought
+ * the card's last height pixels and read as bottom-row jitter; a bare
+ * opacity cut read as a hard swap. The active-tab icon + label (and
+ * the brand lockup on anon home) materialise the same way the menu
+ * rows do: soft focus-in, not a pop.
+ */
+const IDENTITY_BLUR = "blur(10px)";
+const IDENTITY_SHARP = "blur(0px)";
+/** Shared readable ease — same family as the scrim, not the card expo. */
+const IDENTITY_EASE = [0.4, 0, 0.2, 1] as const;
+
+/**
+ * Opening: user/Login lands shortly after the pill label starts
+ * peeling. Keep it snappy — the eye is on the growing menu.
  */
 const IDENTITY_IN: Transition = {
-  duration: 0.18,
-  delay: 0.05,
-  ease: [0.32, 0.72, 0, 1],
-  opacity: { duration: 0.16, delay: 0.05, ease: EASE_OUT_SOFT },
-  filter: { duration: 0.18, delay: 0.05, ease: EASE_OUT_SOFT },
+  duration: 0.22,
+  delay: 0.06,
+  ease: IDENTITY_EASE,
+  opacity: { duration: 0.2, delay: 0.06, ease: IDENTITY_EASE },
+  filter: { duration: 0.24, delay: 0.06, ease: IDENTITY_EASE },
 };
 const IDENTITY_OUT: Transition = {
-  duration: 0.12,
+  duration: 0.14,
   ease: "easeIn",
-  opacity: { duration: 0.1, ease: "easeIn" },
-  filter: { duration: 0.12, ease: "easeIn" },
+  opacity: { duration: 0.12, ease: "easeIn" },
+  filter: { duration: 0.14, ease: "easeIn" },
 };
 /**
- * Closing: hold the open identity (Login / user) until the menu has
- * actually shrunk. Consecutive close frames showed "Search" printing
- * over "Login" in a still-tall card — the pill identity was swapping
- * on the open-path timing while height was still delayed. Same ease as
- * open; just later, so it lands as the card becomes a pill.
+ * Closing: this is the one that has to feel soft. The active-tab
+ * icon + word (or logo) are what the pill settles on, and a short
+ * opacity cut there reads as a hard land after the menu crop. Hold
+ * the open identity until the card is mid-crop, then let the tab
+ * identity ease in with a longer blur resolve that finishes with
+ * the pill — same duration family as CARD_CROP so they read as one
+ * motion.
  */
 const IDENTITY_IN_CLOSE: Transition = {
-  duration: 0.18,
-  delay: 0.18,
-  ease: [0.32, 0.72, 0, 1],
-  opacity: { duration: 0.16, delay: 0.18, ease: EASE_OUT_SOFT },
-  filter: { duration: 0.18, delay: 0.18, ease: EASE_OUT_SOFT },
+  duration: 0.32,
+  delay: 0.12,
+  ease: IDENTITY_EASE,
+  opacity: { duration: 0.28, delay: 0.12, ease: IDENTITY_EASE },
+  filter: { duration: 0.32, delay: 0.12, ease: IDENTITY_EASE },
 };
 const IDENTITY_OUT_CLOSE: Transition = {
-  duration: 0.12,
-  delay: 0.1,
+  duration: 0.2,
+  delay: 0.04,
   ease: "easeIn",
-  opacity: { duration: 0.1, delay: 0.1, ease: "easeIn" },
-  filter: { duration: 0.12, delay: 0.1, ease: "easeIn" },
+  opacity: { duration: 0.16, delay: 0.04, ease: "easeIn" },
+  filter: { duration: 0.2, delay: 0.04, ease: "easeIn" },
 };
 
 /**
@@ -672,15 +683,15 @@ export function MobileNav({
                       initial={
                         reducedMotion
                           ? false
-                          : { opacity: 0, filter: "blur(6px)" }
+                          : { opacity: 0, filter: IDENTITY_BLUR }
                       }
-                      animate={{ opacity: 1, filter: "blur(0px)" }}
+                      animate={{ opacity: 1, filter: IDENTITY_SHARP }}
                       exit={
                         reducedMotion
                           ? { opacity: 0 }
                           : {
                               opacity: 0,
-                              filter: "blur(6px)",
+                              filter: IDENTITY_BLUR,
                               transition: IDENTITY_OUT_CLOSE,
                             }
                       }
@@ -740,18 +751,20 @@ export function MobileNav({
                       initial={
                         reducedMotion
                           ? false
-                          : { opacity: 0, filter: "blur(6px)" }
+                          : { opacity: 0, filter: IDENTITY_BLUR }
                       }
-                      animate={{ opacity: 1, filter: "blur(0px)" }}
+                      animate={{ opacity: 1, filter: IDENTITY_SHARP }}
                       exit={
                         reducedMotion
                           ? { opacity: 0 }
                           : {
                               opacity: 0,
-                              filter: "blur(6px)",
+                              filter: IDENTITY_BLUR,
                               transition: IDENTITY_OUT,
                             }
                       }
+                      // Close is the soft path — IDENTITY_IN_CLOSE.
+                      // Open peels the tab label out via exit above.
                       transition={
                         reducedMotion ? { duration: 0 } : IDENTITY_IN_CLOSE
                       }

@@ -3,6 +3,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { CardImageCarousel } from "@/components/photos/card-image-carousel";
 import { FileThumbnailStack } from "@/components/projects/file-thumbnail-stack";
+import {
+  FILE_CARD_BODY_CLASS,
+  FILE_CARD_SHELL_CLASS,
+  FILE_CARD_TITLE_CLASS,
+  FILE_CARD_WELL_CLASS,
+} from "@/components/files/file-card";
 
 export interface LibraryProjectCardItem {
   id: string;
@@ -53,8 +59,8 @@ export function LibraryProjectCard({ item }: LibraryProjectCardProps) {
   const isPrivate = item.visibility === "private" && item.source === "owned";
   return (
     <Link href={`/projects/${item.slug}`} className="block">
-      <Card className="group gap-0 p-1 overflow-hidden transition-colors hover:border-primary/30">
-        <div className="relative aspect-square overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted to-muted/50">
+      <Card className={FILE_CARD_SHELL_CLASS}>
+        <div className={FILE_CARD_WELL_CLASS}>
           {carouselImages.length > 0 ? (
             <CardImageCarousel images={carouselImages} alt="" size="sm" />
           ) : item.fileThumbnails.length > 0 ? (
@@ -80,8 +86,8 @@ export function LibraryProjectCard({ item }: LibraryProjectCardProps) {
             </div>
           )}
         </div>
-        <CardContent className="px-2 py-2">
-          <p className="text-sm font-medium line-clamp-1 transition-colors group-hover:text-primary">
+        <CardContent className={FILE_CARD_BODY_CLASS}>
+          <p className={FILE_CARD_TITLE_CLASS}>
             {item.name}
           </p>
           <div className="mt-0.5 flex items-center gap-1.5">

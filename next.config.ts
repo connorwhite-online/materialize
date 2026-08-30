@@ -1,7 +1,6 @@
 import path from "node:path";
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
-import { withIterate } from "iterate-ui-next";
 
 const nextConfig: NextConfig = {
   turbopack: {
@@ -119,7 +118,7 @@ const nextConfig: NextConfig = {
  * don't drop them. Both are no-ops when SENTRY_AUTH_TOKEN is unset,
  * so unconfigured environments still build cleanly.
  */
-export default withIterate(withSentryConfig(nextConfig, {
+export default withSentryConfig(nextConfig, {
   org: process.env.SENTRY_ORG,
   project: process.env.SENTRY_PROJECT,
   // Explicit instead of letting the SDK fish for the env var —
@@ -147,4 +146,4 @@ export default withIterate(withSentryConfig(nextConfig, {
   // is webpack-only and we're on Turbopack, so there's nothing
   // equivalent to flip. The SDK's own debug logging stays at its
   // default verbosity, which is fine.
-}), { disableBabelPlugin: true });
+});

@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import Image from "next/image";
 import { db } from "@/lib/db";
 import {
   collections,
@@ -13,11 +12,13 @@ import {
 import { eq, and, isNotNull, inArray, sql, asc } from "drizzle-orm";
 import { auth } from "@clerk/nextjs/server";
 import { isOrgMember } from "@/lib/authorization";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { OwnerBar } from "@/components/ui/owner-bar";
 import { CollectionSettingsMenu } from "@/components/profile/collection-settings-menu";
 import { getLicenseMeta } from "@/lib/licenses";
+import {
+  FileCard,
+  FileCardPriceBadge,
+} from "@/components/files/file-card";
 
 type FileItem = {
   kind: "file";
@@ -241,58 +242,30 @@ export default async function CollectionPage(props: {
       {items.length === 0 ? (
         <p className="text-muted-foreground">This collection is empty.</p>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {items.map((item) => (
-            <Link
-              key={`${item.kind}-${item.id}`}
-              href={
-                item.kind === "file"
-                  ? `/files/${item.slug}`
-                  : `/projects/${item.slug}`
-              }
-            >
-              <Card className="overflow-hidden transition-colors hover:border-primary/30">
-                <div className="relative aspect-[4/3] bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center">
-                  {item.thumbnailUrl ? (
-                    <Image
-                      src={item.thumbnailUrl}
-                      alt={item.name}
-                      fill
-                      sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, (max-width: 1280px) 33vw, 25vw"
-                      className="object-cover"
-                    />
-                  ) : (
-                    <span className="text-muted-foreground/40 text-sm">
-                      {item.kind === "file" ? "3D Preview" : "Project"}
-                    </span>
-                  )}
-                </div>
-                <CardContent className="p-4">
-                  <h3 className="font-semibold text-sm">{item.name}</h3>
-                  <div className="flex items-center gap-2 mt-1">
-                    {item.kind === "project" && (
-                      <Badge variant="outline" className="text-[10px]">
-                        {item.fileCount}{" "}
-                        {item.fileCount === 1 ? "file" : "files"}
-                      </Badge>
-                    )}
-                    <Badge variant="outline" className="text-[10px]">
-                      {getLicenseMeta(item.license)?.shortName ?? item.license}
-                    </Badge>
-                    {item.price > 0 ? (
-                      <span className="text-xs font-medium">
-                        ${(item.price / 100).toFixed(2)}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">
-                        Free
-                      </span>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
-          ))}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          {items.map((item) => {
+            const license =
+              getLicenseMeta(item.license)?.shortName ?? item.license;
+            const subtitle =
+              item.kind === "project"
+                ? `${item.fileCount} ${item.fileCount === 1 ? "file" : "files"} · ${license}`
+                : license;
+            return (
+              <FileCard
+                key={`${item.kind}-${item.id}`}
+                href={
+                  item.kind === "file"
+                    ? `/files/${item.slug}`
+                    : `/projects/${item.slug}`
+                }
+                title={item.name}
+                thumbnailUrl={item.thumbnailUrl}
+                placeholder={item.kind === "file" ? "3D Preview" : "Project"}
+                overlay={<FileCardPriceBadge priceCents={item.price} />}
+                subtitle={subtitle}
+              />
+            );
+          })}
         </div>
       )}
     </div>

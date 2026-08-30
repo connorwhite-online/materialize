@@ -11,7 +11,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { UploadDialog } from "@/components/upload/upload-dialog";
-import { NewCollectionDialog } from "./new-collection-dialog";
 
 interface LibraryAddMenuProps {
   /**
@@ -27,15 +26,11 @@ interface LibraryAddMenuProps {
  * Single "+ Add" trigger for the profile library that replaces the
  * old [New collection] [New project] [Upload file] cluster. Clicking
  * the button opens a small menu with File / Project / Collection;
- * picking one opens the relevant dialog (or navigates, for project).
- *
- * Both dialogs are mounted in this component so the menu can drive
- * them with controlled `open` state — the existing UploadDialog and
- * NewCollectionDialog already accept that prop pair.
+ * File opens the upload dialog, Project and Collection navigate to
+ * their create pages.
  */
 export function LibraryAddMenu({ canAddProject }: LibraryAddMenuProps) {
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [collectionOpen, setCollectionOpen] = useState(false);
 
   return (
     <>
@@ -64,8 +59,8 @@ export function LibraryAddMenu({ canAddProject }: LibraryAddMenuProps) {
             </DropdownMenuItem>
           )}
           <DropdownMenuItem
+            render={<Link href="/collections/new" />}
             className="px-3 py-2 text-sm"
-            onClick={() => setCollectionOpen(true)}
           >
             Collection
           </DropdownMenuItem>
@@ -73,10 +68,6 @@ export function LibraryAddMenu({ canAddProject }: LibraryAddMenuProps) {
       </DropdownMenu>
 
       <UploadDialog open={uploadOpen} onOpenChange={setUploadOpen} />
-      <NewCollectionDialog
-        open={collectionOpen}
-        onOpenChange={setCollectionOpen}
-      />
     </>
   );
 }

@@ -56,5 +56,3 @@ next-env.d.ts
 !/.claude/settings.json
 !/.claude/hooks/
 !/.claude/skills/
-.iterate/*
-!.iterate/config.json

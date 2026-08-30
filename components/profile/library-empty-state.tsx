@@ -4,7 +4,6 @@ import { useState } from "react";
 import Link from "next/link";
 import { BoxIcon, LayersIcon, FolderOpenIcon, ArrowRightIcon } from "lucide-react";
 import { UploadDialog } from "@/components/upload/upload-dialog";
-import { NewCollectionDialog } from "./new-collection-dialog";
 
 /**
  * First-run empty state for the owner's library. Replaces the old
@@ -16,13 +15,11 @@ import { NewCollectionDialog } from "./new-collection-dialog";
  *   - Project:    a bundle of files sold as a single unit.
  *   - Collection: a shelf that groups files for browsing.
  *
- * File and Collection open their existing controlled dialogs in place;
- * Project links to /projects/new (it needs uploaded files to bundle,
- * which the card's subtext calls out).
+ * File opens the upload dialog in place. Project and Collection
+ * link to their create pages (`/projects/new`, `/collections/new`).
  */
 export function LibraryEmptyState({ compact = false }: { compact?: boolean }) {
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [collectionOpen, setCollectionOpen] = useState(false);
 
   return (
     <div
@@ -71,15 +68,11 @@ export function LibraryEmptyState({ compact = false }: { compact?: boolean }) {
           title="Collection"
           description="Group related files into a shelf to organize your profile. For browsing, not a product."
           cta="New collection"
-          onClick={() => setCollectionOpen(true)}
+          href="/collections/new"
         />
       </div>
 
       <UploadDialog open={uploadOpen} onOpenChange={setUploadOpen} />
-      <NewCollectionDialog
-        open={collectionOpen}
-        onOpenChange={setCollectionOpen}
-      />
     </div>
   );
 }

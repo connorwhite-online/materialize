@@ -36,11 +36,19 @@ import {
   fileNotInAnyProjectCondition,
 } from "@/lib/discovery/browse-pool";
 import { recentDownloadCounts } from "@/lib/discovery/signals";
-import { Download } from "@/components/icons/download";
-import { formatCompactCount } from "@/lib/utils/format-count";
 import { getAvatarGradient } from "@/lib/utils/avatar-gradient";
-import { FileTitleTooltip } from "@/components/browse/file-title-tooltip";
 import { BUBBLE_SHADOW } from "@/components/nav/bubble-shadow";
+import {
+  FileCard,
+  FileCardCreator,
+  FileCardDownloads,
+  FileCardPriceBadge,
+  fileCardPhotoUrls,
+  FILE_CARD_BODY_CLASS,
+  FILE_CARD_SHELL_CLASS,
+  FILE_CARD_TITLE_CLASS,
+  FILE_CARD_WELL_CLASS,
+} from "@/components/files/file-card";
 
 // Shared with the ranking inspector, which marks this cutoff — see
 // BROWSE_FILES_SHOWN. Also the per-section cap for projects,
@@ -795,68 +803,25 @@ function FileGrid({ files }: { files: FileRow[] }) {
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
       {files.map((file) => (
-        <Link key={file.id} href={`/files/${file.slug}`}>
-          <Card className="group gap-0 p-1 overflow-hidden transition-colors hover:border-primary/30">
-            <div className="relative aspect-square overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted to-muted/50">
-              {file.thumbnailUrl && (
-                <CardImageCarousel
-                  images={[
-                    file.thumbnailUrl,
-                    ...file.additionalPhotoIds.map(
-                      (id) => `/api/thumbnails/${file.id}?photoId=${id}`
-                    ),
-                  ]}
-                  alt=""
-                  size="sm"
-                  className="transition-transform duration-300 group-hover:scale-105"
-                />
-              )}
-              {file.price > 0 && (
-                <span className="absolute left-2 top-2 rounded-full bg-background/90 px-2 py-1 text-xs font-medium tabular-nums backdrop-blur-sm">
-                  ${(file.price / 100).toFixed(2)}
-                </span>
-              )}
-            </div>
-            <CardContent className="p-2.5">
-              <FileTitleTooltip
-                title={file.name}
-                className="truncate text-sm font-medium group-hover:text-primary transition-colors"
-              />
-              <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-muted-foreground">
-                {file.avatarUrl &&
-                (file.avatarUrl.startsWith("http://") ||
-                  file.avatarUrl.startsWith("https://")) ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={file.avatarUrl}
-                    alt=""
-                    className="h-3.5 w-3.5 shrink-0 rounded-full object-cover"
-                  />
-                ) : (
-                  <span
-                    className="flex h-3.5 w-3.5 shrink-0 rounded-full"
-                    style={{
-                      background: getAvatarGradient(file.username || file.displayName || ""),
-                    }}
-                  />
-                )}
-                <span className="truncate">
-                  {file.displayName || file.username || "Unknown"}
-                </span>
-              </p>
-              <div className="mt-1.5 flex items-center">
-                <span
-                  className="inline-flex items-center gap-1 text-[10px] text-muted-foreground tabular-nums"
-                  aria-label={`${file.downloadCount} downloads`}
-                  title={`${file.downloadCount} downloads`}
-                >
-                  <Download size={11} />
-                  {formatCompactCount(file.downloadCount)}
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-        </Link>
+        <FileCard
+          key={file.id}
+          href={`/files/${file.slug}`}
+          title={file.name}
+          images={fileCardPhotoUrls(
+            file.id,
+            file.thumbnailUrl,
+            file.additionalPhotoIds
+          )}
+          overlay={<FileCardPriceBadge priceCents={file.price} />}
+          subtitle={
+            <FileCardCreator
+              username={file.username}
+              displayName={file.displayName}
+              avatarUrl={file.avatarUrl}
+            />
+          }
+          meta={<FileCardDownloads count={file.downloadCount} />}
+        />
       ))}
     </div>
   );
@@ -883,8 +848,8 @@ function ProjectCard({ project }: { project: ProjectRow }) {
   const creatorSeed = project.creatorUsername || project.creatorDisplayName || "";
   return (
     <Link href={`/projects/${project.slug}`}>
-      <Card className="group gap-0 p-1 overflow-hidden transition-colors hover:border-primary/30">
-        <div className="relative aspect-square overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted to-muted/50">
+      <Card className={FILE_CARD_SHELL_CLASS}>
+        <div className={FILE_CARD_WELL_CLASS}>
           {hasAnyImage ? (
             <CardImageCarousel
               images={[
@@ -936,8 +901,8 @@ function ProjectCard({ project }: { project: ProjectRow }) {
             </div>
           )}
         </div>
-        <CardContent className="p-2.5">
-          <h3 className="truncate text-sm font-medium group-hover:text-primary transition-colors">
+        <CardContent className={FILE_CARD_BODY_CLASS}>
+          <h3 className={FILE_CARD_TITLE_CLASS}>
             {project.name}
           </h3>
           <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-muted-foreground">
@@ -981,12 +946,12 @@ interface CollectionRow {
 function CollectionCard({ collection }: { collection: CollectionRow }) {
   return (
     <Link href={`/collections/${collection.slug}`}>
-      <Card className="group gap-0 p-1 overflow-hidden transition-colors hover:border-primary/30">
-        <div className="flex aspect-square items-center justify-center overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted to-muted/50 text-xs text-muted-foreground/60">
+      <Card className={FILE_CARD_SHELL_CLASS}>
+        <div className={`flex items-center justify-center text-xs text-muted-foreground/60 ${FILE_CARD_WELL_CLASS}`}>
           Collection
         </div>
-        <CardContent className="p-2.5">
-          <h3 className="truncate text-sm font-medium group-hover:text-primary transition-colors">
+        <CardContent className={FILE_CARD_BODY_CLASS}>
+          <h3 className={FILE_CARD_TITLE_CLASS}>
             {collection.name}
           </h3>
           <p className="mt-0.5 truncate text-xs text-muted-foreground">
