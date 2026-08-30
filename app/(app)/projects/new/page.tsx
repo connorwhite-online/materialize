@@ -1,9 +1,11 @@
 import { redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
+import { LayersIcon } from "lucide-react";
 import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
 import { and, eq, desc } from "drizzle-orm";
 import { notUnsavedStudioDraft } from "@/lib/studio-drafts";
+import { CreateFormHeader } from "@/components/create-form-header";
 import { ProjectCreateForm } from "@/components/projects/project-create-form";
 
 export default async function NewProjectPage() {
@@ -24,12 +26,11 @@ export default async function NewProjectPage() {
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold">New project</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Bundle multiple files into a single sellable unit.
-        </p>
-      </div>
+      <CreateFormHeader
+        icon={<LayersIcon className="size-7" />}
+        title="New project"
+        description="Bundle multiple files into a single sellable unit."
+      />
       <ProjectCreateForm ownedFiles={ownedFiles} />
     </div>
   );
