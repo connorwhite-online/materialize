@@ -64,19 +64,14 @@ import { ProjectCollaborators } from "@/components/projects/project-collaborator
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { swallow } from "@/lib/utils/swallow";
 import { resolveProjectVisibility } from "./access";
+import {
+  FileCard,
+  FileCardPriceBadge,
+  formatFileDimensions,
+} from "@/components/files/file-card";
 
 function truncate(s: string, n: number) {
   return s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s;
-}
-
-// Bounding-box label matching the file cards elsewhere (library /
-// profile): "40.0 × 30.0 × 20.0 mm".
-function dimensionsLabel(
-  dims: [number, number, number] | null
-): string | null {
-  if (!dims) return null;
-  const fmt = (n: number) => n.toFixed(1);
-  return `${fmt(dims[0])} × ${fmt(dims[1])} × ${fmt(dims[2])} mm`;
 }
 
 export async function generateMetadata(props: {
@@ -489,45 +484,17 @@ export default async function ProjectDetailPage(props: {
           </div>
         )}
         <div className="grid gap-3 grid-cols-2 sm:grid-cols-3">
-          {bundledFileCards.map((file) => {
-            const dims = dimensionsLabel(file.dimensions);
-            const subtitle = dims ?? null;
-            return (
-              <Link key={file.id} href={`/files/${file.slug}`} className="block">
-                <Card className="group gap-0 p-1 overflow-hidden transition-colors hover:border-primary/30">
-                  <div className="relative aspect-square overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted to-muted/50">
-                    {file.thumbnailUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={file.thumbnailUrl}
-                        alt=""
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground/50">
-                        No preview
-                      </div>
-                    )}
-                    {file.price > 0 && (
-                      <span className="absolute left-2 top-2 rounded-full bg-background/90 px-2 py-1 text-xs font-medium tabular-nums backdrop-blur-sm">
-                        ${(file.price / 100).toFixed(2)}
-                      </span>
-                    )}
-                  </div>
-                  <CardContent className="px-2 py-2">
-                    <p className="truncate text-sm font-medium line-clamp-1 transition-colors group-hover:text-primary">
-                      {file.displayName}
-                    </p>
-                    {subtitle && (
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                        {subtitle}
-                      </p>
-                    )}
-                  </CardContent>
-                </Card>
-              </Link>
-            );
-          })}
+          {bundledFileCards.map((file) => (
+            <FileCard
+              key={file.id}
+              href={`/files/${file.slug}`}
+              title={file.displayName}
+              thumbnailUrl={file.thumbnailUrl}
+              placeholder="No preview"
+              overlay={<FileCardPriceBadge priceCents={file.price} />}
+              subtitle={formatFileDimensions(file.dimensions)}
+            />
+          ))}
         </div>
       </div>
     ),

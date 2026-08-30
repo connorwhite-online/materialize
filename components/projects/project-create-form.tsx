@@ -23,6 +23,7 @@ import {
   DEFAULT_LICENSE,
   type LicenseId,
 } from "@/lib/licenses";
+import { FileCard } from "@/components/files/file-card";
 
 interface OwnedFile {
   id: string;
@@ -207,37 +208,16 @@ export function ProjectCreateForm({
             </p>
           ) : (
             <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4">
-              {ownedFiles.map((f) => {
-                const isSelected = selected.includes(f.id);
-                return (
-                  <button
-                    key={f.id}
-                    type="button"
-                    onClick={() => toggle(f.id)}
-                    className={`relative aspect-square overflow-hidden rounded-lg border text-left transition-colors ${
-                      isSelected
-                        ? "border-primary ring-2 ring-primary/40"
-                        : "border-border hover:border-primary/30"
-                    }`}
-                  >
-                    {f.thumbnailUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={f.thumbnailUrl}
-                        alt=""
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full bg-muted flex items-center justify-center text-xs text-muted-foreground/60">
-                        No preview
-                      </div>
-                    )}
-                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2 text-xs text-white">
-                      {f.name}
-                    </div>
-                  </button>
-                );
-              })}
+              {ownedFiles.map((f) => (
+                <FileCard
+                  key={f.id}
+                  title={f.name}
+                  thumbnailUrl={f.thumbnailUrl}
+                  placeholder="No preview"
+                  selected={selected.includes(f.id)}
+                  onClick={() => toggle(f.id)}
+                />
+              ))}
             </div>
           )}
           {errors?.fileIds && (
