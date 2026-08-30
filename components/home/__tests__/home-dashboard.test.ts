@@ -32,6 +32,19 @@ describe("HomeDashboard recent files", () => {
       /bg-muted transition-colors group-hover:border-primary\/40/
     );
   });
+
+  it("matches compact library meta (dimensions subtitle)", () => {
+    expect(dashboard).toContain("formatFileDimensions");
+    expect(dashboard).toContain('subtitle={formatFileDimensions(tile.dimensions) ?? "—"}');
+  });
+});
+
+describe("compact library FileCarousel", () => {
+  it("threads compact into LibraryFileCard so title scale matches Recent", () => {
+    expect(libraryTab).toContain(
+      "<LibraryFileCard item={item} isOwner={isOwner} compact={compact} />"
+    );
+  });
 });
 
 describe("authed-home library chrome", () => {

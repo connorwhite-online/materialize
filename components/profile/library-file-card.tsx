@@ -50,6 +50,8 @@ export interface LibraryFileCardItem {
 interface LibraryFileCardProps {
   item: LibraryFileCardItem;
   isOwner: boolean;
+  /** Narrow carousel tiles (authed home). */
+  compact?: boolean;
 }
 
 const PREVIEWABLE_FORMATS = new Set(["stl", "obj", "3mf"]);
@@ -61,7 +63,11 @@ const PREVIEWABLE_FORMATS = new Set(["stl", "obj", "3mf"]);
  * to the static image. Non-owners just see a placeholder until the owner
  * has generated one.
  */
-export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
+export function LibraryFileCard({
+  item,
+  isOwner,
+  compact = false,
+}: LibraryFileCardProps) {
   const [thumbnailUrl, setThumbnailUrl] = useState(item.thumbnailUrl);
   const [captureModelUrl, setCaptureModelUrl] = useState<string | null>(null);
   const [capturing, setCapturing] = useState(false);
@@ -170,6 +176,7 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
       <FileCard
         href={`/files/${item.slug}`}
         title={item.name}
+        compact={compact}
         images={fileCardPhotoUrls(item.id, thumbnailUrl, item.additionalPhotoIds)}
         wellRef={containerRef}
         well={

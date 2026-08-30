@@ -86,6 +86,22 @@ describe("FileCard", () => {
       "bg-gradient-to-br from-muted to-muted/50"
     );
   });
+
+  it("uses the compact title scale and w-28 shell for carousel tiles", () => {
+    render(
+      <FileCard
+        compact
+        href="/print/asset-1"
+        title="Caribiner Hook"
+        subtitle="25.0 × 10.0 × 5.0 mm"
+      />
+    );
+    const link = screen.getByRole("link");
+    expect(link.className).toContain("w-28");
+    const title = screen.getByRole("heading", { name: "Caribiner Hook" });
+    expect(title.className).toContain("text-xs");
+    expect(screen.getByText("25.0 × 10.0 × 5.0 mm")).toBeTruthy();
+  });
 });
 
 describe("FileCardCreator / FileCardDownloads", () => {
