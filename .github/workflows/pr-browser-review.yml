@@ -1,26 +1,31 @@
 name: pr-browser-review
 
-# Fires when Vercel finishes deploying a preview for a PR. The agent
-# opens the preview URL, walks the routes the PR touched, and posts
-# a review comment back to the PR.
+# DISABLED 2026-08-30 (CON-15). Automatic preview review was firing
+# on every Vercel `deployment_status` — including skipped `main`
+# deploys — and billing Claude tokens on every PR push.
 #
-# Why `deployment_status` instead of `pull_request`: on `pull_request`
-# the action can race Vercel — running before the preview is built or
-# while it's still mid-rebuild. The deployment_status event is fired
-# by Vercel's GitHub integration the moment the preview is ready, so
-# there's no polling and no race.
+# The script (`scripts/pr-browser-review.ts`) and this file stay in
+# tree so the work can be re-enabled. To restore:
+#   1. Replace `on: workflow_dispatch` with `on: deployment_status`
+#   2. Restore the job-level `if:` that gated Preview / non-main
+#   3. Remove the `if: false` fence below
+#
+# Why `deployment_status` instead of `pull_request` (when re-enabled):
+# on `pull_request` the action can race Vercel — running before the
+# preview is built or while it's still mid-rebuild. The
+# deployment_status event is fired by Vercel's GitHub integration
+# the moment the preview is ready, so there's no polling and no race.
 #
 # Costs $$ on every PR push — Claude Agent SDK calls bill against the
 # repo's CLAUDE_CODE_OAUTH_TOKEN secret (subscription-backed; metered
 # only on overflow). The 20-minute hard cap inside
 # scripts/pr-browser-review.ts is the second line of defense; the
 # `timeout-minutes` here is the outer fence.
-#
-# Skipped automatically when the deployment is for `main` (post-merge)
-# rather than a PR branch. We only want browser review on PR pushes.
 
 on:
-  deployment_status:
+  # Manual-only while disabled. Restoring `deployment_status` without
+  # lifting `if: false` still no-ops the job.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -28,19 +33,10 @@ permissions:
 
 jobs:
   review:
-    # Only run for successful preview deployments on PR branches.
-    # production deploys (main) and failed/in-progress deploys don't
-    # get reviewed. The `preview` branch is a staging mirror of main
-    # (kept in sync by sync-preview.yml) — it deploys as a Vercel
-    # "Preview" too but never has an open PR, so exclude it to avoid a
-    # wasted trigger on every auto-sync.
-    if: >-
-      github.event.deployment_status.state == 'success' &&
-      github.event.deployment.environment == 'Preview' &&
-      github.event.deployment.ref != 'main' &&
-      github.event.deployment.ref != 'refs/heads/main' &&
-      github.event.deployment.ref != 'preview' &&
-      github.event.deployment.ref != 'refs/heads/preview'
+    # Hard-off while CON-15 is in effect. The previous gate (successful
+    # Preview deploys, excluding `main` + `preview`) lives in git
+    # history — restore it when re-enabling `deployment_status`.
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
