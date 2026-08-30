@@ -77,22 +77,13 @@ describe("decideEnvironmentDispatch", () => {
     }
   });
 
-  it("dispatches HMAC-authenticated deliveries with no environment (Internal Integration issue.created)", () => {
-    const decision = decideEnvironmentDispatch(null, undefined, {
-      allowMissing: true,
-    });
-    expect(decision.dispatch).toBe(true);
-    expect(decision.allowed).toEqual(["production"]);
-  });
-
-  it("still filters a present non-allowed environment even when allowMissing is set", () => {
-    const decision = decideEnvironmentDispatch("preview", undefined, {
-      allowMissing: true,
-    });
-    expect(decision.dispatch).toBe(false);
-    if (!decision.dispatch) {
-      expect(decision.reason).toBe("non-allowed-environment");
-    }
+  it("skips preview / development even when the request is otherwise trusted", () => {
+    expect(decideEnvironmentDispatch("preview", undefined).dispatch).toBe(
+      false
+    );
+    expect(decideEnvironmentDispatch("development", undefined).dispatch).toBe(
+      false
+    );
   });
 
   it("'*' wildcard dispatches regardless of environment, including when missing", () => {

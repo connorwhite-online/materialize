@@ -66,9 +66,11 @@ import { logError } from "@/lib/logger";
  *     `production`, which is the only deploy we want a real agent
  *     run for. Set to `*` to disable filtering entirely (every event
  *     dispatches regardless of environment tag). Events with no
- *     environment field are skipped under the default UNLESS the
- *     request was HMAC-authenticated — Internal Integration
- *     `issue.created` payloads have no environment field (CON-15).
+ *     environment field are always skipped under the default —
+ *     Internal Integration `issue.created` payloads omit the field,
+ *     so they do not dispatch. Use an Alert Rule or an `error`
+ *     webhook (both carry `event.environment`) so preview / local
+ *     testing cannot start a run.
  */
 
 export const dynamic = "force-dynamic";
@@ -227,21 +229,19 @@ export async function POST(request: Request) {
 
   // Skip events from environments the agent shouldn't touch. The
   // default is production-only because a fresh agent run costs
-  // real money + opens a real PR; dev errors should stay in the
-  // local terminal where the engineer can deal with them
-  // directly. `*` disables filtering for anyone running staging
-  // or preview triage.
+  // real money + opens a real PR; preview / local errors stay in
+  // the terminal or the Sentry dashboard. `*` disables filtering
+  // for anyone running staging or preview triage.
   //
-  // Missing environment: skipped for unsigned/shared-secret
-  // payloads (hand-crafted curls). HMAC-authenticated deliveries
-  // are allowed through — Internal Integration `issue.created`
-  // payloads have no environment field, and that skip is what
-  // silently killed sentry-fixer after CON-51 (CON-15).
+  // Missing environment is a skip, HMAC or not. Official
+  // `issue.created` payloads omit the field, and treating that as
+  // "dispatch" would fire on the first occurrence of a preview
+  // or local error (CON-15). Alert Rules and `error` webhooks
+  // carry `event.environment`; those are the production path.
   const environment = readEnvironment(flattened);
   const decision = decideEnvironmentDispatch(
     environment,
-    process.env.SENTRY_TRIGGER_ENVIRONMENT,
-    { allowMissing: hmacAuthed }
+    process.env.SENTRY_TRIGGER_ENVIRONMENT
   );
   if (!decision.dispatch) {
     return Response.json({
@@ -358,10 +358,11 @@ export type EnvironmentDispatchDecision =
  * - missing config — defaults to `["production"]`.
  * - comma-separated list — case-insensitive exact match against
  *   `event.environment`.
- * - `allowMissing` — HMAC-authenticated Sentry issue hooks have
- *   no environment field; treat absence as "dispatch" rather than
- *   "hand-crafted test". When the field IS present it still has
- *   to match the allowlist (preview events stay filtered).
+ *
+ * Missing environment is always a skip under the default. HMAC
+ * does not change that — `issue.created` has no environment
+ * field, and guessing "production" would fire on preview / local
+ * first-seen issues.
  *
  * Returning a structured decision instead of a bare boolean lets
  * the route surface "why was this skipped?" in the response body,
@@ -369,8 +370,7 @@ export type EnvironmentDispatchDecision =
  */
 export function decideEnvironmentDispatch(
   environment: string | null,
-  rawConfig: string | undefined,
-  options?: { allowMissing?: boolean }
+  rawConfig: string | undefined
 ): EnvironmentDispatchDecision {
   const config = rawConfig?.trim();
   if (config === "*") {
@@ -381,9 +381,6 @@ export function decideEnvironmentDispatch(
     .map((s) => s.trim().toLowerCase())
     .filter((s) => s.length > 0);
   if (!environment) {
-    if (options?.allowMissing) {
-      return { dispatch: true, allowed };
-    }
     return { dispatch: false, allowed, reason: "missing-environment" };
   }
   if (allowed.includes(environment.toLowerCase())) {

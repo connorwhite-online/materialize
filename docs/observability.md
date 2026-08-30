@@ -113,8 +113,11 @@ outbound webhooks — they sign them with HMAC-SHA-256 against the integration's
 
 - **HMAC mode** (Sentry-native): `Sentry-Hook-Signature` verified against
   `SENTRY_INTEGRATION_CLIENT_SECRET`. This is what Sentry's UI gives you.
-  HMAC-authenticated `issue.created` deliveries dispatch even when the
-  payload has no `environment` field — official issue webhooks omit it.
+  Dispatch still requires `environment=production` (or whatever
+  `SENTRY_TRIGGER_ENVIRONMENT` lists). Official `issue.created` payloads
+  omit that field, so they are skipped on purpose — otherwise a preview
+  or local first-seen issue would start a fixer run. Prefer an Alert
+  Rule or the `error` webhook (both carry `event.environment`).
   Non-`created` issue actions (`resolved`, `assigned`, …) are skipped.
 - **Shared-header mode**: `X-Sentry-Trigger-Secret` matched against
   `SENTRY_TRIGGER_SECRET`, plus a freshness signal so a captured request
@@ -136,7 +139,10 @@ that flag is only the hand-run path.
 1. In Sentry: **Settings → Custom Integrations → Create New Integration →
    Internal**.
 2. Set the **Webhook URL** to `https://www.materialize.cc/api/internal/sentry-trigger`.
-3. Under **Webhooks**, check `Issues` (so `issue.created` deliveries fire).
+3. Under **Webhooks**, check `Errors` (the event payload includes
+   `environment`, which is what the production-only gate reads).
+   `Issues` alone is not enough — `issue.created` has no environment
+   field and is skipped so preview / local testing cannot start a run.
 4. Permissions: `Issue & Event → Read` is sufficient.
 5. Save. Sentry shows you a **Client Secret** — copy it.
 6. Add it to Vercel env (Production + Preview):
