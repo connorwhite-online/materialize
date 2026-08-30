@@ -28,6 +28,7 @@ export function FileThumbnailStack({ thumbnails, className }: Props) {
 
   // Back-to-front so the first thumbnail sits on top. Each deeper
   // card is nudged + rotated a touch and scaled down for depth.
+  // Tile width is w-3/4 of the well (bumped from w-3/5 in CON-20).
   const layers = top
     .map((src, i) => ({ src, i }))
     .reverse();
@@ -40,13 +41,15 @@ export function FileThumbnailStack({ thumbnails, className }: Props) {
       )}
     >
       {layers.map(({ src, i }) => {
-        const offset = i * 8; // px
+        // Slightly tighter stagger than before so the larger tiles
+        // still fit inside the square well without clipping hard.
+        const offset = i * 6; // px
         const rotate = i === 0 ? 0 : i === 1 ? -5 : 5;
-        const scale = 1 - i * 0.06;
+        const scale = 1 - i * 0.05;
         return (
           <div
             key={i}
-            className="absolute aspect-square w-3/5 overflow-hidden rounded-xl border border-border bg-muted shadow-sm"
+            className="absolute aspect-square w-3/4 overflow-hidden rounded-xl border border-border bg-muted shadow-sm"
             style={{
               transform: `translate(${i % 2 === 0 ? offset : -offset}px, ${offset}px) rotate(${rotate}deg) scale(${scale})`,
               zIndex: top.length - i,
