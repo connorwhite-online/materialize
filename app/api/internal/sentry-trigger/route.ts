@@ -11,15 +11,15 @@ import { logError } from "@/lib/logger";
  *        verify the `Sentry-Hook-Signature` header against an
  *        HMAC-SHA-256 of the raw body, keyed by the integration's
  *        Client Secret in `SENTRY_INTEGRATION_CLIENT_SECRET`.
- *      - **Shared-header mode** (manual triggers / providers that
- *        let you set custom headers): match `X-Sentry-Trigger-Secret`
- *        against `SENTRY_TRIGGER_SECRET`. This mode is OFF by default
- *        — a single static header has no replay protection, so a
- *        leaked secret would let an attacker fire arbitrary agent
- *        runs. It is only honored when
- *        `SENTRY_TRIGGER_ALLOW_SHARED_SECRET` is explicitly enabled,
- *        and only for requests inside a short freshness window
- *        (see `X-Sentry-Trigger-Timestamp`).
+ *      - **Shared-header mode**: match `X-Sentry-Trigger-Secret`
+ *        against `SENTRY_TRIGGER_SECRET`, plus a freshness signal
+ *        so a captured request cannot be replayed forever.
+ *        Sentry-native freshness (`Sentry-Hook-Timestamp`, or the
+ *        event's `timestamp`/`datetime`) is always accepted — that's
+ *        what Alert Rule webhooks can actually send. The curl header
+ *        `X-Sentry-Trigger-Timestamp` is only honored when
+ *        `SENTRY_TRIGGER_ALLOW_SHARED_SECRET` is on (or HMAC is not
+ *        configured, so shared-secret is the only path).
  *      Either path works; at least one must be configured.
  *   3. Extract the event id + the full payload and dispatch the
  *      `sentry-fixer` GitHub Action with both as inputs.
@@ -42,31 +42,33 @@ import { logError } from "@/lib/logger";
  *       Sentry Internal Integration; we HMAC-verify
  *       `Sentry-Hook-Signature` against it.
  *     SENTRY_TRIGGER_SECRET — shared secret matching what the
- *       webhook sender posts in `X-Sentry-Trigger-Secret`. Useful
- *       for manual triggers or webhook providers that let you set
- *       a custom header. INERT unless
- *       SENTRY_TRIGGER_ALLOW_SHARED_SECRET is also enabled.
+ *       webhook sender posts in `X-Sentry-Trigger-Secret`. Honored
+ *       when the request also carries Sentry-native freshness, or
+ *       (for manual curls) when SENTRY_TRIGGER_ALLOW_SHARED_SECRET
+ *       is enabled.
  *   Plus:
  *     GITHUB_DISPATCH_TOKEN — PAT with `actions:write` scope on
  *       the repo.
  *     GITHUB_REPO — `owner/repo` (e.g. "connor/materialize").
  *
  * Env optional:
- *   SENTRY_TRIGGER_ALLOW_SHARED_SECRET — opt-in flag that enables the
- *     shared-header (`X-Sentry-Trigger-Secret`) auth mode. OFF by
- *     default: with the flag unset we require HMAC and ignore the
- *     shared header entirely, even if SENTRY_TRIGGER_SECRET is set.
- *     Set to `1`/`true`/`yes`/`on` to enable manual `curl` triggers.
- *     When enabled, requests must also carry a recent
- *     `X-Sentry-Trigger-Timestamp` (see below).
+ *   SENTRY_TRIGGER_ALLOW_SHARED_SECRET — opt-in flag that enables
+ *     the manual `curl` path (`X-Sentry-Trigger-Timestamp`). Alert
+ *     Rule + Internal Integration deliveries do not need this flag;
+ *     they authenticate via HMAC or Sentry-native freshness.
  *   SENTRY_TRIGGER_TIMESTAMP_WINDOW_SECONDS — freshness window (in
- *     seconds) for the shared-secret replay guard. Defaults to 300.
+ *     seconds) for header-based replay guards. Defaults to 300.
+ *     Payload timestamps (Alert Rule `event.timestamp`) use a
+ *     longer default (7200) because an alert can fire on a burst
+ *     whose first event is minutes old.
  *   SENTRY_TRIGGER_ENVIRONMENT — comma-separated allowlist of Sentry
  *     environments that should dispatch a fix. Defaults to
  *     `production`, which is the only deploy we want a real agent
  *     run for. Set to `*` to disable filtering entirely (every event
  *     dispatches regardless of environment tag). Events with no
- *     environment field are skipped under the default.
+ *     environment field are skipped under the default UNLESS the
+ *     request was HMAC-authenticated — Internal Integration
+ *     `issue.created` payloads have no environment field (CON-15).
  */
 
 export const dynamic = "force-dynamic";
@@ -93,8 +95,8 @@ export async function POST(request: Request) {
 
   // Try HMAC first — that's the Sentry-native path. Fall back to
   // the shared header if HMAC isn't configured or the signature
-  // doesn't match.
-  let authed = false;
+  // doesn't match (Alert Rules never send Sentry-Hook-Signature).
+  let hmacAuthed = false;
 
   if (hmacSecret) {
     const provided = request.headers.get("sentry-hook-signature");
@@ -112,7 +114,7 @@ export async function POST(request: Request) {
               Buffer.from(computed, "utf8")
             )
           ) {
-            authed = true;
+            hmacAuthed = true;
           }
         } catch {
           // Buffer length mismatch from utf8 encoding shouldn't
@@ -122,24 +124,52 @@ export async function POST(request: Request) {
     }
   }
 
-  // Shared-secret fallback. OFF by default: a single static header
-  // has no replay protection, so a leaked SENTRY_TRIGGER_SECRET would
-  // let an attacker fire arbitrary agent runs. Only honor it when the
-  // operator explicitly opts in via SENTRY_TRIGGER_ALLOW_SHARED_SECRET
-  // (e.g. to keep the documented manual `curl` test path working).
-  const sharedSecretAllowed = isSharedSecretModeEnabled(
-    process.env.SENTRY_TRIGGER_ALLOW_SHARED_SECRET
-  );
-  if (!authed && sharedSecret && sharedSecretAllowed) {
+  let rawEvent: Record<string, unknown> | null = null;
+  try {
+    rawEvent = JSON.parse(rawBody) as Record<string, unknown>;
+  } catch {
+    rawEvent = null;
+  }
+
+  let authed = hmacAuthed;
+
+  // Shared-secret fallback. A static header alone is not enough —
+  // we also need a freshness signal so a captured request expires.
+  // Sentry Alert Rules can send the secret but not a custom
+  // timestamp header; they DO send event.timestamp / datetime
+  // (and Internal Integration sends Sentry-Hook-Timestamp).
+  // The curl header stays flag-gated so a leaked secret plus
+  // `date +%s` is not enough unless the operator opted in.
+  if (!authed && sharedSecret) {
     const provided = request.headers.get("x-sentry-trigger-secret");
     if (provided && constantTimeStringEqual(provided, sharedSecret)) {
-      // Even with the right secret, require a recent timestamp so a
-      // captured request can't be replayed indefinitely. The window
-      // is small but generous enough for hand-run curl commands.
+      const flagOn = isSharedSecretModeEnabled(
+        process.env.SENTRY_TRIGGER_ALLOW_SHARED_SECRET
+      );
+      const flattenedForTs = rawEvent ? extractEventLike(rawEvent) : null;
+      const timestamp = resolveSharedSecretTimestamp({
+        sentryHookTimestamp: request.headers.get("sentry-hook-timestamp"),
+        curlTimestamp: request.headers.get("x-sentry-trigger-timestamp"),
+        payload: flattenedForTs,
+        envelope: rawEvent,
+        allowCurlHeader: flagOn || !hmacSecret,
+      });
+      if (!timestamp) {
+        return Response.json(
+          { error: "Forbidden", reason: "missing-timestamp" },
+          { status: 403 }
+        );
+      }
       const freshness = checkSharedSecretFreshness(
-        request.headers.get("x-sentry-trigger-timestamp"),
+        timestamp.value,
         process.env.SENTRY_TRIGGER_TIMESTAMP_WINDOW_SECONDS,
-        Date.now()
+        Date.now(),
+        {
+          defaultWindowSeconds:
+            timestamp.source === "payload"
+              ? PAYLOAD_TIMESTAMP_WINDOW_SECONDS
+              : DEFAULT_TIMESTAMP_WINDOW_SECONDS,
+        }
       );
       if (freshness.ok) {
         authed = true;
@@ -156,10 +186,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let rawEvent: Record<string, unknown>;
-  try {
-    rawEvent = JSON.parse(rawBody) as Record<string, unknown>;
-  } catch {
+  if (!rawEvent) {
     return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
@@ -185,19 +212,36 @@ export async function POST(request: Request) {
     (flattened.shortId as string | undefined) ??
     "unknown";
 
+  // Issue lifecycle webhooks fire on assigned/resolved/archived too.
+  // Only `created` should spawn a fixer run.
+  const actionability = isActionableSentryDelivery(
+    rawEvent,
+    request.headers.get("sentry-hook-resource")
+  );
+  if (!actionability.dispatch) {
+    return Response.json({
+      skipped: actionability.reason,
+      eventId,
+    });
+  }
+
   // Skip events from environments the agent shouldn't touch. The
   // default is production-only because a fresh agent run costs
   // real money + opens a real PR; dev errors should stay in the
   // local terminal where the engineer can deal with them
   // directly. `*` disables filtering for anyone running staging
-  // or preview triage. Events with no environment field are
-  // skipped under the default — Sentry's SDK populates the field
-  // automatically for real events, so absence is a signal the
-  // payload came from a hand-crafted test rather than a deploy.
+  // or preview triage.
+  //
+  // Missing environment: skipped for unsigned/shared-secret
+  // payloads (hand-crafted curls). HMAC-authenticated deliveries
+  // are allowed through — Internal Integration `issue.created`
+  // payloads have no environment field, and that skip is what
+  // silently killed sentry-fixer after CON-51 (CON-15).
   const environment = readEnvironment(flattened);
   const decision = decideEnvironmentDispatch(
     environment,
-    process.env.SENTRY_TRIGGER_ENVIRONMENT
+    process.env.SENTRY_TRIGGER_ENVIRONMENT,
+    { allowMissing: hmacAuthed }
   );
   if (!decision.dispatch) {
     return Response.json({
@@ -264,15 +308,36 @@ export async function POST(request: Request) {
  * Read the environment tag off a flattened Sentry event. Sentry
  * populates this from `Sentry.init({ environment })` — see
  * `sentry.server.config.ts:25` where we set it from
- * `VERCEL_ENV ?? NODE_ENV`. Returns null when missing or empty so
- * the caller can apply its own default.
+ * `VERCEL_ENV ?? NODE_ENV`. Also accepts `tags.environment` in
+ * either object or `{key,value}[]` form. Returns null when
+ * missing or empty so the caller can apply its own default.
  */
 export function readEnvironment(
   flattened: Record<string, unknown>
 ): string | null {
-  const raw = flattened.environment;
-  if (typeof raw !== "string") return null;
-  const trimmed = raw.trim();
+  const fromField = asNonEmptyString(flattened.environment);
+  if (fromField) return fromField;
+
+  const tags = flattened.tags;
+  if (isObject(tags)) {
+    const fromObjectTag = asNonEmptyString(tags.environment);
+    if (fromObjectTag) return fromObjectTag;
+  }
+  if (Array.isArray(tags)) {
+    for (const tag of tags) {
+      if (!isObject(tag)) continue;
+      const key = asNonEmptyString(tag.key) ?? asNonEmptyString(tag.name);
+      if (key !== "environment") continue;
+      const fromArrayTag = asNonEmptyString(tag.value);
+      if (fromArrayTag) return fromArrayTag;
+    }
+  }
+  return null;
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
   return trimmed.length === 0 ? null : trimmed;
 }
 
@@ -293,6 +358,10 @@ export type EnvironmentDispatchDecision =
  * - missing config — defaults to `["production"]`.
  * - comma-separated list — case-insensitive exact match against
  *   `event.environment`.
+ * - `allowMissing` — HMAC-authenticated Sentry issue hooks have
+ *   no environment field; treat absence as "dispatch" rather than
+ *   "hand-crafted test". When the field IS present it still has
+ *   to match the allowlist (preview events stay filtered).
  *
  * Returning a structured decision instead of a bare boolean lets
  * the route surface "why was this skipped?" in the response body,
@@ -300,7 +369,8 @@ export type EnvironmentDispatchDecision =
  */
 export function decideEnvironmentDispatch(
   environment: string | null,
-  rawConfig: string | undefined
+  rawConfig: string | undefined,
+  options?: { allowMissing?: boolean }
 ): EnvironmentDispatchDecision {
   const config = rawConfig?.trim();
   if (config === "*") {
@@ -311,12 +381,67 @@ export function decideEnvironmentDispatch(
     .map((s) => s.trim().toLowerCase())
     .filter((s) => s.length > 0);
   if (!environment) {
+    if (options?.allowMissing) {
+      return { dispatch: true, allowed };
+    }
     return { dispatch: false, allowed, reason: "missing-environment" };
   }
   if (allowed.includes(environment.toLowerCase())) {
     return { dispatch: true, allowed };
   }
   return { dispatch: false, allowed, reason: "non-allowed-environment" };
+}
+
+const NON_ACTIONABLE_RESOURCES = new Set([
+  "installation",
+  "comment",
+  "seer",
+  "preprod_artifact",
+  "metric_alert",
+]);
+
+export type SentryActionability =
+  | { dispatch: true }
+  | {
+      dispatch: false;
+      reason: "non-actionable-issue-action" | "non-actionable-resource";
+    };
+
+/**
+ * Whether this Sentry delivery should spawn a fixer run.
+ *
+ * Internal Integration issue webhooks fire on every lifecycle
+ * change (`assigned`, `resolved`, `archived`, …). Only
+ * `issue.created` is a new error. Other resources (installation
+ * handshake, comments, metric alerts) are never actionable.
+ */
+export function isActionableSentryDelivery(
+  payload: Record<string, unknown>,
+  resourceHeader: string | null
+): SentryActionability {
+  const resource = resourceHeader?.trim().toLowerCase() ?? "";
+  const action =
+    typeof payload.action === "string"
+      ? payload.action.trim().toLowerCase()
+      : "";
+  const data = isObject(payload.data) ? payload.data : null;
+  const isIssueEnvelope =
+    resource === "issue" || (data !== null && isObject(data.issue));
+
+  if (isIssueEnvelope) {
+    // Missing action: treat as created-equivalent (flat/manual
+    // payloads, or an Alert Rule that nested an issue).
+    if (action === "" || action === "created") {
+      return { dispatch: true };
+    }
+    return { dispatch: false, reason: "non-actionable-issue-action" };
+  }
+
+  if (resource && NON_ACTIONABLE_RESOURCES.has(resource)) {
+    return { dispatch: false, reason: "non-actionable-resource" };
+  }
+
+  return { dispatch: true };
 }
 
 /**
@@ -349,9 +474,9 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Whether the shared-secret (`X-Sentry-Trigger-Secret`) auth mode is
- * enabled. OFF unless the operator opts in, because a static header
- * has no replay protection — by default we require HMAC. Accepts the
+ * Whether the shared-secret curl header (`X-Sentry-Trigger-Timestamp`)
+ * is enabled. OFF unless the operator opts in. Alert Rule / Internal
+ * Integration freshness does not go through this flag. Accepts the
  * usual truthy spellings; anything else (including unset) is false.
  */
 export function isSharedSecretModeEnabled(
@@ -374,20 +499,87 @@ export type SharedSecretFreshness =
       reason: "missing-timestamp" | "malformed-timestamp" | "stale-timestamp";
     };
 
+export type SharedSecretTimestampSource = "sentry-hook" | "curl" | "payload";
+
+export type SharedSecretTimestamp = {
+  value: string;
+  source: SharedSecretTimestampSource;
+};
+
 /**
- * Replay guard for the shared-secret path. The caller must send an
- * `X-Sentry-Trigger-Timestamp` header (Unix seconds; milliseconds are
- * also accepted) within `windowSeconds` of now. Without this a single
- * captured request could be replayed forever; with it a captured
- * request expires quickly.
+ * Pick a freshness signal for the shared-secret path.
  *
- * Defaults to a 300s window. Future timestamps are bounded by the same
- * window so a skewed-forward clock can't grant an unbounded lifetime.
+ * Priority: Sentry-Hook-Timestamp (Internal Integration) → curl
+ * header when allowed → event.timestamp / datetime on the payload.
+ */
+export function resolveSharedSecretTimestamp(input: {
+  sentryHookTimestamp: string | null;
+  curlTimestamp: string | null;
+  payload: Record<string, unknown> | null;
+  envelope: Record<string, unknown> | null;
+  allowCurlHeader: boolean;
+}): SharedSecretTimestamp | null {
+  const hook = input.sentryHookTimestamp?.trim();
+  if (hook) return { value: hook, source: "sentry-hook" };
+
+  if (input.allowCurlHeader) {
+    const curl = input.curlTimestamp?.trim();
+    if (curl) return { value: curl, source: "curl" };
+  }
+
+  const fromPayload =
+    readPayloadTimestamp(input.payload) ?? readPayloadTimestamp(input.envelope);
+  if (fromPayload) return { value: fromPayload, source: "payload" };
+
+  return null;
+}
+
+/**
+ * Read a unix-seconds / unix-ms / ISO timestamp off a Sentry
+ * event-like object. Returns a numeric string checkSharedSecretFreshness
+ * can parse, or null.
+ */
+export function readPayloadTimestamp(
+  obj: Record<string, unknown> | null
+): string | null {
+  if (!obj) return null;
+  if (typeof obj.timestamp === "number") {
+    if (Number.isFinite(obj.timestamp) && obj.timestamp > 0) {
+      return String(obj.timestamp);
+    }
+    return null;
+  }
+  if (typeof obj.timestamp === "string" && obj.timestamp.trim()) {
+    const raw = obj.timestamp.trim();
+    const asNumber = Number(raw);
+    if (Number.isFinite(asNumber) && asNumber > 0) return raw;
+    const ms = Date.parse(raw);
+    if (Number.isFinite(ms)) return String(ms);
+  }
+  if (typeof obj.datetime === "string" && obj.datetime.trim()) {
+    const ms = Date.parse(obj.datetime.trim());
+    if (Number.isFinite(ms)) return String(ms);
+  }
+  return null;
+}
+
+/**
+ * Replay guard for the shared-secret path. The caller must present
+ * a timestamp (Unix seconds; milliseconds are also accepted) within
+ * `windowSeconds` of now. Without this a single captured request
+ * could be replayed forever; with it a captured request expires.
+ *
+ * Defaults to a 300s window for headers. Payload timestamps pass a
+ * longer default because Alert Rules can fire on a burst whose
+ * first event is minutes old. Future timestamps are bounded by the
+ * same window so a skewed-forward clock can't grant an unbounded
+ * lifetime.
  */
 export function checkSharedSecretFreshness(
   rawTimestamp: string | null,
   rawWindowSeconds: string | undefined,
-  nowMs: number
+  nowMs: number,
+  options?: { defaultWindowSeconds?: number }
 ): SharedSecretFreshness {
   if (rawTimestamp === null || rawTimestamp.trim().length === 0) {
     return { ok: false, reason: "missing-timestamp" };
@@ -400,7 +592,9 @@ export function checkSharedSecretFreshness(
   // treated as ms; smaller values are treated as seconds.
   const timestampMs = parsed >= 1e12 ? parsed : parsed * 1000;
 
-  const windowSeconds = parseWindowSeconds(rawWindowSeconds);
+  const fallback =
+    options?.defaultWindowSeconds ?? DEFAULT_TIMESTAMP_WINDOW_SECONDS;
+  const windowSeconds = parseWindowSeconds(rawWindowSeconds, fallback);
   const windowMs = windowSeconds * 1000;
   if (Math.abs(nowMs - timestampMs) > windowMs) {
     return { ok: false, reason: "stale-timestamp" };
@@ -409,12 +603,16 @@ export function checkSharedSecretFreshness(
 }
 
 const DEFAULT_TIMESTAMP_WINDOW_SECONDS = 300;
+const PAYLOAD_TIMESTAMP_WINDOW_SECONDS = 7200;
 
-function parseWindowSeconds(raw: string | undefined): number {
-  if (typeof raw !== "string") return DEFAULT_TIMESTAMP_WINDOW_SECONDS;
+function parseWindowSeconds(
+  raw: string | undefined,
+  fallback: number = DEFAULT_TIMESTAMP_WINDOW_SECONDS
+): number {
+  if (typeof raw !== "string") return fallback;
   const parsed = Number(raw.trim());
   if (!Number.isFinite(parsed) || parsed <= 0) {
-    return DEFAULT_TIMESTAMP_WINDOW_SECONDS;
+    return fallback;
   }
   return parsed;
 }
