@@ -105,6 +105,8 @@ const quotes: EnrichedQuote[] = [
     finishGroupImage: "pol.png",
     color: "White",
     price: 20,
+    productionTimeFast: 8,
+    productionTimeSlow: 12,
     vendorName: "PrintLab",
   }),
   quote({
@@ -114,6 +116,8 @@ const quotes: EnrichedQuote[] = [
     finishGroupImage: "pol.png",
     color: "White",
     price: 22,
+    productionTimeFast: 2,
+    productionTimeSlow: 4,
     vendorId: "v2",
     vendorName: "MakerForge",
     vendorStateCode: "CA",
@@ -231,5 +235,33 @@ describe("VendorStep finish + color filters", () => {
     renderStep({ onBack });
     fireEvent.click(screen.getByRole("button", { name: "All materials" }));
     expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not chip a lone vendor", () => {
+    renderStep();
+    // Standard/White has only PrintLab — nothing to compare.
+    expect(screen.queryByText("Cheapest")).toBeNull();
+    expect(screen.queryByText("Fastest")).toBeNull();
+  });
+
+  it("chips Cheapest and Fastest among visible multi-vendor quotes", () => {
+    renderStep({
+      initialFinishGroupId: "polished",
+      shipping: [
+        { vendorId: "v1", price: 5, deliveryTime: 7 },
+        { vendorId: "v2", price: 5, deliveryTime: 3 },
+      ],
+    });
+
+    // PrintLab: 20+5=25$, 8+7=15d — Cheapest
+    // MakerForge: 22+5=27$, 2+3=5d — Fastest
+    expect(
+      screen.getByRole("button", { name: "PrintLab, Cheapest" })
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "MakerForge, Fastest" })
+    ).toBeTruthy();
+    expect(screen.getByText("Cheapest")).toBeTruthy();
+    expect(screen.getByText("Fastest")).toBeTruthy();
   });
 });

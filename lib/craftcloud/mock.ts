@@ -36,9 +36,24 @@ const MOCK_MATERIALS = [
 ];
 
 const MOCK_VENDORS = [
-  { id: "vendor-1", name: "PrintLab EU" },
-  { id: "vendor-2", name: "MakerForge US" },
-  { id: "vendor-3", name: "PrecisionParts DE" },
+  {
+    id: "vendor-1",
+    name: "PrintLab EU",
+    productionTimeFast: 5,
+    productionTimeSlow: 9,
+  },
+  {
+    id: "vendor-2",
+    name: "MakerForge US",
+    productionTimeFast: 2,
+    productionTimeSlow: 5,
+  },
+  {
+    id: "vendor-3",
+    name: "PrecisionParts DE",
+    productionTimeFast: 4,
+    productionTimeSlow: 8,
+  },
 ];
 
 /**
@@ -144,8 +159,8 @@ function quotesForConfigIds(
         quantity,
         price: base * variation * unitFactor,
         currency: "USD" as const,
-        productionTimeFast: 3,
-        productionTimeSlow: 7,
+        productionTimeFast: vendor.productionTimeFast,
+        productionTimeSlow: vendor.productionTimeSlow,
         scale: 1,
       };
     })
@@ -177,8 +192,8 @@ export function getMockPriceResponse(
               quantity,
               price: material.priceBase * variation * unitFactor,
               currency: "USD" as const,
-              productionTimeFast: 3,
-              productionTimeSlow: 7,
+              productionTimeFast: vendor.productionTimeFast,
+              productionTimeSlow: vendor.productionTimeSlow,
               scale: 1,
             };
           })

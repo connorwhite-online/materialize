@@ -19,6 +19,7 @@ import {
   pickDefaultFinishGroupId,
   type ShippingLite,
 } from "./finish-cards";
+import { vendorQuoteBadges } from "./vendor-badges";
 import type { EnrichedQuote } from "./types";
 
 /**
@@ -226,6 +227,14 @@ export function VendorStep({
     colors.find((c) => c.name === activeColor) ?? colors[0];
   const vendorQuotes = activeColorGroup?.quotes ?? [];
 
+  // Cheapest / Fastest among the *visible* list only — finish and
+  // color filters change the winners. Pure helper so the scoring
+  // is unit-testable without mounting the step.
+  const badgesByQuoteId = useMemo(
+    () => vendorQuoteBadges(vendorQuotes, shipping, sortQuantity),
+    [vendorQuotes, shipping, sortQuantity]
+  );
+
   const handleFinishChange = (id: string) => {
     setFinishGroupId(id);
     setActiveColor("");
@@ -317,23 +326,47 @@ export function VendorStep({
         </p>
       </div>
 
-      {/* Vendor quotes for the selected color */}
-      <div className="space-y-2">
+      {/* Vendor quotes for the selected color. Extra vertical gap
+          so the Cheapest/Fastest chips hanging off the top edge
+          don't collide with the card above. */}
+      <div className="space-y-3 pt-1">
         {vendorQuotes.map((quote) => {
           const isSelected = selectedQuote?.quoteId === quote.quoteId;
           const cheapestShipping = cheapestShippingByVendor.get(quote.vendorId);
+          const badges = badgesByQuoteId.get(quote.quoteId);
           return (
             <button
               key={quote.quoteId}
               type="button"
               onClick={() => onPick(quote)}
               aria-pressed={isSelected}
-              className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors ${
+              aria-label={[
+                quote.vendorName,
+                badges?.cheapest ? "Cheapest" : null,
+                badges?.fastest ? "Fastest" : null,
+              ]
+                .filter(Boolean)
+                .join(", ")}
+              className={`relative flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors ${
                 isSelected
                   ? "border-primary bg-primary/5"
                   : "border-border bg-card hover:border-primary/30"
               }`}
             >
+              {badges && (badges.cheapest || badges.fastest) && (
+                <div className="absolute -top-2 left-2 z-10 flex gap-1">
+                  {badges.cheapest && (
+                    <span className="inline-flex items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium leading-none text-emerald-900 ring-1 ring-emerald-300 dark:bg-emerald-950/70 dark:text-emerald-200 dark:ring-emerald-800">
+                      Cheapest
+                    </span>
+                  )}
+                  {badges.fastest && (
+                    <span className="inline-flex items-center rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium leading-none text-sky-900 ring-1 ring-sky-300 dark:bg-sky-950/70 dark:text-sky-200 dark:ring-sky-800">
+                      Fastest
+                    </span>
+                  )}
+                </div>
+              )}
               <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted/80 to-muted/30 text-muted-foreground">
                 <Factory className="size-7" />
               </div>

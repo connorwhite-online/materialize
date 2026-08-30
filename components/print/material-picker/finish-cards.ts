@@ -3,6 +3,12 @@ import type { EnrichedQuote } from "./types";
 export interface ShippingLite {
   vendorId: string;
   price: number;
+  /**
+   * Days in transit. Optional so call sites that only care about
+   * price keep compiling; treated as 0 when absent (same default
+   * cheapest-shipping uses when a poll snapshot hasn't landed yet).
+   */
+  deliveryTime?: number;
 }
 
 export interface FinishCard {
