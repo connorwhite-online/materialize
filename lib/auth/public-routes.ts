@@ -60,6 +60,11 @@ export const PUBLIC_ROUTES = [
   "/u/(.*)",
   "/api/webhooks(.*)",
   "/api/craftcloud/(.*)",
+  // Anon draft /print stages the STL in R2 before the server relays
+  // it to CraftCloud. The route self-gates via a one-time grant —
+  // auth.protect() would redirect visitors to sign-in and kill the
+  // anon quote path before OTP signup ever runs.
+  "/api/upload/anon-presign",
   // Anon home-bar search hits this; protecting it breaks the search
   // panel for signed-out visitors.
   "/api/search(.*)",
