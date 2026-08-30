@@ -115,13 +115,13 @@ interface QuoteConfiguratorProps {
    * CraftCloud material id from /materials/[slug] → "Print with X".
    * Passed straight through to MaterialPicker, which exact-matches
    * it against the returned quotes to auto-advance past the
-   * material step.
+   * material step onto vendor quotes (finish is preselected there).
    */
   preselectMaterialId?: string;
   /**
    * CraftCloud finish group id. When provided alongside
    * preselectMaterialId, MaterialPicker jumps straight to vendor
-   * selection, skipping both material and finish steps.
+   * quotes and opens on that finish instead of the cheapest.
    */
   preselectFinishGroupId?: string;
   /**

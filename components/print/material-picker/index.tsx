@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MaterialStep } from "./material-step";
-import { FinishStep } from "./finish-step";
 import { VendorStep } from "./vendor-step";
 import type {
   EnrichedQuote,
@@ -20,7 +19,7 @@ interface MaterialPickerProps {
   /**
    * Shipping options returned by the same /v5/price call as the
    * quotes. The vendor step uses these to compute a per-vendor
-   * "cheapest shipping" badge under each price; all three steps
+   * "cheapest shipping" badge under each price; both steps
    * use them to sort by total cost (production + shipping) instead
    * of production alone, which would otherwise bury US vendors
    * (high production, low domestic shipping) below EU vendors
@@ -57,15 +56,16 @@ interface MaterialPickerProps {
   /**
    * CraftCloud material id from the "Print with X" flow. When
    * provided and a matching quote arrives, we jump straight to
-   * the finish step. /materials/[slug] passes the real CraftCloud
+   * the vendor step. /materials/[slug] passes the real CraftCloud
    * id here, so an exact match is reliable.
    */
   preselectMaterialId?: string;
   /**
    * CraftCloud finish group id. When provided alongside
-   * preselectMaterialId and a matching quote arrives, we jump
-   * straight past finish selection to vendor selection. The user
-   * can still press Back to return to the finish or material steps.
+   * preselectMaterialId and a matching quote arrives, the vendor
+   * step opens on that finish instead of the cheapest. The user
+   * can still change finish from there, or press Back to the
+   * material grid.
    */
   preselectFinishGroupId?: string;
   /**
@@ -93,50 +93,45 @@ export function MaterialPicker({
 }: MaterialPickerProps) {
   const [step, setStep] = useState<PickerStep>("material");
   const [materialId, setMaterialId] = useState<string | null>(null);
-  const [finishGroupId, setFinishGroupId] = useState<string | null>(null);
   // Tracks whether the preselect has already fired. Without this,
-  // a later user "Back" out of the finish step would get rubber-
+  // a later user "Back" out of the vendor step would get rubber-
   // banded right back in by the effect re-running.
   const preselectFiredRef = useRef(false);
-
-  // How many finish groups does the currently-selected material
-  // have quotes for? If it's 1, FinishStep auto-advances straight
-  // to vendor — and we need the vendor step's Back button to pop
-  // two steps instead of one, otherwise the user lands on finish,
-  // gets re-auto-advanced, and rubber-bands right back to vendor.
-  const finishGroupCountForMaterial = useMemo(() => {
-    if (!materialId) return 0;
-    const ids = new Set<string>();
-    for (const q of quotes) {
-      if (q.materialId === materialId) ids.add(q.finishGroupId);
-    }
-    return ids.size;
-  }, [quotes, materialId]);
 
   useEffect(() => {
     if (!preselectMaterialId) return;
     if (preselectFiredRef.current) return;
-    // Jump all the way to vendor when a finish group is also specified
-    // and a matching quote exists for the (material, finish group) pair.
+    // Prefer a (material, finish) hit when both are specified so
+    // the vendor step can open on that finish. Fall through to
+    // material-only if the pair hasn't landed in this snapshot.
     if (preselectFinishGroupId) {
-      const hit = quotes.find(
+      const pair = quotes.find(
         (q) =>
           q.materialId === preselectMaterialId &&
           q.finishGroupId === preselectFinishGroupId
       );
-      if (!hit) return;
-      preselectFiredRef.current = true;
-      setMaterialId(preselectMaterialId);
-      setFinishGroupId(preselectFinishGroupId);
-      setStep("vendor");
-      return;
+      if (pair) {
+        preselectFiredRef.current = true;
+        setMaterialId(preselectMaterialId);
+        setStep("vendor");
+        return;
+      }
     }
     const hit = quotes.find((q) => q.materialId === preselectMaterialId);
     if (!hit) return;
     preselectFiredRef.current = true;
     setMaterialId(preselectMaterialId);
-    setStep("finish");
+    setStep("vendor");
   }, [preselectMaterialId, preselectFinishGroupId, quotes]);
+
+  const goToMaterials = () => {
+    setStep("material");
+    setMaterialId(null);
+    // Drop the parent's preselect scope so the refetched
+    // quote set includes every material, not just the one
+    // the user came in with.
+    onClearPreselectScope?.();
+  };
 
   if (step === "material") {
     return (
@@ -152,64 +147,28 @@ export function MaterialPicker({
         onClearScope={onClearPreselectScope}
         onPick={(id) => {
           setMaterialId(id);
-          setFinishGroupId(null);
-          setStep("finish");
-        }}
-      />
-    );
-  }
-
-  if (step === "finish" && materialId) {
-    return (
-      <FinishStep
-        quotes={quotes}
-        shipping={shipping}
-        sortQuantity={sortQuantity}
-        materialId={materialId}
-        onPick={(id) => {
-          setFinishGroupId(id);
           setStep("vendor");
         }}
-        onBack={() => {
-          setStep("material");
-          setMaterialId(null);
-          // Drop the parent's preselect scope so the refetched
-          // quote set includes every material, not just the one
-          // the user came in with.
-          onClearPreselectScope?.();
-        }}
       />
     );
   }
 
-  if (step === "vendor" && materialId && finishGroupId) {
-    // The label has to match where Back actually goes. Single-finish
-    // materials skip the finish step on the way in, so vendor → back
-    // pops two steps and lands on the material grid; saying
-    // "Finishes" there would lie to the user. Mirror FinishStep's
-    // own back-to-materials copy ("All materials") for consistency.
-    const isSingleFinish = finishGroupCountForMaterial <= 1;
+  if (step === "vendor" && materialId) {
     return (
       <VendorStep
+        key={materialId}
         quotes={quotes}
         shipping={shipping}
         sortQuantity={sortQuantity}
         materialId={materialId}
-        finishGroupId={finishGroupId}
+        initialFinishGroupId={
+          materialId === preselectMaterialId
+            ? preselectFinishGroupId
+            : undefined
+        }
         selectedQuote={selectedQuote}
         onPick={onSelectQuote}
-        backLabel={isSingleFinish ? "All materials" : "Finishes"}
-        onBack={() => {
-          if (isSingleFinish) {
-            setStep("material");
-            setMaterialId(null);
-            setFinishGroupId(null);
-            onClearPreselectScope?.();
-            return;
-          }
-          setStep("finish");
-          setFinishGroupId(null);
-        }}
+        onBack={goToMaterials}
       />
     );
   }

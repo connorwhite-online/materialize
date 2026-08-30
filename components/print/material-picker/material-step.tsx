@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ChevronRight } from "@/components/icons/chevron-right";
+import { resolveCatalogImage } from "./catalog-image";
 import type { EnrichedQuote, OptimisticMaterial } from "./types";
 
 const ALL_GROUPS = "all";
@@ -79,7 +80,7 @@ interface MaterialCard {
    * Null when this card is an optimistic placeholder — a viable
    * material with no real quote yet. The card renders skeletons in
    * place of price + leadtime and is non-interactive (clicking would
-   * push the user into a finish step with no quotes to enumerate).
+   * push the user into a vendor step with no quotes to enumerate).
    */
   cheapest: number | null;
   /** Min total (production*qty + shipping) — sort tiebreaker. Null until a quote arrives. */
@@ -362,7 +363,7 @@ export function MaterialStep({
         <p className="mt-0.5 text-xs text-muted-foreground">
           {quotesLoading
             ? "Still collecting quotes — more options will appear as vendors respond."
-            : "Pick a material family, then a finish, then a vendor."}
+            : "Pick a material family, then a vendor."}
         </p>
       </div>
 
@@ -632,7 +633,3 @@ function GroupSection({
   );
 }
 
-function resolveCatalogImage(path: string): string {
-  if (path.startsWith("http")) return path;
-  return `https://res.cloudinary.com/all3dp/image/upload/w_200,q_auto,f_auto/${path}`;
-}
