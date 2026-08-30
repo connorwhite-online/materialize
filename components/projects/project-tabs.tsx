@@ -19,7 +19,7 @@ export interface ProjectTab {
 }
 
 /**
- * The project detail page's content tabs (Files, Build Guide, BOM,
+ * The project detail page's content tabs (Files, Guide, BOM,
  * Wiring). Sits under the cover/photos and above the Discussion
  * section. Each panel's body is rendered on the server and handed in
  * as a `content` node, so this client wrapper only owns the tab chrome
