@@ -7,10 +7,7 @@ import { loadUserByHandle } from "@/app/(app)/[handle]/loader";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { LibraryTab } from "@/components/profile/library-tab";
 import { OwnerSettingsTabs } from "@/components/profile/owner-settings-tabs";
-import {
-  OWNER_SETTINGS_TAB_ALIASES,
-  resolveOwnerSettingsTab,
-} from "@/lib/profile/owner-settings-tabs";
+import { resolveOwnerSettingsTab } from "@/lib/profile/owner-settings-tabs";
 import { OwnerProfileHeadline } from "@/components/profile/owner-profile-headline";
 import {
   AgentSettings,
@@ -131,25 +128,15 @@ export async function UserProfileView({
 
   if (isOwner) {
     const rawTab = searchParams.tab;
-    const preserveQuery = () => {
+    if (rawTab && rawTab in OWNER_TAB_REDIRECTS) {
+      const dest = OWNER_TAB_REDIRECTS[rawTab];
       const query = new URLSearchParams();
       if (searchParams.welcome) query.set("welcome", searchParams.welcome);
       if (searchParams.payment) query.set("payment", searchParams.payment);
       if (searchParams.production)
         query.set("production", searchParams.production);
-      return query.toString();
-    };
-
-    if (rawTab && rawTab in OWNER_TAB_REDIRECTS) {
-      const dest = OWNER_TAB_REDIRECTS[rawTab];
-      const qs = preserveQuery();
+      const qs = query.toString();
       redirect(qs ? `${dest}?${qs}` : dest);
-    }
-
-    // Fold legacy General / Notifications query values onto Settings.
-    if (rawTab && rawTab in OWNER_SETTINGS_TAB_ALIASES) {
-      const qs = preserveQuery();
-      redirect(qs ? `/${handle}?${qs}` : `/${handle}`);
     }
 
     const [settings] = await db
