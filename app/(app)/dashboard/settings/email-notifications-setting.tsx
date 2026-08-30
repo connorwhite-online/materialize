@@ -11,31 +11,11 @@ import type { EmailPrefMap } from "@/lib/notifications/email-prefs";
 const EVENT_TYPES: Array<{
   key: keyof EmailPrefMap;
   label: string;
-  description: string;
 }> = [
-  {
-    key: "comment_on_listing",
-    label: "Comments on your listings",
-    description:
-      "When someone leaves a top-level comment on one of your files or projects.",
-  },
-  {
-    key: "reply_to_comment",
-    label: "Replies to your comments",
-    description: "When someone replies to a comment you posted.",
-  },
-  {
-    key: "build_on_file",
-    label: "Builds of your files",
-    description:
-      "When someone shares a photo of a print of one of your files.",
-  },
-  {
-    key: "print_on_file",
-    label: "Prints of your files",
-    description:
-      "When someone places a print order containing one of your files.",
-  },
+  { key: "comment_on_listing", label: "Comments on your listings" },
+  { key: "reply_to_comment", label: "Replies to your comments" },
+  { key: "build_on_file", label: "Builds of your files" },
+  { key: "print_on_file", label: "Prints of your files" },
 ];
 
 interface Props {
@@ -72,32 +52,21 @@ export function EmailNotificationsSetting({ initial, initialPrefs }: Props) {
 
   return (
     <div>
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1">
-          <div className="text-sm font-medium">Email notifications</div>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Master switch for all transactional notification emails. The bell
-            on the nav stays active either way.
-          </p>
-        </div>
+      <div className="flex items-center justify-between gap-4">
+        <div className="text-sm font-medium">Email notifications</div>
         <Switch checked={master} onCheckedChange={handleMaster} />
       </div>
 
       {master && (
-        <div className="mt-4 space-y-3 rounded-xl border border-border bg-muted/50 p-4">
-          {EVENT_TYPES.map(({ key, label, description }) => {
+        <div className="mt-4 space-y-1 rounded-xl border border-border bg-muted/50 p-2">
+          {EVENT_TYPES.map(({ key, label }) => {
             const enabled = prefs[key] !== false;
             return (
               <div
                 key={key}
-                className="flex items-start justify-between gap-4"
+                className="flex items-center justify-between gap-4 rounded-lg px-2 py-2.5"
               >
-                <div className="flex-1">
-                  <div className="text-sm">{label}</div>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {description}
-                  </p>
-                </div>
+                <div className="text-sm">{label}</div>
                 <Switch
                   checked={enabled}
                   onCheckedChange={(v) => handleType(key, v)}

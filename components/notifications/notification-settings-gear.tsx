@@ -79,15 +79,9 @@ export function NotificationSettingsGear({
         ariaLabel="Notification settings"
       >
         <div className="space-y-4 px-5 pb-2 pt-1">
-          <div>
-            <h2 className="text-lg font-semibold tracking-tight">
-              Notification settings
-            </h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Choose which emails you get. The in-app bell stays on either
-              way.
-            </p>
-          </div>
+          <h2 className="text-lg font-semibold tracking-tight">
+            Notification settings
+          </h2>
 
           {error && (
             <p className="text-sm text-destructive">{error}</p>
