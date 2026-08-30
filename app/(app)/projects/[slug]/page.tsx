@@ -67,7 +67,7 @@ import { resolveProjectVisibility } from "./access";
 import {
   FileCard,
   FileCardPriceBadge,
-  formatFileDimensions,
+  fileCardOwnedSubtitle,
 } from "@/components/files/file-card";
 
 function truncate(s: string, n: number) {
@@ -354,8 +354,8 @@ export default async function ProjectDetailPage(props: {
     },
   }));
 
-  // Primary asset per bundled file — gives the "Files in this project"
-  // grid the same name + dimensions treatment as file cards elsewhere.
+  // Primary asset per bundled file — display name + format subtitle
+  // (same owned-card treatment as the library strip; CON-19).
   // The display name prefers the user-entered file name and falls back
   // to the original upload filename (files auto-created by the print
   // flow can land with an empty name). Mirrors the primary-asset pick
@@ -366,7 +366,7 @@ export default async function ProjectDetailPage(props: {
         .select({
           fileId: fileAssets.fileId,
           originalFilename: fileAssets.originalFilename,
-          geometryData: fileAssets.geometryData,
+          format: fileAssets.format,
         })
         .from(fileAssets)
         .where(inArray(fileAssets.fileId, bundledFileIds))
@@ -374,19 +374,13 @@ export default async function ProjectDetailPage(props: {
     : [];
   const primaryAssetByFileId = new Map<
     string,
-    { originalFilename: string; dimensions: [number, number, number] | null }
+    { originalFilename: string; format: string }
   >();
   for (const a of fileAssetRows) {
     if (!a.fileId || primaryAssetByFileId.has(a.fileId)) continue;
-    const dims = a.geometryData?.dimensions;
-    const dimsOk =
-      dims &&
-      typeof dims.x === "number" &&
-      typeof dims.y === "number" &&
-      typeof dims.z === "number";
     primaryAssetByFileId.set(a.fileId, {
       originalFilename: a.originalFilename,
-      dimensions: dimsOk ? [dims.x, dims.y, dims.z] : null,
+      format: a.format,
     });
   }
   const bundledFileCards = bundledFiles.map((file) => {
@@ -395,7 +389,7 @@ export default async function ProjectDetailPage(props: {
       ...file,
       displayName:
         file.name?.trim() || asset?.originalFilename || "Untitled file",
-      dimensions: asset?.dimensions ?? null,
+      format: asset?.format ?? null,
     };
   });
 
@@ -492,7 +486,7 @@ export default async function ProjectDetailPage(props: {
               thumbnailUrl={file.thumbnailUrl}
               placeholder="No preview"
               overlay={<FileCardPriceBadge priceCents={file.price} />}
-              subtitle={formatFileDimensions(file.dimensions)}
+              subtitle={fileCardOwnedSubtitle(file.format)}
             />
           ))}
         </div>

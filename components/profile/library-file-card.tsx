@@ -4,8 +4,9 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { Badge } from "@/components/ui/badge";
 import {
   FileCard,
+  fileCardOwnedSubtitle,
   fileCardPhotoUrls,
-  formatFileDimensions,
+  fileCardPurchasedSubtitle,
 } from "@/components/files/file-card";
 
 // ThumbnailCapture pulls in the full three.js + R3F stack. It only
@@ -36,7 +37,6 @@ export interface LibraryFileCardItem {
   additionalPhotoIds: string[];
   primaryAssetId: string | null;
   primaryFormat: string | null;
-  dimensions: [number, number, number] | null;
   creatorUsername?: string | null;
   creatorDisplayName?: string | null;
   // Set when the deferred fingerprint pass auto-archived this listing
@@ -50,6 +50,8 @@ export interface LibraryFileCardItem {
 interface LibraryFileCardProps {
   item: LibraryFileCardItem;
   isOwner: boolean;
+  /** Narrow carousel tiles (authed home). */
+  compact?: boolean;
 }
 
 const PREVIEWABLE_FORMATS = new Set(["stl", "obj", "3mf"]);
@@ -61,7 +63,11 @@ const PREVIEWABLE_FORMATS = new Set(["stl", "obj", "3mf"]);
  * to the static image. Non-owners just see a placeholder until the owner
  * has generated one.
  */
-export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
+export function LibraryFileCard({
+  item,
+  isOwner,
+  compact = false,
+}: LibraryFileCardProps) {
   const [thumbnailUrl, setThumbnailUrl] = useState(item.thumbnailUrl);
   const [captureModelUrl, setCaptureModelUrl] = useState<string | null>(null);
   const [capturing, setCapturing] = useState(false);
@@ -158,18 +164,19 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
   const isFlagged =
     item.source === "owned" && isOwner && !!item.flaggedReason;
 
-  const dims = formatFileDimensions(item.dimensions);
-  const subtitle =
-    dims ??
-    (isPurchased && item.creatorUsername
-      ? `by ${item.creatorDisplayName || item.creatorUsername}`
-      : "—");
+  // Own files: .stl (matches /print WhatNextPane). Purchased: by creator.
+  // Bounding box stays off the card — it truncates on compact tiles and
+  // belongs in the quote flow (CON-19).
+  const subtitle = isPurchased
+    ? fileCardPurchasedSubtitle(item.creatorDisplayName, item.creatorUsername)
+    : fileCardOwnedSubtitle(item.primaryFormat);
 
   return (
     <>
       <FileCard
         href={`/files/${item.slug}`}
         title={item.name}
+        compact={compact}
         images={fileCardPhotoUrls(item.id, thumbnailUrl, item.additionalPhotoIds)}
         wellRef={containerRef}
         well={

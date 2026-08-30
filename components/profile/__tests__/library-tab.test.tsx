@@ -27,7 +27,6 @@ function makeItem(id: string): LibraryFileCardItem {
     additionalPhotoIds: [],
     primaryAssetId: null,
     primaryFormat: null,
-    dimensions: null,
   };
 }
 

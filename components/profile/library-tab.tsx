@@ -276,31 +276,16 @@ export async function LibraryTab({
     projectFileRows,
     projectPhotoRows,
   ] = await Promise.all([
-    // Only the `dimensions` sub-object is consumed below (the card's
-    // "W × D × H" line) — select it via a jsonb path expression instead
-    // of the full `geometryData` blob (which also carries volume/
-    // triangleCount, unused here). We deliberately select
-    // `geometryData->'dimensions'` rather than the bbox*Um columns
-    // (schema.ts:546-548): those are populated only for the mesh
-    // formats the fingerprint pass parses (stl/obj/3mf, and only after
-    // that async pass completes) and are never set for step/amf, while
-    // `geometryData` is populated by the CraftCloud quote-caching route
-    // for any format a listing has been quoted in. Switching to the
-    // bbox columns would blank out dimensions for step/amf assets and
-    // for freshly uploaded stl/obj/3mf assets that haven't finished
-    // fingerprinting yet — a real regression, not just a legacy-data
-    // edge case.
+    // Primary asset id + format for card subtitles / thumbnail capture.
+    // Bounding box used to live here for the card subtitle; CON-19 moved
+    // that off the card (format / creator instead), so we no longer pull
+    // geometryData on this path.
     allFileIds.length > 0
       ? db
           .select({
             id: fileAssets.id,
             fileId: fileAssets.fileId,
             format: fileAssets.format,
-            dimensions: sql<{
-              x: number;
-              y: number;
-              z: number;
-            } | null>`${fileAssets.geometryData}->'dimensions'`,
             createdAt: fileAssets.createdAt,
           })
           .from(fileAssets)
@@ -311,7 +296,6 @@ export async function LibraryTab({
             id: string;
             fileId: string | null;
             format: typeof fileAssets.format._.data;
-            dimensions: { x: number; y: number; z: number } | null;
             createdAt: Date;
           }>
         ),
@@ -435,26 +419,14 @@ export async function LibraryTab({
     {
       id: string;
       format: string;
-      dimensions: [number, number, number] | null;
     }
   >();
   for (const asset of assetRows) {
     if (!asset.fileId) continue;
     if (!primaryAssetByFileId.has(asset.fileId)) {
-      const dims = asset.dimensions;
-      // Older CraftCloud responses sometimes returned partial shapes
-      // (e.g. {x: null, y: null, z: null}) that we persisted before
-      // the normalize at the cache boundary; treat anything missing
-      // a numeric axis as no dimensions at all.
-      const dimsOk =
-        dims &&
-        typeof dims.x === "number" &&
-        typeof dims.y === "number" &&
-        typeof dims.z === "number";
       primaryAssetByFileId.set(asset.fileId, {
         id: asset.id,
         format: asset.format,
-        dimensions: dimsOk ? [dims.x, dims.y, dims.z] : null,
       });
     }
   }
@@ -476,7 +448,6 @@ export async function LibraryTab({
       additionalPhotoIds,
       primaryAssetId: asset?.id ?? null,
       primaryFormat: asset?.format ?? null,
-      dimensions: asset?.dimensions ?? null,
       creatorUsername: r.creatorUsername,
       creatorDisplayName: r.creatorDisplayName,
       recommendedMaterialId: r.recommendedMaterialId,
@@ -548,7 +519,6 @@ export async function LibraryTab({
       additionalPhotoIds,
       primaryAssetId: asset?.id ?? null,
       primaryFormat: asset?.format ?? null,
-      dimensions: asset?.dimensions ?? null,
       flaggedReason: f.flaggedReason,
       recommendedMaterialId: f.recommendedMaterialId,
     };
@@ -711,7 +681,7 @@ function FileCarousel({
           key={item.id}
           className={compact ? "w-28 shrink-0" : "w-40 shrink-0"}
         >
-          <LibraryFileCard item={item} isOwner={isOwner} />
+          <LibraryFileCard item={item} isOwner={isOwner} compact={compact} />
         </div>
       ))}
     </FeatheredCarousel>
