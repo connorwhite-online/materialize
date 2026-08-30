@@ -466,7 +466,6 @@ export default async function ProjectDetailPage(props: {
   tabs.push({
     value: "files",
     label: "Files",
-    meta: bundledFiles.length,
     content: (
       <div>
         {canWrite && (
@@ -540,7 +539,6 @@ export default async function ProjectDetailPage(props: {
     tabs.push({
       value: "bom",
       label: "Components",
-      meta: bomItems.length || undefined,
       content: (
         <div className="space-y-3">
           {canWrite && (
@@ -583,7 +581,6 @@ export default async function ProjectDetailPage(props: {
     tabs.push({
       value: "wiring",
       label: "Wiring",
-      meta: circuits.length || undefined,
       content: (
         <CircuitGallery
           projectId={project.id}

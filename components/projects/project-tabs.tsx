@@ -12,8 +12,6 @@ export interface ProjectTab {
   value: string;
   /** Label shown on the trigger. */
   label: string;
-  /** Optional count badge rendered next to the label. */
-  meta?: number;
   /** Panel body — server-rendered content passed down from the page. */
   content: React.ReactNode;
 }
@@ -38,11 +36,6 @@ export function ProjectTabs({ tabs }: { tabs: ProjectTab[] }) {
         {tabs.map((tab) => (
           <TabsTrigger key={tab.value} value={tab.value}>
             {tab.label}
-            {tab.meta !== undefined && (
-              <span className="ml-1.5 text-xs text-muted-foreground tabular-nums">
-                {tab.meta}
-              </span>
-            )}
           </TabsTrigger>
         ))}
       </TabsList>
