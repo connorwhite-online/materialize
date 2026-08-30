@@ -1,8 +1,8 @@
 import type { SVGProps } from "react";
 
 /**
- * Chunky settings gear for the notifications headline. Filled teeth +
- * hub so it reads as a soft tile icon rather than a thin outline.
+ * Chunky settings gear for the notifications headline. Thick stroke +
+ * round joins so it sits in a soft tile without looking wiry.
  */
 export function Gear({
   size = 20,
@@ -18,10 +18,16 @@ export function Gear({
       {...props}
     >
       <path
-        fill="currentColor"
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d="M11.06 2.75c-.42 0-.79.27-.93.66l-.4 1.13a1.6 1.6 0 0 1-1.5.99l-1.2-.14a.98.98 0 0 0-.97.48L4.3 7.8a.98.98 0 0 0 .1 1.08l.86.9a1.6 1.6 0 0 1 0 2.14l-.86.9a.98.98 0 0 0-.1 1.08l.76 1.93c.18.45.64.71 1.12.62l1.2-.14c.58-.07 1.14.24 1.4.77l.4 1.13c.14.39.51.66.93.66h1.88c.42 0 .79-.27.93-.66l.4-1.13a1.6 1.6 0 0 1 1.5-.99l1.2.14c.48.09.94-.17 1.12-.62l.76-1.93a.98.98 0 0 0-.1-1.08l-.86-.9a1.6 1.6 0 0 1 0-2.14l.86-.9a.98.98 0 0 0 .1-1.08L18.7 6.87a.98.98 0 0 0-.97-.48l-1.2.14a1.6 1.6 0 0 1-1.5-.99l-.4-1.13a.98.98 0 0 0-.93-.66h-1.88ZM12 9.25a2.75 2.75 0 1 0 0 5.5 2.75 2.75 0 0 0 0-5.5Z"
+        d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"
+        stroke="currentColor"
+        strokeWidth={2.4}
+      />
+      <path
+        d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H5a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H10a1.65 1.65 0 0 0 1-1.51V5a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V10c.36.3.8.48 1.27.5H19a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
+        stroke="currentColor"
+        strokeWidth={2.4}
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </svg>
   );

@@ -42,7 +42,7 @@ describe("NotificationSettingsGear", () => {
       name: "Notification settings",
     });
     expect(button).toBeTruthy();
-    expect(button.className).toMatch(/rounded-2xl/);
+    expect(button.className).toMatch(/rounded-\[14px\]/);
     expect(button.className).toMatch(/h-11/);
   });
 

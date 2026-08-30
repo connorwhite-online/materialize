@@ -65,12 +65,12 @@ export function NotificationSettingsGear({
           setOpen(true);
         }}
         className={cn(
-          "inline-flex shrink-0 cursor-pointer items-center justify-center rounded-2xl border border-border/80 bg-muted/60 text-foreground shadow-sm transition-colors hover:bg-muted hover:border-border active:scale-[0.97]",
+          "inline-flex shrink-0 cursor-pointer items-center justify-center rounded-[14px] bg-muted text-foreground shadow-[0_1px_0_rgba(0,0,0,0.04)] ring-1 ring-border/70 transition-[transform,background-color,box-shadow] hover:bg-muted/80 hover:ring-border active:scale-[0.96]",
           compact ? "h-9 w-9" : "h-11 w-11",
           className
         )}
       >
-        <Gear size={compact ? 18 : 20} />
+        <Gear size={compact ? 17 : 19} />
       </button>
 
       <NativeSheet

@@ -102,13 +102,13 @@ test.describe("Owner profile settings polish", () => {
       fullPage: true,
     });
     await gear.click();
-    await expect(
-      page.getByRole("dialog", { name: "Notification settings" })
-    ).toBeVisible();
-    await expect(page.getByText("Email notifications")).toBeVisible();
+    const sheet = page.getByRole("dialog", { name: "Notification settings" });
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByText("Email notifications")).toBeVisible();
+    // Let the spring settle before snapshotting the sheet.
+    await page.waitForTimeout(450);
     await page.screenshot({
       path: testInfo.outputPath("notifications_settings_sheet.png"),
-      fullPage: true,
     });
   });
 });
