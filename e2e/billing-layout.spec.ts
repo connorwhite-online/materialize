@@ -78,6 +78,8 @@ test.describe("billing payment method layout", () => {
     await expect(page.getByRole("button", { name: "Remove" })).toBeVisible();
     await expect(page.getByText(/ending in/i)).toBeVisible();
 
+    await expect(page.getByText(/expires/i)).toHaveCount(0);
+
     const layout = await page.evaluate(() => {
       const buttons = [...document.querySelectorAll("button")].filter((b) =>
         /^(Remove|Replace card)$/.test((b.textContent || "").trim())
@@ -85,18 +87,29 @@ test.describe("billing payment method layout", () => {
       const info = [...document.querySelectorAll("p")].find((p) =>
         /ending in/.test(p.textContent || "")
       );
-      if (!info || buttons.length < 2) {
+      const card = document.querySelector(".rounded-2xl.border");
+      if (!info || buttons.length < 2 || !card) {
         return { ok: false, reason: "missing nodes" as const };
       }
       const infoRect = info.getBoundingClientRect();
+      const cardRect = card.getBoundingClientRect();
       const btnRects = buttons.map((b) => b.getBoundingClientRect());
       const minBtnTop = Math.min(...btnRects.map((r) => r.top));
       const stacked = minBtnTop >= infoRect.bottom - 1;
-      const sameRow =
-        Math.abs(btnRects[0].top - btnRects[1].top) < 8 &&
-        Math.min(btnRects[0].left, btnRects[1].left) <
-          Math.max(btnRects[0].right, btnRects[1].right);
-      return { ok: stacked && sameRow, stacked, sameRow, minBtnTop, infoBottom: infoRect.bottom };
+      const sameRow = Math.abs(btnRects[0].top - btnRects[1].top) < 8;
+      // Each button should take roughly half the card content width.
+      const widths = btnRects.map((r) => r.width).sort((a, b) => a - b);
+      const halfish =
+        Math.abs(widths[0] - widths[1]) < 8 &&
+        widths[0] + widths[1] > cardRect.width * 0.7;
+      return {
+        ok: stacked && sameRow && halfish,
+        stacked,
+        sameRow,
+        halfish,
+        widths,
+        cardWidth: cardRect.width,
+      };
     });
 
     expect(layout.ok, JSON.stringify(layout)).toBe(true);

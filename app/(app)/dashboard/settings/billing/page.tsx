@@ -62,8 +62,7 @@ export default async function BillingSettingsPage({
               <span className="font-medium capitalize text-foreground">
                 {summary.brand}
               </span>{" "}
-              ending in {summary.last4} · expires{" "}
-              {String(summary.expMonth).padStart(2, "0")}/{summary.expYear}
+              ending in {summary.last4}
             </p>
             <BillingActions hasCard />
           </div>
