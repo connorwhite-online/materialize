@@ -11,7 +11,11 @@ import { eq, desc, and, inArray, asc } from "drizzle-orm";
 import { withDbRetry } from "@/lib/db/retry";
 import { getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
 
-/** Orders that still need the user to do something. */
+/**
+ * In-progress print orders shown on the authed-home Orders carousel.
+ * Actionable statuses (user must do something) are sorted ahead of
+ * `auto_approved` (system is placing — no user action).
+ */
 export const PENDING_ORDER_STATUSES = [
   "cart_created",
   "awaiting_production_payment",
@@ -21,27 +25,33 @@ export const PENDING_ORDER_STATUSES = [
 
 export type PendingOrderStatus = (typeof PENDING_ORDER_STATUSES)[number];
 
+/** Statuses where the user still has a step to take. */
+export const ATTENTION_ORDER_STATUSES = [
+  "cart_created",
+  "awaiting_production_payment",
+  "awaiting_agent_approval",
+] as const satisfies readonly PendingOrderStatus[];
+
 export type PendingOrder = {
   id: string;
   status: PendingOrderStatus;
   /** CraftCloud material config UUID — used for resume deep-links. */
   material: string | null;
   /**
-   * Display label resolved from the CraftCloud catalog
-   * (`material · color`). Null when the config id is missing or
-   * unknown — never a raw UUID.
+   * Display label for a single-material order (`material · color`).
+   * Null when unknown or when `materialCount > 1` (tile shows a count).
    */
   materialName: string | null;
-  vendorName: string | null;
-  totalPrice: number;
-  serviceFee: number;
   fileAssetId: string | null;
+  /** First / only file name — null when `fileCount > 1` (tile shows a count). */
   fileName: string | null;
+  fileCount: number;
+  materialCount: number;
 };
 
 /**
- * Compact material line for pending-order cards. Color alone is not
- * enough ("Black"), and finish is usually redundant on a 13rem tile.
+ * Compact material line for order cards. Color alone is not enough
+ * ("Black"), and finish is usually redundant on a 13rem tile.
  */
 export function formatPendingMaterialName(
   materialName: string | null | undefined,
@@ -53,12 +63,49 @@ export function formatPendingMaterialName(
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
+/** File line: the name for one file, otherwise "N files". */
+export function formatOrderFileLine(
+  fileCount: number,
+  fileName: string | null
+): string {
+  if (fileCount > 1) return `${fileCount} files`;
+  return fileName?.trim() || "3D Print";
+}
+
+/** Material line: the label for one material, otherwise "N materials". */
+export function formatOrderMaterialLine(
+  materialCount: number,
+  materialName: string | null
+): string | null {
+  if (materialCount > 1) return `${materialCount} materials`;
+  return materialName;
+}
+
+export function orderNeedsAttention(status: PendingOrderStatus): boolean {
+  return (ATTENTION_ORDER_STATUSES as readonly string[]).includes(status);
+}
+
+/**
+ * Attention-needed first, then newest. Pure so the home carousel order
+ * is unit-testable without a DB.
+ */
+export function sortHomeOrders<
+  T extends { status: PendingOrderStatus; id: string },
+>(orders: T[], createdAtById: Map<string, number>): T[] {
+  return [...orders].sort((a, b) => {
+    const aAttn = orderNeedsAttention(a.status) ? 0 : 1;
+    const bAttn = orderNeedsAttention(b.status) ? 0 : 1;
+    if (aAttn !== bAttn) return aAttn - bAttn;
+    return (createdAtById.get(b.id) ?? 0) - (createdAtById.get(a.id) ?? 0);
+  });
+}
+
 const PENDING_MAX = 12;
 
 /**
  * In-progress print orders for the authed home carousel. Filename is
  * best-effort: legacy single-item rows join through fileAssets; multi-
- * item carts fall back to the first line item.
+ * item carts aggregate counts from printOrderItems.
  */
 export async function loadPendingOrders(
   userId: string
@@ -72,12 +119,9 @@ async function loadPendingOrdersOnce(userId: string): Promise<PendingOrder[]> {
       id: printOrders.id,
       status: printOrders.status,
       material: printOrders.material,
-      vendor: printOrders.vendor,
-      vendorName: printOrders.vendorName,
-      totalPrice: printOrders.totalPrice,
-      serviceFee: printOrders.serviceFee,
       fileAssetId: printOrders.fileAssetId,
       fileName: files.name,
+      createdAt: printOrders.createdAt,
     })
     .from(printOrders)
     .leftJoin(fileAssets, eq(printOrders.fileAssetId, fileAssets.id))
@@ -97,6 +141,8 @@ async function loadPendingOrdersOnce(userId: string): Promise<PendingOrder[]> {
       ? await db
           .select({
             printOrderId: printOrderItems.printOrderId,
+            fileAssetId: printOrderItems.fileAssetId,
+            materialConfigId: printOrderItems.materialConfigId,
             fileName: files.name,
             originalFilename: fileAssets.originalFilename,
           })
@@ -107,20 +153,27 @@ async function loadPendingOrdersOnce(userId: string): Promise<PendingOrder[]> {
           .orderBy(asc(printOrderItems.createdAt))
       : [];
 
-  const firstNameByOrder = new Map<string, { name: string; count: number }>();
+  type MultiAgg = {
+    firstName: string | null;
+    fileIds: Set<string>;
+    materialIds: Set<string>;
+  };
+  const multiByOrder = new Map<string, MultiAgg>();
   for (const item of multiItemMeta) {
-    const existing = firstNameByOrder.get(item.printOrderId);
-    if (existing) {
-      existing.count += 1;
-    } else {
-      firstNameByOrder.set(item.printOrderId, {
-        name:
+    let agg = multiByOrder.get(item.printOrderId);
+    if (!agg) {
+      agg = {
+        firstName:
           item.fileName ??
           item.originalFilename?.replace(/\.[^.]+$/, "") ??
-          "3D Print",
-        count: 1,
-      });
+          null,
+        fileIds: new Set(),
+        materialIds: new Set(),
+      };
+      multiByOrder.set(item.printOrderId, agg);
     }
+    agg.fileIds.add(item.fileAssetId);
+    if (item.materialConfigId) agg.materialIds.add(item.materialConfigId);
   }
 
   // One catalog fetch for the whole carousel — printOrders.material is
@@ -128,32 +181,54 @@ async function loadPendingOrdersOnce(userId: string): Promise<PendingOrder[]> {
   // null so the tile never prints a raw UUID.
   const catalog = await getCraftCloudCatalog().catch(() => null);
 
-  return draftsRaw.map((d) => {
-    const meta = !d.fileAssetId ? firstNameByOrder.get(d.id) : undefined;
-    const fileName = d.fileName
-      ? d.fileName
-      : meta
-        ? meta.count > 1
-          ? `${meta.name} + ${meta.count - 1} more`
-          : meta.name
+  const mapped = draftsRaw.map((d) => {
+    const multi = !d.fileAssetId ? multiByOrder.get(d.id) : undefined;
+    const fileCount = multi ? Math.max(multi.fileIds.size, 1) : 1;
+    const materialCount = multi
+      ? multi.materialIds.size
+      : d.material
+        ? 1
+        : 0;
+
+    const singleMaterialId =
+      materialCount === 1
+        ? multi
+          ? [...multi.materialIds][0]
+          : d.material
         : null;
     const entry =
-      d.material && catalog ? catalog.configById.get(d.material) : undefined;
+      singleMaterialId && catalog
+        ? catalog.configById.get(singleMaterialId)
+        : undefined;
+
     return {
       id: d.id,
       status: d.status as PendingOrderStatus,
       material: d.material,
-      materialName: formatPendingMaterialName(
-        entry?.material.name,
-        entry?.config.color
-      ),
-      vendorName: d.vendorName ?? d.vendor ?? null,
-      totalPrice: d.totalPrice,
-      serviceFee: d.serviceFee,
+      materialName:
+        materialCount === 1
+          ? formatPendingMaterialName(
+              entry?.material.name,
+              entry?.config.color
+            )
+          : null,
       fileAssetId: d.fileAssetId,
-      fileName,
+      fileName:
+        fileCount === 1
+          ? (d.fileName ?? multi?.firstName ?? null)
+          : null,
+      fileCount,
+      materialCount,
+      createdAtMs: d.createdAt.getTime(),
     };
   });
+
+  const createdAtById = new Map(
+    mapped.map((o) => [o.id, o.createdAtMs] as const)
+  );
+  return sortHomeOrders(mapped, createdAtById).map(
+    ({ createdAtMs: _createdAtMs, ...order }) => order
+  );
 }
 
 export function pendingOrderHref(order: PendingOrder): string {

@@ -7,6 +7,8 @@ import {
 } from "lucide-react";
 import { Factory } from "@/components/icons/factory";
 import {
+  formatOrderFileLine,
+  formatOrderMaterialLine,
   pendingOrderHref,
   type PendingOrder,
   type PendingOrderStatus,
@@ -19,37 +21,34 @@ type StatusMeta = {
 
 const PENDING_STATUS: Record<PendingOrderStatus, StatusMeta> = {
   awaiting_agent_approval: {
-    label: "Awaiting Approval",
+    label: "Confirm order",
     Icon: MailOpenIcon,
   },
   auto_approved: {
-    label: "Approved — Placing Soon",
+    label: "Placing soon",
     Icon: CheckCircle2Icon,
   },
   cart_created: {
-    label: "Pending Payment",
+    label: "Pending payment",
     Icon: CreditCardIcon,
   },
   awaiting_production_payment: {
-    label: "Awaiting production payment",
+    label: "Complete payment",
     Icon: Factory,
   },
 };
 
 export function PendingOrderTile({ order }: { order: PendingOrder }) {
-  const total = order.totalPrice + order.serviceFee;
   const { label, Icon } = PENDING_STATUS[order.status] ?? {
     label: order.status,
     Icon: CreditCardIcon,
   };
 
-  const meta = [
-    order.vendorName,
-    order.materialName,
-    total > 0 ? `$${(total / 100).toFixed(2)}` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const fileLine = formatOrderFileLine(order.fileCount, order.fileName);
+  const materialLine = formatOrderMaterialLine(
+    order.materialCount,
+    order.materialName
+  );
 
   return (
     <Link
@@ -67,12 +66,16 @@ export function PendingOrderTile({ order }: { order: PendingOrder }) {
           {label}
         </p>
       </div>
-      <p className="truncate text-sm font-medium leading-tight group-hover:text-primary">
-        {order.fileName ?? order.materialName ?? "3D Print"}
-      </p>
-      <p className="truncate text-xs text-muted-foreground">
-        {meta || "Continue"}
-      </p>
+      <div className="min-w-0 space-y-0.5">
+        <p className="truncate text-sm font-medium leading-tight group-hover:text-primary">
+          {fileLine}
+        </p>
+        {materialLine ? (
+          <p className="truncate text-xs text-muted-foreground">
+            {materialLine}
+          </p>
+        ) : null}
+      </div>
     </Link>
   );
 }
