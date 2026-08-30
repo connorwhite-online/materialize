@@ -41,8 +41,8 @@ export function BillingActions({ hasCard }: { hasCard: boolean }) {
   };
 
   return (
-    <div className="flex flex-col items-end gap-1">
-      <div className="flex items-center gap-2">
+    <div className="flex flex-col items-start gap-1">
+      <div className="flex flex-wrap items-center gap-2">
         {hasCard && (
           <Button
             variant="ghost"
