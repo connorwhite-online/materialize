@@ -604,11 +604,22 @@ describe("MobileNav open/close fade", () => {
   });
 
   it("crossfades the identity with blur, not opacity alone", () => {
-    expect(src).toMatch(/filter:\s*"blur\(6px\)"/);
-    expect(src).toMatch(/filter:\s*"blur\(0px\)"/);
-    // Both the open user-container and the closed page-pill.
-    const identityBlurIns = src.match(/filter:\s*"blur\(6px\)"/g) ?? [];
-    expect(identityBlurIns.length).toBeGreaterThanOrEqual(2);
+    // Shared constants so open/close can't drift on blur strength.
+    expect(src).toMatch(/const IDENTITY_BLUR = "blur\(10px\)"/);
+    expect(src).toMatch(/const IDENTITY_SHARP = "blur\(0px\)"/);
+    expect(src).toMatch(/filter:\s*IDENTITY_BLUR/);
+    expect(src).toMatch(/filter:\s*IDENTITY_SHARP/);
+    // Close is the soft path — longer than open, and later than the
+    // open-path enter, so the active-tab icon + label ease in as the
+    // card becomes a pill rather than popping on.
+    const closeIn = Number(
+      src.match(/const IDENTITY_IN_CLOSE[^=]*=\s*\{\s*duration:\s*([\d.]+)/)?.[1]
+    );
+    const openIn = Number(
+      src.match(/const IDENTITY_IN[^=]*=\s*\{\s*duration:\s*([\d.]+)/)?.[1]
+    );
+    expect(closeIn).toBeGreaterThan(openIn);
+    expect(closeIn).toBeGreaterThanOrEqual(0.28);
   });
 
   it("materialises menu rows with opacity and blur", () => {
