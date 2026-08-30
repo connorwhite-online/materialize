@@ -4,7 +4,7 @@ import { PendingOrderTile } from "@/components/home/pending-order-tile";
 import { LibraryTab } from "@/components/profile/library-tab";
 import {
   FileCard,
-  formatFileDimensions,
+  fileCardOwnedSubtitle,
 } from "@/components/files/file-card";
 import { loadPendingOrders } from "@/lib/dashboard/pending-orders";
 import { loadLibraryTiles } from "@/lib/print/library-tiles";
@@ -66,9 +66,8 @@ export async function HomeDashboard({ userId }: { userId: string }) {
                 href={`/print/${tile.fileAssetId}`}
                 title={tile.name}
                 thumbnailUrl={tile.thumbnailUrl}
-                // Same subtitle line as LibraryFileCard so Recent and
-                // the compact Files strip share one card height/meta.
-                subtitle={formatFileDimensions(tile.dimensions) ?? "—"}
+                // Same owned subtitle as LibraryFileCard (.{format}).
+                subtitle={fileCardOwnedSubtitle(tile.format)}
                 placeholder={
                   <span className="text-[9px] uppercase tracking-wider text-muted-foreground/50">
                     .{tile.format}

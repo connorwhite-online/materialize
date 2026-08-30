@@ -8,6 +8,9 @@ import {
   FileCardDownloads,
   fileCardPhotoUrls,
   formatFileDimensions,
+  formatFileExtension,
+  fileCardOwnedSubtitle,
+  fileCardPurchasedSubtitle,
   FILE_CARD_SHELL_CLASS,
 } from "../file-card";
 
@@ -26,13 +29,28 @@ describe("fileCardPhotoUrls", () => {
 });
 
 describe("formatFileDimensions", () => {
-  it("formats the bounding box the way library / project cards used to", () => {
+  it("formats the bounding box for print-adjacent detail", () => {
     expect(formatFileDimensions([40, 30, 20])).toBe("40.0 × 30.0 × 20.0 mm");
   });
 
   it("returns null when dimensions are missing", () => {
     expect(formatFileDimensions(null)).toBeNull();
     expect(formatFileDimensions(undefined)).toBeNull();
+  });
+});
+
+describe("file card subtitle helpers", () => {
+  it("normalizes owned format to a lowercase extension", () => {
+    expect(formatFileExtension("STL")).toBe(".stl");
+    expect(formatFileExtension(".3MF")).toBe(".3mf");
+    expect(fileCardOwnedSubtitle("obj")).toBe(".obj");
+    expect(fileCardOwnedSubtitle(null)).toBeNull();
+  });
+
+  it("names the seller on purchased cards", () => {
+    expect(fileCardPurchasedSubtitle("Ada", "ada")).toBe("by Ada");
+    expect(fileCardPurchasedSubtitle(null, "ada")).toBe("by ada");
+    expect(fileCardPurchasedSubtitle(null, null)).toBeNull();
   });
 });
 
@@ -93,14 +111,14 @@ describe("FileCard", () => {
         compact
         href="/print/asset-1"
         title="Caribiner Hook"
-        subtitle="25.0 × 10.0 × 5.0 mm"
+        subtitle=".stl"
       />
     );
     const link = screen.getByRole("link");
     expect(link.className).toContain("w-28");
     const title = screen.getByRole("heading", { name: "Caribiner Hook" });
     expect(title.className).toContain("text-xs");
-    expect(screen.getByText("25.0 × 10.0 × 5.0 mm")).toBeTruthy();
+    expect(screen.getByText(".stl")).toBeTruthy();
   });
 });
 

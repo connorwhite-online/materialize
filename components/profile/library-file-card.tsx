@@ -4,8 +4,9 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { Badge } from "@/components/ui/badge";
 import {
   FileCard,
+  fileCardOwnedSubtitle,
   fileCardPhotoUrls,
-  formatFileDimensions,
+  fileCardPurchasedSubtitle,
 } from "@/components/files/file-card";
 
 // ThumbnailCapture pulls in the full three.js + R3F stack. It only
@@ -36,7 +37,6 @@ export interface LibraryFileCardItem {
   additionalPhotoIds: string[];
   primaryAssetId: string | null;
   primaryFormat: string | null;
-  dimensions: [number, number, number] | null;
   creatorUsername?: string | null;
   creatorDisplayName?: string | null;
   // Set when the deferred fingerprint pass auto-archived this listing
@@ -164,12 +164,12 @@ export function LibraryFileCard({
   const isFlagged =
     item.source === "owned" && isOwner && !!item.flaggedReason;
 
-  const dims = formatFileDimensions(item.dimensions);
-  const subtitle =
-    dims ??
-    (isPurchased && item.creatorUsername
-      ? `by ${item.creatorDisplayName || item.creatorUsername}`
-      : "—");
+  // Own files: .stl (matches /print WhatNextPane). Purchased: by creator.
+  // Bounding box stays off the card — it truncates on compact tiles and
+  // belongs in the quote flow (CON-19).
+  const subtitle = isPurchased
+    ? fileCardPurchasedSubtitle(item.creatorDisplayName, item.creatorUsername)
+    : fileCardOwnedSubtitle(item.primaryFormat);
 
   return (
     <>

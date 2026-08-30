@@ -59,6 +59,36 @@ export function formatFileDimensions(
   return `${dims[0].toFixed(1)} × ${dims[1].toFixed(1)} × ${dims[2].toFixed(1)} mm`;
 }
 
+/** Extension line for own-library / Recent / print tiles — e.g. `.stl`. */
+export function formatFileExtension(
+  format: string | null | undefined
+): string | null {
+  if (!format) return null;
+  const trimmed = format.trim().replace(/^\./, "");
+  if (!trimmed) return null;
+  return `.${trimmed.toLowerCase()}`;
+}
+
+/**
+ * Subtitle for a file the viewer owns (library, Recent, project bundle).
+ * Format beats bounding box on compact tiles — the full W×D×H truncates
+ * and belongs in the quote flow, not as the permanent scan line.
+ */
+export function fileCardOwnedSubtitle(
+  format: string | null | undefined
+): string | null {
+  return formatFileExtension(format);
+}
+
+/** Subtitle for a purchased file — who you bought it from. */
+export function fileCardPurchasedSubtitle(
+  creatorDisplayName?: string | null,
+  creatorUsername?: string | null
+): string | null {
+  const name = creatorDisplayName?.trim() || creatorUsername?.trim();
+  return name ? `by ${name}` : null;
+}
+
 export function FileCardPriceBadge({ priceCents }: { priceCents: number }) {
   if (priceCents <= 0) return null;
   return (

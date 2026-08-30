@@ -33,9 +33,9 @@ describe("HomeDashboard recent files", () => {
     );
   });
 
-  it("matches compact library meta (dimensions subtitle)", () => {
-    expect(dashboard).toContain("formatFileDimensions");
-    expect(dashboard).toContain('subtitle={formatFileDimensions(tile.dimensions) ?? "—"}');
+  it("matches compact library meta (format subtitle)", () => {
+    expect(dashboard).toContain("fileCardOwnedSubtitle");
+    expect(dashboard).toContain("subtitle={fileCardOwnedSubtitle(tile.format)}");
   });
 });
 
