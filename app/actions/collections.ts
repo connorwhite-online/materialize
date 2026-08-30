@@ -11,9 +11,10 @@ import {
 } from "@/lib/db/schema";
 import { eq, and, desc, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { nanoid } from "nanoid";
 import { z } from "zod";
-import { logError } from "@/lib/logger";
+import { logError, isRedirectError } from "@/lib/logger";
 import {
   canWriteCollection,
   resolveOwnerForCreate,
@@ -104,7 +105,7 @@ export async function createCollection(formData: FormData) {
     description: formData.get("description"),
     visibility: formData.get("visibility") || undefined,
     category: formData.get("category") || undefined,
-    tags: formData.get("tags"),
+    tags: formData.get("tags") || undefined,
   });
 
   if (!parsed.success) {
@@ -132,8 +133,10 @@ export async function createCollection(formData: FormData) {
       .returning();
 
     revalidatePath("/dashboard/uploads");
-    return { collectionId: collection.id, slug: collection.slug };
+    revalidatePath("/dashboard");
+    redirect(`/collections/${collection.slug}`);
   } catch (error) {
+    if (isRedirectError(error)) throw error;
     logError("createCollection", error);
     return { error: { name: ["Failed to create collection."] } };
   }
