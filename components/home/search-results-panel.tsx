@@ -14,6 +14,7 @@ import type {
   SearchResponse,
 } from "@/app/api/search/route";
 import { FileCard } from "@/components/files/file-card";
+import { isSessionGatedImageSrc } from "@/lib/images/session-gated-src";
 
 interface SearchResultsPanelProps {
   results: SearchResponse | null;
@@ -204,6 +205,7 @@ function ProjectCard({
             alt=""
             fill
             sizes="112px"
+            unoptimized={isSessionGatedImageSrc(hit.thumbnailUrl)}
             className="object-cover transition-transform group-hover:scale-105"
           />
         ) : (

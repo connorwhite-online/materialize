@@ -46,6 +46,11 @@ const UUID_RE =
  * previews to anon visitors). For unpublished files (drafts), the
  * thumbnail is gated to the owner so a leaked fileId can't surface
  * work-in-progress artwork.
+ *
+ * Callers that render draft/private thumbnails through next/image
+ * MUST pass `unoptimized` (see `isSessionGatedImageSrc`) — the
+ * optimizer fetches without Clerk cookies and would otherwise get
+ * the transparent placeholder (CON-23). Plain `<img>` is fine.
  */
 export async function GET(
   request: Request,

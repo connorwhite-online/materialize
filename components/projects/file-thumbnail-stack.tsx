@@ -17,10 +17,10 @@ interface Props {
  * content instead of an empty gradient. Used by the project detail
  * cover and the library project card.
  *
- * Plain <img> (not next/image) because file thumbnails are already
- * full, directly-renderable URLs everywhere else they're shown
- * (project file grid, create-form picker) and we don't want to route
- * them through the optimizer just for a decorative stack.
+ * Plain <img> (not next/image) on purpose: draft/private file
+ * thumbnails are session-gated, and the optimizer fetches without
+ * Clerk cookies (CON-23). Same reason `CardImageCarousel` sets
+ * `unoptimized` for `/api/thumbnails/**` srcs.
  */
 export function FileThumbnailStack({ thumbnails, className }: Props) {
   const top = thumbnails.filter(Boolean).slice(0, 3);

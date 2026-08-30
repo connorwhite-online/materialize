@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import { ChevronLeft } from "@/components/icons/chevron-left";
 import { ChevronRight } from "@/components/icons/chevron-right";
+import { isSessionGatedImageSrc } from "@/lib/images/session-gated-src";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -66,9 +67,11 @@ export function CardImageCarousel({
   if (images.length === 0) return null;
 
   // next.config.ts widens `images.localPatterns` for /api/thumbnails/**
-  // so both `?photoId=…` and bare-cover URLs satisfy the optimizer's
-  // src allowlist — no per-instance `unoptimized` escape hatch needed
-  // for the carousel anymore.
+  // so query-string thumbnail URLs clear the optimizer allowlist.
+  // That is not enough for drafts/private covers: the optimizer
+  // fetches without Clerk cookies and the proxy returns a transparent
+  // placeholder (CON-23). Bypass it for those same-origin srcs;
+  // remote signed R2 gallery URLs stay optimized.
   const carouselSizes =
     size === "lg"
       ? "(min-width: 1024px) 50vw, 100vw"
@@ -84,6 +87,7 @@ export function CardImageCarousel({
           alt={alt}
           fill
           sizes={carouselSizes}
+          unoptimized={isSessionGatedImageSrc(images[0])}
           // The `lg` variant is the detail-page hero — eager-load its
           // cover so it doesn't lazy-pop on a cold (e.g. anon) first
           // visit, where it isn't already in the browser cache.
@@ -110,6 +114,7 @@ export function CardImageCarousel({
               alt={alt}
               fill
               sizes={carouselSizes}
+              unoptimized={isSessionGatedImageSrc(src)}
               // Eager-load only the hero cover (first slide of the `lg`
               // variant) so it's painted immediately on a cold/anon
               // first visit instead of lazy-popping in.
