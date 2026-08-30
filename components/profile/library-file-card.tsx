@@ -2,6 +2,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { PrivateCardMark } from "@/components/ui/visibility-mark";
 import {
   FileCard,
   fileCardOwnedSubtitle,
@@ -188,12 +189,8 @@ export function LibraryFileCard({
         }
         overlay={
           (isPrivate || isFlagged) && (
-            <div className="pointer-events-none absolute left-1.5 top-1.5 flex flex-wrap items-center gap-1">
-              {isPrivate && (
-                <span className="inline-flex items-center rounded-md bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-white backdrop-blur-md ring-1 ring-white/10">
-                  Private
-                </span>
-              )}
+            <div className="pointer-events-none absolute left-1.5 top-1.5 z-10 flex flex-wrap items-center gap-1">
+              {isPrivate && <PrivateCardMark />}
               {isFlagged && (
                 <span className="inline-flex items-center rounded-md bg-destructive/85 px-1.5 py-0.5 text-[10px] font-medium text-destructive-foreground backdrop-blur-md ring-1 ring-destructive/30">
                   Flagged

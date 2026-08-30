@@ -3,6 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { CardImageCarousel } from "@/components/photos/card-image-carousel";
 import { FileThumbnailStack } from "@/components/projects/file-thumbnail-stack";
+import { PrivateCardMark } from "@/components/ui/visibility-mark";
 import {
   FILE_CARD_BODY_CLASS,
   FILE_CARD_SHELL_CLASS,
@@ -72,12 +73,11 @@ export function LibraryProjectCard({ item }: LibraryProjectCardProps) {
           )}
 
           {(isPrivate || item.price > 0) && (
-            <div className="pointer-events-none absolute left-1.5 top-1.5 flex flex-wrap items-center gap-1">
-              {isPrivate && (
-                <span className="inline-flex items-center rounded-md bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-white backdrop-blur-md ring-1 ring-white/10">
-                  Private
-                </span>
-              )}
+            // z-10 keeps the mark above FileThumbnailStack's inline
+            // zIndex layers — without it the frosted chip paints under
+            // the deck (CON-20).
+            <div className="pointer-events-none absolute left-1.5 top-1.5 z-10 flex flex-wrap items-center gap-1">
+              {isPrivate && <PrivateCardMark />}
               {item.price > 0 && (
                 <span className="inline-flex items-center rounded-md bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-white backdrop-blur-md ring-1 ring-white/10">
                   ${(item.price / 100).toFixed(2)}
