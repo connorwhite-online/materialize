@@ -6,10 +6,6 @@ const dashboard = readFileSync(
   resolve(__dirname, "../home-dashboard.tsx"),
   "utf8"
 );
-const fileCard = readFileSync(
-  resolve(__dirname, "../../profile/library-file-card.tsx"),
-  "utf8"
-);
 const libraryTab = readFileSync(
   resolve(__dirname, "../../profile/library-tab.tsx"),
   "utf8"
@@ -29,12 +25,9 @@ describe("HomeDashboard authed create cluster", () => {
 });
 
 describe("HomeDashboard recent files", () => {
-  it("uses the same thumbnail well as library file cards", () => {
-    const well =
-      "rounded-lg border border-border bg-gradient-to-br from-muted/60 to-muted/30";
-    expect(fileCard).toContain(well);
-    expect(dashboard).toContain(well);
-    expect(dashboard).toContain("hover:border-primary/30");
+  it("uses the shared FileCard", () => {
+    expect(dashboard).toContain('from "@/components/files/file-card"');
+    expect(dashboard).toContain("<FileCard");
     expect(dashboard).not.toMatch(
       /bg-muted transition-colors group-hover:border-primary\/40/
     );

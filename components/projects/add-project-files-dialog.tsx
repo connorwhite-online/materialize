@@ -16,6 +16,7 @@ import { Plus } from "@/components/icons/plus";
 import { FileUploader } from "@/components/upload/file-uploader";
 import { FileMetadataForm } from "@/components/upload/file-metadata-form";
 import { addFilesToProject } from "@/app/actions/projects";
+import { FileCard } from "@/components/files/file-card";
 
 interface AvailableFile {
   id: string;
@@ -145,45 +146,17 @@ export function AddProjectFilesDialog({ projectId, availableFiles }: Props) {
                 </p>
               ) : (
                 <div className="flex gap-3 overflow-x-auto pb-2">
-                  {availableFiles.map((f) => {
-                    const isSelected = selected.includes(f.id);
-                    return (
-                      <button
-                        key={f.id}
-                        type="button"
-                        onClick={() => toggle(f.id)}
-                        aria-pressed={isSelected}
-                        className={`group relative w-28 shrink-0 overflow-hidden rounded-lg border text-left transition-colors ${
-                          isSelected
-                            ? "border-primary ring-2 ring-primary/40"
-                            : "border-border hover:border-primary/30"
-                        }`}
-                      >
-                        <div className="aspect-square w-full overflow-hidden bg-muted">
-                          {f.thumbnailUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={f.thumbnailUrl}
-                              alt=""
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            <div className="flex h-full w-full items-center justify-center text-[10px] text-muted-foreground/60">
-                              No preview
-                            </div>
-                          )}
-                        </div>
-                        {isSelected && (
-                          <span className="absolute right-1 top-1 inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground">
-                            ✓
-                          </span>
-                        )}
-                        <p className="truncate px-1.5 py-1 text-[11px] font-medium">
-                          {f.name}
-                        </p>
-                      </button>
-                    );
-                  })}
+                  {availableFiles.map((f) => (
+                    <FileCard
+                      key={f.id}
+                      compact
+                      title={f.name}
+                      thumbnailUrl={f.thumbnailUrl}
+                      placeholder="No preview"
+                      selected={selected.includes(f.id)}
+                      onClick={() => toggle(f.id)}
+                    />
+                  ))}
                 </div>
               )}
               {error && <p className="text-xs text-destructive">{error}</p>}

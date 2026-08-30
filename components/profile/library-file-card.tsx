@@ -1,10 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { CardImageCarousel } from "@/components/photos/card-image-carousel";
+import {
+  FileCard,
+  fileCardPhotoUrls,
+  formatFileDimensions,
+} from "@/components/files/file-card";
 
 // ThumbnailCapture pulls in the full three.js + R3F stack. It only
 // renders when an owner's file has no thumbnail yet, but the static
@@ -51,10 +53,6 @@ interface LibraryFileCardProps {
 }
 
 const PREVIEWABLE_FORMATS = new Set(["stl", "obj", "3mf"]);
-
-function formatDim(n: number) {
-  return n.toFixed(1);
-}
 
 /**
  * Library card. Shows the cached thumbnail image if one exists. For the
@@ -160,34 +158,29 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
   const isFlagged =
     item.source === "owned" && isOwner && !!item.flaggedReason;
 
+  const dims = formatFileDimensions(item.dimensions);
+  const subtitle =
+    dims ??
+    (isPurchased && item.creatorUsername
+      ? `by ${item.creatorDisplayName || item.creatorUsername}`
+      : "—");
+
   return (
-    <Link href={`/files/${item.slug}`}>
-      <Card className="group gap-0 p-1 overflow-hidden transition-colors hover:border-primary/30">
-        <div
-          ref={containerRef}
-          className="relative aspect-square w-full overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted/60 to-muted/30"
-        >
-          {thumbnailUrl ? (
-            <CardImageCarousel
-              images={[
-                thumbnailUrl,
-                ...item.additionalPhotoIds.map(
-                  (id) => `/api/thumbnails/${item.id}?photoId=${id}`
-                ),
-              ]}
-              alt=""
-              size="sm"
-            />
-          ) : capturing ? (
+    <>
+      <FileCard
+        href={`/files/${item.slug}`}
+        title={item.name}
+        images={fileCardPhotoUrls(item.id, thumbnailUrl, item.additionalPhotoIds)}
+        wellRef={containerRef}
+        well={
+          thumbnailUrl ? undefined : capturing ? (
             <div className="flex h-full w-full items-center justify-center">
               <span className="h-5 w-5 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-muted-foreground/70" />
             </div>
-          ) : null}
-
-          {/* Status badges overlay the thumbnail top-left so they
-              read at a glance without taking up footer real estate.
-              Backdrop-blur keeps them legible over any image. */}
-          {(isPrivate || isFlagged) && (
+          ) : null
+        }
+        overlay={
+          (isPrivate || isFlagged) && (
             <div className="pointer-events-none absolute left-1.5 top-1.5 flex flex-wrap items-center gap-1">
               {isPrivate && (
                 <span className="inline-flex items-center rounded-md bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-white backdrop-blur-md ring-1 ring-white/10">
@@ -200,23 +193,11 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
                 </span>
               )}
             </div>
-          )}
-        </div>
-        <CardContent className="px-2 py-2">
-          <h3 className="truncate text-sm font-medium transition-colors group-hover:text-primary">
-            {item.name}
-          </h3>
-          <p className="mt-0.5 truncate text-xs text-muted-foreground">
-            {item.dimensions
-              ? `${formatDim(item.dimensions[0])} × ${formatDim(item.dimensions[1])} × ${formatDim(item.dimensions[2])} mm`
-              : isPurchased && item.creatorUsername
-                ? `by ${item.creatorDisplayName || item.creatorUsername}`
-                : "—"}
-          </p>
-          {/* isPrivate / isFlagged intentionally omitted from this
-              row — they surface in the top-left overlay above so the
-              status reads at thumb-glance instead of footer-glance. */}
-          {(hasPrice || isPurchased) && (
+          )
+        }
+        subtitle={subtitle}
+        meta={
+          (hasPrice || isPurchased) && (
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {hasPrice && (
                 <Badge variant="secondary" className="text-[10px]">
@@ -229,9 +210,9 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
                 </Badge>
               )}
             </div>
-          )}
-        </CardContent>
-      </Card>
+          )
+        }
+      />
       {captureModelUrl && item.primaryFormat && (
         <Suspense fallback={null}>
           <ThumbnailCapture
@@ -245,6 +226,6 @@ export function LibraryFileCard({ item, isOwner }: LibraryFileCardProps) {
           />
         </Suspense>
       )}
-    </Link>
+    </>
   );
 }

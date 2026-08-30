@@ -1,9 +1,8 @@
-import Link from "next/link";
 import { HomeDropzone } from "@/components/home/home-dropzone";
 import { FeatheredCarousel } from "@/components/home/feathered-carousel";
 import { PendingOrderTile } from "@/components/home/pending-order-tile";
 import { LibraryTab } from "@/components/profile/library-tab";
-import { Card, CardContent } from "@/components/ui/card";
+import { FileCard } from "@/components/files/file-card";
 import { loadPendingOrders } from "@/lib/dashboard/pending-orders";
 import { loadLibraryTiles } from "@/lib/print/library-tiles";
 import { logError } from "@/lib/logger";
@@ -58,34 +57,18 @@ export async function HomeDashboard({ userId }: { userId: string }) {
           <h2 className="mb-3 text-sm font-medium">Recent files</h2>
           <FeatheredCarousel>
             {recent.map((tile) => (
-              <Link
+              <FileCard
                 key={tile.fileAssetId}
+                compact
                 href={`/print/${tile.fileAssetId}`}
-                className="group block w-28 shrink-0"
-              >
-                <Card className="gap-0 overflow-hidden p-1 transition-colors hover:border-primary/30">
-                  <div className="relative aspect-square w-full overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted/60 to-muted/30">
-                    {tile.thumbnailUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={tile.thumbnailUrl}
-                        alt=""
-                        loading="lazy"
-                        className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                      />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center text-[9px] uppercase tracking-wider text-muted-foreground/50">
-                        .{tile.format}
-                      </div>
-                    )}
-                  </div>
-                  <CardContent className="px-2 py-2">
-                    <p className="truncate text-sm font-medium transition-colors group-hover:text-primary">
-                      {tile.name}
-                    </p>
-                  </CardContent>
-                </Card>
-              </Link>
+                title={tile.name}
+                thumbnailUrl={tile.thumbnailUrl}
+                placeholder={
+                  <span className="text-[9px] uppercase tracking-wider text-muted-foreground/50">
+                    .{tile.format}
+                  </span>
+                }
+              />
             ))}
           </FeatheredCarousel>
         </section>
