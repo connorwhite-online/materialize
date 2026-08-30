@@ -61,7 +61,7 @@ test.describe("Owner profile settings polish", () => {
       page.getByRole("button", { name: "General", exact: true })
     ).toHaveCount(0);
 
-    await expect(page.getByText("Email notifications")).toBeVisible();
+    await expect(page.getByText("Email notifications")).toHaveCount(0);
     await expect(page.getByRole("radio", { name: "System" })).toBeVisible();
     await expect(page.getByRole("radio", { name: "Light" })).toBeVisible();
     await expect(page.getByRole("radio", { name: "Dark" })).toBeVisible();
@@ -91,19 +91,23 @@ test.describe("Owner profile settings polish", () => {
       fullPage: true,
     });
 
-    await page.goto(`/${username}?tab=notifications`);
-    await expect(page.getByText("Email notifications")).toBeVisible({
-      timeout: 15_000,
-    });
+    await page.goto("/notifications");
     await expect(
-      page.getByRole("button", { name: "Settings", exact: true })
-    ).toHaveAttribute("aria-current", "page");
-    // Client replaceState strips the legacy query once Settings mounts.
-    await expect
-      .poll(() => new URL(page.url()).searchParams.get("tab"))
-      .toBeNull();
+      page.getByRole("heading", { name: "Notifications" })
+    ).toBeVisible({ timeout: 15_000 });
+    const gear = page.getByRole("button", { name: "Notification settings" });
+    await expect(gear).toBeVisible();
     await page.screenshot({
-      path: testInfo.outputPath("settings_legacy_notifications_redirect.png"),
+      path: testInfo.outputPath("notifications_gear_headline.png"),
+      fullPage: true,
+    });
+    await gear.click();
+    await expect(
+      page.getByRole("dialog", { name: "Notification settings" })
+    ).toBeVisible();
+    await expect(page.getByText("Email notifications")).toBeVisible();
+    await page.screenshot({
+      path: testInfo.outputPath("notifications_settings_sheet.png"),
       fullPage: true,
     });
   });

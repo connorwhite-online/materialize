@@ -1,28 +1,16 @@
 import Link from "next/link";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { UploadVisibilitySetting } from "@/app/(app)/dashboard/settings/upload-visibility-setting";
-import { EmailNotificationsSetting } from "@/app/(app)/dashboard/settings/email-notifications-setting";
 import { SignOutButton } from "@/app/(app)/dashboard/settings/sign-out-button";
-import type { EmailPrefMap } from "@/lib/notifications/email-prefs";
 
 export function GeneralSettings({
   defaultUploadVisibility,
-  emailNotificationsEnabled,
-  emailNotificationPrefs,
 }: {
   defaultUploadVisibility: "public" | "private";
-  emailNotificationsEnabled: boolean;
-  emailNotificationPrefs: EmailPrefMap | null;
 }) {
   return (
     <div className="space-y-8">
       <ThemeSwitcher />
-      <div className="border-t border-border pt-6">
-        <EmailNotificationsSetting
-          initial={emailNotificationsEnabled}
-          initialPrefs={emailNotificationPrefs}
-        />
-      </div>
       <UploadVisibilitySetting initial={defaultUploadVisibility} />
       <SignOutButton />
     </div>

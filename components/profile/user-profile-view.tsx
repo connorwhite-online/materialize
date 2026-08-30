@@ -142,8 +142,6 @@ export async function UserProfileView({
     const [settings] = await db
       .select({
         defaultUploadVisibility: users.defaultUploadVisibility,
-        emailNotificationsEnabled: users.emailNotificationsEnabled,
-        emailNotificationPrefs: users.emailNotificationPrefs,
       })
       .from(users)
       .where(eq(users.id, user.id));
@@ -170,12 +168,6 @@ export async function UserProfileView({
               <GeneralSettings
                 defaultUploadVisibility={
                   settings?.defaultUploadVisibility ?? "private"
-                }
-                emailNotificationsEnabled={
-                  settings?.emailNotificationsEnabled ?? true
-                }
-                emailNotificationPrefs={
-                  settings?.emailNotificationPrefs ?? null
                 }
               />
             )}

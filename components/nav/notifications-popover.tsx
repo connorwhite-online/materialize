@@ -9,6 +9,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { NotificationItem } from "@/components/notifications/notification-item";
+import { NotificationSettingsGear } from "@/components/notifications/notification-settings-gear";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useUnreadCount } from "@/lib/hooks/use-unread-count";
 import {
@@ -106,27 +107,30 @@ export function NotificationsPopover({
       >
         <div className="flex items-center justify-between gap-3 border-b border-border/60 px-3 py-2.5">
           <PopoverTitle>Notifications</PopoverTitle>
-          {unreadInList > 0 && (
-            <button
-              type="button"
-              disabled={marking}
-              onClick={() =>
-                startMark(async () => {
-                  await markAllNotificationsRead();
-                  setItems((prev) =>
-                    prev
-                      ? prev.map((r) =>
-                          r.readAt ? r : { ...r, readAt: new Date() }
-                        )
-                      : prev
-                  );
-                })
-              }
-              className="cursor-pointer text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-            >
-              {marking ? "Marking…" : "Mark all read"}
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {unreadInList > 0 && (
+              <button
+                type="button"
+                disabled={marking}
+                onClick={() =>
+                  startMark(async () => {
+                    await markAllNotificationsRead();
+                    setItems((prev) =>
+                      prev
+                        ? prev.map((r) =>
+                            r.readAt ? r : { ...r, readAt: new Date() }
+                          )
+                        : prev
+                    );
+                  })
+                }
+                className="cursor-pointer text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+              >
+                {marking ? "Marking…" : "Mark all read"}
+              </button>
+            )}
+            <NotificationSettingsGear compact />
+          </div>
         </div>
         <div className="max-h-[min(28rem,70vh)] overflow-y-auto">
           {items === null && !error && <NotificationListSkeleton />}

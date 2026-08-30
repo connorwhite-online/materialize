@@ -8,6 +8,7 @@ import { revalidatePath } from "next/cache";
 import { profileSchema, socialLinksSchema } from "@/lib/validations/file";
 import { validateHandle } from "@/lib/handles/validate";
 import { logError } from "@/lib/logger";
+import type { EmailPrefMap } from "@/lib/notifications/email-prefs";
 
 export async function updateProfile(formData: FormData) {
   const { userId } = await auth();
@@ -153,6 +154,35 @@ export async function updateDefaultUploadVisibility(
 }
 
 /**
+ * Load the current user's email-notification master switch + per-type
+ * prefs. Used by the notifications gear sheet (page + bell popover).
+ */
+export async function getMyEmailNotificationPrefs(): Promise<
+  | { enabled: boolean; prefs: EmailPrefMap | null }
+  | { error: string }
+> {
+  const { userId } = await auth();
+  if (!userId) return { error: "Unauthorized" };
+
+  try {
+    const [row] = await db
+      .select({
+        enabled: users.emailNotificationsEnabled,
+        prefs: users.emailNotificationPrefs,
+      })
+      .from(users)
+      .where(eq(users.id, userId));
+    return {
+      enabled: row?.enabled ?? true,
+      prefs: row?.prefs ?? null,
+    };
+  } catch (error) {
+    logError("getMyEmailNotificationPrefs", error);
+    return { error: "Failed to load notification settings." };
+  }
+}
+
+/**
  * Master switch for transactional notification emails (comments, replies,
  * makes). The in-app bell stays on regardless; this only governs whether
  * we also fire an email per event.
@@ -170,6 +200,7 @@ export async function updateEmailNotificationsEnabled(
       .where(eq(users.id, userId));
 
     revalidatePath("/dashboard/settings");
+    revalidatePath("/notifications");
     return { ok: true };
   } catch (error) {
     logError("updateEmailNotificationsEnabled", error);
@@ -214,6 +245,7 @@ export async function updateEmailNotificationPref(
       .where(eq(users.id, userId));
 
     revalidatePath("/dashboard/settings");
+    revalidatePath("/notifications");
     return { ok: true };
   } catch (error) {
     logError("updateEmailNotificationPref", error);
