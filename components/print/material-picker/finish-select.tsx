@@ -30,7 +30,14 @@ function FinishThumb({ image }: { image: string | null }) {
   );
 }
 
-function FinishMeta({ card }: { card: FinishCard }) {
+function FinishMeta({
+  card,
+  showPrice = false,
+}: {
+  card: FinishCard;
+  /** From-price belongs on sheet options, not the closed trigger. */
+  showPrice?: boolean;
+}) {
   return (
     <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
       <div className="min-w-0">
@@ -40,12 +47,14 @@ function FinishMeta({ card }: { card: FinishCard }) {
           {card.configCount} {card.configCount === 1 ? "option" : "options"}
         </p>
       </div>
-      <div className="shrink-0 text-right">
-        <p className="text-[10px] text-muted-foreground">from</p>
-        <p className="text-sm font-medium tabular-nums">
-          ${card.cheapest.toFixed(2)}
-        </p>
-      </div>
+      {showPrice && (
+        <div className="shrink-0 text-right">
+          <p className="text-[10px] text-muted-foreground">from</p>
+          <p className="text-sm font-medium tabular-nums">
+            ${card.cheapest.toFixed(2)}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -127,7 +136,7 @@ export function FinishSelect({ finishes, value, onChange }: FinishSelectProps) {
                     }`}
                   >
                     <FinishThumb image={card.finishGroupImage} />
-                    <FinishMeta card={card} />
+                    <FinishMeta card={card} showPrice />
                   </button>
                 );
               })}

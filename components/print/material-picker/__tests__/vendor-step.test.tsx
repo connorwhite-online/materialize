@@ -164,15 +164,27 @@ describe("VendorStep finish + color filters", () => {
   it("opens a finish sheet and refilters vendors when a new finish is picked", () => {
     renderStep();
 
-    fireEvent.click(screen.getByRole("button", { name: "Finish, Standard" }));
-    expect(screen.getByRole("dialog", { name: "Choose a finish" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Polished" })).toBeTruthy();
+    // Closed trigger: name + image only — from-price lives on sheet options.
+    const finishTrigger = screen.getByRole("button", {
+      name: "Finish, Standard",
+    });
+    expect(finishTrigger.textContent).not.toMatch(/from\s*\$/);
 
-    fireEvent.click(screen.getByRole("button", { name: "Polished" }));
+    fireEvent.click(finishTrigger);
+    expect(screen.getByRole("dialog", { name: "Choose a finish" })).toBeTruthy();
+    const polishedOption = screen.getByRole("button", { name: "Polished" });
+    expect(polishedOption).toBeTruthy();
+    expect(polishedOption.textContent).toMatch(/from/);
+    expect(polishedOption.textContent).toMatch(/\$/);
+
+    fireEvent.click(polishedOption);
     expect(screen.queryByRole("dialog")).toBeNull();
 
-    // Polished is now the trigger, and both polished vendors show.
-    expect(screen.getByRole("button", { name: "Finish, Polished" })).toBeTruthy();
+    // Polished is now the trigger (still no price), and both polished vendors show.
+    const polishedTrigger = screen.getByRole("button", {
+      name: "Finish, Polished",
+    });
+    expect(polishedTrigger.textContent).not.toMatch(/from\s*\$/);
     expect(screen.getByText("PrintLab")).toBeTruthy();
     expect(screen.getByText("MakerForge")).toBeTruthy();
   });
