@@ -1,9 +1,7 @@
 import Link from "next/link";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { UploadVisibilitySetting } from "@/app/(app)/dashboard/settings/upload-visibility-setting";
-import { EmailNotificationsSetting } from "@/app/(app)/dashboard/settings/email-notifications-setting";
 import { SignOutButton } from "@/app/(app)/dashboard/settings/sign-out-button";
-import type { EmailPrefMap } from "@/lib/notifications/email-prefs";
 
 export function GeneralSettings({
   defaultUploadVisibility,
@@ -16,21 +14,6 @@ export function GeneralSettings({
       <UploadVisibilitySetting initial={defaultUploadVisibility} />
       <SignOutButton />
     </div>
-  );
-}
-
-export function NotificationSettings({
-  emailNotificationsEnabled,
-  emailNotificationPrefs,
-}: {
-  emailNotificationsEnabled: boolean;
-  emailNotificationPrefs: EmailPrefMap | null;
-}) {
-  return (
-    <EmailNotificationsSetting
-      initial={emailNotificationsEnabled}
-      initialPrefs={emailNotificationPrefs}
-    />
   );
 }
 
@@ -51,8 +34,8 @@ export function PaymentSettings() {
     <div className="space-y-2">
       <SettingsLink
         href="/dashboard/settings/billing"
-        title="Billing"
-        description="Saved card for agent-initiated orders"
+        title="Saved card"
+        description="Card on file for print checkout and agent orders"
       />
       <SettingsLink
         href="/dashboard/settings/payouts"

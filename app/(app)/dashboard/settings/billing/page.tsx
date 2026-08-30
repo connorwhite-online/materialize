@@ -27,11 +27,11 @@ export default async function BillingSettingsPage({
       </Link>
 
       <div>
-        <h1 className="text-2xl font-bold">Billing</h1>
+        <h1 className="text-2xl font-bold">Saved card</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Save a card for agent-initiated orders. Orders within a connected
-          agent&apos;s spending policy will charge this card automatically;
-          everything else will continue to ask you to confirm by email.
+          Keep a card on file for print checkout and agent orders. Agents
+          within a spending policy can charge it automatically; everything
+          else still asks you to confirm.
         </p>
       </div>
 
@@ -69,8 +69,8 @@ export default async function BillingSettingsPage({
         ) : (
           <div className="mt-4 flex flex-col gap-3">
             <p className="text-sm text-muted-foreground">
-              No card on file. Agents will continue to need email confirmation
-              for every order.
+              No card on file. You can add one here for one-tap checkout and
+              agent auto-charge.
             </p>
             <BillingActions hasCard={false} />
           </div>

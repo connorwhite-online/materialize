@@ -11,13 +11,13 @@ import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
 import {
+  OWNER_SETTINGS_TAB_ALIASES,
   ownerSettingsHref,
   type OwnerSettingsTab,
 } from "@/lib/profile/owner-settings-tabs";
 
 const TABS: Array<{ key: OwnerSettingsTab; label: string }> = [
-  { key: "general", label: "General" },
-  { key: "notifications", label: "Notifications" },
+  { key: "settings", label: "Settings" },
   { key: "agents", label: "Agents" },
   { key: "payments", label: "Payments" },
 ];
@@ -41,6 +41,19 @@ export function OwnerSettingsTabs({
   useEffect(() => {
     setLocalTab(activeTab);
   }, [activeTab]);
+
+  // Soft-clean legacy ?tab=general / ?tab=notifications onto Settings
+  // without a server redirect (those flash a Next error boundary on
+  // client navigations).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    const tab = url.searchParams.get("tab");
+    if (!tab || !(tab in OWNER_SETTINGS_TAB_ALIASES)) return;
+    url.searchParams.delete("tab");
+    const next = url.pathname + (url.searchParams.toString() ? `?${url.searchParams}` : "");
+    window.history.replaceState(null, "", next);
+  }, []);
 
   const navRef = useRef<HTMLElement | null>(null);
   const tabRefs = useRef<Map<OwnerSettingsTab, HTMLButtonElement | null>>(

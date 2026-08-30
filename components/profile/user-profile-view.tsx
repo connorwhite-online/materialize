@@ -7,12 +7,11 @@ import { loadUserByHandle } from "@/app/(app)/[handle]/loader";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { LibraryTab } from "@/components/profile/library-tab";
 import { OwnerSettingsTabs } from "@/components/profile/owner-settings-tabs";
-import { isOwnerSettingsTab } from "@/lib/profile/owner-settings-tabs";
+import { resolveOwnerSettingsTab } from "@/lib/profile/owner-settings-tabs";
 import { OwnerProfileHeadline } from "@/components/profile/owner-profile-headline";
 import {
   AgentSettings,
   GeneralSettings,
-  NotificationSettings,
   PaymentSettings,
 } from "@/components/profile/general-settings";
 import { profilePageJsonLd, safeJsonLdScript } from "@/lib/seo/json-ld";
@@ -134,7 +133,8 @@ export async function UserProfileView({
       const query = new URLSearchParams();
       if (searchParams.welcome) query.set("welcome", searchParams.welcome);
       if (searchParams.payment) query.set("payment", searchParams.payment);
-      if (searchParams.production) query.set("production", searchParams.production);
+      if (searchParams.production)
+        query.set("production", searchParams.production);
       const qs = query.toString();
       redirect(qs ? `${dest}?${qs}` : dest);
     }
@@ -142,14 +142,11 @@ export async function UserProfileView({
     const [settings] = await db
       .select({
         defaultUploadVisibility: users.defaultUploadVisibility,
-        emailNotificationsEnabled: users.emailNotificationsEnabled,
-        emailNotificationPrefs: users.emailNotificationPrefs,
       })
       .from(users)
       .where(eq(users.id, user.id));
 
-    const activeTab =
-      rawTab && isOwnerSettingsTab(rawTab) ? rawTab : "general";
+    const activeTab = resolveOwnerSettingsTab(rawTab);
 
     return (
       <div className="mx-auto max-w-3xl px-4 py-8">
@@ -163,16 +160,7 @@ export async function UserProfileView({
         <div className="mt-10">
           <OwnerSettingsTabs username={handle} activeTab={activeTab} />
           <div className="mt-8">
-            {activeTab === "notifications" ? (
-              <NotificationSettings
-                emailNotificationsEnabled={
-                  settings?.emailNotificationsEnabled ?? true
-                }
-                emailNotificationPrefs={
-                  settings?.emailNotificationPrefs ?? null
-                }
-              />
-            ) : activeTab === "agents" ? (
+            {activeTab === "agents" ? (
               <AgentSettings />
             ) : activeTab === "payments" ? (
               <PaymentSettings />

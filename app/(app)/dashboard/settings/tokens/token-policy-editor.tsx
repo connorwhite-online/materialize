@@ -114,7 +114,7 @@ export function TokenPolicyEditor({
             href="/dashboard/settings/billing"
             className="underline hover:text-foreground"
           >
-            add one in Billing
+            add a saved card
           </Link>
           . The policy will start working as soon as you do.
         </div>
