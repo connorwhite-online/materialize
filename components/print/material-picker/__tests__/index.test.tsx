@@ -3,13 +3,13 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import type { EnrichedQuote } from "../types";
 
-// The picker delegates rendering to the three step components and
+// The picker delegates rendering to the two step components and
 // keeps the navigation state itself. To keep these tests focused on
-// the state machine — preselect, single-finish back-skip, scope
-// clearing — we replace each step with a button-shaped stub that
-// surfaces the onPick / onBack / onClearScope callbacks. The real
-// step components have their own UI surface area and are tested
-// elsewhere; here we only care about transitions.
+// the state machine — preselect, back-to-materials, scope clearing —
+// we replace each step with a button-shaped stub that surfaces the
+// onPick / onBack / onClearScope callbacks. The real step components
+// have their own UI surface area and are tested elsewhere; here we
+// only care about transitions.
 vi.mock("../material-step", () => ({
   MaterialStep: (props: {
     onPick: (id: string) => void;
@@ -27,32 +27,18 @@ vi.mock("../material-step", () => ({
   ),
 }));
 
-vi.mock("../finish-step", () => ({
-  FinishStep: (props: {
-    materialId: string;
-    onPick: (id: string) => void;
-    onBack: () => void;
-  }) => (
-    <div data-testid="finish-step">
-      <span data-testid="finish-material">{props.materialId}</span>
-      <button onClick={() => props.onPick("matte")}>pick matte</button>
-      <button onClick={props.onBack}>finish back</button>
-    </div>
-  ),
-}));
-
 vi.mock("../vendor-step", () => ({
   VendorStep: (props: {
     materialId: string;
-    finishGroupId: string;
-    backLabel: string;
+    initialFinishGroupId?: string;
     onPick: (quote: EnrichedQuote) => void;
     onBack: () => void;
   }) => (
     <div data-testid="vendor-step">
       <span data-testid="vendor-material">{props.materialId}</span>
-      <span data-testid="vendor-finish">{props.finishGroupId}</span>
-      <span data-testid="vendor-back-label">{props.backLabel}</span>
+      <span data-testid="vendor-finish">
+        {props.initialFinishGroupId ?? ""}
+      </span>
       <button
         onClick={() =>
           props.onPick({
@@ -107,10 +93,6 @@ const multiFinishQuotes: EnrichedQuote[] = [
   quote({ quoteId: "2", materialId: "pla", finishGroupId: "glossy" }),
 ];
 
-const singleFinishQuotes: EnrichedQuote[] = [
-  quote({ quoteId: "1", materialId: "pla", finishGroupId: "matte" }),
-];
-
 function renderPicker(
   overrides: Partial<React.ComponentProps<typeof MaterialPicker>> = {}
 ) {
@@ -131,22 +113,19 @@ describe("MaterialPicker state machine", () => {
   it("starts on the material step when no preselect is provided", () => {
     renderPicker();
     expect(screen.getByTestId("material-step")).toBeTruthy();
-    expect(screen.queryByTestId("finish-step")).toBeNull();
     expect(screen.queryByTestId("vendor-step")).toBeNull();
   });
 
-  it("walks material → finish → vendor and reports the selection back", () => {
+  it("walks material → vendor and reports the selection back", () => {
     const onSelectQuote = vi.fn();
     renderPicker({ onSelectQuote });
 
     fireEvent.click(screen.getByText("pick pla"));
-    expect(screen.getByTestId("finish-step")).toBeTruthy();
-    expect(screen.getByTestId("finish-material").textContent).toBe("pla");
-
-    fireEvent.click(screen.getByText("pick matte"));
     expect(screen.getByTestId("vendor-step")).toBeTruthy();
     expect(screen.getByTestId("vendor-material").textContent).toBe("pla");
-    expect(screen.getByTestId("vendor-finish").textContent).toBe("matte");
+    // Picking from the grid is not a Print-with-X arrival, so no
+    // finish is forced — VendorStep picks the cheapest itself.
+    expect(screen.getByTestId("vendor-finish").textContent).toBe("");
 
     fireEvent.click(screen.getByText("pick vendor"));
     expect(onSelectQuote).toHaveBeenCalledWith(
@@ -154,22 +133,38 @@ describe("MaterialPicker state machine", () => {
     );
   });
 
-  it("back from finish returns to material and fires onClearPreselectScope", () => {
+  it("does not route through a finish step", () => {
+    renderPicker();
+    fireEvent.click(screen.getByText("pick pla"));
+    expect(screen.getByTestId("vendor-step")).toBeTruthy();
+    expect(screen.queryByTestId("finish-step")).toBeNull();
+  });
+
+  it("back from vendor returns to material and fires onClearPreselectScope", () => {
     const onClearPreselectScope = vi.fn();
     renderPicker({ onClearPreselectScope });
 
     fireEvent.click(screen.getByText("pick pla"));
-    expect(screen.getByTestId("finish-step")).toBeTruthy();
+    expect(screen.getByTestId("vendor-step")).toBeTruthy();
 
-    fireEvent.click(screen.getByText("finish back"));
+    fireEvent.click(screen.getByText("vendor back"));
     expect(screen.getByTestId("material-step")).toBeTruthy();
     expect(onClearPreselectScope).toHaveBeenCalledTimes(1);
   });
 
-  it("preselectMaterialId jumps straight to finish when a matching quote exists", () => {
+  it("preselectMaterialId jumps straight to vendor when a matching quote exists", () => {
     renderPicker({ preselectMaterialId: "pla" });
-    expect(screen.getByTestId("finish-step")).toBeTruthy();
-    expect(screen.getByTestId("finish-material").textContent).toBe("pla");
+    expect(screen.getByTestId("vendor-step")).toBeTruthy();
+    expect(screen.getByTestId("vendor-material").textContent).toBe("pla");
+  });
+
+  it("preselectFinishGroupId is forwarded when the pair matches", () => {
+    renderPicker({
+      preselectMaterialId: "pla",
+      preselectFinishGroupId: "glossy",
+    });
+    expect(screen.getByTestId("vendor-step")).toBeTruthy();
+    expect(screen.getByTestId("vendor-finish").textContent).toBe("glossy");
   });
 
   it("does not preselect-rubber-band the user back after they navigate to material", () => {
@@ -186,10 +181,9 @@ describe("MaterialPicker state machine", () => {
         onClearPreselectScope={onClearPreselectScope}
       />
     );
-    // Lands on finish from the preselect.
-    expect(screen.getByTestId("finish-step")).toBeTruthy();
+    expect(screen.getByTestId("vendor-step")).toBeTruthy();
 
-    fireEvent.click(screen.getByText("finish back"));
+    fireEvent.click(screen.getByText("vendor back"));
     expect(screen.getByTestId("material-step")).toBeTruthy();
     expect(onClearPreselectScope).toHaveBeenCalledTimes(1);
 
@@ -212,48 +206,24 @@ describe("MaterialPicker state machine", () => {
       );
     });
     expect(screen.getByTestId("material-step")).toBeTruthy();
-    expect(screen.queryByTestId("finish-step")).toBeNull();
+    expect(screen.queryByTestId("vendor-step")).toBeNull();
   });
 
   it("does not preselect-jump when preselectMaterialId has no matching quote", () => {
     renderPicker({ preselectMaterialId: "nylon-not-in-quotes" });
     expect(screen.getByTestId("material-step")).toBeTruthy();
-    expect(screen.queryByTestId("finish-step")).toBeNull();
+    expect(screen.queryByTestId("vendor-step")).toBeNull();
   });
 
-  it("for a single-finish material, vendor back skips finish and returns to material", () => {
-    const onClearPreselectScope = vi.fn();
+  it("does not forward a finish preselect after the user picks a different material", () => {
     renderPicker({
-      quotes: singleFinishQuotes,
-      onClearPreselectScope,
+      preselectMaterialId: "pla",
+      preselectFinishGroupId: "glossy",
     });
-
-    fireEvent.click(screen.getByText("pick pla"));
-    fireEvent.click(screen.getByText("pick matte"));
-    expect(screen.getByTestId("vendor-step")).toBeTruthy();
-    // Single-finish materials get the "All materials" copy on the
-    // back button so the label matches where the click goes.
-    expect(screen.getByTestId("vendor-back-label").textContent).toBe(
-      "All materials"
-    );
-
     fireEvent.click(screen.getByText("vendor back"));
-    expect(screen.getByTestId("material-step")).toBeTruthy();
-    expect(onClearPreselectScope).toHaveBeenCalledTimes(1);
-  });
-
-  it("for a multi-finish material, vendor back returns to finish", () => {
-    renderPicker();
-
-    fireEvent.click(screen.getByText("pick pla"));
-    fireEvent.click(screen.getByText("pick matte"));
-    expect(screen.getByTestId("vendor-step")).toBeTruthy();
-    expect(screen.getByTestId("vendor-back-label").textContent).toBe(
-      "Finishes"
-    );
-
-    fireEvent.click(screen.getByText("vendor back"));
-    expect(screen.getByTestId("finish-step")).toBeTruthy();
+    fireEvent.click(screen.getByText("pick petg"));
+    expect(screen.getByTestId("vendor-material").textContent).toBe("petg");
+    expect(screen.getByTestId("vendor-finish").textContent).toBe("");
   });
 
   it("propagates materialScoped to the material step when a preselect is active", () => {

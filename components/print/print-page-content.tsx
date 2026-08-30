@@ -533,7 +533,15 @@ function FileContextBar({
 }) {
   const metaLine = (() => {
     if (statusLabel) return statusLabel;
-    if (dimensions) {
+    // CraftCloud confirm occasionally returns a dimensions object
+    // with null components (empty / unparseable meshes). Treat that
+    // the same as "no dimensions" rather than crashing the bar.
+    if (
+      dimensions &&
+      typeof dimensions.x === "number" &&
+      typeof dimensions.y === "number" &&
+      typeof dimensions.z === "number"
+    ) {
       return `${dimensions.x.toFixed(1)} × ${dimensions.y.toFixed(1)} × ${dimensions.z.toFixed(1)} mm · ${formatSize(file.size)}`;
     }
     return `${formatSize(file.size)} · .${format}`;

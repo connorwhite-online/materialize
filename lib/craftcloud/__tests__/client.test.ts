@@ -3,6 +3,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Force mock mode for these tests
 vi.stubEnv("CRAFTCLOUD_USE_MOCK", "true");
 
+// Keep getPrice on the hardcoded mock roster — hitting the live
+// catalog here would make material-count assertions network-flaky.
+vi.mock("../catalog", () => ({
+  getCraftCloudCatalog: () =>
+    Promise.reject(new Error("catalog skipped in client unit test")),
+}));
+
 import {
   uploadModel,
   getModel,

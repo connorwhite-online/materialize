@@ -12,12 +12,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { FinishSelect } from "./finish-select";
+import {
+  aggregateFinishCards,
+  cheapestShippingByVendor as shippingMap,
+  pickDefaultFinishGroupId,
+  type ShippingLite,
+} from "./finish-cards";
+import { vendorQuoteBadges } from "./vendor-badges";
 import type { EnrichedQuote } from "./types";
-
-interface ShippingLite {
-  vendorId: string;
-  price: number;
-}
 
 /**
  * Resolve a country code to a human-readable name via the
@@ -91,102 +94,122 @@ interface VendorStepProps {
    */
   sortQuantity: number;
   materialId: string;
-  finishGroupId: string;
+  /**
+   * Preferred finish when the user arrived via Print-with-X. Ignored
+   * when it isn't in this material's quote set — we fall through to
+   * the cheapest finish.
+   */
+  initialFinishGroupId?: string;
   selectedQuote: EnrichedQuote | null;
   onPick: (quote: EnrichedQuote) => void;
   onBack: () => void;
-  /**
-   * Label for the back button. Single-finish materials skip the
-   * finish step entirely on the way in, so back from vendor goes
-   * to the material grid — and the label needs to say so. The
-   * parent owns that decision and passes the right copy down.
-   */
-  backLabel: string;
 }
 
 /**
- * Step 3 — the actual bookable quotes. Groups the quotes for the
- * chosen (material × finish) by color and shows each vendor offering
- * that color. The cheapest quote is selected by default. Users can
- * switch color via the swatch rail at the top.
+ * Vendor quotes for the chosen material. Finish is preselected
+ * (cheapest-by-total, or `initialFinishGroupId`) and sits above
+ * color — changing either refilters this list. Back always returns
+ * to the material grid; finish is no longer its own step.
  */
 export function VendorStep({
   quotes,
   shipping,
   sortQuantity,
   materialId,
-  finishGroupId,
+  initialFinishGroupId,
   selectedQuote,
   onPick,
   onBack,
-  backLabel,
 }: VendorStepProps) {
-  // Cheapest shipping price per vendor — used to surface the "+ $X
-  // Shipping" line on each vendor card.
-  const cheapestShippingByVendor = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const s of shipping) {
-      const current = map.get(s.vendorId);
-      if (current === undefined || s.price < current) {
-        map.set(s.vendorId, s.price);
-      }
-    }
-    return map;
-  }, [shipping]);
+  const cheapestShippingByVendor = useMemo(
+    () => shippingMap(shipping),
+    [shipping]
+  );
 
-  const { materialName, finishGroupName, colors, cheapestPerColor } =
-    useMemo(() => {
-      const filtered = quotes.filter(
-        (q) => q.materialId === materialId && q.finishGroupId === finishGroupId
+  const finishes = useMemo(
+    () => aggregateFinishCards(quotes, shipping, sortQuantity, materialId),
+    [quotes, shipping, sortQuantity, materialId]
+  );
+
+  const [finishGroupId, setFinishGroupId] = useState<string | null>(() =>
+    pickDefaultFinishGroupId(
+      finishes,
+      initialFinishGroupId ?? selectedQuote?.finishGroupId
+    )
+  );
+
+  // Quotes grow as polling snapshots land. Keep the user's finish
+  // when it's still offered; otherwise re-pick the default so we
+  // don't sit on an empty list.
+  useEffect(() => {
+    setFinishGroupId((current) => {
+      if (current && finishes.some((f) => f.finishGroupId === current)) {
+        return current;
+      }
+      return pickDefaultFinishGroupId(
+        finishes,
+        initialFinishGroupId ?? selectedQuote?.finishGroupId
       );
-      const materialName = filtered[0]?.materialName ?? "Material";
-      const finishGroupName = filtered[0]?.finishGroupName ?? "Finish";
+    });
+  }, [finishes, initialFinishGroupId, selectedQuote?.finishGroupId]);
 
-      // Total cost the buyer actually pays drives the rank. A US
-      // vendor's quote with high production but low domestic shipping
-      // can outrank an EU quote that's cheaper to make but expensive
-      // to ship into the US — sorting by `q.price` alone hid those
-      // wins. Shipping defaults to 0 for vendors whose shipping option
-      // hasn't landed yet in this poll snapshot; the next snapshot
-      // will reorder them once their shipping arrives.
-      const totalCost = (q: EnrichedQuote) =>
-        q.price * sortQuantity + (cheapestShippingByVendor.get(q.vendorId) ?? 0);
+  const { materialName, colors, cheapestPerColor } = useMemo(() => {
+    const filtered = quotes.filter(
+      (q) => q.materialId === materialId && q.finishGroupId === finishGroupId
+    );
+    const materialName = filtered[0]?.materialName ?? "Material";
 
-      const byColor = new Map<string, EnrichedQuote[]>();
-      for (const q of filtered) {
-        const list = byColor.get(q.color) ?? [];
-        list.push(q);
-        byColor.set(q.color, list);
-      }
+    // Total cost the buyer actually pays drives the rank. A US
+    // vendor's quote with high production but low domestic shipping
+    // can outrank an EU quote that's cheaper to make but expensive
+    // to ship into the US — sorting by `q.price` alone hid those
+    // wins. Shipping defaults to 0 for vendors whose shipping option
+    // hasn't landed yet in this poll snapshot; the next snapshot
+    // will reorder them once their shipping arrives.
+    const totalCost = (q: EnrichedQuote) =>
+      q.price * sortQuantity + (cheapestShippingByVendor.get(q.vendorId) ?? 0);
 
-      // Swatch label still shows the cheapest single-unit production
-      // price ("$X per part starting at"). Sorting uses total — so
-      // the cheapest-by-total color leads the rail even if a different
-      // color has lower production but worse shipping.
-      const cheapestPerColor = new Map<string, number>();
-      const cheapestTotalPerColor = new Map<string, number>();
-      const colors = Array.from(byColor.entries())
-        .map(([name, qs]) => {
-          qs.sort((a, b) => totalCost(a) - totalCost(b));
-          cheapestPerColor.set(
-            name,
-            qs.reduce((min, q) => (q.price < min ? q.price : min), qs[0].price)
-          );
-          cheapestTotalPerColor.set(name, totalCost(qs[0]));
-          return {
-            name,
-            colorCode: qs[0].colorCode,
-            quotes: qs,
-          };
-        })
-        .sort(
-          (a, b) =>
-            cheapestTotalPerColor.get(a.name)! -
-            cheapestTotalPerColor.get(b.name)!
+    const byColor = new Map<string, EnrichedQuote[]>();
+    for (const q of filtered) {
+      const list = byColor.get(q.color) ?? [];
+      list.push(q);
+      byColor.set(q.color, list);
+    }
+
+    // Swatch label still shows the cheapest single-unit production
+    // price ("$X per part starting at"). Sorting uses total — so
+    // the cheapest-by-total color leads the rail even if a different
+    // color has lower production but worse shipping.
+    const cheapestPerColor = new Map<string, number>();
+    const cheapestTotalPerColor = new Map<string, number>();
+    const colors = Array.from(byColor.entries())
+      .map(([name, qs]) => {
+        qs.sort((a, b) => totalCost(a) - totalCost(b));
+        cheapestPerColor.set(
+          name,
+          qs.reduce((min, q) => (q.price < min ? q.price : min), qs[0].price)
         );
+        cheapestTotalPerColor.set(name, totalCost(qs[0]));
+        return {
+          name,
+          colorCode: qs[0].colorCode,
+          quotes: qs,
+        };
+      })
+      .sort(
+        (a, b) =>
+          cheapestTotalPerColor.get(a.name)! -
+          cheapestTotalPerColor.get(b.name)!
+      );
 
-      return { materialName, finishGroupName, colors, cheapestPerColor };
-    }, [quotes, materialId, finishGroupId, sortQuantity, cheapestShippingByVendor]);
+    return { materialName, colors, cheapestPerColor };
+  }, [
+    quotes,
+    materialId,
+    finishGroupId,
+    sortQuantity,
+    cheapestShippingByVendor,
+  ]);
 
   const [activeColor, setActiveColor] = useState<string>(
     selectedQuote?.color ?? colors[0]?.name ?? ""
@@ -198,8 +221,24 @@ export function VendorStep({
     headingRef.current?.focus();
   }, []);
 
-  const activeColorGroup = colors.find((c) => c.name === activeColor) ?? colors[0];
+  // If the user (or a finish change) left us on a color this finish
+  // doesn't offer, fall through to the cheapest color of the new set.
+  const activeColorGroup =
+    colors.find((c) => c.name === activeColor) ?? colors[0];
   const vendorQuotes = activeColorGroup?.quotes ?? [];
+
+  // Cheapest / Fastest among the *visible* list only — finish and
+  // color filters change the winners. Pure helper so the scoring
+  // is unit-testable without mounting the step.
+  const badgesByQuoteId = useMemo(
+    () => vendorQuoteBadges(vendorQuotes, shipping, sortQuantity),
+    [vendorQuotes, shipping, sortQuantity]
+  );
+
+  const handleFinishChange = (id: string) => {
+    setFinishGroupId(id);
+    setActiveColor("");
+  };
 
   return (
     <div className="space-y-6">
@@ -210,22 +249,29 @@ export function VendorStep({
           className="inline-flex cursor-pointer items-center gap-1 rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
         >
           <ChevronRight size={14} className="rotate-180" />
-          {backLabel}
+          All materials
         </button>
-        <h2 ref={headingRef} tabIndex={-1} className="mt-2 text-lg font-semibold outline-none">
+        <h2
+          ref={headingRef}
+          tabIndex={-1}
+          className="mt-2 text-lg font-semibold outline-none"
+        >
           {materialName}
-          <span className="ml-2 text-sm font-normal text-muted-foreground">
-            {finishGroupName}
-          </span>
         </h2>
-        <p className="text-xs text-muted-foreground">Pick a color + vendor</p>
+        <p className="text-xs text-muted-foreground">Pick a vendor</p>
       </div>
+
+      <FinishSelect
+        finishes={finishes}
+        value={finishGroupId}
+        onChange={handleFinishChange}
+      />
 
       {colors.length > 1 && (
         <div>
           <Label htmlFor="color-select">Color</Label>
           <Select
-            value={activeColor}
+            value={activeColor || (colors[0]?.name ?? null)}
             onValueChange={(v) => v && setActiveColor(v)}
           >
             <SelectTrigger id="color-select" className="w-full">
@@ -233,6 +279,8 @@ export function VendorStep({
                 {(value) => {
                   const c = colors.find((c) => c.name === value);
                   if (!c) return "Select a color";
+                  // From-price lives on the dropdown options only —
+                  // same rule as the finish trigger.
                   return (
                     <>
                       <span
@@ -240,9 +288,6 @@ export function VendorStep({
                         style={{ backgroundColor: c.colorCode }}
                       />
                       <span className="truncate">{c.name}</span>
-                      <span className="ml-auto text-muted-foreground tabular-nums">
-                        from ${cheapestPerColor.get(c.name)!.toFixed(2)}
-                      </span>
                     </>
                   );
                 }}
@@ -280,23 +325,47 @@ export function VendorStep({
         </p>
       </div>
 
-      {/* Vendor quotes for the selected color */}
-      <div className="space-y-2">
+      {/* Vendor quotes for the selected color. Extra vertical gap
+          so the Cheapest/Fastest chips hanging off the top edge
+          don't collide with the card above. */}
+      <div className="space-y-3 pt-1">
         {vendorQuotes.map((quote) => {
           const isSelected = selectedQuote?.quoteId === quote.quoteId;
           const cheapestShipping = cheapestShippingByVendor.get(quote.vendorId);
+          const badges = badgesByQuoteId.get(quote.quoteId);
           return (
             <button
               key={quote.quoteId}
               type="button"
               onClick={() => onPick(quote)}
               aria-pressed={isSelected}
-              className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors ${
+              aria-label={[
+                quote.vendorName,
+                badges?.cheapest ? "Cheapest" : null,
+                badges?.fastest ? "Fastest" : null,
+              ]
+                .filter(Boolean)
+                .join(", ")}
+              className={`relative flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors ${
                 isSelected
                   ? "border-primary bg-primary/5"
                   : "border-border bg-card hover:border-primary/30"
               }`}
             >
+              {badges && (badges.cheapest || badges.fastest) && (
+                <div className="absolute -top-2 left-0 z-10 flex gap-1">
+                  {badges.cheapest && (
+                    <span className="inline-flex items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium leading-none text-emerald-900 ring-1 ring-emerald-300 dark:bg-emerald-950/70 dark:text-emerald-200 dark:ring-emerald-800">
+                      Cheapest
+                    </span>
+                  )}
+                  {badges.fastest && (
+                    <span className="inline-flex items-center rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium leading-none text-sky-900 ring-1 ring-sky-300 dark:bg-sky-950/70 dark:text-sky-200 dark:ring-sky-800">
+                      Fastest
+                    </span>
+                  )}
+                </div>
+              )}
               <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted/80 to-muted/30 text-muted-foreground">
                 <Factory className="size-7" />
               </div>

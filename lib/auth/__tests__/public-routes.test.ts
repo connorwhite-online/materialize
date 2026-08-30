@@ -54,6 +54,7 @@ describe("PUBLIC_ROUTES — genuinely public surfaces", () => {
     "/materials/pla-white",
     "/api/search?q=x",
     "/api/webhooks/stripe",
+    "/api/upload/anon-presign",
     "/api/cron/place-auto-approved-orders",
     "/llms.txt",
     "/sitemap.xml",

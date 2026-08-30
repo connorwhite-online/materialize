@@ -36,9 +36,24 @@ const MOCK_MATERIALS = [
 ];
 
 const MOCK_VENDORS = [
-  { id: "vendor-1", name: "PrintLab EU" },
-  { id: "vendor-2", name: "MakerForge US" },
-  { id: "vendor-3", name: "PrecisionParts DE" },
+  {
+    id: "vendor-1",
+    name: "PrintLab EU",
+    productionTimeFast: 5,
+    productionTimeSlow: 9,
+  },
+  {
+    id: "vendor-2",
+    name: "MakerForge US",
+    productionTimeFast: 2,
+    productionTimeSlow: 5,
+  },
+  {
+    id: "vendor-3",
+    name: "PrecisionParts DE",
+    productionTimeFast: 4,
+    productionTimeSlow: 8,
+  },
 ];
 
 /**
@@ -84,30 +99,105 @@ function quantityFromPriceId(priceId: string): number {
   return Number.isFinite(q) && q >= 1 ? q : 1;
 }
 
-export function getMockPriceResponse(priceId: string): PriceResponse {
-  const quantity = quantityFromPriceId(priceId);
-  const unitFactor = volumeUnitFactor(quantity);
-  const quotes = MOCK_MATERIALS.flatMap((material) =>
+/**
+ * Slim catalog slice used to seed mock quotes with real CraftCloud
+ * materialConfigIds. Without this, /api/craftcloud/quotes/poll drops
+ * every mock quote (the hardcoded pla-white ids are not in the
+ * catalog) and the picker never leaves the empty state.
+ */
+export interface MockCatalogMaterial {
+  sortIndex?: number;
+  finishGroups?: Array<{
+    materialConfigs?: Array<{ id: string; color: string }>;
+  }>;
+}
+
+const MOCK_CATALOG_MATERIALS = 12;
+const MOCK_CATALOG_FINISHES = 8;
+const MOCK_CATALOG_COLORS_PER_FINISH = 4;
+
+export function selectMockCatalogConfigIds(
+  catalog: { materialById: Map<string, MockCatalogMaterial> }
+): string[] {
+  const materials = Array.from(catalog.materialById.values())
+    .sort((a, b) => (a.sortIndex ?? 9999) - (b.sortIndex ?? 9999))
+    .slice(0, MOCK_CATALOG_MATERIALS);
+
+  const ids: string[] = [];
+  for (const material of materials) {
+    for (const fg of (material.finishGroups ?? []).slice(
+      0,
+      MOCK_CATALOG_FINISHES
+    )) {
+      const seen = new Set<string>();
+      for (const config of fg.materialConfigs ?? []) {
+        if (seen.has(config.color)) continue;
+        seen.add(config.color);
+        ids.push(config.id);
+        if (seen.size >= MOCK_CATALOG_COLORS_PER_FINISH) break;
+      }
+    }
+  }
+  return ids;
+}
+
+function quotesForConfigIds(
+  configIds: string[],
+  quantity: number,
+  unitFactor: number
+) {
+  return configIds.flatMap((configId) =>
     MOCK_VENDORS.map((vendor) => {
-      // Deterministic per-(material, vendor) variation in [0.8, 1.2],
-      // then the quantity volume discount on top — so the per-unit
-      // price visibly drops as the user bumps quantity.
-      const variation = 0.8 + stableUnit(`${material.id}-${vendor.id}`) * 0.4;
+      const variation = 0.8 + stableUnit(`${configId}-${vendor.id}`) * 0.4;
+      const base = 8 + stableUnit(configId) * 42;
       return {
-        quoteId: `quote-${material.id}-${vendor.id}`,
+        quoteId: `quote-${configId}-${vendor.id}`,
         vendorId: vendor.id,
         modelId: "mock-model",
-        materialConfigId: material.id,
-        printingMethodId: material.method.toLowerCase(),
+        materialConfigId: configId,
+        printingMethodId: "fdm",
         quantity,
-        price: material.priceBase * variation * unitFactor,
+        price: base * variation * unitFactor,
         currency: "USD" as const,
-        productionTimeFast: 3,
-        productionTimeSlow: 7,
+        productionTimeFast: vendor.productionTimeFast,
+        productionTimeSlow: vendor.productionTimeSlow,
         scale: 1,
       };
     })
   );
+}
+
+export function getMockPriceResponse(
+  priceId: string,
+  configIds?: string[]
+): PriceResponse {
+  const quantity = quantityFromPriceId(priceId);
+  const unitFactor = volumeUnitFactor(quantity);
+  const quotes =
+    configIds && configIds.length > 0
+      ? quotesForConfigIds(configIds, quantity, unitFactor)
+      : MOCK_MATERIALS.flatMap((material) =>
+          MOCK_VENDORS.map((vendor) => {
+            // Deterministic per-(material, vendor) variation in [0.8, 1.2],
+            // then the quantity volume discount on top — so the per-unit
+            // price visibly drops as the user bumps quantity.
+            const variation =
+              0.8 + stableUnit(`${material.id}-${vendor.id}`) * 0.4;
+            return {
+              quoteId: `quote-${material.id}-${vendor.id}`,
+              vendorId: vendor.id,
+              modelId: "mock-model",
+              materialConfigId: material.id,
+              printingMethodId: material.method.toLowerCase(),
+              quantity,
+              price: material.priceBase * variation * unitFactor,
+              currency: "USD" as const,
+              productionTimeFast: vendor.productionTimeFast,
+              productionTimeSlow: vendor.productionTimeSlow,
+              scale: 1,
+            };
+          })
+        );
 
   const shipping = MOCK_VENDORS.flatMap((vendor) => [
     {

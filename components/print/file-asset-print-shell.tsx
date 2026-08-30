@@ -18,7 +18,7 @@ interface FileAssetPrintShellProps {
     triangleCount?: number;
   } | null;
   preselectMaterialId?: string;
-  /** CraftCloud finish group id. When set alongside preselectMaterialId, the picker jumps to vendor. */
+  /** CraftCloud finish group id. When set alongside preselectMaterialId, the picker jumps to vendor on that finish. */
   preselectFinishGroupId?: string;
   /**
    * Page-level header (h1 + filename meta + creator recommendation).

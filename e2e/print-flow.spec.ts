@@ -13,12 +13,8 @@ import { test, expect } from "@playwright/test";
  * API; the mock returns synthesized models / quotes regardless
  * of what's uploaded.
  *
- * NOTE: the mock's quote material ids don't match the live
- * CraftCloud catalog UUIDs, so the poll route drops all quotes
- * and the configurator's "happy" render doesn't appear. That's
- * acceptable for a smoke test — we want to catch crashes and
- * early-flow regressions, not assert on quote display logic
- * (which has its own vitest coverage).
+ * Quote display is covered by vitest on the picker. This file
+ * only asserts the early-flow transition (uploader → configurator).
  */
 
 /**

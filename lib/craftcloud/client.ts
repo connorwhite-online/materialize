@@ -242,7 +242,14 @@ async function realCreateStripeCheckout(
 
 // --- Mock client (for development without API access) ---
 
-import { getMockModel, getMockPriceResponse, getMockCart, getMockOrder, getMockOrderStatus } from "./mock";
+import {
+  getMockModel,
+  getMockPriceResponse,
+  getMockCart,
+  getMockOrder,
+  getMockOrderStatus,
+  selectMockCatalogConfigIds,
+} from "./mock";
 
 // --- Exported client ---
 
@@ -272,7 +279,21 @@ export async function createPriceRequest(params: PriceRequest): Promise<{ priceI
 }
 
 export async function getPrice(priceId: string): Promise<PriceResponse> {
-  if (USE_MOCK) return getMockPriceResponse(priceId);
+  if (USE_MOCK) {
+    // Prefer real catalog config ids so the poll enricher can attach
+    // finish names / images. Fall back to the hardcoded mock roster
+    // when the catalog fetch fails (unit tests, offline).
+    let configIds: string[] | undefined;
+    try {
+      const { getCraftCloudCatalog } = await import("./catalog");
+      const catalog = await getCraftCloudCatalog();
+      const selected = selectMockCatalogConfigIds(catalog);
+      if (selected.length > 0) configIds = selected;
+    } catch {
+      configIds = undefined;
+    }
+    return getMockPriceResponse(priceId, configIds);
+  }
   return realGetPrice(priceId);
 }
 

@@ -1,5 +1,6 @@
 /**
- * Shared types for the three-step print material picker.
+ * Shared types for the two-step print material picker
+ * (material → vendor, with finish + color as filters on the vendor step).
  *
  * `EnrichedQuote` is the shape returned by /api/craftcloud/quotes
  * after the server merges CraftCloud's raw Quote with its
@@ -60,7 +61,7 @@ export interface EnrichedQuote {
   configName: string;
 }
 
-export type PickerStep = "material" | "finish" | "vendor";
+export type PickerStep = "material" | "vendor";
 
 /**
  * Slim material descriptor used to render optimistic cards on the
