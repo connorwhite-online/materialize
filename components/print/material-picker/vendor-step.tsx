@@ -279,6 +279,8 @@ export function VendorStep({
                 {(value) => {
                   const c = colors.find((c) => c.name === value);
                   if (!c) return "Select a color";
+                  // From-price lives on the dropdown options only —
+                  // same rule as the finish trigger.
                   return (
                     <>
                       <span
@@ -286,9 +288,6 @@ export function VendorStep({
                         style={{ backgroundColor: c.colorCode }}
                       />
                       <span className="truncate">{c.name}</span>
-                      <span className="ml-auto text-muted-foreground tabular-nums">
-                        from ${cheapestPerColor.get(c.name)!.toFixed(2)}
-                      </span>
                     </>
                   );
                 }}

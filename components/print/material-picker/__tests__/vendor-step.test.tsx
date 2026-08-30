@@ -237,6 +237,19 @@ describe("VendorStep finish + color filters", () => {
     expect(onBack).toHaveBeenCalledTimes(1);
   });
 
+  it("hides from-price on the color trigger; keeps it on options", () => {
+    renderStep();
+    // Standard offers White + Black — color select is visible.
+    const trigger = screen.getByLabelText("Color");
+    expect(trigger.textContent).toMatch(/White|Black/);
+    expect(trigger.textContent).not.toMatch(/\$/);
+
+    fireEvent.click(trigger);
+    // Options still show unit prices for comparison.
+    const black = screen.getByRole("option", { name: /Black/ });
+    expect(black.textContent).toMatch(/\$/);
+  });
+
   it("does not chip a lone vendor", () => {
     renderStep();
     // Standard/White has only PrintLab — nothing to compare.
