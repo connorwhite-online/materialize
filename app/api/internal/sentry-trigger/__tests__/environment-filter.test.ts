@@ -4,6 +4,9 @@ import {
   readEnvironment,
   isSharedSecretModeEnabled,
   checkSharedSecretFreshness,
+  isActionableSentryDelivery,
+  resolveSharedSecretTimestamp,
+  readPayloadTimestamp,
 } from "../route";
 
 describe("readEnvironment", () => {
@@ -24,6 +27,32 @@ describe("readEnvironment", () => {
   it("trims whitespace and treats empty as null", () => {
     expect(readEnvironment({ environment: "  staging  " })).toBe("staging");
     expect(readEnvironment({ environment: "   " })).toBeNull();
+  });
+
+  it("reads tags.environment from an object map", () => {
+    expect(
+      readEnvironment({ tags: { environment: "production", release: "abc" } })
+    ).toBe("production");
+  });
+
+  it("reads environment from a {key,value} tag array", () => {
+    expect(
+      readEnvironment({
+        tags: [
+          { key: "release", value: "abc" },
+          { key: "environment", value: "production" },
+        ],
+      })
+    ).toBe("production");
+  });
+
+  it("prefers the top-level field over tags", () => {
+    expect(
+      readEnvironment({
+        environment: "production",
+        tags: { environment: "preview" },
+      })
+    ).toBe("production");
   });
 });
 
@@ -46,6 +75,15 @@ describe("decideEnvironmentDispatch", () => {
     if (!decision.dispatch) {
       expect(decision.reason).toBe("missing-environment");
     }
+  });
+
+  it("skips preview / development even when the request is otherwise trusted", () => {
+    expect(decideEnvironmentDispatch("preview", undefined).dispatch).toBe(
+      false
+    );
+    expect(decideEnvironmentDispatch("development", undefined).dispatch).toBe(
+      false
+    );
   });
 
   it("'*' wildcard dispatches regardless of environment, including when missing", () => {
@@ -91,6 +129,123 @@ describe("decideEnvironmentDispatch", () => {
     const decision = decideEnvironmentDispatch("production", "");
     expect(decision.dispatch).toBe(true);
     expect(decision.allowed).toEqual(["production"]);
+  });
+});
+
+describe("isActionableSentryDelivery", () => {
+  it("dispatches issue.created", () => {
+    expect(
+      isActionableSentryDelivery(
+        { action: "created", data: { issue: { id: "1" } } },
+        "issue"
+      ).dispatch
+    ).toBe(true);
+  });
+
+  it("skips issue lifecycle actions that are not created", () => {
+    for (const action of ["resolved", "assigned", "archived", "unresolved"]) {
+      const decision = isActionableSentryDelivery(
+        { action, data: { issue: { id: "1" } } },
+        "issue"
+      );
+      expect(decision.dispatch).toBe(false);
+      if (!decision.dispatch) {
+        expect(decision.reason).toBe("non-actionable-issue-action");
+      }
+    }
+  });
+
+  it("detects an issue envelope from data.issue even without the resource header", () => {
+    const decision = isActionableSentryDelivery(
+      { action: "resolved", data: { issue: { id: "1" } } },
+      null
+    );
+    expect(decision.dispatch).toBe(false);
+  });
+
+  it("skips installation / comment / metric_alert resources", () => {
+    for (const resource of ["installation", "comment", "metric_alert"]) {
+      const decision = isActionableSentryDelivery({ action: "created" }, resource);
+      expect(decision.dispatch).toBe(false);
+      if (!decision.dispatch) {
+        expect(decision.reason).toBe("non-actionable-resource");
+      }
+    }
+  });
+
+  it("treats a flat event (no action, no resource) as actionable — manual curl", () => {
+    expect(
+      isActionableSentryDelivery({ event_id: "abc", environment: "production" }, null)
+        .dispatch
+    ).toBe(true);
+  });
+});
+
+describe("resolveSharedSecretTimestamp", () => {
+  const nowSeconds = "1700000000";
+
+  it("prefers Sentry-Hook-Timestamp over curl and payload", () => {
+    const resolved = resolveSharedSecretTimestamp({
+      sentryHookTimestamp: nowSeconds,
+      curlTimestamp: "1",
+      payload: { timestamp: 2 },
+      envelope: null,
+      allowCurlHeader: true,
+    });
+    expect(resolved).toEqual({ value: nowSeconds, source: "sentry-hook" });
+  });
+
+  it("uses the curl header only when allowed", () => {
+    expect(
+      resolveSharedSecretTimestamp({
+        sentryHookTimestamp: null,
+        curlTimestamp: nowSeconds,
+        payload: null,
+        envelope: null,
+        allowCurlHeader: false,
+      })
+    ).toBeNull();
+    expect(
+      resolveSharedSecretTimestamp({
+        sentryHookTimestamp: null,
+        curlTimestamp: nowSeconds,
+        payload: null,
+        envelope: null,
+        allowCurlHeader: true,
+      })
+    ).toEqual({ value: nowSeconds, source: "curl" });
+  });
+
+  it("falls back to the event timestamp so Alert Rules authenticate without a custom header", () => {
+    const resolved = resolveSharedSecretTimestamp({
+      sentryHookTimestamp: null,
+      curlTimestamp: nowSeconds,
+      payload: { timestamp: 1_700_000_000 },
+      envelope: null,
+      allowCurlHeader: false,
+    });
+    expect(resolved).toEqual({
+      value: "1700000000",
+      source: "payload",
+    });
+  });
+});
+
+describe("readPayloadTimestamp", () => {
+  it("reads numeric unix seconds and ISO datetime", () => {
+    expect(readPayloadTimestamp({ timestamp: 1_700_000_000 })).toBe(
+      "1700000000"
+    );
+    expect(readPayloadTimestamp({ datetime: "2023-11-14T22:13:20.000Z" })).toBe(
+      String(Date.parse("2023-11-14T22:13:20.000Z"))
+    );
+  });
+
+  it("returns null for missing or invalid values", () => {
+    expect(readPayloadTimestamp(null)).toBeNull();
+    expect(readPayloadTimestamp({})).toBeNull();
+    expect(readPayloadTimestamp({ timestamp: -1 })).toBeNull();
+    expect(readPayloadTimestamp({ datetime: "not-a-date" })).toBeNull();
   });
 });
 
@@ -188,5 +343,17 @@ describe("checkSharedSecretFreshness", () => {
     expect(
       checkSharedSecretFreshness(String(nowSeconds - 301), "0", now).ok
     ).toBe(false);
+  });
+
+  it("honors a longer default window for payload timestamps (Alert Rule lag)", () => {
+    // 1 hour ago: stale under the 300s header default, fresh under 7200s
+    expect(
+      checkSharedSecretFreshness(String(nowSeconds - 3600), undefined, now).ok
+    ).toBe(false);
+    expect(
+      checkSharedSecretFreshness(String(nowSeconds - 3600), undefined, now, {
+        defaultWindowSeconds: 7200,
+      }).ok
+    ).toBe(true);
   });
 });

@@ -5,9 +5,10 @@
  * structured review comment back to the PR.
  *
  * Designed to run inside a GitHub Action (see
- * .github/workflows/pr-browser-review.yml) — fires on
- * `deployment_status` so Vercel's preview is guaranteed ready by
- * the time the agent starts; no polling for the URL.
+ * .github/workflows/pr-browser-review.yml). That workflow is
+ * DISABLED (CON-15) — it used to fire on `deployment_status`
+ * once Vercel marked the preview Ready. Re-enable the yaml
+ * trigger to restore the loop.
  *
  * Inputs (all via env):
  *   PR_NUMBER     — the PR being reviewed (resolved upstream)

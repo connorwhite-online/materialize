@@ -95,7 +95,7 @@ Once Sentry is wired, the self-healing pipeline activates:
 
 ```
 Sentry alert fires
-  → POST /api/internal/sentry-trigger (validates X-Sentry-Trigger-Secret)
+  → POST /api/internal/sentry-trigger (HMAC or shared-secret + freshness)
   → dispatches the `sentry-fixer` GitHub Action with the event JSON
   → fresh CI runner installs deps + Playwright, then runs
     scripts/sentry-fixer.ts which spawns a Claude Agent SDK session
@@ -113,23 +113,36 @@ outbound webhooks — they sign them with HMAC-SHA-256 against the integration's
 
 - **HMAC mode** (Sentry-native): `Sentry-Hook-Signature` verified against
   `SENTRY_INTEGRATION_CLIENT_SECRET`. This is what Sentry's UI gives you.
-- **Shared-header mode** (manual / alternate providers): `X-Sentry-Trigger-Secret`
-  matched against `SENTRY_TRIGGER_SECRET`. Useful for manual `curl` triggers,
-  webhook providers that allow custom headers, or load testing. **OFF by
-  default** — a static header has no replay protection, so this mode is only
-  honored when `SENTRY_TRIGGER_ALLOW_SHARED_SECRET` is explicitly enabled. When
-  enabled, each request must also carry a recent `X-Sentry-Trigger-Timestamp`
-  (Unix seconds, within `SENTRY_TRIGGER_TIMESTAMP_WINDOW_SECONDS`, default 300).
+  Dispatch still requires `environment=production` (or whatever
+  `SENTRY_TRIGGER_ENVIRONMENT` lists). Official `issue.created` payloads
+  omit that field, so they are skipped on purpose — otherwise a preview
+  or local first-seen issue would start a fixer run. Prefer an Alert
+  Rule or the `error` webhook (both carry `event.environment`).
+  Non-`created` issue actions (`resolved`, `assigned`, …) are skipped.
+- **Shared-header mode**: `X-Sentry-Trigger-Secret` matched against
+  `SENTRY_TRIGGER_SECRET`, plus a freshness signal so a captured request
+  cannot be replayed. Sentry-native freshness is always accepted:
+  `Sentry-Hook-Timestamp` (Internal Integration) or the event's
+  `timestamp`/`datetime` (Alert Rules). The manual curl header
+  `X-Sentry-Trigger-Timestamp` is only honored when
+  `SENTRY_TRIGGER_ALLOW_SHARED_SECRET` is explicitly enabled (or HMAC
+  is not configured). Header window defaults to 300s; payload timestamps
+  use 7200s because an alert can fire on a burst whose first event is
+  minutes old.
 
-At least one auth mode must be configured. HMAC works on its own; shared-header
-mode additionally requires `SENTRY_TRIGGER_ALLOW_SHARED_SECRET`.
+At least one auth mode must be configured. HMAC works on its own. Alert
+Rule webhooks that send the shared secret do **not** need the curl flag —
+that flag is only the hand-run path.
 
 **For Sentry's Internal Integration:**
 
 1. In Sentry: **Settings → Custom Integrations → Create New Integration →
    Internal**.
 2. Set the **Webhook URL** to `https://www.materialize.cc/api/internal/sentry-trigger`.
-3. Under **Webhooks**, check `Issues` (so `issue.created` deliveries fire).
+3. Under **Webhooks**, check `Errors` (the event payload includes
+   `environment`, which is what the production-only gate reads).
+   `Issues` alone is not enough — `issue.created` has no environment
+   field and is skipped so preview / local testing cannot start a run.
 4. Permissions: `Issue & Event → Read` is sufficient.
 5. Save. Sentry shows you a **Client Secret** — copy it.
 6. Add it to Vercel env (Production + Preview):
@@ -144,8 +157,9 @@ echo 'SENTRY_TRIGGER_SECRET="'"$(openssl rand -hex 32)"'"' >> .env.local
 echo 'SENTRY_TRIGGER_ALLOW_SHARED_SECRET=1' >> .env.local
 ```
 
-Both are required — the secret alone is inert until the flag is set, so
-production stays HMAC-only by default. Mirror to Vercel only where you actually
+The flag is only required for the hand-run `X-Sentry-Trigger-Timestamp`
+path. Alert Rule deliveries authenticate via the event timestamp even
+when the flag is unset. Mirror the flag to Vercel only where you actually
 want manual triggers. Then you can `curl` the trigger route with the secret and
 a fresh timestamp:
 
