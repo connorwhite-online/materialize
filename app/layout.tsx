@@ -6,7 +6,6 @@ import { AuthModalProvider } from "@/components/auth/auth-modal";
 import { ThemeProvider } from "@/components/theme-provider";
 import { PendingPrintFileProvider } from "@/components/upload/pending-print-file";
 import { PageTransitionLoader } from "@/components/nav/page-transition-loader";
-import { Iterate } from "iterate-ui-next/devtools";
 
 // Body text and headings share the system font stack (globals.css).
 //
@@ -172,7 +171,6 @@ export default function RootLayout({
               </AuthModalProvider>
             </ThemeProvider>
           </MotionConfig>
-          <Iterate />
         </body>
       </html>
     </ClerkProvider>
