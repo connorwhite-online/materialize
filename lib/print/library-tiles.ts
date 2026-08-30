@@ -24,6 +24,8 @@ export interface LibraryTile {
   thumbnailUrl: string | null;
   format: string;
   source: "owned" | "purchased";
+  /** Bounding box in mm when geometryData has been cached (home Recent meta). */
+  dimensions?: [number, number, number] | null;
   /** Original upload filename (e.g. "terra_shell_top.stl"). Only populated for project-mode tiles. */
   originalFilename?: string;
   /** Asset file size in bytes. Only populated for project-mode tiles. */
@@ -82,21 +84,46 @@ async function loadLibraryTilesOnce(userId: string): Promise<LibraryTile[]> {
   ];
   if (fileIds.length === 0) return [];
 
+  // Same jsonb path as library-tab: geometryData.dimensions is the
+  // quote-cache source of truth (bbox*Um columns stay null for step/amf
+  // and for mesh assets that haven't finished fingerprinting).
   const assetRows = await db
     .select({
       id: fileAssets.id,
       fileId: fileAssets.fileId,
       format: fileAssets.format,
+      dimensions: sql<{
+        x: number;
+        y: number;
+        z: number;
+      } | null>`${fileAssets.geometryData}->'dimensions'`,
       createdAt: fileAssets.createdAt,
     })
     .from(fileAssets)
     .where(inArray(fileAssets.fileId, fileIds))
     .orderBy(fileAssets.createdAt);
 
-  const primaryByFileId = new Map<string, { id: string; format: string }>();
+  const primaryByFileId = new Map<
+    string,
+    {
+      id: string;
+      format: string;
+      dimensions: [number, number, number] | null;
+    }
+  >();
   for (const row of assetRows) {
     if (!row.fileId || primaryByFileId.has(row.fileId)) continue;
-    primaryByFileId.set(row.fileId, { id: row.id, format: row.format });
+    const dims = row.dimensions;
+    const dimsOk =
+      dims != null &&
+      Number.isFinite(dims.x) &&
+      Number.isFinite(dims.y) &&
+      Number.isFinite(dims.z);
+    primaryByFileId.set(row.fileId, {
+      id: row.id,
+      format: row.format,
+      dimensions: dimsOk ? [dims.x, dims.y, dims.z] : null,
+    });
   }
 
   const primaryAssetIds = Array.from(primaryByFileId.values()).map((a) => a.id);
@@ -159,6 +186,7 @@ async function loadLibraryTilesOnce(userId: string): Promise<LibraryTile[]> {
       thumbnailUrl: f.thumbnailUrl,
       format: asset.format,
       source: "owned",
+      dimensions: asset.dimensions,
     });
   }
   for (const r of purchasedRows) {
@@ -170,6 +198,7 @@ async function loadLibraryTilesOnce(userId: string): Promise<LibraryTile[]> {
       thumbnailUrl: r.thumbnailUrl,
       format: asset.format,
       source: "purchased",
+      dimensions: asset.dimensions,
     });
   }
 

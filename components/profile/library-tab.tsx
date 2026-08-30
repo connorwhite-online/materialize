@@ -711,7 +711,7 @@ function FileCarousel({
           key={item.id}
           className={compact ? "w-28 shrink-0" : "w-40 shrink-0"}
         >
-          <LibraryFileCard item={item} isOwner={isOwner} />
+          <LibraryFileCard item={item} isOwner={isOwner} compact={compact} />
         </div>
       ))}
     </FeatheredCarousel>
