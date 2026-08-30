@@ -41,19 +41,29 @@ export function BillingActions({ hasCard }: { hasCard: boolean }) {
   };
 
   return (
-    <div className="flex flex-col items-end gap-1">
-      <div className="flex items-center gap-2">
+    <div className="flex w-full flex-col gap-1">
+      <div
+        className={
+          hasCard ? "grid w-full grid-cols-2 gap-2" : "flex w-full"
+        }
+      >
         {hasCard && (
           <Button
-            variant="ghost"
+            variant="outline"
             size="sm"
+            className="w-full"
             onClick={handleRemove}
             disabled={pending}
           >
             Remove
           </Button>
         )}
-        <Button onClick={handleAddOrReplace} disabled={pending} size="sm">
+        <Button
+          onClick={handleAddOrReplace}
+          disabled={pending}
+          size="sm"
+          className="w-full"
+        >
           {hasCard ? "Replace card" : "Add card"}
         </Button>
       </div>

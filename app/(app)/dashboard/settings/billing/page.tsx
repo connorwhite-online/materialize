@@ -57,18 +57,17 @@ export default async function BillingSettingsPage({
           />
         </div>
         {summary ? (
-          <div className="mt-4 flex items-center justify-between gap-4">
+          <div className="mt-4 flex flex-col gap-3">
             <p className="text-sm text-muted-foreground">
               <span className="font-medium capitalize text-foreground">
                 {summary.brand}
               </span>{" "}
-              ending in {summary.last4} · expires{" "}
-              {String(summary.expMonth).padStart(2, "0")}/{summary.expYear}
+              ending in {summary.last4}
             </p>
             <BillingActions hasCard />
           </div>
         ) : (
-          <div className="mt-4 flex items-center justify-between gap-4">
+          <div className="mt-4 flex flex-col gap-3">
             <p className="text-sm text-muted-foreground">
               No card on file. Agents will continue to need email confirmation
               for every order.
