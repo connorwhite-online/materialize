@@ -9,6 +9,7 @@ import {
 } from "@/lib/db/schema";
 import { eq, desc, and, inArray, asc } from "drizzle-orm";
 import { withDbRetry } from "@/lib/db/retry";
+import { getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
 
 /** Orders that still need the user to do something. */
 export const PENDING_ORDER_STATUSES = [
@@ -23,13 +24,34 @@ export type PendingOrderStatus = (typeof PENDING_ORDER_STATUSES)[number];
 export type PendingOrder = {
   id: string;
   status: PendingOrderStatus;
+  /** CraftCloud material config UUID — used for resume deep-links. */
   material: string | null;
+  /**
+   * Display label resolved from the CraftCloud catalog
+   * (`material · color`). Null when the config id is missing or
+   * unknown — never a raw UUID.
+   */
+  materialName: string | null;
   vendorName: string | null;
   totalPrice: number;
   serviceFee: number;
   fileAssetId: string | null;
   fileName: string | null;
 };
+
+/**
+ * Compact material line for pending-order cards. Color alone is not
+ * enough ("Black"), and finish is usually redundant on a 13rem tile.
+ */
+export function formatPendingMaterialName(
+  materialName: string | null | undefined,
+  color: string | null | undefined
+): string | null {
+  const parts = [materialName, color].filter(
+    (p): p is string => typeof p === "string" && p.trim().length > 0
+  );
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
 
 const PENDING_MAX = 12;
 
@@ -101,6 +123,11 @@ async function loadPendingOrdersOnce(userId: string): Promise<PendingOrder[]> {
     }
   }
 
+  // One catalog fetch for the whole carousel — printOrders.material is
+  // a CraftCloud config UUID, not a lib/materials slug. Misses stay
+  // null so the tile never prints a raw UUID.
+  const catalog = await getCraftCloudCatalog().catch(() => null);
+
   return draftsRaw.map((d) => {
     const meta = !d.fileAssetId ? firstNameByOrder.get(d.id) : undefined;
     const fileName = d.fileName
@@ -110,10 +137,16 @@ async function loadPendingOrdersOnce(userId: string): Promise<PendingOrder[]> {
           ? `${meta.name} + ${meta.count - 1} more`
           : meta.name
         : null;
+    const entry =
+      d.material && catalog ? catalog.configById.get(d.material) : undefined;
     return {
       id: d.id,
       status: d.status as PendingOrderStatus,
       material: d.material,
+      materialName: formatPendingMaterialName(
+        entry?.material.name,
+        entry?.config.color
+      ),
       vendorName: d.vendorName ?? d.vendor ?? null,
       totalPrice: d.totalPrice,
       serviceFee: d.serviceFee,

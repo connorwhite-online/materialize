@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  formatPendingMaterialName,
   pendingOrderHref,
   type PendingOrder,
 } from "../pending-orders";
@@ -9,6 +10,7 @@ function order(overrides: Partial<PendingOrder> = {}): PendingOrder {
     id: "ord-1",
     status: "cart_created",
     material: null,
+    materialName: null,
     vendorName: null,
     totalPrice: 0,
     serviceFee: 0,
@@ -17,6 +19,19 @@ function order(overrides: Partial<PendingOrder> = {}): PendingOrder {
     ...overrides,
   };
 }
+
+describe("formatPendingMaterialName", () => {
+  it("joins material and color", () => {
+    expect(formatPendingMaterialName("PLA", "Black")).toBe("PLA · Black");
+  });
+
+  it("omits missing pieces and never echoes a UUID", () => {
+    expect(formatPendingMaterialName("PLA", null)).toBe("PLA");
+    expect(formatPendingMaterialName(null, "Black")).toBe("Black");
+    expect(formatPendingMaterialName(undefined, "")).toBeNull();
+    expect(formatPendingMaterialName(null, null)).toBeNull();
+  });
+});
 
 describe("pendingOrderHref", () => {
   it("sends agent-approval rows to the confirm page", () => {
