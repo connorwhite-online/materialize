@@ -16,8 +16,7 @@ import {
 } from "@/lib/profile/owner-settings-tabs";
 
 const TABS: Array<{ key: OwnerSettingsTab; label: string }> = [
-  { key: "general", label: "General" },
-  { key: "notifications", label: "Notifications" },
+  { key: "settings", label: "Settings" },
   { key: "agents", label: "Agents" },
   { key: "payments", label: "Payments" },
 ];

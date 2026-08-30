@@ -7,30 +7,25 @@ import type { EmailPrefMap } from "@/lib/notifications/email-prefs";
 
 export function GeneralSettings({
   defaultUploadVisibility,
-}: {
-  defaultUploadVisibility: "public" | "private";
-}) {
-  return (
-    <div className="space-y-8">
-      <ThemeSwitcher />
-      <UploadVisibilitySetting initial={defaultUploadVisibility} />
-      <SignOutButton />
-    </div>
-  );
-}
-
-export function NotificationSettings({
   emailNotificationsEnabled,
   emailNotificationPrefs,
 }: {
+  defaultUploadVisibility: "public" | "private";
   emailNotificationsEnabled: boolean;
   emailNotificationPrefs: EmailPrefMap | null;
 }) {
   return (
-    <EmailNotificationsSetting
-      initial={emailNotificationsEnabled}
-      initialPrefs={emailNotificationPrefs}
-    />
+    <div className="space-y-8">
+      <ThemeSwitcher />
+      <div className="border-t border-border pt-6">
+        <EmailNotificationsSetting
+          initial={emailNotificationsEnabled}
+          initialPrefs={emailNotificationPrefs}
+        />
+      </div>
+      <UploadVisibilitySetting initial={defaultUploadVisibility} />
+      <SignOutButton />
+    </div>
   );
 }
 
@@ -51,8 +46,8 @@ export function PaymentSettings() {
     <div className="space-y-2">
       <SettingsLink
         href="/dashboard/settings/billing"
-        title="Billing"
-        description="Saved card for agent-initiated orders"
+        title="Saved card"
+        description="Card on file for print checkout and agent orders"
       />
       <SettingsLink
         href="/dashboard/settings/payouts"

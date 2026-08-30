@@ -2,13 +2,13 @@
 
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { MonitorIcon, MoonIcon, SunIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const OPTIONS = [
-  { value: "system", label: "System" },
-  { value: "light", label: "Light" },
-  { value: "dark", label: "Dark" },
+  { value: "system", label: "System", Icon: MonitorIcon },
+  { value: "light", label: "Light", Icon: SunIcon },
+  { value: "dark", label: "Dark", Icon: MoonIcon },
 ] as const;
 
 export function ThemeSwitcher() {
@@ -20,35 +20,42 @@ export function ThemeSwitcher() {
   }, []);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Appearance</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <p className="text-sm text-muted-foreground mb-3">
-          Choose how Materialize looks. System matches your device.
+    <div className="flex items-center justify-between gap-4">
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium">Appearance</div>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          System matches your device.
         </p>
-        <div className="grid grid-cols-3 gap-2">
-          {OPTIONS.map((option) => {
-            const isActive = mounted && theme === option.value;
-            return (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => setTheme(option.value)}
-                className={cn(
-                  "rounded-lg border px-3 py-2 text-sm transition-colors",
-                  isActive
-                    ? "border-primary bg-primary/5 text-foreground font-medium"
-                    : "border-border text-muted-foreground hover:border-primary/30 hover:text-foreground"
-                )}
-              >
-                {option.label}
-              </button>
-            );
-          })}
-        </div>
-      </CardContent>
-    </Card>
+      </div>
+      <div
+        role="radiogroup"
+        aria-label="Theme"
+        className="inline-flex items-center rounded-full border border-border bg-muted/40 p-0.5"
+      >
+        {OPTIONS.map((option) => {
+          const isActive = mounted && theme === option.value;
+          const Icon = option.Icon;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={isActive}
+              aria-label={option.label}
+              title={option.label}
+              onClick={() => setTheme(option.value)}
+              className={cn(
+                "inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors",
+                isActive
+                  ? "bg-background text-foreground shadow-sm ring-1 ring-border/60"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <Icon className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }

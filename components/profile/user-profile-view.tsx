@@ -7,12 +7,14 @@ import { loadUserByHandle } from "@/app/(app)/[handle]/loader";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { LibraryTab } from "@/components/profile/library-tab";
 import { OwnerSettingsTabs } from "@/components/profile/owner-settings-tabs";
-import { isOwnerSettingsTab } from "@/lib/profile/owner-settings-tabs";
+import {
+  OWNER_SETTINGS_TAB_ALIASES,
+  resolveOwnerSettingsTab,
+} from "@/lib/profile/owner-settings-tabs";
 import { OwnerProfileHeadline } from "@/components/profile/owner-profile-headline";
 import {
   AgentSettings,
   GeneralSettings,
-  NotificationSettings,
   PaymentSettings,
 } from "@/components/profile/general-settings";
 import { profilePageJsonLd, safeJsonLdScript } from "@/lib/seo/json-ld";
@@ -129,14 +131,25 @@ export async function UserProfileView({
 
   if (isOwner) {
     const rawTab = searchParams.tab;
-    if (rawTab && rawTab in OWNER_TAB_REDIRECTS) {
-      const dest = OWNER_TAB_REDIRECTS[rawTab];
+    const preserveQuery = () => {
       const query = new URLSearchParams();
       if (searchParams.welcome) query.set("welcome", searchParams.welcome);
       if (searchParams.payment) query.set("payment", searchParams.payment);
-      if (searchParams.production) query.set("production", searchParams.production);
-      const qs = query.toString();
+      if (searchParams.production)
+        query.set("production", searchParams.production);
+      return query.toString();
+    };
+
+    if (rawTab && rawTab in OWNER_TAB_REDIRECTS) {
+      const dest = OWNER_TAB_REDIRECTS[rawTab];
+      const qs = preserveQuery();
       redirect(qs ? `${dest}?${qs}` : dest);
+    }
+
+    // Fold legacy General / Notifications query values onto Settings.
+    if (rawTab && rawTab in OWNER_SETTINGS_TAB_ALIASES) {
+      const qs = preserveQuery();
+      redirect(qs ? `/${handle}?${qs}` : `/${handle}`);
     }
 
     const [settings] = await db
@@ -148,8 +161,7 @@ export async function UserProfileView({
       .from(users)
       .where(eq(users.id, user.id));
 
-    const activeTab =
-      rawTab && isOwnerSettingsTab(rawTab) ? rawTab : "general";
+    const activeTab = resolveOwnerSettingsTab(rawTab);
 
     return (
       <div className="mx-auto max-w-3xl px-4 py-8">
@@ -163,16 +175,7 @@ export async function UserProfileView({
         <div className="mt-10">
           <OwnerSettingsTabs username={handle} activeTab={activeTab} />
           <div className="mt-8">
-            {activeTab === "notifications" ? (
-              <NotificationSettings
-                emailNotificationsEnabled={
-                  settings?.emailNotificationsEnabled ?? true
-                }
-                emailNotificationPrefs={
-                  settings?.emailNotificationPrefs ?? null
-                }
-              />
-            ) : activeTab === "agents" ? (
+            {activeTab === "agents" ? (
               <AgentSettings />
             ) : activeTab === "payments" ? (
               <PaymentSettings />
@@ -180,6 +183,12 @@ export async function UserProfileView({
               <GeneralSettings
                 defaultUploadVisibility={
                   settings?.defaultUploadVisibility ?? "private"
+                }
+                emailNotificationsEnabled={
+                  settings?.emailNotificationsEnabled ?? true
+                }
+                emailNotificationPrefs={
+                  settings?.emailNotificationPrefs ?? null
                 }
               />
             )}
