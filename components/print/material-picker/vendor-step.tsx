@@ -353,7 +353,7 @@ export function VendorStep({
               }`}
             >
               {badges && (badges.cheapest || badges.fastest) && (
-                <div className="absolute -top-2 left-2 z-10 flex gap-1">
+                <div className="absolute -top-2 left-0 z-10 flex gap-1">
                   {badges.cheapest && (
                     <span className="inline-flex items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium leading-none text-emerald-900 ring-1 ring-emerald-300 dark:bg-emerald-950/70 dark:text-emerald-200 dark:ring-emerald-800">
                       Cheapest
