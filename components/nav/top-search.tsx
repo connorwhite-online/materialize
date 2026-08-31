@@ -14,6 +14,7 @@ import { Print } from "@/components/icons/print";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { Button } from "@/components/ui/button";
 import { useCart } from "@/components/print/cart-context";
+import { isSessionGatedImageSrc } from "@/lib/images/session-gated-src";
 import { cn } from "@/lib/utils";
 import type {
   SearchHitCollection,
@@ -394,6 +395,7 @@ function HitRow({ hit }: { hit: AnyHit }) {
             alt=""
             fill
             sizes="36px"
+            unoptimized={isSessionGatedImageSrc(thumb)}
             className="object-cover"
           />
         )}

@@ -11,7 +11,6 @@ describe("ProjectTabs", () => {
           {
             value: "files",
             label: "Files",
-            meta: 0,
             content: <p>Just the files panel</p>,
           },
         ]}
@@ -34,7 +33,7 @@ describe("ProjectTabs", () => {
           },
           {
             value: "guide",
-            label: "Build Guide",
+            label: "Guide",
             content: <p>Guide panel</p>,
           },
         ]}
@@ -43,6 +42,6 @@ describe("ProjectTabs", () => {
 
     expect(screen.getAllByRole("tab")).toHaveLength(2);
     expect(screen.getByRole("tab", { name: /files/i })).toBeTruthy();
-    expect(screen.getByRole("tab", { name: /build guide/i })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: /^guide$/i })).toBeTruthy();
   });
 });

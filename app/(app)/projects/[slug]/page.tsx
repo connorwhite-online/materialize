@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
+import { isSessionGatedImageSrc } from "@/lib/images/session-gated-src";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import {
@@ -454,7 +455,7 @@ export default async function ProjectDetailPage(props: {
       : null;
 
   // Content tabs that sit under the cover/photos and above the
-  // Discussion section. Order is fixed — Files, Build Guide, BOM,
+  // Discussion section. Order is fixed — Files, Guide, BOM,
   // Wiring — and each tab is only included when it has something to
   // show (always for owners, who get the inline editors / empty
   // states). The first entry is the default selection, so Files
@@ -464,7 +465,6 @@ export default async function ProjectDetailPage(props: {
   tabs.push({
     value: "files",
     label: "Files",
-    meta: bundledFiles.length,
     content: (
       <div>
         {canWrite && bundledFiles.length === 0 ? (
@@ -516,7 +516,7 @@ export default async function ProjectDetailPage(props: {
   if (project.buildGuide || canWrite) {
     tabs.push({
       value: "build-guide",
-      label: "Build Guide",
+      label: "Guide",
       content: (
         <div className="space-y-3">
           {project.buildGuide ? (
@@ -529,7 +529,7 @@ export default async function ProjectDetailPage(props: {
                     <Link href={`/projects/${project.slug}/build-guide/edit`} />
                   }
                 >
-                  Edit build guide
+                  Edit guide
                 </Button>
               )}
               <BuildGuideReader html={project.buildGuide} />
@@ -539,7 +539,7 @@ export default async function ProjectDetailPage(props: {
               <ProjectTabEmptyWell
                 href={`/projects/${project.slug}/build-guide/edit`}
                 icon={<BookOpenIcon className="size-4" />}
-                title="Write build guide"
+                title="Write guide"
                 description="Steps, photos, and notes for builders."
               />
             )
@@ -564,7 +564,6 @@ export default async function ProjectDetailPage(props: {
     tabs.push({
       value: "bom",
       label: "Components",
-      meta: bomItems.length || undefined,
       content: (
         <div className="space-y-3">
           {bomItems.length > 0 ? (
@@ -611,7 +610,6 @@ export default async function ProjectDetailPage(props: {
     tabs.push({
       value: "wiring",
       label: "Wiring",
-      meta: circuits.length || undefined,
       content: (
         <CircuitGallery
           projectId={project.id}
@@ -760,6 +758,9 @@ export default async function ProjectDetailPage(props: {
                   fill
                   priority
                   sizes="(max-width: 768px) 100vw, 60vw"
+                  // Private/draft project covers are session-gated;
+                  // optimizer fetch has no Clerk cookies (CON-23).
+                  unoptimized={isSessionGatedImageSrc(project.thumbnailUrl)}
                   className="object-cover"
                 />
               </div>

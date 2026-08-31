@@ -1,8 +1,9 @@
 import type { SVGProps } from "react";
 
 /**
- * Chunky settings gear for the notifications headline. Thick stroke +
- * round joins so it sits in a soft tile without looking wiry.
+ * Chunky filled settings gear for the notifications headline.
+ * Soft 6-tooth silhouette (same family as Bell / Print) so it reads
+ * cute and solid in the muted tile — not a wiry stroked outline.
  */
 export function Gear({
   size = 20,
@@ -18,16 +19,10 @@ export function Gear({
       {...props}
     >
       <path
-        d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"
-        stroke="currentColor"
-        strokeWidth={2.4}
-      />
-      <path
-        d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H5a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H10a1.65 1.65 0 0 0 1-1.51V5a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V10c.36.3.8.48 1.27.5H19a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
-        stroke="currentColor"
-        strokeWidth={2.4}
-        strokeLinecap="round"
-        strokeLinejoin="round"
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M10.01 5.29 Q9.22 2.60 10.68 2.29 A9.80 9.80 0 0 1 13.32 2.29 Q14.78 2.60 13.99 5.29 A7.00 7.00 0 0 1 16.82 6.92 Q18.75 4.89 19.75 6.00 A9.80 9.80 0 0 1 21.07 8.29 Q21.53 9.71 18.81 10.37 A7.00 7.00 0 0 1 18.81 13.63 Q21.53 14.29 21.07 15.71 A9.80 9.80 0 0 1 19.75 18.00 Q18.75 19.11 16.82 17.08 A7.00 7.00 0 0 1 13.99 18.71 Q14.78 21.40 13.32 21.71 A9.80 9.80 0 0 1 10.68 21.71 Q9.22 21.40 10.01 18.71 A7.00 7.00 0 0 1 7.18 17.08 Q5.25 19.11 4.25 18.00 A9.80 9.80 0 0 1 2.93 15.71 Q2.47 14.29 5.19 13.63 A7.00 7.00 0 0 1 5.19 10.37 Q2.47 9.71 2.93 8.29 A9.80 9.80 0 0 1 4.25 6.00 Q5.25 4.89 7.18 6.92 A7.00 7.00 0 0 1 10.01 5.29 Z M15.50 12.00 A3.50 3.50 0 1 0 8.50 12.00 A3.50 3.50 0 1 0 15.50 12.00 Z"
+        fill="currentColor"
       />
     </svg>
   );

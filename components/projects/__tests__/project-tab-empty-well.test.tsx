@@ -34,12 +34,12 @@ describe("ProjectTabEmptyWell", () => {
       <ProjectTabEmptyWell
         href="/projects/demo/build-guide/edit"
         icon={<BoxIcon className="size-4" />}
-        title="Write build guide"
+        title="Write guide"
         description="Steps, photos, and notes for builders."
       />
     );
 
-    const link = screen.getByRole("link", { name: /write build guide/i });
+    const link = screen.getByRole("link", { name: /write guide/i });
     expect(link.getAttribute("href")).toBe(
       "/projects/demo/build-guide/edit"
     );
