@@ -367,6 +367,7 @@ export default async function ProjectDetailPage(props: {
           fileId: fileAssets.fileId,
           originalFilename: fileAssets.originalFilename,
           format: fileAssets.format,
+          fileSize: fileAssets.fileSize,
         })
         .from(fileAssets)
         .where(inArray(fileAssets.fileId, bundledFileIds))
@@ -374,13 +375,14 @@ export default async function ProjectDetailPage(props: {
     : [];
   const primaryAssetByFileId = new Map<
     string,
-    { originalFilename: string; format: string }
+    { originalFilename: string; format: string; fileSize: number }
   >();
   for (const a of fileAssetRows) {
     if (!a.fileId || primaryAssetByFileId.has(a.fileId)) continue;
     primaryAssetByFileId.set(a.fileId, {
       originalFilename: a.originalFilename,
       format: a.format,
+      fileSize: a.fileSize,
     });
   }
   const bundledFileCards = bundledFiles.map((file) => {
@@ -390,6 +392,7 @@ export default async function ProjectDetailPage(props: {
       displayName:
         file.name?.trim() || asset?.originalFilename || "Untitled file",
       format: asset?.format ?? null,
+      fileSizeBytes: asset?.fileSize ?? null,
     };
   });
 
@@ -499,7 +502,7 @@ export default async function ProjectDetailPage(props: {
                   thumbnailUrl={file.thumbnailUrl}
                   placeholder="No preview"
                   overlay={<FileCardPriceBadge priceCents={file.price} />}
-                  subtitle={fileCardOwnedSubtitle(file.format)}
+                  subtitle={fileCardOwnedSubtitle(file.fileSizeBytes)}
                 />
               ))}
             </div>
