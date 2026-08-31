@@ -6,7 +6,7 @@ import { canWriteProject } from "@/lib/authorization";
 import { BuildGuideEditor } from "@/components/projects/build-guide-editor";
 
 export const metadata: Metadata = {
-  title: "Edit build guide",
+  title: "Edit guide",
   robots: { index: false, follow: false },
 };
 
