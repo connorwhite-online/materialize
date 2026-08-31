@@ -26,6 +26,49 @@ export const CAPTURE_TARGET_WORLD_SIZE = 2.4;
 export const CAPTURE_DEFAULT_DISTANCE = 4.5;
 
 /**
+ * Margin drei `<Stage adjustCamera>` passes to `<Bounds>` when we hand
+ * it `1.2`. Kept as a named constant so the saved-view restorer and the
+ * Stage prop cannot drift apart — the baseline distance a capture was
+ * measured against is exactly `Bounds.getSize().distance` at this margin.
+ */
+export const STAGE_FIT_MARGIN = 1.2;
+
+/**
+ * Whether Stage should auto-fit. When a saved preview view is present we
+ * own the camera ourselves (`ApplyInitialView`) and must keep Stage's
+ * `fit()` off for the whole mount — even a single late Refit after we
+ * place the camera snaps it back to head-on (CON-27).
+ */
+export function stageAdjustCamera(hasInitialView: boolean): false | number {
+  return hasInitialView ? false : STAGE_FIT_MARGIN;
+}
+
+/**
+ * Fit distance drei `<Bounds getSize()>` would report for a model of
+ * `maxDim` at the given lens, using Stage's margin.
+ *
+ * Deliberately mirrors Bounds' `atan` (not `tan`) form so a restored
+ * view anchors on the same baseline the capture measured against when
+ * Stage was still auto-fitting. Used when Stage auto-fit is disabled
+ * for a saved view — `Number(false)` would otherwise zero the margin
+ * and make `getSize().distance` unusable.
+ */
+export function stageFitDistance(
+  maxDim: number,
+  fovDeg: number,
+  aspect: number,
+  margin: number = STAGE_FIT_MARGIN
+): number {
+  if (!(maxDim > 0) || !(fovDeg > 0) || !(aspect > 0) || !(margin > 0)) {
+    return 0;
+  }
+  const fitHeightDistance =
+    maxDim / (2 * Math.atan((Math.PI * fovDeg) / 360));
+  const fitWidthDistance = fitHeightDistance / aspect;
+  return margin * Math.max(fitHeightDistance, fitWidthDistance);
+}
+
+/**
  * Framing bounds for a captured snapshot.
  *
  * A creator can orbit to a legitimate angle while zoomed absurdly far

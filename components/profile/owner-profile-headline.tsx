@@ -10,15 +10,23 @@ import {
   updateProfile,
   updateSocialLinks,
 } from "@/app/actions/profile";
+import {
+  SocialPlatformIcon,
+  platformLabel,
+  type SocialPlatform,
+} from "@/components/profile/social-platforms";
 import { cn } from "@/lib/utils";
 
 const PLATFORMS = [
-  { key: "website", label: "Website", placeholder: "yoursite.com" },
-  { key: "twitter", label: "X / Twitter", placeholder: "username" },
-  { key: "github", label: "GitHub", placeholder: "username" },
-  { key: "instagram", label: "Instagram", placeholder: "username" },
-  { key: "youtube", label: "YouTube", placeholder: "channel or @handle" },
-] as const;
+  { key: "website", placeholder: "yoursite.com" },
+  { key: "twitter", placeholder: "username" },
+  { key: "github", placeholder: "username" },
+  { key: "instagram", placeholder: "username" },
+  { key: "youtube", placeholder: "channel or @handle" },
+] as const satisfies ReadonlyArray<{
+  key: SocialPlatform;
+  placeholder: string;
+}>;
 
 type PlatformKey = (typeof PLATFORMS)[number]["key"];
 
@@ -50,6 +58,9 @@ interface OwnerProfileHeadlineProps {
 /**
  * Own-profile headline as tappable fields. Looks like the public
  * profile until you click a piece — then it becomes the editor.
+ *
+ * Social rows sit below the avatar + identity row so they flush to
+ * the page's left edge on mobile (not indented under the name column).
  */
 export function OwnerProfileHeadline({
   username: initialUsername,
@@ -124,146 +135,148 @@ export function OwnerProfileHeadline({
   };
 
   return (
-    <div className="flex items-start gap-6">
-      <div className="relative shrink-0">
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/jpeg,image/png,image/webp,image/gif"
-          className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) handleAvatar(file);
-            e.target.value = "";
-          }}
-        />
-        <button
-          type="button"
-          onClick={() => fileRef.current?.click()}
-          disabled={pending}
-          aria-label="Change photo"
-          className="group relative cursor-pointer rounded-full"
-        >
-          <UserAvatar
-            seed={username}
-            imageUrl={shownAvatar}
-            displayName={shownName}
-            className="h-20 w-20 text-2xl"
-          />
-          <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/45 text-xs font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
-            Change
-          </span>
-        </button>
-      </div>
-
-      <div className="min-w-0 flex-1 space-y-1">
-        {editing === "name" ? (
-          <Input
-            autoFocus
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            onBlur={() => {
-              setEditing(null);
-              if (displayName !== initialDisplayName) {
-                saveProfile({ displayName });
-              }
+    <div className="space-y-3">
+      <div className="flex items-start gap-6">
+        <div className="relative shrink-0">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleAvatar(file);
+              e.target.value = "";
             }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-              if (e.key === "Escape") {
-                setDisplayName(initialDisplayName);
-                setEditing(null);
-              }
-            }}
-            className="h-auto px-1 py-0.5 text-2xl font-bold"
-            aria-label="Display name"
           />
-        ) : (
-          <h1 className="text-2xl font-bold">
-            <button
-              type="button"
-              onClick={() => setEditing("name")}
-              className={cn(
-                "block w-full cursor-text rounded-md px-1 py-0.5 text-left hover:bg-muted/50",
-                !displayName && "text-muted-foreground"
-              )}
-            >
-              {displayName || "Add a display name"}
-            </button>
-          </h1>
-        )}
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            disabled={pending}
+            aria-label="Change photo"
+            className="group relative cursor-pointer rounded-full"
+          >
+            <UserAvatar
+              seed={username}
+              imageUrl={shownAvatar}
+              displayName={shownName}
+              className="h-20 w-20 text-2xl"
+            />
+            <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/45 text-xs font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
+              Change
+            </span>
+          </button>
+        </div>
 
-        {editing === "username" ? (
-          <div className="flex items-center gap-0.5 px-1">
-            <span className="text-muted-foreground">@</span>
+        <div className="min-w-0 flex-1 space-y-1">
+          {editing === "name" ? (
             <Input
               autoFocus
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
               onBlur={() => {
                 setEditing(null);
-                if (username !== initialUsername) {
-                  saveProfile({ username });
+                if (displayName !== initialDisplayName) {
+                  saveProfile({ displayName });
                 }
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") (e.target as HTMLInputElement).blur();
                 if (e.key === "Escape") {
-                  setUsername(initialUsername);
+                  setDisplayName(initialDisplayName);
                   setEditing(null);
                 }
               }}
-              className="h-auto px-1 py-0.5"
-              aria-label="Username"
+              className="h-auto px-1 py-0.5 text-2xl font-bold"
+              aria-label="Display name"
             />
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setEditing("username")}
-            className="block w-full cursor-text rounded-md px-1 py-0.5 text-left text-muted-foreground hover:bg-muted/50"
-          >
-            @{username}
-          </button>
-        )}
+          ) : (
+            <h1 className="text-2xl font-bold">
+              <button
+                type="button"
+                onClick={() => setEditing("name")}
+                className={cn(
+                  "block w-full cursor-text rounded-md px-1 py-0.5 text-left hover:bg-muted/50",
+                  !displayName && "text-muted-foreground"
+                )}
+              >
+                {displayName || "Add a display name"}
+              </button>
+            </h1>
+          )}
 
-        {editing === "bio" ? (
-          <Textarea
-            autoFocus
-            value={bio}
-            rows={3}
-            onChange={(e) => setBio(e.target.value)}
-            onBlur={() => {
-              setEditing(null);
-              if (bio !== initialBio) saveProfile({ bio });
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                setBio(initialBio);
+          {editing === "username" ? (
+            <div className="flex items-center gap-0.5 px-1">
+              <span className="text-muted-foreground">@</span>
+              <Input
+                autoFocus
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                onBlur={() => {
+                  setEditing(null);
+                  if (username !== initialUsername) {
+                    saveProfile({ username });
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                  if (e.key === "Escape") {
+                    setUsername(initialUsername);
+                    setEditing(null);
+                  }
+                }}
+                className="h-auto px-1 py-0.5"
+                aria-label="Username"
+              />
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setEditing("username")}
+              className="block w-full cursor-text rounded-md px-1 py-0.5 text-left text-muted-foreground hover:bg-muted/50"
+            >
+              @{username}
+            </button>
+          )}
+
+          {editing === "bio" ? (
+            <Textarea
+              autoFocus
+              value={bio}
+              rows={3}
+              onChange={(e) => setBio(e.target.value)}
+              onBlur={() => {
                 setEditing(null);
-              }
-            }}
-            placeholder="Tell others about yourself…"
-            className="mt-2"
-            aria-label="Bio"
-          />
-        ) : (
-          <button
-            type="button"
-            onClick={() => setEditing("bio")}
-            className={cn(
-              "mt-2 block w-full max-w-xl cursor-text rounded-md px-1 py-1 text-left text-sm leading-relaxed hover:bg-muted/50",
-              bio ? "" : "text-muted-foreground"
-            )}
-          >
-            {bio || "Add a bio"}
-          </button>
-        )}
-
-        <SocialLinksEditor initial={socialLinks} />
-
-        {error && <p className="pt-1 text-xs text-destructive">{error}</p>}
+                if (bio !== initialBio) saveProfile({ bio });
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  setBio(initialBio);
+                  setEditing(null);
+                }
+              }}
+              placeholder="Tell others about yourself…"
+              className="mt-2"
+              aria-label="Bio"
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setEditing("bio")}
+              className={cn(
+                "mt-2 block w-full max-w-xl cursor-text rounded-md px-1 py-1 text-left text-sm leading-relaxed hover:bg-muted/50",
+                bio ? "" : "text-muted-foreground"
+              )}
+            >
+              {bio || "Add a bio"}
+            </button>
+          )}
+        </div>
       </div>
+
+      <SocialLinksEditor initial={socialLinks} />
+
+      {error && <p className="pt-1 text-xs text-destructive">{error}</p>}
     </div>
   );
 }
@@ -294,24 +307,31 @@ function SocialLinksEditor({
   };
 
   return (
-    <div className="max-w-md space-y-2 pt-3">
-      {PLATFORMS.map((p) => (
-        <div key={p.key} className="flex items-center gap-2">
-          <span className="w-24 shrink-0 text-xs text-muted-foreground">
-            {p.label}
-          </span>
-          <Input
-            value={urls[p.key]}
-            placeholder={p.placeholder}
-            onChange={(e) =>
-              setUrls((prev) => ({ ...prev, [p.key]: e.target.value }))
-            }
-            onBlur={() => commit(urls)}
-            className="h-8"
-            aria-label={p.label}
-          />
-        </div>
-      ))}
+    <div className="max-w-md space-y-2">
+      {PLATFORMS.map((p) => {
+        const label = platformLabel(p.key);
+        return (
+          <div key={p.key} className="flex items-center gap-2">
+            <span
+              className="flex h-8 w-8 shrink-0 items-center justify-center text-muted-foreground"
+              title={label}
+              aria-hidden="true"
+            >
+              <SocialPlatformIcon platform={p.key} size={16} />
+            </span>
+            <Input
+              value={urls[p.key]}
+              placeholder={p.placeholder}
+              onChange={(e) =>
+                setUrls((prev) => ({ ...prev, [p.key]: e.target.value }))
+              }
+              onBlur={() => commit(urls)}
+              className="h-8"
+              aria-label={label}
+            />
+          </div>
+        );
+      })}
     </div>
   );
 }

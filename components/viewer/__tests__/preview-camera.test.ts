@@ -8,12 +8,15 @@ import {
   CAPTURE_TARGET_WORLD_SIZE,
   MAX_FRAMING,
   MIN_FRAMING,
+  STAGE_FIT_MARGIN,
   capturePositionFor,
   defaultFraming,
   distanceForFraming,
   framingFraction,
   normalizeDirection,
   previewViewFromOrbit,
+  stageAdjustCamera,
+  stageFitDistance,
 } from "../preview-camera";
 
 const length = (v: [number, number, number]) => Math.hypot(v[0], v[1], v[2]);
@@ -286,6 +289,53 @@ describe("restoring a saved view in the detail viewer", () => {
     expect(viewerDistanceForFraming(150, 0)).toBe(150);
     expect(viewerDistanceForFraming(150, -1)).toBe(150);
     expect(viewerDistanceForFraming(0, 0.5)).toBe(0);
+  });
+});
+
+describe("stageAdjustCamera", () => {
+  it("disables Stage auto-fit whenever a saved view will be restored", () => {
+    // Keeping fit on for even one late Refit is what wiped the saved
+    // angle back to head-on (CON-27).
+    expect(stageAdjustCamera(true)).toBe(false);
+  });
+
+  it("keeps Stage's 1.2 margin fit when there is no saved view", () => {
+    expect(stageAdjustCamera(false)).toBe(STAGE_FIT_MARGIN);
+  });
+});
+
+describe("stageFitDistance", () => {
+  it("matches drei Bounds.getSize distance at Stage's margin", () => {
+    // Bounds: maxSize / (2 * atan(π * fov / 360)), then × margin / aspect.
+    const maxDim = 55;
+    const fov = 45;
+    const aspect = 4 / 3;
+    const fitHeight = maxDim / (2 * Math.atan((Math.PI * fov) / 360));
+    const expected = STAGE_FIT_MARGIN * Math.max(fitHeight, fitHeight / aspect);
+    expect(stageFitDistance(maxDim, fov, aspect)).toBeCloseTo(expected, 10);
+  });
+
+  it("returns 0 for unusable inputs instead of NaN", () => {
+    expect(stageFitDistance(0, 45, 1)).toBe(0);
+    expect(stageFitDistance(10, 0, 1)).toBe(0);
+    expect(stageFitDistance(10, 45, 0)).toBe(0);
+  });
+
+  it("anchors viewerCameraPositionFor on the Stage-equivalent baseline", () => {
+    // A saved view at default framing must reopen at exactly the fit
+    // distance — the contract ApplyInitialView relies on when Stage
+    // auto-fit is off and getSize().distance would be 0.
+    const view = {
+      direction: [0, 0.5, 0.866] as [number, number, number],
+      framing: defaultFraming(),
+    };
+    const baseline = stageFitDistance(40, 45, 1.333);
+    const [x, y, z] = viewerCameraPositionFor({
+      view,
+      target: [0, 0, 0],
+      baselineDistance: baseline,
+    });
+    expect(Math.hypot(x, y, z)).toBeCloseTo(baseline, 6);
   });
 });
 

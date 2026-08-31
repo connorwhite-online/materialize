@@ -11,7 +11,14 @@ import {
   type RefObject,
 } from "react";
 import { Canvas, useFrame, useLoader, useThree } from "@react-three/fiber";
-import { OrbitControls, Stage, Center, Grid, Line } from "@react-three/drei";
+import {
+  OrbitControls,
+  Stage,
+  Center,
+  Grid,
+  Line,
+  useBounds,
+} from "@react-three/drei";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import {
   STUDIO_CAMERA,
@@ -52,6 +59,8 @@ import {
 import { FrameCorners } from "@/components/icons/frame-corners";
 import {
   previewViewFromOrbit,
+  stageAdjustCamera,
+  stageFitDistance,
   viewerCameraPositionFor,
   type PreviewView,
 } from "./preview-camera";
@@ -760,9 +769,8 @@ interface ModelViewerProps {
   capturePreviewMessage?: string | null;
   /**
    * Open on the angle the file's owner chose, instead of the viewer's
-   * own head-on default. Applied once, as soon as the automatic fit
-   * settles — that fit is the baseline the saved framing is measured
-   * against, so it has to land first.
+   * own head-on default. Applied once via `ApplyInitialView` inside
+   * Stage (not from the frame probe) so Bounds cannot overwrite it.
    *
    * Null/undefined keeps the default framing, which is the right
    * behaviour for every file whose thumbnail came from the automatic
@@ -800,6 +808,10 @@ function ReadySignal({ onReady }: { onReady?: () => void }) {
  *
  * Records once and stops. A later re-fit would move the baseline out
  * from under a zoom the creator has already dialled in.
+ *
+ * Only used when there is no `initialView`. A saved view is restored by
+ * `ApplyInitialView` instead — applying from this probe raced Stage's
+ * Bounds animation and got wiped back to head-on (CON-27).
  */
 function PreviewFrameProbe({
   controlsRef,
@@ -844,6 +856,87 @@ function PreviewFrameProbe({
 }
 
 const STABLE_FRAMES_FOR_BASELINE = 3;
+
+/**
+ * Open the detail viewer on a saved preview angle.
+ *
+ * Must live inside `<Stage>` so it can talk to drei's `<Bounds>` API.
+ * The previous approach — wait for a stable camera distance outside
+ * Stage, then `controls.object.position.set(...)` — lost to Bounds:
+ * Stage animates the head-on fit for up to a second (exponential damp),
+ * and `PreviewFrameProbe`'s 3-frame stability check fires while that
+ * animation is still ACTIVE. The next Bounds tick (or its final snap)
+ * then overwrote the saved angle with the head-on goal. Stage's Refit
+ * on `radius` updates could do the same after a late measure.
+ *
+ * Fix: keep Stage `adjustCamera` off for the whole mount when a saved
+ * view is present, measure the centered model through Bounds, compute
+ * the Stage-equivalent fit distance ourselves, and place the camera
+ * once. No in-flight fit goal exists to race us.
+ */
+function ApplyInitialView({
+  view,
+  controlsRef,
+  onApplied,
+}: {
+  view: PreviewView;
+  controlsRef: RefObject<OrbitControlsImpl | null>;
+  onApplied: (baselineDistance: number) => void;
+}) {
+  const api = useBounds();
+  const camera = useThree((state) => state.camera);
+  const applied = useRef(false);
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const onAppliedRef = useRef(onApplied);
+  onAppliedRef.current = onApplied;
+
+  useFrame(() => {
+    if (applied.current) return;
+    const controls = controlsRef.current;
+    if (!controls) return;
+
+    api.refresh();
+    const { center, box } = api.getSize();
+    if (box.isEmpty()) return;
+
+    const size = box.getSize(new Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    // Stage auto-fit is off, so Bounds' own margin is 0 — compute the
+    // distance Stage would have used at STAGE_FIT_MARGIN instead.
+    const fov = "fov" in camera && typeof camera.fov === "number" ? camera.fov : 45;
+    const aspect =
+      "aspect" in camera && typeof camera.aspect === "number"
+        ? camera.aspect
+        : 1;
+    const distance = stageFitDistance(maxDim, fov, aspect);
+    if (!(distance > 0)) return;
+
+    applied.current = true;
+
+    const [x, y, z] = viewerCameraPositionFor({
+      view: viewRef.current,
+      target: [center.x, center.y, center.z],
+      baselineDistance: distance,
+    });
+
+    camera.position.set(x, y, z);
+    camera.up.set(0, 1, 0);
+    camera.lookAt(center);
+    // Match Bounds.clip() so orbit zoom limits stay sane at model scale.
+    camera.near = distance / 100;
+    camera.far = distance * 100;
+    camera.updateProjectionMatrix();
+
+    controls.target.copy(center);
+    controls.maxDistance = distance * 10;
+    controls.update();
+
+    onAppliedRef.current(distance);
+  });
+
+  return null;
+}
 
 const CAPTURE_PREVIEW_LABELS = {
   idle: "Update preview",
@@ -1386,37 +1479,24 @@ export function ModelViewer({
 
   // "Update preview" — the camera distance at the viewer's own settled
   // fit, and whether we have it yet. The button stays disabled until
-  // the probe reports in, which also covers the load window: there is
-  // no meaningful angle to capture before the model is on screen.
+  // the probe (no saved view) or ApplyInitialView (saved view) reports
+  // in. There is no meaningful angle to capture before the model is on
+  // screen.
   const previewBaselineRef = useRef<number | null>(null);
   const [previewBaselineReady, setPreviewBaselineReady] = useState(false);
   const capturePreviewEnabled = !!onCapturePreview;
-  // The probe supplies the settled baseline, which both the capture
-  // button and a saved initial view depend on.
-  const needsFrameProbe = capturePreviewEnabled || !!initialView;
-
-  // Applied at most once. Re-aiming on a later re-fit would yank the
-  // camera out from under someone who has since orbited it themselves.
-  const initialViewAppliedRef = useRef(false);
+  // Probe is only for the capture baseline when there is no saved view
+  // to restore. Saved views go through ApplyInitialView inside Stage.
+  const needsFrameProbe = capturePreviewEnabled && !initialView;
 
   const markPreviewBaselineReady = useCallback(() => {
     setPreviewBaselineReady(true);
+  }, []);
 
-    const controls = controlsRef.current;
-    const baseline = previewBaselineRef.current;
-    if (!initialView || !controls || !baseline) return;
-    if (initialViewAppliedRef.current) return;
-    initialViewAppliedRef.current = true;
-
-    const t = controls.target;
-    const [x, y, z] = viewerCameraPositionFor({
-      view: initialView,
-      target: [t.x, t.y, t.z],
-      baselineDistance: baseline,
-    });
-    controls.object.position.set(x, y, z);
-    controls.update();
-  }, [initialView]);
+  const handleInitialViewApplied = useCallback((baselineDistance: number) => {
+    previewBaselineRef.current = baselineDistance;
+    setPreviewBaselineReady(true);
+  }, []);
 
   const handleCapturePreview = useCallback(() => {
     const controls = controlsRef.current;
@@ -1646,7 +1726,10 @@ export function ModelViewer({
               </>
             ) : (
               <Stage
-                adjustCamera={1.2}
+                // Off for the whole mount when restoring a saved view —
+                // ApplyInitialView owns the camera. A late Stage Refit
+                // was what wiped the angle back to head-on (CON-27).
+                adjustCamera={stageAdjustCamera(!!initialView)}
                 intensity={0.5}
                 // No IBL environment: drei's "city" preset fetches an HDR
                 // from an external CDN (raw.githack.com) that drops CORS
@@ -1655,6 +1738,13 @@ export function ModelViewer({
                 // spot + point), which is plenty for matte print previews.
                 environment={null}
               >
+                {initialView && (
+                  <ApplyInitialView
+                    view={initialView}
+                    controlsRef={controlsRef}
+                    onApplied={handleInitialViewApplied}
+                  />
+                )}
                 <Center>
                   {inspectable ? (
                     <InspectModel
@@ -1729,6 +1819,11 @@ export function ModelViewer({
           </Suspense>
           <OrbitControls
             ref={controlsRef}
+            // Bounds/Stage read `state.controls` for target sync during
+            // fit animations. Without makeDefault the orbit target stays
+            // at the origin while Stage recenters the model — fine for
+            // head-on, wrong once ApplyInitialView aims off-axis.
+            makeDefault
             enableZoom={wheelZoom}
             enablePan={!isPreview}
             autoRotate={isPreview}
