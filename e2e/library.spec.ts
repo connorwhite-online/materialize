@@ -6,6 +6,7 @@ import {
   seedAppUserForClerkId,
   setClerkUsername,
   createOwnedFileFixture,
+  attachOwnedFileAsset,
   deleteOwnedFileFixture,
   deleteAppUserRow,
   type ClerkTestUserFixture,
@@ -33,6 +34,8 @@ test.describe("library tab", () => {
     username = seed.username;
     await setClerkUsername(user.userId, username);
     file = await createOwnedFileFixture(user.userId);
+    // Recent files is loadLibraryTiles, which skips files with no asset.
+    await attachOwnedFileAsset(file.fileId);
   });
 
   test.afterAll(async () => {
@@ -75,6 +78,40 @@ test.describe("library tab", () => {
     await expect(page.getByText(file.name)).toBeVisible({
       timeout: 10_000,
     });
+  });
+
+  test("recent and library cards open the listing, not print (CON-32)", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await clerk.signIn({
+      page,
+      signInParams: {
+        strategy: "email_code",
+        identifier: user.email,
+      },
+    });
+    await page.goto("/");
+
+    await expect(
+      page.getByRole("heading", { name: "Recent files" })
+    ).toBeVisible({ timeout: 10_000 });
+
+    const listingHref = `/files/${file.slug}`;
+    const cards = page.getByRole("link").filter({ hasText: file.name });
+    await expect(cards.first()).toBeVisible();
+    const hrefs = await cards.evaluateAll((els) =>
+      els.map((el) => el.getAttribute("href"))
+    );
+    expect(hrefs.length).toBeGreaterThanOrEqual(1);
+    for (const href of hrefs) {
+      expect(href).toBe(listingHref);
+      expect(href).not.toMatch(/^\/print\//);
+    }
+
+    await cards.first().click();
+    await expect(page).toHaveURL(new RegExp(`${listingHref}(?:\\?.*)?$`));
+    expect(page.url()).not.toContain("/print/");
   });
 });
 

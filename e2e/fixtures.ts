@@ -253,6 +253,28 @@ export async function deleteOwnedFileFixture(
   await db.delete(schema.files).where(eq(schema.files.id, fixture.fileId));
 }
 
+/**
+ * Attach a primary asset so `loadLibraryTiles` (authed-home Recent)
+ * will include the file. LibraryTab lists files without this; Recent
+ * skips rows that have no asset.
+ */
+export async function attachOwnedFileAsset(
+  fileId: string
+): Promise<{ fileAssetId: string }> {
+  const db = getDb();
+  const [asset] = await db
+    .insert(schema.fileAssets)
+    .values({
+      fileId,
+      storageKey: `e2e/${fileId}/model.stl`,
+      originalFilename: "model.stl",
+      format: "stl",
+      fileSize: 1024,
+    })
+    .returning({ id: schema.fileAssets.id });
+  return { fileAssetId: asset.id };
+}
+
 export async function deleteAppUserRow(userId: string): Promise<void> {
   const db = getDb();
   await db.delete(schema.users).where(eq(schema.users.id, userId));
