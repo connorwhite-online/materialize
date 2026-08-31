@@ -153,7 +153,7 @@ describe("runCreateListing", () => {
     if (!result.ok) expect(result.error).toBe("database exploded");
   });
 
-  it("forces price=0 and license=cc_by when sellEnabled is off", async () => {
+  it("forces price=0 but keeps the chosen license when sellEnabled is off", async () => {
     mockPresign();
     const seen: FormData[] = [];
     createImpl = async (fd) => {
@@ -163,7 +163,7 @@ describe("runCreateListing", () => {
     const input = makeInput({ sellEnabled: false, license: "cc_by_nc" });
     await runCreateListing(input);
     expect(seen[0].get("price")).toBe("0");
-    expect(seen[0].get("license")).toBe("cc_by");
+    expect(seen[0].get("license")).toBe("cc_by_nc");
   });
 
   it("uses the chosen license when sellEnabled is on", async () => {

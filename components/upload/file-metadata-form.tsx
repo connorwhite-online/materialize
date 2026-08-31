@@ -318,6 +318,45 @@ export function FileMetadataForm({
           </div>
 
           <div>
+            <Label htmlFor="license-trigger">License</Label>
+            <Select
+              value={license}
+              onValueChange={(v) => v && setLicense(v as LicenseId)}
+            >
+              <SelectTrigger id="license-trigger" className="w-full">
+                <SelectValue>
+                  {(value) => {
+                    const meta = LICENSES[value as LicenseId];
+                    return meta
+                      ? `${meta.shortName} — ${meta.name}`
+                      : "Select a license";
+                  }}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {LICENSE_ORDER.map((id) => {
+                  const meta = LICENSES[id];
+                  return (
+                    <SelectItem key={id} value={id}>
+                      <div className="flex flex-col gap-0.5">
+                        <span>
+                          {meta.shortName} — {meta.name}
+                        </span>
+                        <span className="whitespace-normal text-[11px] text-muted-foreground leading-tight">
+                          {meta.summary}
+                        </span>
+                      </div>
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Controls what people can do with the files after download.
+            </p>
+          </div>
+
+          <div>
             <Label htmlFor="collection-trigger">Collection</Label>
             <Select
               value={collectionChoice}
@@ -421,60 +460,20 @@ export function FileMetadataForm({
               className="overflow-hidden"
             >
               <CardContent>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div>
-                    <Label htmlFor="price">Price (USD)</Label>
-                    <Input
-                      id="price"
-                      name="price"
-                      type="number"
-                      min="0"
-                      max={MAX_PRICE_CENTS / 100}
-                      step="0.01"
-                      defaultValue="0"
-                    />
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Set to 0 for free download
-                    </p>
-                  </div>
-                  <div>
-                    <Label htmlFor="license-trigger">License</Label>
-                    <Select
-                      value={license}
-                      onValueChange={(v) => v && setLicense(v as LicenseId)}
-                    >
-                      <SelectTrigger id="license-trigger" className="w-full">
-                        <SelectValue>
-                          {(value) => {
-                            const meta = LICENSES[value as LicenseId];
-                            return meta
-                              ? `${meta.shortName} — ${meta.name}`
-                              : "Select a license";
-                          }}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {LICENSE_ORDER.map((id) => {
-                          const meta = LICENSES[id];
-                          return (
-                            <SelectItem key={id} value={id}>
-                              <div className="flex flex-col gap-0.5">
-                                <span>
-                                  {meta.shortName} — {meta.name}
-                                </span>
-                                <span className="whitespace-normal text-[11px] text-muted-foreground leading-tight">
-                                  {meta.summary}
-                                </span>
-                              </div>
-                            </SelectItem>
-                          );
-                        })}
-                      </SelectContent>
-                    </Select>
-                    <p className="mt-1 text-[11px] text-muted-foreground">
-                      Controls what buyers can do with the files after download.
-                    </p>
-                  </div>
+                <div>
+                  <Label htmlFor="price">Price (USD)</Label>
+                  <Input
+                    id="price"
+                    name="price"
+                    type="number"
+                    min="0"
+                    max={MAX_PRICE_CENTS / 100}
+                    step="0.01"
+                    defaultValue="0"
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Set to 0 for free download
+                  </p>
                 </div>
               </CardContent>
             </motion.div>
