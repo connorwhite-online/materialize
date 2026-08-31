@@ -13,9 +13,9 @@ import { logError } from "@/lib/logger";
 const RECENT_MAX = 12;
 
 /**
- * Authed home: pending orders (if any), upload, recent files (if any),
- * then the full library. Not a jump-off to other routes — those
- * sections live on this page.
+ * Authed home: in-progress orders (if any; attention-needed first),
+ * upload, recent files (if any), then the full library. Not a jump-off
+ * to other routes — those sections live on this page.
  */
 export async function HomeDashboard({ userId }: { userId: string }) {
   let pending = [] as Awaited<ReturnType<typeof loadPendingOrders>>;
@@ -41,7 +41,7 @@ export async function HomeDashboard({ userId }: { userId: string }) {
 
       {pending.length > 0 && (
         <section>
-          <h2 className="mb-3 text-sm font-medium">Needs attention</h2>
+          <h2 className="mb-3 text-sm font-medium">Orders</h2>
           <FeatheredCarousel>
             {pending.map((order) => (
               <PendingOrderTile key={order.id} order={order} />

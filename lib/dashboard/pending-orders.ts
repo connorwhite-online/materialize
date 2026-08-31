@@ -1,16 +1,15 @@
 import "server-only";
 
 import { db } from "@/lib/db";
-import {
-  printOrders,
-  printOrderItems,
-  fileAssets,
-  files,
-} from "@/lib/db/schema";
-import { eq, desc, and, inArray, asc } from "drizzle-orm";
+import { printOrders, printOrderItems } from "@/lib/db/schema";
+import { eq, desc, and, inArray } from "drizzle-orm";
 import { withDbRetry } from "@/lib/db/retry";
 
-/** Orders that still need the user to do something. */
+/**
+ * In-progress print orders shown on the authed-home Orders carousel.
+ * Actionable statuses (user must do something) are sorted ahead of
+ * `auto_approved` (system is placing — no user action).
+ */
 export const PENDING_ORDER_STATUSES = [
   "cart_created",
   "awaiting_production_payment",
@@ -20,23 +19,68 @@ export const PENDING_ORDER_STATUSES = [
 
 export type PendingOrderStatus = (typeof PENDING_ORDER_STATUSES)[number];
 
+/** Statuses where the user still has a step to take. */
+export const ATTENTION_ORDER_STATUSES = [
+  "cart_created",
+  "awaiting_production_payment",
+  "awaiting_agent_approval",
+] as const satisfies readonly PendingOrderStatus[];
+
 export type PendingOrder = {
   id: string;
   status: PendingOrderStatus;
+  /** CraftCloud material config UUID — used for resume deep-links. */
   material: string | null;
-  vendorName: string | null;
-  totalPrice: number;
-  serviceFee: number;
   fileAssetId: string | null;
-  fileName: string | null;
+  fileCount: number;
+  /** ISO timestamp — when the order row was created / started. */
+  createdAt: string;
 };
+
+/** Always a count: "1 file" / "3 files". */
+export function formatOrderFileCount(fileCount: number): string {
+  const n = Math.max(1, fileCount);
+  return n === 1 ? "1 file" : `${n} files`;
+}
+
+/** Short calendar date for the card meta line. */
+export function formatOrderDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+export function orderNeedsAttention(status: PendingOrderStatus): boolean {
+  return (ATTENTION_ORDER_STATUSES as readonly string[]).includes(status);
+}
+
+/**
+ * Attention-needed first, then newest. Pure so the home carousel order
+ * is unit-testable without a DB.
+ */
+export function sortHomeOrders<
+  T extends { status: PendingOrderStatus; id: string; createdAt: string },
+>(orders: T[]): T[] {
+  return [...orders].sort((a, b) => {
+    const aAttn = orderNeedsAttention(a.status) ? 0 : 1;
+    const bAttn = orderNeedsAttention(b.status) ? 0 : 1;
+    if (aAttn !== bAttn) return aAttn - bAttn;
+    return (
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  });
+}
 
 const PENDING_MAX = 12;
 
 /**
- * In-progress print orders for the authed home carousel. Filename is
- * best-effort: legacy single-item rows join through fileAssets; multi-
- * item carts fall back to the first line item.
+ * In-progress print orders for the authed home carousel. File count is
+ * 1 for legacy single-item rows; multi-item carts count distinct
+ * printOrderItems.fileAssetId values.
  */
 export async function loadPendingOrders(
   userId: string
@@ -50,16 +94,10 @@ async function loadPendingOrdersOnce(userId: string): Promise<PendingOrder[]> {
       id: printOrders.id,
       status: printOrders.status,
       material: printOrders.material,
-      vendor: printOrders.vendor,
-      vendorName: printOrders.vendorName,
-      totalPrice: printOrders.totalPrice,
-      serviceFee: printOrders.serviceFee,
       fileAssetId: printOrders.fileAssetId,
-      fileName: files.name,
+      createdAt: printOrders.createdAt,
     })
     .from(printOrders)
-    .leftJoin(fileAssets, eq(printOrders.fileAssetId, fileAssets.id))
-    .leftJoin(files, eq(fileAssets.fileId, files.id))
     .where(
       and(
         eq(printOrders.userId, userId),
@@ -75,52 +113,37 @@ async function loadPendingOrdersOnce(userId: string): Promise<PendingOrder[]> {
       ? await db
           .select({
             printOrderId: printOrderItems.printOrderId,
-            fileName: files.name,
-            originalFilename: fileAssets.originalFilename,
+            fileAssetId: printOrderItems.fileAssetId,
           })
           .from(printOrderItems)
-          .innerJoin(fileAssets, eq(printOrderItems.fileAssetId, fileAssets.id))
-          .leftJoin(files, eq(fileAssets.fileId, files.id))
           .where(inArray(printOrderItems.printOrderId, multiItemIds))
-          .orderBy(asc(printOrderItems.createdAt))
       : [];
 
-  const firstNameByOrder = new Map<string, { name: string; count: number }>();
+  const fileIdsByOrder = new Map<string, Set<string>>();
   for (const item of multiItemMeta) {
-    const existing = firstNameByOrder.get(item.printOrderId);
-    if (existing) {
-      existing.count += 1;
-    } else {
-      firstNameByOrder.set(item.printOrderId, {
-        name:
-          item.fileName ??
-          item.originalFilename?.replace(/\.[^.]+$/, "") ??
-          "3D Print",
-        count: 1,
-      });
+    let set = fileIdsByOrder.get(item.printOrderId);
+    if (!set) {
+      set = new Set();
+      fileIdsByOrder.set(item.printOrderId, set);
     }
+    set.add(item.fileAssetId);
   }
 
-  return draftsRaw.map((d) => {
-    const meta = !d.fileAssetId ? firstNameByOrder.get(d.id) : undefined;
-    const fileName = d.fileName
-      ? d.fileName
-      : meta
-        ? meta.count > 1
-          ? `${meta.name} + ${meta.count - 1} more`
-          : meta.name
-        : null;
+  const mapped: PendingOrder[] = draftsRaw.map((d) => {
+    const multiFiles = !d.fileAssetId
+      ? fileIdsByOrder.get(d.id)
+      : undefined;
     return {
       id: d.id,
       status: d.status as PendingOrderStatus,
       material: d.material,
-      vendorName: d.vendorName ?? d.vendor ?? null,
-      totalPrice: d.totalPrice,
-      serviceFee: d.serviceFee,
       fileAssetId: d.fileAssetId,
-      fileName,
+      fileCount: multiFiles ? Math.max(multiFiles.size, 1) : 1,
+      createdAt: d.createdAt.toISOString(),
     };
   });
+
+  return sortHomeOrders(mapped);
 }
 
 export function pendingOrderHref(order: PendingOrder): string {
