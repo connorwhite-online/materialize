@@ -5,6 +5,12 @@ import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Shared tab primitives. The default `TabsList` variant is the app's
+ * segmented control (muted track + active background pill) — same chrome
+ * as project detail tabs. Prefer `SegmentedControl` when you only need
+ * the strip; compose these with `TabsContent` for in-place panels.
+ */
 function Tabs({
   className,
   orientation = "horizontal",
