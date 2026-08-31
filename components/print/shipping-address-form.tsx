@@ -15,6 +15,7 @@ import {
   InputOTPGroup,
   InputOTPSlot,
 } from "@/components/ui/input-otp";
+import { ChevronLeft } from "@/components/icons/chevron-left";
 
 interface Address {
   firstName: string;
@@ -67,8 +68,9 @@ interface ShippingAddressFormProps {
   savedAddress?: SavedCheckoutAddress | null;
   /**
    * Sheet chrome: drop the Card wrappers / icon tiles (the parent
-   * sheet already provides the surface) and rename Back
-   * to "Change shipping". Used by ShippingSheet's address step.
+   * sheet already provides the surface) and surface step-back as a
+   * top-left chevron ("← Shipping") instead of a bottom text button.
+   * Used by ShippingSheet's address step.
    */
   embedded?: boolean;
 }
@@ -389,10 +391,11 @@ export function ShippingAddressForm({
         )}
         {embedded && (
           <div>
+            <EmbeddedSheetBack onClick={onBack} disabled={isSubmitting} />
             <h2
               ref={titleRef}
               tabIndex={-1}
-              className="text-lg font-semibold outline-none"
+              className="mt-2 text-lg font-semibold outline-none"
             >
               Ship it to the usual?
             </h2>
@@ -446,16 +449,6 @@ export function ShippingAddressForm({
           >
             Use a different address
           </button>
-          {embedded && (
-            <button
-              type="button"
-              onClick={onBack}
-              disabled={isSubmitting}
-              className="block w-full text-center text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-            >
-              Change shipping
-            </button>
-          )}
         </div>
       </div>
     );
@@ -485,13 +478,19 @@ export function ShippingAddressForm({
     const codeBody = (
       <div className="space-y-4">
         {embedded ? (
-          <h2
-            ref={titleRef}
-            tabIndex={-1}
-            className="text-lg font-semibold outline-none"
-          >
-            Verify your email
-          </h2>
+          <div>
+            <EmbeddedSheetBack
+              onClick={onBack}
+              disabled={otpVerifying || isSubmitting}
+            />
+            <h2
+              ref={titleRef}
+              tabIndex={-1}
+              className="mt-2 text-lg font-semibold outline-none"
+            >
+              Verify your email
+            </h2>
+          </div>
         ) : (
           <div className="flex flex-row items-center gap-3">
             <IconTile tone="bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400">
@@ -577,13 +576,19 @@ export function ShippingAddressForm({
   const formFields = (
           <div className="space-y-4">
         {embedded ? (
-          <h2
-            ref={titleRef}
-            tabIndex={-1}
-            className="text-lg font-semibold outline-none"
-          >
-            Where should we ship?
-          </h2>
+          <div>
+            <EmbeddedSheetBack
+              onClick={onBack}
+              disabled={isSubmitting || otpSending}
+            />
+            <h2
+              ref={titleRef}
+              tabIndex={-1}
+              className="mt-2 text-lg font-semibold outline-none"
+            >
+              Where should we ship?
+            </h2>
+          </div>
         ) : (
           <div className="flex flex-row items-center gap-3">
             <IconTile tone="bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-400">
@@ -767,15 +772,16 @@ export function ShippingAddressForm({
       )}
 
       <div className="mt-6 flex gap-3">
-        <Button
-          type="button"
-          variant={embedded ? "ghost" : "outline"}
-          onClick={onBack}
-          disabled={isSubmitting || otpSending}
-          className={embedded ? "text-muted-foreground" : undefined}
-        >
-          {embedded ? "Change shipping" : "Back"}
-        </Button>
+        {!embedded && (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onBack}
+            disabled={isSubmitting || otpSending}
+          >
+            Back
+          </Button>
+        )}
         <Button
           type="submit"
           disabled={isSubmitting || otpSending}
@@ -791,6 +797,31 @@ export function ShippingAddressForm({
         </Button>
       </div>
     </form>
+  );
+}
+
+/**
+ * Top-left step-back control for the embedded checkout sheet.
+ * Mirrors material-picker's "← All materials" — chevron + destination,
+ * not a second muted text button under the primary CTA.
+ */
+function EmbeddedSheetBack({
+  onClick,
+  disabled,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex cursor-pointer items-center gap-1 rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground disabled:pointer-events-none disabled:opacity-50 -ml-3"
+    >
+      <ChevronLeft size={14} />
+      Shipping
+    </button>
   );
 }
 

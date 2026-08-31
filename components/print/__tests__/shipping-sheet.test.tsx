@@ -37,7 +37,7 @@ vi.mock("../shipping-address-form", () => ({
     <div>
       <span>{embedded ? "embedded-address" : "card-address"}</span>
       <button type="button" onClick={onBack}>
-        Change shipping
+        Shipping
       </button>
     </div>
   ),
@@ -125,9 +125,9 @@ describe("ShippingSheet", () => {
     expect(screen.getByText("embedded-address")).toBeTruthy();
   });
 
-  it("Change shipping returns to the shipping step", () => {
+  it("Shipping back control returns to the shipping step", () => {
     const { onStepChange } = renderSheet({ step: "address" });
-    fireEvent.click(screen.getByText("Change shipping"));
+    fireEvent.click(screen.getByText("Shipping"));
     expect(onStepChange).toHaveBeenCalledWith("shipping");
   });
 
