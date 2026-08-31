@@ -9,10 +9,10 @@ describe("DiscussionEmptyBanner", () => {
     render(<DiscussionEmptyBanner onStart={onStart} />);
 
     const button = screen.getByRole("button", {
-      name: /start the conversation/i,
+      name: /share your build/i,
     });
-    expect(button.className).toMatch(/bg-gradient-to-br/);
-    expect(button.className).toMatch(/from-emerald-100/);
+    expect(button.className).toMatch(/bg-gradient-to-r/);
+    expect(button.className).toMatch(/from-emerald-50/);
     button.click();
     expect(onStart).toHaveBeenCalledOnce();
   });
@@ -23,7 +23,7 @@ describe("DiscussionEmptyBanner", () => {
     );
 
     const link = screen.getByRole("link", {
-      name: /start the conversation/i,
+      name: /share your build/i,
     });
     expect(link.getAttribute("href")).toBe(
       "/sign-in?redirect=%2Fprojects%2Fdemo"

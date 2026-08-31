@@ -850,41 +850,51 @@ export default async function ProjectDetailPage(props: {
             <ProjectTabs tabs={tabs} />
           </div>
 
-          {comments.length === 0 && buildsWithUrls.length === 0 ? (
-            // Empty discussion skips the muted Card — the green
-            // invitation banner is the whole section.
-            <section className="space-y-3">
-              <h2 className="text-base font-semibold">Discussion</h2>
-              <CommentsSection
-                target="project"
-                targetId={project.id}
-                comments={comments}
-                photoPosts={buildsWithUrls}
-                ownerId={project.userId}
-                viewerId={userId}
-                isSignedIn={!!userId}
-                signInRedirect={`/projects/${slug}`}
-                acceptPhoto={!!userId && canPostBuild}
-              />
-            </section>
-          ) : (
-            <Card className="bg-muted/50">
-              <CardContent className="space-y-5">
-                <h2 className="text-base font-semibold">Discussion</h2>
-                <CommentsSection
-                  target="project"
-                  targetId={project.id}
-                  comments={comments}
-                  photoPosts={buildsWithUrls}
-                  ownerId={project.userId}
-                  viewerId={userId}
-                  isSignedIn={!!userId}
-                  signInRedirect={`/projects/${slug}`}
-                  acceptPhoto={!!userId && canPostBuild}
-                />
-              </CardContent>
-            </Card>
-          )}
+          {(() => {
+            const discussionEmpty =
+              comments.length === 0 && buildsWithUrls.length === 0;
+            // Owners don't see an empty Discussion invitation on
+            // their own project — nothing to invite themselves to.
+            if (discussionEmpty && isOwner) return null;
+
+            if (discussionEmpty) {
+              return (
+                <section className="space-y-3">
+                  <h2 className="text-base font-semibold">Discussion</h2>
+                  <CommentsSection
+                    target="project"
+                    targetId={project.id}
+                    comments={comments}
+                    photoPosts={buildsWithUrls}
+                    ownerId={project.userId}
+                    viewerId={userId}
+                    isSignedIn={!!userId}
+                    signInRedirect={`/projects/${slug}`}
+                    acceptPhoto={!!userId && canPostBuild}
+                  />
+                </section>
+              );
+            }
+
+            return (
+              <Card className="bg-muted/50">
+                <CardContent className="space-y-5">
+                  <h2 className="text-base font-semibold">Discussion</h2>
+                  <CommentsSection
+                    target="project"
+                    targetId={project.id}
+                    comments={comments}
+                    photoPosts={buildsWithUrls}
+                    ownerId={project.userId}
+                    viewerId={userId}
+                    isSignedIn={!!userId}
+                    signInRedirect={`/projects/${slug}`}
+                    acceptPhoto={!!userId && canPostBuild}
+                  />
+                </CardContent>
+              </Card>
+            );
+          })()}
 
           <div className="flex justify-center pt-2">
             <LicenseBadge license={project.license} />

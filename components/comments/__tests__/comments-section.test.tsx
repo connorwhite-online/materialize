@@ -42,8 +42,8 @@ const photo: PhotoPost = {
 };
 
 describe("CommentsSection empty discussion", () => {
-  it("shows the invitation banner instead of the composer when empty", () => {
-    render(
+  it("renders nothing for the owner when discussion is empty", () => {
+    const { container } = render(
       <CommentsSection
         target="project"
         targetId="project-1"
@@ -56,21 +56,41 @@ describe("CommentsSection empty discussion", () => {
       />
     );
 
+    expect(container.firstChild).toBeNull();
     expect(
-      screen.getByRole("button", { name: /start the conversation/i })
-    ).toBeTruthy();
-    expect(screen.queryByPlaceholderText(/share thoughts/i)).toBeNull();
+      screen.queryByRole("button", { name: /share your build/i })
+    ).toBeNull();
   });
 
-  it("expands the composer after clicking the banner", () => {
+  it("shows the invitation banner to non-owners when empty", () => {
     render(
       <CommentsSection
         target="project"
         targetId="project-1"
         comments={[]}
         photoPosts={[]}
-        ownerId="user-1"
-        viewerId="user-1"
+        ownerId="owner-1"
+        viewerId="visitor-1"
+        isSignedIn
+        signInRedirect="/projects/demo"
+      />
+    );
+
+    expect(
+      screen.getByRole("button", { name: /share your build/i })
+    ).toBeTruthy();
+    expect(screen.queryByPlaceholderText(/share thoughts/i)).toBeNull();
+  });
+
+  it("expands the composer after a visitor clicks the banner", () => {
+    render(
+      <CommentsSection
+        target="project"
+        targetId="project-1"
+        comments={[]}
+        photoPosts={[]}
+        ownerId="owner-1"
+        viewerId="visitor-1"
         isSignedIn
         signInRedirect="/projects/demo"
         acceptPhoto
@@ -78,7 +98,7 @@ describe("CommentsSection empty discussion", () => {
     );
 
     fireEvent.click(
-      screen.getByRole("button", { name: /start the conversation/i })
+      screen.getByRole("button", { name: /share your build/i })
     );
     expect(
       screen.getByPlaceholderText(/share thoughts, or drop a photo/i)

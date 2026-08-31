@@ -126,6 +126,13 @@ export function CommentsSection({
   const signInHref = `/sign-in?redirect=${encodeURIComponent(signInRedirect)}`;
 
   if (items.length === 0) {
+    // Owners don't need an invitation on their own empty listing —
+    // the whole Discussion section is omitted (call sites skip the
+    // heading when CommentsSection returns null).
+    if (viewerId !== null && viewerId === ownerId) {
+      return null;
+    }
+
     return (
       <div className="space-y-4">
         {!composing && (

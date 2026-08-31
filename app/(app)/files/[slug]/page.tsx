@@ -905,41 +905,51 @@ export default async function FileDetailPage(props: {
             </div>
           )}
 
-          {comments.length === 0 && buildsWithUrls.length === 0 ? (
-            // Empty discussion skips the muted Card — the green
-            // invitation banner is the whole section.
-            <section className="space-y-3">
-              <h2 className="text-base font-semibold">Discussion</h2>
-              <CommentsSection
-                target="file"
-                targetId={file.id}
-                comments={comments}
-                photoPosts={buildsWithUrls}
-                ownerId={file.userId}
-                viewerId={userId}
-                isSignedIn={!!userId}
-                signInRedirect={`/files/${slug}`}
-                acceptPhoto={canPostBuild}
-              />
-            </section>
-          ) : (
-            <Card className="bg-muted/50">
-              <CardContent className="space-y-5">
-                <h2 className="text-base font-semibold">Discussion</h2>
-                <CommentsSection
-                  target="file"
-                  targetId={file.id}
-                  comments={comments}
-                  photoPosts={buildsWithUrls}
-                  ownerId={file.userId}
-                  viewerId={userId}
-                  isSignedIn={!!userId}
-                  signInRedirect={`/files/${slug}`}
-                  acceptPhoto={canPostBuild}
-                />
-              </CardContent>
-            </Card>
-          )}
+          {(() => {
+            const discussionEmpty =
+              comments.length === 0 && buildsWithUrls.length === 0;
+            // Owners don't see an empty Discussion invitation on
+            // their own listing — nothing to invite themselves to.
+            if (discussionEmpty && isOwner) return null;
+
+            if (discussionEmpty) {
+              return (
+                <section className="space-y-3">
+                  <h2 className="text-base font-semibold">Discussion</h2>
+                  <CommentsSection
+                    target="file"
+                    targetId={file.id}
+                    comments={comments}
+                    photoPosts={buildsWithUrls}
+                    ownerId={file.userId}
+                    viewerId={userId}
+                    isSignedIn={!!userId}
+                    signInRedirect={`/files/${slug}`}
+                    acceptPhoto={canPostBuild}
+                  />
+                </section>
+              );
+            }
+
+            return (
+              <Card className="bg-muted/50">
+                <CardContent className="space-y-5">
+                  <h2 className="text-base font-semibold">Discussion</h2>
+                  <CommentsSection
+                    target="file"
+                    targetId={file.id}
+                    comments={comments}
+                    photoPosts={buildsWithUrls}
+                    ownerId={file.userId}
+                    viewerId={userId}
+                    isSignedIn={!!userId}
+                    signInRedirect={`/files/${slug}`}
+                    acceptPhoto={canPostBuild}
+                  />
+                </CardContent>
+              </Card>
+            );
+          })()}
 
           <FileActivity
             prints={printActivity}

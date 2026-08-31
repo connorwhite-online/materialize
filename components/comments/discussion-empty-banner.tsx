@@ -12,8 +12,9 @@ type Props = {
 
 /**
  * Compact empty-state for Discussion when there are no comments or
- * photo posts yet. A short green gradient banner with a chunky chat
- * icon — much lighter than the always-on composer chrome.
+ * photo posts yet — and the viewer is not the owner. Soft green
+ * wash + chunky chat icon; owners never see this (their empty
+ * Discussion section is omitted entirely).
  */
 export function DiscussionEmptyBanner({
   className,
@@ -23,28 +24,26 @@ export function DiscussionEmptyBanner({
   const content = (
     <>
       <span
-        className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-white/55 text-emerald-800 shadow-sm ring-1 ring-emerald-900/10 backdrop-blur-sm dark:bg-emerald-950/50 dark:text-emerald-100 dark:ring-emerald-100/10"
+        className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-200"
         aria-hidden="true"
       >
-        <MessageCircleIcon className="size-6" strokeWidth={2.6} absoluteStrokeWidth />
+        <MessageCircleIcon className="size-5" strokeWidth={2.4} absoluteStrokeWidth />
       </span>
-      <span className="text-base font-semibold tracking-tight text-emerald-950 dark:text-emerald-50">
-        Start the conversation!
+      <span className="text-sm font-semibold tracking-tight text-foreground">
+        Share your build!
       </span>
     </>
   );
 
   const classes = cn(
-    "flex w-full items-center justify-center gap-3 rounded-2xl px-5 py-5 text-center transition-[transform,box-shadow] sm:py-6",
-    "bg-gradient-to-br from-emerald-100 via-teal-50 to-lime-100",
-    "shadow-[0_10px_28px_-12px_rgba(6,78,59,0.45),0_4px_10px_-6px_rgba(20,83,45,0.28)]",
-    "ring-1 ring-emerald-900/10",
-    "dark:from-emerald-950 dark:via-teal-950/80 dark:to-lime-950/70",
-    "dark:shadow-[0_12px_32px_-14px_rgba(0,0,0,0.7),0_4px_12px_-6px_rgba(16,185,129,0.18)]",
-    "dark:ring-emerald-100/10",
-    "hover:-translate-y-0.5 hover:shadow-[0_16px_36px_-12px_rgba(6,78,59,0.5),0_6px_14px_-6px_rgba(20,83,45,0.32)]",
-    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2",
-    "dark:hover:shadow-[0_16px_40px_-14px_rgba(0,0,0,0.75),0_6px_16px_-6px_rgba(16,185,129,0.25)]",
+    "flex w-full items-center justify-center gap-2.5 rounded-2xl px-5 py-4 text-center transition-[background-color,box-shadow]",
+    "bg-gradient-to-r from-emerald-50/70 via-muted/40 to-teal-50/50",
+    "shadow-sm ring-1 ring-emerald-900/[0.06]",
+    "dark:from-emerald-950/35 dark:via-muted/20 dark:to-teal-950/30",
+    "dark:ring-emerald-100/[0.06]",
+    "hover:shadow-md hover:ring-emerald-900/10",
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+    "dark:hover:ring-emerald-100/10",
     className
   );
 
@@ -57,7 +56,11 @@ export function DiscussionEmptyBanner({
   }
 
   return (
-    <button type="button" onClick={onStart} className={cn(classes, "cursor-pointer")}>
+    <button
+      type="button"
+      onClick={onStart}
+      className={cn(classes, "cursor-pointer")}
+    >
       {content}
     </button>
   );
