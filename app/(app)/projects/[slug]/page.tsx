@@ -25,6 +25,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ExpandableDescription } from "@/components/ui/expandable-description";
 import { Button } from "@/components/ui/button";
 import { Download } from "@/components/icons/download";
+import { ImagePlaceholder } from "@/components/icons/image-placeholder";
 import { Print } from "@/components/icons/print";
 import { OwnerBar } from "@/components/ui/owner-bar";
 import { DeleteProjectButton } from "@/components/projects/delete-project-button";
@@ -769,10 +770,15 @@ export default async function ProjectDetailPage(props: {
                 <FileThumbnailStack thumbnails={fileThumbs} />
               </div>
             ) : (
-              <div className="aspect-[4/3] rounded-2xl bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center">
-                <span className="text-xs text-muted-foreground/50">
-                  No cover image
-                </span>
+              <div
+                className="flex aspect-[4/3] items-center justify-center rounded-2xl bg-gradient-to-br from-muted to-muted/50"
+                role="img"
+                aria-label="No cover image"
+              >
+                <ImagePlaceholder
+                  size={48}
+                  className="text-muted-foreground/40"
+                />
               </div>
             )}
           </div>
