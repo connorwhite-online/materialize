@@ -14,7 +14,6 @@ import { Canvas, useFrame, useLoader, useThree } from "@react-three/fiber";
 import {
   OrbitControls,
   Stage,
-  Center,
   Grid,
   Line,
   useBounds,
@@ -58,12 +57,16 @@ import {
 } from "lucide-react";
 import { FrameCorners } from "@/components/icons/frame-corners";
 import {
+  boundsMeasurementStable,
+  previewOrbitOffset,
   previewViewFromOrbit,
   stageAdjustCamera,
   stageFitDistance,
+  STABLE_BOUNDS_FRAMES,
   viewerCameraPositionFor,
   type PreviewView,
 } from "./preview-camera";
+import { CameraRelativeLightRig } from "./preview-lights";
 import { StlModel } from "./loaders/stl-model";
 import { ObjModel } from "./loaders/obj-model";
 import { ThreeMfModel } from "./loaders/threemf-model";
@@ -861,31 +864,33 @@ const STABLE_FRAMES_FOR_BASELINE = 3;
  * Open the detail viewer on a saved preview angle.
  *
  * Must live inside `<Stage>` so it can talk to drei's `<Bounds>` API.
- * The previous approach — wait for a stable camera distance outside
- * Stage, then `controls.object.position.set(...)` — lost to Bounds:
- * Stage animates the head-on fit for up to a second (exponential damp),
- * and `PreviewFrameProbe`'s 3-frame stability check fires while that
- * animation is still ACTIVE. The next Bounds tick (or its final snap)
- * then overwrote the saved angle with the head-on goal. Stage's Refit
- * on `radius` updates could do the same after a late measure.
- *
- * Fix: keep Stage `adjustCamera` off for the whole mount when a saved
- * view is present, measure the centered model through Bounds, compute
- * the Stage-equivalent fit distance ourselves, and place the camera
- * once. No in-flight fit goal exists to race us.
+ * Stage auto-fit stays off for the whole mount when a saved view is
+ * present (CON-27). We also wait for the Bounds centre/size to hold
+ * steady across a few frames — Stage's own `<Center>` (and any nested
+ * layout) can still be translating the mesh on the first non-empty
+ * measure, and aiming from that pivot leaves the listing thumbnail
+ * and the live viewer disagreeing even with identical DB columns
+ * (CON-35).
  */
 function ApplyInitialView({
   view,
   controlsRef,
   onApplied,
+  modelCenterRef,
 }: {
   view: PreviewView;
   controlsRef: RefObject<OrbitControlsImpl | null>;
   onApplied: (baselineDistance: number) => void;
+  modelCenterRef: RefObject<[number, number, number] | null>;
 }) {
   const api = useBounds();
   const camera = useThree((state) => state.camera);
   const applied = useRef(false);
+  const previous = useRef<{
+    center: [number, number, number];
+    maxDim: number;
+  } | null>(null);
+  const stableFrames = useRef(0);
   const viewRef = useRef(view);
   viewRef.current = view;
   const onAppliedRef = useRef(onApplied);
@@ -902,6 +907,27 @@ function ApplyInitialView({
 
     const size = box.getSize(new Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
+    const centerTuple: [number, number, number] = [
+      center.x,
+      center.y,
+      center.z,
+    ];
+
+    if (
+      boundsMeasurementStable({
+        previous: previous.current,
+        center: centerTuple,
+        maxDim,
+      })
+    ) {
+      stableFrames.current += 1;
+    } else {
+      stableFrames.current = 0;
+    }
+    previous.current = { center: centerTuple, maxDim };
+
+    if (stableFrames.current < STABLE_BOUNDS_FRAMES) return;
+
     // Stage auto-fit is off, so Bounds' own margin is 0 — compute the
     // distance Stage would have used at STAGE_FIT_MARGIN instead.
     const fov = "fov" in camera && typeof camera.fov === "number" ? camera.fov : 45;
@@ -913,10 +939,11 @@ function ApplyInitialView({
     if (!(distance > 0)) return;
 
     applied.current = true;
+    modelCenterRef.current = centerTuple;
 
     const [x, y, z] = viewerCameraPositionFor({
       view: viewRef.current,
-      target: [center.x, center.y, center.z],
+      target: centerTuple,
       baselineDistance: distance,
     });
 
@@ -933,6 +960,28 @@ function ApplyInitialView({
     controls.update();
 
     onAppliedRef.current(distance);
+  });
+
+  return null;
+}
+
+/**
+ * Keeps the latest Bounds model centre available to "Update preview"
+ * so capture aims at the same pivot the thumbnail rig uses (origin of
+ * the normalised model), not a panned OrbitControls target.
+ */
+function ModelCenterTracker({
+  modelCenterRef,
+}: {
+  modelCenterRef: RefObject<[number, number, number] | null>;
+}) {
+  const api = useBounds();
+
+  useFrame(() => {
+    api.refresh();
+    const { center, box } = api.getSize();
+    if (box.isEmpty()) return;
+    modelCenterRef.current = [center.x, center.y, center.z];
   });
 
   return null;
@@ -1483,6 +1532,7 @@ export function ModelViewer({
   // in. There is no meaningful angle to capture before the model is on
   // screen.
   const previewBaselineRef = useRef<number | null>(null);
+  const modelCenterRef = useRef<[number, number, number] | null>(null);
   const [previewBaselineReady, setPreviewBaselineReady] = useState(false);
   const capturePreviewEnabled = !!onCapturePreview;
   // Probe is only for the capture baseline when there is no saved view
@@ -1505,11 +1555,19 @@ export function ModelViewer({
 
     const camera = controls.object;
     const t = controls.target;
-    const offset: [number, number, number] = [
-      camera.position.x - t.x,
-      camera.position.y - t.y,
-      camera.position.z - t.z,
-    ];
+    // Snap the orbit pivot back to the model centre before measuring —
+    // the thumbnail always orbits the normalised origin, so a panned
+    // target would save a direction the capture cannot show.
+    const center = modelCenterRef.current;
+    if (center) {
+      t.set(center[0], center[1], center[2]);
+      controls.update();
+    }
+    const offset = previewOrbitOffset({
+      camera: [camera.position.x, camera.position.y, camera.position.z],
+      modelCenter: center,
+      controlsTarget: [t.x, t.y, t.z],
+    });
 
     onCapturePreview(
       previewViewFromOrbit({ offset, baselineDistance: baseline })
@@ -1557,6 +1615,9 @@ export function ModelViewer({
 
   // Inspection state (only meaningful when `inspect`). STL only.
   const inspectable = inspect && format === "stl";
+  // File-detail product preview: camera-relative lights matching the
+  // thumbnail rig. Inspect/studio keeps Stage's world-fixed rembrandt.
+  const useProductPreviewLights = !fixedFrame && !inspectable;
   const isAssembly = !!assemblyParts && assemblyParts.length > 1;
   const [showGrid, setShowGrid] = useState(false);
   const [sectionOn, setSectionOn] = useState(false);
@@ -1725,27 +1786,39 @@ export function ModelViewer({
                 {ghostUrl && <GhostModel url={ghostUrl} />}
               </>
             ) : (
-              <Stage
-                // Off for the whole mount when restoring a saved view —
-                // ApplyInitialView owns the camera. A late Stage Refit
-                // was what wiped the angle back to head-on (CON-27).
-                adjustCamera={stageAdjustCamera(!!initialView)}
-                intensity={0.5}
-                // No IBL environment: drei's "city" preset fetches an HDR
-                // from an external CDN (raw.githack.com) that drops CORS
-                // headers, spamming the console and failing intermittently.
-                // Stage still provides its three-point light rig (ambient +
-                // spot + point), which is plenty for matte print previews.
-                environment={null}
-              >
-                {initialView && (
-                  <ApplyInitialView
-                    view={initialView}
-                    controlsRef={controlsRef}
-                    onApplied={handleInitialViewApplied}
-                  />
-                )}
-                <Center>
+              <>
+                {/* Outside Stage so light positions cannot inflate
+                    Bounds/Center measurements used by ApplyInitialView. */}
+                {useProductPreviewLights && <CameraRelativeLightRig />}
+                <Stage
+                  // Off for the whole mount when restoring a saved view —
+                  // ApplyInitialView owns the camera. A late Stage Refit
+                  // was what wiped the angle back to head-on (CON-27).
+                  adjustCamera={stageAdjustCamera(!!initialView)}
+                  // Product previews zero Stage's world-fixed rembrandt
+                  // lights and use CameraRelativeLightRig instead so an
+                  // off-axis restored angle is shaded like the thumbnail
+                  // (CON-35). Inspect/studio keeps the Stage rig.
+                  intensity={useProductPreviewLights ? 0 : 0.5}
+                  // No IBL environment: drei's "city" preset fetches an HDR
+                  // from an external CDN (raw.githack.com) that drops CORS
+                  // headers, spamming the console and failing intermittently.
+                  // Stage still provides its three-point light rig (ambient +
+                  // spot + point), which is plenty for matte print previews.
+                  environment={null}
+                >
+                  <ModelCenterTracker modelCenterRef={modelCenterRef} />
+                  {initialView && (
+                    <ApplyInitialView
+                      view={initialView}
+                      controlsRef={controlsRef}
+                      onApplied={handleInitialViewApplied}
+                      modelCenterRef={modelCenterRef}
+                    />
+                  )}
+                  {/* Stage already wraps children in <Center> — a nested
+                      Center here only added a second layout pass that
+                      ApplyInitialView could measure mid-settle. */}
                   {inspectable ? (
                     <InspectModel
                       modelUrl={modelUrl}
@@ -1771,8 +1844,8 @@ export function ModelViewer({
                       materialColor={materialColor}
                     />
                   )}
-                </Center>
-              </Stage>
+                </Stage>
+              </>
             )}
             {inspectable && showGrid && bounds && (
               <Grid
@@ -1825,7 +1898,10 @@ export function ModelViewer({
             // head-on, wrong once ApplyInitialView aims off-axis.
             makeDefault
             enableZoom={wheelZoom}
-            enablePan={!isPreview}
+            // Pan is off whenever Update preview is offered: a panned
+            // target saves a direction the thumbnail (origin pivot)
+            // cannot reproduce (CON-35).
+            enablePan={!isPreview && !capturePreviewEnabled}
             autoRotate={isPreview}
             autoRotateSpeed={2}
           />

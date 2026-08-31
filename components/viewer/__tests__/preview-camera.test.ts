@@ -9,11 +9,13 @@ import {
   MAX_FRAMING,
   MIN_FRAMING,
   STAGE_FIT_MARGIN,
+  boundsMeasurementStable,
   capturePositionFor,
   defaultFraming,
   distanceForFraming,
   framingFraction,
   normalizeDirection,
+  previewOrbitOffset,
   previewViewFromOrbit,
   stageAdjustCamera,
   stageFitDistance,
@@ -336,6 +338,67 @@ describe("stageFitDistance", () => {
       baselineDistance: baseline,
     });
     expect(Math.hypot(x, y, z)).toBeCloseTo(baseline, 6);
+  });
+});
+
+describe("boundsMeasurementStable", () => {
+  it("rejects the first sample and unusable sizes", () => {
+    expect(
+      boundsMeasurementStable({
+        previous: null,
+        center: [0, 0, 0],
+        maxDim: 10,
+      })
+    ).toBe(false);
+    expect(
+      boundsMeasurementStable({
+        previous: { center: [0, 0, 0], maxDim: 10 },
+        center: [0, 0, 0],
+        maxDim: 0,
+      })
+    ).toBe(false);
+  });
+
+  it("accepts a centre/size that held within relative tolerance", () => {
+    expect(
+      boundsMeasurementStable({
+        previous: { center: [1, 2, 3], maxDim: 100 },
+        center: [1.005, 2.005, 3.005],
+        maxDim: 100.005,
+      })
+    ).toBe(true);
+  });
+
+  it("rejects a centre that is still drifting from Stage Center", () => {
+    expect(
+      boundsMeasurementStable({
+        previous: { center: [0, 0, 0], maxDim: 50 },
+        center: [5, 0, 0],
+        maxDim: 50,
+      })
+    ).toBe(false);
+  });
+});
+
+describe("previewOrbitOffset", () => {
+  it("prefers the model/Bounds centre over a panned controls target", () => {
+    expect(
+      previewOrbitOffset({
+        camera: [10, 20, 30],
+        modelCenter: [1, 2, 3],
+        controlsTarget: [9, 9, 9],
+      })
+    ).toEqual([9, 18, 27]);
+  });
+
+  it("falls back to the controls target when centre is unknown", () => {
+    expect(
+      previewOrbitOffset({
+        camera: [10, 20, 30],
+        modelCenter: null,
+        controlsTarget: [1, 2, 3],
+      })
+    ).toEqual([9, 18, 27]);
   });
 });
 
