@@ -70,7 +70,7 @@ export function NotificationSettingsGear({
           className
         )}
       >
-        <Gear size={compact ? 17 : 19} />
+        <Gear size={compact ? 18 : 20} />
       </button>
 
       <NativeSheet
