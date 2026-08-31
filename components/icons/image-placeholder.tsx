@@ -18,13 +18,14 @@ export function ImagePlaceholder({
       aria-hidden="true"
       {...props}
     >
-      {/* Sun — sits above the smaller (right) hill */}
-      <circle cx="17" cy="5.75" r="2.85" fill="currentColor" />
-      {/* Double hill: taller left peak, smaller right peak under the sun */}
-      <path
-        fill="currentColor"
-        d="M1.75 19.25c0-.4.14-.78.4-1.08l4.95-5.7a2.35 2.35 0 0 1 3.55 0l.95 1.1 2.85-3.95a2.35 2.35 0 0 1 3.8.1l3.4 5.05c.45.66-.02 1.58-.9 1.58H2.55a.8.8 0 0 1-.8-.8Z"
-      />
+      {/* Mirrored so the sun sits above the smaller (left) hill */}
+      <g transform="translate(24 0) scale(-1 1)">
+        <circle cx="17" cy="5.75" r="2.85" fill="currentColor" />
+        <path
+          fill="currentColor"
+          d="M1.75 19.25c0-.4.14-.78.4-1.08l4.95-5.7a2.35 2.35 0 0 1 3.55 0l.95 1.1 2.85-3.95a2.35 2.35 0 0 1 3.8.1l3.4 5.05c.45.66-.02 1.58-.9 1.58H2.55a.8.8 0 0 1-.8-.8Z"
+        />
+      </g>
     </svg>
   );
 }
