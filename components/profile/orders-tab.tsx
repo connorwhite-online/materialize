@@ -275,7 +275,7 @@ export async function OrdersTab({ userId }: { userId: string }) {
               {drafts.length} in progress
             </p>
           </div>
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             {drafts.map((draft) => {
               const materialMeta = draft.material
                 ? getMaterialById(draft.material)
@@ -317,55 +317,67 @@ export async function OrdersTab({ userId }: { userId: string }) {
               export.
             </div>
           )}
-          <div className="space-y-2">
+          {/* flex+gap (not space-y): each row is a Link, and space-y's
+              margin-top does not land on a default-inline <a>, so cards
+              sat flush. SettingsLink uses the same block Link pattern. */}
+          <div className="flex flex-col gap-2">
             {orders.map((order) => {
-        const materialMeta = order.material
-          ? getMaterialById(order.material)
-          : null;
-        const orderNumber = formatOrderNumber(order.id);
-        const statusLabel = STATUS_LABELS[order.status] || order.status;
-        const variant = STATUS_VARIANT[order.status] || "outline";
+              const materialMeta = order.material
+                ? getMaterialById(order.material)
+                : null;
+              const orderNumber = formatOrderNumber(order.id);
+              const statusLabel = STATUS_LABELS[order.status] || order.status;
+              const variant = STATUS_VARIANT[order.status] || "outline";
 
-        return (
-          <Link key={order.id} href={`/dashboard/orders/${order.id}`}>
-            <Card className="transition-colors hover:border-primary/30">
-              <CardContent className="p-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  {materialMeta && (
-                    <div
-                      className="h-8 w-8 rounded-md border border-border shrink-0"
-                      style={{
-                        background: `linear-gradient(135deg, ${materialMeta.color}, ${materialMeta.color}dd)`,
-                      }}
-                    />
-                  )}
-                  <div>
-                    <p className="font-medium text-sm">
-                      {order.fileName ||
-                        materialMeta?.name ||
-                        order.material ||
-                        "3D Print"}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {orderNumber}
-                      {order.vendorName || order.vendor
-                        ? ` · ${order.vendorName ?? order.vendor}`
-                        : ""}
-                      {materialMeta ? ` · ${materialMeta.method}` : ""}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <Badge variant={variant}>{statusLabel}</Badge>
-                  <p className="text-sm font-medium w-20 text-right tabular-nums">
-                    $
-                    {((order.totalPrice + order.serviceFee) / 100).toFixed(2)}
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-        );
+              return (
+                <Link
+                  key={order.id}
+                  href={`/dashboard/orders/${order.id}`}
+                  className="block"
+                >
+                  {/* py-0: Card defaults to py-4; CardContent already
+                      pads the row, so the default doubled the height. */}
+                  <Card className="py-0 transition-colors hover:border-primary/30">
+                    <CardContent className="flex items-center justify-between p-4">
+                      <div className="flex items-center gap-3">
+                        {materialMeta && (
+                          <div
+                            className="h-8 w-8 shrink-0 rounded-md border border-border"
+                            style={{
+                              background: `linear-gradient(135deg, ${materialMeta.color}, ${materialMeta.color}dd)`,
+                            }}
+                          />
+                        )}
+                        <div>
+                          <p className="text-sm font-medium">
+                            {order.fileName ||
+                              materialMeta?.name ||
+                              order.material ||
+                              "3D Print"}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {orderNumber}
+                            {order.vendorName || order.vendor
+                              ? ` · ${order.vendorName ?? order.vendor}`
+                              : ""}
+                            {materialMeta ? ` · ${materialMeta.method}` : ""}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <Badge variant={variant}>{statusLabel}</Badge>
+                        <p className="w-20 text-right text-sm font-medium tabular-nums">
+                          $
+                          {(
+                            (order.totalPrice + order.serviceFee) /
+                            100
+                          ).toFixed(2)}
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </Link>
+              );
             })}
           </div>
         </section>

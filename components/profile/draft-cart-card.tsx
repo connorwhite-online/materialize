@@ -97,7 +97,8 @@ export function DraftCartCard({
   };
 
   return (
-    <Card className="transition-colors">
+    // py-0: Card defaults to py-4; CardContent already pads the row.
+    <Card className="py-0 transition-colors">
       <CardContent className="flex items-center justify-between gap-3 p-4">
         <div className="flex min-w-0 items-center gap-3">
           {materialColor && (
