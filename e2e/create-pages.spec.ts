@@ -77,5 +77,25 @@ test.describe("create pages", () => {
       path: `${testInfo.outputDir}/project-create-page.png`,
       fullPage: true,
     });
+
+    // CON-34 — License is a details field, not gated by List for sale.
+    // Sale off: License visible, Price hidden. CardTitle is a div, not a heading.
+    const licenseTrigger = page.locator("#license-trigger");
+    await expect(licenseTrigger).toBeVisible();
+    await expect(page.getByText("List for sale", { exact: true })).toBeVisible();
+    await expect(page.locator("#price")).toHaveCount(0);
+    await page.screenshot({
+      path: `${testInfo.outputDir}/project-license-sale-off.png`,
+      fullPage: true,
+    });
+
+    // Sale on: Price appears; License stays in Project details.
+    await page.getByRole("switch").click();
+    await expect(page.locator("#price")).toBeVisible();
+    await expect(licenseTrigger).toBeVisible();
+    await page.screenshot({
+      path: `${testInfo.outputDir}/project-license-sale-on.png`,
+      fullPage: true,
+    });
   });
 });
