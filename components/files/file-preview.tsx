@@ -1,6 +1,13 @@
 "use client";
 
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useRouter } from "next/navigation";
 import { OrderModelPreviewLazy } from "@/components/print/order-model-preview-lazy";
 import {
@@ -75,6 +82,10 @@ export function FilePreview({
   const [status, setStatus] = useState<CaptureStatus>("idle");
   const [message, setMessage] = useState<string | null>(null);
   const [pendingView, setPendingView] = useState<PreviewView | null>(null);
+  // Ref twin of pendingView so the capture callback cannot POST the
+  // image without the angle — a stale closure here is how a thumbnail
+  // can land with null preview_dir_* columns (CON-27 data gap).
+  const pendingViewRef = useRef<PreviewView | null>(null);
 
   // Settle the button back to its resting label so a creator can shoot
   // again without wondering whether the control is still live. The
@@ -92,6 +103,7 @@ export function FilePreview({
   const onCapturePreview = useCallback((view: PreviewView) => {
     setStatus("capturing");
     setMessage(null);
+    pendingViewRef.current = view;
     setPendingView(view);
   }, []);
 
@@ -99,7 +111,8 @@ export function FilePreview({
     async (id: string, dataUrl: string) => {
       // Read before clearing — the state update below is what unmounts
       // the capture rig, and the view has to travel with the image.
-      const view = pendingView;
+      const view = pendingViewRef.current;
+      pendingViewRef.current = null;
       setPendingView(null);
       try {
         const res = await fetch("/api/thumbnails", {
@@ -109,7 +122,9 @@ export function FilePreview({
           fileId: id,
           dataUrl,
           // Sent with the image so the file remembers the angle it was
-          // shot from, and can open on it.
+          // shot from, and can open on it. Required for Update preview:
+          // without it the angled thumbnail survives and the viewer
+          // still opens head-on.
           previewView: view
             ? { direction: view.direction, framing: view.framing }
             : undefined,
@@ -150,7 +165,7 @@ export function FilePreview({
         setStatus("error");
       }
     },
-    [router, pendingView]
+    [router]
   );
 
   return (
