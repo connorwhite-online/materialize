@@ -478,13 +478,19 @@ export function ShippingAddressForm({
     const codeBody = (
       <div className="space-y-4">
         {embedded ? (
-          <h2
-            ref={titleRef}
-            tabIndex={-1}
-            className="text-lg font-semibold outline-none"
-          >
-            Verify your email
-          </h2>
+          <div>
+            <EmbeddedSheetBack
+              onClick={onBack}
+              disabled={otpVerifying || isSubmitting}
+            />
+            <h2
+              ref={titleRef}
+              tabIndex={-1}
+              className="mt-2 text-lg font-semibold outline-none"
+            >
+              Verify your email
+            </h2>
+          </div>
         ) : (
           <div className="flex flex-row items-center gap-3">
             <IconTile tone="bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400">
