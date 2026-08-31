@@ -456,7 +456,7 @@ export default async function ProjectDetailPage(props: {
       : null;
 
   // Content tabs that sit under the cover/photos and above the
-  // Discussion section. Order is fixed — Files, Build Guide, BOM,
+  // Discussion section. Order is fixed — Files, Guide, BOM,
   // Wiring — and each tab is only included when it has something to
   // show (always for owners, who get the inline editors / empty
   // states). The first entry is the default selection, so Files
@@ -466,7 +466,6 @@ export default async function ProjectDetailPage(props: {
   tabs.push({
     value: "files",
     label: "Files",
-    meta: bundledFiles.length,
     content: (
       <div>
         {canWrite && (
@@ -502,7 +501,7 @@ export default async function ProjectDetailPage(props: {
   if (project.buildGuide || canWrite) {
     tabs.push({
       value: "build-guide",
-      label: "Build Guide",
+      label: "Guide",
       content: (
         <div className="space-y-3">
           {canWrite && (
@@ -513,7 +512,7 @@ export default async function ProjectDetailPage(props: {
                 <Link href={`/projects/${project.slug}/build-guide/edit`} />
               }
             >
-              {project.buildGuide ? "Edit build guide" : "Write build guide"}
+              {project.buildGuide ? "Edit guide" : "Write guide"}
             </Button>
           )}
           {project.buildGuide ? (
@@ -540,7 +539,6 @@ export default async function ProjectDetailPage(props: {
     tabs.push({
       value: "bom",
       label: "Components",
-      meta: bomItems.length || undefined,
       content: (
         <div className="space-y-3">
           {canWrite && (
@@ -583,7 +581,6 @@ export default async function ProjectDetailPage(props: {
     tabs.push({
       value: "wiring",
       label: "Wiring",
-      meta: circuits.length || undefined,
       content: (
         <CircuitGallery
           projectId={project.id}

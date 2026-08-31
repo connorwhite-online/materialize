@@ -166,7 +166,7 @@ export function BuildGuideEditor({
     const payload = isEmptyHtml(draft) ? "" : draft;
     if (payload.length > MAX_BUILD_GUIDE_LENGTH) {
       setError(
-        `Build guide is too long (${payload.length.toLocaleString()} / ${MAX_BUILD_GUIDE_LENGTH.toLocaleString()} characters).`
+        `Guide is too long (${payload.length.toLocaleString()} / ${MAX_BUILD_GUIDE_LENGTH.toLocaleString()} characters).`
       );
       return;
     }
@@ -268,7 +268,7 @@ export function BuildGuideEditor({
           <DialogHeader>
             <DialogTitle>Discard unsaved changes?</DialogTitle>
             <DialogDescription>
-              You have edits to this build guide that haven&apos;t been saved.
+              You have edits to this guide that haven&apos;t been saved.
               Leaving now will lose them.
             </DialogDescription>
           </DialogHeader>

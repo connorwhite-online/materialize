@@ -338,7 +338,7 @@ export async function updateProjectBuildGuide(
     const project = access.resource;
 
     if (typeof buildGuide !== "string") {
-      return { error: "Invalid build guide" };
+      return { error: "Invalid guide" };
     }
     if (buildGuide.length > MAX_BUILD_GUIDE_LENGTH) {
       return {
@@ -361,7 +361,7 @@ export async function updateProjectBuildGuide(
     return { success: true };
   } catch (error) {
     logError("updateProjectBuildGuide", error);
-    return { error: "Failed to save build guide." };
+    return { error: "Failed to save guide." };
   }
 }
 
