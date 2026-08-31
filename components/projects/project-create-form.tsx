@@ -105,6 +105,44 @@ export function ProjectCreateForm({
             </p>
           </div>
           <div>
+            <Label htmlFor="license-trigger">License</Label>
+            <Select
+              value={license}
+              onValueChange={(v) => v && setLicense(v as LicenseId)}
+            >
+              <SelectTrigger id="license-trigger" className="w-full">
+                <SelectValue>
+                  {(value) => {
+                    const meta = LICENSES[value as LicenseId];
+                    return meta
+                      ? `${meta.shortName} — ${meta.name}`
+                      : "Select a license";
+                  }}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {LICENSE_ORDER.map((id) => {
+                  const meta = LICENSES[id];
+                  return (
+                    <SelectItem key={id} value={id}>
+                      <div className="flex flex-col gap-0.5">
+                        <span>
+                          {meta.shortName} — {meta.name}
+                        </span>
+                        <span className="whitespace-normal text-[11px] leading-tight text-muted-foreground">
+                          {meta.summary}
+                        </span>
+                      </div>
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Controls what people can do with the files after download.
+            </p>
+          </div>
+          <div>
             <Label htmlFor="repoUrl">Code repository (optional)</Label>
             <Input
               id="repoUrl"
@@ -140,53 +178,19 @@ export function ProjectCreateForm({
         </CardHeader>
         {sellEnabled && (
           <CardContent>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <Label htmlFor="price">Price (USD)</Label>
-                <Input
-                  id="price"
-                  name="price"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  defaultValue="0"
-                />
-              </div>
-              <div>
-                <Label htmlFor="license-trigger">License</Label>
-                <Select
-                  value={license}
-                  onValueChange={(v) => v && setLicense(v as LicenseId)}
-                >
-                  <SelectTrigger id="license-trigger" className="w-full">
-                    <SelectValue>
-                      {(value) => {
-                        const meta = LICENSES[value as LicenseId];
-                        return meta
-                          ? `${meta.shortName} — ${meta.name}`
-                          : "Select a license";
-                      }}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {LICENSE_ORDER.map((id) => {
-                      const meta = LICENSES[id];
-                      return (
-                        <SelectItem key={id} value={id}>
-                          <div className="flex flex-col gap-0.5">
-                            <span>
-                              {meta.shortName} — {meta.name}
-                            </span>
-                            <span className="whitespace-normal text-[11px] leading-tight text-muted-foreground">
-                              {meta.summary}
-                            </span>
-                          </div>
-                        </SelectItem>
-                      );
-                    })}
-                  </SelectContent>
-                </Select>
-              </div>
+            <div>
+              <Label htmlFor="price">Price (USD)</Label>
+              <Input
+                id="price"
+                name="price"
+                type="number"
+                min="0"
+                step="0.01"
+                defaultValue="0"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Set to 0 for free download
+              </p>
             </div>
           </CardContent>
         )}
