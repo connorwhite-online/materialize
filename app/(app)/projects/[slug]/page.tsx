@@ -747,8 +747,8 @@ export default async function ProjectDetailPage(props: {
                 aria-label="No cover image"
               >
                 <ImagePlaceholder
-                  size={44}
-                  className="text-muted-foreground/35"
+                  size={48}
+                  className="text-muted-foreground/40"
                 />
               </div>
             )}
