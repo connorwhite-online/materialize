@@ -276,16 +276,17 @@ export async function LibraryTab({
     projectFileRows,
     projectPhotoRows,
   ] = await Promise.all([
-    // Primary asset id + format for card subtitles / thumbnail capture.
-    // Bounding box used to live here for the card subtitle; CON-19 moved
-    // that off the card (format / creator instead), so we no longer pull
-    // geometryData on this path.
+    // Primary asset id / format / size for card subtitles + thumbnail
+    // capture. Bounding box used to live here for the card subtitle;
+    // CON-19 moved that off the card, CON-33 swapped format → size for
+    // owned tiles, so we pull fileSize and still skip geometryData.
     allFileIds.length > 0
       ? db
           .select({
             id: fileAssets.id,
             fileId: fileAssets.fileId,
             format: fileAssets.format,
+            fileSize: fileAssets.fileSize,
             createdAt: fileAssets.createdAt,
           })
           .from(fileAssets)
@@ -296,6 +297,7 @@ export async function LibraryTab({
             id: string;
             fileId: string | null;
             format: typeof fileAssets.format._.data;
+            fileSize: number;
             createdAt: Date;
           }>
         ),
@@ -419,6 +421,7 @@ export async function LibraryTab({
     {
       id: string;
       format: string;
+      fileSize: number;
     }
   >();
   for (const asset of assetRows) {
@@ -427,6 +430,7 @@ export async function LibraryTab({
       primaryAssetByFileId.set(asset.fileId, {
         id: asset.id,
         format: asset.format,
+        fileSize: asset.fileSize,
       });
     }
   }
@@ -448,6 +452,7 @@ export async function LibraryTab({
       additionalPhotoIds,
       primaryAssetId: asset?.id ?? null,
       primaryFormat: asset?.format ?? null,
+      primaryFileSizeBytes: asset?.fileSize ?? null,
       creatorUsername: r.creatorUsername,
       creatorDisplayName: r.creatorDisplayName,
       recommendedMaterialId: r.recommendedMaterialId,
@@ -519,6 +524,7 @@ export async function LibraryTab({
       additionalPhotoIds,
       primaryAssetId: asset?.id ?? null,
       primaryFormat: asset?.format ?? null,
+      primaryFileSizeBytes: asset?.fileSize ?? null,
       flaggedReason: f.flaggedReason,
       recommendedMaterialId: f.recommendedMaterialId,
     };

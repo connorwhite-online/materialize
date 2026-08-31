@@ -28,7 +28,7 @@ export interface LibraryTile {
   source: "owned" | "purchased";
   /** Original upload filename (e.g. "terra_shell_top.stl"). Only populated for project-mode tiles. */
   originalFilename?: string;
-  /** Asset file size in bytes. Only populated for project-mode tiles. */
+  /** Asset file size in bytes — feeds owned FileCard subtitles. */
   fileSizeBytes?: number;
 }
 
@@ -91,16 +91,24 @@ async function loadLibraryTilesOnce(userId: string): Promise<LibraryTile[]> {
       id: fileAssets.id,
       fileId: fileAssets.fileId,
       format: fileAssets.format,
+      fileSize: fileAssets.fileSize,
       createdAt: fileAssets.createdAt,
     })
     .from(fileAssets)
     .where(inArray(fileAssets.fileId, fileIds))
     .orderBy(fileAssets.createdAt);
 
-  const primaryByFileId = new Map<string, { id: string; format: string }>();
+  const primaryByFileId = new Map<
+    string,
+    { id: string; format: string; fileSize: number }
+  >();
   for (const row of assetRows) {
     if (!row.fileId || primaryByFileId.has(row.fileId)) continue;
-    primaryByFileId.set(row.fileId, { id: row.id, format: row.format });
+    primaryByFileId.set(row.fileId, {
+      id: row.id,
+      format: row.format,
+      fileSize: row.fileSize,
+    });
   }
 
   const primaryAssetIds = Array.from(primaryByFileId.values()).map((a) => a.id);
@@ -163,6 +171,7 @@ async function loadLibraryTilesOnce(userId: string): Promise<LibraryTile[]> {
       slug: f.slug,
       thumbnailUrl: f.thumbnailUrl,
       format: asset.format,
+      fileSizeBytes: asset.fileSize,
       source: "owned",
     });
   }
@@ -175,6 +184,7 @@ async function loadLibraryTilesOnce(userId: string): Promise<LibraryTile[]> {
       slug: r.slug,
       thumbnailUrl: r.thumbnailUrl,
       format: asset.format,
+      fileSizeBytes: asset.fileSize,
       source: "purchased",
     });
   }
