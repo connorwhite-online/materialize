@@ -34,8 +34,6 @@ test.describe("library tab", () => {
     username = seed.username;
     await setClerkUsername(user.userId, username);
     file = await createOwnedFileFixture(user.userId);
-    // Recent files is loadLibraryTiles, which skips files with no asset.
-    await attachOwnedFileAsset(file.fileId);
   });
 
   test.afterAll(async () => {
@@ -75,7 +73,7 @@ test.describe("library tab", () => {
     // The seeded file should appear in the library by its name.
     // We don't pin to a specific card component selector — copy
     // is the user-visible contract.
-    await expect(page.getByText(file.name)).toBeVisible({
+    await expect(page.getByRole("heading", { name: file.name })).toBeVisible({
       timeout: 10_000,
     });
   });
@@ -83,6 +81,9 @@ test.describe("library tab", () => {
   test("recent and library cards open the listing, not print (CON-32)", async ({
     page,
   }) => {
+    // Recent is loadLibraryTiles, which skips files with no asset.
+    await attachOwnedFileAsset(file.fileId);
+
     await page.goto("/");
     await clerk.signIn({
       page,
@@ -93,24 +94,29 @@ test.describe("library tab", () => {
     });
     await page.goto("/");
 
-    await expect(
-      page.getByRole("heading", { name: "Recent files" })
-    ).toBeVisible({ timeout: 10_000 });
+    const recentSection = page
+      .getByRole("heading", { name: "Recent files" })
+      .locator("xpath=ancestor::section[1]");
+    await expect(recentSection).toBeVisible({ timeout: 10_000 });
 
     const listingHref = `/files/${file.slug}`;
-    const cards = page.getByRole("link").filter({ hasText: file.name });
-    await expect(cards.first()).toBeVisible();
-    const hrefs = await cards.evaluateAll((els) =>
-      els.map((el) => el.getAttribute("href"))
-    );
-    expect(hrefs.length).toBeGreaterThanOrEqual(1);
-    for (const href of hrefs) {
-      expect(href).toBe(listingHref);
-      expect(href).not.toMatch(/^\/print\//);
-    }
+    const recentCard = recentSection.locator(`a[href="${listingHref}"]`);
+    const libraryCard = page
+      .getByRole("heading", { name: "Files", exact: true })
+      .locator("xpath=ancestor::section[1]")
+      .locator(`a[href="${listingHref}"]`);
 
-    await cards.first().click();
-    await expect(page).toHaveURL(new RegExp(`${listingHref}(?:\\?.*)?$`));
+    await expect(recentCard).toHaveAttribute("href", listingHref);
+    await expect(libraryCard).toHaveAttribute("href", listingHref);
+    await expect(recentCard).not.toHaveAttribute("href", /\/print\//);
+    await expect(libraryCard).not.toHaveAttribute("href", /\/print\//);
+
+    // Click the thumb well, not the title tooltip trigger. First
+    // compile of /files/[slug] can exceed the default 5s URL timeout.
+    await recentCard.locator("[data-slot='file-card']").click();
+    await expect(page).toHaveURL(new RegExp(`${listingHref}(?:\\?.*)?$`), {
+      timeout: 30_000,
+    });
     expect(page.url()).not.toContain("/print/");
   });
 });
