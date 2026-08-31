@@ -37,6 +37,11 @@ describe("HomeDashboard recent files", () => {
     expect(dashboard).toContain("fileCardOwnedSubtitle");
     expect(dashboard).toContain("subtitle={fileCardOwnedSubtitle(tile.format)}");
   });
+
+  it("opens the listing, not the print flow (CON-32)", () => {
+    expect(dashboard).toContain("href={`/files/${tile.slug}`}");
+    expect(dashboard).not.toContain("href={`/print/${tile.fileAssetId}`}");
+  });
 });
 
 describe("compact library FileCarousel", () => {

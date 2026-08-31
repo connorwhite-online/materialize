@@ -100,9 +100,9 @@ describe("loadProjectPrintTiles", () => {
   it("filters unpublished bundled files for non-owners but keeps order", async () => {
     projectRows = [publishedPublicProject()];
     bundledRows = [
-      { id: "f1", name: "Base", thumbnailUrl: "t1", status: "published", position: 0 },
-      { id: "f2", name: "Draft Part", thumbnailUrl: "t2", status: "draft", position: 1 },
-      { id: "f3", name: "Lid", thumbnailUrl: "t3", status: "published", position: 2 },
+      { id: "f1", name: "Base", slug: "base", thumbnailUrl: "t1", status: "published", position: 0 },
+      { id: "f2", name: "Draft Part", slug: "draft-part", thumbnailUrl: "t2", status: "draft", position: 1 },
+      { id: "f3", name: "Lid", slug: "lid", thumbnailUrl: "t3", status: "published", position: 2 },
     ];
     assetRows = [
       { id: "a1", fileId: "f1", format: "stl", createdAt: new Date(1) },
@@ -111,13 +111,14 @@ describe("loadProjectPrintTiles", () => {
     const ctx = await loadProjectPrintTiles("robot-arm", VIEWER);
     expect(ctx!.tiles.map((t) => t.fileAssetId)).toEqual(["a1", "a3"]);
     expect(ctx!.tiles.map((t) => t.name)).toEqual(["Base", "Lid"]);
+    expect(ctx!.tiles.map((t) => t.slug)).toEqual(["base", "lid"]);
   });
 
   it("includes unpublished bundled files for the owner", async () => {
     projectRows = [publishedPublicProject()];
     bundledRows = [
-      { id: "f1", name: "Base", thumbnailUrl: null, status: "published", position: 0 },
-      { id: "f2", name: "Draft Part", thumbnailUrl: null, status: "draft", position: 1 },
+      { id: "f1", name: "Base", slug: "base", thumbnailUrl: null, status: "published", position: 0 },
+      { id: "f2", name: "Draft Part", slug: "draft-part", thumbnailUrl: null, status: "draft", position: 1 },
     ];
     assetRows = [
       { id: "a1", fileId: "f1", format: "stl", createdAt: new Date(1) },
@@ -130,7 +131,7 @@ describe("loadProjectPrintTiles", () => {
   it("picks the earliest-created asset per file as primary", async () => {
     projectRows = [publishedPublicProject()];
     bundledRows = [
-      { id: "f1", name: "Base", thumbnailUrl: null, status: "published", position: 0 },
+      { id: "f1", name: "Base", slug: "base", thumbnailUrl: null, status: "published", position: 0 },
     ];
     // Loader orders assets by createdAt asc, so the first row seen for a
     // file id wins. Provide them in ascending order to mirror the query.
@@ -147,8 +148,8 @@ describe("loadProjectPrintTiles", () => {
   it("skips bundled files that have no asset", async () => {
     projectRows = [publishedPublicProject()];
     bundledRows = [
-      { id: "f1", name: "Base", thumbnailUrl: null, status: "published", position: 0 },
-      { id: "f2", name: "No Asset", thumbnailUrl: null, status: "published", position: 1 },
+      { id: "f1", name: "Base", slug: "base", thumbnailUrl: null, status: "published", position: 0 },
+      { id: "f2", name: "No Asset", slug: "no-asset", thumbnailUrl: null, status: "published", position: 1 },
     ];
     assetRows = [
       { id: "a1", fileId: "f1", format: "stl", createdAt: new Date(1) },
