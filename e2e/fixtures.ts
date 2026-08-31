@@ -257,6 +257,10 @@ export async function deleteOwnedFileFixture(
  * Attach a primary asset so `loadLibraryTiles` (authed-home Recent)
  * will include the file. LibraryTab lists files without this; Recent
  * skips rows that have no asset.
+ *
+ * Also stamps a placeholder thumbnailUrl so LibraryFileCard does not
+ * mount ThumbnailCapture against a fake storage key (502 → Next.js
+ * error overlay that blocks clicks on the page).
  */
 export async function attachOwnedFileAsset(
   fileId: string
@@ -272,6 +276,10 @@ export async function attachOwnedFileAsset(
       fileSize: 1024,
     })
     .returning({ id: schema.fileAssets.id });
+  await db
+    .update(schema.files)
+    .set({ thumbnailUrl: "/file.svg" })
+    .where(eq(schema.files.id, fileId));
   return { fileAssetId: asset.id };
 }
 

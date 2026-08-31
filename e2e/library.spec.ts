@@ -111,6 +111,14 @@ test.describe("library tab", () => {
     await expect(recentCard).not.toHaveAttribute("href", /\/print\//);
     await expect(libraryCard).not.toHaveAttribute("href", /\/print\//);
 
+    const walkthroughOut = process.env.WALKTHROUGH_OUT;
+    if (walkthroughOut) {
+      await page.screenshot({
+        path: `${walkthroughOut}/home_recent_and_files.png`,
+        fullPage: true,
+      });
+    }
+
     // Click the thumb well, not the title tooltip trigger. First
     // compile of /files/[slug] can exceed the default 5s URL timeout.
     await recentCard.locator("[data-slot='file-card']").click();
@@ -118,6 +126,13 @@ test.describe("library tab", () => {
       timeout: 30_000,
     });
     expect(page.url()).not.toContain("/print/");
+
+    if (walkthroughOut) {
+      await page.screenshot({
+        path: `${walkthroughOut}/file_details_after_recent_click.png`,
+        fullPage: true,
+      });
+    }
   });
 });
 
