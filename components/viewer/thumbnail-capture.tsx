@@ -16,6 +16,7 @@ import {
   CAPTURE_FOV,
   CAPTURE_TARGET_WORLD_SIZE,
 } from "./preview-camera";
+import { previewLightRigQuaternion } from "./preview-lights";
 import { StlModel } from "./loaders/stl-model";
 import { ObjModel } from "./loaders/obj-model";
 import { ThreeMfModel } from "./loaders/threemf-model";
@@ -69,30 +70,6 @@ function AimAtOrigin() {
     camera.updateProjectionMatrix();
   }, [camera]);
   return null;
-}
-
-/**
- * Rotation that carries the light rig around with the camera.
- *
- * The three-point rig below is authored in world space for the default
- * head-on shot: key light up and to the right, fill behind-left, rim
- * from behind. That is a deliberate arrangement relative to the
- * VIEWER, not to the model — leave it pinned to world axes and a
- * creator who orbits round to the back of their part gets a capture
- * lit from behind, which is to say a silhouette.
- *
- * So rotate the whole rig by the same rotation that carries the
- * default view direction onto the chosen one. Every angle is then lit
- * exactly like the head-on default is, which is the point: the creator
- * is choosing an angle, not a lighting setup.
- */
-function lightRigQuaternion(
-  cameraPosition: [number, number, number]
-): THREE.Quaternion {
-  const from = new THREE.Vector3(0, 0, 1);
-  const to = new THREE.Vector3(...cameraPosition);
-  if (to.lengthSq() === 0) return new THREE.Quaternion();
-  return new THREE.Quaternion().setFromUnitVectors(from, to.normalize());
 }
 
 function NormalizedModel({
@@ -281,7 +258,7 @@ export function ThumbnailCapture({
 
   const resolvedCamera = cameraPosition ?? DEFAULT_CAMERA_POSITION;
   const lightRig = useMemo(
-    () => lightRigQuaternion(resolvedCamera),
+    () => previewLightRigQuaternion(resolvedCamera),
     // Position is a fresh tuple each render; compare by value.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [resolvedCamera[0], resolvedCamera[1], resolvedCamera[2]]

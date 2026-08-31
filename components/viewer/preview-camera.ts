@@ -68,6 +68,66 @@ export function stageFitDistance(
   return margin * Math.max(fitHeightDistance, fitWidthDistance);
 }
 
+/** Frames a Bounds center/size must hold steady before ApplyInitialView. */
+export const STABLE_BOUNDS_FRAMES = 3;
+
+/**
+ * Relative tolerance for "Bounds has finished centering" — model-native
+ * units (mm for STL) can run to the hundreds, so an absolute epsilon
+ * either never trips or trips too early.
+ */
+export const STABLE_BOUNDS_REL_TOLERANCE = 1e-4;
+
+/**
+ * Whether a Bounds measurement is stable enough to aim a saved preview
+ * camera. Pure so the settle policy is unit-tested without R3F.
+ */
+export function boundsMeasurementStable(params: {
+  previous: {
+    center: [number, number, number];
+    maxDim: number;
+  } | null;
+  center: [number, number, number];
+  maxDim: number;
+}): boolean {
+  const { previous, center, maxDim } = params;
+  if (!(maxDim > 0)) return false;
+  if (!previous) return false;
+  if (!(previous.maxDim > 0)) return false;
+
+  const dimTol =
+    Math.max(maxDim, previous.maxDim) * STABLE_BOUNDS_REL_TOLERANCE;
+  if (Math.abs(maxDim - previous.maxDim) > dimTol) return false;
+
+  const centerTol = Math.max(maxDim, previous.maxDim) * STABLE_BOUNDS_REL_TOLERANCE;
+  return (
+    Math.abs(center[0] - previous.center[0]) <= centerTol &&
+    Math.abs(center[1] - previous.center[1]) <= centerTol &&
+    Math.abs(center[2] - previous.center[2]) <= centerTol
+  );
+}
+
+/**
+ * Camera−pivot offset used when saving a preview. Always prefer the
+ * model/Bounds centre over OrbitControls.target — the thumbnail rig
+ * orbits the normalised origin, and a panned target would bake a
+ * direction the capture cannot reproduce (CON-35).
+ */
+export function previewOrbitOffset(params: {
+  camera: [number, number, number];
+  /** Model/Bounds centre when known. */
+  modelCenter: [number, number, number] | null;
+  /** OrbitControls.target fallback when centre is not ready. */
+  controlsTarget: [number, number, number];
+}): [number, number, number] {
+  const pivot = params.modelCenter ?? params.controlsTarget;
+  return [
+    params.camera[0] - pivot[0],
+    params.camera[1] - pivot[1],
+    params.camera[2] - pivot[2],
+  ];
+}
+
 /**
  * Framing bounds for a captured snapshot.
  *
