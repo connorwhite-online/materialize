@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
+import { isSessionGatedImageSrc } from "@/lib/images/session-gated-src";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import {
@@ -729,6 +730,9 @@ export default async function ProjectDetailPage(props: {
                   fill
                   priority
                   sizes="(max-width: 768px) 100vw, 60vw"
+                  // Private/draft project covers are session-gated;
+                  // optimizer fetch has no Clerk cookies (CON-23).
+                  unoptimized={isSessionGatedImageSrc(project.thumbnailUrl)}
                   className="object-cover"
                 />
               </div>
