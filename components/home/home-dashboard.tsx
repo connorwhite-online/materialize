@@ -63,7 +63,9 @@ export async function HomeDashboard({ userId }: { userId: string }) {
               <FileCard
                 key={tile.fileAssetId}
                 compact
-                href={`/print/${tile.fileAssetId}`}
+                // Same destination as LibraryFileCard — print from the
+                // listing, not by skipping it (CON-32).
+                href={`/files/${tile.slug}`}
                 title={tile.name}
                 thumbnailUrl={tile.thumbnailUrl}
                 // Same owned subtitle as LibraryFileCard (.{format}).

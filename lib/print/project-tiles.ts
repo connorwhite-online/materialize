@@ -86,6 +86,7 @@ async function loadProjectPrintTilesOnce(
     .select({
       id: files.id,
       name: files.name,
+      slug: files.slug,
       thumbnailUrl: files.thumbnailUrl,
       status: files.status,
       position: projectFiles.position,
@@ -192,6 +193,7 @@ async function loadProjectPrintTilesOnce(
     tiles.push({
       fileAssetId: asset.id,
       name: f.name,
+      slug: f.slug,
       thumbnailUrl: f.thumbnailUrl,
       format: asset.format,
       source: "owned",

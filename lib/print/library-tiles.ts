@@ -21,6 +21,8 @@ const LIBRARY_MAX_FILES = 500;
 export interface LibraryTile {
   fileAssetId: string;
   name: string;
+  /** Listing slug — home/library cards open `/files/{slug}`. Print pickers still use `fileAssetId`. */
+  slug: string;
   thumbnailUrl: string | null;
   format: string;
   source: "owned" | "purchased";
@@ -54,6 +56,7 @@ async function loadLibraryTilesOnce(userId: string): Promise<LibraryTile[]> {
       .select({
         id: files.id,
         name: files.name,
+        slug: files.slug,
         thumbnailUrl: files.thumbnailUrl,
       })
       .from(files)
@@ -64,6 +67,7 @@ async function loadLibraryTilesOnce(userId: string): Promise<LibraryTile[]> {
       .select({
         id: files.id,
         name: files.name,
+        slug: files.slug,
         thumbnailUrl: files.thumbnailUrl,
       })
       .from(purchases)
@@ -156,6 +160,7 @@ async function loadLibraryTilesOnce(userId: string): Promise<LibraryTile[]> {
     tiles.push({
       fileAssetId: asset.id,
       name: f.name,
+      slug: f.slug,
       thumbnailUrl: f.thumbnailUrl,
       format: asset.format,
       source: "owned",
@@ -167,6 +172,7 @@ async function loadLibraryTilesOnce(userId: string): Promise<LibraryTile[]> {
     tiles.push({
       fileAssetId: asset.id,
       name: r.name,
+      slug: r.slug,
       thumbnailUrl: r.thumbnailUrl,
       format: asset.format,
       source: "purchased",

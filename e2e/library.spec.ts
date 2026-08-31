@@ -6,6 +6,7 @@ import {
   seedAppUserForClerkId,
   setClerkUsername,
   createOwnedFileFixture,
+  attachOwnedFileAsset,
   deleteOwnedFileFixture,
   deleteAppUserRow,
   type ClerkTestUserFixture,
@@ -72,9 +73,66 @@ test.describe("library tab", () => {
     // The seeded file should appear in the library by its name.
     // We don't pin to a specific card component selector — copy
     // is the user-visible contract.
-    await expect(page.getByText(file.name)).toBeVisible({
+    await expect(page.getByRole("heading", { name: file.name })).toBeVisible({
       timeout: 10_000,
     });
+  });
+
+  test("recent and library cards open the listing, not print (CON-32)", async ({
+    page,
+  }) => {
+    // Recent is loadLibraryTiles, which skips files with no asset.
+    await attachOwnedFileAsset(file.fileId);
+
+    await page.goto("/");
+    await clerk.signIn({
+      page,
+      signInParams: {
+        strategy: "email_code",
+        identifier: user.email,
+      },
+    });
+    await page.goto("/");
+
+    const recentSection = page
+      .getByRole("heading", { name: "Recent files" })
+      .locator("xpath=ancestor::section[1]");
+    await expect(recentSection).toBeVisible({ timeout: 10_000 });
+
+    const listingHref = `/files/${file.slug}`;
+    const recentCard = recentSection.locator(`a[href="${listingHref}"]`);
+    const libraryCard = page
+      .getByRole("heading", { name: "Files", exact: true })
+      .locator("xpath=ancestor::section[1]")
+      .locator(`a[href="${listingHref}"]`);
+
+    await expect(recentCard).toHaveAttribute("href", listingHref);
+    await expect(libraryCard).toHaveAttribute("href", listingHref);
+    await expect(recentCard).not.toHaveAttribute("href", /\/print\//);
+    await expect(libraryCard).not.toHaveAttribute("href", /\/print\//);
+
+    const walkthroughOut = process.env.WALKTHROUGH_OUT;
+    if (walkthroughOut) {
+      await page.screenshot({
+        path: `${walkthroughOut}/home_recent_and_files.png`,
+        fullPage: true,
+      });
+    }
+
+    // Click the thumb well, not the title tooltip trigger. First
+    // compile of /files/[slug] can exceed the default 5s URL timeout.
+    await recentCard.locator("[data-slot='file-card']").click();
+    await expect(page).toHaveURL(new RegExp(`${listingHref}(?:\\?.*)?$`), {
+      timeout: 30_000,
+    });
+    expect(page.url()).not.toContain("/print/");
+
+    if (walkthroughOut) {
+      await page.screenshot({
+        path: `${walkthroughOut}/file_details_after_recent_click.png`,
+        fullPage: true,
+      });
+    }
   });
 });
 
