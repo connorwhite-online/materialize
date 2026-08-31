@@ -110,12 +110,12 @@ export async function runCreateListing(
     if (input.category) {
       input.formData.set("category", input.category);
     }
+    // Sale toggle only controls price — license is always the
+    // creator's choice (reuse terms apply to free downloads too).
     if (!input.sellEnabled) {
       input.formData.set("price", "0");
-      input.formData.set("license", "cc_by");
-    } else {
-      input.formData.set("license", input.license);
     }
+    input.formData.set("license", input.license);
     if (input.recommendedMaterial) {
       input.formData.set("recommendedMaterialId", input.recommendedMaterial);
     }

@@ -68,8 +68,8 @@ export async function HomeDashboard({ userId }: { userId: string }) {
                 href={`/files/${tile.slug}`}
                 title={tile.name}
                 thumbnailUrl={tile.thumbnailUrl}
-                // Same owned subtitle as LibraryFileCard (.{format}).
-                subtitle={fileCardOwnedSubtitle(tile.format)}
+                // Same owned subtitle as LibraryFileCard (file size).
+                subtitle={fileCardOwnedSubtitle(tile.fileSizeBytes)}
                 placeholder={
                   <span className="text-[9px] uppercase tracking-wider text-muted-foreground/50">
                     .{tile.format}

@@ -59,7 +59,7 @@ export function formatFileDimensions(
   return `${dims[0].toFixed(1)} × ${dims[1].toFixed(1)} × ${dims[2].toFixed(1)} mm`;
 }
 
-/** Extension line for own-library / Recent / print tiles — e.g. `.stl`. */
+/** Extension line — e.g. `.stl`. Kept for placeholders / non-card surfaces. */
 export function formatFileExtension(
   format: string | null | undefined
 ): string | null {
@@ -70,14 +70,31 @@ export function formatFileExtension(
 }
 
 /**
+ * Human-readable file size for owned-card subtitles — e.g. `340 KB`, `1.2 MB`.
+ * Returns null for missing/non-positive sizes so the subtitle row collapses.
+ */
+export function formatFileSize(
+  bytes: number | null | undefined
+): string | null {
+  if (bytes == null || !Number.isFinite(bytes) || bytes <= 0) return null;
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${mb.toFixed(1)} MB`;
+  return `${(mb / 1024).toFixed(1)} GB`;
+}
+
+/**
  * Subtitle for a file the viewer owns (library, Recent, project bundle).
- * Format beats bounding box on compact tiles — the full W×D×H truncates
- * and belongs in the quote flow, not as the permanent scan line.
+ * Size beats extension on compact tiles — almost everything is STL/3MF,
+ * while byte size is useful when scanning your own library. Bounding box
+ * stays off the card (CON-19); it belongs in the quote flow.
  */
 export function fileCardOwnedSubtitle(
-  format: string | null | undefined
+  fileSizeBytes: number | null | undefined
 ): string | null {
-  return formatFileExtension(format);
+  return formatFileSize(fileSizeBytes);
 }
 
 /** Subtitle for a purchased file — who you bought it from. */

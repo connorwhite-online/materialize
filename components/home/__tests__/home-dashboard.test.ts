@@ -33,9 +33,11 @@ describe("HomeDashboard recent files", () => {
     );
   });
 
-  it("matches compact library meta (format subtitle)", () => {
+  it("matches compact library meta (file size subtitle)", () => {
     expect(dashboard).toContain("fileCardOwnedSubtitle");
-    expect(dashboard).toContain("subtitle={fileCardOwnedSubtitle(tile.format)}");
+    expect(dashboard).toContain(
+      "subtitle={fileCardOwnedSubtitle(tile.fileSizeBytes)}"
+    );
   });
 
   it("opens the listing, not the print flow (CON-32)", () => {

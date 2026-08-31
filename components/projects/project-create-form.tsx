@@ -56,6 +56,10 @@ export function ProjectCreateForm({
     for (const id of selected) formData.append("fileIds", id);
     formData.append("license", license);
     formData.set("category", category);
+    // Sale toggle only controls price — license is always submitted.
+    if (!sellEnabled) {
+      formData.set("price", "0");
+    }
     startTransition(async () => {
       const result = await createProject(formData);
       if (result && "error" in result) {
