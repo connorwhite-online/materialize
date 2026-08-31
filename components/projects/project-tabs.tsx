@@ -20,10 +20,12 @@ export interface ProjectTab {
  * The project detail page's content tabs (Files, Guide, BOM,
  * Wiring). Sits under the cover/photos and above the Discussion
  * section. Each panel's body is rendered on the server and handed in
- * as a `content` node, so this client wrapper only owns the tab chrome
- * and selection state. Tabs are supplied already filtered for
- * visibility, so the first entry is always a safe default. A single
- * tab skips the chrome entirely — nothing to switch between.
+ * as a `content` node, so this client wrapper only owns selection
+ * state on top of the shared `Tabs` segmented chrome (same pill track
+ * as `SegmentedControl` / owner settings). Tabs are supplied already
+ * filtered for visibility, so the first entry is always a safe
+ * default. A single tab skips the chrome entirely — nothing to switch
+ * between.
  */
 export function ProjectTabs({ tabs }: { tabs: ProjectTab[] }) {
   if (tabs.length === 0) return null;

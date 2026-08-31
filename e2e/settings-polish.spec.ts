@@ -35,7 +35,7 @@ test.describe("Owner profile settings polish", () => {
   test("Settings folds notifications, icon theme, saved-card copy", async ({
     page,
   }, testInfo) => {
-    const settingsTab = page.getByRole("button", {
+    const settingsTab = page.getByRole("tab", {
       name: "Settings",
       exact: true,
     });
@@ -52,13 +52,13 @@ test.describe("Owner profile settings polish", () => {
 
     await page.goto(`/${username}`);
     await expect(settingsTab).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByRole("button", { name: "Agents" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Payments" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Agents" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Payments" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Notifications" })).toHaveCount(
+      0
+    );
     await expect(
-      page.getByRole("button", { name: "Notifications" })
-    ).toHaveCount(0);
-    await expect(
-      page.getByRole("button", { name: "General", exact: true })
+      page.getByRole("tab", { name: "General", exact: true })
     ).toHaveCount(0);
 
     await expect(page.getByText("Email notifications")).toHaveCount(0);
@@ -81,7 +81,7 @@ test.describe("Owner profile settings polish", () => {
       fullPage: true,
     });
 
-    await page.getByRole("button", { name: "Payments" }).click();
+    await page.getByRole("tab", { name: "Payments" }).click();
     await expect(page.getByText("Saved card")).toBeVisible();
     await expect(
       page.getByText("Card on file for print checkout and agent orders")
