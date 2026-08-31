@@ -13,69 +13,55 @@ const dashboard = readFileSync(
   resolve(__dirname, "../home-dashboard.tsx"),
   "utf8"
 );
+const loader = readFileSync(
+  resolve(__dirname, "../../../lib/dashboard/pending-orders.ts"),
+  "utf8"
+);
 
 function order(overrides: Partial<PendingOrder> = {}): PendingOrder {
   return {
     id: "ord-1",
     status: "cart_created",
     material: "cc-config-uuid",
-    materialName: "PLA · Black",
     fileAssetId: "asset-1",
-    fileName: "Caribiner Hook",
     fileCount: 1,
-    materialCount: 1,
+    createdAt: "2026-08-30T12:00:00.000Z",
     ...overrides,
   };
 }
 
 describe("PendingOrderTile", () => {
-  it("does not look up lib/materials swatches (CraftCloud ids never match)", () => {
-    expect(source).not.toContain("getMaterialById");
-    expect(source).not.toContain("@/lib/materials");
-    expect(source).not.toContain("linear-gradient");
-  });
-
-  it("lives under an Orders heading, not Needs attention", () => {
+  it("lives under an Orders heading", () => {
     expect(dashboard).toContain(">Orders</h2>");
     expect(dashboard).not.toContain("Needs attention");
   });
 
-  it("renders status, file, and material on separate lines — no total or vendor", () => {
+  it("does not resolve CraftCloud materials for the tile", () => {
+    expect(loader).not.toContain("getCraftCloudCatalog");
+    expect(loader).not.toContain("findMaterialConfig");
+    expect(source).not.toContain("materialName");
+    expect(source).not.toContain("getMaterialById");
+  });
+
+  it("renders status, file count, and date — no material, vendor, or total", () => {
     const html = renderToStaticMarkup(
       <PendingOrderTile order={order()} />
     );
     expect(html).toContain("Pending payment");
-    expect(html).toContain("Caribiner Hook");
-    expect(html).toContain("PLA · Black");
+    expect(html).toContain("1 file");
+    expect(html).toMatch(/Aug/);
+    expect(html).toMatch(/30/);
+    expect(html).not.toContain("Caribiner");
+    expect(html).not.toContain("PLA");
     expect(html).not.toContain("Panashape");
-    expect(html).not.toContain("$8.26");
-    expect(html).not.toMatch(/\$\d/);
+    expect(html).not.toMatch(/\$\d+\.\d{2}/);
     expect(html).toContain("<svg");
   });
 
-  it("shows file and material counts for multi-item orders", () => {
+  it("shows a plural file count for multi-item orders", () => {
     const html = renderToStaticMarkup(
-      <PendingOrderTile
-        order={order({
-          fileName: null,
-          materialName: null,
-          fileCount: 3,
-          materialCount: 2,
-        })}
-      />
+      <PendingOrderTile order={order({ fileCount: 3 })} />
     );
     expect(html).toContain("3 files");
-    expect(html).toContain("2 materials");
-  });
-
-  it("uses distinct icons and short status labels", () => {
-    expect(source).toContain("CreditCardIcon");
-    expect(source).toContain("MailOpenIcon");
-    expect(source).toContain("CheckCircle2Icon");
-    expect(source).toContain("Factory");
-    expect(source).toContain("Pending payment");
-    expect(source).toContain("Complete payment");
-    expect(source).toContain("Confirm order");
-    expect(source).toContain("Placing soon");
   });
 });

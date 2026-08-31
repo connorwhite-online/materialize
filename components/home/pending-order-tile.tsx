@@ -7,8 +7,8 @@ import {
 } from "lucide-react";
 import { Factory } from "@/components/icons/factory";
 import {
-  formatOrderFileLine,
-  formatOrderMaterialLine,
+  formatOrderDate,
+  formatOrderFileCount,
   pendingOrderHref,
   type PendingOrder,
   type PendingOrderStatus,
@@ -44,11 +44,7 @@ export function PendingOrderTile({ order }: { order: PendingOrder }) {
     Icon: CreditCardIcon,
   };
 
-  const fileLine = formatOrderFileLine(order.fileCount, order.fileName);
-  const materialLine = formatOrderMaterialLine(
-    order.materialCount,
-    order.materialName
-  );
+  const dateLine = formatOrderDate(order.createdAt);
 
   return (
     <Link
@@ -68,12 +64,10 @@ export function PendingOrderTile({ order }: { order: PendingOrder }) {
       </div>
       <div className="min-w-0 space-y-0.5">
         <p className="truncate text-sm font-medium leading-tight group-hover:text-primary">
-          {fileLine}
+          {formatOrderFileCount(order.fileCount)}
         </p>
-        {materialLine ? (
-          <p className="truncate text-xs text-muted-foreground">
-            {materialLine}
-          </p>
+        {dateLine ? (
+          <p className="truncate text-xs text-muted-foreground">{dateLine}</p>
         ) : null}
       </div>
     </Link>

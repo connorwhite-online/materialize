@@ -1,8 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  formatOrderFileLine,
-  formatOrderMaterialLine,
-  formatPendingMaterialName,
+  formatOrderDate,
+  formatOrderFileCount,
   orderNeedsAttention,
   pendingOrderHref,
   sortHomeOrders,
@@ -14,63 +13,44 @@ function order(overrides: Partial<PendingOrder> = {}): PendingOrder {
     id: "ord-1",
     status: "cart_created",
     material: null,
-    materialName: null,
     fileAssetId: null,
-    fileName: "bracket",
     fileCount: 1,
-    materialCount: 0,
+    createdAt: "2026-08-30T12:00:00.000Z",
     ...overrides,
   };
 }
 
-describe("formatPendingMaterialName", () => {
-  it("joins material and color", () => {
-    expect(formatPendingMaterialName("PLA", "Black")).toBe("PLA · Black");
-  });
-
-  it("omits missing pieces and never echoes a UUID", () => {
-    expect(formatPendingMaterialName("PLA", null)).toBe("PLA");
-    expect(formatPendingMaterialName(null, "Black")).toBe("Black");
-    expect(formatPendingMaterialName(undefined, "")).toBeNull();
-    expect(formatPendingMaterialName(null, null)).toBeNull();
+describe("formatOrderFileCount", () => {
+  it("always shows a count", () => {
+    expect(formatOrderFileCount(1)).toBe("1 file");
+    expect(formatOrderFileCount(3)).toBe("3 files");
   });
 });
 
-describe("formatOrderFileLine / formatOrderMaterialLine", () => {
-  it("uses the file name for a single file", () => {
-    expect(formatOrderFileLine(1, "Caribiner Hook")).toBe("Caribiner Hook");
+describe("formatOrderDate", () => {
+  it("formats a short calendar date", () => {
+    expect(formatOrderDate("2026-08-30T12:00:00.000Z")).toMatch(/Aug/);
+    expect(formatOrderDate("2026-08-30T12:00:00.000Z")).toMatch(/30/);
+    expect(formatOrderDate("2026-08-30T12:00:00.000Z")).toMatch(/2026/);
   });
 
-  it("counts files when there are several", () => {
-    expect(formatOrderFileLine(3, "Caribiner Hook")).toBe("3 files");
-  });
-
-  it("uses the material label for a single material", () => {
-    expect(formatOrderMaterialLine(1, "PLA · Black")).toBe("PLA · Black");
-  });
-
-  it("counts materials when there are several", () => {
-    expect(formatOrderMaterialLine(2, "PLA · Black")).toBe("2 materials");
-  });
-
-  it("hides the material line when none are known", () => {
-    expect(formatOrderMaterialLine(0, null)).toBeNull();
+  it("returns empty for invalid input", () => {
+    expect(formatOrderDate("not-a-date")).toBe("");
   });
 });
 
 describe("sortHomeOrders", () => {
   it("puts attention-needed statuses ahead of auto_approved", () => {
     const rows = [
-      order({ id: "auto", status: "auto_approved" }),
-      order({ id: "pay", status: "cart_created" }),
-      order({ id: "agent", status: "awaiting_agent_approval" }),
+      order({ id: "auto", status: "auto_approved", createdAt: "2026-08-30T15:00:00.000Z" }),
+      order({ id: "pay", status: "cart_created", createdAt: "2026-08-30T10:00:00.000Z" }),
+      order({
+        id: "agent",
+        status: "awaiting_agent_approval",
+        createdAt: "2026-08-30T12:00:00.000Z",
+      }),
     ];
-    const createdAtById = new Map([
-      ["auto", 300],
-      ["pay", 100],
-      ["agent", 200],
-    ]);
-    expect(sortHomeOrders(rows, createdAtById).map((o) => o.id)).toEqual([
+    expect(sortHomeOrders(rows).map((o) => o.id)).toEqual([
       "agent",
       "pay",
       "auto",
