@@ -38,6 +38,8 @@ export interface LibraryFileCardItem {
   additionalPhotoIds: string[];
   primaryAssetId: string | null;
   primaryFormat: string | null;
+  /** Primary asset size in bytes — owned-card subtitle. */
+  primaryFileSizeBytes?: number | null;
   creatorUsername?: string | null;
   creatorDisplayName?: string | null;
   // Set when the deferred fingerprint pass auto-archived this listing
@@ -165,12 +167,12 @@ export function LibraryFileCard({
   const isFlagged =
     item.source === "owned" && isOwner && !!item.flaggedReason;
 
-  // Own files: .stl (matches /print WhatNextPane). Purchased: by creator.
+  // Own files: human-readable size (CON-33). Purchased: by creator.
   // Bounding box stays off the card — it truncates on compact tiles and
   // belongs in the quote flow (CON-19).
   const subtitle = isPurchased
     ? fileCardPurchasedSubtitle(item.creatorDisplayName, item.creatorUsername)
-    : fileCardOwnedSubtitle(item.primaryFormat);
+    : fileCardOwnedSubtitle(item.primaryFileSizeBytes);
 
   return (
     <>

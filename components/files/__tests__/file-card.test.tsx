@@ -9,6 +9,7 @@ import {
   fileCardPhotoUrls,
   formatFileDimensions,
   formatFileExtension,
+  formatFileSize,
   fileCardOwnedSubtitle,
   fileCardPurchasedSubtitle,
   FILE_CARD_SHELL_CLASS,
@@ -40,11 +41,21 @@ describe("formatFileDimensions", () => {
 });
 
 describe("file card subtitle helpers", () => {
-  it("normalizes owned format to a lowercase extension", () => {
+  it("normalizes format to a lowercase extension", () => {
     expect(formatFileExtension("STL")).toBe(".stl");
     expect(formatFileExtension(".3MF")).toBe(".3mf");
-    expect(fileCardOwnedSubtitle("obj")).toBe(".obj");
+    expect(formatFileExtension(null)).toBeNull();
+  });
+
+  it("formats owned subtitle as human-readable file size", () => {
+    expect(formatFileSize(512)).toBe("512 B");
+    expect(formatFileSize(340 * 1024)).toBe("340.0 KB");
+    expect(formatFileSize(1.2 * 1024 * 1024)).toBe("1.2 MB");
+    expect(formatFileSize(2 * 1024 * 1024 * 1024)).toBe("2.0 GB");
+    expect(fileCardOwnedSubtitle(2048)).toBe("2.0 KB");
     expect(fileCardOwnedSubtitle(null)).toBeNull();
+    expect(fileCardOwnedSubtitle(0)).toBeNull();
+    expect(fileCardOwnedSubtitle(-1)).toBeNull();
   });
 
   it("names the seller on purchased cards", () => {
@@ -111,14 +122,14 @@ describe("FileCard", () => {
         compact
         href="/print/asset-1"
         title="Caribiner Hook"
-        subtitle=".stl"
+        subtitle="1.2 MB"
       />
     );
     const link = screen.getByRole("link");
     expect(link.className).toContain("w-28");
     const title = screen.getByRole("heading", { name: "Caribiner Hook" });
     expect(title.className).toContain("text-xs");
-    expect(screen.getByText(".stl")).toBeTruthy();
+    expect(screen.getByText("1.2 MB")).toBeTruthy();
   });
 });
 
