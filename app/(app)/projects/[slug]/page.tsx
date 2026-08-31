@@ -858,21 +858,19 @@ export default async function ProjectDetailPage(props: {
             if (discussionEmpty && isOwner) return null;
 
             if (discussionEmpty) {
+              // Banner alone — no "Discussion" heading when empty.
               return (
-                <section className="space-y-3">
-                  <h2 className="text-base font-semibold">Discussion</h2>
-                  <CommentsSection
-                    target="project"
-                    targetId={project.id}
-                    comments={comments}
-                    photoPosts={buildsWithUrls}
-                    ownerId={project.userId}
-                    viewerId={userId}
-                    isSignedIn={!!userId}
-                    signInRedirect={`/projects/${slug}`}
-                    acceptPhoto={!!userId && canPostBuild}
-                  />
-                </section>
+                <CommentsSection
+                  target="project"
+                  targetId={project.id}
+                  comments={comments}
+                  photoPosts={buildsWithUrls}
+                  ownerId={project.userId}
+                  viewerId={userId}
+                  isSignedIn={!!userId}
+                  signInRedirect={`/projects/${slug}`}
+                  acceptPhoto={!!userId && canPostBuild}
+                />
               );
             }
 

@@ -127,8 +127,8 @@ export function CommentsSection({
 
   if (items.length === 0) {
     // Owners don't need an invitation on their own empty listing —
-    // the whole Discussion section is omitted (call sites skip the
-    // heading when CommentsSection returns null).
+    // the whole Discussion section is omitted. Visitors get the
+    // banner alone (call sites also skip the "Discussion" heading).
     if (viewerId !== null && viewerId === ownerId) {
       return null;
     }

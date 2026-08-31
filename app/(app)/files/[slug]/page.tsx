@@ -913,21 +913,19 @@ export default async function FileDetailPage(props: {
             if (discussionEmpty && isOwner) return null;
 
             if (discussionEmpty) {
+              // Banner alone — no "Discussion" heading when empty.
               return (
-                <section className="space-y-3">
-                  <h2 className="text-base font-semibold">Discussion</h2>
-                  <CommentsSection
-                    target="file"
-                    targetId={file.id}
-                    comments={comments}
-                    photoPosts={buildsWithUrls}
-                    ownerId={file.userId}
-                    viewerId={userId}
-                    isSignedIn={!!userId}
-                    signInRedirect={`/files/${slug}`}
-                    acceptPhoto={canPostBuild}
-                  />
-                </section>
+                <CommentsSection
+                  target="file"
+                  targetId={file.id}
+                  comments={comments}
+                  photoPosts={buildsWithUrls}
+                  ownerId={file.userId}
+                  viewerId={userId}
+                  isSignedIn={!!userId}
+                  signInRedirect={`/files/${slug}`}
+                  acceptPhoto={canPostBuild}
+                />
               );
             }
 
