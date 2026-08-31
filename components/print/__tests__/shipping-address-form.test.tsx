@@ -390,3 +390,77 @@ describe("ShippingAddressForm — anon mode pivots to sign-in for existing accou
     expect(screen.queryByText(/Verify your email/i)).toBeNull();
   });
 });
+
+const SAVED_ADDRESS = {
+  email: "connor@example.com",
+  shipping: {
+    firstName: "Connor",
+    lastName: "White",
+    address: "3711 Glenfeliz Blvd.",
+    city: "Los Angeles",
+    stateCode: "CA",
+    zipCode: "90039",
+    countryCode: "US",
+  },
+  billing: {
+    firstName: "Connor",
+    lastName: "White",
+    address: "3711 Glenfeliz Blvd.",
+    city: "Los Angeles",
+    stateCode: "CA",
+    zipCode: "90039",
+    countryCode: "US",
+    isCompany: false,
+  },
+};
+
+describe("ShippingAddressForm — embedded saved-address sheet chrome", () => {
+  it("puts step-back in a top Shipping chevron and keeps one secondary text action", () => {
+    const onBack = vi.fn();
+    render(
+      <ShippingAddressForm
+        onSubmit={vi.fn()}
+        onBack={onBack}
+        isSubmitting={false}
+        embedded
+        savedAddress={SAVED_ADDRESS}
+      />
+    );
+
+    expect(screen.getByText(/Ship it to the usual/i)).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /Deliver to this address/i })
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /Use a different address/i })
+    ).toBeTruthy();
+
+    // No stacked muted "Change shipping" peer under the CTA.
+    expect(screen.queryByText("Change shipping")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Shipping$/i }));
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the top Shipping chevron on the edit-address form", () => {
+    const onBack = vi.fn();
+    render(
+      <ShippingAddressForm
+        onSubmit={vi.fn()}
+        onBack={onBack}
+        isSubmitting={false}
+        embedded
+        savedAddress={SAVED_ADDRESS}
+      />
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Use a different address/i })
+    );
+    expect(screen.getByText(/Where should we ship/i)).toBeTruthy();
+    expect(screen.queryByText("Change shipping")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Shipping$/i }));
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+});
