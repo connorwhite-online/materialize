@@ -60,8 +60,6 @@ import {
 } from "@/components/photos/photos-feed";
 import { userOwnsProject } from "@/lib/entitlement";
 import { canWriteProject, isOrgMember } from "@/lib/authorization";
-import { listProjectCollaborators } from "@/app/actions/projects";
-import { ProjectCollaborators } from "@/components/projects/project-collaborators";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { swallow } from "@/lib/utils/swallow";
 import { resolveProjectVisibility } from "./access";
@@ -70,6 +68,8 @@ import {
   FileCardPriceBadge,
   fileCardOwnedSubtitle,
 } from "@/components/files/file-card";
+import { ProjectTabEmptyWell } from "@/components/projects/project-tab-empty-well";
+import { BoxIcon, BookOpenIcon, PackageIcon } from "lucide-react";
 
 function truncate(s: string, n: number) {
   return s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s;
@@ -162,7 +162,6 @@ export default async function ProjectDetailPage(props: {
     circuitRows,
     bomItems,
     commentRows,
-    collaborators,
   ] = await Promise.all([
     db
       .select({
@@ -283,7 +282,6 @@ export default async function ProjectDetailPage(props: {
         .orderBy(asc(projectComments.createdAt))
         .limit(500)
     ),
-    listProjectCollaborators(project.id),
   ]);
   const canDownload = ownsProject;
   // Gate for project builds / inline-comment photos. Owner is always
@@ -469,27 +467,43 @@ export default async function ProjectDetailPage(props: {
     label: "Files",
     content: (
       <div>
-        {canWrite && (
-          <div className="mb-3 flex items-center justify-end">
-            <AddProjectFilesDialog
-              projectId={project.id}
-              availableFiles={availableFilesToAdd}
-            />
-          </div>
+        {canWrite && bundledFiles.length === 0 ? (
+          <AddProjectFilesDialog
+            projectId={project.id}
+            availableFiles={availableFilesToAdd}
+            trigger={
+              <ProjectTabEmptyWell
+                icon={<BoxIcon className="size-4" />}
+                title="Add files"
+                description="Bundle the printable parts for this project."
+              />
+            }
+          />
+        ) : (
+          <>
+            {canWrite && (
+              <div className="mb-3 flex items-center justify-end">
+                <AddProjectFilesDialog
+                  projectId={project.id}
+                  availableFiles={availableFilesToAdd}
+                />
+              </div>
+            )}
+            <div className="grid gap-3 grid-cols-2 sm:grid-cols-3">
+              {bundledFileCards.map((file) => (
+                <FileCard
+                  key={file.id}
+                  href={`/files/${file.slug}`}
+                  title={file.displayName}
+                  thumbnailUrl={file.thumbnailUrl}
+                  placeholder="No preview"
+                  overlay={<FileCardPriceBadge priceCents={file.price} />}
+                  subtitle={fileCardOwnedSubtitle(file.format)}
+                />
+              ))}
+            </div>
+          </>
         )}
-        <div className="grid gap-3 grid-cols-2 sm:grid-cols-3">
-          {bundledFileCards.map((file) => (
-            <FileCard
-              key={file.id}
-              href={`/files/${file.slug}`}
-              title={file.displayName}
-              thumbnailUrl={file.thumbnailUrl}
-              placeholder="No preview"
-              overlay={<FileCardPriceBadge priceCents={file.price} />}
-              subtitle={fileCardOwnedSubtitle(file.format)}
-            />
-          ))}
-        </div>
       </div>
     ),
   });
@@ -505,26 +519,29 @@ export default async function ProjectDetailPage(props: {
       label: "Guide",
       content: (
         <div className="space-y-3">
-          {canWrite && (
-            <Button
-              variant="outline"
-              size="sm"
-              render={
-                <Link href={`/projects/${project.slug}/build-guide/edit`} />
-              }
-            >
-              {project.buildGuide ? "Edit guide" : "Write guide"}
-            </Button>
-          )}
           {project.buildGuide ? (
-            <BuildGuideReader html={project.buildGuide} />
+            <>
+              {canWrite && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  render={
+                    <Link href={`/projects/${project.slug}/build-guide/edit`} />
+                  }
+                >
+                  Edit guide
+                </Button>
+              )}
+              <BuildGuideReader html={project.buildGuide} />
+            </>
           ) : (
             canWrite && (
-              <p className="text-sm text-muted-foreground">
-                Document how to build this project — steps, photos, wiring
-                notes, code snippets. Organize it into chapters and add
-                image galleries.
-              </p>
+              <ProjectTabEmptyWell
+                href={`/projects/${project.slug}/build-guide/edit`}
+                icon={<BookOpenIcon className="size-4" />}
+                title="Write guide"
+                description="Steps, photos, and notes for builders."
+              />
             )
           )}
         </div>
@@ -537,38 +554,49 @@ export default async function ProjectDetailPage(props: {
   // (the editor lives here now, not the sidebar); everyone else only
   // once items exist.
   if (bomItems.length > 0 || canWrite) {
+    const bomInitial = bomItems.map((it) => ({
+      name: it.name,
+      quantity: String(it.quantity),
+      unit: it.unit ?? "",
+      notes: it.notes ?? "",
+      sourceUrl: it.sourceUrl ?? "",
+    }));
     tabs.push({
       value: "bom",
       label: "Components",
       content: (
         <div className="space-y-3">
-          {canWrite && (
-            <div className="flex justify-end">
+          {bomItems.length > 0 ? (
+            <>
+              {canWrite && (
+                <div className="flex justify-end">
+                  <EditBomDialog
+                    projectId={project.id}
+                    initial={bomInitial}
+                    trigger={
+                      <Button variant="outline" size="sm">
+                        Edit Components
+                      </Button>
+                    }
+                  />
+                </div>
+              )}
+              <BomDisplay items={bomItems} />
+            </>
+          ) : (
+            canWrite && (
               <EditBomDialog
                 projectId={project.id}
-                initial={bomItems.map((it) => ({
-                  name: it.name,
-                  quantity: String(it.quantity),
-                  unit: it.unit ?? "",
-                  notes: it.notes ?? "",
-                  sourceUrl: it.sourceUrl ?? "",
-                }))}
+                initial={bomInitial}
                 trigger={
-                  <Button variant="outline" size="sm">
-                    {bomItems.length > 0
-                      ? "Edit Components"
-                      : "Add a Bill of Materials"}
-                  </Button>
+                  <ProjectTabEmptyWell
+                    icon={<PackageIcon className="size-4" />}
+                    title="Add components"
+                    description="Screws, electronics, and other non-printed parts."
+                  />
                 }
               />
-            </div>
-          )}
-          {bomItems.length > 0 ? (
-            <BomDisplay items={bomItems} />
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              No bill of materials yet.
-            </p>
+            )
           )}
         </div>
       ),
@@ -823,36 +851,49 @@ export default async function ProjectDetailPage(props: {
             <ProjectTabs tabs={tabs} />
           </div>
 
-          {(collaborators.length > 0 || isOwner) && (
-            <ProjectCollaborators
-              projectId={project.id}
-              initial={collaborators.map((c) => ({
-                id: c.id,
-                username: c.username,
-                displayName: c.displayName,
-                avatarUrl: c.avatarUrl,
-              }))}
-              canManage={isOwner}
-              viewerId={userId}
-            />
-          )}
+          {(() => {
+            const discussionEmpty =
+              comments.length === 0 && buildsWithUrls.length === 0;
+            // Owners don't see an empty Discussion invitation on
+            // their own project — nothing to invite themselves to.
+            if (discussionEmpty && isOwner) return null;
 
-          <Card className="bg-muted/50">
-            <CardContent className="space-y-5">
-              <h2 className="text-base font-semibold">Discussion</h2>
-              <CommentsSection
-                target="project"
-                targetId={project.id}
-                comments={comments}
-                photoPosts={buildsWithUrls}
-                ownerId={project.userId}
-                viewerId={userId}
-                isSignedIn={!!userId}
-                signInRedirect={`/projects/${slug}`}
-                acceptPhoto={!!userId && canPostBuild}
-              />
-            </CardContent>
-          </Card>
+            if (discussionEmpty) {
+              // Banner alone — no "Discussion" heading when empty.
+              return (
+                <CommentsSection
+                  target="project"
+                  targetId={project.id}
+                  comments={comments}
+                  photoPosts={buildsWithUrls}
+                  ownerId={project.userId}
+                  viewerId={userId}
+                  isSignedIn={!!userId}
+                  signInRedirect={`/projects/${slug}`}
+                  acceptPhoto={!!userId && canPostBuild}
+                />
+              );
+            }
+
+            return (
+              <Card className="bg-muted/50">
+                <CardContent className="space-y-5">
+                  <h2 className="text-base font-semibold">Discussion</h2>
+                  <CommentsSection
+                    target="project"
+                    targetId={project.id}
+                    comments={comments}
+                    photoPosts={buildsWithUrls}
+                    ownerId={project.userId}
+                    viewerId={userId}
+                    isSignedIn={!!userId}
+                    signInRedirect={`/projects/${slug}`}
+                    acceptPhoto={!!userId && canPostBuild}
+                  />
+                </CardContent>
+              </Card>
+            );
+          })()}
 
           <div className="flex justify-center pt-2">
             <LicenseBadge license={project.license} />

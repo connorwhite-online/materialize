@@ -41,6 +41,71 @@ const photo: PhotoPost = {
   },
 };
 
+describe("CommentsSection empty discussion", () => {
+  it("renders nothing for the owner when discussion is empty", () => {
+    const { container } = render(
+      <CommentsSection
+        target="project"
+        targetId="project-1"
+        comments={[]}
+        photoPosts={[]}
+        ownerId="user-1"
+        viewerId="user-1"
+        isSignedIn
+        signInRedirect="/projects/demo"
+      />
+    );
+
+    expect(container.firstChild).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /share your build/i })
+    ).toBeNull();
+  });
+
+  it("shows the invitation banner to non-owners when empty", () => {
+    render(
+      <CommentsSection
+        target="project"
+        targetId="project-1"
+        comments={[]}
+        photoPosts={[]}
+        ownerId="owner-1"
+        viewerId="visitor-1"
+        isSignedIn
+        signInRedirect="/projects/demo"
+      />
+    );
+
+    expect(
+      screen.getByRole("button", { name: /share your build/i })
+    ).toBeTruthy();
+    expect(screen.queryByPlaceholderText(/share thoughts/i)).toBeNull();
+  });
+
+  it("expands the composer after a visitor clicks the banner", () => {
+    render(
+      <CommentsSection
+        target="project"
+        targetId="project-1"
+        comments={[]}
+        photoPosts={[]}
+        ownerId="owner-1"
+        viewerId="visitor-1"
+        isSignedIn
+        signInRedirect="/projects/demo"
+        acceptPhoto
+      />
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /share your build/i })
+    );
+    expect(
+      screen.getByPlaceholderText(/share thoughts, or drop a photo/i)
+    ).toBeTruthy();
+  });
+});
+
 describe("CommentsSection photo delete routing", () => {
   beforeEach(() => {
     deleteFilePhoto.mockClear();

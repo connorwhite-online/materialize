@@ -8,6 +8,7 @@ import { UserAvatar } from "@/components/auth/user-avatar";
 import { Pencil } from "@/components/icons/pencil";
 import { Trash } from "@/components/icons/trash";
 import { CommentForm } from "./comment-form";
+import { DiscussionEmptyBanner } from "./discussion-empty-banner";
 import { DeletePhotoButton } from "@/components/photos/delete-photo-button";
 import { PhotoLightbox } from "@/components/photos/photo-lightbox";
 import { MarkdownProse } from "@/components/ui/markdown-prose";
@@ -92,6 +93,10 @@ export function CommentsSection({
   signInRedirect,
   acceptPhoto = false,
 }: Props) {
+  // Empty discussion starts collapsed behind the banner so the
+  // section stays a light invitation instead of a full composer.
+  const [composing, setComposing] = useState(false);
+
   const topLevel = comments.filter((c) => c.parentId === null);
   const repliesByParent = new Map<string, CommentRow[]>();
   for (const c of comments) {
@@ -118,6 +123,38 @@ export function CommentsSection({
     return aT - bT;
   });
 
+  const signInHref = `/sign-in?redirect=${encodeURIComponent(signInRedirect)}`;
+
+  if (items.length === 0) {
+    // Owners don't need an invitation on their own empty listing —
+    // the whole Discussion section is omitted. Visitors get the
+    // banner alone (call sites also skip the "Discussion" heading).
+    if (viewerId !== null && viewerId === ownerId) {
+      return null;
+    }
+
+    return (
+      <div className="space-y-4">
+        {!composing && (
+          <DiscussionEmptyBanner
+            onStart={isSignedIn ? () => setComposing(true) : undefined}
+            signInHref={isSignedIn ? undefined : signInHref}
+          />
+        )}
+        {isSignedIn && composing && (
+          <CommentForm
+            target={target}
+            targetId={targetId}
+            placeholder="Share thoughts on this listing…"
+            acceptPhoto={acceptPhoto}
+            autoFocus
+            onCancel={() => setComposing(false)}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5">
       {isSignedIn ? (
@@ -129,43 +166,37 @@ export function CommentsSection({
         />
       ) : (
         <Link
-          href={`/sign-in?redirect=${encodeURIComponent(signInRedirect)}`}
+          href={signInHref}
           className="block rounded-xl border border-dashed border-border px-4 py-3 text-center text-sm text-muted-foreground hover:bg-muted/40 transition-colors"
         >
           Sign in to comment
         </Link>
       )}
 
-      {items.length === 0 ? (
-        <p className="py-6 text-center text-sm text-muted-foreground">
-          No comments yet.
-        </p>
-      ) : (
-        <div className="space-y-5">
-          {items.map((item) =>
-            item.kind === "comment" ? (
-              <CommentThread
-                key={`c-${item.data.id}`}
-                target={target}
-                targetId={targetId}
-                comment={item.data}
-                replies={item.replies}
-                ownerId={ownerId}
-                viewerId={viewerId}
-                canReply={isSignedIn}
-              />
-            ) : (
-              <PhotoPostRow
-                key={`p-${item.data.id}`}
-                target={target}
-                photo={item.data}
-                ownerId={ownerId}
-                viewerId={viewerId}
-              />
-            )
-          )}
-        </div>
-      )}
+      <div className="space-y-5">
+        {items.map((item) =>
+          item.kind === "comment" ? (
+            <CommentThread
+              key={`c-${item.data.id}`}
+              target={target}
+              targetId={targetId}
+              comment={item.data}
+              replies={item.replies}
+              ownerId={ownerId}
+              viewerId={viewerId}
+              canReply={isSignedIn}
+            />
+          ) : (
+            <PhotoPostRow
+              key={`p-${item.data.id}`}
+              target={target}
+              photo={item.data}
+              ownerId={ownerId}
+              viewerId={viewerId}
+            />
+          )
+        )}
+      </div>
     </div>
   );
 }

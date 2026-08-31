@@ -22,10 +22,18 @@ export interface ProjectTab {
  * section. Each panel's body is rendered on the server and handed in
  * as a `content` node, so this client wrapper only owns the tab chrome
  * and selection state. Tabs are supplied already filtered for
- * visibility, so the first entry is always a safe default.
+ * visibility, so the first entry is always a safe default. A single
+ * tab skips the chrome entirely — nothing to switch between.
  */
 export function ProjectTabs({ tabs }: { tabs: ProjectTab[] }) {
   if (tabs.length === 0) return null;
+
+  // One panel: render the body alone. The tab strip would just be a
+  // lonely Files (0) pill with no siblings to navigate to.
+  if (tabs.length === 1) {
+    return <div>{tabs[0].content}</div>;
+  }
+
   return (
     // No wrapping container — the tab line sits directly on the page
     // and content sits under it. Dropping the bordered/filled/padded box

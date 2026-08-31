@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type ReactElement } from "react";
 import { useRouter } from "next/navigation";
 import {
   Dialog,
@@ -32,6 +32,11 @@ interface Props {
    * offers attachable, not-yet-attached files.
    */
   availableFiles: AvailableFile[];
+  /**
+   * Optional custom trigger. Lets empty-state wells replace the
+   * default outline "Add files" button without forking the dialog.
+   */
+  trigger?: ReactElement;
 }
 
 type PickedFile = {
@@ -50,7 +55,11 @@ type PickedFile = {
  *     that aren't in this project yet, then addFilesToProject (which
  *     dedupes + caps at MAX_PROJECT_FILES server-side).
  */
-export function AddProjectFilesDialog({ projectId, availableFiles }: Props) {
+export function AddProjectFilesDialog({
+  projectId,
+  availableFiles,
+  trigger,
+}: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
@@ -98,10 +107,12 @@ export function AddProjectFilesDialog({ projectId, availableFiles }: Props) {
     >
       <DialogTrigger
         render={
-          <Button variant="outline" size="sm">
-            <Plus size={14} />
-            Add files
-          </Button>
+          trigger ?? (
+            <Button variant="outline" size="sm">
+              <Plus size={14} />
+              Add files
+            </Button>
+          )
         }
       />
       <DialogContent className="max-h-[90vh] w-full max-w-2xl overflow-y-auto sm:max-w-2xl">

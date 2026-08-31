@@ -2,23 +2,24 @@
 
 import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { CableIcon } from "lucide-react";
 import { ImagePlus } from "@/components/icons/image-plus";
 import { addProjectCircuitImage } from "@/app/actions/circuits";
 import {
   uploadCircuitToR2,
   validateCircuitImage,
 } from "@/lib/circuits/upload-circuit";
+import { ProjectTabEmptyWell } from "@/components/projects/project-tab-empty-well";
 import { cn } from "@/lib/utils";
 
 interface Props {
   projectId: string;
   /**
-   * 'sm' — compact 48×48 dashed square for empty placement.
-   * 'lg' — fills the parent (designed for an aspect-square slot at
-   *        the start of the circuit gallery so it sits flush with the
-   *        existing diagram tiles).
+   * 'sm' — compact 48×48 dashed square.
+   * 'lg' — fills the parent (aspect-square gallery add tile).
+   * 'well' — wide/short project-tab empty-state well.
    */
-  size?: "sm" | "lg";
+  size?: "sm" | "lg" | "well";
   multiple?: boolean;
 }
 
@@ -62,9 +63,7 @@ export function CircuitUploader({
         router.refresh();
       } catch (err) {
         console.error("Circuit upload failed:", err);
-        setError(
-          err instanceof Error ? err.message : "Upload failed."
-        );
+        setError(err instanceof Error ? err.message : "Upload failed.");
       } finally {
         setUploading(false);
       }
@@ -108,6 +107,41 @@ export function CircuitUploader({
     [upload, uploading]
   );
 
+  const fileInput = (
+    <input
+      ref={inputRef}
+      type="file"
+      accept="image/jpeg,image/png,image/webp,image/svg+xml"
+      multiple={multiple}
+      onChange={(e) => {
+        const files = Array.from(e.target.files || []);
+        if (files.length > 0) void uploadAll(files);
+        e.target.value = "";
+      }}
+      className="hidden"
+    />
+  );
+
+  if (size === "well") {
+    return (
+      <div className="space-y-1.5">
+        <ProjectTabEmptyWell
+          icon={<CableIcon className="size-4" />}
+          title={uploading ? "Uploading…" : "Add wiring"}
+          description="Drop a diagram so builders can connect it."
+          disabled={uploading}
+          aria-label="Add wiring diagram (click, drag, or paste)"
+          onClick={() => inputRef.current?.click()}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={onDrop}
+          onPaste={onPaste}
+        />
+        {fileInput}
+        {error && <p className="text-xs text-destructive">{error}</p>}
+      </div>
+    );
+  }
+
   const isLarge = size === "lg";
   return (
     <div className={cn("space-y-1.5", isLarge && "h-full w-full")}>
@@ -137,18 +171,7 @@ export function CircuitUploader({
         <ImagePlus size={isLarge ? 28 : 20} />
         {isLarge && <span className="text-xs font-medium">Add diagram</span>}
       </button>
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/jpeg,image/png,image/webp,image/svg+xml"
-        multiple={multiple}
-        onChange={(e) => {
-          const files = Array.from(e.target.files || []);
-          if (files.length > 0) void uploadAll(files);
-          e.target.value = "";
-        }}
-        className="hidden"
-      />
+      {fileInput}
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   );

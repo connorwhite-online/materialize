@@ -50,8 +50,9 @@ interface Props {
  * project. Matches the chrome of the file-page PhotosFeed — same
  * snap-scrolling tiles, same lightbox on click, same scrollbar
  * suppression, same add-tile-first ordering for owners. Empty + owner
- * collapses to a compact uploader; empty + non-owner renders nothing
- * (the parent decides whether to show the section header at all).
+ * collapses to the project-tab empty well; empty + non-owner renders
+ * nothing (the parent decides whether to show the section header at
+ * all).
  */
 export function CircuitGallery({ projectId, circuits, canManage }: Props) {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
@@ -60,13 +61,8 @@ export function CircuitGallery({ projectId, circuits, canManage }: Props) {
 
   if (circuits.length === 0 && canManage) {
     return (
-      <div className="space-y-2">
-        <div className="flex items-center gap-3">
-          <CircuitUploader projectId={projectId} size="sm" multiple />
-          <p className="text-xs text-muted-foreground">
-            Add a wiring diagram so builders can wire up the electronics.
-          </p>
-        </div>
+      <div className="space-y-3">
+        <CircuitUploader projectId={projectId} size="well" multiple />
         <div className="flex flex-wrap items-center gap-2">
           <AddWokwiDialog projectId={projectId} />
           <AddKiCadButton projectId={projectId} />
