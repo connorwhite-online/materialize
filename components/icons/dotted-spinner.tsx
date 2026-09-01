@@ -2,9 +2,13 @@ import type { SVGProps } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * Dashed ring spinner — 2px round-cap dashes on a circle, spun with
+ * Dotted ring spinner — 2px round-cap dots on a circle, spun with
  * Tailwind's linear `animate-spin` (CSS only; respects reduced motion
  * via the global `.animate-spin` override in globals.css).
+ *
+ * `strokeDasharray="0 6.5"` with round caps collapses each dash to a
+ * dot; the gap keeps them evenly spaced so the ring reads as dotted
+ * rather than dashed (search loading + Update preview capturing).
  */
 export function DottedSpinner({
   size = 16,
@@ -28,7 +32,7 @@ export function DottedSpinner({
         stroke="currentColor"
         strokeWidth={2}
         strokeLinecap="round"
-        strokeDasharray="5.5 4"
+        strokeDasharray="0 6.5"
       />
     </svg>
   );

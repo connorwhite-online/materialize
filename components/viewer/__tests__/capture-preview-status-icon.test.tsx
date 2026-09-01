@@ -13,7 +13,8 @@ describe("CapturePreviewStatusIcon", () => {
     expect(svg?.classList.contains("animate-spin")).toBe(true);
     const circle = container.querySelector("circle");
     expect(circle?.getAttribute("stroke-linecap")).toBe("round");
-    expect(circle?.getAttribute("stroke-dasharray")).toBeTruthy();
+    // Round-cap zero-length dashes = dots (not long dashes).
+    expect(circle?.getAttribute("stroke-dasharray")).toBe("0 6.5");
   });
 
   it("shows a filled check circle when saved", () => {
