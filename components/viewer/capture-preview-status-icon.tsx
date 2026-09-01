@@ -7,7 +7,7 @@ export type CapturePreviewStatus = "idle" | "capturing" | "saved" | "error";
 /**
  * Progress glyph for the in-frame Update preview control.
  * Resting / error keep the viewfinder; capturing spins the shared
- * dotted ring; saved lands on a filled check (CON-36).
+ * dashed ring; saved lands on a filled check (CON-36).
  */
 export function CapturePreviewStatusIcon({
   status,

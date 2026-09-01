@@ -4,7 +4,7 @@ import { render } from "@testing-library/react";
 import { CapturePreviewStatusIcon } from "../capture-preview-status-icon";
 
 describe("CapturePreviewStatusIcon", () => {
-  it("spins the dotted ring while capturing", () => {
+  it("spins the dashed ring while capturing", () => {
     const { container } = render(
       <CapturePreviewStatusIcon status="capturing" />
     );
@@ -13,8 +13,8 @@ describe("CapturePreviewStatusIcon", () => {
     expect(svg?.classList.contains("animate-spin")).toBe(true);
     const circle = container.querySelector("circle");
     expect(circle?.getAttribute("stroke-linecap")).toBe("round");
-    // Round-cap zero-length dashes = dots (not long dashes).
-    expect(circle?.getAttribute("stroke-dasharray")).toBe("0 6.5");
+    // Round-cap dashes, not collapsed dots (`0 6.5`).
+    expect(circle?.getAttribute("stroke-dasharray")).toBe("5.5 4");
   });
 
   it("shows a filled check circle when saved", () => {
