@@ -55,7 +55,7 @@ import {
   RulerIcon,
   ScissorsIcon,
 } from "lucide-react";
-import { FrameCorners } from "@/components/icons/frame-corners";
+import { CapturePreviewStatusIcon } from "./capture-preview-status-icon";
 import {
   boundsMeasurementStable,
   previewOrbitOffset,
@@ -1951,7 +1951,7 @@ export function ModelViewer({
             }
             className="flex h-8 items-center gap-1.5 px-3 text-xs text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
           >
-            <FrameCorners size={14} strokeWidth={1.75} />
+            <CapturePreviewStatusIcon status={capturePreviewStatus} />
             <span aria-live="polite">
               {CAPTURE_PREVIEW_LABELS[capturePreviewStatus]}
             </span>

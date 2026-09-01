@@ -5,6 +5,8 @@ import { cn } from "@/lib/utils";
  * Dashed ring spinner — 2px round-cap dashes on a circle, spun with
  * Tailwind's linear `animate-spin` (CSS only; respects reduced motion
  * via the global `.animate-spin` override in globals.css).
+ *
+ * Used by search loading and Update preview capturing (CON-36).
  */
 export function DottedSpinner({
   size = 16,
