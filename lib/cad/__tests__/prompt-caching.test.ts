@@ -16,10 +16,18 @@ const createMock = vi.fn<
   ) => Promise<Partial<Anthropic.Message>>
 >();
 
+// Both entry points funnel into ONE spy: model-client's completeText calls
+// `create`, the agentic loop streams (long thinking turns would otherwise trip
+// the non-streaming request timeout). The request body is identical either
+// way, so every assertion on createMock.mock.calls[n][0] still reads the real
+// request — and call ordering across the two paths stays observable.
 vi.mock("@anthropic-ai/sdk", () => ({
   default: class MockAnthropic {
     messages = {
       create: (...args: Parameters<typeof createMock>) => createMock(...args),
+      stream: (...args: Parameters<typeof createMock>) => ({
+        finalMessage: () => createMock(...args),
+      }),
     };
   },
 }));
@@ -193,5 +201,50 @@ describe("agentic loop prompt caching (MTR-221)", () => {
       tool_use_id: "tu2",
       cache_control: { type: "ephemeral" },
     });
+  });
+});
+
+describe("reasoning params reach the request", () => {
+  it("gives a one-shot completion its role's model, thinking and effort", async () => {
+    createMock.mockResolvedValueOnce(textTurn("hello"));
+
+    await completeText({ system: "SYS", prompt: "make a cube", role: "plan" });
+
+    const body = createMock.mock.calls[0][0];
+    expect(body.model).toBe("claude-opus-5");
+    expect(body.thinking).toEqual({ type: "adaptive" });
+    expect(body.output_config).toEqual({ effort: "medium" });
+  });
+
+  it("keeps the role's reasoning params when the caller pins a model", async () => {
+    // A CAD_MODEL_* pin is a routing choice, not an opt-out of reasoning —
+    // the harness resolves models at several call sites and passes them
+    // explicitly, so a pin must not silently drop thinking.
+    createMock.mockResolvedValueOnce(textTurn("hello"));
+
+    await completeText({
+      system: "SYS",
+      prompt: "make a cube",
+      model: "claude-opus-4-8",
+      role: "critique",
+    });
+
+    const body = createMock.mock.calls[0][0];
+    expect(body.model).toBe("claude-opus-4-8");
+    expect(body.thinking).toEqual({ type: "adaptive" });
+    expect(body.output_config).toEqual({ effort: "high" });
+  });
+
+  it("spends xhigh effort on the agentic loop's geometry turns", async () => {
+    createMock.mockResolvedValueOnce(textTurn("done"));
+
+    await runAgenticHarness({ prompt: "a bracket", maxAttempts: 1 }).catch(
+      () => undefined
+    );
+
+    const body = createMock.mock.calls[0][0];
+    expect(body.model).toBe("claude-opus-5");
+    expect(body.thinking).toEqual({ type: "adaptive" });
+    expect(body.output_config).toEqual({ effort: "xhigh" });
   });
 });

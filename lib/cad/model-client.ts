@@ -5,6 +5,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { activeCadContext, meterModelUsage } from "./metering";
 import type { ResolvedModelCredentials } from "./credentials";
 import type { PromptImage } from "./types";
+import { cadRoleOrDefault, modelParamsForRole } from "./models";
 
 /**
  * Thin wrapper over the Anthropic Messages API for one-shot text completions
@@ -33,12 +34,16 @@ import type { PromptImage } from "./types";
  * model) into the active CadMeter — a no-op outside a metered run.
  */
 
-// Default when a role doesn't pin a model (modelForRole -> CAD_MODEL_* ->
-// undefined). Sonnet 4.6 is the strong, fast default proven for CAD codegen;
-// override per role via the CAD_MODEL_* env vars.
-const DEFAULT_MODEL = "claude-sonnet-4-6";
-// build123d for a non-trivial part can run long; headroom avoids truncation.
-const MAX_TOKENS = 8192;
+// The model + thinking/effort for a call come from modelParamsForRole (see
+// ./models) — this module no longer carries a default id of its own, so there
+// is one place a role's model is decided instead of two that drift.
+//
+// build123d for a non-trivial part can run long, and adaptive thinking spends
+// from the SAME budget, so 8192 (the pre-thinking cap) now truncates long
+// scripts. 16000 is the headroom that still lands inside the SDK's
+// non-streaming HTTP timeout; the agentic loop streams instead and can go
+// higher.
+const MAX_TOKENS = 16_000;
 
 /**
  * True when a usable credential is present in the environment.
@@ -88,11 +93,14 @@ export type { PromptImage } from "./types";
 export interface CompleteTextOptions {
   system: string;
   prompt: string;
-  /** Model id; falls back to DEFAULT_MODEL when omitted. */
+  /** Model id; falls back to the role's configured model when omitted. */
   model?: string;
   /**
-   * Harness role making the call ("plan", "brief", "critique", …) — used
-   * only to attribute token usage in the metering summary (MTR-181).
+   * Harness role making the call ("plan", "brief", "critique", …). Attributes
+   * token usage in the metering summary (MTR-181) AND selects the model +
+   * thinking/effort params when `model` is not pinned. Callers outside the
+   * role set (e.g. "route") pass a free-form label and get the plan role's
+   * params, which is what they were already resolving by hand.
    */
   role?: string;
   /** Reference images to include in the user turn (multimodal). */
@@ -143,9 +151,14 @@ export async function completeText(opts: CompleteTextOptions): Promise<string> {
 
   const client = clientForCredentials(activeCadContext()?.credentials);
   const started = Date.now();
+  const params = modelParamsForRole(cadRoleOrDefault(opts.role));
   const message = await client.messages.create(
     {
-      model: opts.model || DEFAULT_MODEL,
+      ...params,
+      // An explicitly pinned model wins over the role's default, but keeps the
+      // role's thinking/effort — the pin is a routing choice, not an opt-out
+      // of reasoning.
+      ...(opts.model ? { model: opts.model } : {}),
       max_tokens: MAX_TOKENS,
       // Prompt caching (MTR-221): the system prompt (base prompt + knowledge
       // blocks + exemplars) is byte-identical across every repair attempt of a
@@ -164,7 +177,7 @@ export async function completeText(opts: CompleteTextOptions): Promise<string> {
   );
   meterModelUsage({
     role: opts.role ?? "other",
-    model: message.model || opts.model || DEFAULT_MODEL,
+    model: message.model || opts.model || params.model,
     inputTokens: message.usage?.input_tokens ?? 0,
     outputTokens: message.usage?.output_tokens ?? 0,
     cacheReadTokens: message.usage?.cache_read_input_tokens ?? 0,
@@ -181,7 +194,7 @@ export async function completeText(opts: CompleteTextOptions): Promise<string> {
   // persisted job transcript. Observation-only; no-op without a recorder.
   activeCadContext()?.recorder?.recordModelCall({
     role: opts.role ?? "other",
-    model: message.model || opts.model || DEFAULT_MODEL,
+    model: message.model || opts.model || params.model,
     system: opts.system,
     prompt: opts.prompt,
     imageLabels: (opts.images ?? []).map(

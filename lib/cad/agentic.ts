@@ -38,7 +38,7 @@ import {
 } from "./brief";
 import { enrichRepairHint } from "./repair-taxonomy";
 import { sampleStlPoints } from "./stl-points";
-import { briefStepEnabled, modelForRole } from "./models";
+import { briefStepEnabled, modelForRole, modelParamsForRole } from "./models";
 import {
   sourcePart,
   catalogEnabled,
@@ -113,9 +113,11 @@ const DEFAULT_MAX_MS = 600_000;
 // (brief + plan + one attempt + judge) after an agentic cutoff.
 const MIN_AGENTIC_MS = 120_000;
 const FALLBACK_RESERVE_MS = 240_000;
-// Same default + headroom rationale as model-client.
-const DEFAULT_MODEL = "claude-sonnet-4-6";
-const MAX_TOKENS = 8192;
+// The model + thinking/effort come from modelParamsForRole (./models). Higher
+// than model-client's cap because this loop STREAMS: an agentic turn at high
+// effort can spend real time thinking before its first tool_use block, which
+// is exactly the shape that trips a non-streaming HTTP timeout.
+const MAX_TOKENS = 32_000;
 // Keep tool results promptable — stdout beyond this is noise, not signal.
 const STDOUT_CAP = 2_000;
 
@@ -158,9 +160,17 @@ async function completeWithTools(opts: {
   }
   const client = clientForCredentials(activeCadContext()?.credentials);
   const started = Date.now();
-  const message = await client.messages.create(
+  const params = modelParamsForRole("implement");
+  // Streamed, then collected: `.finalMessage()` returns the same Message the
+  // non-streaming call did, so the tool loop below is unchanged — streaming is
+  // purely what keeps a long thinking turn from hitting the request timeout.
+  // Thinking blocks ride in `message.content`, which the loop already pushes
+  // back verbatim as the assistant turn (:659) — they must be replayed
+  // unchanged, so do not start filtering that array by block type.
+  const stream = client.messages.stream(
     {
-      model: opts.model || DEFAULT_MODEL,
+      ...params,
+      ...(opts.model ? { model: opts.model } : {}),
       max_tokens: MAX_TOKENS,
       // Prompt caching (MTR-221) — 3 of the max 4 breakpoints per request:
       //   1. last tool definition (tools render before system, so this pins
@@ -190,11 +200,12 @@ async function completeWithTools(opts: {
     },
     { signal: opts.signal }
   );
+  const message = await stream.finalMessage();
   // Cost metering (MTR-181): agentic turns are usually the job's biggest
   // token line item — attribute them to their own role.
   meterModelUsage({
     role: "agentic",
-    model: message.model || opts.model || DEFAULT_MODEL,
+    model: message.model || opts.model || params.model,
     inputTokens: message.usage?.input_tokens ?? 0,
     outputTokens: message.usage?.output_tokens ?? 0,
     cacheReadTokens: message.usage?.cache_read_input_tokens ?? 0,
