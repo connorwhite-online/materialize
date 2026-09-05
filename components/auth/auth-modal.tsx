@@ -9,7 +9,6 @@ import {
 } from "@/components/ui/dialog";
 import { AnimatedWordmark } from "@/components/brand/logo";
 import { SignInForm } from "./sign-in-form";
-import { SignUpForm } from "./sign-up-form";
 
 type Mode = "sign-in" | "sign-up";
 
@@ -30,10 +29,8 @@ export function useAuthModal() {
 
 export function AuthModalProvider({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState<Mode>("sign-in");
 
-  const openAuth = useCallback((newMode: Mode = "sign-in") => {
-    setMode(newMode);
+  const openAuth = useCallback((_mode?: Mode) => {
     setOpen(true);
   }, []);
 
@@ -60,51 +57,18 @@ export function AuthModalProvider({ children }: { children: React.ReactNode }) {
           setOpen(nextOpen);
         }}
       >
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
+        <DialogContent className="gap-3 rounded-3xl pb-0 sm:max-w-sm">
+          <DialogHeader className="items-start pb-2">
             <AnimatedWordmark
               title="Materialize"
               animateOnMount
-              className="mx-auto text-foreground [--mz-h:7px]"
+              height={13}
+              className="text-foreground"
             />
-            <DialogTitle className="text-center">
-              {mode === "sign-in" ? "Sign in" : "Create an account"}
-            </DialogTitle>
+            <DialogTitle className="sr-only">Sign in</DialogTitle>
           </DialogHeader>
 
-          <div className="mt-2">
-            {mode === "sign-in" ? (
-              <SignInForm onSuccess={closeAuth} />
-            ) : (
-              <SignUpForm onSuccess={closeAuth} />
-            )}
-          </div>
-
-          <p className="mt-4 text-center text-sm text-muted-foreground">
-            {mode === "sign-in" ? (
-              <>
-                Don&apos;t have an account?{" "}
-                <button
-                  type="button"
-                  onClick={() => setMode("sign-up")}
-                  className="text-foreground transition-colors hover:text-foreground/80"
-                >
-                  Sign up
-                </button>
-              </>
-            ) : (
-              <>
-                Already have an account?{" "}
-                <button
-                  type="button"
-                  onClick={() => setMode("sign-in")}
-                  className="text-foreground transition-colors hover:text-foreground/80"
-                >
-                  Sign in
-                </button>
-              </>
-            )}
-          </p>
+          <SignInForm onSuccess={closeAuth} />
         </DialogContent>
       </Dialog>
     </AuthModalContext.Provider>

@@ -193,21 +193,16 @@
   --sidebar-ring: oklch(0.556 0.008 80);
 }
 
-/* Surface system — flat + frosted.
-   The app used to model controls as physical objects (convex "raised"
-   buttons, concave "sunken" inputs) via bevel gradients and inset rim
-   shadows. That 3D language is retired: controls are now flat, defined
-   by hairline borders and flat fills, and genuine elevation is reserved
-   for floating layers (cards, dialogs, popovers) which get a soft
-   layered-transparent drop shadow + frosted translucency. The same
-   token + utility names are kept so the change propagates everywhere
-   the .depth-* utilities are used without touching every call site. */
+/* Surface system — frosted floats + symmetric control shadows.
+   Floating layers (cards, dialogs, popovers) get soft elevation via
+   `--shadow-surface`. Clickable controls and text fields share zero-
+   offset shadows: an even outer glow for buttons, an even inset for
+   inputs — no directional bevel or top-only sheen. */
 :root {
-  /* Controls (button, select trigger) are flat — no shadow at rest.
-     Separation comes from the border + fill. Hover earns a whisper of
-     lift so the control still feels tactile under the cursor. */
-  --shadow-raised: 0 0 0 0 transparent;
-  --shadow-raised-hover: 0 1px 2px 0 oklch(0 0 0 / 0.06);
+  /* Controls — symmetric shadows (zero offset): even glow around the
+     perimeter for elevation, even inset for recessed fields. */
+  --shadow-raised: 0 0 6px -1px oklch(0 0 0 / 0.08);
+  --shadow-raised-hover: 0 0 10px -1px oklch(0 0 0 / 0.12);
   /* Floating surfaces (cards, dialogs, popovers) keep real elevation,
      but as a clean soft drop shadow — no inset bevel highlight, which
      was the main "3D pillow" tell. Layered transparency reads natural
@@ -216,15 +211,17 @@
     0 1px 2px -1px oklch(0 0 0 / 0.05),
     0 4px 12px -4px oklch(0 0 0 / 0.06),
     0 10px 28px -10px oklch(0 0 0 / 0.05);
-  /* Inputs are flat too — recess language dropped. */
-  --shadow-sunken: 0 0 0 0 transparent;
+  /* Recessed text fields — uniform inset around the interior. */
+  --shadow-sunken: inset 0 0 4px oklch(0 0 0 / 0.12);
+  --shadow-input-focus: var(--shadow-sunken), var(--shadow-focus-ring);
   /* Focus ring — a crisp outer ring (not an inset glow), matching the
      ring buttons already use so focus reads consistently across every
      control. Composes as a box-shadow so it can stack with utilities. */
   --shadow-focus-ring: 0 0 0 3px oklch(0.708 0.012 80 / 0.4);
-  /* Dark-filled buttons (primary in light mode): flat, no inset polish. */
-  --shadow-raised-on-dark: 0 0 0 0 transparent;
-  --shadow-raised-on-dark-hover: 0 1px 2px 0 oklch(0 0 0 / 0.18);
+  /* Dark-filled buttons (primary in light mode). */
+  --shadow-raised-on-dark: 0 0 8px -2px oklch(0 0 0 / 0.32);
+  --shadow-raised-on-dark-hover: 0 0 12px -2px oklch(0 0 0 / 0.38);
+  --shadow-control-pressed: inset 0 0 4px oklch(0 0 0 / 0.16);
   /* Gradients retired — flat fills only. Kept as `none` so the
      .depth-* utilities that reference them become no-ops. */
   --gradient-raised-on-dark: none;
@@ -234,18 +231,20 @@
 }
 
 .dark {
-  --shadow-raised: 0 0 0 0 transparent;
-  --shadow-raised-hover: 0 1px 2px 0 oklch(0 0 0 / 0.4);
+  --shadow-raised: 0 0 6px -1px oklch(0 0 0 / 0.35);
+  --shadow-raised-hover: 0 0 10px -1px oklch(0 0 0 / 0.42);
   /* Dark surfaces lean on a deeper, softer drop shadow to separate
      from the near-black canvas. Still flat — no inset highlight. */
   --shadow-surface:
     0 1px 2px -1px oklch(0 0 0 / 0.5),
     0 6px 16px -4px oklch(0 0 0 / 0.45),
     0 16px 32px -12px oklch(0 0 0 / 0.4);
-  --shadow-sunken: 0 0 0 0 transparent;
+  --shadow-sunken: inset 0 0 5px oklch(0 0 0 / 0.55);
+  --shadow-input-focus: var(--shadow-sunken), var(--shadow-focus-ring);
   --shadow-focus-ring: 0 0 0 3px oklch(0.556 0.008 80 / 0.5);
-  --shadow-raised-on-dark: 0 0 0 0 transparent;
-  --shadow-raised-on-dark-hover: 0 1px 2px 0 oklch(0 0 0 / 0.4);
+  --shadow-raised-on-dark: 0 0 8px -2px oklch(0 0 0 / 0.5);
+  --shadow-raised-on-dark-hover: 0 0 12px -2px oklch(0 0 0 / 0.55);
+  --shadow-control-pressed: inset 0 0 4px oklch(0 0 0 / 0.35);
   --gradient-raised-on-dark: none;
   --gradient-raised: none;
   --gradient-surface: none;
@@ -294,6 +293,10 @@
   --shadow-raised: var(--shadow-raised);
   --shadow-raised-hover: var(--shadow-raised-hover);
   --shadow-sunken: var(--shadow-sunken);
+  --shadow-control-pressed: var(--shadow-control-pressed);
+  --shadow-input-focus: var(--shadow-input-focus);
+  --shadow-raised-on-dark: var(--shadow-raised-on-dark);
+  --shadow-raised-on-dark-hover: var(--shadow-raised-on-dark-hover);
   /* Registered as a real shadow utility (`shadow-surface`) so it
      composes with `ring-*` through Tailwind's shared shadow chain —
      a component-layer box-shadow would be clobbered by the ring. */
@@ -316,14 +319,12 @@
     -webkit-backdrop-filter: blur(12px);
     backdrop-filter: blur(12px);
   }
-  /* Flat clickable controls (button, select trigger). The gradient
-     tokens are `none` now, so these resolve to a flat fill + (at rest)
-     no shadow; the names are kept so existing call sites stay valid. */
+  /* Clickable controls (button, select trigger) — symmetric outer glow. */
   .depth-raised {
     background-image: var(--gradient-raised);
     box-shadow: var(--shadow-raised);
   }
-  /* Dark-filled buttons (primary in light mode). Flat. */
+  /* Dark-filled buttons (primary in light mode). */
   .depth-raised-on-dark {
     background-image: var(--gradient-raised-on-dark);
     box-shadow: var(--shadow-raised-on-dark);
@@ -332,7 +333,7 @@
     box-shadow: var(--shadow-raised-on-dark-hover);
   }
   /* Floating containers (cards, dialogs, popovers). Soft layered drop
-     shadow, no bevel — genuine elevation without the 3D pillow. */
+     shadow — genuine elevation without a directional bevel. */
   .depth-surface {
     background-image: var(--gradient-surface);
     box-shadow: var(--shadow-surface);
@@ -340,7 +341,7 @@
   .depth-raised-hover:hover {
     box-shadow: var(--shadow-raised-hover);
   }
-  /* Flat editable fields (input, textarea). */
+  /* Editable fields (input, textarea) — uniform inset around interior. */
   .depth-sunken {
     background-image: var(--gradient-sunken);
     box-shadow: var(--shadow-sunken);

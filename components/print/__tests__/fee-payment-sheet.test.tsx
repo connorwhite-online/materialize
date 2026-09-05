@@ -151,10 +151,10 @@ describe("fee sheet primary CTA", () => {
 function expectPrimaryButton(button: HTMLElement) {
   expect(button.getAttribute("data-slot")).toBe("button");
   // Same tokens as `<Button size="lg">` (Proceed to checkout, etc.):
-  // filled primary, pill, sheen, not a hand-rolled rounded-2xl block.
+  // filled primary, pill, symmetric elevation — not a hand-rolled block.
   expect(button.className).toMatch(/bg-primary/);
   expect(button.className).toMatch(/text-primary-foreground/);
   expect(button.className).toMatch(/rounded-full/);
-  expect(button.className).toMatch(/before:from-white/);
+  expect(button.className).toMatch(/shadow-raised-on-dark/);
   expect(button.className).toMatch(/\bh-10\b/);
 }

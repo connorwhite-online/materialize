@@ -6,9 +6,7 @@ import { cn } from "@/lib/utils"
 const buttonVariants = cva(
   // transition-property is enumerated (never `transition: all`) so only
   // color/shadow/transform animate — keeps press + hover crisp.
-  // Top sheen is a soft vertical gradient (::before), not a hard 1px inset
-  // highlight — that edge read as fake chrome.
-  "group/button relative inline-flex shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out outline-none select-none before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-[58%] before:bg-gradient-to-b before:from-white/0 before:to-transparent before:content-[''] before:opacity-0 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:not-aria-[haspopup]:translate-y-px active:not-aria-[haspopup]:scale-[0.98] disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button inline-flex shrink-0 cursor-pointer items-center justify-center rounded-full border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:not-aria-[haspopup]:translate-y-px active:not-aria-[haspopup]:scale-[0.98] disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
@@ -17,11 +15,11 @@ const buttonVariants = cva(
           // background extends under the transparent 1px border — the
           // padding-box clip let the light page bg show through that
           // 1px ring, reading as a stray white outline on the dark pill.
-          "bg-clip-border bg-primary text-primary-foreground shadow-[0_1px_2px_rgba(0,0,0,0.14),0_4px_8px_-4px_rgba(0,0,0,0.35)] before:from-white/28 before:opacity-100 hover:bg-primary/90 hover:shadow-[0_2px_3px_rgba(0,0,0,0.16),0_6px_12px_-5px_rgba(0,0,0,0.4)] hover:before:from-white/34 active:shadow-[inset_0_1px_2px_rgba(0,0,0,0.18),0_1px_2px_rgba(0,0,0,0.12)] active:before:from-white/12 active:before:opacity-70",
+          "bg-clip-border bg-primary text-primary-foreground shadow-raised-on-dark hover:bg-primary/90 hover:shadow-raised-on-dark-hover active:shadow-control-pressed",
         outline:
-          "border-border bg-card/80 shadow-[0_2px_5px_-2px_rgba(0,0,0,0.16)] backdrop-blur-sm before:from-white/55 before:opacity-100 hover:bg-card hover:text-foreground hover:shadow-[0_4px_8px_-4px_rgba(0,0,0,0.24)] hover:before:from-white/65 aria-expanded:bg-muted aria-expanded:text-foreground active:before:from-white/30 active:before:opacity-70 dark:border-input dark:bg-input/30 dark:shadow-[0_2px_5px_-2px_rgba(0,0,0,0.5)] dark:before:from-white/12 dark:hover:bg-input/50 dark:hover:before:from-white/16",
+          "border-border bg-card/80 shadow-raised backdrop-blur-sm hover:bg-card hover:text-foreground hover:shadow-raised-hover aria-expanded:bg-muted aria-expanded:text-foreground active:shadow-control-pressed dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
         secondary:
-          "bg-secondary/80 text-secondary-foreground shadow-[0_3px_7px_-3px_rgba(0,0,0,0.22)] backdrop-blur-sm before:from-white/42 before:opacity-100 hover:bg-secondary hover:shadow-[0_5px_10px_-5px_rgba(0,0,0,0.28)] hover:before:from-white/52 aria-expanded:bg-secondary aria-expanded:text-secondary-foreground active:before:from-white/22 active:before:opacity-70 dark:before:from-white/14 dark:shadow-[0_3px_7px_-3px_rgba(0,0,0,0.55)] dark:hover:before:from-white/18",
+          "bg-secondary/80 text-secondary-foreground shadow-raised backdrop-blur-sm hover:bg-secondary hover:shadow-raised-hover aria-expanded:bg-secondary aria-expanded:text-secondary-foreground active:shadow-control-pressed",
         ghost:
           "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
         destructive:

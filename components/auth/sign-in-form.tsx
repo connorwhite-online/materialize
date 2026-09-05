@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { useSignIn } from "@clerk/nextjs/legacy";
+import { useSignIn, useSignUp } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
+import { setUsername } from "@/app/actions/onboarding";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,84 +12,51 @@ import {
   InputOTPGroup,
   InputOTPSlot,
 } from "@/components/ui/input-otp";
-import { Separator } from "@/components/ui/separator";
+import {
+  MAX_USERNAME_LENGTH,
+  MIN_USERNAME_LENGTH,
+} from "@/lib/handles/limits";
 import { SocialButtons } from "./social-buttons";
 
-type CodeStrategy = "email_code" | "phone_code";
+type Step = "identifier" | "code" | "username";
 
 interface SignInFormProps {
   onSuccess?: () => void;
   redirectUrl?: string;
+  /** Social buttons above the email form (sign-in page layout). */
+  socialFirst?: boolean;
 }
 
-export function SignInForm({ onSuccess, redirectUrl = "/dashboard" }: SignInFormProps) {
-  const { isLoaded, signIn, setActive } = useSignIn();
+function errorMessage(
+  error: { longMessage?: string; message?: string } | null,
+  fallback: string
+): string {
+  return error?.longMessage ?? error?.message ?? fallback;
+}
+
+function looksLikeEmail(value: string): boolean {
+  return value.includes("@");
+}
+
+export function SignInForm({
+  onSuccess,
+  redirectUrl = "/dashboard",
+  socialFirst = false,
+}: SignInFormProps) {
+  const { signIn } = useSignIn();
+  const { signUp } = useSignUp();
   const router = useRouter();
 
   const [identifier, setIdentifier] = useState("");
   const [code, setCode] = useState("");
-  const [step, setStep] = useState<"identifier" | "code">("identifier");
-  const [strategy, setStrategy] = useState<CodeStrategy>("email_code");
+  const [username, setUsernameInput] = useState("");
+  const [step, setStep] = useState<Step>("identifier");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const handleSendCode = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isLoaded || !signIn) return;
-    setLoading(true);
-    setError("");
-
-    try {
-      const { supportedFirstFactors } = await signIn.create({ identifier });
-
-      const emailFactor = supportedFirstFactors?.find(
-        (f) => f.strategy === "email_code"
-      );
-      const phoneFactor = supportedFirstFactors?.find(
-        (f) => f.strategy === "phone_code"
-      );
-
-      if (emailFactor && "emailAddressId" in emailFactor) {
-        await signIn.prepareFirstFactor({
-          strategy: "email_code",
-          emailAddressId: emailFactor.emailAddressId,
-        });
-        setStrategy("email_code");
-        setStep("code");
-      } else if (phoneFactor && "phoneNumberId" in phoneFactor) {
-        await signIn.prepareFirstFactor({
-          strategy: "phone_code",
-          phoneNumberId: phoneFactor.phoneNumberId,
-        });
-        setStrategy("phone_code");
-        setStep("code");
-      } else {
-        setError("No verification method available for this account.");
-      }
-    } catch (err: unknown) {
-      const clerkErr = err as { errors?: Array<{ longMessage?: string }> };
-      setError(
-        clerkErr.errors?.[0]?.longMessage ||
-          (err instanceof Error ? err.message : "Something went wrong")
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleVerifyCode = async (value: string) => {
-    if (!isLoaded || !signIn || value.length < 6) return;
-    setLoading(true);
-    setError("");
-
-    try {
-      const result = await signIn.attemptFirstFactor({
-        strategy,
-        code: value,
-      });
-
-      if (result.status === "complete" && result.createdSessionId) {
-        await setActive({ session: result.createdSessionId });
+  const finishSignedIn = async () => {
+    const { error: finalizeError } = await signIn.finalize({
+      navigate: () => {
         if (onSuccess) {
           onSuccess();
           router.refresh();
@@ -96,24 +64,178 @@ export function SignInForm({ onSuccess, redirectUrl = "/dashboard" }: SignInForm
           router.push(redirectUrl);
           router.refresh();
         }
-      }
-    } catch (err: unknown) {
-      const clerkErr = err as { errors?: Array<{ longMessage?: string }> };
-      setError(
-        clerkErr.errors?.[0]?.longMessage ||
-          (err instanceof Error ? err.message : "Invalid code")
-      );
-      setCode("");
-    } finally {
-      setLoading(false);
+      },
+    });
+    if (finalizeError) {
+      setError(errorMessage(finalizeError, "Something went wrong"));
     }
   };
+
+  const resetToIdentifier = async () => {
+    await signIn.reset();
+    setStep("identifier");
+    setCode("");
+    setError("");
+  };
+
+  const handleSendCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+
+    const useSignUpIfMissing = looksLikeEmail(identifier);
+
+    const { error: createError } = await signIn.create({
+      identifier,
+      ...(useSignUpIfMissing ? { signUpIfMissing: true } : {}),
+    });
+
+    if (createError) {
+      if (
+        !useSignUpIfMissing &&
+        createError.code === "form_identifier_not_found"
+      ) {
+        setError("No account found with that username.");
+      } else {
+        setError(errorMessage(createError, "Something went wrong"));
+      }
+      setLoading(false);
+      return;
+    }
+
+    const { error: sendError } = await signIn.emailCode.sendCode();
+    if (sendError) {
+      setError(errorMessage(sendError, "Couldn't send verification code"));
+      setLoading(false);
+      return;
+    }
+
+    setStep("code");
+    setLoading(false);
+  };
+
+  const handleTransferToSignUp = async () => {
+    const { error: transferError } = await signUp.create({ transfer: true });
+    if (transferError) {
+      setError(errorMessage(transferError, "Something went wrong"));
+      return false;
+    }
+
+    if (signUp.status === "complete") {
+      const { error: finalizeError } = await signUp.finalize({
+        navigate: () => {
+          setStep("username");
+        },
+      });
+      if (finalizeError) {
+        setError(errorMessage(finalizeError, "Something went wrong"));
+        return false;
+      }
+      return true;
+    }
+
+    if (signUp.status === "missing_requirements") {
+      setError("Additional sign-up details are required.");
+      return false;
+    }
+
+    setError("Sign-up could not be completed.");
+    return false;
+  };
+
+  const handleVerifyCode = async (value: string) => {
+    if (value.length < 6) return;
+    setLoading(true);
+    setError("");
+
+    const { error: verifyError } = await signIn.emailCode.verifyCode({
+      code: value,
+    });
+
+    if (verifyError?.code === "sign_up_if_missing_transfer") {
+      await handleTransferToSignUp();
+      setLoading(false);
+      return;
+    }
+
+    if (verifyError) {
+      setError(errorMessage(verifyError, "Invalid code"));
+      setCode("");
+      setLoading(false);
+      return;
+    }
+
+    if (signIn.status === "complete") {
+      await finishSignedIn();
+    }
+
+    setLoading(false);
+  };
+
+  const handleSetUsername = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+
+    const result = await setUsername(username);
+    if ("error" in result) {
+      setError(result.error);
+      setLoading(false);
+      return;
+    }
+
+    if (onSuccess) {
+      onSuccess();
+      router.refresh();
+    } else {
+      router.push(redirectUrl);
+      router.refresh();
+    }
+  };
+
+  if (step === "username") {
+    return (
+      <form onSubmit={handleSetUsername} className="space-y-5">
+        <div>
+          <Label htmlFor="username">Pick a username</Label>
+          <Input
+            id="username"
+            value={username}
+            onChange={(e) =>
+              setUsernameInput(
+                e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, "")
+              )
+            }
+            placeholder="yourname"
+            required
+            minLength={MIN_USERNAME_LENGTH}
+            maxLength={MAX_USERNAME_LENGTH}
+            autoFocus
+          />
+          <p className="mt-2 text-xs text-muted-foreground">
+            This is how others will find you
+          </p>
+        </div>
+
+        {error && <p className="text-xs text-destructive">{error}</p>}
+
+        <Button
+          type="submit"
+          size="xl"
+          className="w-full"
+          disabled={loading || username.length < MIN_USERNAME_LENGTH}
+        >
+          {loading ? "Finishing up..." : "Complete sign-up"}
+        </Button>
+      </form>
+    );
+  }
 
   if (step === "code") {
     return (
       <div className="space-y-4">
         <p className="text-sm text-muted-foreground text-center">
-          We sent a code to {identifier}
+          Enter the code we sent to {identifier}
         </p>
         <div className="flex justify-center">
           <InputOTP
@@ -148,9 +270,7 @@ export function SignInForm({ onSuccess, redirectUrl = "/dashboard" }: SignInForm
         <button
           type="button"
           onClick={() => {
-            setStep("identifier");
-            setCode("");
-            setError("");
+            void resetToIdentifier();
           }}
           className="block w-full cursor-pointer text-center text-xs text-muted-foreground transition-colors hover:text-foreground"
         >
@@ -160,42 +280,50 @@ export function SignInForm({ onSuccess, redirectUrl = "/dashboard" }: SignInForm
     );
   }
 
-  return (
-    <div className="space-y-4">
-      <form onSubmit={handleSendCode} className="space-y-5">
-        <div>
-          <Label htmlFor="identifier">Email, phone, or username</Label>
-          <Input
-            id="identifier"
-            type="text"
-            value={identifier}
-            onChange={(e) => setIdentifier(e.target.value)}
-            placeholder="you@example.com"
-            required
-            autoFocus
-          />
-        </div>
-
-        {error && <p className="text-xs text-destructive">{error}</p>}
-
-        <Button
-          type="submit"
-          size="xl"
-          className="w-full"
-          disabled={loading || !identifier}
-        >
-          {loading ? "Sending code..." : "Continue"}
-        </Button>
-      </form>
-
-      <div className="relative">
-        <Separator />
-        <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs text-muted-foreground">
-          or
-        </span>
+  const identifierForm = (
+    <form onSubmit={handleSendCode} className="space-y-4">
+      <div>
+        <Label htmlFor="identifier">Email or username</Label>
+        <Input
+          id="identifier"
+          type="text"
+          value={identifier}
+          onChange={(e) => setIdentifier(e.target.value)}
+          placeholder="you@example.com"
+          required
+          autoFocus
+        />
       </div>
 
-      <SocialButtons mode="sign-in" />
+      {error && <p className="text-xs text-destructive">{error}</p>}
+
+      <Button
+        type="submit"
+        size="xl"
+        className="w-full"
+        disabled={loading || !identifier}
+      >
+        {loading ? "Sending code..." : "Continue"}
+      </Button>
+    </form>
+  );
+
+  const social = <SocialButtons mode="sign-in" />;
+
+  return (
+    <div className="space-y-4">
+      {socialFirst ? (
+        <>
+          {social}
+          {identifierForm}
+        </>
+      ) : (
+        <>
+          {identifierForm}
+          {social}
+        </>
+      )}
+      <div id="clerk-captcha" />
     </div>
   );
 }

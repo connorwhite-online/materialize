@@ -11,7 +11,6 @@ import {
   InputOTPGroup,
   InputOTPSlot,
 } from "@/components/ui/input-otp";
-import { Separator } from "@/components/ui/separator";
 import { SocialButtons } from "./social-buttons";
 import { setUsername } from "@/app/actions/onboarding";
 import {
@@ -262,13 +261,6 @@ export function SignUpForm({
           {loading ? "Sending code..." : "Continue"}
         </Button>
       </form>
-
-      <div className="relative">
-        <Separator />
-        <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs text-muted-foreground">
-          or
-        </span>
-      </div>
 
       <SocialButtons mode="sign-up" />
     </div>
