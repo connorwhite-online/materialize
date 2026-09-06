@@ -45,7 +45,7 @@ import {
 import { notifyCollaboratorAddedToProject } from "@/lib/notifications/notify";
 
 /**
- * Cache tag for the idle-browse grid on app/(app)/files/page.tsx
+ * Cache tag for the idle-browse grid on app/(app)/files/(browse)/page.tsx
  * (PERF-16). Must match IDLE_BROWSE_CACHE_TAG there exactly — see the
  * matching constant + comment in app/actions/files.ts for why this
  * can't just be a shared import (page.tsx and "use server" files both

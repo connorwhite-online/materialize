@@ -88,7 +88,7 @@ import { after } from "next/server";
 import { ACTIVE_ORDER_STATUSES } from "@/lib/print-statuses";
 
 /**
- * Cache tag for the idle-browse grid on app/(app)/files/page.tsx
+ * Cache tag for the idle-browse grid on app/(app)/files/(browse)/page.tsx
  * (PERF-16). Must match IDLE_BROWSE_CACHE_TAG there exactly — kept as
  * a separate literal rather than a shared export because that file is
  * a page.tsx (next build rejects non-reserved named exports from page
