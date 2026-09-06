@@ -36,6 +36,10 @@ describe("FileDetailLoading", () => {
     const thumbs = container.querySelectorAll(".aspect-square.w-32");
     expect(thumbs.length).toBe(4);
 
+    // Activity card (always on the live page).
+    expect(container.querySelector(".bg-muted\\/50")).toBeTruthy();
+    expect(container.querySelectorAll(".h-6.w-6.rounded-full").length).toBe(3);
+
     // Must not look like the browse grid.
     expect(container.querySelector(".grid-cols-2")).toBeNull();
     expect(container.querySelector("[data-slot='file-card']")).toBeNull();
