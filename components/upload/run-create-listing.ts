@@ -34,6 +34,7 @@ export interface CreateListingInput {
   recommendedMaterial: string;
   sellEnabled: boolean;
   license: string;
+  visibility?: "public" | "private";
   collectionChoice: string;
   newCollectionName: string;
   /** Optional project to attach the new file to ("none" / "" = skip). */
@@ -116,6 +117,9 @@ export async function runCreateListing(
       input.formData.set("price", "0");
     }
     input.formData.set("license", input.license);
+    if (input.visibility) {
+      input.formData.set("visibility", input.visibility);
+    }
     if (input.recommendedMaterial) {
       input.formData.set("recommendedMaterialId", input.recommendedMaterial);
     }

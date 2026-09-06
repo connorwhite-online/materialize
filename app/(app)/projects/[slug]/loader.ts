@@ -1,7 +1,7 @@
 import "server-only";
 
 import { cache } from "react";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { projects, users } from "@/lib/db/schema";
 
@@ -27,6 +27,12 @@ export const loadProjectBySlug = cache(async function loadProjectBySlug(slug: st
       thumbnailUrl: projects.thumbnailUrl,
       status: projects.status,
       visibility: projects.visibility,
+      // Used by resolveProjectVisibility / generateMetadata so an
+      // empty public shell 404s and noindexes for non-writers.
+      fileCount: sql<number>`cast((
+        select count(*) from project_files pf
+        where pf.project_id = ${projects.id}
+      ) as int)`,
       // Page body fields
       id: projects.id,
       buildGuide: projects.buildGuide,

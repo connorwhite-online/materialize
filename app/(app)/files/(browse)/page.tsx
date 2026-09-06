@@ -35,6 +35,7 @@ import {
   fileCandidateColumns,
   fileNotInAnyProjectCondition,
 } from "@/lib/discovery/browse-pool";
+import { projectHasBundledFile } from "@/lib/projects/listed";
 import { recentDownloadCounts } from "@/lib/discovery/signals";
 import { getAvatarGradient } from "@/lib/utils/avatar-gradient";
 import { BUBBLE_SHADOW } from "@/components/nav/bubble-shadow";
@@ -129,7 +130,13 @@ const getIdleBrowseData = unstable_cache(
         .from(projects)
         .innerJoin(users, eq(projects.userId, users.id))
         .leftJoin(projectFiles, eq(projectFiles.projectId, projects.id))
-        .where(and(eq(projects.status, "published"), eq(projects.visibility, "public")))
+        .where(
+          and(
+            eq(projects.status, "published"),
+            eq(projects.visibility, "public"),
+            projectHasBundledFile()
+          )
+        )
         .groupBy(projects.id, users.username, users.displayName, users.avatarUrl, projects.createdAt)
         .orderBy(desc(projects.createdAt))
         .limit(PROJECT_POOL),
@@ -577,6 +584,7 @@ export default async function BrowsePage(props: {
         and(
           eq(projects.status, "published"),
           eq(projects.visibility, "public"),
+          projectHasBundledFile(),
           projectMatch,
           category ? eq(projects.category, category) : undefined
         )

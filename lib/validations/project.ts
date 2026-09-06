@@ -82,10 +82,13 @@ export const createProjectSchema = z.object({
     .max(500)
     .optional()
     .or(z.literal("").transform(() => undefined)),
+  // Empty is allowed — create the project first, add files later.
+  // Visitor-facing listings hide a project until it has ≥1 file
+  // (`isProjectListedToOthers` / `projectHasBundledFile`).
   fileIds: z
     .array(z.string().uuid())
-    .min(1, "At least one file is required")
     .max(MAX_PROJECT_FILES, `A project can bundle at most ${MAX_PROJECT_FILES} files`)
+    .default([])
     // Dedupe in-place so the project_files insert doesn't fail the
     // UNIQUE constraint when the caller submits the same id twice.
     .transform((ids) => Array.from(new Set(ids))),

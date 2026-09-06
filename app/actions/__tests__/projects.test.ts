@@ -365,6 +365,44 @@ describe("createProject", () => {
     expect(buildGuide).toContain("Step 1");
   });
 
+  it("creates a project with zero files", async () => {
+    const formData = new FormData();
+    formData.set("name", "Empty shell");
+    formData.set("price", "0");
+    formData.set("license", "cc_by");
+
+    let threw: unknown;
+    try {
+      await createProject(formData);
+    } catch (err) {
+      threw = err;
+    }
+    expect((threw as Error)?.message).toContain("REDIRECT:/projects/");
+    expect(insertedProjects.length).toBe(1);
+    expect(insertedProjectFiles.length).toBe(0);
+  });
+
+  it("persists the chosen visibility", async () => {
+    ownedFilesResponse = [
+      { id: FILE_1, userId: "test-user-id", organizationId: null },
+    ];
+    const formData = new FormData();
+    formData.set("name", "Private set");
+    formData.set("price", "0");
+    formData.set("license", "cc_by");
+    formData.set("visibility", "private");
+    formData.append("fileIds", FILE_1);
+
+    let threw: unknown;
+    try {
+      await createProject(formData);
+    } catch (err) {
+      threw = err;
+    }
+    expect((threw as Error)?.message).toContain("REDIRECT:/projects/");
+    expect(insertedProjects[0]).toMatchObject({ visibility: "private" });
+  });
+
   it("leaves an empty/undefined buildGuide untouched (MTR-236)", async () => {
     ownedFilesResponse = [
       { id: FILE_1, userId: "test-user-id", organizationId: null },

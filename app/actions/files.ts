@@ -259,6 +259,7 @@ export async function createFileListing(formData: FormData) {
     description: formData.get("description"),
     price: formData.get("price"),
     license: formData.get("license"),
+    visibility: formData.get("visibility") || undefined,
     tags: formData.get("tags"),
     category: formData.get("category") || undefined,
     recommendedMaterialId: formData.get("recommendedMaterialId") || undefined,

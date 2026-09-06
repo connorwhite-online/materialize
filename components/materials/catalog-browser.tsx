@@ -18,14 +18,18 @@ import {
 
 const ALL_GROUPS = "all";
 
+/** Dense browse grid — two-up on phones, scaling up on wider viewports. */
+const MATERIAL_GRID =
+  "grid grid-cols-2 gap-3 pt-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6";
+
 interface CatalogBrowserProps {
   groups: BrowseMaterialGroup[];
 }
 
 /**
  * How many materials to surface in the "Popular" section at the top
- * of the All view. Eight fills two rows of four at xl, three rows at
- * lg, four at sm — and CraftCloud's first ten sortIndex slots are
+ * of the All view. Eight fills two rows of four at lg, three rows at
+ * md — and CraftCloud's first ten sortIndex slots are
  * exactly the canonical shortlist (PLA, SLS Nylon, 316L Steel, etc.)
  * so eight gives breathing room past the obvious picks.
  */
@@ -138,7 +142,7 @@ export function CatalogBrowser({ groups }: CatalogBrowserProps) {
         <div className="space-y-4">
           {showPopular && (
             <GroupSection name="Popular" count={popularMaterials.length}>
-              <div className="grid grid-cols-1 gap-4 pt-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              <div className={MATERIAL_GRID}>
                 {popularMaterials.map(({ material, group }) => (
                   <CatalogMaterialCard
                     key={material.id}
@@ -151,7 +155,7 @@ export function CatalogBrowser({ groups }: CatalogBrowserProps) {
           )}
           {visibleGroups.map((g) => (
             <GroupSection key={g.id} name={g.name} count={g.materials.length}>
-              <div className="grid grid-cols-1 gap-4 pt-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              <div className={MATERIAL_GRID}>
                 {g.materials.map((material) => (
                   <CatalogMaterialCard
                     key={material.id}

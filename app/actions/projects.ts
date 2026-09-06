@@ -141,8 +141,13 @@ export async function createProject(formData: FormData) {
   // Files can be attached if the viewer owns them OR they belong to
   // an org the viewer is in. This means an org-owned project can
   // bundle files from any of the org's members without a separate
-  // transfer step.
-  if (!(await viewerCanAttachAllFiles(userId, parsed.data.fileIds))) {
+  // transfer step. Zero files is allowed — viewerCanAttachAllFiles
+  // returns false on [] by design (CON-85), so skip the check when
+  // the caller is creating an empty shell.
+  if (
+    parsed.data.fileIds.length > 0 &&
+    !(await viewerCanAttachAllFiles(userId, parsed.data.fileIds))
+  ) {
     return {
       error: { fileIds: ["One or more files are not yours."] },
     };
@@ -164,10 +169,11 @@ export async function createProject(formData: FormData) {
       ? (await sanitizeRichHtml(parsed.data.buildGuide)).trim() || undefined
       : parsed.data.buildGuide;
 
-    // Both inserts happen atomically — a failure between them (e.g. an
-    // FK violation from a file deleted after the viewerCanAttachAllFiles
-    // check above) must not leave a published, publicly-visible project
-    // with zero files.
+    // Both inserts happen atomically when files are supplied — a
+    // failure between them (e.g. an FK violation from a file deleted
+    // after the viewerCanAttachAllFiles check above) must not leave a
+    // half-created project. Empty shells are allowed; they stay
+    // hidden from other users until a file is attached.
     const project = await db.transaction(async (tx) => {
       const [p] = await tx
         .insert(projects)

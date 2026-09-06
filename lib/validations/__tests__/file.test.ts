@@ -79,6 +79,21 @@ describe("createListingSchema", () => {
     }
   });
 
+  it("accepts public or private visibility", () => {
+    const pub = createListingSchema.safeParse({
+      ...validData,
+      visibility: "public",
+    });
+    const priv = createListingSchema.safeParse({
+      ...validData,
+      visibility: "private",
+    });
+    expect(pub.success).toBe(true);
+    expect(priv.success).toBe(true);
+    if (pub.success) expect(pub.data.visibility).toBe("public");
+    if (priv.success) expect(priv.data.visibility).toBe("private");
+  });
+
   it("converts price from dollars to cents", () => {
     const result = createListingSchema.safeParse({ ...validData, price: "25" });
     expect(result.success).toBe(true);

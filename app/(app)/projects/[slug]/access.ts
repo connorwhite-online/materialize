@@ -9,19 +9,20 @@
  * server component.
  */
 
+import { isProjectListedToOthers } from "@/lib/projects/listed";
+
 /**
- * Can the viewer see this project at all? Public + published projects
- * are open to everyone; everything else (draft, private, archived)
- * requires write access — owner, org member, or per-project
- * collaborator, all folded into the single `canWrite` flag computed
- * via `canWriteProject` in the page.
+ * Can the viewer see this project at all? A published + public project
+ * with at least one file is open to everyone; empty shells, drafts,
+ * private, and archived rows require write access — owner, org member,
+ * or per-project collaborator, all folded into the single `canWrite`
+ * flag computed via `canWriteProject` in the page.
  */
 export function resolveProjectVisibility(params: {
   status: string;
   visibility: string;
   canWrite: boolean;
+  fileCount: number;
 }): boolean {
-  const isPublicPublished =
-    params.status === "published" && params.visibility === "public";
-  return isPublicPublished || params.canWrite;
+  return isProjectListedToOthers(params) || params.canWrite;
 }

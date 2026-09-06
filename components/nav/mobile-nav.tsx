@@ -968,8 +968,8 @@ function PageIdentityContent({
 }
 
 /**
- * Right-hand end of the identity row: the grabber. It reads the same
- * open or closed, so unlike a lone chevron it has nothing to rotate.
+ * Right-hand end of the identity row: the grabber. Outward chevrons
+ * when collapsed; tips point inward while the menu is open.
  */
 function TrailingCluster({
   open = false,
@@ -995,7 +995,7 @@ function TrailingCluster({
         // small; the padding does the work.
         className="flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-muted/60"
       >
-        <Grabber size={24} />
+        <Grabber size={24} open={open} />
       </button>
     </div>
   );

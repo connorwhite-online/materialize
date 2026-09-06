@@ -20,6 +20,10 @@ vi.mock("drizzle-orm", () => ({
   eq: vi.fn(() => "eq"),
   and: vi.fn(() => "and"),
   asc: vi.fn(() => "asc"),
+  sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
+    strings,
+    values,
+  }),
 }));
 
 vi.mock("@/lib/db/schema", () => ({
@@ -65,6 +69,7 @@ const PROJECT = {
   coverPhotoId: null,
   status: "published",
   visibility: "public",
+  fileCount: 1,
   displayName: "Connor",
   username: "connor",
 };

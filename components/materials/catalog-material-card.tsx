@@ -48,26 +48,26 @@ export function CatalogMaterialCard({
   material,
 }: CatalogMaterialCardProps) {
   return (
-    <Link href={`/materials/${material.slug}`}>
-      <Card className="group gap-0 p-1 overflow-hidden transition-[color,box-shadow,border-color] duration-200 hover:border-primary/30 hover:shadow-[0_2px_4px_-2px_rgba(0,0,0,0.08),0_10px_24px_-8px_rgba(0,0,0,0.14),0_20px_44px_-14px_rgba(0,0,0,0.10)]">
-        <div className="relative aspect-[4/3] w-full overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted/40 to-muted/10">
+    <Link href={`/materials/${material.slug}`} className="block min-w-0">
+      <Card className="group gap-0 overflow-hidden p-1 transition-[color,box-shadow,border-color] duration-200 hover:border-primary/30 hover:shadow-[0_2px_4px_-2px_rgba(0,0,0,0.08),0_10px_24px_-8px_rgba(0,0,0,0.14),0_20px_44px_-14px_rgba(0,0,0,0.10)]">
+        <div className="relative aspect-[4/3] w-full shrink-0 overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted/40 to-muted/10">
           {material.featuredImage && (
             <Image
               src={resolveCatalogImage(material.featuredImage)}
               alt={material.name}
               fill
-              sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
+              sizes="(min-width: 1536px) 16vw, (min-width: 1280px) 20vw, (min-width: 1024px) 25vw, (min-width: 768px) 33vw, 50vw"
               className="object-cover transition-transform duration-500 group-hover:scale-[1.03]"
             />
           )}
         </div>
 
-        <CardContent className="p-3">
-          <h3 className="truncate font-semibold text-sm transition-colors group-hover:text-primary">
+        <CardContent className="p-2">
+          <h3 className="truncate text-xs font-semibold leading-snug transition-colors group-hover:text-primary sm:text-sm">
             {material.name}
           </h3>
           {material.descriptionShort && (
-            <p className="mt-1.5 line-clamp-2 text-xs text-muted-foreground leading-relaxed">
+            <p className="mt-1 line-clamp-2 text-[0.6875rem] leading-snug text-muted-foreground sm:text-xs sm:leading-relaxed">
               {material.descriptionShort}
             </p>
           )}

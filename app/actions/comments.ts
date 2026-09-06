@@ -1,7 +1,8 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, sql } from "drizzle-orm";
+import { isProjectListedToOthers } from "@/lib/projects/listed";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import {
@@ -189,6 +190,10 @@ export async function postComment(
         visibility: projects.visibility,
         status: projects.status,
         organizationId: projects.organizationId,
+        fileCount: sql<number>`cast((
+          select count(*) from project_files pf
+          where pf.project_id = ${projects.id}
+        ) as int)`,
       })
       .from(projects)
       .where(eq(projects.id, targetId));
@@ -201,8 +206,11 @@ export async function postComment(
         (await isOrgMember(userId, project.organizationId)).member);
     if (
       !(
-        (project.status === "published" && project.visibility === "public") ||
-        projectIsWriter
+        isProjectListedToOthers({
+          status: project.status,
+          visibility: project.visibility,
+          fileCount: project.fileCount,
+        }) || projectIsWriter
       )
     ) {
       return { error: "Project not found" };
