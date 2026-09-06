@@ -1,7 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { projects, projectPhotos } from "@/lib/db/schema";
-import { eq, and, asc } from "drizzle-orm";
+import { eq, and, asc, sql } from "drizzle-orm";
+import { isProjectListedToOthers } from "@/lib/projects/listed";
 import { generateDownloadUrl } from "@/lib/storage";
 import { logError } from "@/lib/logger";
 import { canWriteProject } from "@/lib/authorization";
@@ -63,6 +64,10 @@ export async function GET(
         thumbnailUrl: projects.thumbnailUrl,
         status: projects.status,
         visibility: projects.visibility,
+        fileCount: sql<number>`cast((
+          select count(*) from project_files pf
+          where pf.project_id = ${projects.id}
+        ) as int)`,
         userId: projects.userId,
         coverPhotoId: projects.coverPhotoId,
       })
@@ -75,8 +80,11 @@ export async function GET(
       return thumbnailPlaceholderResponse();
     }
 
-    const publicListing =
-      project.status === "published" && project.visibility === "public";
+    const publicListing = isProjectListedToOthers({
+      status: project.status,
+      visibility: project.visibility,
+      fileCount: project.fileCount,
+    });
     if (!publicListing) {
       const { userId } = await auth();
       if (!userId || !(await canWriteProject(userId, project.id)).ok) {

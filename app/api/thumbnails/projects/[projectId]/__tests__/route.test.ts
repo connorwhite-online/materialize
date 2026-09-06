@@ -103,6 +103,9 @@ function draftProject(overrides: Partial<Record<string, unknown>> = {}) {
     visibility: "private",
     userId: "owner-1",
     coverPhotoId: null,
+    // Public listings need ≥1 file; tests that don't care about the
+    // empty-shell gate default to a bundled project.
+    fileCount: 1,
     ...overrides,
   };
 }
@@ -150,6 +153,22 @@ describe("GET /api/thumbnails/projects/[projectId]", () => {
     expect(mockCanWriteProject).toHaveBeenCalledWith("org-teammate", PROJECT_ID);
 
     fetchSpy.mockRestore();
+  });
+
+  it("serves a placeholder for an empty public project to an anonymous viewer", async () => {
+    setMockUserId(null);
+    projectRow = draftProject({
+      status: "published",
+      visibility: "public",
+      fileCount: 0,
+    });
+
+    const { req, context } = makeRequest(PROJECT_ID);
+    const res = await GET(req, context);
+
+    expect(res.status).toBe(200);
+    // Anonymous + not listed → placeholder, no write-check.
+    expect(mockCanWriteProject).not.toHaveBeenCalled();
   });
 
   it("skips the canWriteProject check entirely for a published + public project", async () => {

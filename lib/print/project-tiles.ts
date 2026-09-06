@@ -96,6 +96,12 @@ async function loadProjectPrintTilesOnce(
     .where(eq(projectFiles.projectId, project.id))
     .orderBy(asc(projectFiles.position));
 
+  // Empty public shells stay owner-only — same listing gate as the
+  // project detail page.
+  if (!isOwner && bundled.length === 0) {
+    return null;
+  }
+
   // Non-owners can only print published listings — a draft bundled
   // into an otherwise-public project stays hidden from the hub (and
   // `addToCart` would reject it server-side anyway via

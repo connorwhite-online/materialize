@@ -29,7 +29,7 @@ export default async function NewProjectPage() {
       <CreateFormHeader
         icon={<LayersIcon className="size-7" />}
         title="New project"
-        description="Bundle multiple files into a single sellable unit."
+        description="Bundle files into a sellable project — start empty if you want and add files later."
       />
       <ProjectCreateForm ownedFiles={ownedFiles} />
     </div>

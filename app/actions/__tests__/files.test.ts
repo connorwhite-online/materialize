@@ -187,6 +187,36 @@ describe("createFileListing", () => {
         name: "Test Model",
         price: 999,
         license: "cc_by",
+        visibility: "public",
+      })
+    );
+  });
+
+  it("persists private visibility from the create form", async () => {
+    const formData = new FormData();
+    formData.set("name", "Secret Model");
+    formData.set("description", "");
+    formData.set("price", "0");
+    formData.set("license", "cc_by");
+    formData.set("tags", "");
+    formData.set("visibility", "private");
+    formData.set(
+      "assetsJson",
+      JSON.stringify([
+        {
+          storageKey: "uploads/test-user-id/abc/secret.stl",
+          originalFilename: "secret.stl",
+          format: "stl",
+          fileSize: 1024,
+        },
+      ])
+    );
+
+    await expect(createFileListing(formData)).rejects.toThrow("REDIRECT");
+    expect(mockValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "Secret Model",
+        visibility: "private",
       })
     );
   });

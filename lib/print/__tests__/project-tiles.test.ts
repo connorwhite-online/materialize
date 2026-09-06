@@ -88,6 +88,12 @@ describe("loadProjectPrintTiles", () => {
     expect(await loadProjectPrintTiles("robot-arm", VIEWER)).toBeNull();
   });
 
+  it("hides an empty public project from a non-owner", async () => {
+    projectRows = [publishedPublicProject()];
+    bundledRows = [];
+    expect(await loadProjectPrintTiles("robot-arm", VIEWER)).toBeNull();
+  });
+
   it("lets the owner load a draft project", async () => {
     projectRows = [publishedPublicProject({ status: "draft" })];
     bundledRows = [];
