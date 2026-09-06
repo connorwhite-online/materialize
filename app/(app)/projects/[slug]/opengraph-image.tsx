@@ -6,7 +6,8 @@ import {
   files,
   users,
 } from "@/lib/db/schema";
-import { eq, and, asc } from "drizzle-orm";
+import { eq, and, asc, sql } from "drizzle-orm";
+import { isProjectListedToOthers } from "@/lib/projects/listed";
 import { generateDownloadUrl } from "@/lib/storage";
 import { OG_CONTENT_TYPE, OG_SIZE, renderOgCard } from "@/lib/og/render-card";
 import {
@@ -53,6 +54,10 @@ export default async function Image({
           coverPhotoId: projects.coverPhotoId,
           status: projects.status,
           visibility: projects.visibility,
+          fileCount: sql<number>`cast((
+            select count(*) from project_files pf
+            where pf.project_id = ${projects.id}
+          ) as int)`,
           displayName: users.displayName,
           username: users.username,
         })
@@ -64,7 +69,14 @@ export default async function Image({
       return await renderOgCard({ title: "Materialize", subtitle: null });
     }
 
-    if (!row || row.status !== "published" || row.visibility !== "public") {
+    if (
+      !row ||
+      !isProjectListedToOthers({
+        status: row.status,
+        visibility: row.visibility,
+        fileCount: row.fileCount,
+      })
+    ) {
       return await renderOgCard({ title: "Materialize", subtitle: null });
     }
 

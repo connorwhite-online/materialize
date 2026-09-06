@@ -115,6 +115,7 @@ export function FileMetadataForm({
   const [category, setCategory] = useState("");
   const [recommendedMaterial, setRecommendedMaterial] = useState("");
   const [license, setLicense] = useState<LicenseId>(DEFAULT_LICENSE);
+  const [visibility, setVisibility] = useState<"public" | "private">("public");
   const [sellEnabled, setSellEnabled] = useState(false);
   const [printRecOpen, setPrintRecOpen] = useState(false);
   const [fileUnit, setFileUnit] = useState<"mm" | "cm" | "in">("mm");
@@ -193,6 +194,7 @@ export function FileMetadataForm({
       recommendedMaterial,
       sellEnabled,
       license,
+      visibility,
       collectionChoice,
       newCollectionName,
       projectChoice,
@@ -353,6 +355,31 @@ export function FileMetadataForm({
             </Select>
             <p className="mt-1 text-[11px] text-muted-foreground">
               Controls what people can do with the files after download.
+            </p>
+          </div>
+
+          <div>
+            <Label htmlFor="visibility-trigger">Visibility</Label>
+            <Select
+              value={visibility}
+              onValueChange={(v) =>
+                v && setVisibility(v as "public" | "private")
+              }
+            >
+              <SelectTrigger id="visibility-trigger" className="w-full">
+                <SelectValue>
+                  {(value) => (value === "private" ? "Private" : "Public")}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="public">Public</SelectItem>
+                <SelectItem value="private">Private</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {visibility === "public"
+                ? "Appears in browse and search."
+                : "Hidden from browse and search. Only you can see it."}
             </p>
           </div>
 

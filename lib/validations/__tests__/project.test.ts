@@ -113,9 +113,32 @@ describe("createProjectSchema", () => {
     expect(out.success).toBe(false);
   });
 
-  it("requires at least one fileId", () => {
+  it("accepts an empty fileIds list so a project can be created first", () => {
     const out = createProjectSchema.safeParse({ ...baseInput, fileIds: [] });
-    expect(out.success).toBe(false);
+    expect(out.success).toBe(true);
+    if (out.success) expect(out.data.fileIds).toEqual([]);
+  });
+
+  it("defaults missing fileIds to an empty list", () => {
+    const { fileIds: _omit, ...withoutFiles } = baseInput;
+    const out = createProjectSchema.safeParse(withoutFiles);
+    expect(out.success).toBe(true);
+    if (out.success) expect(out.data.fileIds).toEqual([]);
+  });
+
+  it("accepts public or private visibility", () => {
+    const pub = createProjectSchema.safeParse({
+      ...baseInput,
+      visibility: "public",
+    });
+    const priv = createProjectSchema.safeParse({
+      ...baseInput,
+      visibility: "private",
+    });
+    expect(pub.success).toBe(true);
+    expect(priv.success).toBe(true);
+    if (pub.success) expect(pub.data.visibility).toBe("public");
+    if (priv.success) expect(priv.data.visibility).toBe("private");
   });
 
   it("rejects non-UUID fileIds", () => {

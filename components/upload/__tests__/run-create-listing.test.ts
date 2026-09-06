@@ -166,6 +166,17 @@ describe("runCreateListing", () => {
     expect(seen[0].get("license")).toBe("cc_by_nc");
   });
 
+  it("forwards the chosen visibility onto the form", async () => {
+    mockPresign();
+    const seen: FormData[] = [];
+    createImpl = async (fd) => {
+      seen.push(fd);
+      return undefined;
+    };
+    await runCreateListing(makeInput({ visibility: "private" }));
+    expect(seen[0].get("visibility")).toBe("private");
+  });
+
   it("uses the chosen license when sellEnabled is on", async () => {
     mockPresign();
     const seen: FormData[] = [];

@@ -39,6 +39,7 @@ export function ProjectCreateForm({
   const [selected, setSelected] = useState<string[]>([]);
   const [category, setCategory] = useState("");
   const [license, setLicense] = useState<LicenseId>(DEFAULT_LICENSE);
+  const [visibility, setVisibility] = useState<"public" | "private">("public");
   const [sellEnabled, setSellEnabled] = useState(false);
   const [errors, setErrors] = useState<Record<string, string[]> | null>(null);
   const [pending, startTransition] = useTransition();
@@ -49,13 +50,10 @@ export function ProjectCreateForm({
     );
 
   const handleSubmit = (formData: FormData) => {
-    if (selected.length === 0) {
-      setErrors({ fileIds: ["Pick at least one file."] });
-      return;
-    }
     for (const id of selected) formData.append("fileIds", id);
     formData.append("license", license);
     formData.set("category", category);
+    formData.set("visibility", visibility);
     // Sale toggle only controls price — license is always submitted.
     if (!sellEnabled) {
       formData.set("price", "0");
@@ -147,6 +145,30 @@ export function ProjectCreateForm({
             </p>
           </div>
           <div>
+            <Label htmlFor="visibility-trigger">Visibility</Label>
+            <Select
+              value={visibility}
+              onValueChange={(v) =>
+                v && setVisibility(v as "public" | "private")
+              }
+            >
+              <SelectTrigger id="visibility-trigger" className="w-full">
+                <SelectValue>
+                  {(value) => (value === "private" ? "Private" : "Public")}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="public">Public</SelectItem>
+                <SelectItem value="private">Private</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {visibility === "public"
+                ? "Appears in browse and search once it has at least one file."
+                : "Hidden from browse and search. Only you can see it."}
+            </p>
+          </div>
+          <div>
             <Label htmlFor="repoUrl">Code repository (optional)</Label>
             <Input
               id="repoUrl"
@@ -206,13 +228,14 @@ export function ProjectCreateForm({
             Pick files for this project
           </CardTitle>
           <p className="text-xs text-muted-foreground">
-            {selected.length} selected
+            Optional — add files now or later. {selected.length} selected.
           </p>
         </CardHeader>
         <CardContent>
           {ownedFiles.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              You don&apos;t have any files yet. Upload one first.
+              You don&apos;t have any files yet. You can create the project
+              now and add files after.
             </p>
           ) : (
             <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4">

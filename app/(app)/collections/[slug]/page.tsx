@@ -15,6 +15,7 @@ import { isOrgMember } from "@/lib/authorization";
 import { OwnerBar } from "@/components/ui/owner-bar";
 import { CollectionSettingsMenu } from "@/components/profile/collection-settings-menu";
 import { getLicenseMeta } from "@/lib/licenses";
+import { projectHasBundledFile } from "@/lib/projects/listed";
 import {
   FileCard,
   FileCardPriceBadge,
@@ -133,7 +134,8 @@ export default async function CollectionPage(props: {
           eq(collectionItems.collectionId, collection.id),
           isNotNull(collectionItems.projectId),
           eq(projects.status, "published"),
-          eq(projects.visibility, "public")
+          eq(projects.visibility, "public"),
+          projectHasBundledFile()
         )
       )
       .orderBy(asc(collectionItems.sortOrder))

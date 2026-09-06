@@ -63,6 +63,7 @@ import { userOwnsProject } from "@/lib/entitlement";
 import { canWriteProject, isOrgMember } from "@/lib/authorization";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { swallow } from "@/lib/utils/swallow";
+import { isProjectListedToOthers } from "@/lib/projects/listed";
 import { resolveProjectVisibility } from "./access";
 import {
   FileCard,
@@ -82,7 +83,14 @@ export async function generateMetadata(props: {
   const { slug } = await props.params;
   const row = await loadProjectBySlug(slug);
 
-  if (!row || row.status !== "published" || row.visibility !== "public") {
+  if (
+    !row ||
+    !isProjectListedToOthers({
+      status: row.status,
+      visibility: row.visibility,
+      fileCount: row.fileCount,
+    })
+  ) {
     return { title: "Not found", robots: { index: false, follow: false } };
   }
 
@@ -146,6 +154,7 @@ export default async function ProjectDetailPage(props: {
       status: project.status,
       visibility: project.visibility,
       canWrite,
+      fileCount: project.fileCount,
     })
   ) {
     notFound();
@@ -436,11 +445,15 @@ export default async function ProjectDetailPage(props: {
   }
 
   // JSON-LD for crawlers — emitted only for the public, indexable
-  // form (published + public). Mirrors the gate used for the page-
-  // level visibility check above so Google never sees a graph entry
-  // for a draft or private project.
+  // form (published + public + ≥1 file). Mirrors the listing gate
+  // so Google never sees a graph entry for a draft, private, or
+  // empty shell.
   const jsonLd =
-    project.status === "published" && project.visibility === "public"
+    isProjectListedToOthers({
+      status: project.status,
+      visibility: project.visibility,
+      fileCount: project.fileCount,
+    })
       ? projectJsonLd({
           slug: project.slug,
           name: project.name,
@@ -708,6 +721,8 @@ export default async function ProjectDetailPage(props: {
           category: project.category,
           repoUrl: project.repoUrl,
           license: project.license,
+          visibility:
+            project.visibility === "private" ? "private" : "public",
           coverPhotoId: project.coverPhotoId,
           photos: curatorPhotos.map((p) => ({
             id: p.id,

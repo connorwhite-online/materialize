@@ -45,6 +45,7 @@ interface Props {
     category: string | null;
     repoUrl: string | null;
     license: string;
+    visibility: "public" | "private";
     coverPhotoId: string | null;
     /**
      * Curator photos that are eligible to be picked as the cover.
@@ -76,6 +77,9 @@ export function EditProjectDialog({ projectId, initial, trigger }: Props) {
     resolveLicense(initial.license)
   );
   const [category, setCategory] = useState(initial.category ?? "");
+  const [visibility, setVisibility] = useState<"public" | "private">(
+    initial.visibility
+  );
   // Empty string = auto thumbnail (no override); otherwise the selected
   // curator photo's id. Mirrors edit-file-button.tsx.
   const [coverPhotoId, setCoverPhotoId] = useState<string>(
@@ -89,6 +93,7 @@ export function EditProjectDialog({ projectId, initial, trigger }: Props) {
     // string clears, populated string picks).
     formData.set("license", license);
     formData.set("category", category);
+    formData.set("visibility", visibility);
     formData.set("coverPhotoId", coverPhotoId);
     startTransition(async () => {
       const res = await updateProject(projectId, formData);
@@ -199,6 +204,31 @@ export function EditProjectDialog({ projectId, initial, trigger }: Props) {
                 })}
               </SelectContent>
             </Select>
+          </div>
+
+          <div>
+            <Label htmlFor="edit-project-visibility">Visibility</Label>
+            <Select
+              value={visibility}
+              onValueChange={(v) =>
+                v && setVisibility(v as "public" | "private")
+              }
+            >
+              <SelectTrigger id="edit-project-visibility" className="w-full">
+                <SelectValue>
+                  {(value) => (value === "private" ? "Private" : "Public")}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="public">Public</SelectItem>
+                <SelectItem value="private">Private</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {visibility === "public"
+                ? "Appears in browse and search once it has at least one file."
+                : "Hidden from browse and search. Only you can see it."}
+            </p>
           </div>
 
           <div>

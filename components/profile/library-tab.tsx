@@ -13,6 +13,7 @@ import {
 } from "@/lib/db/schema";
 import { eq, and, asc, desc, inArray, sql } from "drizzle-orm";
 import { notUnsavedStudioDraft } from "@/lib/studio-drafts";
+import { projectHasBundledFile } from "@/lib/projects/listed";
 import { CollectionSection } from "./collection-section";
 import { LibrarySection } from "./library-section";
 import {
@@ -110,6 +111,7 @@ export async function LibraryTab({
   if (!isOwner) {
     projectConditions.push(eq(projects.status, "published"));
     projectConditions.push(eq(projects.visibility, "public"));
+    projectConditions.push(projectHasBundledFile());
   }
 
   // Wave 1: every "top-level" fetch is independent; run in parallel.
