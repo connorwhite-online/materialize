@@ -14,7 +14,7 @@ function src(rel: string) {
  * picker from growing another one-off tile.
  */
 const FILE_CARD_SURFACES = [
-  "app/(app)/files/page.tsx",
+  "app/(app)/files/(browse)/page.tsx",
   "components/projects/project-create-form.tsx",
   "components/projects/add-project-files-dialog.tsx",
   "components/profile/library-file-card.tsx",
