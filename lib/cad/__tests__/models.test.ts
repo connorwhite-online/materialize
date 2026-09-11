@@ -3,7 +3,9 @@ import {
   cadRoleOrDefault,
   modelForRole,
   modelParamsForRole,
+  openaiParamsForRole,
   planStepEnabled,
+  providerForRole,
 } from "@/lib/cad/models";
 
 const ENV_KEYS = [
@@ -14,6 +16,12 @@ const ENV_KEYS = [
   "CAD_EFFORT_IMPLEMENT",
   "CAD_EFFORT_DEFAULT",
   "CAD_PLAN_STEP",
+  // Provider selection reads these, so they have to be cleared too or the
+  // defaults under test depend on whoever's shell is running the suite.
+  "CAD_PROVIDER",
+  "OAI_SECRET_KEY",
+  "OPENAI_API_KEY",
+  "ANTHROPIC_API_KEY",
 ];
 const saved: Record<string, string | undefined> = {};
 for (const k of ENV_KEYS) saved[k] = process.env[k];
@@ -129,5 +137,87 @@ describe("planStepEnabled", () => {
     expect(planStepEnabled()).toBe(true);
     process.env.CAD_PLAN_STEP = "false";
     expect(planStepEnabled()).toBe(false);
+  });
+});
+
+describe("provider selection", () => {
+  it("defaults every role to Claude with only an Anthropic key", () => {
+    clearEnv();
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    expect(providerForRole("implement")).toBe("anthropic");
+    expect(modelForRole("implement")).toBe("claude-opus-5");
+  });
+
+  it("defaults every role to OpenAI once an OpenAI key is present", () => {
+    clearEnv();
+    process.env.OAI_SECRET_KEY = "sk-oai-test";
+    expect(providerForRole("implement")).toBe("openai");
+    expect(modelForRole("implement")).toBe("gpt-6-astra");
+    expect(modelForRole("plan")).toBe("gpt-6-astra");
+    expect(modelForRole("title")).toBe("gpt-5.6-luna");
+  });
+
+  it("lets CAD_PROVIDER pin the vendor when both keys are set", () => {
+    clearEnv();
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    process.env.OAI_SECRET_KEY = "sk-oai-test";
+    expect(modelForRole("implement")).toBe("gpt-6-astra");
+    process.env.CAD_PROVIDER = "anthropic";
+    expect(modelForRole("implement")).toBe("claude-opus-5");
+  });
+
+  it("keeps the judge off the generator's model on OpenAI too", () => {
+    // Same self-preference mitigation as the Claude defaults — it has to hold
+    // within a single-vendor deployment, not just across vendors.
+    clearEnv();
+    process.env.OAI_SECRET_KEY = "sk-oai-test";
+    expect(modelForRole("critique")).not.toBe(modelForRole("implement"));
+  });
+
+  it("follows a per-role override across vendors", () => {
+    clearEnv();
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    process.env.CAD_MODEL_IMPLEMENT = "gpt-6-astra";
+    expect(providerForRole("implement")).toBe("openai");
+    expect(providerForRole("plan")).toBe("anthropic");
+  });
+});
+
+describe("openaiParamsForRole", () => {
+  it("sends the role's effort as reasoning.effort", () => {
+    clearEnv();
+    process.env.OAI_SECRET_KEY = "sk-oai-test";
+    expect(openaiParamsForRole("implement")).toEqual({
+      model: "gpt-6-astra",
+      reasoning: { effort: "xhigh" },
+    });
+  });
+
+  it("honours the same effort env vars as the Claude path", () => {
+    clearEnv();
+    process.env.OAI_SECRET_KEY = "sk-oai-test";
+    process.env.CAD_EFFORT_IMPLEMENT = "medium";
+    expect(openaiParamsForRole("implement").reasoning?.effort).toBe("medium");
+  });
+
+  it("clamps the top rungs for models that do not offer them", () => {
+    // Luna is the cheap tier; xhigh/max are flagship-only, and a 400 here
+    // would fail the whole title step rather than just costing less.
+    clearEnv();
+    process.env.OAI_SECRET_KEY = "sk-oai-test";
+    process.env.CAD_EFFORT_TITLE = "max";
+    expect(openaiParamsForRole("title").reasoning?.effort).toBe("high");
+    process.env.CAD_EFFORT_IMPLEMENT = "max";
+    expect(openaiParamsForRole("implement").reasoning?.effort).toBe("max");
+  });
+
+  it("sends no reasoning knob for a non-reasoning or unknown id", () => {
+    clearEnv();
+    process.env.CAD_MODEL_IMPLEMENT = "gpt-4o";
+    expect(openaiParamsForRole("implement")).toEqual({ model: "gpt-4o" });
+    process.env.CAD_MODEL_IMPLEMENT = "gpt-5-chat-latest";
+    expect(openaiParamsForRole("implement")).toEqual({
+      model: "gpt-5-chat-latest",
+    });
   });
 });

@@ -6,11 +6,17 @@ import { activeCadContext, meterModelUsage } from "./metering";
 import type { ResolvedModelCredentials } from "./credentials";
 import type { PromptImage } from "./types";
 import { cadRoleOrDefault, modelParamsForRole } from "./models";
+import { completeTextOpenAI, hasOpenAiCredentials } from "./openai-client";
+import { providerForModel } from "./provider";
 
 /**
- * Thin wrapper over the Anthropic Messages API for one-shot text completions
- * (the harness drives its own plan/repair loop, so each call is a single
- * completion with no tools).
+ * Thin wrapper for one-shot text completions (the harness drives its own
+ * plan/repair loop, so each call is a single completion with no tools).
+ *
+ * The transport follows the role's RESOLVED model: a `claude-*` id takes the
+ * Anthropic Messages path below, an OpenAI id is handed to ./openai-client.
+ * Both come back through one metering + transcript site, so a job's cost
+ * report reads the same whichever vendor served it.
  *
  * Why the direct API, not the Agent SDK's `query()`: `query()` spawns a Claude
  * Code subprocess per call — fine locally but heavy, occasionally wedged, and
@@ -46,7 +52,10 @@ import { cadRoleOrDefault, modelParamsForRole } from "./models";
 const MAX_TOKENS = 16_000;
 
 /**
- * True when a usable credential is present in the environment.
+ * True when a usable credential is present in the environment — for EITHER
+ * vendor. Every caller uses this as "can the harness call a model at all",
+ * so an OpenAI-only deployment must answer yes here or the whole harness
+ * silently falls back to its offline stub.
  *
  * Deliberately env-only even under BYOK: the user-key path has no storage yet
  * (MTR-187 gate), so a user key can never be the ONLY credential. Revisit
@@ -54,7 +63,9 @@ const MAX_TOKENS = 16_000;
  */
 export function hasModelCredentials(): boolean {
   return !!(
-    process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_OAUTH_TOKEN
+    process.env.ANTHROPIC_API_KEY ||
+    process.env.CLAUDE_CODE_OAUTH_TOKEN ||
+    hasOpenAiCredentials()
   );
 }
 
@@ -122,79 +133,109 @@ export interface CompleteTextOptions {
 export async function completeText(opts: CompleteTextOptions): Promise<string> {
   if (!hasModelCredentials()) {
     throw new Error(
-      "No model credentials (set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN)"
+      "No model credentials (set OAI_SECRET_KEY, ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN)"
     );
   }
 
-  const content: Anthropic.ContentBlockParam[] = [
-    { type: "text", text: opts.prompt },
-  ];
-  for (const img of opts.images ?? []) {
-    // Caption-then-image: a labeled image is announced by its own text block
-    // so multi-image turns (refs + concept + prior render) stay unambiguous.
-    if (img.label) content.push({ type: "text", text: img.label });
-    content.push({
-      type: "image",
-      source: { type: "base64", media_type: img.mediaType, data: img.data },
-    });
-  }
-  for (const doc of opts.documents ?? []) {
-    content.push({
-      type: "document",
-      source: {
-        type: "base64",
-        media_type: "application/pdf",
-        data: doc.data,
-      },
-    });
-  }
-
-  const client = clientForCredentials(activeCadContext()?.credentials);
   const started = Date.now();
   const params = modelParamsForRole(cadRoleOrDefault(opts.role));
-  const message = await client.messages.create(
-    {
-      ...params,
-      // An explicitly pinned model wins over the role's default, but keeps the
-      // role's thinking/effort — the pin is a routing choice, not an opt-out
-      // of reasoning.
+  // An explicitly pinned model wins over the role's default, but keeps the
+  // role's thinking/effort — the pin is a routing choice, not an opt-out of
+  // reasoning. It can also cross vendors, which is what decides the transport.
+  const model = opts.model || params.model;
+
+  let response: string;
+  let usedModel: string;
+  let usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+  };
+
+  if (providerForModel(model) === "openai") {
+    const completion = await completeTextOpenAI({
+      system: opts.system,
+      prompt: opts.prompt,
+      role: cadRoleOrDefault(opts.role),
       ...(opts.model ? { model: opts.model } : {}),
-      max_tokens: MAX_TOKENS,
-      // Prompt caching (MTR-221): the system prompt (base prompt + knowledge
-      // blocks + exemplars) is byte-identical across every repair attempt of a
-      // job — a breakpoint on its final block lets attempt 2+ read it from
-      // cache instead of re-paying full input price.
-      system: [
-        {
-          type: "text",
-          text: opts.system,
-          cache_control: { type: "ephemeral" },
+      images: opts.images,
+      documents: opts.documents,
+      signal: opts.signal,
+    });
+    response = completion.text;
+    usedModel = completion.model;
+    usage = completion.usage;
+  } else {
+    const content: Anthropic.ContentBlockParam[] = [
+      { type: "text", text: opts.prompt },
+    ];
+    for (const img of opts.images ?? []) {
+      // Caption-then-image: a labeled image is announced by its own text block
+      // so multi-image turns (refs + concept + prior render) stay unambiguous.
+      if (img.label) content.push({ type: "text", text: img.label });
+      content.push({
+        type: "image",
+        source: { type: "base64", media_type: img.mediaType, data: img.data },
+      });
+    }
+    for (const doc of opts.documents ?? []) {
+      content.push({
+        type: "document",
+        source: {
+          type: "base64",
+          media_type: "application/pdf",
+          data: doc.data,
         },
-      ],
-      messages: [{ role: "user", content }],
-    },
-    { signal: opts.signal }
-  );
+      });
+    }
+
+    const client = clientForCredentials(activeCadContext()?.credentials);
+    const message = await client.messages.create(
+      {
+        ...params,
+        ...(opts.model ? { model: opts.model } : {}),
+        max_tokens: MAX_TOKENS,
+        // Prompt caching (MTR-221): the system prompt (base prompt + knowledge
+        // blocks + exemplars) is byte-identical across every repair attempt of
+        // a job — a breakpoint on its final block lets attempt 2+ read it from
+        // cache instead of re-paying full input price.
+        system: [
+          {
+            type: "text",
+            text: opts.system,
+            cache_control: { type: "ephemeral" },
+          },
+        ],
+        messages: [{ role: "user", content }],
+      },
+      { signal: opts.signal }
+    );
+    usedModel = message.model || model;
+    usage = {
+      inputTokens: message.usage?.input_tokens ?? 0,
+      outputTokens: message.usage?.output_tokens ?? 0,
+      cacheReadTokens: message.usage?.cache_read_input_tokens ?? 0,
+      cacheWriteTokens: message.usage?.cache_creation_input_tokens ?? 0,
+    };
+    response = message.content
+      .filter((b): b is Anthropic.TextBlock => b.type === "text")
+      .map((b) => b.text)
+      .join("");
+  }
+
   meterModelUsage({
     role: opts.role ?? "other",
-    model: message.model || opts.model || params.model,
-    inputTokens: message.usage?.input_tokens ?? 0,
-    outputTokens: message.usage?.output_tokens ?? 0,
-    cacheReadTokens: message.usage?.cache_read_input_tokens ?? 0,
-    cacheWriteTokens: message.usage?.cache_creation_input_tokens ?? 0,
+    model: usedModel,
+    ...usage,
     ms: Date.now() - started,
   });
-
-  const response = message.content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join("");
 
   // Flight recorder (lib/cad/transcript.ts): full prompt/response for the
   // persisted job transcript. Observation-only; no-op without a recorder.
   activeCadContext()?.recorder?.recordModelCall({
     role: opts.role ?? "other",
-    model: message.model || opts.model || params.model,
+    model: usedModel,
     system: opts.system,
     prompt: opts.prompt,
     imageLabels: (opts.images ?? []).map(
@@ -202,8 +243,8 @@ export async function completeText(opts: CompleteTextOptions): Promise<string> {
     ),
     response,
     ms: Date.now() - started,
-    inputTokens: message.usage?.input_tokens ?? undefined,
-    outputTokens: message.usage?.output_tokens ?? undefined,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
   });
 
   return response;

@@ -13,8 +13,22 @@
  * both are MODEL-GATED, and the same env vars that let you re-route a role are
  * what can point it at a model that rejects them.
  *
+ * A role's model also decides its VENDOR (./provider): `CAD_MODEL_IMPLEMENT=
+ * gpt-6-astra` routes that role through the OpenAI Responses API, and the
+ * defaults below follow whichever provider the environment is credentialed
+ * for. Effort is the one knob both vendors share — `low | medium | high |
+ * xhigh | max` is the same ladder on Claude's `output_config.effort` and on
+ * OpenAI's `reasoning.effort`, so the per-role effort table below means the
+ * same thing whichever vendor serves the role.
+ *
  * Pure (no `server-only`) so the eval runner and tests can use it.
  */
+
+import {
+  defaultProvider,
+  providerForModel,
+  type CadProvider,
+} from "./provider";
 
 export type CadRole =
   | "plan"
@@ -45,12 +59,14 @@ const ROLE_EFFORT_ENV: Record<CadRole, string> = {
 };
 
 /**
- * Default model per role. Everything that writes or repairs geometry stays on
- * ONE strong model on purpose: prompt caches are model-scoped, so a per-role
- * cascade would fragment the byte-stable prefix MTR-221/222 built. Trade cost
- * with EFFORT below before trading it with a cheaper model.
+ * Default model per role, per provider. Everything that writes or repairs
+ * geometry stays on ONE strong model on purpose: prompt caches are
+ * model-scoped on both vendors, so a per-role cascade would fragment the
+ * byte-stable prefix MTR-221/222 built. Trade cost with EFFORT below before
+ * trading it with a cheaper model.
  *
- * Two roles diverge deliberately:
+ * Two roles diverge deliberately, and they diverge WITHIN each provider so
+ * the rule survives a single-vendor deployment:
  *   - `critique` must NOT be the model that generated the part. A judge
  *     scoring its own output shows self-preference bias (the reason recorded
  *     in lib/cad/critique.ts) — a mitigation that was inert while every role
@@ -59,13 +75,23 @@ const ROLE_EFFORT_ENV: Record<CadRole, string> = {
  *   - `title` names a finished part in one line; nothing is bought by
  *     spending a frontier model on it.
  */
-const ROLE_DEFAULT_MODEL: Record<CadRole, string> = {
-  plan: "claude-opus-5",
-  brief: "claude-opus-5",
-  implement: "claude-opus-5",
-  repair: "claude-opus-5",
-  critique: "claude-sonnet-5",
-  title: "claude-haiku-4-5",
+const ROLE_DEFAULT_MODEL: Record<CadProvider, Record<CadRole, string>> = {
+  anthropic: {
+    plan: "claude-opus-5",
+    brief: "claude-opus-5",
+    implement: "claude-opus-5",
+    repair: "claude-opus-5",
+    critique: "claude-sonnet-5",
+    title: "claude-haiku-4-5",
+  },
+  openai: {
+    plan: "gpt-6-astra",
+    brief: "gpt-6-astra",
+    implement: "gpt-6-astra",
+    repair: "gpt-6-astra",
+    critique: "gpt-5.6-sol",
+    title: "gpt-5.6-luna",
+  },
 };
 
 /**
@@ -93,6 +119,22 @@ const SUPPORTS_EFFORT =
 const SUPPORTS_XHIGH =
   /^claude-(fable-5|mythos-5|opus-5|opus-4-8|opus-4-7|sonnet-5)/;
 
+/**
+ * OpenAI models that take `reasoning: { effort }` — the reasoning families.
+ * A chat-tuned or non-reasoning id (gpt-4o, gpt-4.1, `*-chat-latest`)
+ * rejects the field, so the same "an id this doesn't recognize gets neither
+ * knob" degradation the Claude gates give applies here too.
+ */
+const OPENAI_REASONING = /^(gpt-6|gpt-5(\.|-)|o[1-9](-|$)|codex-)/;
+/** Chat-tuned snapshots inside those families, which do NOT reason. */
+const OPENAI_CHAT_TUNED = /-chat(-|$)/;
+/**
+ * OpenAI models whose effort ladder reaches the top rungs. `max` arrived with
+ * GPT-5.6 Sol and is a flagship-only setting, so a role pointed at a smaller
+ * tier (Terra, Luna, mini, nano) clamps to `high` rather than 400ing.
+ */
+const OPENAI_TOP_EFFORT = /^(gpt-6|gpt-5\.6-sol|gpt-5\.5-pro|gpt-5-pro|gpt-5\.1-codex-max)/;
+
 const CAD_ROLES = new Set<string>(Object.keys(ROLE_ENV));
 
 /**
@@ -110,8 +152,13 @@ export function modelForRole(role: CadRole): string {
   return (
     process.env[ROLE_ENV[role]] ||
     process.env.CAD_MODEL_DEFAULT ||
-    ROLE_DEFAULT_MODEL[role]
+    ROLE_DEFAULT_MODEL[defaultProvider()][role]
   );
+}
+
+/** The vendor that serves a role's resolved model. */
+export function providerForRole(role: CadRole): CadProvider {
+  return providerForModel(modelForRole(role));
 }
 
 const EFFORTS: readonly CadEffort[] = [
@@ -159,6 +206,31 @@ export function modelParamsForRole(role: CadRole): CadModelParams {
     params.output_config = {
       effort:
         effort === "xhigh" && !SUPPORTS_XHIGH.test(model) ? "high" : effort,
+    };
+  }
+  return params;
+}
+
+/** Request params for a role on the OpenAI Responses API. */
+export interface OpenAiModelParams {
+  model: string;
+  reasoning?: { effort: CadEffort };
+}
+
+/**
+ * The OpenAI-side twin of `modelParamsForRole`: the same per-role effort
+ * table, expressed as `reasoning.effort`, gated on what the resolved model
+ * accepts. `thinking` has no counterpart — a reasoning model on the Responses
+ * API always reasons, and effort is how much.
+ */
+export function openaiParamsForRole(role: CadRole): OpenAiModelParams {
+  const model = modelForRole(role);
+  const params: OpenAiModelParams = { model };
+  if (OPENAI_REASONING.test(model) && !OPENAI_CHAT_TUNED.test(model)) {
+    const effort = effortForRole(role);
+    const top = OPENAI_TOP_EFFORT.test(model);
+    params.reasoning = {
+      effort: !top && (effort === "xhigh" || effort === "max") ? "high" : effort,
     };
   }
   return params;
