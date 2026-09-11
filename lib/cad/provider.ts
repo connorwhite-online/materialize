@@ -27,12 +27,57 @@ export function providerForModel(model: string): CadProvider {
 }
 
 /**
- * The OpenAI key. `OAI_SECRET_KEY` is the name this project's deployment
- * uses; `OPENAI_API_KEY` is the SDK's own default and is accepted so a local
- * shell that already exports it works without a second variable.
+ * The OpenAI key as configured. `OAI_SECRET_KEY` is the name this project's
+ * deployment uses; `OPENAI_API_KEY` is the SDK's own default and is accepted
+ * so a local shell that already exports it works without a second variable.
  */
 export function openaiApiKey(): string | undefined {
-  return process.env.OAI_SECRET_KEY || process.env.OPENAI_API_KEY;
+  const raw = (
+    process.env.OAI_SECRET_KEY ||
+    process.env.OPENAI_API_KEY ||
+    ""
+  ).trim();
+  return raw || undefined;
+}
+
+/**
+ * Shape of a real OpenAI secret. Every issued key is `sk-` followed by a long
+ * opaque body (`sk-proj-…`, `sk-svcacct-…` and friends all share the prefix).
+ */
+const OPENAI_KEY_SHAPE = /^sk-\S{16,}$/;
+
+let warnedAboutKeyShape = false;
+
+/**
+ * The key, but only if it could possibly authenticate.
+ *
+ * This guard exists because of a real outage: provider selection keys off
+ * whether an OpenAI credential is PRESENT, so a variable holding something
+ * that is not a key — the six-character identifier the dashboard prints
+ * beside a secret, a pasted one-time code, a truncated copy — still captured
+ * every role and turned one mistyped env var into a total generation outage,
+ * 401ing on every call with no path back to the working vendor.
+ *
+ * A value that cannot be a key is therefore treated as no key at all: the
+ * harness stays on Anthropic and says why, which degrades instead of failing.
+ * An explicit `CAD_PROVIDER=openai` still forces the issue — stated intent
+ * beats a shape heuristic, and the 401 is then the answer the operator asked
+ * for.
+ */
+export function usableOpenaiKey(): string | undefined {
+  const key = openaiApiKey();
+  if (!key) return undefined;
+  if (OPENAI_KEY_SHAPE.test(key)) return key;
+  if (!warnedAboutKeyShape) {
+    warnedAboutKeyShape = true;
+    console.warn(
+      "[cad/provider] OAI_SECRET_KEY/OPENAI_API_KEY is set but is not shaped " +
+        "like an OpenAI secret (expected `sk-…`); ignoring it for provider " +
+        "selection and staying on Anthropic. Set CAD_PROVIDER=openai to use " +
+        "it anyway."
+    );
+  }
+  return undefined;
 }
 
 /** The Anthropic credential — API key, or the OAuth bearer fallback. */
@@ -42,7 +87,9 @@ export function anthropicCredential(): string | undefined {
 
 /** True when THIS provider has a usable credential in the environment. */
 export function hasCredentialsFor(provider: CadProvider): boolean {
-  return provider === "openai" ? !!openaiApiKey() : !!anthropicCredential();
+  return provider === "openai"
+    ? !!usableOpenaiKey()
+    : !!anthropicCredential();
 }
 
 /**
@@ -57,6 +104,6 @@ export function hasCredentialsFor(provider: CadProvider): boolean {
 export function defaultProvider(): CadProvider {
   const forced = process.env.CAD_PROVIDER?.toLowerCase();
   if (forced === "openai" || forced === "anthropic") return forced;
-  if (openaiApiKey()) return "openai";
+  if (usableOpenaiKey()) return "openai";
   return "anthropic";
 }

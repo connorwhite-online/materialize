@@ -4,6 +4,7 @@ import {
   hasCredentialsFor,
   openaiApiKey,
   providerForModel,
+  usableOpenaiKey,
 } from "@/lib/cad/provider";
 
 const ENV = [
@@ -61,7 +62,7 @@ describe("credential resolution", () => {
 
   it("reports per-provider credentials independently", () => {
     clearEnv();
-    process.env.OAI_SECRET_KEY = "sk-oai";
+    process.env.OAI_SECRET_KEY = "sk-test-000000000000000000";
     expect(hasCredentialsFor("openai")).toBe(true);
     expect(hasCredentialsFor("anthropic")).toBe(false);
     process.env.CLAUDE_CODE_OAUTH_TOKEN = "oauth";
@@ -78,16 +79,61 @@ describe("defaultProvider", () => {
   it("prefers OpenAI when its key is present", () => {
     clearEnv();
     process.env.ANTHROPIC_API_KEY = "sk-ant";
-    process.env.OAI_SECRET_KEY = "sk-oai";
+    process.env.OAI_SECRET_KEY = "sk-test-000000000000000000";
     expect(defaultProvider()).toBe("openai");
   });
 
   it("obeys CAD_PROVIDER over the environment", () => {
     clearEnv();
-    process.env.OAI_SECRET_KEY = "sk-oai";
+    process.env.OAI_SECRET_KEY = "sk-test-000000000000000000";
     process.env.CAD_PROVIDER = "anthropic";
     expect(defaultProvider()).toBe("anthropic");
     process.env.CAD_PROVIDER = "nonsense";
     expect(defaultProvider()).toBe("openai");
+  });
+});
+
+describe("malformed OpenAI key", () => {
+  // Regression: OAI_SECRET_KEY was set to "341193" — the six-character
+  // identifier the dashboard prints beside a secret, not the secret. Provider
+  // selection keyed off key PRESENCE, so that captured every role and 401ed
+  // every generation with no path back to the working vendor.
+  const NOT_A_KEY = ["341193", "sk-", "sk-short", "your-key-here", "   "];
+
+  it("is treated as no key at all, so the harness stays on Anthropic", () => {
+    for (const value of NOT_A_KEY) {
+      clearEnv();
+      process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+      process.env.OAI_SECRET_KEY = value;
+      expect(usableOpenaiKey()).toBeUndefined();
+      expect(hasCredentialsFor("openai")).toBe(false);
+      expect(defaultProvider()).toBe("anthropic");
+    }
+  });
+
+  it("still reports the raw value, so the operator can be told what is set", () => {
+    clearEnv();
+    process.env.OAI_SECRET_KEY = "341193";
+    expect(openaiApiKey()).toBe("341193");
+  });
+
+  it("yields to an explicit CAD_PROVIDER — stated intent beats a heuristic", () => {
+    clearEnv();
+    process.env.OAI_SECRET_KEY = "341193";
+    process.env.CAD_PROVIDER = "openai";
+    expect(defaultProvider()).toBe("openai");
+  });
+
+  it("accepts the real key shapes", () => {
+    for (const value of [
+      "sk-" + "a".repeat(48),
+      "sk-proj-" + "b".repeat(64),
+      "sk-svcacct-" + "c".repeat(40),
+    ]) {
+      clearEnv();
+      process.env.OAI_SECRET_KEY = value;
+      expect(usableOpenaiKey()).toBe(value);
+      expect(defaultProvider()).toBe("openai");
+    }
   });
 });
