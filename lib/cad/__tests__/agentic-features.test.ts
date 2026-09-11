@@ -23,10 +23,18 @@ const createMock = vi.fn<
   ) => Promise<Partial<Anthropic.Message>>
 >();
 
+// Both entry points funnel into ONE spy: model-client's completeText calls
+// `create`, the agentic loop streams (long thinking turns would otherwise trip
+// the non-streaming request timeout). The request body is identical either
+// way, so every assertion on createMock.mock.calls[n][0] still reads the real
+// request — and call ordering across the two paths stays observable.
 vi.mock("@anthropic-ai/sdk", () => ({
   default: class MockAnthropic {
     messages = {
       create: (...args: Parameters<typeof createMock>) => createMock(...args),
+      stream: (...args: Parameters<typeof createMock>) => ({
+        finalMessage: () => createMock(...args),
+      }),
     };
   },
 }));

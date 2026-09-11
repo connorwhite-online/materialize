@@ -38,7 +38,14 @@ import {
 } from "./brief";
 import { enrichRepairHint } from "./repair-taxonomy";
 import { sampleStlPoints } from "./stl-points";
-import { briefStepEnabled, modelForRole } from "./models";
+import { briefStepEnabled, modelForRole, modelParamsForRole } from "./models";
+import {
+  completeWithToolsOpenAI,
+  type OpenAiToolDef,
+  type OpenAiToolSession,
+} from "./openai-client";
+import { providerForModel } from "./provider";
+import type OpenAI from "openai";
 import {
   sourcePart,
   catalogEnabled,
@@ -113,9 +120,11 @@ const DEFAULT_MAX_MS = 600_000;
 // (brief + plan + one attempt + judge) after an agentic cutoff.
 const MIN_AGENTIC_MS = 120_000;
 const FALLBACK_RESERVE_MS = 240_000;
-// Same default + headroom rationale as model-client.
-const DEFAULT_MODEL = "claude-sonnet-4-6";
-const MAX_TOKENS = 8192;
+// The model + thinking/effort come from modelParamsForRole (./models). Higher
+// than model-client's cap because this loop STREAMS: an agentic turn at high
+// effort can spend real time thinking before its first tool_use block, which
+// is exactly the shape that trips a non-streaming HTTP timeout.
+const MAX_TOKENS = 32_000;
 // Keep tool results promptable — stdout beyond this is noise, not signal.
 const STDOUT_CAP = 2_000;
 
@@ -149,18 +158,31 @@ async function completeWithTools(opts: {
   messages: Anthropic.MessageParam[];
   tools: Anthropic.Tool[];
   model?: string;
+  /** OpenAI chaining handle; unused on the Anthropic path. */
+  session: OpenAiToolSession;
   signal?: AbortSignal;
 }): Promise<Anthropic.Message> {
   if (!hasModelCredentials()) {
     throw new Error(
-      "No model credentials (set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN)"
+      "No model credentials (set OAI_SECRET_KEY, ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN)"
     );
   }
-  const client = clientForCredentials(activeCadContext()?.credentials);
   const started = Date.now();
-  const message = await client.messages.create(
+  const params = modelParamsForRole("implement");
+  if (providerForModel(opts.model || params.model) === "openai") {
+    return completeWithToolsViaOpenAI(opts, started);
+  }
+  const client = clientForCredentials(activeCadContext()?.credentials);
+  // Streamed, then collected: `.finalMessage()` returns the same Message the
+  // non-streaming call did, so the tool loop below is unchanged — streaming is
+  // purely what keeps a long thinking turn from hitting the request timeout.
+  // Thinking blocks ride in `message.content`, which the loop already pushes
+  // back verbatim as the assistant turn (:659) — they must be replayed
+  // unchanged, so do not start filtering that array by block type.
+  const stream = client.messages.stream(
     {
-      model: opts.model || DEFAULT_MODEL,
+      ...params,
+      ...(opts.model ? { model: opts.model } : {}),
       max_tokens: MAX_TOKENS,
       // Prompt caching (MTR-221) — 3 of the max 4 breakpoints per request:
       //   1. last tool definition (tools render before system, so this pins
@@ -190,11 +212,12 @@ async function completeWithTools(opts: {
     },
     { signal: opts.signal }
   );
+  const message = await stream.finalMessage();
   // Cost metering (MTR-181): agentic turns are usually the job's biggest
   // token line item — attribute them to their own role.
   meterModelUsage({
     role: "agentic",
-    model: message.model || opts.model || DEFAULT_MODEL,
+    model: message.model || opts.model || params.model,
     inputTokens: message.usage?.input_tokens ?? 0,
     outputTokens: message.usage?.output_tokens ?? 0,
     cacheReadTokens: message.usage?.cache_read_input_tokens ?? 0,
@@ -202,6 +225,143 @@ async function completeWithTools(opts: {
     ms: Date.now() - started,
   });
   return message;
+}
+
+/**
+ * The OpenAI arm of `completeWithTools`.
+ *
+ * The loop below is written in Anthropic's vocabulary — `MessageParam`,
+ * `tool_use`, `tool_result` — and that stays the harness's internal shape
+ * (it is also what the flight recorder persists). This translates at the
+ * boundary in both directions: the NEWEST turn out, the model's reply back in
+ * as a synthetic `Message`.
+ *
+ * Only the newest turn is sent because `previous_response_id` re-attaches
+ * everything before it, reasoning included. That also means the O(turns²)
+ * image re-upload `pruneStaleImages` exists to bound never happens here —
+ * prior renders are referenced, not resent.
+ */
+async function completeWithToolsViaOpenAI(
+  opts: {
+    system: string;
+    messages: Anthropic.MessageParam[];
+    tools: Anthropic.Tool[];
+    model?: string;
+    session: OpenAiToolSession;
+    signal?: AbortSignal;
+  },
+  started: number
+): Promise<Anthropic.Message> {
+  const turn = await completeWithToolsOpenAI({
+    system: opts.system,
+    input: openaiInputForNewestTurn(opts.messages),
+    tools: opts.tools.map(
+      (tool): OpenAiToolDef => ({
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.input_schema as Record<string, unknown>,
+      })
+    ),
+    session: opts.session,
+    role: "implement",
+    ...(opts.model ? { model: opts.model } : {}),
+    signal: opts.signal,
+  });
+
+  meterModelUsage({
+    role: "agentic",
+    model: turn.model,
+    ...turn.usage,
+    ms: Date.now() - started,
+  });
+
+  const content: Anthropic.ContentBlockParam[] = [];
+  if (turn.text) content.push({ type: "text", text: turn.text });
+  for (const call of turn.toolCalls) {
+    content.push({
+      type: "tool_use",
+      // The OpenAI `call_id` rides in the Anthropic id field, so the
+      // tool_result the loop builds quotes back exactly what
+      // `function_call_output` needs.
+      id: call.id,
+      name: call.name,
+      input: call.input,
+    });
+  }
+  return {
+    id: turn.responseId,
+    type: "message",
+    role: "assistant",
+    model: turn.model,
+    content,
+    stop_reason: turn.toolCalls.length > 0 ? "tool_use" : "end_turn",
+    stop_sequence: null,
+    usage: {
+      input_tokens: turn.usage.inputTokens,
+      output_tokens: turn.usage.outputTokens,
+      cache_read_input_tokens: turn.usage.cacheReadTokens,
+      cache_creation_input_tokens: turn.usage.cacheWriteTokens,
+    },
+  } as unknown as Anthropic.Message;
+}
+
+/**
+ * The newest turn of the harness's message log, as Responses input items.
+ *
+ * Turn 1 is the task (text + reference images) and becomes a user message.
+ * Every turn after it is tool results, which become `function_call_output`
+ * items keyed by the `call_id` the model issued. The budget-warning text the
+ * loop appends rides inside the last result's content, so it needs no special
+ * case.
+ */
+function openaiInputForNewestTurn(
+  messages: Anthropic.MessageParam[]
+): OpenAI.Responses.ResponseInputItem[] {
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== "user") return [];
+  if (!Array.isArray(last.content)) {
+    return [{ role: "user", content: last.content }];
+  }
+
+  const items: OpenAI.Responses.ResponseInputItem[] = [];
+  const plain: OpenAI.Responses.ResponseInputContent[] = [];
+  for (const block of last.content) {
+    if (block.type === "tool_result") {
+      items.push({
+        type: "function_call_output",
+        call_id: block.tool_use_id,
+        output:
+          typeof block.content === "string"
+            ? block.content
+            : (block.content ?? []).map(toOpenAiContent),
+      });
+    } else if (block.type === "text" || block.type === "image") {
+      plain.push(toOpenAiContent(block));
+    }
+  }
+  if (plain.length > 0) items.push({ role: "user", content: plain });
+  return items;
+}
+
+/** One Anthropic text/image block as a Responses input content part. */
+function toOpenAiContent(block: {
+  type: string;
+  text?: string;
+  source?: unknown;
+}): OpenAI.Responses.ResponseInputContent {
+  if (block.type === "image") {
+    const source = block.source as {
+      type?: string;
+      media_type?: string;
+      data?: string;
+    };
+    return {
+      type: "input_image",
+      detail: "auto",
+      image_url: `data:${source?.media_type ?? "image/png"};base64,${source?.data ?? ""}`,
+    };
+  }
+  return { type: "input_text", text: block.text ?? "" };
 }
 
 /**
@@ -594,6 +754,10 @@ export async function runAgenticHarness(
   // Hoisted above the try so the finally can hand the full message log to
   // the flight recorder on EVERY exit (finish, budget cutoff, crash).
   let messages: Anthropic.MessageParam[] = [];
+  // Server-side continuation handle for the OpenAI transport (unused on the
+  // Anthropic path, where the chain rides in `messages`). One per run: it is
+  // this build's reasoning thread, and it must not outlive it.
+  const openaiSession: OpenAiToolSession = {};
   try {
     sessionId = await createSession({ signal: input.signal });
 
@@ -650,6 +814,7 @@ export async function runAgenticHarness(
           messages,
           tools: TOOLS,
           model,
+          session: openaiSession,
           signal: input.signal,
         });
       } finally {
