@@ -53,6 +53,15 @@ jobs:
       - name: Pre-exec source guard (stdlib only)
         run: python3 tests/test_validate.py
 
+      # Feature-chip instrumentation + the PACKAGING contract (stdlib only).
+      # This suite existed but was never wired into CI, which is how the
+      # Dockerfile's hand-kept COPY list drifted far enough to ship an image
+      # with no features.py (feature chips silently absent), no validate.py
+      # (MTR-187 guard silently off) and no exchanger.py. Those imports all
+      # fail open, so nothing else in this workflow could have caught it.
+      - name: Feature instrumentation + image packaging (stdlib only)
+        run: python3 tests/test_features.py
+
       - name: Kernel contracts — sdf_kit / networks / fea
         run: python3 tests/run_tests.py
 
