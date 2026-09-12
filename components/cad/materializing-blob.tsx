@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import * as THREE from "three";
-import { type Spin, nextSpin } from "./cloud-spin";
+import { type Spin, nextSpin, shortestSpin } from "./cloud-spin";
 import {
   STUDIO_CAMERA,
   STUDIO_TARGET_SIZE,
@@ -206,7 +206,13 @@ function bakeMorph(geom: THREE.BufferGeometry, morph: number) {
  *  rotation standing right now becomes what this morph unwinds to 0.
  *  Re-captured on EVERY morph start, not just the first — a chained live morph
  *  resets the eased progress to 0, so unwinding from a stale origin would snap
- *  the rotation back to where it stood before the previous morph. */
+ *  the rotation back to where it stood before the previous morph.
+ *
+ *  Captured through `shortestSpin`, which is what keeps the unwind from being a
+ *  whip: the blob may have banked whole turns before a shape arrived, and those
+ *  turns are the same orientation as the fraction left over. Wrapping here (not
+ *  only while accumulating) means the guarantee holds however the rotation got
+ *  there — the morph never unwinds more than half a turn. */
 function beginShaping(
   points: THREE.Points | null,
   shaping: { current: boolean },
@@ -214,7 +220,7 @@ function beginShaping(
 ) {
   shaping.current = true;
   const r = points?.rotation;
-  unwindFrom.current = r ? { x: r.x, y: r.y } : null;
+  unwindFrom.current = r ? shortestSpin({ x: r.x, y: r.y }) : null;
 }
 
 function PointCloud({
