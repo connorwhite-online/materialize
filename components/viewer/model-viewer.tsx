@@ -58,11 +58,12 @@ import {
 import { CapturePreviewStatusIcon } from "./capture-preview-status-icon";
 import {
   boundsMeasurementStable,
+  DEFAULT_PREVIEW_VIEW,
   previewOrbitOffset,
   previewViewFromOrbit,
-  stageAdjustCamera,
   stageFitDistance,
   STABLE_BOUNDS_FRAMES,
+  STAGE_AUTO_FIT,
   viewerCameraPositionFor,
   type PreviewView,
 } from "./preview-camera";
@@ -773,11 +774,13 @@ interface ModelViewerProps {
   /**
    * Open on the angle the file's owner chose, instead of the viewer's
    * own head-on default. Applied once via `ApplyInitialView` inside
-   * Stage (not from the frame probe) so Bounds cannot overwrite it.
+   * Stage, which is also what places the default camera, so Bounds
+   * never gets to overwrite either.
    *
-   * Null/undefined keeps the default framing, which is the right
-   * behaviour for every file whose thumbnail came from the automatic
-   * capture.
+   * Null/undefined falls back to `DEFAULT_PREVIEW_VIEW` — the same
+   * head-on shot at the same distance Stage's fit would have chosen,
+   * which is the right behaviour for every file whose thumbnail came
+   * from the automatic capture.
    */
   initialView?: PreviewView | null;
 }
@@ -798,79 +801,25 @@ function ReadySignal({ onReady }: { onReady?: () => void }) {
 }
 
 /**
- * Records the camera-to-target distance at the viewer's settled
- * automatic fit — the baseline "Update preview" measures a creator's
- * zoom against (see `previewViewFromOrbit`).
- *
- * Rendered inside the Suspense boundary, so it only starts looking
- * once the model's loader has resolved; before that the camera still
- * sits at its unfitted mount position and would give a meaningless
- * baseline. drei's `<Stage adjustCamera>` then reframes via `<Bounds>`,
- * which animates, so "settled" is defined as the distance holding
- * steady across a few consecutive frames rather than any single one.
- *
- * Records once and stops. A later re-fit would move the baseline out
- * from under a zoom the creator has already dialled in.
- *
- * Only used when there is no `initialView`. A saved view is restored by
- * `ApplyInitialView` instead — applying from this probe raced Stage's
- * Bounds animation and got wiped back to head-on (CON-27).
- */
-function PreviewFrameProbe({
-  controlsRef,
-  baselineRef,
-  onSettled,
-}: {
-  controlsRef: RefObject<OrbitControlsImpl | null>;
-  baselineRef: RefObject<number | null>;
-  onSettled: () => void;
-}) {
-  const camera = useThree((state) => state.camera);
-  const lastDistance = useRef<number | null>(null);
-  const stableFrames = useRef(0);
-  const recorded = useRef(false);
-
-  useFrame(() => {
-    if (recorded.current) return;
-    const controls = controlsRef.current;
-    if (!controls) return;
-
-    const distance = camera.position.distanceTo(controls.target);
-    if (!(distance > 0)) return;
-
-    const previous = lastDistance.current;
-    // Relative tolerance: these are model-native units, which for an
-    // STL are millimetres and can run to the hundreds.
-    if (previous !== null && Math.abs(distance - previous) <= distance * 1e-4) {
-      stableFrames.current += 1;
-    } else {
-      stableFrames.current = 0;
-    }
-    lastDistance.current = distance;
-
-    if (stableFrames.current >= STABLE_FRAMES_FOR_BASELINE) {
-      recorded.current = true;
-      baselineRef.current = distance;
-      onSettled();
-    }
-  });
-
-  return null;
-}
-
-const STABLE_FRAMES_FOR_BASELINE = 3;
-
-/**
- * Open the detail viewer on a saved preview angle.
+ * Open the detail viewer on a view — the angle the file's owner saved,
+ * or `DEFAULT_PREVIEW_VIEW` (head-on, Stage's own fit) for a file that
+ * has none. Every file goes through here: Stage auto-fit is off for the
+ * whole mount (see `STAGE_AUTO_FIT`), so this is the only thing that
+ * ever places the camera, and it places it in ONE frame instead of
+ * dollying to it over a second from `z = 5` in a millimetre scene.
  *
  * Must live inside `<Stage>` so it can talk to drei's `<Bounds>` API.
- * Stage auto-fit stays off for the whole mount when a saved view is
- * present (CON-27). We also wait for the Bounds centre/size to hold
- * steady across a few frames — Stage's own `<Center>` (and any nested
- * layout) can still be translating the mesh on the first non-empty
- * measure, and aiming from that pivot leaves the listing thumbnail
- * and the live viewer disagreeing even with identical DB columns
- * (CON-35).
+ * We wait for the Bounds centre/size to hold steady across a few frames
+ * — Stage's own `<Center>` (and any nested layout) can still be
+ * translating the mesh on the first non-empty measure, and aiming from
+ * that pivot leaves the listing thumbnail and the live viewer
+ * disagreeing even with identical DB columns (CON-35).
+ *
+ * It also reports the fit distance back as the "Update preview"
+ * baseline. That number is analytic (`stageFitDistance`) rather than
+ * observed, which is what lets the camera land immediately: a probe
+ * that watches for a settled distance can only report one after the
+ * animation it exists to wait out.
  */
 function ApplyInitialView({
   view,
@@ -1535,13 +1484,10 @@ export function ModelViewer({
   const modelCenterRef = useRef<[number, number, number] | null>(null);
   const [previewBaselineReady, setPreviewBaselineReady] = useState(false);
   const capturePreviewEnabled = !!onCapturePreview;
-  // Probe is only for the capture baseline when there is no saved view
-  // to restore. Saved views go through ApplyInitialView inside Stage.
-  const needsFrameProbe = capturePreviewEnabled && !initialView;
-
-  const markPreviewBaselineReady = useCallback(() => {
-    setPreviewBaselineReady(true);
-  }, []);
+  // The camera every file opens on: the owner's saved angle, or the
+  // head-on default. One path, so no file can be left on the unfitted
+  // mount camera while Bounds animates toward the shot.
+  const openingView = initialView ?? DEFAULT_PREVIEW_VIEW;
 
   const handleInitialViewApplied = useCallback((baselineDistance: number) => {
     previewBaselineRef.current = baselineDistance;
@@ -1733,13 +1679,6 @@ export function ModelViewer({
             {/* Real "geometry loaded" signal — commits with the mesh, after
                 Suspense resolves (MTR-214). */}
             {onReady && <ReadySignal onReady={onReady} />}
-            {needsFrameProbe && (
-              <PreviewFrameProbe
-                controlsRef={controlsRef}
-                baselineRef={previewBaselineRef}
-                onSettled={markPreviewBaselineReady}
-              />
-            )}
             {fixedFrame && inspectable ? (
               // Studio: fixed camera + deterministic fit (no Stage), so this
               // viewer registers with the deforming-loader canvas. MaterializeMaterial
@@ -1791,10 +1730,12 @@ export function ModelViewer({
                     Bounds/Center measurements used by ApplyInitialView. */}
                 {useProductPreviewLights && <CameraRelativeLightRig />}
                 <Stage
-                  // Off for the whole mount when restoring a saved view —
+                  // Off for the whole mount, for every file —
                   // ApplyInitialView owns the camera. A late Stage Refit
-                  // was what wiped the angle back to head-on (CON-27).
-                  adjustCamera={stageAdjustCamera(!!initialView)}
+                  // was what wiped a saved angle back to head-on (CON-27),
+                  // and Bounds' 1s dolly from the mount camera is what
+                  // opened millimetre-scale parts inside their own mesh.
+                  adjustCamera={STAGE_AUTO_FIT}
                   // Product previews zero Stage's world-fixed rembrandt
                   // lights and use CameraRelativeLightRig instead so an
                   // off-axis restored angle is shaded like the thumbnail
@@ -1808,14 +1749,17 @@ export function ModelViewer({
                   environment={null}
                 >
                   <ModelCenterTracker modelCenterRef={modelCenterRef} />
-                  {initialView && (
-                    <ApplyInitialView
-                      view={initialView}
-                      controlsRef={controlsRef}
-                      onApplied={handleInitialViewApplied}
-                      modelCenterRef={modelCenterRef}
-                    />
-                  )}
+                  <ApplyInitialView
+                    // Re-aim when the model itself changes: the applier
+                    // fires once per mount, and a re-suspended subtree
+                    // keeps its state, so a swapped modelUrl would
+                    // otherwise inherit the previous part's camera.
+                    key={modelUrl}
+                    view={openingView}
+                    controlsRef={controlsRef}
+                    onApplied={handleInitialViewApplied}
+                    modelCenterRef={modelCenterRef}
+                  />
                   {/* Stage already wraps children in <Center> — a nested
                       Center here only added a second layout pass that
                       ApplyInitialView could measure mid-settle. */}

@@ -17,8 +17,9 @@ import {
   normalizeDirection,
   previewOrbitOffset,
   previewViewFromOrbit,
-  stageAdjustCamera,
   stageFitDistance,
+  DEFAULT_PREVIEW_VIEW,
+  STAGE_AUTO_FIT,
 } from "../preview-camera";
 
 const length = (v: [number, number, number]) => Math.hypot(v[0], v[1], v[2]);
@@ -294,15 +295,60 @@ describe("restoring a saved view in the detail viewer", () => {
   });
 });
 
-describe("stageAdjustCamera", () => {
-  it("disables Stage auto-fit whenever a saved view will be restored", () => {
-    // Keeping fit on for even one late Refit is what wiped the saved
-    // angle back to head-on (CON-27).
-    expect(stageAdjustCamera(true)).toBe(false);
+describe("STAGE_AUTO_FIT / DEFAULT_PREVIEW_VIEW", () => {
+  it("keeps Stage auto-fit off so nothing but ApplyInitialView aims the camera", () => {
+    // Keeping fit on for even one late Refit is what wiped a saved
+    // angle back to head-on (CON-27), and Bounds' 1s dolly from the
+    // mount camera is what opened millimetre-scale parts inside their
+    // own mesh.
+    expect(STAGE_AUTO_FIT).toBe(false);
   });
 
-  it("keeps Stage's 1.2 margin fit when there is no saved view", () => {
-    expect(stageAdjustCamera(false)).toBe(STAGE_FIT_MARGIN);
+  it("defaults to a head-on unit direction", () => {
+    expect(DEFAULT_PREVIEW_VIEW.direction).toEqual([0, 0, 1]);
+    expect(length(DEFAULT_PREVIEW_VIEW.direction)).toBeCloseTo(1, 10);
+  });
+
+  it("defaults to the capture rig's framing, so no file opens zoomed", () => {
+    expect(DEFAULT_PREVIEW_VIEW.framing).toBeCloseTo(defaultFraming(), 10);
+    expect(DEFAULT_PREVIEW_VIEW.framing).toBeGreaterThan(MIN_FRAMING);
+    expect(DEFAULT_PREVIEW_VIEW.framing).toBeLessThan(MAX_FRAMING);
+  });
+
+  it("reproduces the camera Stage's own fit would have animated to", () => {
+    // Stage centres the model at the origin and derives its direction
+    // from the mount camera at [0, 0, 5] — i.e. +Z at Bounds'
+    // getSize().distance. Computing that is the whole point: the same
+    // shot lands on the first frame instead of a second later.
+    const baseline = stageFitDistance(60, 45, 4 / 3);
+    const pos = viewerCameraPositionFor({
+      view: DEFAULT_PREVIEW_VIEW,
+      target: [0, 0, 0],
+      baselineDistance: baseline,
+    });
+    expect(pos[0]).toBeCloseTo(0, 10);
+    expect(pos[1]).toBeCloseTo(0, 10);
+    expect(pos[2]).toBeCloseTo(baseline, 10);
+  });
+
+  it("is scale-free: the opening camera tracks the part's own size", () => {
+    // The bug this replaced: a fixed mount camera at z = 5 in a scene
+    // measured in millimetres is 16x too close for a 60mm part and
+    // barely moved for a 5mm one.
+    const small = stageFitDistance(5, 45, 4 / 3);
+    const large = stageFitDistance(500, 45, 4 / 3);
+    expect(large / small).toBeCloseTo(100, 6);
+    for (const maxDim of [1, 5, 60, 500, 2000]) {
+      const baseline = stageFitDistance(maxDim, 45, 4 / 3);
+      const pos = viewerCameraPositionFor({
+        view: DEFAULT_PREVIEW_VIEW,
+        target: [0, 0, 0],
+        baselineDistance: baseline,
+      });
+      // Framed with Stage's margin: the camera always sits far enough
+      // out that the part's longest axis fits, whatever the units.
+      expect(length(pos)).toBeGreaterThan(maxDim);
+    }
   });
 });
 
