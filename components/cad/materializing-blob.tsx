@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import * as THREE from "three";
+import { type Spin, nextSpin } from "./cloud-spin";
 import {
   STUDIO_CAMERA,
   STUDIO_TARGET_SIZE,
@@ -201,9 +202,25 @@ function bakeMorph(geom: THREE.BufferGeometry, morph: number) {
   pos.needsUpdate = true;
 }
 
+/** Bind the cloud to geometry at the start of a morph: spin stops here, and the
+ *  rotation standing right now becomes what this morph unwinds to 0.
+ *  Re-captured on EVERY morph start, not just the first — a chained live morph
+ *  resets the eased progress to 0, so unwinding from a stale origin would snap
+ *  the rotation back to where it stood before the previous morph. */
+function beginShaping(
+  points: THREE.Points | null,
+  shaping: { current: boolean },
+  unwindFrom: { current: Spin | null }
+) {
+  shaping.current = true;
+  const r = points?.rotation;
+  unwindFrom.current = r ? { x: r.x, y: r.y } : null;
+}
+
 function PointCloud({
   baseGeom,
   active,
+  shaped = false,
   idleAmp,
   activeAmp,
   freq,
@@ -214,6 +231,9 @@ function PointCloud({
 }: {
   baseGeom: THREE.BufferGeometry;
   active: boolean;
+  /** The base cloud is already a model's surface, not the abstract blob — it
+   *  opens in the model's own framing and must never be spun off it. */
+  shaped?: boolean;
   idleAmp: number;
   activeAmp: number;
   freq: number;
@@ -239,6 +259,12 @@ function PointCloud({
   // shape stays readable (mirrors the source-cloud amps).
   const formed = useRef(false);
   const morphDuration = useRef(MORPH_DURATION);
+  // Spin is the blob's alone (see ./cloud-spin). `shaping` latches the moment
+  // the cloud is bound to real geometry — a surface base cloud, a live snapshot
+  // morph, or the final handoff — and `unwindFrom` is the spin standing at that
+  // moment, paid off across the morph that follows.
+  const shaping = useRef(shaped);
+  const unwindFrom = useRef<Spin | null>(null);
   const gl = useThree((s) => s.gl);
   const pixelRatio = gl.getPixelRatio();
 
@@ -316,6 +342,7 @@ function PointCloud({
           morphDuration.current = MORPH_DURATION;
           isFinalMorph.current = true;
           morphing.current = true;
+          beginShaping(pointsRef.current, shaping, unwindFrom);
         } catch {
           onMorphCompleteRef.current?.();
         } finally {
@@ -368,6 +395,7 @@ function PointCloud({
     isFinalMorph.current = false;
     morphing.current = true;
     formed.current = true;
+    beginShaping(pointsRef.current, shaping, unwindFrom);
   }, [livePoints, morphUrl, baseGeom, gl]);
 
   useFrame((_, delta) => {
@@ -412,10 +440,25 @@ function PointCloud({
         }
       }
     }
-    if (pointsRef.current) {
-      const rot = active ? 0.1 : 0.06;
-      pointsRef.current.rotation.y += delta * rot;
-      pointsRef.current.rotation.x += delta * rot * 0.3;
+    const p = pointsRef.current;
+    if (p) {
+      // The blob tumbles; geometry never does, and the morph onto geometry pays
+      // off the standing spin on the SAME eased progress as the shape, so
+      // rotation is exactly 0 on the frame the shape lands (./cloud-spin).
+      const easedMorph = morphing.current
+        ? smoothstep(morphProgress.current)
+        : 1;
+      const spin = nextSpin({
+        current: p.rotation,
+        delta,
+        active,
+        shaping: shaping.current,
+        unwindFrom: unwindFrom.current,
+        easedMorph,
+      });
+      p.rotation.x = spin.x;
+      p.rotation.y = spin.y;
+      if (easedMorph >= 1) unwindFrom.current = null;
     }
   });
 
@@ -525,6 +568,9 @@ export function PointCloudScene({
           key={isSource ? "src" : "blob"}
           baseGeom={sourceGeom ?? blob}
           active={active}
+          // A surface cloud is the previous model, already in its own framing —
+          // it is geometry from the first frame, so it never tumbles.
+          shaped={isSource}
           // Surface clouds are already shaped — wobble gently; the blob is
           // abstract — wobble more, at a higher noise frequency for liveliness.
           idleAmp={isSource ? 0.05 : 0.18}
