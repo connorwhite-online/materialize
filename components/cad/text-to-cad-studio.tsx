@@ -311,6 +311,17 @@ function triggerBlobDownload(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/**
+ * The build title's one type ramp. "New Build" (empty state) and the generated
+ * build name render at the SAME size on purpose — the heading must not resize
+ * when a generation lands — so both read this constant rather than repeating
+ * the classes. The row it sits in is `min-w-0 flex-1`, so a long name
+ * ellipsises exactly where the toolbar starts instead of wrapping under it or
+ * pushing the buttons off-row.
+ */
+const BUILD_TITLE_CLASS =
+  "mt-1 min-w-0 font-heading text-lg font-normal tracking-tight text-foreground";
+
 function threadLabel(t: StudioThread): string {
   return t.title?.trim() || truncate(t.turns[0]?.prompt ?? "Untitled build");
 }
@@ -1995,7 +2006,7 @@ export function TextToCadStudio({
         {/* Main column */}
         <section className="min-w-0 lg:min-h-0 lg:overflow-y-auto lg:pb-36">
           <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               {activeThread && !generating && viewedTurn?.fileAssetId ? (
                 renaming ? (
                   <div className="mt-1 flex items-center gap-2">
@@ -2033,7 +2044,10 @@ export function TextToCadStudio({
                       setNameDraft(threadLabel(activeThread));
                       setRenaming(true);
                     }}
-                    className="group inline-flex max-w-full cursor-pointer items-center gap-2 font-heading text-xl font-normal tracking-tight text-foreground"
+                    className={cn(
+                      BUILD_TITLE_CLASS,
+                      "group inline-flex max-w-full cursor-pointer items-center gap-2"
+                    )}
                     title="Rename build"
                   >
                     <span className="truncate">{threadLabel(activeThread)}</span>
@@ -2041,15 +2055,13 @@ export function TextToCadStudio({
                   </button>
                 )
               ) : activeThread ? (
-                <p className="mt-1 text-sm text-muted-foreground">
+                <p className="mt-1 truncate text-sm text-muted-foreground">
                   {threadLabel(activeThread)}
                 </p>
               ) : (
                 // Empty state: just the heading, matching the post-generation
                 // build title's size/font so the page doesn't visibly shift.
-                <h1 className="mt-1 font-heading text-xl font-normal tracking-tight text-foreground">
-                  New Build
-                </h1>
+                <h1 className={BUILD_TITLE_CLASS}>New Build</h1>
               )}
             </div>
             <div className="flex shrink-0 items-center gap-2">

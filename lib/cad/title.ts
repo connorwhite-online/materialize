@@ -15,12 +15,13 @@ const TITLE_MODEL = "claude-haiku-4-5-20251001";
 
 const TITLE_SYSTEM = `You write a concise title for a 3D-model design thread.
 Rules:
-- 3 to 6 words, Title Case.
+- 4 or 5 words, Title Case. Never more than 5.
 - Name the object and its most distinctive trait (e.g. "iPhone Air Case, MagSafe").
 - The request may mention attached images, links, or files you cannot see — ignore that entirely and just name the object.
 - No quotes, no trailing punctuation, no preamble — output ONLY the title.`;
 
 const MAX_TITLE_LEN = 60;
+const MAX_TITLE_WORDS = 8;
 
 /**
  * Reject model output that is conversation, not a title. Seen in the wild: a
@@ -31,7 +32,11 @@ const MAX_TITLE_LEN = 60;
  */
 function looksLikeTitle(title: string): boolean {
   if (title.length === 0 || title.length > MAX_TITLE_LEN) return false;
-  if (title.split(/\s+/).length > 8) return false;
+  // Deliberately looser than the 4-or-5-word ASK above: this is the
+  // "is this a sentence?" gate, not a style ruler. Rejecting a 6-word title
+  // doesn't yield a 5-word one — it yields the raw prompt slice, which is
+  // longer and worse. The studio heading ellipsises anything over-long.
+  if (title.split(/\s+/).length > MAX_TITLE_WORDS) return false;
   if (title.includes("?")) return false;
   return !/\b(I|I'm|I've|me|my|you|your|sorry|unable|cannot|can't|don't|please)\b/i.test(
     title
