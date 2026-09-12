@@ -236,6 +236,19 @@ export async function GET(
                 )
                 .returning({ id: cadJobs.id });
               status = "failed";
+              // A reaped job is the ONE failure mode that reaches nobody: the
+              // executor was killed by the platform rather than throwing, so
+              // executeCadJob's catch never ran and Sentry never heard about
+              // it. The only trace was this synthesized message in front of a
+              // user. Report it here, where we are the ones noticing.
+              logError(
+                "cad.events.staleJobReaped",
+                new Error(
+                  `CAD job ${jobId} reaped: no heartbeat for ${Math.round(
+                    (Date.now() - lastBeat.getTime()) / 1000
+                  )}s while status=${row.status}`
+                )
+              );
               // Only when OUR update actually matched a row (the .returning()
               // guards a race where the job finished between the read above
               // and this write — reaping it now would clobber a legitimate

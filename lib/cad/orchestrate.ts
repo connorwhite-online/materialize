@@ -6,6 +6,7 @@ import {
   type PromptImage,
 } from "./model-client";
 import { labelUserReferences } from "./types";
+import { runWithCadTier } from "./budget";
 import { modelForRole } from "./models";
 import { runHarness, type HarnessInput, type HarnessResult } from "./harness";
 import { runAgenticHarness, CadAgenticError } from "./agentic";
@@ -188,71 +189,87 @@ export async function runCadGeneration(
   }
 
   const kind = await classifyCadRequest(input.prompt, input.signal, input.images);
-  if (kind === "organic" && generativeEnabled()) {
-    note({ type: "route", route: "organic" });
-    return { ...(await generative()), route: "organic" };
-  }
-  if (kind === "complex") {
-    try {
-      note({ type: "route", route: "complex" });
-      return { ...(await runAgenticHarness(input)), route: "complex" };
-    } catch (err) {
-      // Abort = the caller hung up, not an agentic failure — propagate.
-      if ((err as Error)?.name === "AbortError") throw err;
-      logError("runCadGeneration:agentic-fallback", err);
-      const reason = (err as Error)?.message ?? String(err);
-      // Budget-cutoff salvage (see CadAgenticError.salvage): the structurally
-      // valid best-so-far, used ONLY when the scripted fallback can't run or
-      // fails — the quality rail (don't ship an unfinished exploration as if
-      // it were the finished part) still prefers a full scripted rebuild.
-      const salvage =
-        err instanceof CadAgenticError ? err.salvage : undefined;
-      const remainingMs = input.deadlineAt
-        ? input.deadlineAt - Date.now()
-        : Infinity;
-      if (salvage && remainingMs < MIN_SCRIPTED_FALLBACK_MS) {
-        note({
-          type: "fallback",
-          from: "agentic",
-          to: "salvage",
-          reason: `${reason} — too little time left for a scripted rebuild; keeping the best-so-far solid`,
-        });
-        return { ...salvage, route: "complex-salvage" };
-      }
-      note({ type: "fallback", from: "agentic", to: "scripted", reason });
-      if (!salvage) {
-        return { ...(await runHarness(input)), route: "complex-fallback" };
-      }
+
+  // The verdict sets the BUDGET as well as the engine (./budget). Everything
+  // below runs inside the tier it selected, so effort, tool turns, repair
+  // attempts and the runaway token ceiling are all sized to the part instead
+  // of to the worst part the harness has ever been asked for.
+  //
+  // The tier is the verdict itself, including when an `organic` request falls
+  // through to the scripted loop below because the generative engine is off:
+  // a sculptural form on the scripted loop is the case least likely to repay
+  // xhigh codegen and four repair turns, so it keeps organic's smaller budget
+  // rather than inheriting the fallback engine's.
+  //
+  // The classifier call above is deliberately outside — it is one cheap
+  // completion on the plan role, and it is what decides the tier.
+  return runWithCadTier(kind, async (): Promise<HarnessResult> => {
+    if (kind === "organic" && generativeEnabled()) {
+      note({ type: "route", route: "organic" });
+      return { ...(await generative()), route: "organic" };
+    }
+    if (kind === "complex") {
       try {
-        const scripted = await runHarness(input);
-        if (scripted.ok) return { ...scripted, route: "complex-fallback" };
-        note({
-          type: "fallback",
-          from: "scripted",
-          to: "salvage",
-          reason:
-            scripted.error ??
-            "scripted rebuild produced no valid result — keeping the agentic best-so-far solid",
-        });
-        return { ...salvage, route: "complex-salvage" };
-      } catch (err2) {
-        if ((err2 as Error)?.name === "AbortError") throw err2;
-        logError("runCadGeneration:scripted-salvage", err2);
-        note({
-          type: "fallback",
-          from: "scripted",
-          to: "salvage",
-          reason: (err2 as Error)?.message ?? String(err2),
-        });
-        return { ...salvage, route: "complex-salvage" };
+        note({ type: "route", route: "complex" });
+        return { ...(await runAgenticHarness(input)), route: "complex" };
+      } catch (err) {
+        // Abort = the caller hung up, not an agentic failure — propagate.
+        if ((err as Error)?.name === "AbortError") throw err;
+        logError("runCadGeneration:agentic-fallback", err);
+        const reason = (err as Error)?.message ?? String(err);
+        // Budget-cutoff salvage (see CadAgenticError.salvage): the structurally
+        // valid best-so-far, used ONLY when the scripted fallback can't run or
+        // fails — the quality rail (don't ship an unfinished exploration as if
+        // it were the finished part) still prefers a full scripted rebuild.
+        const salvage =
+          err instanceof CadAgenticError ? err.salvage : undefined;
+        const remainingMs = input.deadlineAt
+          ? input.deadlineAt - Date.now()
+          : Infinity;
+        if (salvage && remainingMs < MIN_SCRIPTED_FALLBACK_MS) {
+          note({
+            type: "fallback",
+            from: "agentic",
+            to: "salvage",
+            reason: `${reason} — too little time left for a scripted rebuild; keeping the best-so-far solid`,
+          });
+          return { ...salvage, route: "complex-salvage" };
+        }
+        note({ type: "fallback", from: "agentic", to: "scripted", reason });
+        if (!salvage) {
+          return { ...(await runHarness(input)), route: "complex-fallback" };
+        }
+        try {
+          const scripted = await runHarness(input);
+          if (scripted.ok) return { ...scripted, route: "complex-fallback" };
+          note({
+            type: "fallback",
+            from: "scripted",
+            to: "salvage",
+            reason:
+              scripted.error ??
+              "scripted rebuild produced no valid result — keeping the agentic best-so-far solid",
+          });
+          return { ...salvage, route: "complex-salvage" };
+        } catch (err2) {
+          if ((err2 as Error)?.name === "AbortError") throw err2;
+          logError("runCadGeneration:scripted-salvage", err2);
+          note({
+            type: "fallback",
+            from: "scripted",
+            to: "salvage",
+            reason: (err2 as Error)?.message ?? String(err2),
+          });
+          return { ...salvage, route: "complex-salvage" };
+        }
       }
     }
-  }
-  const n = !input.priorSourceCode ? bestOfN() : 1;
-  if (n > 1) {
-    note({ type: "route", route: `simple-bestof${n}` });
-    return { ...(await runBestOf(input, n)), route: `simple-bestof${n}` };
-  }
-  note({ type: "route", route: "simple" });
-  return { ...(await runHarness(input)), route: "simple" };
+    const n = !input.priorSourceCode ? bestOfN() : 1;
+    if (n > 1) {
+      note({ type: "route", route: `simple-bestof${n}` });
+      return { ...(await runBestOf(input, n)), route: `simple-bestof${n}` };
+    }
+    note({ type: "route", route: "simple" });
+    return { ...(await runHarness(input)), route: "simple" };
+  });
 }

@@ -35,6 +35,7 @@ vi.mock("@/lib/cad/session-client", () => ({
 vi.mock("@/lib/logger", () => ({ logError: vi.fn() }));
 
 import { runCadGeneration, classifyCadRequest } from "@/lib/cad/orchestrate";
+import { activeCadTier } from "@/lib/cad/budget";
 
 const RESULT = { ok: true, sourceCode: "x", attempts: 1 };
 
@@ -212,5 +213,84 @@ describe("runCadGeneration routing", () => {
     generativeEnabled.mockReturnValue(false);
     r = await runCadGeneration({ prompt: "a dragon figurine" });
     expect(r.sourceCode).toBe("harness");
+  });
+});
+
+// The routing verdict is also the SPEND TIER (lib/cad/budget.ts). These pin
+// the wiring rather than the numbers: that every engine runs inside the tier
+// its verdict selected, and that the paths which promise pre-tier behavior
+// stay untiered. The tier travels by AsyncLocalStorage, so "did it reach the
+// engine" is only answerable from inside the engine.
+describe("runCadGeneration spend tier", () => {
+  const tierSeenBy = (fn: ReturnType<typeof vi.fn>) => {
+    let seen: string | undefined = "not-called";
+    fn.mockImplementation(async () => {
+      seen = activeCadTier();
+      return { ...RESULT, sourceCode: "x" };
+    });
+    return () => seen;
+  };
+
+  it("runs the scripted loop inside the simple tier", async () => {
+    completeText.mockResolvedValue("SIMPLE");
+    const seen = tierSeenBy(runHarness);
+    await runCadGeneration({ prompt: "a 20mm cube" });
+    expect(seen()).toBe("simple");
+  });
+
+  it("runs the agentic loop inside the complex tier", async () => {
+    completeText.mockResolvedValue("COMPLEX");
+    const seen = tierSeenBy(runAgenticHarness);
+    await runCadGeneration({ prompt: "an exchanger" });
+    expect(seen()).toBe("complex");
+  });
+
+  it("keeps the scripted FALLBACK on the complex tier", async () => {
+    // The part didn't get simpler because the agentic engine fell over — the
+    // rebuild needs complex's attempts, not simple's.
+    completeText.mockResolvedValue("COMPLEX");
+    runAgenticHarness.mockRejectedValue(new Error("session down"));
+    const seen = tierSeenBy(runHarness);
+    await runCadGeneration({ prompt: "an exchanger" });
+    expect(seen()).toBe("complex");
+  });
+
+  it("runs the generative engine inside the organic tier", async () => {
+    completeText.mockResolvedValue("ORGANIC");
+    generativeEnabled.mockReturnValue(true);
+    const seen = tierSeenBy(runGenerative);
+    await runCadGeneration({ prompt: "a dragon" });
+    expect(seen()).toBe("organic");
+  });
+
+  it("keeps an organic request on the organic tier when it falls through to the scripted loop", async () => {
+    completeText.mockResolvedValue("ORGANIC");
+    generativeEnabled.mockReturnValue(false);
+    const seen = tierSeenBy(runHarness);
+    await runCadGeneration({ prompt: "a dragon" });
+    expect(seen()).toBe("organic");
+  });
+
+  it("leaves the legacy path untiered — it promises pre-tier behavior", async () => {
+    process.env.CAD_AGENTIC = "false";
+    const seen = tierSeenBy(runHarness);
+    await runCadGeneration({ prompt: "a 20mm cube" });
+    expect(seen()).toBeUndefined();
+  });
+
+  it("classifies OUTSIDE any tier, since the verdict is what picks one", async () => {
+    let tierDuringClassify: string | undefined = "not-called";
+    completeText.mockImplementation(async () => {
+      tierDuringClassify = activeCadTier();
+      return "SIMPLE";
+    });
+    await runCadGeneration({ prompt: "a 20mm cube" });
+    expect(tierDuringClassify).toBeUndefined();
+  });
+
+  it("does not leak the tier back to the caller", async () => {
+    completeText.mockResolvedValue("COMPLEX");
+    await runCadGeneration({ prompt: "an exchanger" });
+    expect(activeCadTier()).toBeUndefined();
   });
 });

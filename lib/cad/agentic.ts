@@ -40,6 +40,11 @@ import { enrichRepairHint } from "./repair-taxonomy";
 import { sampleStlPoints } from "./stl-points";
 import { briefStepEnabled, modelForRole, modelParamsForRole } from "./models";
 import {
+  activeTierBudget,
+  budgetExhausted,
+  toolTurnBudget,
+} from "./budget";
+import {
   completeWithToolsOpenAI,
   type OpenAiToolDef,
   type OpenAiToolSession,
@@ -104,6 +109,10 @@ function maxAgenticQuestions(): number {
 
 // Tool-turn cap: each turn = one model call + its tool executions. Complex
 // parts per doc 03 need >4 execs; 16 bounds cost without strangling them.
+//
+// This is the COMPLEX tier's figure, which is what it was chosen for — the
+// active tier supplies the real cap (./budget) and this is the fallback for
+// an untiered caller (eval runner, a direct runAgenticHarness call).
 const MAX_TOOL_TURNS = 16;
 // How many times finish() may be refused for an incomplete part before the
 // loop honors it anyway. The gate exists to stop the agent declaring done on
@@ -649,7 +658,16 @@ function runSummary(run: CadRunResult, extra?: Record<string, unknown>): string 
 export async function runAgenticHarness(
   input: HarnessInput
 ): Promise<HarnessResult> {
-  const envMaxMs = Number(process.env.CAD_AGENTIC_MAX_MS) || DEFAULT_MAX_MS;
+  // Turn and wall budgets come from the active tier (./budget) so a part the
+  // router called simple cannot spend the loop that exists for exchangers.
+  // CAD_AGENTIC_MAX_MS still wins over both — stated operator intent beats the
+  // heuristic — and an untiered caller keeps the historical constants.
+  const tierLimits = activeTierBudget();
+  const maxToolTurns = toolTurnBudget() ?? MAX_TOOL_TURNS;
+  const envMaxMs =
+    Number(process.env.CAD_AGENTIC_MAX_MS) ||
+    tierLimits?.agenticMaxMs ||
+    DEFAULT_MAX_MS;
   // Under a platform deadline (input.deadlineAt), trim the wall budget so a
   // scripted fallback still FITS after a cutoff — an agentic loop that eats
   // the whole window leaves the fallback to be platform-killed mid-run, which
@@ -789,16 +807,22 @@ export async function runAgenticHarness(
     ];
     const system = buildSystemPrompt(input);
 
-    while (toolTurns < MAX_TOOL_TURNS && !finished) {
+    while (toolTurns < maxToolTurns && !finished) {
       if (input.signal?.aborted) break;
       if (Date.now() - startedAt > maxMs) break;
+      // Runaway backstop (./budget): checked BETWEEN turns, so the loop stops
+      // holding a part it can still salvage rather than being aborted
+      // mid-call. Falls through to the same cutoff handling as turns and wall
+      // clock — from here down, spending the budget and running out of it are
+      // the same event.
+      if (budgetExhausted()) break;
       toolTurns++;
 
       emit({
         type: "phase",
         phase: "generating",
         attempt: toolTurns,
-        maxAttempts: MAX_TOOL_TURNS,
+        maxAttempts: maxToolTurns,
       });
       // Renders of superseded intermediate solids carry no signal but their
       // base64 re-uploads on EVERY subsequent call — O(turns²) image cost
@@ -856,7 +880,7 @@ export async function runAgenticHarness(
       // whatever intermediate/preview state `result` happens to hold. Without
       // this a multi-part build (e.g. a manifolded exchanger) can get cut off
       // mid-assembly and silently return a sanity-check shape as "finished".
-      const turnsLeft = MAX_TOOL_TURNS - toolTurns;
+      const turnsLeft = maxToolTurns - toolTurns;
       if (!finished && turnsLeft > 0 && turnsLeft <= 2) {
         const last = results[results.length - 1];
         if (Array.isArray(last.content)) {
@@ -900,7 +924,10 @@ export async function runAgenticHarness(
   }
 
   budgetCutoff =
-    !finished && (toolTurns >= MAX_TOOL_TURNS || Date.now() - startedAt > maxMs);
+    !finished &&
+    (toolTurns >= maxToolTurns ||
+      Date.now() - startedAt > maxMs ||
+      budgetExhausted());
   // Hard turn/time cutoff while the model was still mid-build (not a
   // graceful stop, not finish()): bestRun is whatever last passed the
   // shallow structural grade, which may be an unfinished exploration or
@@ -1039,7 +1066,7 @@ export async function runAgenticHarness(
           type: "phase",
           phase: "executing",
           attempt: toolTurns,
-          maxAttempts: MAX_TOOL_TURNS,
+          maxAttempts: maxToolTurns,
         });
         execCount++;
         const res = await execInSession(sessionId!, code, {
@@ -1159,7 +1186,7 @@ export async function runAgenticHarness(
           emit({
             type: "validation",
             attempt: toolTurns,
-            maxAttempts: MAX_TOOL_TURNS,
+            maxAttempts: maxToolTurns,
             pass: false,
             failures: grade.failures,
             validation: lastRun.validation,

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { HarnessResult } from "@/lib/cad/harness";
 import type { CadJobProgressEntry, CadProgressEvent } from "@/lib/cad/types";
+import { meterModelUsage } from "@/lib/cad/metering";
 
 // --- @/lib/db/schema: minimal column-reference stubs (drizzle's eq()/and()
 // just wrap these; identity doesn't matter to the mocked db below). ---
@@ -167,6 +168,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  delete process.env.CAD_MAX_TOKENS_PER_JOB;
 });
 
 describe("createCadJob", () => {
@@ -326,6 +328,82 @@ describe("executeCadJob", () => {
       seq: expect.any(Number),
     });
     expect(persistGenerationSuccess).not.toHaveBeenCalled();
+  });
+
+  // --- Hard spend wall (lib/cad/budget.ts) --------------------------------
+  // The engines stop themselves at the tier ceiling; this is the backstop for
+  // a run that doesn't, and the thing it must get right is the REPORTING —
+  // it trips the same AbortSignal cancellation uses.
+  it("aborts and fails a build that blows through the hard token ceiling", async () => {
+    vi.useFakeTimers();
+    // Ceiling 100 -> hard wall at 150 (the 1.5x headroom for judge/title/persist).
+    process.env.CAD_MAX_TOKENS_PER_JOB = "100";
+    runHarness.mockImplementation(
+      ({ signal }: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          // Spend past the wall, then wait to be stopped.
+          meterModelUsage({
+            role: "implement",
+            model: "claude-opus-5",
+            inputTokens: 200,
+            outputTokens: 100,
+            ms: 10,
+          });
+          signal.addEventListener("abort", () =>
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" }))
+          );
+        })
+    );
+
+    const running = executeCadJob(baseInput);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(3_100);
+    await running;
+
+    // Failed, not cancelled: the user did not stop this build.
+    expect(updateCalls).toContainEqual(
+      expect.objectContaining({
+        status: "failed",
+        error: expect.stringContaining("cost limit"),
+        finishedAt: expect.any(Date),
+      })
+    );
+    expect(updateCalls).not.toContainEqual(
+      expect.objectContaining({ status: "cancelled" })
+    );
+    expect(persistGenerationFailure).toHaveBeenCalledWith(
+      "gen-1",
+      expect.stringContaining("cost limit")
+    );
+    // The receipt still lands — a build that cost money records what it cost.
+    expect(updateCalls).toContainEqual(
+      expect.objectContaining({ usage: expect.anything() })
+    );
+  });
+
+  it("leaves a build under the ceiling alone", async () => {
+    vi.useFakeTimers();
+    process.env.CAD_MAX_TOKENS_PER_JOB = "100000";
+    runHarness.mockImplementation(async () => {
+      meterModelUsage({
+        role: "implement",
+        model: "claude-opus-5",
+        inputTokens: 200,
+        outputTokens: 100,
+        ms: 10,
+      });
+      return { ok: true, sourceCode: "fine", attempts: 1 } satisfies HarnessResult;
+    });
+
+    const running = executeCadJob(baseInput);
+    await vi.advanceTimersByTimeAsync(3_100);
+    await running;
+
+    // Scoped to the wall: this build may still succeed or fail on its own
+    // merits, it just must not be stopped for cost.
+    expect(updateCalls).not.toContainEqual(
+      expect.objectContaining({ error: expect.stringContaining("cost limit") })
+    );
   });
 
   it("marks the job cancelled without running the harness when cancel raced the start", async () => {
