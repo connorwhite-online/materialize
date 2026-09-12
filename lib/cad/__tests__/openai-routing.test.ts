@@ -14,11 +14,18 @@ const responsesCreate = vi.fn<
   (body: Record<string, unknown>, opts?: unknown) => Promise<unknown>
 >();
 
+// Both entry points funnel into ONE spy: the code streams (a high-effort
+// reasoning turn would otherwise trip a non-streaming request timeout), and
+// the request body is identical either way, so every assertion on
+// responsesCreate.mock.calls[n][0] still reads the real request.
 vi.mock("openai", () => ({
   default: class MockOpenAI {
     responses = {
       create: (...args: Parameters<typeof responsesCreate>) =>
         responsesCreate(...args),
+      stream: (...args: Parameters<typeof responsesCreate>) => ({
+        finalResponse: () => responsesCreate(...args),
+      }),
     };
   },
 }));
@@ -71,8 +78,15 @@ function textResponse(text: string) {
   return {
     id: "resp_1",
     model: "gpt-6-astra",
-    output_text: text,
-    output: [],
+    status: "completed",
+    // Text is read out of `output`, never `output_text` — the streaming path
+    // does not populate that convenience field.
+    output: [
+      {
+        type: "message",
+        content: [{ type: "output_text", text }],
+      },
+    ],
     usage: {
       input_tokens: 100,
       output_tokens: 10,
@@ -86,7 +100,7 @@ function toolCallResponse(id: string, callId: string) {
   return {
     id,
     model: "gpt-6-astra",
-    output_text: "",
+    status: "completed",
     output: [
       {
         type: "function_call",
@@ -108,7 +122,7 @@ beforeEach(() => {
   responsesCreate.mockReset();
   anthropicCreate.mockClear();
   for (const k of ENV) delete process.env[k];
-  process.env.OAI_SECRET_KEY = "sk-oai-test";
+  process.env.OAI_SECRET_KEY = "sk-test-000000000000000000";
   process.env.CAD_BRIEF_STEP = "false";
 });
 
@@ -250,5 +264,52 @@ describe("agentic loop on OpenAI", () => {
       expect(call[0].store).toBe(false);
       expect(call[0].previous_response_id).toBeUndefined();
     }
+  });
+});
+
+describe("responses that did not finish", () => {
+  it("throws naming the token budget instead of returning an empty string", async () => {
+    // Reasoning bills against max_output_tokens, so an xhigh turn can spend
+    // the whole cap thinking and return EMPTY output. Swallowing that reaches
+    // the harness as "the model had nothing to say" and surfaces layers later
+    // as "no code produced" — the budget has to be in the error.
+    responsesCreate.mockResolvedValueOnce({
+      id: "resp_1",
+      model: "gpt-6-astra",
+      status: "incomplete",
+      incomplete_details: { reason: "max_output_tokens" },
+      output: [],
+      usage: {
+        input_tokens: 10,
+        output_tokens: 32000,
+        input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 },
+        output_tokens_details: { reasoning_tokens: 32000 },
+      },
+    });
+
+    await expect(
+      completeText({ system: "SYS", prompt: "make a cube", role: "implement" })
+    ).rejects.toThrow(/incomplete \(max_output_tokens\)/);
+  });
+
+  it("surfaces a refusal rather than an empty completion", async () => {
+    responsesCreate.mockResolvedValueOnce({
+      id: "resp_1",
+      model: "gpt-6-astra",
+      status: "completed",
+      output: [
+        { type: "message", content: [{ type: "refusal", refusal: "nope" }] },
+      ],
+      usage: {
+        input_tokens: 10,
+        output_tokens: 1,
+        input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 },
+        output_tokens_details: { reasoning_tokens: 0 },
+      },
+    });
+
+    await expect(
+      completeText({ system: "SYS", prompt: "x", role: "plan" })
+    ).rejects.toThrow(/refused/);
   });
 });

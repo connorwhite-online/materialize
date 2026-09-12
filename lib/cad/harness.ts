@@ -59,6 +59,7 @@ import {
   briefStepEnabled,
   type CadRole,
 } from "./models";
+import { attemptBudget, budgetExhausted } from "./budget";
 import { CAD_FEEDBACK_TAG_LABELS, type CadFeedbackTag } from "./feedback";
 import {
   checkDimensionTargets,
@@ -503,7 +504,13 @@ export function repairHintFor(note: string): string {
  * full record (the failed code is still useful flywheel data).
  */
 export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
-  const maxAttempts = input.maxAttempts ?? MAX_ATTEMPTS_DEFAULT;
+  // Attempt budget: an explicit caller value wins, then the active tier's
+  // (./budget), then the historical default. The 4 below was chosen for parts
+  // that "clear a sequence of distinct build123d gotchas" — a simple part that
+  // fails twice is usually an underspecified prompt, and a 3rd and 4th attempt
+  // on it mostly re-buys the same failure.
+  const maxAttempts =
+    input.maxAttempts ?? attemptBudget() ?? MAX_ATTEMPTS_DEFAULT;
   const useModel = hasModelCredentials();
 
   // Router-gated system prompt (MTR-222): selected ONCE from the job's user
@@ -868,6 +875,13 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
     ) {
       break;
     }
+    // Runaway backstop (./budget), same shape as the deadline floor above and
+    // for the same reason: a repair cycle that keeps not converging stops at a
+    // known bound and returns what it has, rather than at the platform's kill
+    // signal with nothing persisted. Never on the first attempt — a generation
+    // that has already blown the ceiling before writing a line of build123d is
+    // a metering bug, and failing it outright would turn that into an outage.
+    if (attempt > 1 && budgetExhausted()) break;
     lastAttempt = attempt;
 
     emit({ type: "phase", phase: "generating", attempt, maxAttempts });

@@ -150,7 +150,7 @@ describe("provider selection", () => {
 
   it("defaults every role to OpenAI once an OpenAI key is present", () => {
     clearEnv();
-    process.env.OAI_SECRET_KEY = "sk-oai-test";
+    process.env.OAI_SECRET_KEY = "sk-test-000000000000000000";
     expect(providerForRole("implement")).toBe("openai");
     expect(modelForRole("implement")).toBe("gpt-6-astra");
     expect(modelForRole("plan")).toBe("gpt-6-astra");
@@ -160,7 +160,7 @@ describe("provider selection", () => {
   it("lets CAD_PROVIDER pin the vendor when both keys are set", () => {
     clearEnv();
     process.env.ANTHROPIC_API_KEY = "sk-ant-test";
-    process.env.OAI_SECRET_KEY = "sk-oai-test";
+    process.env.OAI_SECRET_KEY = "sk-test-000000000000000000";
     expect(modelForRole("implement")).toBe("gpt-6-astra");
     process.env.CAD_PROVIDER = "anthropic";
     expect(modelForRole("implement")).toBe("claude-opus-5");
@@ -170,7 +170,7 @@ describe("provider selection", () => {
     // Same self-preference mitigation as the Claude defaults — it has to hold
     // within a single-vendor deployment, not just across vendors.
     clearEnv();
-    process.env.OAI_SECRET_KEY = "sk-oai-test";
+    process.env.OAI_SECRET_KEY = "sk-test-000000000000000000";
     expect(modelForRole("critique")).not.toBe(modelForRole("implement"));
   });
 
@@ -186,7 +186,7 @@ describe("provider selection", () => {
 describe("openaiParamsForRole", () => {
   it("sends the role's effort as reasoning.effort", () => {
     clearEnv();
-    process.env.OAI_SECRET_KEY = "sk-oai-test";
+    process.env.OAI_SECRET_KEY = "sk-test-000000000000000000";
     expect(openaiParamsForRole("implement")).toEqual({
       model: "gpt-6-astra",
       reasoning: { effort: "xhigh" },
@@ -195,7 +195,7 @@ describe("openaiParamsForRole", () => {
 
   it("honours the same effort env vars as the Claude path", () => {
     clearEnv();
-    process.env.OAI_SECRET_KEY = "sk-oai-test";
+    process.env.OAI_SECRET_KEY = "sk-test-000000000000000000";
     process.env.CAD_EFFORT_IMPLEMENT = "medium";
     expect(openaiParamsForRole("implement").reasoning?.effort).toBe("medium");
   });
@@ -204,7 +204,7 @@ describe("openaiParamsForRole", () => {
     // Luna is the cheap tier; xhigh/max are flagship-only, and a 400 here
     // would fail the whole title step rather than just costing less.
     clearEnv();
-    process.env.OAI_SECRET_KEY = "sk-oai-test";
+    process.env.OAI_SECRET_KEY = "sk-test-000000000000000000";
     process.env.CAD_EFFORT_TITLE = "max";
     expect(openaiParamsForRole("title").reasoning?.effort).toBe("high");
     process.env.CAD_EFFORT_IMPLEMENT = "max";

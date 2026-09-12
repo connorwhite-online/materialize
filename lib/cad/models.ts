@@ -25,10 +25,17 @@
  */
 
 import {
+  activeTierBudget,
+  EFFORTS,
+  type CadEffort,
+} from "./budget";
+import {
   defaultProvider,
   providerForModel,
   type CadProvider,
 } from "./provider";
+
+export type { CadEffort };
 
 export type CadRole =
   | "plan"
@@ -46,8 +53,6 @@ const ROLE_ENV: Record<CadRole, string> = {
   critique: "CAD_MODEL_CRITIQUE",
   title: "CAD_MODEL_TITLE",
 };
-
-export type CadEffort = "low" | "medium" | "high" | "xhigh" | "max";
 
 const ROLE_EFFORT_ENV: Record<CadRole, string> = {
   plan: "CAD_EFFORT_PLAN",
@@ -161,23 +166,34 @@ export function providerForRole(role: CadRole): CadProvider {
   return providerForModel(modelForRole(role));
 }
 
-const EFFORTS: readonly CadEffort[] = [
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-];
-
+/**
+ * The effort a role runs at.
+ *
+ * Resolution order, and the order matters:
+ *   1. An explicit `CAD_EFFORT_<ROLE>` / `CAD_EFFORT_DEFAULT` wins outright,
+ *      tier or no tier. Stated operator intent beats a complexity heuristic —
+ *      the same principle the provider guard follows, where `CAD_PROVIDER`
+ *      overrides the key-shape check.
+ *   2. Otherwise the role's table default, CLAMPED DOWN to the active tier's
+ *      `effortCap` (./budget). Clamped, never raised: a tier may decide a part
+ *      doesn't need `xhigh` codegen, but it may not decide that naming a part
+ *      deserves more than `low`.
+ *
+ * With no tier active (eval runner, scripts, the legacy no-agentic path) the
+ * clamp is a no-op and this is the pre-tier function exactly.
+ */
 function effortForRole(role: CadRole): CadEffort {
   const raw = (
     process.env[ROLE_EFFORT_ENV[role]] ||
     process.env.CAD_EFFORT_DEFAULT ||
     ""
   ).toLowerCase();
-  return (EFFORTS as readonly string[]).includes(raw)
-    ? (raw as CadEffort)
-    : ROLE_DEFAULT_EFFORT[role];
+  if ((EFFORTS as readonly string[]).includes(raw)) return raw as CadEffort;
+
+  const base = ROLE_DEFAULT_EFFORT[role];
+  const cap = activeTierBudget()?.effortCap;
+  if (!cap) return base;
+  return EFFORTS.indexOf(base) <= EFFORTS.indexOf(cap) ? base : cap;
 }
 
 /** Request params for a role: the model plus the knobs it actually supports. */

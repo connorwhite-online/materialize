@@ -27,12 +27,17 @@ import { openaiParamsForRole, type CadRole } from "./models";
  */
 
 /**
- * Cap for one-shot completions. Matches model-client's rationale: reasoning
- * spends from a separate budget here (OpenAI bills reasoning as output but
- * does not truncate the visible answer to make room), so this is sized for
- * the build123d script itself.
+ * Cap for one-shot completions.
+ *
+ * Reasoning tokens bill against `max_output_tokens` — they are not a separate
+ * budget. At `xhigh` a frontier model can spend tens of thousands of tokens
+ * thinking before it writes the first line of build123d, so a cap sized for
+ * the SCRIPT alone gets consumed by the reasoning and the response comes back
+ * `incomplete` with EMPTY output. This is sized for reasoning + script, and
+ * `assertComplete` below makes exhaustion loud rather than silent if it is
+ * still not enough.
  */
-const MAX_OUTPUT_TOKENS = 16_000;
+const MAX_OUTPUT_TOKENS = 32_000;
 
 /** True when an OpenAI credential is present. */
 export function hasOpenAiCredentials(): boolean {
@@ -120,6 +125,66 @@ function cacheKeyFor(role: CadRole): string {
   return `cad-${role}`;
 }
 
+/**
+ * Concatenate the assistant text out of a response's output items.
+ *
+ * Deliberately NOT `response.output_text`: that field is SDK sugar applied by
+ * `responses.create()`'s unwrap, and the STREAMING path never applies it — so
+ * reading it after `finalResponse()` yields undefined and would silently turn
+ * every streamed completion into an empty string.
+ */
+function outputTextOf(response: OpenAI.Responses.Response): string {
+  const texts: string[] = [];
+  for (const item of response.output ?? []) {
+    if (item.type !== "message") continue;
+    for (const part of item.content ?? []) {
+      if (part.type === "output_text") texts.push(part.text);
+    }
+  }
+  return texts.join("");
+}
+
+/** The model's refusal text, if it refused rather than answering. */
+function refusalOf(response: OpenAI.Responses.Response): string | null {
+  for (const item of response.output ?? []) {
+    if (item.type !== "message") continue;
+    for (const part of item.content ?? []) {
+      if (part.type === "refusal") return part.refusal;
+    }
+  }
+  return null;
+}
+
+/**
+ * Fail loudly on a response that did not finish.
+ *
+ * An `incomplete` response — almost always reasoning exhausting
+ * `max_output_tokens` — carries EMPTY output. Returning that as a normal empty
+ * completion is how a token-budget problem reaches the harness disguised as a
+ * model that had nothing to say, and then surfaces three layers downstream as
+ * "no code produced". The budget is the thing that needs to be in the error.
+ */
+function assertComplete(
+  response: OpenAI.Responses.Response,
+  role: CadRole
+): void {
+  const refusal = refusalOf(response);
+  if (refusal) {
+    throw new Error(`OpenAI refused the ${role} request: ${refusal}`);
+  }
+  if (response.status && response.status !== "completed") {
+    const reason =
+      response.incomplete_details?.reason ??
+      response.error?.message ??
+      "unknown";
+    throw new Error(
+      `OpenAI ${role} response ended ${response.status} (${reason}); ` +
+        `reasoning tokens count against max_output_tokens — raise the cap or ` +
+        `lower CAD_EFFORT_${role.toUpperCase()}`
+    );
+  }
+}
+
 export interface OpenAiCompletion {
   text: string;
   model: string;
@@ -137,7 +202,12 @@ export async function completeTextOpenAI(opts: {
   signal?: AbortSignal;
 }): Promise<OpenAiCompletion> {
   const params = openaiParamsForRole(opts.role);
-  const response = await openaiClient().responses.create(
+  // Streamed, then collected — the same reason the Anthropic agentic path
+  // streams: a high-effort reasoning turn can think for minutes before
+  // emitting its first visible token, which is exactly the shape that trips a
+  // non-streaming request timeout. `finalResponse()` returns the same Response
+  // the non-streaming call would.
+  const stream = openaiClient().responses.stream(
     {
       ...params,
       ...(opts.model ? { model: opts.model } : {}),
@@ -151,15 +221,20 @@ export async function completeTextOpenAI(opts: {
     },
     { signal: opts.signal }
   );
+  const response = await stream.finalResponse();
+  assertComplete(response, opts.role);
   return {
-    text: response.output_text ?? "",
+    text: outputTextOf(response),
     model: response.model || params.model,
     usage: normalizeUsage(response.usage),
   };
 }
 
-/** Cap for an agentic turn — the twin of agentic.ts's own MAX_TOKENS. */
-const MAX_TOOL_OUTPUT_TOKENS = 32_000;
+/**
+ * Cap for an agentic turn — the twin of agentic.ts's own MAX_TOKENS, with the
+ * same reasoning-bills-against-output headroom as the one-shot cap above.
+ */
+const MAX_TOOL_OUTPUT_TOKENS = 64_000;
 
 /** A tool the model may call, in the harness's vendor-neutral shape. */
 export interface OpenAiToolDef {
@@ -221,7 +296,7 @@ export async function completeWithToolsOpenAI(opts: {
 }): Promise<OpenAiToolTurn> {
   const params = openaiParamsForRole(opts.role);
   const store = process.env.CAD_OPENAI_STORE !== "false";
-  const response = await openaiClient().responses.create(
+  const stream = openaiClient().responses.stream(
     {
       ...params,
       ...(opts.model ? { model: opts.model } : {}),
@@ -246,6 +321,8 @@ export async function completeWithToolsOpenAI(opts: {
     },
     { signal: opts.signal }
   );
+  const response = await stream.finalResponse();
+  assertComplete(response, opts.role);
 
   if (store) opts.session.previousResponseId = response.id;
 
@@ -265,7 +342,7 @@ export async function completeWithToolsOpenAI(opts: {
   }
 
   return {
-    text: response.output_text ?? "",
+    text: outputTextOf(response),
     toolCalls,
     model: response.model || params.model,
     usage: normalizeUsage(response.usage),

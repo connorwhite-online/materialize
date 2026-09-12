@@ -14,6 +14,11 @@ import { resolveModelCredentials } from "@/lib/cad/credentials";
 import type { PriorFeedback } from "@/lib/cad/harness";
 import type { CadProcess } from "@/lib/cad/knowledge/dfm";
 import { CadMeter, runWithCadContext } from "@/lib/cad/metering";
+import {
+  CadBudgetExceededError,
+  tierForRoute,
+  tokenCeilingForTier,
+} from "@/lib/cad/budget";
 import { runCadGeneration } from "@/lib/cad/orchestrate";
 import type { PromptImage } from "@/lib/cad/model-client";
 import {
@@ -66,6 +71,14 @@ import { makeSnippet } from "@/lib/notifications/types";
 export const MAX_PROGRESS_EVENTS = 200;
 /** How often executeCadJob checks cancelRequestedAt. */
 const CANCEL_POLL_MS = 3_000;
+/**
+ * User-facing copy when a build hits the hard spend wall (lib/cad/budget.ts).
+ * Deliberately not "Generation failed": nothing broke, the job outgrew what
+ * one generation is allowed to spend, and the useful next step is a narrower
+ * prompt rather than a retry of the same one.
+ */
+const BUDGET_EXCEEDED_MESSAGE =
+  "This build ran past its cost limit before finishing. Try a more specific prompt, or break the part into simpler pieces.";
 /** Builds shorter than this notify in-app only — no email (desk iteration). */
 const NOTIFY_EMAIL_MIN_BUILD_MS = 180_000;
 /** Progress writes are batched; flush at most this often (terminal always flushes). */
@@ -221,6 +234,24 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
 
   const controller = new AbortController();
   let cancelRequested = false;
+  /**
+   * Hard spend wall (MTR-181 follow-up). The engines stop themselves at the
+   * tier's token ceiling between turns and attempts (lib/cad/budget.ts), which
+   * is the path that keeps the part; this is the wall for a run that somehow
+   * does not — and it is deliberately set ABOVE the graceful ceiling, because
+   * a loop that has just stopped still has to pay for the judge, the title and
+   * persistence. Aborting at the same number would kill jobs during their own
+   * orderly wrap-up and turn a cost control into a failure mode.
+   */
+  const HARD_CEILING_FACTOR = 1.5;
+  let hardTokenCeiling: number | undefined;
+  let budgetAborted = false;
+  const hardCeilingFrom = (route: string): number | undefined => {
+    const ceiling = tokenCeilingForTier(tierForRoute(route));
+    return ceiling === undefined
+      ? undefined
+      : Math.ceil(ceiling * HARD_CEILING_FACTOR);
+  };
 
   // --- Batched progress writes -------------------------------------------
   // Events are buffered and flushed at most every FLUSH_INTERVAL_MS so a
@@ -265,6 +296,13 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
     if (event.type === "snapshot") {
       writeSnapshot(event.render, event.step, event.points);
       return;
+    }
+    // The routing verdict is also the job's spend tier (lib/cad/budget.ts).
+    // The tier lives in the orchestrator's async context, which the cancel
+    // poll below does not run inside — this event is how the ceiling reaches
+    // it, on a channel that already exists.
+    if (event.type === "route") {
+      hardTokenCeiling = hardCeilingFrom(event.route);
     }
     // Stamp emit time: replayed transcripts arrive in one burst, so the
     // studio's stage timers need the entry's own clock, not arrival time.
@@ -526,6 +564,19 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
       } catch {
         // Best-effort — the live meter is cosmetic until the terminal write.
       }
+      // Hard spend wall: the same tick that flushes the meter enforces it, so
+      // the check costs nothing extra and lands within one poll of the
+      // overrun. A single in-flight call is never interrupted — the per-call
+      // max_tokens caps bound that last call's worth of overshoot.
+      if (
+        hardTokenCeiling !== undefined &&
+        !budgetAborted &&
+        !cancelRequested &&
+        meter.totalModelTokens() >= hardTokenCeiling
+      ) {
+        budgetAborted = true;
+        controller.abort();
+      }
     })();
   }, CANCEL_POLL_MS);
 
@@ -719,7 +770,31 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
       route: result.route,
     });
   } catch (error) {
-    if (cancelRequested || (error as Error)?.name === "AbortError") {
+    if (budgetAborted) {
+      // Ordered BEFORE the cancel branch: a budget abort trips the same
+      // signal, and reporting it as "cancelled" would tell the user they
+      // stopped a build they did not stop. Nothing is broken here — the job
+      // was too expensive — so the copy says so, and the usage summary the
+      // terminal write carries is the receipt.
+      // Log the TYPED error, never the raw abort: logError drops anything
+      // whose name is AbortError as a benign client disconnect, so handing it
+      // the signal's own error would make the one failure an operator most
+      // needs to see the one failure Sentry never receives.
+      logError(
+        "executeCadJob.budgetExceeded",
+        new CadBudgetExceededError(
+          meter.totalModelTokens(),
+          hardTokenCeiling ?? 0
+        )
+      );
+      await persistGenerationFailure(
+        generationId,
+        BUDGET_EXCEEDED_MESSAGE
+      ).catch((err) => logError("cad.persistGenerationFailure", err));
+      await finishFailed(BUDGET_EXCEEDED_MESSAGE, error).catch((err) =>
+        logError("executeCadJob.budgetFail", err)
+      );
+    } else if (cancelRequested || (error as Error)?.name === "AbortError") {
       await finishCancelled().catch((err) =>
         logError("executeCadJob.cancel", err)
       );
