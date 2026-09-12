@@ -2295,6 +2295,39 @@ def run(req: RunRequest, request: Request) -> dict:
     }
 
 
+# Optional modules app.py imports lazily, each behind a fail-open `except`.
+# A missing one degrades silently at runtime, so /health probes them by ACTUAL
+# import rather than asserting they exist.
+_OPTIONAL_MODULES = ("features", "validate", "exchanger", "networks", "fea", "fit")
+
+
+_MODULE_STATUS: Optional[dict] = None
+
+
+def _module_status() -> dict:
+    """Which optional modules actually import in THIS image.
+
+    Computed once and cached: /health is probed every 30s, and a real import
+    of the numpy/trimesh-backed modules costs a second or two the first time.
+    The answer cannot change without a new process, so recomputing it per
+    request would only risk tripping the 5s healthcheck timeout.
+    """
+    global _MODULE_STATUS
+    if _MODULE_STATUS is not None:
+        return _MODULE_STATUS
+    import importlib
+
+    status: dict = {}
+    for name in _OPTIONAL_MODULES:
+        try:
+            importlib.import_module(name)
+            status[name] = True
+        except Exception:  # noqa: BLE001 — absence is the thing we report
+            status[name] = False
+    _MODULE_STATUS = status
+    return status
+
+
 @app.get("/health")
 async def health() -> dict:
     # Deploy-drift detector: Railway stamps the built commit into the env, so
@@ -2303,8 +2336,19 @@ async def health() -> dict:
     # indistinguishable from a rebuild without this — the prod sidecar sat on
     # a pre-feature-instrumentation image while everyone assumed it was
     # current.)
+    #
+    # `features_instrumentation` used to be a hardcoded `True` — a literal, not
+    # a measurement — so it kept reporting healthy while the image shipped
+    # without features.py and the studio's feature chips never rendered. It is
+    # a real import probe now: the one thing this endpoint exists to catch is
+    # exactly the thing a constant cannot see. `modules` reports the rest of
+    # the fail-open imports for the same reason. Keep these measured.
+    modules = _module_status()
     return {
         "ok": True,
         "rev": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "unknown")[:12],
-        "features_instrumentation": True,
+        "features_instrumentation": modules["features"],
+        "modules": modules,
+        # Loud, greppable signal for a deploy that silently lost a module.
+        "degraded": sorted(n for n, present in modules.items() if not present),
     }
