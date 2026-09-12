@@ -35,11 +35,20 @@ ENV MPLCONFIGDIR=/tmp/mpl \
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-# app.py plus the modules generated scripts / post-export checks import:
-# sdf_kit (mesh-mode implicit modeling), networks + fea + fit (checks,
-# MTR-179/180/204). fit.py is imported by app.py's `checks.fit` path — it MUST
-# be copied or that check errors at runtime in the image.
-COPY app.py sdf_kit.py networks.py fea.py fit.py ./
+# app.py plus every module it or a generated script imports: sdf_kit
+# (mesh-mode implicit modeling), networks + fea + fit (checks, MTR-179/180/204),
+# features (feature-chip instrumentation), validate (MTR-187 pre-exec guard),
+# exchanger (prompted directly — `from exchanger import exchanger_core`).
+#
+# Globbed, NOT enumerated, and that is the whole point: this was a hand-kept
+# list and it drifted, shipping an image missing features.py, validate.py and
+# exchanger.py. Every one of those imports is wrapped in a bare `except` that
+# fails open, so the image booted, passed its health check and served
+# generations — with the feature chips silently absent, the AST guard silently
+# disabled, and every exchanger build failing inside user code. A module that
+# is only *sometimes* imported must never depend on someone remembering to add
+# a COPY line.
+COPY *.py ./
 
 # Run as a non-root, no-login user — defense in depth for executing generated
 # code (it can never be root inside the container). The base image ships no
