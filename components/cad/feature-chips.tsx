@@ -11,6 +11,14 @@
  * `markedIds` flags chips whose faces the user annotated in the viewer
  * (face→chip reverse highlight).
  *
+ * The chips are ICON-ONLY squares (components/icons/cad): at a glance you
+ * want the SHAPE of the timeline — which ops ran, in what order — and op
+ * names plus their measurements made every chip a different width, so the
+ * strip read as ragged text rather than a sequence. The name and value still
+ * reach assistive tech and hover through `aria-label` / `title`, and the
+ * popover names the feature in full the moment a chip is opened. The step
+ * number went with the text for the same reason: position already carries it.
+ *
  * The popover renders OUTSIDE the horizontal scroll container (as a sibling,
  * absolutely positioned under the strip and aligned to the open chip) so the
  * strip's `overflow-x-auto` never clips it.
@@ -26,41 +34,18 @@ import {
   useTransition,
 } from "react";
 import {
-  BoxIcon,
   CheckIcon,
-  CircleDotIcon,
-  CombineIcon,
-  CylinderIcon,
-  LayersIcon,
   Loader2Icon,
-  Rotate3dIcon,
   RotateCcwIcon,
-  ShapesIcon,
-  SlashIcon,
-  SparklesIcon,
   WandSparklesIcon,
 } from "lucide-react";
 
 import type { CadFeature } from "@/lib/cad/types";
 import { editableFeatureKeys } from "@/lib/cad/features";
-import {
-  timelineEntries,
-  type TimelineIconKind,
-} from "@/components/cad/feature-timeline";
+import { timelineEntries } from "@/components/cad/feature-timeline";
+import { CAD_OP_ICONS } from "@/components/icons/cad";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-
-const KIND_ICON: Record<TimelineIconKind, typeof BoxIcon> = {
-  extrude: BoxIcon,
-  revolve: Rotate3dIcon,
-  boolean: CombineIcon,
-  fillet: SparklesIcon,
-  chamfer: SlashIcon,
-  shell: LayersIcon,
-  loft: CylinderIcon,
-  hole: CircleDotIcon,
-  generic: ShapesIcon,
-};
 
 /** Matches the popover's `w-56` for clamping it inside the strip. */
 const POPOVER_WIDTH_PX = 224;
@@ -203,7 +188,7 @@ export function FeatureChips({
         >
           {entries.map((entry, i) => {
             const f = entry.feature;
-            const Icon = KIND_ICON[entry.iconKind];
+            const Icon = CAD_OP_ICONS[entry.iconKind];
             const open = activeId === f.id;
             const marked = !open && !!markedIds?.has(f.id);
             return (
@@ -227,7 +212,10 @@ export function FeatureChips({
                   aria-controls={open ? panelId : undefined}
                   onClick={() => onActiveChange(open ? null : f.id)}
                   className={cn(
-                    "inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors",
+                    // Square, icon-only: size-9 around a size-4 glyph leaves
+                    // 10px of padding on every side, so the mark sits in the
+                    // chip rather than filling it.
+                    "inline-flex size-9 cursor-pointer items-center justify-center rounded-md border transition-colors",
                     open
                       ? "border-sky-500/50 bg-sky-500/10 text-foreground"
                       : marked
@@ -236,11 +224,7 @@ export function FeatureChips({
                     disabled && "cursor-not-allowed opacity-50"
                   )}
                 >
-                  <span className="text-[10px] tabular-nums text-muted-foreground/70">
-                    {entry.step}
-                  </span>
-                  <Icon className="size-3.5 shrink-0" />
-                  <span className="max-w-[10rem] truncate">{f.label}</span>
+                  <Icon className="size-4 shrink-0" />
                 </button>
               </li>
             );
