@@ -2667,10 +2667,44 @@ export function TextToCadStudio({
 
         </section>
 
-        {/* Right sidebar — revisions + parametric source for the current build,
-            then the build history. self-start keeps it at content height instead
-            of stretching to match the (tall) viewer column. */}
+        {/* Right sidebar — features, then revisions + parametric source for the
+            current build, then the build history. self-start keeps it at content
+            height instead of stretching to match the (tall) viewer column. */}
         <aside className="flex min-w-0 flex-col gap-5 self-start lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:min-h-0">
+          {/* Construction features (chips) — FIRST in the column, above
+              Revisions. These are live controls on the solid currently on
+              screen; Revisions is a list you reach for only when switching
+              versions. Putting the editable thing under the viewer and the
+              archive below it matches what the eye does after a build lands. */}
+          {!generating &&
+            viewedTurn?.sourceCode &&
+            viewedFeatures.length > 0 && (
+              <div>
+                <div className="mb-2 flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                  <Layers className="size-4 shrink-0" />
+                  <span>Features</span>
+                </div>
+                <FeatureChips
+                  features={viewedFeatures}
+                  sourceCode={viewedTurn.sourceCode}
+                  activeId={activeFeatureId}
+                  onActiveChange={setActiveFeatureId}
+                  onUpdate={applyFeatureUpdate}
+                  onEditStatement={applyFeatureStatementEdit}
+                  onPreview={previewFeatureDraft}
+                  // Single-solid viewer only: assemblies render via
+                  // assemblyParts and compare mode pins a ghost pair.
+                  previewEnabled={
+                    viewedParts.length <= 1 && !compareBaseAssetId
+                  }
+                  previewPending={paramPreviewPending}
+                  previewError={paramPreviewError}
+                  disabled={featureUpdating}
+                  markedIds={annotatedFeatureIds}
+                />
+              </div>
+            )}
+
           {/* Revisions for the current build */}
           {!generating && turns.length > 0 && (
             <div>
@@ -2795,55 +2829,29 @@ export function TextToCadStudio({
             </div>
           )}
 
-          {/* Construction features (chips) + collapsible parametric source */}
+          {/* Collapsible parametric source. Stays BELOW Revisions: it is
+              reference, not a control surface — the editable version of this
+              code is the Features strip at the top of the column. */}
           {!generating && viewedTurn?.sourceCode && (
-            <div className="space-y-3">
-              {viewedFeatures.length > 0 && (
-                <div>
-                  <div className="mb-2 flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                    <Layers className="size-4 shrink-0" />
-                    <span>Features</span>
-                  </div>
-                  <FeatureChips
-                    features={viewedFeatures}
-                    sourceCode={viewedTurn.sourceCode}
-                    activeId={activeFeatureId}
-                    onActiveChange={setActiveFeatureId}
-                    onUpdate={applyFeatureUpdate}
-                    onEditStatement={applyFeatureStatementEdit}
-                    onPreview={previewFeatureDraft}
-                    // Single-solid viewer only: assemblies render via
-                    // assemblyParts and compare mode pins a ghost pair.
-                    previewEnabled={
-                      viewedParts.length <= 1 && !compareBaseAssetId
-                    }
-                    previewPending={paramPreviewPending}
-                    previewError={paramPreviewError}
-                    disabled={featureUpdating}
-                    markedIds={annotatedFeatureIds}
-                  />
-                </div>
-              )}
-              <div>
-                <button
-                  type="button"
-                  onClick={() => setShowSource((v) => !v)}
-                  className="flex w-full cursor-pointer items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
-                >
-                  <Layers className="size-4 shrink-0" />
-                  <span>Parametric source</span>
-                  {showSource ? (
-                    <ChevronDown className="ml-auto size-4 shrink-0" />
-                  ) : (
-                    <ChevronRight className="ml-auto size-4 shrink-0" />
-                  )}
-                </button>
-                {showSource && (
-                  <pre className="mt-2 max-h-72 overflow-auto rounded-lg bg-muted/40 p-3 text-xs">
-                    {viewedTurn.sourceCode}
-                  </pre>
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowSource((v) => !v)}
+                className="flex w-full cursor-pointer items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
+              >
+                <Layers className="size-4 shrink-0" />
+                <span>Parametric source</span>
+                {showSource ? (
+                  <ChevronDown className="ml-auto size-4 shrink-0" />
+                ) : (
+                  <ChevronRight className="ml-auto size-4 shrink-0" />
                 )}
-              </div>
+              </button>
+              {showSource && (
+                <pre className="mt-2 max-h-72 overflow-auto rounded-lg bg-muted/40 p-3 text-xs">
+                  {viewedTurn.sourceCode}
+                </pre>
+              )}
             </div>
           )}
 
