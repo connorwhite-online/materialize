@@ -6,6 +6,14 @@
  * spin is the shape being turned away from how the model is actually framed, so
  * it stops — and the morph unwinds whatever spin had accumulated.
  *
+ * The unwind takes the SHORTEST path to 0, because a turn is 2pi-periodic: the
+ * blob may have been tumbling for minutes before a shape arrives, and driving
+ * the raw accumulated angle to 0 across one ~1s morph spins the forming shape
+ * through every whole turn it had banked. Three minutes of tumble is 1031deg
+ * unwound at 300x the spin rate — a whip, at the exact moment the shape is
+ * supposed to be settling. Wrapped to (-pi, pi] it is the same orientation
+ * reached the short way, so the worst case is half a turn.
+ *
  * The unwind is driven by the SAME eased morph progress as the shape, not by its
  * own tween, so rotation reaches exactly 0 on the frame the shape lands. That
  * exactness is load-bearing: the final handoff freezes the cloud at its target
@@ -45,6 +53,19 @@ export interface SpinFrame {
   easedMorph: number;
 }
 
+/** The same orientation, expressed as the smallest turn that reaches it.
+ *  Rotation is 2pi-periodic, so this changes nothing on screen — it only
+ *  changes how far there is to travel back. */
+export function shortestTurn(angle: number): number {
+  const TAU = Math.PI * 2;
+  return ((((angle + Math.PI) % TAU) + TAU) % TAU) - Math.PI;
+}
+
+/** Both axes wrapped to the short way round. */
+export function shortestSpin({ x, y }: Spin): Spin {
+  return { x: shortestTurn(x), y: shortestTurn(y) };
+}
+
 /** The cloud's rotation for this frame. */
 export function nextSpin({
   current,
@@ -56,10 +77,12 @@ export function nextSpin({
 }: SpinFrame): Spin {
   if (!shaping) {
     const rate = active ? SPIN_RATE_ACTIVE : SPIN_RATE_IDLE;
-    return {
+    // Kept wrapped as it accumulates: identical on screen, but the angle stays
+    // canonical instead of growing for as long as the studio is open.
+    return shortestSpin({
       x: current.x + delta * rate * SPIN_X_RATIO,
       y: current.y + delta * rate,
-    };
+    });
   }
   if (!unwindFrom) return { x: current.x, y: current.y };
   const remaining = 1 - Math.min(1, Math.max(0, easedMorph));

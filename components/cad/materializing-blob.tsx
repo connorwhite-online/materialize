@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import * as THREE from "three";
-import { type Spin, nextSpin } from "./cloud-spin";
+import { BLOB_IDLE_SPEED, deformTarget } from "./cloud-deform";
+import { type Spin, nextSpin, shortestSpin } from "./cloud-spin";
 import {
   STUDIO_CAMERA,
   STUDIO_TARGET_SIZE,
@@ -72,10 +73,6 @@ const POINT_COUNT = 20000; // dense cloud; one draw call so cost is trivial
 const MORPH_DURATION = 1.2;
 // Live (mid-generation) morphs are snappier than the final handoff morph.
 const LIVE_MORPH_DURATION = 0.9;
-// Wobble once the cloud has formed onto a live intermediate shape: enough to
-// stay alive, small enough that the shape still reads.
-const FORMED_IDLE_AMP = 0.05;
-const FORMED_ACTIVE_AMP = 0.13;
 
 function smoothstep(t: number) {
   const x = Math.min(1, Math.max(0, t));
@@ -206,7 +203,13 @@ function bakeMorph(geom: THREE.BufferGeometry, morph: number) {
  *  rotation standing right now becomes what this morph unwinds to 0.
  *  Re-captured on EVERY morph start, not just the first — a chained live morph
  *  resets the eased progress to 0, so unwinding from a stale origin would snap
- *  the rotation back to where it stood before the previous morph. */
+ *  the rotation back to where it stood before the previous morph.
+ *
+ *  Captured through `shortestSpin`, which is what keeps the unwind from being a
+ *  whip: the blob may have banked whole turns before a shape arrived, and those
+ *  turns are the same orientation as the fraction left over. Wrapping here (not
+ *  only while accumulating) means the guarantee holds however the rotation got
+ *  there — the morph never unwinds more than half a turn. */
 function beginShaping(
   points: THREE.Points | null,
   shaping: { current: boolean },
@@ -214,7 +217,7 @@ function beginShaping(
 ) {
   shaping.current = true;
   const r = points?.rotation;
-  unwindFrom.current = r ? { x: r.x, y: r.y } : null;
+  unwindFrom.current = r ? shortestSpin({ x: r.x, y: r.y }) : null;
 }
 
 function PointCloud({
@@ -246,7 +249,7 @@ function PointCloud({
 }) {
   const matRef = useRef<THREE.ShaderMaterial>(null);
   const pointsRef = useRef<THREE.Points>(null);
-  const speed = useRef(0.6);
+  const speed = useRef(BLOB_IDLE_SPEED);
   const amp = useRef(idleAmp);
   const morphProgress = useRef(0);
   const morphing = useRef(false);
@@ -255,9 +258,10 @@ function PointCloud({
   // one freezes at the target and fires onMorphComplete. Live morphs bake +
   // resume wobbling instead.
   const isFinalMorph = useRef(false);
-  // The cloud has formed onto a live intermediate shape — wobble gently so the
-  // shape stays readable (mirrors the source-cloud amps).
-  const formed = useRef(false);
+  // The cloud is showing real geometry rather than the abstract blob — either
+  // it was one from the first frame (a revision's source surface) or it has
+  // morphed onto an in-progress solid. Calms the wobble (see ./cloud-deform).
+  const formed = useRef(shaped);
   const morphDuration = useRef(MORPH_DURATION);
   // Spin is the blob's alone (see ./cloud-spin). `shaping` latches the moment
   // the cloud is bound to real geometry — a surface base cloud, a live snapshot
@@ -400,17 +404,16 @@ function PointCloud({
 
   useFrame((_, delta) => {
     const k = Math.min(1, delta * 2.5);
-    speed.current += ((active ? 1.7 : 0.6) - speed.current) * k;
-    // Once formed onto a live shape, wobble gently so the shape stays
-    // readable; the abstract blob wobbles at full amplitude.
-    const targetAmp = formed.current
-      ? active
-        ? Math.min(activeAmp, FORMED_ACTIVE_AMP)
-        : Math.min(idleAmp, FORMED_IDLE_AMP)
-      : active
-        ? activeAmp
-        : idleAmp;
-    amp.current += (targetAmp - amp.current) * k;
+    // Amplitude AND rate both calm down once the cloud is showing a shape —
+    // lerped, not switched, so the change eases (./cloud-deform).
+    const target = deformTarget({
+      formed: formed.current,
+      active,
+      idleAmp,
+      activeAmp,
+    });
+    speed.current += (target.speed - speed.current) * k;
+    amp.current += (target.amp - amp.current) * k;
 
     const m = matRef.current;
     if (m) {
