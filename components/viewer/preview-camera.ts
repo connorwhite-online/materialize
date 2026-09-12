@@ -6,9 +6,9 @@
  * cannot simply be copied between them:
  *
  * - The detail viewer (`ModelViewer`, non-`fixedFrame`) renders the
- *   model at its native scale — millimetres, for an STL — inside drei's
- *   `<Stage adjustCamera={1.2}>`, which repositions the camera on mount
- *   to fit whatever it measures. Field of view 45°.
+ *   model at its native scale — millimetres, for an STL — inside a
+ *   `<Stage>` whose auto-fit we keep off (see `STAGE_AUTO_FIT`),
+ *   placing the camera at the fit distance ourselves. Field of view 45°.
  * - The capture rig (`ThumbnailCapture`) normalizes every model to a
  *   fixed `TARGET_WORLD_SIZE` and shoots it from a fixed distance at
  *   field of view 40°.
@@ -34,14 +34,26 @@ export const CAPTURE_DEFAULT_DISTANCE = 4.5;
 export const STAGE_FIT_MARGIN = 1.2;
 
 /**
- * Whether Stage should auto-fit. When a saved preview view is present we
- * own the camera ourselves (`ApplyInitialView`) and must keep Stage's
- * `fit()` off for the whole mount — even a single late Refit after we
- * place the camera snaps it back to head-on (CON-27).
+ * Stage's `<Bounds>` auto-fit is OFF for the whole mount of the detail
+ * viewer — `ApplyInitialView` places the camera instead, for every file.
+ *
+ * Two reasons, and both are load-bearing:
+ *
+ * - **A saved angle cannot survive it.** Even a single late Refit after
+ *   we place the camera snaps it back to head-on (CON-27).
+ * - **The model renders unframed until the fit lands.** The `<Canvas>`
+ *   mounts its camera at a fixed `z = 5` while the scene is in the
+ *   model's own units — millimetres for an STL — so a 60mm part opens
+ *   with the camera roughly 16× too close, i.e. INSIDE the mesh. Bounds
+ *   then dollies out over `maxDuration = 1s`, and drei aborts that
+ *   animation on the controls' `start` event to avoid drag-hijacking:
+ *   on a phone, a scroll gesture whose finger lands on the canvas fires
+ *   `start`, freezing the camera mid-dolly AND leaving `controls.target`
+ *   at the interpolated distance — inside the part. The viewer then
+ *   stays a stuck close-up until the user zooms out by hand. Placing the
+ *   camera in one frame removes the window entirely.
  */
-export function stageAdjustCamera(hasInitialView: boolean): false | number {
-  return hasInitialView ? false : STAGE_FIT_MARGIN;
-}
+export const STAGE_AUTO_FIT = false;
 
 /**
  * Fit distance drei `<Bounds getSize()>` would report for a model of
@@ -49,9 +61,9 @@ export function stageAdjustCamera(hasInitialView: boolean): false | number {
  *
  * Deliberately mirrors Bounds' `atan` (not `tan`) form so a restored
  * view anchors on the same baseline the capture measured against when
- * Stage was still auto-fitting. Used when Stage auto-fit is disabled
- * for a saved view — `Number(false)` would otherwise zero the margin
- * and make `getSize().distance` unusable.
+ * Stage was still auto-fitting. This is THE baseline now: Stage auto-fit
+ * is off for every file, and `Number(false)` zeroes Bounds' own margin,
+ * which would make `getSize().distance` unusable.
  */
 export function stageFitDistance(
   maxDim: number,
@@ -226,6 +238,24 @@ export function defaultFraming(): number {
     CAPTURE_FOV
   );
 }
+
+/**
+ * The view a file with no saved angle opens on: head-on down +Z at the
+ * capture rig's own framing.
+ *
+ * This is not a new default — it is drei's, computed instead of animated
+ * to. `<Stage>` wraps its children in `<Center>`, so the model sits at
+ * the origin and `Bounds.reset()` derives its direction from the mount
+ * camera at `[0, 0, 5]`, i.e. exactly `+Z`; `viewerDistanceForFraming`
+ * returns the baseline unchanged at `defaultFraming()`, and that
+ * baseline is `stageFitDistance()` — `Bounds.getSize().distance` at
+ * Stage's own margin. Same shot, on the first frame rather than a
+ * second later. See `STAGE_AUTO_FIT` for why that matters.
+ */
+export const DEFAULT_PREVIEW_VIEW: PreviewView = {
+  direction: [0, 0, 1],
+  framing: defaultFraming(),
+};
 
 /**
  * Turn the detail viewer's live orbit state into a portable view.
