@@ -7,6 +7,10 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { CadStreamEvent } from "@/lib/cad/types";
 import type { CadEngineId } from "@/lib/cad/engines";
+// From engines/types, NOT the registry: the registry imports the system
+// prompts, and pulling those into a client bundle to render two labels is
+// ~33KB of dead weight in the browser.
+import { CAD_ENGINE_LABELS } from "@/lib/cad/engines/types";
 import {
   bakeoffVerdict,
   elapsedMs,
@@ -28,11 +32,6 @@ import {
  * This file is rendering and one EventSource per arm.
  */
 
-const ENGINE_LABEL: Record<CadEngineId, string> = {
-  brep: "build123d (B-rep)",
-  sdf: "sdf_kit (implicit)",
-};
-
 function secs(ms: number): string {
   return `${(ms / 1000).toFixed(0)}s`;
 }
@@ -43,7 +42,7 @@ function PaneCard({ pane, tick }: { pane: BakeoffPane; tick: number }) {
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-3 rounded-xl border border-border p-4">
       <div className="flex items-baseline justify-between gap-2">
-        <h2 className="truncate text-sm font-medium">{ENGINE_LABEL[pane.engine]}</h2>
+        <h2 className="truncate text-sm font-medium">{CAD_ENGINE_LABELS[pane.engine]}</h2>
         <span
           className={cn(
             "shrink-0 text-xs tabular-nums",
@@ -67,7 +66,7 @@ function PaneCard({ pane, tick }: { pane: BakeoffPane; tick: number }) {
               pane.renderUrl ??
               `data:image/png;base64,${pane.snapshotPng ?? ""}`
             }
-            alt={`${ENGINE_LABEL[pane.engine]} result`}
+            alt={`${CAD_ENGINE_LABELS[pane.engine]} result`}
             className="h-full w-full object-contain"
           />
         ) : (
@@ -268,7 +267,7 @@ export function BakeoffPanel() {
               {verdict.winner ? (
                 <>
                   <span className="font-medium">
-                    {ENGINE_LABEL[verdict.winner]}
+                    {CAD_ENGINE_LABELS[verdict.winner]}
                   </span>{" "}
                   — {verdict.reason}
                 </>

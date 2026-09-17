@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   allEngines,
+  CAD_ENGINE_LABELS,
   DEFAULT_CAD_ENGINE,
   engineFor,
   isCadEngineId,
@@ -82,6 +83,16 @@ describe("engine registry", () => {
     expect(sdf.systemPrompt("an air-to-water intercooler core")).toMatch(
       /DUAL-FLUID/
     );
+  });
+
+  it("has ONE definition of each engine's label", () => {
+    // The drift PR #279 names: two hand-copied strings that agree until one
+    // side is edited. The client panel cannot import the registry (that would
+    // bundle ~33KB of system prompts into the browser), so the labels live in
+    // engines/types — prompt-free — and both sides read them.
+    for (const engine of allEngines()) {
+      expect(engine.label).toBe(CAD_ENGINE_LABELS[engine.id]);
+    }
   });
 
   it("gives every engine a distinct stored engine name", () => {

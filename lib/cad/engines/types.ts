@@ -22,6 +22,21 @@ export function isCadEngineId(value: unknown): value is CadEngineId {
 }
 
 /**
+ * Display names, defined HERE rather than on the profile because this module
+ * imports no prompt text.
+ *
+ * The client bake-off panel needs these labels, and reaching them through the
+ * registry would drag ~33KB of build123d + SDF system prompts into the
+ * browser bundle. It had its own hand-copied copy for exactly that reason,
+ * which is the drift PR #279 names: two strings that happen to agree until
+ * one side is edited. One definition, no prompt text, both sides read it.
+ */
+export const CAD_ENGINE_LABELS: Record<CadEngineId, string> = {
+  brep: "build123d (B-rep)",
+  sdf: "sdf_kit (implicit)",
+};
+
+/**
  * Everything that differs between engines, in one object. The harness loop —
  * brief, concept, plan, repair, judge, dimension checks, persistence — is
  * shared and reads this profile at the three points where it would otherwise
@@ -29,7 +44,7 @@ export function isCadEngineId(value: unknown): value is CadEngineId {
  */
 export interface CadEngineProfile {
   id: CadEngineId;
-  /** Human label for the studio toggle and benchmark output. */
+  /** Human label (from CAD_ENGINE_LABELS) for the toggle and benchmark. */
   label: string;
   /** Value sent as the sidecar's `engine` field. */
   sidecarEngine: "build123d" | "mesh";

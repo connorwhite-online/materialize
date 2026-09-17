@@ -5,10 +5,12 @@ import {
 } from "../prompt";
 import { BREP_OUTPUT_FORMATS } from "../types";
 import { buildSdfSystemPrompt, SDF_PLAN_PROMPT } from "./sdf-prompt";
+import { CAD_ENGINE_LABELS } from "./types";
 import type { CadEngineId, CadEngineProfile } from "./types";
 
 export {
   CAD_ENGINE_IDS,
+  CAD_ENGINE_LABELS,
   isCadEngineId,
   type CadEngineId,
   type CadEngineProfile,
@@ -26,7 +28,7 @@ export {
 
 const BREP: CadEngineProfile = {
   id: "brep",
-  label: "build123d (B-rep)",
+  label: CAD_ENGINE_LABELS.brep,
   sidecarEngine: "build123d",
   outputFormats: BREP_OUTPUT_FORMATS,
   systemPrompt: (prompt) =>
@@ -38,7 +40,7 @@ const BREP: CadEngineProfile = {
 
 const SDF: CadEngineProfile = {
   id: "sdf",
-  label: "sdf_kit (implicit)",
+  label: CAD_ENGINE_LABELS.sdf,
   // The sidecar's "mesh" engine skips the OpenCASCADE warm import entirely
   // and requires `result` to be a trimesh — which is the contract the SDF
   // prompt writes to, and the reason an SDF run cannot fail inside OCCT.
