@@ -16,6 +16,7 @@
  */
 
 import { FARMED_EXEMPLARS } from "./exemplars-farmed";
+import type { CadEngineId } from "../engines/types";
 
 export interface CadExemplar {
   id: string;
@@ -1286,6 +1287,36 @@ export function selectExemplars(
     .sort((a, b) => b.s - a.s)
     .slice(0, limit)
     .map(({ e }) => e);
+}
+
+/**
+ * Which engine an exemplar's code targets, DERIVED from the code rather than
+ * hand-tagged. A tag would be one more list to keep in sync, and this repo
+ * has already been bitten by exactly that (the Dockerfile's hand-kept COPY
+ * list shipped an image missing three modules). An exemplar that imports
+ * sdf_kit or meshes a field IS an implicit exemplar; nothing else is.
+ */
+export function exemplarEngine(ex: CadExemplar): CadEngineId {
+  return /from sdf_kit import|\bto_mesh\(/.test(ex.code) ? "sdf" : "brep";
+}
+
+/**
+ * Exemplar pool for an engine, to pass as `selectExemplars({ pool })`.
+ *
+ * NOTE the asymmetry, which is deliberate: "brep" returns the pool UNCHANGED,
+ * including the implicit exemplars. The build123d prompt still carries its
+ * own SDF section for organic prompts, so filtering them out would change
+ * that engine's behaviour — and the engine registry's whole safety claim is
+ * that the B-rep path is untouched. The implicit engine, which cannot run
+ * build123d at all, gets only implicit exemplars.
+ */
+export function exemplarPoolFor(
+  engine: CadEngineId,
+  pool: CadExemplar[] = CAD_EXEMPLARS
+): CadExemplar[] {
+  return engine === "sdf"
+    ? pool.filter((e) => exemplarEngine(e) === "sdf")
+    : pool;
 }
 
 /**
