@@ -68,6 +68,9 @@ jobs:
       - name: Fit contract (MTR-204)
         run: python3 tests/test_fit.py
 
+      - name: Printability checks — walls / overhangs / trapped voids
+        run: python3 tests/test_dfm.py
+
       - name: Adversarial proof suite (MTR-187)
         run: python3 tests/test_adversarial.py
 
