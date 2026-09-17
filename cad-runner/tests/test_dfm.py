@@ -1,7 +1,15 @@
 """
-Plain-python tests for the printability checks (dfm.py). No CAD kernel needed
-— every fixture is built with trimesh primitives, so this runs anywhere the
-implicit stack installs. Run: `python3 cad-runner/tests/test_dfm.py`.
+Plain-python tests for the printability checks (dfm.py). No CAD kernel
+needed — fixtures are trimesh primitives. Run:
+`python3 cad-runner/tests/test_dfm.py`.
+
+The sealed-cavity fixture is assembled by hand (an outer shell plus an
+inverted inner shell) rather than by subtracting one box from another. That
+is deliberate twice over: it is exactly the topology the trapped-void probe
+has to recognise, and it does not depend on trimesh having a boolean backend
+— a dependency this file originally took by accident, passing locally and
+failing CI with "No boolean backend". Only test_open_cavity_drains still
+needs one (manifold3d, pinned in requirements.txt).
 
 Each test pins a contract the repair loop depends on: a thin part must be
 CALLED thin, a sealed cavity must be found, and a plain printable box must
@@ -46,11 +54,19 @@ def test_thin_plate_fails_min_wall():
     assert not r["ok"], r
 
 
+def _hollow_box(outer_mm, inner_mm):
+    """Outer shell + inner shell with INVERTED winding = a solid with one
+    sealed cavity. No boolean backend involved: flipping the inner faces is
+    what makes its enclosed volume read as void rather than material."""
+    outer = trimesh.creation.box(extents=(outer_mm,) * 3)
+    inner = trimesh.creation.box(extents=(inner_mm,) * 3)
+    inner.invert()
+    return trimesh.util.concatenate([outer, inner])
+
+
 def test_sealed_cavity_is_trapped():
     """A hollow shell with no drain: one enclosed void, correctly located."""
-    outer = trimesh.creation.box(extents=(30, 30, 30))
-    inner = trimesh.creation.box(extents=(16, 16, 16))
-    mesh = trimesh.boolean.difference([outer, inner])
+    mesh = _hollow_box(30, 16)
     r = check_dfm(mesh, {"minWall": 1.5, "pitch": 0.8})
     assert r["watertight"], r
     assert not r["drainsOk"], f"a sealed cavity must be reported: {r}"

@@ -29,6 +29,21 @@ fast-simplification==0.1.13
 # trimesh.repair.fill_holes needs networkx for boundary-loop detection — the
 # mesh auto-repair pass silently no-ops on holes without it.
 networkx==3.6.1
+# Robust mesh booleans + guaranteed-manifold output. Two roles:
+#   1. trimesh's boolean BACKEND. Without it `trimesh.boolean.*` raises
+#      "No boolean backend" — which is how tests/test_dfm.py first failed in
+#      CI while passing locally, and would equally break any generated script
+#      that reaches for a mesh boolean.
+#   2. The exactness path for implicit modeling. Marching cubes cannot
+#      represent a crease, so a field-level subtract rounds a bore mouth into
+#      a chamfer (measured: 0.29mm of rounding at pitch 0.8, and 0.028mm of
+#      waviness across a nominally flat mating face). Meshing the organic
+#      field and then booleaning exact primitives into it keeps the rim sharp
+#      and the face planar at the same triangle budget.
+# Note manifold3d's own level_set uses the OPPOSITE sign convention to
+# sdf_kit (positive = inside) and takes a per-point scalar callback, so it is
+# not a drop-in for to_mesh's vectorized (N,3)->(N,) fields.
+manifold3d==3.5.3
 # trimesh's voxel marching-cubes (organic remesh fallback) needs scikit-image.
 scikit-image==0.26.0
 # trimesh.intersections.slice_mesh_plane(cap=True) needs shapely (cut-loop
