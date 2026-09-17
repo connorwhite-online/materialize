@@ -109,7 +109,17 @@ function PaneCard({ pane, tick }: { pane: BakeoffPane; tick: number }) {
   );
 }
 
+/** What the toggle can ask for: both engines, or one on its own. */
+type EngineChoice = CadEngineId | "both";
+
+const CHOICES: { id: EngineChoice; label: string }[] = [
+  { id: "both", label: "Both" },
+  { id: "brep", label: "build123d" },
+  { id: "sdf", label: "sdf_kit" },
+];
+
 export function BakeoffPanel() {
+  const [choice, setChoice] = useState<EngineChoice>("both");
   const [prompt, setPrompt] = useState("");
   const [panes, setPanes] = useState<BakeoffPane[]>([]);
   const [starting, setStarting] = useState(false);
@@ -146,7 +156,12 @@ export function BakeoffPanel() {
       const res = await fetch("/api/cad/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: prompt.trim(), compare: true }),
+        // `compare` and `engine` are mutually exclusive server-side
+        // (compare wins), so send exactly one of them.
+        body: JSON.stringify({
+          prompt: prompt.trim(),
+          ...(choice === "both" ? { compare: true } : { engine: choice }),
+        }),
       });
       if (!res.ok) {
         setStartError(await res.text());
@@ -185,7 +200,7 @@ export function BakeoffPanel() {
     } finally {
       setStarting(false);
     }
-  }, [prompt, starting]);
+  }, [prompt, starting, choice]);
 
   const verdict = panes.length > 0 ? bakeoffVerdict(panes) : null;
 
@@ -199,13 +214,42 @@ export function BakeoffPanel() {
           rows={3}
           className="field-text w-full resize-y rounded-xl border border-border bg-background p-3 outline-none focus:ring-2 focus:ring-ring sm:text-sm"
         />
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <div
+            role="radiogroup"
+            aria-label="Geometry engine"
+            className="flex rounded-lg border border-border p-0.5"
+          >
+            {CHOICES.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                role="radio"
+                aria-checked={choice === c.id}
+                onClick={() => setChoice(c.id)}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-xs transition-colors",
+                  choice === c.id
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
           <Button onClick={run} disabled={starting || prompt.trim().length < 3}>
-            {starting ? "Starting…" : "Run both engines"}
+            {starting
+              ? "Starting…"
+              : choice === "both"
+                ? "Run both engines"
+                : "Run"}
           </Button>
-          <span className="text-xs text-muted-foreground">
-            Runs two full generations — double the model and sidecar spend.
-          </span>
+          {choice === "both" ? (
+            <span className="text-xs text-muted-foreground">
+              Two full generations — double the model and sidecar spend.
+            </span>
+          ) : null}
         </div>
         {startError ? (
           <p className="text-xs text-destructive">{startError}</p>

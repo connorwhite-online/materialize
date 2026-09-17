@@ -46,7 +46,7 @@ export default async function BakeoffPage() {
         </Link>
         <h1 className="text-xl font-medium">Engine bake-off</h1>
         <p className="max-w-2xl text-sm text-muted-foreground">
-          One prompt, both geometry engines, side by side. This is a
+          One prompt, one or both geometry engines, side by side. This is a
           comparison with a scheduled end, not a permanent feature — for the
           numbers that actually decide it, run{" "}
           <code className="rounded bg-muted px-1 py-0.5">npm run bench:cad</code>{" "}
