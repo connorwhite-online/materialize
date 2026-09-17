@@ -1,0 +1,22 @@
+-- Per-generation outcome record for the engine bake-off
+-- (see lib/cad/run-stats.ts and docs/text-to-cad/11-engine-bakeoff.md).
+--
+-- The comparison needs one row per generation answering: which engine, did
+-- it work, what KIND of failure, how many retries, model time vs geometry
+-- time, triangle count, watertight. Those signals existed but were
+-- scattered across cad_generations, cad_jobs.usage, and the transient run
+-- payload — triangle count and watertightness were never persisted at all,
+-- so "which engine produces bigger, more broken meshes" was unanswerable.
+--
+-- Deliberately ONE jsonb rather than seven columns: this is comparison
+-- instrumentation with a scheduled end, and it should be droppable in a
+-- single migration when the losing engine is retired.
+--
+-- Nullable with no default. NULL means "this row predates the bake-off",
+-- which is a real distinction from "we measured and found nothing";
+-- backfilling would erase it.
+--
+-- Idempotent per the 0039+ convention: the neon-http migrator runs these
+-- over HTTP with no wrapping transaction, so a file that fails halfway
+-- must be safe to re-apply.
+ALTER TABLE "cad_generations" ADD COLUMN IF NOT EXISTS "run_stats" jsonb;

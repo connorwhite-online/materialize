@@ -186,6 +186,25 @@ export async function runCadGeneration(
       onProgress: input.onProgress,
     });
 
+  // An EXPLICIT engine pins the build to the scripted loop on that engine,
+  // bypassing complexity routing entirely. Two reasons, both load-bearing for
+  // the bake-off:
+  //
+  //   The agentic and generative paths carry their own prompts and cannot
+  //   honour an engine choice, so letting the router send one arm there would
+  //   compare two different products rather than two representations.
+  //
+  //   The keyword router is exactly what made the implicit engine
+  //   unreachable. A caller that names an engine must get it, whether or not
+  //   the prompt happens to contain a trigger word.
+  if (input.engine) {
+    const n = !input.priorSourceCode ? bestOfN() : 1;
+    const route = `engine-${input.engine}${n > 1 ? `-bestof${n}` : ""}`;
+    note({ type: "route", route });
+    const result = await (n > 1 ? runBestOf(input, n) : runHarness(input));
+    return { ...result, route };
+  }
+
   if (!agenticEnabled()) {
     // Kill switch / no sessions / no model: today's behavior, unchanged.
     const useGenerative =
