@@ -20,6 +20,16 @@ midsurface), `seal_ramp` (0..1 face-seal weights), and `dual_sheet` (the
 two-fluid separator with per-point channel capping). `exchanger.py` composes
 them into a complete manifolded heat-exchanger block.
 
+v4 adds the EXACT-FEATURE path: `mesh_cyl` / `mesh_box` build exactly
+tessellated primitives, and `mesh_subtract` / `mesh_union` / `mesh_intersect`
+boolean them into a meshed field with manifold3d. Marching cubes cannot
+represent a crease, so cutting a bore as a FIELD rounds its mouth into a
+chamfer; cutting it as a MESH, after the organic body is meshed, keeps the
+rim sharp and any flat mating face planar. Mesh-level primitives take the
+same arguments as their field counterparts (`mesh_cyl(x, y, r, z0, z1)`
+mirrors `cyl_z(P, x, y, r, z0, z1)`) so swapping one for the other is a
+one-word edit.
+
 Importable by sidecar-exec'd model code: `from sdf_kit import *`.
 """
 import numpy as np
@@ -35,6 +45,7 @@ __all__ = [
     "mask", "shell_field", "offset_field",
     "translate", "rotate_z",
     "from_mesh", "to_mesh", "split_shell",
+    "mesh_union", "mesh_subtract", "mesh_intersect", "mesh_cyl", "mesh_box",
 ]
 
 
@@ -525,3 +536,92 @@ def to_mesh(field, lo, hi, pitch=0.7):
     except Exception:  # noqa: BLE001 — debris filtering is best-effort
         pass
     return m
+
+
+# ---- exact-feature booleans (manifold3d) ------------------------------------
+# WHY these exist, measured on a flat plate with a through-bore at pitch 0.8:
+#
+#                       bore r at the rim   flat-face planarity
+#   field subtract          2.789 mm            0.0281 mm
+#   mesh boolean            2.500 mm            0.0000 mm   (true r = 2.500)
+#
+# Away from edges both are fine — a field subtract measures 2.488-2.495 across
+# pitch 0.4-1.2, well inside print tolerance. SIZES were never the problem.
+# EDGES are: marching cubes cannot represent a crease, so it rounds a bore
+# mouth into a 0.29mm chamfer, which is a press fit or a fastener seat gone.
+#
+# So the pattern to reach for is: mesh the ORGANIC field once, then boolean
+# the EXACT features into the result. Not the other way around, and not by
+# subtracting exact features as fields.
+#
+# manifold3d also guarantees manifold output by construction, which the
+# marching-cubes path cannot: non-manifold blends are a live failure mode in
+# production (one build shipped euler number 184 against a closed-surface 2,
+# with 425 faces on open boundary edges).
+
+
+def _to_manifold(mesh):
+    import manifold3d
+
+    return manifold3d.Manifold(
+        manifold3d.Mesh(
+            vert_properties=np.asarray(mesh.vertices, np.float32),
+            tri_verts=np.asarray(mesh.faces, np.uint32),
+        )
+    )
+
+
+def _from_manifold(man):
+    md = man.to_mesh()
+    return trimesh.Trimesh(
+        vertices=np.asarray(md.vert_properties[:, :3], np.float64),
+        faces=np.asarray(md.tri_verts, np.int64),
+    )
+
+
+def _boolean(a, b, op):
+    ma, mb = _to_manifold(a), _to_manifold(b)
+    out = {"union": ma + mb, "subtract": ma - mb, "intersect": ma ^ mb}[op]
+    if out.is_empty():
+        raise ValueError(
+            f"mesh_{op} produced an empty solid — check the operands overlap "
+            f"and that you are cutting the bore OUT of the body, not the body "
+            f"out of the bore")
+    return _from_manifold(out)
+
+
+def mesh_union(a, b):
+    """Fuse two meshes into one manifold solid."""
+    return _boolean(a, b, "union")
+
+
+def mesh_subtract(a, b):
+    """Cut mesh `b` out of mesh `a`, keeping `b`'s edges crisp. THE exact-hole
+    operator: mesh the organic body with to_mesh, then subtract mesh_cyl bores
+    so tolerances survive the sampling grid."""
+    return _boolean(a, b, "subtract")
+
+
+def mesh_intersect(a, b):
+    """Keep only the volume common to both meshes."""
+    return _boolean(a, b, "intersect")
+
+
+def mesh_cyl(x, y, r, z0, z1, sections=96):
+    """Exactly tessellated vertical cylinder — the mesh twin of `cyl_z`, with
+    the same arguments. Use for bores, counterbores and pin seats that must
+    hold a real tolerance. Extend past the body for a through-hole."""
+    if z1 <= z0:
+        raise ValueError(f"mesh_cyl needs z1 > z0, got z0={z0}, z1={z1}")
+    c = trimesh.creation.cylinder(radius=r, height=z1 - z0, sections=sections)
+    c.apply_translation([x, y, 0.5 * (z0 + z1)])
+    return c
+
+
+def mesh_box(center, half):
+    """Exactly tessellated axis-aligned box — the mesh twin of `box`, with the
+    same arguments. Use for flat mating faces, slots and rectangular pockets
+    that must stay planar and square."""
+    b = trimesh.creation.box(extents=[2.0 * h for h in half])
+    b.apply_translation(np.asarray(center, float))
+    return b
