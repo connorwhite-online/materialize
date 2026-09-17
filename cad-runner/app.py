@@ -1160,6 +1160,19 @@ def _run_checks(mesh, checks: dict) -> dict:
             )
         except Exception as err:  # noqa: BLE001
             out["fea"] = {"error": str(err)}
+    dfm_spec = checks.get("dfm")
+    if dfm_spec is not None:
+        # Printability probes (walls / overhangs / trapped voids). Like the
+        # others, failure-isolated: an unmeasurable part reports {"error"}
+        # rather than failing the run. check_dfm itself distinguishes "could
+        # not check" from "checked and failed" (probesRan), so a degraded
+        # image never hands back a printable verdict it did not earn.
+        try:
+            from dfm import check_dfm
+
+            out["dfm"] = _plain(check_dfm(mesh, dfm_spec if isinstance(dfm_spec, dict) else {}))
+        except Exception as err:  # noqa: BLE001
+            out["dfm"] = {"error": str(err)}
     fit_spec = checks.get("fit")
     if fit_spec is not None:
         # Component-fit verifier (MTR-204): cavity containment, boss↔hole
