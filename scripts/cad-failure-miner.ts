@@ -6,11 +6,22 @@
  * additive, offline, never touches the harness hot path. Nothing is
  * auto-injected: approved hints are landed by hand in repairHintFor().
  *
- * Run with:
- *   npx tsx scripts/cad-failure-miner.ts
- *   npx tsx scripts/cad-failure-miner.ts --since-days 30 --min-count 5
- *   npx tsx scripts/cad-failure-miner.ts --draft   # + model-drafted hints
- *   npx tsx scripts/cad-failure-miner.ts --out review-queue.json
+ * Run with `npm run cad:failure-miner -- [flags]`, NOT bare `npx tsx`.
+ * This module reaches @/lib/db, which imports `server-only` — a package
+ * whose entire job is to throw outside a React Server Component. The npm
+ * script sets NODE_OPTIONS=--conditions=react-server, which resolves it to
+ * its empty stub exactly as Next does on the server. Without that the script
+ * dies at import and always has:
+ *
+ *   npm run cad:failure-miner
+ *   npm run cad:failure-miner -- --since-days 30 --min-count 5
+ *   npm run cad:failure-miner -- --draft      # + model-drafted hints
+ *   npm run cad:failure-miner -- --out review-queue.json
+ *
+ * Note this clusters cad_generations.error, which is the SCRUBBED
+ * user-facing copy — run scripts/cad-failure-detail.ts (no such trap, it
+ * talks to neon directly) for the unscrubbed cad_jobs.error_detail and job
+ * wall-clock.
  */
 
 import fs from "node:fs";

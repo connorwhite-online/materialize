@@ -445,7 +445,9 @@ function buildUserPrompt(
     // Implicit exemplars are the only ones the SDF engine can learn from —
     // a build123d exemplar would teach it code its runtime cannot execute.
     // exemplarPoolFor("brep") is the FULL pool, so this is a no-op there.
-    const pool = exemplarPoolFor(engineFor(input.engine).id);
+    const pool = exemplarPoolFor(engineFor(input.engine).id, {
+      prompt: input.prompt,
+    });
     let chosen = selectExemplars(input.prompt, { pool });
     if (extras.exemplarIds != null) {
       if (extras.exemplarIds.length === 0) {

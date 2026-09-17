@@ -5,6 +5,8 @@ import {
   selectExemplarsByIds,
   formatExemplars,
   formatExemplarCatalog,
+  exemplarEngine,
+  exemplarPoolFor,
   type CadExemplar,
 } from "@/lib/cad/knowledge/exemplars";
 
@@ -113,5 +115,42 @@ describe("CAD_EXEMPLARS authoring invariants", () => {
       expect(e.verified).toBe(true);
       expect(e.keywords.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("engine-aware exemplar pools", () => {
+  it("classifies mesh-mode exemplars as implicit even without sdf_kit", () => {
+    // gyroid_tpms_core is raw numpy + skimage.measure.marching_cubes and
+    // assigns a trimesh to `result`. A narrower check filed it as build123d,
+    // which is how "a pair of meshing spur gears" — a core-only build123d
+    // prompt — came to be offered a marching-cubes exemplar.
+    const gyroid = CAD_EXEMPLARS.find((e) => e.id === "gyroid_tpms_core")!;
+    expect(gyroid.code).not.toMatch(/from sdf_kit/);
+    expect(exemplarEngine(gyroid)).toBe("sdf");
+  });
+
+  it("gives the sdf engine only implicit exemplars", () => {
+    const pool = exemplarPoolFor("sdf");
+    expect(pool.length).toBeGreaterThan(0);
+    expect(pool.every((e) => exemplarEngine(e) === "sdf")).toBe(true);
+  });
+
+  it("keeps implicit exemplars out of a build123d-only prompt", () => {
+    // The prompt's section gate and the exemplar keyword scoring are
+    // independent, so they can disagree. An exemplar must never teach a
+    // dialect the assembled system prompt did not describe.
+    const pool = exemplarPoolFor("brep", { prompt: "a pair of meshing spur gears" });
+    expect(pool.every((e) => exemplarEngine(e) === "brep")).toBe(true);
+  });
+
+  it("allows them when the b-rep prompt did describe the implicit vocabulary", () => {
+    const pool = exemplarPoolFor("brep", {
+      prompt: "an organic bracket with a gyroid lattice infill",
+    });
+    expect(pool.some((e) => exemplarEngine(e) === "sdf")).toBe(true);
+  });
+
+  it("leaves the pool untouched when no prompt is supplied", () => {
+    expect(exemplarPoolFor("brep")).toEqual(CAD_EXEMPLARS);
   });
 });

@@ -17,6 +17,7 @@
 
 import { FARMED_EXEMPLARS } from "./exemplars-farmed";
 import type { CadEngineId } from "../engines/types";
+import { selectSystemPromptSections } from "../prompt";
 
 export interface CadExemplar {
   id: string;
@@ -1297,7 +1298,17 @@ export function selectExemplars(
  * sdf_kit or meshes a field IS an implicit exemplar; nothing else is.
  */
 export function exemplarEngine(ex: CadExemplar): CadEngineId {
-  return /from sdf_kit import|\bto_mesh\(/.test(ex.code) ? "sdf" : "brep";
+  // The real test is what `result` ends up being: a trimesh (implicit) or a
+  // B-rep solid. sdf_kit is the common route, but MESH MODE exemplars reach
+  // the same place with raw numpy + skimage.measure.marching_cubes and no
+  // sdf_kit import at all — gyroid_tpms_core is one, and a narrower check
+  // misfiled it as build123d, which is how a build123d-only prompt came to be
+  // offered a marching-cubes exemplar.
+  return /from sdf_kit import|\bto_mesh\(|marching_cubes|trimesh\.Trimesh/.test(
+    ex.code
+  )
+    ? "sdf"
+    : "brep";
 }
 
 /**
@@ -1312,11 +1323,21 @@ export function exemplarEngine(ex: CadExemplar): CadEngineId {
  */
 export function exemplarPoolFor(
   engine: CadEngineId,
-  pool: CadExemplar[] = CAD_EXEMPLARS
+  opts: { prompt?: string; pool?: CadExemplar[] } = {}
 ): CadExemplar[] {
-  return engine === "sdf"
-    ? pool.filter((e) => exemplarEngine(e) === "sdf")
-    : pool;
+  const pool = opts.pool ?? CAD_EXEMPLARS;
+  if (engine === "sdf") return pool.filter((e) => exemplarEngine(e) === "sdf");
+  // B-rep: only offer implicit exemplars when the assembled prompt actually
+  // DESCRIBED the implicit vocabulary. The prompt's section gate and the
+  // exemplar keyword scoring are independent, so they can disagree — and did:
+  // "a pair of meshing spur gears" gets the core-only build123d prompt and
+  // still scored the gyroid mesh-mode exemplar highest, teaching a dialect
+  // the system prompt never authorized. With no prompt supplied the pool is
+  // unchanged, so existing callers keep today's behaviour.
+  if (opts.prompt === undefined) return pool;
+  return selectSystemPromptSections(opts.prompt).sdf
+    ? pool
+    : pool.filter((e) => exemplarEngine(e) === "brep");
 }
 
 /**
