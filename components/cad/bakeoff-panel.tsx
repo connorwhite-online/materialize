@@ -163,7 +163,19 @@ export function BakeoffPanel() {
         }),
       });
       if (!res.ok) {
-        setStartError(await res.text());
+        // NEVER let an empty body render as nothing. A non-2xx with no body
+        // is what an UNHANDLED exception looks like (every handled path in
+        // the route sends text), and swallowing it made a 500 read as "the
+        // button does nothing" — which is worse than the error. Always show
+        // the status.
+        const detail = (await res.text()).trim();
+        setStartError(
+          detail
+            ? `${res.status}: ${detail}`
+            : `${res.status} ${res.statusText || "error"} — the request failed ` +
+              `with an empty body, which usually means an unhandled server ` +
+              `exception. Check the /api/cad/generate function logs.`
+        );
         return;
       }
       const body = (await res.json()) as {
@@ -195,7 +207,9 @@ export function BakeoffPanel() {
         sourcesRef.current.push(es);
       }
     } catch (err) {
-      setStartError((err as Error).message);
+      setStartError(
+        (err as Error)?.message || "the request threw with no message"
+      );
     } finally {
       setStarting(false);
     }

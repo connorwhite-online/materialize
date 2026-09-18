@@ -4,6 +4,7 @@ Run: `python3 cad-runner/tests/test_features.py`
 """
 
 import os
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -228,6 +229,48 @@ def test_health_reports_measured_module_presence():
         "real import (see _module_status)"
     )
     assert "def _module_status()" in src, "health module probe is gone"
+
+
+def test_health_probe_covers_every_fail_open_module():
+    """/health's module list must not drift from what app.py actually imports.
+
+    The list was hand-kept and `dfm` was added without being registered, so
+    the endpoint whose entire job is spotting a module missing from the image
+    could not have spotted that one. Same class of drift the Dockerfile's COPY
+    list suffered before it was globbed; this test is the reason the list can
+    stay explicit instead of being globbed too.
+
+    Modules imported UNCONDITIONALLY at app.py's top level are exempt: if one
+    of those is missing the process does not boot, so there is nothing for a
+    health probe to report.
+    """
+    import ast as ast_mod
+
+    src = (_runner_dir() / "app.py").read_text()
+    tree = ast_mod.parse(src)
+
+    # Unconditional top-level imports — absence is a crash, not degradation.
+    hard = set()
+    siblings = _sibling_modules()
+    for node in tree.body:
+        if isinstance(node, ast_mod.ImportFrom) and node.level == 0 and node.module:
+            if node.module.split(".")[0] in siblings:
+                hard.add(node.module.split(".")[0])
+        elif isinstance(node, ast_mod.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0] in siblings:
+                    hard.add(alias.name.split(".")[0])
+
+    declared = set(
+        re.findall(r'"([a-z_]+)"', src.split("_OPTIONAL_MODULES = (")[1].split(")")[0])
+    )
+    fail_open = (_app_local_imports() | _prompted_imports()) - hard
+    missing = sorted(fail_open - declared)
+    assert not missing, (
+        f"fail-open modules missing from _OPTIONAL_MODULES: {missing}. "
+        "/health cannot report a module it does not probe, so one of these "
+        "could vanish from the image and the endpoint would still say ok."
+    )
 
 
 def main() -> int:

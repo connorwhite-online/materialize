@@ -2311,7 +2311,20 @@ def run(req: RunRequest, request: Request) -> dict:
 # Optional modules app.py imports lazily, each behind a fail-open `except`.
 # A missing one degrades silently at runtime, so /health probes them by ACTUAL
 # import rather than asserting they exist.
-_OPTIONAL_MODULES = ("features", "validate", "exchanger", "networks", "fea", "fit")
+# Every fail-open sibling module, so /health can report one that silently
+# vanished from the image. SELF-POLICING: tests/test_features.py derives the
+# real set from app.py's imports (plus the ones the TS prompts tell generated
+# scripts to import) and fails if this list has drifted.
+#
+# It was a plain hand-kept list and had already drifted twice: `sdf_kit` was
+# never registered, and `dfm` was added without being registered. Both are the
+# same class of drift the Dockerfile's COPY list suffered before it was
+# globbed — and precisely what this endpoint exists to catch, so it could not
+# have caught itself.
+_OPTIONAL_MODULES = (
+    "features", "validate", "exchanger", "networks", "fea", "fit",
+    "sdf_kit", "dfm",
+)
 
 
 _MODULE_STATUS: Optional[dict] = None
