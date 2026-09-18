@@ -5,7 +5,6 @@ import { gzipSync } from "node:zlib";
 import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 
-import type { CadRunStats } from "./run-stats";
 
 import { db } from "@/lib/db";
 import {
@@ -383,14 +382,7 @@ export async function persistGenerationFailure(
   generationId: string,
   message: string,
   sourceCode = "",
-  attempts = 0,
-  /**
-   * Bake-off outcome record. Failures are the MORE important half of the
-   * comparison — an engine's failure-class histogram is what the whole
-   * exercise is for — so this is written on the failure path too, not just
-   * on success.
-   */
-  runStats?: CadRunStats | null
+  attempts = 0
 ): Promise<PersistError> {
   await db
     .update(cadGenerations)
@@ -399,7 +391,6 @@ export async function persistGenerationFailure(
       sourceCode: sourceCode || null,
       attempts,
       error: message,
-      ...(runStats ? { runStats, engine: runStats.engine } : {}),
       updatedAt: new Date(),
     })
     .where(eq(cadGenerations.id, generationId));
@@ -427,13 +418,6 @@ export async function persistGenerationSuccess(opts: {
   nameOverride?: string;
   /** Target process this generation built for (MTR-171), stamped on the fingerprint. */
   process?: CadProcess | null;
-  /**
-   * Bake-off outcome record (lib/cad/run-stats.ts). Built by the CALLER
-   * rather than derived here, because the model/geometry timing lives on the
-   * cost meter, which is scoped to runCadGeneration — persist runs outside
-   * that context and would read an empty one.
-   */
-  runStats?: CadRunStats | null;
   result: HarnessResult;
 }): Promise<PersistedGeneration | PersistError> {
   const { userId, generationId, prompt, isRoot, result } = opts;
@@ -448,7 +432,6 @@ export async function persistGenerationSuccess(opts: {
       isRoot,
       nameOverride: opts.nameOverride,
       process: opts.process,
-      runStats: opts.runStats,
       result,
       parts,
     });
@@ -557,9 +540,6 @@ export async function persistGenerationSuccess(opts: {
       status: "succeeded",
       sourceCode: result.sourceCode,
       attempts: result.attempts,
-      ...(opts.runStats
-        ? { runStats: opts.runStats, engine: opts.runStats.engine }
-        : {}),
       fileAssetId: draft.fileAssetId,
       renderStorageKey,
       // B-rep topology sidecar key (MTR-174) when the run carried a manifest;
@@ -629,7 +609,6 @@ async function persistAssembly(opts: {
   isRoot: boolean;
   nameOverride?: string;
   process?: CadProcess | null;
-  runStats?: CadRunStats | null;
   result: HarnessResult;
   parts: CadPart[];
 }): Promise<PersistedGeneration | PersistError> {
@@ -774,9 +753,6 @@ async function persistAssembly(opts: {
       status: "succeeded",
       sourceCode: result.sourceCode,
       attempts: result.attempts,
-      ...(opts.runStats
-        ? { runStats: opts.runStats, engine: opts.runStats.engine }
-        : {}),
       fileAssetId: created[0].fileAssetId,
       projectId,
       renderStorageKey,

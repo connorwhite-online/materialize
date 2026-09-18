@@ -311,17 +311,7 @@ describe("executeCadJob", () => {
       "gen-1",
       "not watertight",
       "broken",
-      4,
-      // A FAILED run carries its bake-off record too — an engine comparison
-      // lives or dies on its failure-class histogram, so recording outcomes
-      // only on success would measure exactly the wrong half.
-      expect.objectContaining({
-        v: 1,
-        engine: "brep",
-        ok: false,
-        attempts: 4,
-        failureClass: expect.any(String),
-      })
+      4
     );
     expect(updateCalls).toContainEqual(
       expect.objectContaining({

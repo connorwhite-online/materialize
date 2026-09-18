@@ -1661,22 +1661,6 @@ export const cadGenerations = pgTable(
       import("@/lib/cad/dimension-check").DimensionCheckResult[]
     >(),
     /**
-     * Per-generation outcome record for the engine bake-off
-     * (lib/cad/run-stats.ts): engine, ok, failure class, attempts, model vs
-     * geometry time, triangles, watertight, remeshed, DFM summary.
-     *
-     * One jsonb rather than seven columns on purpose — this is comparison
-     * instrumentation with a scheduled end, droppable in one migration when
-     * the losing engine goes (docs/text-to-cad/11).
-     *
-     * NULL means the row predates the bake-off, which is distinct from
-     * "measured and found nothing". Inside it, a null *Ok field means the
-     * probe did not RUN — unknown, never a pass.
-     */
-    runStats: jsonb("run_stats").$type<
-      import("@/lib/cad/run-stats").CadRunStats
-    >(),
-    /**
      * Config fingerprint: WHICH harness configuration produced this row
      * (per-role models, flags, router verdict) — the treatment beside the
      * outcome, so quality changes are attributable (lib/cad/fingerprint.ts).

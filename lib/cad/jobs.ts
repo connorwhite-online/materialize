@@ -14,7 +14,6 @@ import { resolveModelCredentials } from "@/lib/cad/credentials";
 import type { PriorFeedback } from "@/lib/cad/harness";
 import type { CadProcess } from "@/lib/cad/knowledge/dfm";
 import { CadMeter, runWithCadContext } from "@/lib/cad/metering";
-import { buildRunStats } from "@/lib/cad/run-stats";
 import { engineFor, type CadEngineId } from "@/lib/cad/engines";
 import {
   CadBudgetExceededError,
@@ -208,9 +207,8 @@ export interface ExecuteCadJobInput {
   priorFeedback?: PriorFeedback | null;
   /**
    * Geometry engine to build with (lib/cad/engines). Omitted = "brep", the
-   * behaviour every existing caller gets. Threaded into runCadGeneration and
-   * recorded on the generation's runStats so the bake-off can attribute an
-   * outcome to an engine.
+   * behaviour every existing caller gets. Threaded into runCadGeneration so
+   * a caller that names an engine gets it.
    */
   engine?: CadEngineId | null;
   /** Parent's persisted design brief (jsonb) — revisions inherit + patch it. */
@@ -694,27 +692,12 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
       return;
     }
 
-    // Bake-off outcome record. Built HERE, above the failure branch, for two
-    // reasons: the model/geometry timing lives on the cost meter, which is
-    // scoped to runCadGeneration (persist runs outside that context and would
-    // read an empty one); and a FAILED run is the more important half of an
-    // engine comparison, so it must be recorded too.
-    const runStats = buildRunStats({
-      engine: engineFor(input.engine).id,
-      ok: result.ok,
-      attempts: result.attempts,
-      run: result.run,
-      error: result.error,
-      usage: meter.summarize(result.route),
-    });
-
     if (!result.ok || !result.run) {
       const failed = await persistGenerationFailure(
         generationId,
         result.error ?? "Could not produce a valid model.",
         result.sourceCode,
-        result.attempts,
-        runStats
+        result.attempts
       );
       await finishFailed(failed.error);
       return;
@@ -729,7 +712,6 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
       nameOverride: input.name,
       // Stamped onto the config fingerprint for outcome slicing (MTR-171).
       process: input.process ?? null,
-      runStats,
       result,
     });
 
