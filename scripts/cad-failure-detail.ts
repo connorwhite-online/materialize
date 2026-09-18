@@ -20,6 +20,14 @@
  * Run with:
  *   npx tsx scripts/cad-failure-detail.ts
  *   npx tsx scripts/cad-failure-detail.ts --since-days 90 --full
+ *   npx tsx scripts/cad-failure-detail.ts --all --since-days 1
+ *
+ * `--all` lists generations of EVERY status, not just `failed`. That matters
+ * more than it sounds: a run that dies without reaching a terminal state
+ * stays `pending` forever, and a status='failed' filter cannot see it — so
+ * "my generation failed" plus "zero failed rows" reads as a contradiction
+ * when it is actually the diagnosis. Same blind spot that let a job run 7.2
+ * hours unnoticed.
  */
 
 import fs from "node:fs";
@@ -48,10 +56,13 @@ function flag(name: string): string | undefined {
 
 const SINCE_DAYS = Number(flag("since-days") ?? 60);
 const FULL = process.argv.includes("--full");
+/** Include non-failed rows — pending/succeeded — so stuck runs are visible. */
+const ALL = process.argv.includes("--all");
 const DETAIL_CHARS = FULL ? 4000 : 600;
 
 interface Row {
   id: string;
+  status: string;
   created_at: string;
   engine: string | null;
   attempts: number;
@@ -86,6 +97,7 @@ async function main() {
   const rows = (await sql`
     SELECT
       g.id,
+      g.status,
       g.created_at,
       g.engine,
       g.attempts,
@@ -99,12 +111,22 @@ async function main() {
       j.usage ->> 'route'          AS route
     FROM cad_generations g
     LEFT JOIN cad_jobs j ON j.generation_id = g.id
-    WHERE g.status = 'failed'
+    WHERE (${ALL} OR g.status = 'failed')
       AND g.created_at > now() - make_interval(days => ${SINCE_DAYS})
     ORDER BY g.created_at DESC
   `) as Row[];
 
-  console.log(`\n${rows.length} failed generations in the last ${SINCE_DAYS} days\n`);
+  console.log(
+    `\n${rows.length} ${ALL ? "generations" : "failed generations"} in the ` +
+      `last ${SINCE_DAYS} days\n`
+  );
+  if (!ALL && rows.length === 0) {
+    console.log(
+      "No FAILED rows. If a generation just failed in the UI, re-run with " +
+        "--all: a run that never reached a terminal state is still 'pending' " +
+        "and this filter cannot see it.\n"
+    );
+  }
 
   let deadlineKills = 0;
   let noDetail = 0;
@@ -120,7 +142,7 @@ async function main() {
 
     console.log("─".repeat(78));
     console.log(
-      `${when}  ${dur}${mark}  attempts=${row.attempts}  ` +
+      `${when}  ${dur}${mark}  gen=${row.status}  attempts=${row.attempts}  ` +
         `engine=${row.engine ?? "?"}  route=${row.route ?? "?"}  job=${row.job_status ?? "?"}`
     );
     console.log(`  prompt : ${row.prompt.replace(/\s+/g, " ").slice(0, 110)}`);
@@ -134,8 +156,11 @@ async function main() {
   }
 
   console.log("─".repeat(78));
+  const stuck = rows.filter(
+    (r) => r.status === "pending" || r.job_status === "running"
+  ).length;
   console.log(
-    `\nSummary: ${rows.length} failures · ` +
+    `\nSummary: ${rows.length} rows · ${stuck} still pending/running · ` +
       `${deadlineKills} ran >=600s (deadline-kill shaped) · ` +
       `${noDetail} with no error_detail\n`
   );
