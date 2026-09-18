@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   render,
   screen,
@@ -388,6 +388,145 @@ describe("ShippingAddressForm — anon mode pivots to sign-in for existing accou
     expect(onSubmit).not.toHaveBeenCalled();
     // We should still be on the form stage, not the code stage.
     expect(screen.queryByText(/Verify your email/i)).toBeNull();
+  });
+});
+
+// jsdom ships no navigator.clipboard at all — these tests stub it
+// per-case and remove it afterward so the clipboard-detection code
+// path stays inert (clipboardReadable stays false, no button renders)
+// everywhere else in the suite.
+describe("ShippingAddressForm — clipboard OTP fill", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, "clipboard");
+  });
+
+  function stubClipboard(readText: ReturnType<typeof vi.fn>) {
+    Object.defineProperty(navigator, "clipboard", {
+      value: { readText },
+      configurable: true,
+    });
+  }
+
+  it("auto-fills and submits when the clipboard already holds a 6-digit code", async () => {
+    const readText = vi.fn().mockResolvedValue("424242");
+    stubClipboard(readText);
+
+    const onSubmit = vi.fn();
+    render(
+      <ShippingAddressForm
+        onSubmit={onSubmit}
+        onBack={vi.fn()}
+        isSubmitting={false}
+        anonMode
+      />
+    );
+
+    fillRequiredFields();
+    fireEvent.click(screen.getByRole("button", { name: /Continue/i }));
+    await screen.findByText(/Verify your email/i);
+
+    await waitFor(() => expect(readText).toHaveBeenCalled());
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(calls.signUpAttempt).toHaveBeenCalledWith({ code: "424242" });
+  });
+
+  it("ignores clipboard content that isn't a bare 6-digit code", async () => {
+    const readText = vi.fn().mockResolvedValue("hello there");
+    stubClipboard(readText);
+
+    const onSubmit = vi.fn();
+    render(
+      <ShippingAddressForm
+        onSubmit={onSubmit}
+        onBack={vi.fn()}
+        isSubmitting={false}
+        anonMode
+      />
+    );
+
+    fillRequiredFields();
+    fireEvent.click(screen.getByRole("button", { name: /Continue/i }));
+    await screen.findByText(/Verify your email/i);
+
+    await waitFor(() => expect(readText).toHaveBeenCalled());
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(calls.signUpAttempt).not.toHaveBeenCalled();
+  });
+
+  it("the manual Paste code button fills and submits on click", async () => {
+    const readText = vi.fn().mockResolvedValue("");
+    stubClipboard(readText);
+
+    const onSubmit = vi.fn();
+    render(
+      <ShippingAddressForm
+        onSubmit={onSubmit}
+        onBack={vi.fn()}
+        isSubmitting={false}
+        anonMode
+      />
+    );
+
+    fillRequiredFields();
+    fireEvent.click(screen.getByRole("button", { name: /Continue/i }));
+    await screen.findByText(/Verify your email/i);
+
+    const pasteButton = await screen.findByRole("button", {
+      name: /Paste code/i,
+    });
+    readText.mockResolvedValueOnce("424242");
+    await act(async () => {
+      fireEvent.click(pasteButton);
+    });
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(calls.signUpAttempt).toHaveBeenCalledWith({ code: "424242" });
+  });
+
+  it("surfaces an error when the manual paste finds no code", async () => {
+    const readText = vi.fn().mockResolvedValue("not a code");
+    stubClipboard(readText);
+
+    render(
+      <ShippingAddressForm
+        onSubmit={vi.fn()}
+        onBack={vi.fn()}
+        isSubmitting={false}
+        anonMode
+      />
+    );
+
+    fillRequiredFields();
+    fireEvent.click(screen.getByRole("button", { name: /Continue/i }));
+    await screen.findByText(/Verify your email/i);
+
+    const pasteButton = await screen.findByRole("button", {
+      name: /Paste code/i,
+    });
+    await act(async () => {
+      fireEvent.click(pasteButton);
+    });
+
+    await screen.findByText(/No 6-digit code found/i);
+  });
+
+  it("does not render the Paste code button when the clipboard API is unavailable", async () => {
+    render(
+      <ShippingAddressForm
+        onSubmit={vi.fn()}
+        onBack={vi.fn()}
+        isSubmitting={false}
+        anonMode
+      />
+    );
+
+    fillRequiredFields();
+    fireEvent.click(screen.getByRole("button", { name: /Continue/i }));
+    await screen.findByText(/Verify your email/i);
+
+    expect(
+      screen.queryByRole("button", { name: /Paste code/i })
+    ).toBeNull();
   });
 });
 
