@@ -12,6 +12,12 @@ import { createCadJob, executeCadJob } from "@/lib/cad/jobs";
 import type { PromptImage } from "@/lib/cad/model-client";
 import { PROCESS_DFM, type CadProcess } from "@/lib/cad/knowledge/dfm";
 import { checkCadGenerateRateLimit } from "./rate-limit";
+import {
+  engineFor,
+  isCadEngineId,
+  allEngines,
+  type CadEngineId,
+} from "@/lib/cad/engines";
 
 /**
  * Target-process threading (MTR-171). The harness already branches DFM
@@ -42,12 +48,32 @@ export function parseTargetProcess(value: unknown): CadProcess | null {
  */
 export function resolveGenerationProcess(
   requested: unknown,
-  parentFingerprint: unknown
+  parentFingerprint: unknown,
 ): CadProcess | null {
   const explicit = parseTargetProcess(requested);
   if (explicit) return explicit;
   const fp = parentFingerprint as { process?: unknown } | null | undefined;
   return fp ? parseTargetProcess(fp.process) : null;
+}
+
+/**
+ * Which engine(s) a request runs on.
+ *
+ * `compare` fans out across EVERY engine on the same prompt; otherwise it is
+ * the named engine, or the default. Exported for unit testing, like the
+ * process helpers above.
+ *
+ * Two deliberate choices: an unrecognised engine falls back rather than
+ * 400ing, so a stale client cannot fail a generation with a typo; and
+ * `compare` must be the literal `true`, so a truthy string from a query param
+ * or form body cannot silently double model + sidecar spend.
+ */
+export function resolveEngines(body: {
+  engine?: unknown;
+  compare?: unknown;
+}): CadEngineId[] {
+  if (body.compare === true) return allEngines().map((e) => e.id);
+  return [isCadEngineId(body.engine) ? body.engine : "brep"];
 }
 
 /**
@@ -99,7 +125,7 @@ export async function POST(request: Request) {
       {
         status: 429,
         headers: { "Retry-After": String(rate.retryAfterSeconds) },
-      }
+      },
     );
   }
 
@@ -119,6 +145,19 @@ export async function POST(request: Request) {
      * today's behavior. Revisions inherit the parent's process when unset.
      */
     process?: unknown;
+    /**
+     * Geometry engine for this build ("brep" | "sdf"). Invalid or absent =
+     * "brep", today's behaviour. An explicit value bypasses complexity
+     * routing (lib/cad/orchestrate.ts) so a named engine is the one that runs.
+     */
+    engine?: unknown;
+    /**
+     * Bake-off mode: run the SAME prompt on every engine and return one
+     * {generationId, jobId} per engine, so the studio can show them together
+     * (docs/text-to-cad/11). Doubles model + sidecar spend, which is why it
+     * stays behind the owner-only gate this route already enforces.
+     */
+    compare?: unknown;
   };
   try {
     body = await request.json();
@@ -153,7 +192,7 @@ export async function POST(request: Request) {
         i &&
         typeof i.data === "string" &&
         i.data.length <= MAX_IMAGE_B64_CHARS &&
-        ALLOWED_IMAGE_TYPES.includes(i.mediaType)
+        ALLOWED_IMAGE_TYPES.includes(i.mediaType),
     )
     .slice(0, 4);
 
@@ -199,50 +238,80 @@ export async function POST(request: Request) {
   // conservative envelope (unchanged behavior for existing flows).
   const process = resolveGenerationProcess(body.process, parentFingerprint);
 
-  const [row] = await db
-    .insert(cadGenerations)
-    .values({
-      userId,
-      prompt,
-      engine: "build123d",
-      parentGenerationId: body.parentGenerationId ?? null,
-      status: "pending",
-    })
-    .returning({ id: cadGenerations.id });
-  const generationId = row.id;
+  // Which engine(s) this request runs (see resolveEngines).
+  const engines = resolveEngines(body);
 
-  const { jobId } = await createCadJob(generationId);
+  /**
+   * Mint one generation + job for one engine and schedule it. Factored out
+   * because compare mode needs it twice; each run is a fully independent
+   * generation row, so a failure in one arm cannot take the other down and
+   * either can be revised, rated or saved on its own.
+   */
+  const start = async (engine: CadEngineId) => {
+    const [row] = await db
+      .insert(cadGenerations)
+      .values({
+        userId,
+        prompt,
+        engine: engineFor(engine).storedEngine,
+        parentGenerationId: body.parentGenerationId ?? null,
+        status: "pending",
+      })
+      .returning({ id: cadGenerations.id });
+    const generationId = row.id;
 
-  // Kick the job after the response is sent. Deliberately NOT tied to
-  // request.signal: a client disconnect must not abort the build anymore.
-  after(() =>
-    executeCadJob({
-      jobId,
-      generationId,
-      userId,
-      prompt,
-      parentGenerationId: body.parentGenerationId ?? null,
-      name: body.name,
-      images: images.length ? images : undefined,
-      process,
-      priorSourceCode,
-      priorFeedback,
-      priorBrief,
-      // Size-capped: the harness zod-validates; this only blocks abuse.
-      providedBrief:
-        body.brief != null && JSON.stringify(body.brief).length <= 20_000
-          ? body.brief
-          : undefined,
-      // Pre-build concept pick: a base64 PNG the concepts endpoint minted;
-      // size-capped like the reference images (abuse guard only).
-      providedConcept:
-        typeof body.concept?.png === "string" &&
-        body.concept.png.length > 0 &&
-        body.concept.png.length <= 4_000_000
-          ? { png: body.concept.png }
-          : undefined,
-    }).catch((error) => logError("api/cad/generate.job", error))
+    const { jobId } = await createCadJob(generationId);
+
+    // Kick the job after the response is sent. Deliberately NOT tied to
+    // request.signal: a client disconnect must not abort the build anymore.
+    after(() =>
+      executeCadJob({
+        jobId,
+        generationId,
+        userId,
+        prompt,
+        engine,
+        parentGenerationId: body.parentGenerationId ?? null,
+        name: body.name,
+        images: images.length ? images : undefined,
+        process,
+        priorSourceCode,
+        priorFeedback,
+        priorBrief,
+        // Size-capped: the harness zod-validates; this only blocks abuse.
+        providedBrief:
+          body.brief != null && JSON.stringify(body.brief).length <= 20_000
+            ? body.brief
+            : undefined,
+        // Pre-build concept pick: a base64 PNG the concepts endpoint minted;
+        // size-capped like the reference images (abuse guard only).
+        providedConcept:
+          typeof body.concept?.png === "string" &&
+          body.concept.png.length > 0 &&
+          body.concept.png.length <= 4_000_000
+            ? { png: body.concept.png }
+            : undefined,
+      }).catch((error) => logError("api/cad/generate.job", error)),
+    );
+    return { generationId, jobId, engine };
+  };
+
+  // Sequential, not Promise.all: each arm inserts a row and schedules an
+  // after() callback, and compare mode is at most two arms — the ordering
+  // also makes runs[0] deterministically the requested/default engine, which
+  // is what the back-compat top-level fields mirror.
+  const runs: Array<{
+    generationId: string;
+    jobId: string;
+    engine: CadEngineId;
+  }> = [];
+  for (const engine of engines) runs.push(await start(engine));
+
+  // `runs` is always present (one entry, or one per engine in compare mode).
+  // The top-level generationId/jobId mirror the first so the existing studio
+  // client keeps working untouched.
+  return Response.json(
+    { generationId: runs[0].generationId, jobId: runs[0].jobId, runs },
+    { status: 202 },
   );
-
-  return Response.json({ generationId, jobId }, { status: 202 });
 }

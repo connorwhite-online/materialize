@@ -16,6 +16,8 @@
  */
 
 import { FARMED_EXEMPLARS } from "./exemplars-farmed";
+import type { CadEngineId } from "../engines/types";
+import { selectSystemPromptSections } from "../prompt";
 
 export interface CadExemplar {
   id: string;
@@ -1286,6 +1288,56 @@ export function selectExemplars(
     .sort((a, b) => b.s - a.s)
     .slice(0, limit)
     .map(({ e }) => e);
+}
+
+/**
+ * Which engine an exemplar's code targets, DERIVED from the code rather than
+ * hand-tagged. A tag would be one more list to keep in sync, and this repo
+ * has already been bitten by exactly that (the Dockerfile's hand-kept COPY
+ * list shipped an image missing three modules). An exemplar that imports
+ * sdf_kit or meshes a field IS an implicit exemplar; nothing else is.
+ */
+export function exemplarEngine(ex: CadExemplar): CadEngineId {
+  // The real test is what `result` ends up being: a trimesh (implicit) or a
+  // B-rep solid. sdf_kit is the common route, but MESH MODE exemplars reach
+  // the same place with raw numpy + skimage.measure.marching_cubes and no
+  // sdf_kit import at all — gyroid_tpms_core is one, and a narrower check
+  // misfiled it as build123d, which is how a build123d-only prompt came to be
+  // offered a marching-cubes exemplar.
+  return /from sdf_kit import|\bto_mesh\(|marching_cubes|trimesh\.Trimesh/.test(
+    ex.code
+  )
+    ? "sdf"
+    : "brep";
+}
+
+/**
+ * Exemplar pool for an engine, to pass as `selectExemplars({ pool })`.
+ *
+ * NOTE the asymmetry, which is deliberate: "brep" returns the pool UNCHANGED,
+ * including the implicit exemplars. The build123d prompt still carries its
+ * own SDF section for organic prompts, so filtering them out would change
+ * that engine's behaviour — and the engine registry's whole safety claim is
+ * that the B-rep path is untouched. The implicit engine, which cannot run
+ * build123d at all, gets only implicit exemplars.
+ */
+export function exemplarPoolFor(
+  engine: CadEngineId,
+  opts: { prompt?: string; pool?: CadExemplar[] } = {}
+): CadExemplar[] {
+  const pool = opts.pool ?? CAD_EXEMPLARS;
+  if (engine === "sdf") return pool.filter((e) => exemplarEngine(e) === "sdf");
+  // B-rep: only offer implicit exemplars when the assembled prompt actually
+  // DESCRIBED the implicit vocabulary. The prompt's section gate and the
+  // exemplar keyword scoring are independent, so they can disagree — and did:
+  // "a pair of meshing spur gears" gets the core-only build123d prompt and
+  // still scored the gyroid mesh-mode exemplar highest, teaching a dialect
+  // the system prompt never authorized. With no prompt supplied the pool is
+  // unchanged, so existing callers keep today's behaviour.
+  if (opts.prompt === undefined) return pool;
+  return selectSystemPromptSections(opts.prompt).sdf
+    ? pool
+    : pool.filter((e) => exemplarEngine(e) === "brep");
 }
 
 /**

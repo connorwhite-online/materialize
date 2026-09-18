@@ -6,13 +6,8 @@ import {
   type PromptImage,
 } from "./model-client";
 import { runCadCode } from "./runner-client";
-import {
-  buildSystemPrompt,
-  selectSystemPromptSections,
-  PLAN_SYSTEM_PROMPT,
-  extractCode,
-  gradeRun,
-} from "./prompt";
+import { extractCode, gradeRun } from "./prompt";
+import { engineFor, type CadEngineId } from "./engines";
 import { buildKnowledgeBlock, type CadProcess } from "./knowledge";
 import { needsExchangerRecipe } from "./knowledge/exchanger-recipe";
 import {
@@ -37,6 +32,7 @@ import {
 import {
   selectExemplars,
   selectExemplarsByIds,
+  exemplarPoolFor,
   formatExemplars,
   formatExemplarCatalog,
 } from "./knowledge/exemplars";
@@ -74,7 +70,6 @@ import { usesInternalThreadRecipe } from "./knowledge/bd-warehouse";
 import { sampleStlPoints } from "./stl-points";
 import { getNetworksReport, networksFailure } from "./network-check";
 import {
-  BREP_OUTPUT_FORMATS,
   CUSTOM_ANSWER_PREFIX,
   formatThreadHistory,
   labelUserReferences,
@@ -201,6 +196,14 @@ export interface HarnessInput {
    * exactly as before.
    */
   deadlineAt?: number;
+  /**
+   * Geometry engine to build with (lib/cad/engines). Omitted = "brep", which
+   * is byte-identical to the pre-registry behaviour. An explicit value
+   * BYPASSES the prompt's keyword routing entirely — that gate is exactly
+   * what kept the implicit path unreachable for organic requests, so a
+   * caller that names an engine must get it.
+   */
+  engine?: CadEngineId | null;
 }
 
 export interface HarnessResult {
@@ -258,14 +261,35 @@ export interface HarnessResult {
  * model key (mirrors the CraftCloud / runner mock philosophy). Emits a
  * parametric cube sized from the first number found in the prompt.
  */
-function localFakeModel(prompt: string, prior?: string | null): string {
+function localFakeModel(
+  prompt: string,
+  prior?: string | null,
+  engine: CadEngineId = "brep"
+): string {
   if (prior) return prior;
   const n = prompt.match(/(\d+(?:\.\d+)?)\s*(mm|cm|in)?/i);
-  const size = n ? Number(n[1]) : 20;
+  const size = Number.isFinite(n ? Number(n[1]) : NaN) ? Number(n![1]) : 20;
+  // The fallback must speak the ENGINE's dialect: the sidecar's mesh engine
+  // rejects a non-trimesh `result` outright, so emitting build123d here would
+  // make every credential-free SDF run fail for a reason that has nothing to
+  // do with the engine.
+  if (engine === "sdf") {
+    const half = size / 2;
+    return [
+      "from sdf_kit import *",
+      "",
+      `size = ${size}`,
+      "half = size / 2",
+      "f = lambda P: box(P, (0, 0, 0), (half, half, half))",
+      `result = to_mesh(f, (${-half - 2}, ${-half - 2}, ${-half - 2}), ` +
+        `(${half + 2}, ${half + 2}, ${half + 2}), pitch=0.8)`,
+      "",
+    ].join("\n");
+  }
   return [
     "from build123d import *",
     "",
-    `size = ${Number.isFinite(size) ? size : 20}`,
+    `size = ${size}`,
     "with BuildPart() as part:",
     "    Box(size, size, size)",
     "result = part.part",
@@ -337,7 +361,9 @@ function buildUserPrompt(
 ): string {
   const task = input.priorSourceCode
     ? [
-        "Revise the following build123d model per this instruction:",
+        `Revise the following ${
+          engineFor(input.engine).id === "sdf" ? "sdf_kit" : "build123d"
+        } model per this instruction:`,
         `Instruction: ${input.prompt}`,
         "",
         "Current code:",
@@ -416,12 +442,18 @@ function buildUserPrompt(
   // The plan step's catalog pick wins when present (retrieval v2); keyword
   // scoring remains the fallback when the plan named nothing parseable.
   if (!input.priorSourceCode) {
-    let chosen = selectExemplars(input.prompt);
+    // Implicit exemplars are the only ones the SDF engine can learn from —
+    // a build123d exemplar would teach it code its runtime cannot execute.
+    // exemplarPoolFor("brep") is the FULL pool, so this is a no-op there.
+    const pool = exemplarPoolFor(engineFor(input.engine).id, {
+      prompt: input.prompt,
+    });
+    let chosen = selectExemplars(input.prompt, { pool });
     if (extras.exemplarIds != null) {
       if (extras.exemplarIds.length === 0) {
         chosen = []; // explicit "none" — the model saw the catalog and declined
       } else {
-        const byId = selectExemplarsByIds(extras.exemplarIds);
+        const byId = selectExemplarsByIds(extras.exemplarIds, { pool });
         // All-invalid ids fall back to keyword scoring, never to nothing.
         if (byId.length > 0) chosen = byId;
       }
@@ -517,7 +549,8 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
   // prompt and reused for every attempt (fresh generate + every repair turn)
   // so the assembled prefix stays byte-stable within the job — a sibling PR's
   // prompt caching depends on that stability.
-  const systemPrompt = buildSystemPrompt(selectSystemPromptSections(input.prompt));
+  const engine = engineFor(input.engine);
+  const systemPrompt = engine.systemPrompt(input.prompt);
 
   // Swallow listener errors — progress is cosmetic, never load-bearing.
   const emit = (event: CadProgressEvent) => {
@@ -833,7 +866,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
     try {
       const text = await timed("plan", planModel, () =>
         completeText({
-          system: PLAN_SYSTEM_PROMPT,
+          system: engine.planPrompt,
           prompt: imageryNote
             ? `${buildPlanPrompt(input)}\n\n${imageryNote}`
             : buildPlanPrompt(input),
@@ -943,11 +976,12 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
       lastCode = extractCode(text);
     } else {
       // No credentials: deterministic local fallback, no repair value.
-      lastCode = localFakeModel(input.prompt, input.priorSourceCode);
+      lastCode = localFakeModel(input.prompt, input.priorSourceCode, engine.id);
     }
 
     emit({ type: "phase", phase: "executing", attempt, maxAttempts });
-    lastRun = await runCadCode(lastCode, BREP_OUTPUT_FORMATS, input.signal, {
+    lastRun = await runCadCode(lastCode, engine.outputFormats, input.signal, {
+      engine: engine.sidecarEngine,
       checks: runChecks,
       // Internal-thread compound recipe: watertight ONLY via the mesh
       // pipeline (kernel-verified — booleans shatter or silently drop the
@@ -968,7 +1002,8 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
       lastRun.validation.isSolid &&
       !lastRun.validation.isWatertight
     ) {
-      const remeshed = await runCadCode(lastCode, BREP_OUTPUT_FORMATS, input.signal, {
+      const remeshed = await runCadCode(lastCode, engine.outputFormats, input.signal, {
+        engine: engine.sidecarEngine,
         allowRemesh: true,
         checks: runChecks,
       });

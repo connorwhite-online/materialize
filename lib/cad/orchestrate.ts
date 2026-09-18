@@ -94,28 +94,51 @@ async function runBestOf(
   // (MTR-191) are stripped from the silent candidates too: a background
   // candidate must never suspend on user input (nothing surfaces its card, and
   // it would block the whole Promise.all).
-  const runs = await Promise.all(
+  // Candidate exceptions are CAPTURED, not discarded. `.catch(() => null)`
+  // here used to destroy them, and the all-failed branch then returned the
+  // literal "generation failed" — with nothing thrown, executeCadJob had no
+  // exception to record, so cad_jobs.error_detail stayed null too. Four of
+  // twelve production failures on record are that string and nothing else:
+  // a third of the failure data, self-erased. Both layers are fixed here.
+  const settled = await Promise.all(
     Array.from({ length: n }, (_, i) =>
       runHarness(
         i === 0
           ? input
           : { ...input, onProgress: undefined, onQuestion: undefined }
-      ).catch(() => null)
+      ).then(
+        (result) => ({ result, error: undefined as unknown }),
+        (error: unknown) => ({ result: null, error })
+      )
     )
   );
-  const ok = runs.filter(
-    (r): r is HarnessResult => !!r && r.ok && !!r.run
+
+  // A caller hang-up is not a candidate failure. The old catch swallowed
+  // aborts too, so a cancelled best-of build reported itself as a generation
+  // failure instead of a cancellation.
+  const aborted = settled.find(
+    (s) => (s.error as Error | undefined)?.name === "AbortError"
   );
+  if (aborted) throw aborted.error;
+
+  const returned = settled
+    .map((s) => s.result)
+    .filter((r): r is HarnessResult => !!r);
+  const ok = returned.filter((r) => r.ok && !!r.run);
   if (ok.length === 0) {
-    // All failed — surface the streaming candidate's failure (or any).
-    return (
-      runs.find((r): r is HarnessResult => !!r) ?? {
-        ok: false,
-        sourceCode: "",
-        attempts: 0,
-        error: "generation failed",
-      }
-    );
+    // A returned {ok:false} carries a real diagnosis (kernel stderr, failed
+    // validation) — prefer it, streaming candidate first, since that is the
+    // run whose progress the user watched.
+    if (returned.length > 0) return returned[0];
+    // Every candidate THREW. Rethrow so executeCadJob's catch records the
+    // real exception + stack in cad_jobs.error_detail, instead of inventing
+    // a message that discards it.
+    const thrown = settled.find((s) => s.error !== undefined);
+    throw thrown?.error instanceof Error
+      ? thrown.error
+      : new Error(
+          `all ${n} best-of candidates failed: ${String(thrown?.error ?? "unknown")}`
+        );
   }
   const winner = ok.reduce((best, r) =>
     (r.aestheticScore ?? -1) > (best.aestheticScore ?? -1) ? r : best
@@ -162,6 +185,25 @@ export async function runCadGeneration(
       signal: input.signal,
       onProgress: input.onProgress,
     });
+
+  // An EXPLICIT engine pins the build to the scripted loop on that engine,
+  // bypassing complexity routing entirely. Two reasons, both load-bearing for
+  // the bake-off:
+  //
+  //   The agentic and generative paths carry their own prompts and cannot
+  //   honour an engine choice, so letting the router send one arm there would
+  //   compare two different products rather than two representations.
+  //
+  //   The keyword router is exactly what made the implicit engine
+  //   unreachable. A caller that names an engine must get it, whether or not
+  //   the prompt happens to contain a trigger word.
+  if (input.engine) {
+    const n = !input.priorSourceCode ? bestOfN() : 1;
+    const route = `engine-${input.engine}${n > 1 ? `-bestof${n}` : ""}`;
+    note({ type: "route", route });
+    const result = await (n > 1 ? runBestOf(input, n) : runHarness(input));
+    return { ...result, route };
+  }
 
   if (!agenticEnabled()) {
     // Kill switch / no sessions / no model: today's behavior, unchanged.

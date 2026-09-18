@@ -68,6 +68,12 @@ jobs:
       - name: Fit contract (MTR-204)
         run: python3 tests/test_fit.py
 
+      - name: Exact-feature booleans (sdf_kit v4 / manifold3d)
+        run: python3 tests/test_mesh_boolean.py
+
+      - name: Printability checks — walls / overhangs / trapped voids
+        run: python3 tests/test_dfm.py
+
       - name: Adversarial proof suite (MTR-187)
         run: python3 tests/test_adversarial.py
 

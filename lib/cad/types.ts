@@ -207,7 +207,8 @@ export interface CadRunResult {
    * Post-export checks (sidecar `checks` request, or auto-triggered by the
    * script — `fluid_ports` requests `networks` without any caller wiring):
    * `fit` carries the MTR-204 component-fit verdicts; `networks` the
-   * dual-fluid isolation verdict; `fea` (MTR-180) passes through untyped.
+   * dual-fluid isolation verdict; `dfm` the printability verdict (walls /
+   * overhangs / trapped voids); `fea` (MTR-180) passes through untyped.
    * Absent when no checks ran or the sidecar predates them — consumers must
    * tolerate it missing.
    */
@@ -219,9 +220,63 @@ export interface CadRunResult {
       error?: string;
     };
     networks?: CadNetworksReport;
+    dfm?: CadDfmReport;
     [key: string]: unknown;
   };
   /** stderr / exception message when compile or export failed. */
+  error?: string;
+}
+
+/**
+ * Printability verdict for a produced mesh (cad-runner/dfm.py). Watertight
+ * and manifold say the mesh is a valid solid; these say whether it can be
+ * MADE.
+ *
+ * `null` on a *Ok field means the probe did not RUN — unknown, never a pass.
+ * `probesRan` separates "could not check" from "checked and failed", so a
+ * repair turn never treats a missing sidecar dependency as a geometry
+ * defect. `ok` is true only when every probe ran AND passed.
+ *
+ * Voxel-based figures are honest only to `pitch`: a trapped void or an
+ * escape channel narrower than one voxel is below the check's resolution.
+ */
+export interface CadDfmReport {
+  /** Voxel pitch used by the trapped-void probe (mm). */
+  pitch?: number;
+  watertight?: boolean;
+  triangles?: number;
+  volumeMm3?: number;
+  /** Target the walls were judged against (mm). */
+  minWallTargetMm?: number;
+  /** Thinnest measured wall (mm) — noise-prone; prefer wallP1Mm. */
+  minWallMm?: number | null;
+  /** 1st-percentile wall thickness (mm) — what minWallOk is judged on. */
+  wallP1Mm?: number | null;
+  thinAreaMm2?: number;
+  thinAreaFraction?: number;
+  /** true = passed, false = too thin, null = probe did not run. */
+  minWallOk?: boolean | null;
+  minWallError?: string;
+  overhangLimitDeg?: number;
+  overhangAreaMm2?: number;
+  /** Share of surface area needing support — a cost signal, not a verdict. */
+  overhangFraction?: number;
+  overhangError?: string;
+  /** Enclosed voids that cannot drain resin or release powder. */
+  trappedVoids?: Array<{
+    volumeMm3: number;
+    center: number[];
+    voxels: number;
+  }>;
+  trappedVoidCount?: number;
+  trappedVolumeMm3?: number;
+  /** true = no trapped voids, false = trapped, null = probe did not run. */
+  drainsOk?: boolean | null;
+  trappedError?: string;
+  /** Every probe actually ran. False means the verdict is incomplete. */
+  probesRan?: boolean;
+  /** Every probe ran AND passed. Never true on an unrun probe. */
+  ok?: boolean;
   error?: string;
 }
 
