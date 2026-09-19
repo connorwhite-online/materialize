@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  ClipboardIcon,
   MailOpenIcon,
   MapPinIcon,
   PackageIcon,
@@ -367,18 +366,6 @@ export function ShippingAddressForm({
     handleVerifyOtpRef.current = handleVerifyOtp;
   });
 
-  // Whether this browser exposes a readable clipboard at all — used
-  // to decide whether to render the manual "Paste code" button.
-  // Computed in an effect (not inline) so SSR and the first client
-  // render agree; `navigator` doesn't exist on the server.
-  const [clipboardReadable, setClipboardReadable] = useState(false);
-  useEffect(() => {
-    setClipboardReadable(
-      typeof navigator !== "undefined" && !!navigator.clipboard?.readText
-    );
-  }, []);
-  const [pasteError, setPasteError] = useState("");
-
   const fillCodeFromClipboard = (text: string) => {
     const match = text.trim().match(/^\d{6}$/);
     if (!match) return false;
@@ -387,15 +374,15 @@ export function ShippingAddressForm({
     return true;
   };
 
-  // Best-effort auto-detect: whenever the tab regains focus (the user
-  // switching back from Mail), check the clipboard for a 6-digit code
-  // and submit it immediately. This is much faster than Apple's own
-  // "code from email" keyboard suggestion, which is frequently delayed
-  // by up to a minute. Safari only allows `readText()` to run inside a
+  // Auto-detect: whenever the tab regains focus (the user switching
+  // back from Mail), check the clipboard for a 6-digit code and
+  // submit it immediately. This is much faster than Apple's own "code
+  // from email" keyboard suggestion, which is frequently delayed by
+  // up to a minute. Safari only allows `readText()` to run inside a
   // direct user gesture (a click/tap), so it rejects this silently on
-  // iOS — the "Paste code" button below is the reliable path there;
-  // this effect is the reliable path on Chrome/Android, where no
-  // gesture is required.
+  // iOS — there's no button fallback, so those users still fall back
+  // to typing the code by hand. This effect is the reliable path on
+  // Chrome/Android, where no gesture is required.
   useEffect(() => {
     if (stage !== "code") return;
     if (typeof navigator === "undefined" || !navigator.clipboard?.readText) {
@@ -410,7 +397,7 @@ export function ShippingAddressForm({
         fillCodeFromClipboard(text);
       } catch {
         // No permission, or not inside a user gesture (Safari) —
-        // fail silently, the manual button covers this case.
+        // fail silently; the user can still type the code by hand.
       }
     };
     const onFocus = () => void check();
@@ -425,18 +412,6 @@ export function ShippingAddressForm({
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [stage]);
-
-  const handlePasteCode = async () => {
-    setPasteError("");
-    try {
-      const text = await navigator.clipboard.readText();
-      if (!fillCodeFromClipboard(text)) {
-        setPasteError("No 6-digit code found on your clipboard.");
-      }
-    } catch {
-      setPasteError("Couldn't read your clipboard — paste the code instead.");
-    }
-  };
 
   const updateShipping = (field: keyof Address, value: string) => {
     setShipping((prev) => ({ ...prev, [field]: value }));
@@ -605,7 +580,6 @@ export function ShippingAddressForm({
             value={otpCode}
             onChange={(val) => {
               setOtpCode(val);
-              setPasteError("");
               if (val.length === 6) handleVerifyOtp(val);
             }}
             autoFocus
@@ -624,24 +598,6 @@ export function ShippingAddressForm({
             </InputOTPGroup>
           </InputOTP>
         </div>
-        {clipboardReadable && (
-          <div className="flex justify-center">
-            <button
-              type="button"
-              onClick={handlePasteCode}
-              disabled={otpVerifying || isSubmitting}
-              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-            >
-              <ClipboardIcon className="h-3.5 w-3.5" strokeWidth={2.5} />
-              Paste code
-            </button>
-          </div>
-        )}
-        {pasteError && (
-          <p role="alert" className="text-center text-xs text-destructive">
-            {pasteError}
-          </p>
-        )}
         {otpError && (
           <p
             id="otp-error"
@@ -662,7 +618,6 @@ export function ShippingAddressForm({
             setStage("form");
             setOtpCode("");
             setOtpError("");
-            setPasteError("");
             setPendingSubmission(null);
           }}
           disabled={otpVerifying || isSubmitting}
