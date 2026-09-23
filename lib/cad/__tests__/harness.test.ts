@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { CadRunResult } from "@/lib/cad/types";
+import { CadOutputTruncatedError, type CadRunResult } from "@/lib/cad/types";
 
 // Keep the harness on its credential-free deterministic path unless a test
 // opts in — hasModelCredentials()/completeText() are mocked so these tests
@@ -25,7 +25,7 @@ vi.mock("@/lib/cad/runner-client", () => ({
 // it real so a passing run's judgement short-circuits to { available: false }
 // without needing further mocking.
 
-import { runHarness } from "@/lib/cad/harness";
+import { attemptFloorMs, runHarness } from "@/lib/cad/harness";
 import { runWithCadTier, tierBudget } from "@/lib/cad/budget";
 import { CadMeter, runWithCadContext } from "@/lib/cad/metering";
 
@@ -177,5 +177,143 @@ describe("runHarness attempt budget by tier", () => {
     // nothing.
     expect(result.attempts).toBe(1);
     expect(runCadCode).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Prod, 2026-09-23: an SDF build started its second attempt with ~2 minutes
+// left, the codegen call ran 5+ minutes, and the platform killed the job
+// mid-call. It sat at "running" with no error, because nothing bounded the
+// call itself.
+describe("runHarness deadline", () => {
+  beforeEach(() => {
+    hasModelCredentials.mockReset().mockReturnValue(true);
+    runCadCode.mockReset().mockResolvedValue(failingRun());
+  });
+
+  /** A codegen call that only ends when its signal fires, like a slow model. */
+  function hangingCodegen() {
+    completeText.mockReset().mockImplementation((async (opts: {
+      role?: string;
+      signal?: AbortSignal;
+    }) => {
+      if (opts.role !== "implement" && opts.role !== "repair") {
+        return "```python\nresult = 1\n```";
+      }
+      return new Promise<string>((_, reject) => {
+        const fail = () =>
+          reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+        if (opts.signal?.aborted) return fail();
+        opts.signal?.addEventListener("abort", fail);
+      });
+    }) as never);
+  }
+
+  it("cuts a codegen call at the deadline and returns a failure it can persist", async () => {
+    hangingCodegen();
+    const result = await runHarness({
+      prompt: "a 20mm cube",
+      maxAttempts: 4,
+      deadlineAt: Date.now() + 50,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/ran out of time/);
+    expect(runCadCode).not.toHaveBeenCalled();
+  });
+
+  it("still throws on a caller abort, so it lands as a cancellation", async () => {
+    hangingCodegen();
+    const controller = new AbortController();
+    const run = runHarness({
+      prompt: "a 20mm cube",
+      maxAttempts: 4,
+      signal: controller.signal,
+      deadlineAt: Date.now() + 60_000,
+    });
+    setTimeout(() => controller.abort(), 20);
+    await expect(run).rejects.toMatchObject({ name: "AbortError" });
+  });
+});
+
+describe("attemptFloorMs", () => {
+  it("never goes below the one-minute floor", () => {
+    expect(attemptFloorMs(0)).toBe(60_000);
+    expect(attemptFloorMs(5_000)).toBe(60_000);
+  });
+
+  it("expects the next attempt to cost what the last one did", () => {
+    // The 7-minute codegen call that started with 2 minutes left.
+    expect(attemptFloorMs(430_000)).toBe(430_000);
+  });
+});
+
+describe("runHarness output truncation", () => {
+  beforeEach(() => {
+    hasModelCredentials.mockReset().mockReturnValue(true);
+    runCadCode.mockReset().mockResolvedValue(failingRun());
+  });
+
+  it("skips the sidecar for a cut-off program and asks the next attempt for a shorter one", async () => {
+    let codegenCalls = 0;
+    const prompts: string[] = [];
+    completeText.mockReset().mockImplementation((async (opts: {
+      role?: string;
+      prompt: string;
+    }) => {
+      if (opts.role !== "implement" && opts.role !== "repair") {
+        return "```python\nresult = 1\n```";
+      }
+      prompts.push(opts.prompt);
+      codegenCalls++;
+      if (codegenCalls === 1) {
+        throw new CadOutputTruncatedError(opts.role, 32_000);
+      }
+      return "```python\nresult = 1\n```";
+    }) as never);
+
+    const result = await runHarness({ prompt: "a knob", maxAttempts: 2 });
+
+    // Attempt 1 never reached the sidecar; attempt 2 did.
+    expect(runCadCode).toHaveBeenCalledTimes(1);
+    expect(result.attempts).toBe(2);
+    expect(prompts[1]).toContain("SHORTER program");
+    // And the retry thinks less because its effort came down, not because it
+    // was asked nicely.
+    const caps = completeText.mock.calls
+      .map((c) => (c as unknown[])[0] as { role?: string; effortCap?: string })
+      .filter((o) => o.role === "implement" || o.role === "repair")
+      .map((o) => o.effortCap);
+    expect(caps[0]).toBeUndefined();
+    expect(caps[1]).toBe("high");
+  });
+});
+
+describe("runHarness empty response", () => {
+  beforeEach(() => {
+    hasModelCredentials.mockReset().mockReturnValue(true);
+    runCadCode.mockReset().mockResolvedValue(failingRun());
+  });
+
+  it("never sends an empty program to the sidecar", async () => {
+    // Local SDF run, 2026-09-23: thinking used the whole output budget, the
+    // reply had no code, and "" ran as a valid script that assigned nothing.
+    let codegenCalls = 0;
+    const prompts: string[] = [];
+    completeText.mockReset().mockImplementation((async (opts: {
+      role?: string;
+      prompt: string;
+    }) => {
+      if (opts.role !== "implement" && opts.role !== "repair") {
+        return "```python\nresult = 1\n```";
+      }
+      prompts.push(opts.prompt);
+      return ++codegenCalls === 1 ? "" : "```python\nresult = 1\n```";
+    }) as never);
+
+    const result = await runHarness({ prompt: "a knob", maxAttempts: 2 });
+
+    expect(runCadCode).toHaveBeenCalledTimes(1);
+    expect(runCadCode.mock.calls[0][0]).toBe("result = 1");
+    expect(result.attempts).toBe(2);
+    expect(prompts[1]).toContain("contained no Python code");
   });
 });

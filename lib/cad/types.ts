@@ -572,6 +572,15 @@ export interface CadModelUsage {
   role: string;
   /** Resolved model id the API reported (or the requested id as fallback). */
   model: string;
+  /**
+   * Effort the calls ran at, when the model takes one. Recorded because it is
+   * the biggest single driver of a codegen call's time and tokens, and without
+   * it a job record can't show whether a part ran at medium or xhigh: an
+   * uncapped xhigh ran unnoticed on every explicit-engine build until it was
+   * measured by hand. Separate rows per effort, so a stepped-down retry is
+   * visible as its own line.
+   */
+  effort?: string;
   calls: number;
   inputTokens: number;
   outputTokens: number;
@@ -668,4 +677,23 @@ export function labelUserReferences(
       img.label ??
       `User reference image ${i + 1} of ${list.length} — attached by the user as the design reference. Match its form language, proportions, and visible features unless the text instructions say otherwise.`,
   }));
+}
+
+/**
+ * The model ran out of output budget before finishing. Thrown instead of
+ * returning the partial text: a cut-off program can still compile (if the
+ * cut lands between statements), and it then fails downstream as "script did
+ * not assign `result`". That points the repair loop at the geometry when the
+ * real problem is the length of the response.
+ */
+export class CadOutputTruncatedError extends Error {
+  constructor(
+    readonly role: string,
+    readonly outputTokens: number
+  ) {
+    super(
+      `the ${role} response was cut off at the ${outputTokens}-token output limit before the program finished`
+    );
+    this.name = "CadOutputTruncatedError";
+  }
 }

@@ -51,11 +51,12 @@ import {
 } from "./brief";
 import {
   modelForRole,
+  stepDownEffort,
   planStepEnabled,
   briefStepEnabled,
   type CadRole,
 } from "./models";
-import { attemptBudget, budgetExhausted } from "./budget";
+import { attemptBudget, budgetExhausted, type CadEffort } from "./budget";
 import { CAD_FEEDBACK_TAG_LABELS, type CadFeedbackTag } from "./feedback";
 import {
   checkDimensionTargets,
@@ -70,6 +71,7 @@ import { usesInternalThreadRecipe } from "./knowledge/bd-warehouse";
 import { sampleStlPoints } from "./stl-points";
 import { getNetworksReport, networksFailure } from "./network-check";
 import {
+  CadOutputTruncatedError,
   CUSTOM_ANSWER_PREFIX,
   formatThreadHistory,
   labelUserReferences,
@@ -108,6 +110,50 @@ const MAX_ATTEMPTS_DEFAULT = 4;
 // sidecar run + judge). Below this, the loop returns what it has instead of
 // getting platform-killed mid-attempt with nothing persisted.
 const MIN_ATTEMPT_MS = 60_000;
+
+/**
+ * The time an attempt needs, going by the last one. MIN_ATTEMPT_MS alone
+ * assumed an attempt costs about a minute. On the production model a single
+ * codegen call runs 5–7 minutes (15k+ output tokens), so the old floor let
+ * attempt 2 start with two minutes left, and the platform killed it mid-call
+ * with nothing persisted: a zombie "running" job. The attempt just finished
+ * is the best estimate available of what the next one costs.
+ */
+export function attemptFloorMs(lastAttemptMs: number): number {
+  return Math.max(MIN_ATTEMPT_MS, lastAttemptMs);
+}
+
+/**
+ * The caller's signal, plus one that fires at the deadline. The floor above
+ * only decides whether to START an attempt; this is what stops one that
+ * overruns anyway. A call cut at the deadline makes the loop return the
+ * failure it has, which executeCadJob persists before the platform window
+ * closes. Otherwise the job dies silently at maxDuration.
+ */
+export function deadlineSignal(
+  signal: AbortSignal | undefined,
+  deadlineAt: number | undefined
+): AbortSignal | undefined {
+  if (!deadlineAt) return signal;
+  const timeout = AbortSignal.timeout(Math.max(0, deadlineAt - Date.now()));
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
+/**
+ * Repair note when the model's response was cut off at the output-token cap
+ * (see CadOutputTruncatedError). The repair prompt quotes it, so it says what
+ * to do differently, not just what went wrong.
+ */
+export const TRUNCATED_NOTE =
+  "the response was cut off at the output-token limit before the program finished, so nothing ran. Write a SHORTER program: think less before writing, keep comments to a minimum, factor repeated geometry into loops or helper functions, and make sure the final line assigns `result`";
+
+/** Repair note when the model's response contained no code at all. */
+export const NO_CODE_NOTE =
+  "the response contained no Python code, so nothing ran. Reply with a single ```python code block containing the complete program, ending with the line that assigns `result`";
+
+/** Repair note recorded when the deadline cuts an attempt short. */
+export const DEADLINE_NOTE =
+  "ran out of time: the build hit its time budget before a valid model was produced";
 
 // Instruction paired with user-attached reference images in the plan/generate
 // prompts (each image also carries its own caption block). Counterpart to
@@ -894,20 +940,31 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
   // attempt (past the abort check) so an aborted/never-started attempt isn't
   // counted (MTR-158).
   let lastAttempt = 0;
+  // Wall time of the previous attempt (codegen through grading), which
+  // attemptFloorMs uses to estimate the next one.
+  let lastAttemptMs = 0;
+  // Bounds every codegen call and sidecar run to the deadline; see
+  // deadlineSignal.
+  const attemptSignal = deadlineSignal(input.signal, input.deadlineAt);
+  const deadlineHit = () =>
+    !input.signal?.aborted && !!attemptSignal?.aborted;
+  // Lowered one level each time a codegen response is cut off at the output
+  // limit (see stepDownEffort); unset means the role's normal effort.
+  let codegenEffortCap: CadEffort | undefined;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     if (input.signal?.aborted) break;
-    // Deadline rail: never start an attempt there's no time to finish — a
-    // codegen call + sidecar run + judge comfortably eats a minute. Attempt 1
-    // always runs (a deadline that tight means the caller misconfigured it;
-    // dying mid-try beats returning nothing by fiat).
+    // Deadline rail: never start an attempt there's no time to finish (see
+    // attemptFloorMs). Attempt 1 always runs (a deadline that tight means the
+    // caller misconfigured it; dying mid-try beats returning nothing by fiat).
     if (
       attempt > 1 &&
       input.deadlineAt &&
-      input.deadlineAt - Date.now() < MIN_ATTEMPT_MS
+      input.deadlineAt - Date.now() < attemptFloorMs(lastAttemptMs)
     ) {
       break;
     }
+    const attemptStartedAt = Date.now();
     // Runaway backstop (./budget), same shape as the deadline floor above and
     // for the same reason: a repair cycle that keeps not converging stops at a
     // known bound and returns what it has, rather than at the platform's kill
@@ -932,10 +989,15 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
         ? [
             buildUserPrompt(input, plan, { brief, exemplarIds, partSourcing: partSourcingBlock }),
             "",
-            `The previous attempt failed because ${repairNote}. Here is that code:`,
-            "```python",
-            lastCode,
-            "```",
+            // A cut-off response (TRUNCATED_NOTE) leaves no code to show.
+            ...(lastCode
+              ? [
+                  `The previous attempt failed because ${repairNote}. Here is that code:`,
+                  "```python",
+                  lastCode,
+                  "```",
+                ]
+              : [`The previous attempt failed because ${repairNote}.`]),
             repairHintFor(repairNote),
             // Deterministic stderr->class->fixes enrichment (MTR-198). Additive
             // to the tailored hint above; names the failure class + standard
@@ -963,33 +1025,75 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
             ]
           : []),
       ];
-      const text = await timed(role, model, () =>
-        completeText({
-          system: systemPrompt,
-          prompt: imageryNote ? `${userPrompt}\n\n${imageryNote}` : userPrompt,
-          model,
-          role,
-          images: images.length ? images : undefined,
-          signal: input.signal,
-        })
-      );
+      let text: string;
+      try {
+        text = await timed(role, model, () =>
+          completeText({
+            system: systemPrompt,
+            prompt: imageryNote ? `${userPrompt}\n\n${imageryNote}` : userPrompt,
+            model,
+            role,
+            images: images.length ? images : undefined,
+            signal: attemptSignal,
+            effortCap: codegenEffortCap,
+          })
+        );
+      } catch (err) {
+        if (err instanceof CadOutputTruncatedError) {
+          // Nothing to run: the program was cut off, so sending it to the
+          // sidecar would only produce a misleading geometry error. Spend the
+          // next attempt on a shorter program instead.
+          repairNote = TRUNCATED_NOTE;
+          // Repair turns run on the "repair" role, so step down from that.
+          codegenEffortCap = stepDownEffort("repair", codegenEffortCap);
+          lastAttemptMs = Date.now() - attemptStartedAt;
+          if (attempt < maxAttempts) {
+            emit({ type: "repairing", attempt, maxAttempts, reason: repairNote });
+          }
+          continue;
+        }
+        // The deadline cut this call. Return the failure so it gets persisted.
+        // A caller abort still throws, so it lands as a cancellation.
+        if (!deadlineHit()) throw err;
+        repairNote = repairNote ? `${DEADLINE_NOTE} (last failure: ${repairNote})` : DEADLINE_NOTE;
+        break;
+      }
       lastCode = extractCode(text);
+      if (!lastCode.trim()) {
+        // No program at all. Running "" "succeeds" (it compiles) and then
+        // fails as "did not assign `result`", which sends the repair turn
+        // hunting for a geometry bug that isn't there. Say what happened.
+        repairNote = NO_CODE_NOTE;
+        lastAttemptMs = Date.now() - attemptStartedAt;
+        if (attempt < maxAttempts) {
+          emit({ type: "repairing", attempt, maxAttempts, reason: repairNote });
+        }
+        continue;
+      }
     } else {
       // No credentials: deterministic local fallback, no repair value.
       lastCode = localFakeModel(input.prompt, input.priorSourceCode, engine.id);
     }
 
     emit({ type: "phase", phase: "executing", attempt, maxAttempts });
-    lastRun = await runCadCode(lastCode, engine.outputFormats, input.signal, {
-      engine: engine.sidecarEngine,
-      checks: runChecks,
-      // Internal-thread compound recipe: watertight ONLY via the mesh
-      // pipeline (kernel-verified — booleans shatter or silently drop the
-      // thread), so remesh is allowed from the FIRST run instead of burning
-      // repair attempts on a correct program. Every other program keeps
-      // remesh off here so the model fixes its own geometry.
-      allowRemesh: usesInternalThreadRecipe(lastCode),
-    });
+    try {
+      lastRun = await runCadCode(lastCode, engine.outputFormats, attemptSignal, {
+        engine: engine.sidecarEngine,
+        checks: runChecks,
+        // Internal-thread compound recipe: watertight ONLY via the mesh
+        // pipeline (kernel-verified — booleans shatter or silently drop the
+        // thread), so remesh is allowed from the FIRST run instead of burning
+        // repair attempts on a correct program. Every other program keeps
+        // remesh off here so the model fixes its own geometry.
+        allowRemesh: usesInternalThreadRecipe(lastCode),
+      });
+    } catch (err) {
+      // Same as the codegen cut above: the deadline is a failure to persist,
+      // not an exception.
+      if (!deadlineHit()) throw err;
+      repairNote = repairNote ? `${DEADLINE_NOTE} (last failure: ${repairNote})` : DEADLINE_NOTE;
+      break;
+    }
 
     // Last attempt, and the ONLY defect is an open/non-manifold surface:
     // accept the lossy voxel remesh as an explicit, recorded decision
@@ -1169,6 +1273,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
     }
 
     repairNote = grade.failures.join("; ");
+    lastAttemptMs = Date.now() - attemptStartedAt;
     // The local fallback is deterministic — repairing it is pointless.
     if (!useModel) break;
     if (attempt < maxAttempts) {

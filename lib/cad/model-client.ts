@@ -4,8 +4,13 @@ import Anthropic from "@anthropic-ai/sdk";
 
 import { activeCadContext, meterModelUsage } from "./metering";
 import type { ResolvedModelCredentials } from "./credentials";
-import type { PromptImage } from "./types";
-import { cadRoleOrDefault, modelParamsForRole } from "./models";
+import { CadOutputTruncatedError, type PromptImage } from "./types";
+import {
+  cadRoleOrDefault,
+  modelParamsForRole,
+  openaiParamsForRole,
+} from "./models";
+import type { CadEffort } from "./budget";
 import { completeTextOpenAI, hasOpenAiCredentials } from "./openai-client";
 import { providerForModel } from "./provider";
 
@@ -45,11 +50,19 @@ import { providerForModel } from "./provider";
 // is one place a role's model is decided instead of two that drift.
 //
 // build123d for a non-trivial part can run long, and adaptive thinking spends
-// from the SAME budget, so 8192 (the pre-thinking cap) now truncates long
-// scripts. 16000 is the headroom that still lands inside the SDK's
-// non-streaming HTTP timeout; the agentic loop streams instead and can go
-// higher.
-const MAX_TOKENS = 16_000;
+// from the SAME budget, so 8192 (the pre-thinking cap) truncated long
+// scripts. 16000 was the most that fit inside the SDK's non-streaming HTTP
+// timeout, and it still wasn't enough: implement calls on Opus with adaptive
+// thinking hit exactly 16,000 output tokens (prod SDF knob job 2026-09-23,
+// and again locally), and the cut-off program went to the sidecar as if it
+// were complete. The call now streams, which lifts the SDK's cap, and the
+// budget matches the OpenAI transport's (openai-client.ts MAX_OUTPUT_TOKENS).
+const MAX_TOKENS = 32_000;
+
+// CadOutputTruncatedError lives in ./types (pure and never test-mocked, like
+// PromptImage below), so the harness can check for it even in tests that mock
+// this module.
+export { CadOutputTruncatedError };
 
 /**
  * True when a usable credential is present in the environment — for EITHER
@@ -123,6 +136,11 @@ export interface CompleteTextOptions {
    */
   documents?: { data: string }[];
   signal?: AbortSignal;
+  /**
+   * Upper bound on this call's effort, below the role's own. The harness sets
+   * it after a response is cut off at the output limit (see stepDownEffort).
+   */
+  effortCap?: CadEffort;
 }
 
 /**
@@ -138,11 +156,17 @@ export async function completeText(opts: CompleteTextOptions): Promise<string> {
   }
 
   const started = Date.now();
-  const params = modelParamsForRole(cadRoleOrDefault(opts.role));
+  const params = modelParamsForRole(cadRoleOrDefault(opts.role), opts.effortCap);
   // An explicitly pinned model wins over the role's default, but keeps the
   // role's thinking/effort — the pin is a routing choice, not an opt-out of
   // reasoning. It can also cross vendors, which is what decides the transport.
   const model = opts.model || params.model;
+  // The effort this call runs at, for the usage record (CadModelUsage.effort).
+  const effort =
+    providerForModel(model) === "openai"
+      ? openaiParamsForRole(cadRoleOrDefault(opts.role), opts.effortCap)
+          .reasoning?.effort
+      : params.output_config?.effort;
 
   let response: string;
   let usedModel: string;
@@ -162,6 +186,7 @@ export async function completeText(opts: CompleteTextOptions): Promise<string> {
       images: opts.images,
       documents: opts.documents,
       signal: opts.signal,
+      effortCap: opts.effortCap,
     });
     response = completion.text;
     usedModel = completion.model;
@@ -191,7 +216,9 @@ export async function completeText(opts: CompleteTextOptions): Promise<string> {
     }
 
     const client = clientForCredentials(activeCadContext()?.credentials);
-    const message = await client.messages.create(
+    // Streamed, then collected: see MAX_TOKENS for why this can't be a plain
+    // create().
+    const stream = client.messages.stream(
       {
         ...params,
         ...(opts.model ? { model: opts.model } : {}),
@@ -211,6 +238,7 @@ export async function completeText(opts: CompleteTextOptions): Promise<string> {
       },
       { signal: opts.signal }
     );
+    const message = await stream.finalMessage();
     usedModel = message.model || model;
     usage = {
       inputTokens: message.usage?.input_tokens ?? 0,
@@ -222,6 +250,17 @@ export async function completeText(opts: CompleteTextOptions): Promise<string> {
       .filter((b): b is Anthropic.TextBlock => b.type === "text")
       .map((b) => b.text)
       .join("");
+    if (message.stop_reason === "max_tokens") {
+      // Still metered: the tokens were spent even though the answer is unusable.
+      meterModelUsage({
+        role: opts.role ?? "other",
+        model: usedModel,
+        ...usage,
+        ms: Date.now() - started,
+        effort,
+      });
+      throw new CadOutputTruncatedError(opts.role ?? "other", usage.outputTokens);
+    }
   }
 
   meterModelUsage({
@@ -229,6 +268,7 @@ export async function completeText(opts: CompleteTextOptions): Promise<string> {
     model: usedModel,
     ...usage,
     ms: Date.now() - started,
+    effort,
   });
 
   // Flight recorder (lib/cad/transcript.ts): full prompt/response for the
