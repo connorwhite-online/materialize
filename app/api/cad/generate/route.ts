@@ -13,7 +13,9 @@ import type { PromptImage } from "@/lib/cad/model-client";
 import { PROCESS_DFM, type CadProcess } from "@/lib/cad/knowledge/dfm";
 import { checkCadGenerateRateLimit } from "./rate-limit";
 import {
+  DEFAULT_CAD_ENGINE,
   engineFor,
+  engineIdForStored,
   isCadEngineId,
   allEngines,
   type CadEngineId,
@@ -57,23 +59,33 @@ export function resolveGenerationProcess(
 }
 
 /**
- * Which engine(s) a request runs on.
+ * Which engine(s) a request runs on. `null` means "no engine named": the
+ * complexity router picks the path (scripted, agentic or generative) and the
+ * build runs the default B-rep dialect.
  *
- * `compare` fans out across EVERY engine on the same prompt; otherwise it is
- * the named engine, or the default. Exported for unit testing, like the
- * process helpers above.
+ * Not naming an engine and naming "brep" are different requests. An explicit
+ * engine pins the build to the scripted loop (lib/cad/orchestrate.ts), so
+ * defaulting to "brep" here sent every studio build down that loop from PR
+ * #280 onward. Complex parts stopped reaching the agentic path, and prod
+ * history shows routes changing from `complex`/`simple` to
+ * `engine-brep-bestof2` overnight.
+ *
+ * `compare` fans out across EVERY engine on the same prompt. A revision
+ * with no engine named inherits the parent's engine only when that engine
+ * is SDF. B-rep revisions keep going through the router, as before.
  *
  * Two deliberate choices: an unrecognised engine falls back rather than
  * 400ing, so a stale client cannot fail a generation with a typo; and
  * `compare` must be the literal `true`, so a truthy string from a query param
  * or form body cannot silently double model + sidecar spend.
  */
-export function resolveEngines(body: {
-  engine?: unknown;
-  compare?: unknown;
-}): CadEngineId[] {
+export function resolveEngines(
+  body: { engine?: unknown; compare?: unknown },
+  parentEngine?: CadEngineId | null,
+): Array<CadEngineId | null> {
   if (body.compare === true) return allEngines().map((e) => e.id);
-  return [isCadEngineId(body.engine) ? body.engine : "brep"];
+  if (isCadEngineId(body.engine)) return [body.engine];
+  return [parentEngine === "sdf" ? "sdf" : null];
 }
 
 /**
@@ -147,8 +159,9 @@ export async function POST(request: Request) {
     process?: unknown;
     /**
      * Geometry engine for this build ("brep" | "sdf"). Invalid or absent =
-     * "brep", today's behaviour. An explicit value bypasses complexity
-     * routing (lib/cad/orchestrate.ts) so a named engine is the one that runs.
+     * the complexity router decides, which runs B-rep, or SDF when revising
+     * an SDF build. An explicit value bypasses complexity routing
+     * (lib/cad/orchestrate.ts) so a named engine is the one that runs.
      */
     engine?: unknown;
     /**
@@ -203,6 +216,7 @@ export async function POST(request: Request) {
   let priorFeedback: PriorFeedback | null = null;
   let priorBrief: unknown;
   let parentFingerprint: unknown = null;
+  let parentEngine: CadEngineId | null = null;
   if (body.parentGenerationId) {
     const [parent] = await db
       .select({
@@ -213,6 +227,7 @@ export async function POST(request: Request) {
         feedbackNote: cadGenerations.feedbackNote,
         brief: cadGenerations.brief,
         configFingerprint: cadGenerations.configFingerprint,
+        engine: cadGenerations.engine,
       })
       .from(cadGenerations)
       .where(eq(cadGenerations.id, body.parentGenerationId))
@@ -231,6 +246,8 @@ export async function POST(request: Request) {
     priorBrief = parent.brief ?? undefined;
     // …and the parent's target process (MTR-171), unless this request overrides.
     parentFingerprint = parent.configFingerprint ?? null;
+    // An SDF build's revisions stay on SDF (see resolveEngines).
+    parentEngine = engineIdForStored(parent.engine);
   }
 
   // Target process for DFM guidance (MTR-171): an explicit valid pick wins;
@@ -239,7 +256,7 @@ export async function POST(request: Request) {
   const process = resolveGenerationProcess(body.process, parentFingerprint);
 
   // Which engine(s) this request runs (see resolveEngines).
-  const engines = resolveEngines(body);
+  const engines = resolveEngines(body, parentEngine);
 
   /**
    * Mint one generation + job for one engine and schedule it. Factored out
@@ -247,7 +264,7 @@ export async function POST(request: Request) {
    * generation row, so a failure in one arm cannot take the other down and
    * either can be revised, rated or saved on its own.
    */
-  const start = async (engine: CadEngineId) => {
+  const start = async (engine: CadEngineId | null) => {
     const [row] = await db
       .insert(cadGenerations)
       .values({
@@ -293,7 +310,7 @@ export async function POST(request: Request) {
             : undefined,
       }).catch((error) => logError("api/cad/generate.job", error)),
     );
-    return { generationId, jobId, engine };
+    return { generationId, jobId, engine: engine ?? DEFAULT_CAD_ENGINE };
   };
 
   // Sequential, not Promise.all: each arm inserts a row and schedules an

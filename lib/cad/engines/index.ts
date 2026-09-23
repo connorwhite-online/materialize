@@ -6,11 +6,13 @@ import {
 import { BREP_OUTPUT_FORMATS } from "../types";
 import { buildSdfSystemPrompt, SDF_PLAN_PROMPT } from "./sdf-prompt";
 import { CAD_ENGINE_LABELS } from "./types";
+import type { CadOutputFormat } from "../types";
 import type { CadEngineId, CadEngineProfile } from "./types";
 
 export {
   CAD_ENGINE_IDS,
   CAD_ENGINE_LABELS,
+  engineIdForStored,
   isCadEngineId,
   type CadEngineId,
   type CadEngineProfile,
@@ -66,4 +68,23 @@ export function engineFor(id?: CadEngineId | null): CadEngineProfile {
 /** Every profile, for the benchmark and the studio toggle. */
 export function allEngines(): CadEngineProfile[] {
   return [BREP, SDF];
+}
+
+/**
+ * How to re-run a stored generation's source on the sidecar: its engine
+ * name and the formats to ask for. Param edits and direct source edits rerun
+ * a parent's code outside the harness. They used to pass the stored engine
+ * name straight through, which works for "build123d" and legacy "cadquery"
+ * rows but not for SDF: "sdf_kit" is the dialect name, the sidecar's engine is
+ * "mesh", and it cannot export STEP. Anything that isn't SDF passes through
+ * unchanged.
+ */
+export function sidecarRunForStored(stored: string | null | undefined): {
+  engine: string;
+  formats: CadOutputFormat[];
+} {
+  if (stored === SDF.storedEngine) {
+    return { engine: SDF.sidecarEngine, formats: SDF.outputFormats };
+  }
+  return { engine: stored || "build123d", formats: BREP_OUTPUT_FORMATS };
 }

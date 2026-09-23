@@ -37,6 +37,17 @@ export const CAD_ENGINE_LABELS: Record<CadEngineId, string> = {
 };
 
 /**
+ * Engine id for a stored `cadGenerations.engine` value. Rows store the
+ * dialect that ran ("build123d", "sdf_kit"), not the id. Anything that isn't
+ * SDF (including legacy rows and null) is B-rep. The mapping lives here
+ * rather than on the profiles so the client studio can use it without
+ * importing the prompts.
+ */
+export function engineIdForStored(stored: string | null | undefined): CadEngineId {
+  return stored === "sdf_kit" ? "sdf" : "brep";
+}
+
+/**
  * Everything that differs between engines, in one object. The harness loop —
  * brief, concept, plan, repair, judge, dimension checks, persistence — is
  * shared and reads this profile at the three points where it would otherwise

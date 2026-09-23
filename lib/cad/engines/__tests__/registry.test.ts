@@ -6,7 +6,9 @@ import {
   DEFAULT_CAD_ENGINE,
   engineFor,
   isCadEngineId,
+  sidecarRunForStored,
 } from "../index";
+import { BREP_OUTPUT_FORMATS } from "../../types";
 import { buildSystemPrompt, selectSystemPromptSections } from "../../prompt";
 
 describe("engine registry", () => {
@@ -98,5 +100,22 @@ describe("engine registry", () => {
   it("gives every engine a distinct stored engine name", () => {
     const stored = allEngines().map((e) => e.storedEngine);
     expect(new Set(stored).size).toBe(stored.length);
+  });
+});
+
+describe("sidecarRunForStored", () => {
+  it("reruns an SDF row on the mesh engine, STL only", () => {
+    // "sdf_kit" is the dialect name, not a sidecar engine.
+    expect(sidecarRunForStored("sdf_kit")).toEqual({
+      engine: "mesh",
+      formats: ["stl"],
+    });
+  });
+
+  it("passes B-rep and legacy rows through unchanged", () => {
+    expect(sidecarRunForStored("build123d").engine).toBe("build123d");
+    expect(sidecarRunForStored("cadquery").engine).toBe("cadquery");
+    expect(sidecarRunForStored(null).engine).toBe("build123d");
+    expect(sidecarRunForStored("build123d").formats).toEqual(BREP_OUTPUT_FORMATS);
   });
 });
