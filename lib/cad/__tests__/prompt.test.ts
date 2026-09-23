@@ -129,3 +129,26 @@ describe("gradeRun", () => {
     expect(g.failures).toContain("dimensions off target");
   });
 });
+
+describe("gradeRun never fails silently", () => {
+  const good = { compiled: true, isSolid: true, isWatertight: true, isManifold: true };
+
+  it("names a failing assembly part when the top-level flags all pass", () => {
+    const g = gradeRun({
+      ok: false,
+      files: {},
+      validation: good,
+      parts: [
+        { name: "shell_top", files: {}, validation: good },
+        { name: "shell_bottom", files: {}, validation: { ...good, bodyCount: 3 } },
+      ],
+    });
+    expect(g.pass).toBe(false);
+    expect(g.failures).toEqual(["part 'shell_bottom': 3 disconnected bodies"]);
+  });
+
+  it("still gives a reason when nothing more specific is known", () => {
+    const g = gradeRun({ ok: false, files: {}, validation: good });
+    expect(g.failures.length).toBeGreaterThan(0);
+  });
+});

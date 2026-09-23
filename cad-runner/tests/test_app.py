@@ -462,6 +462,29 @@ def test_run_debris_still_fails_fragment_gate():
     assert "disconnected solids" in (p.get("error") or ""), p.get("error")
 
 
+PARTS_WITH_FLOATING_BODY_SCRIPT = """
+import trimesh
+shell = trimesh.creation.box(extents=[40, 30, 10])
+# A standoff that never touches the shell: two bodies in one part.
+standoff = trimesh.creation.cylinder(radius=2, height=5)
+standoff.apply_translation([0, 0, 20])
+lid = trimesh.creation.box(extents=[40, 30, 2])
+lid.apply_translation([0, 0, 40])
+parts = {"base": trimesh.util.concatenate([shell, standoff]), "lid": lid}
+"""
+
+
+def test_run_names_the_assembly_part_that_failed():
+    """An assembly part with two disconnected bodies used to fail the run
+    with every aggregate flag true and NO error, so the repair turn got an
+    empty reason. The error must name the part and what is wrong with it."""
+    p = run(PARTS_WITH_FLOATING_BODY_SCRIPT)
+    assert p["ok"] is False
+    err = p.get("error") or ""
+    assert "part 'base'" in err and "disconnected" in err, err
+    assert "part 'lid'" not in err, err
+
+
 def test_run_prefers_parts_dict_over_result_compound():
     """When both `result` and `parts` are assigned, the explicit parts dict
     wins — including the author's names — instead of promoting/failing the
@@ -583,6 +606,7 @@ def test_session_exec_timeout_kills_session():
 
 
 TESTS = [
+    test_run_names_the_assembly_part_that_failed,
     test_run_messageless_exception_is_named,
     test_run_mesh_sphere_multiview,
     test_run_opposed_iso_coverage_guarantee,

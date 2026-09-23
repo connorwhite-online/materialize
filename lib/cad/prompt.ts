@@ -227,5 +227,33 @@ export function gradeRun(
     if (!dimsOk) failures.push("dimensions off target");
   }
 
+  // Never fail a run without saying why. The sidecar can report ok=false
+  // while every flag above reads true (an assembly part with disconnected
+  // bodies, before the sidecar named it), and an empty failure list became an
+  // empty repair reason: attempt 2 then ran as a fresh build with nothing to
+  // fix. Fall back to the per-part verdicts, then to a generic reason.
+  if (!run.ok && failures.length === 0) {
+    const bad = (run.parts ?? []).filter(
+      (p) =>
+        !p.validation.isSolid ||
+        !p.validation.isWatertight ||
+        (p.validation.bodyCount ?? 1) !== 1 ||
+        !!p.error
+    );
+    for (const p of bad) {
+      const why = [
+        !p.validation.isSolid && "not a solid",
+        !p.validation.isWatertight && "not watertight",
+        (p.validation.bodyCount ?? 1) !== 1 &&
+          `${p.validation.bodyCount} disconnected bodies`,
+        p.error,
+      ].filter(Boolean);
+      failures.push(`part '${p.name}': ${why.join(", ")}`);
+    }
+    if (failures.length === 0) {
+      failures.push("the sidecar rejected the result without a reason");
+    }
+  }
+
   return { pass: run.ok && failures.length === 0, failures, dimsOk };
 }

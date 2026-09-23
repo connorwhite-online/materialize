@@ -1385,6 +1385,30 @@ def _assemble_parts_payload(
             and entry["validation"]["isWatertight"]
             and entry["validation"].get("bodyCount", 1) == 1
         )
+    # Say WHICH part failed and why. The aggregate validation below has no
+    # bodyCount, so a part with two disconnected bodies (a standoff floating
+    # clear of its shell) made the run not-ok while every flag the caller
+    # grades on read true and no error was set. The repair turn then got an
+    # empty failure reason (local ESP32 enclosure run, 2026-09-23).
+    problems = []
+    for part in parts:
+        v = part["validation"]
+        why = []
+        if not v.get("isSolid"):
+            why.append("not a solid")
+        if not v.get("isWatertight"):
+            why.append("not watertight")
+        if v.get("bodyCount", 1) != 1:
+            why.append(
+                f"{v.get('bodyCount')} disconnected bodies (every part must "
+                "be one fused solid: union anything floating into the body)"
+            )
+        if part.get("error") and not why:
+            why.append(str(part["error"]))
+        if why:
+            problems.append(f"part '{part['name']}': " + ", ".join(why))
+    if problems and not payload.get("error"):
+        payload["error"] = "; ".join(problems)
     # Top-level mirrors the first part for single-part consumers.
     first = parts[0]
     payload["files"] = first["files"]
