@@ -61,6 +61,7 @@ OAuth 2.0 Authorization Code + PKCE flow. The user installs an agent, the agent 
 | `quotes:read` | Run quote calls against the user's files |
 | `orders:create` | Initiate an order (still requires user confirmation to actually charge) |
 | `orders:read` | Read order status, tracking, history |
+| `cad:build` | Run CAD programs on the geometry sidecar, get renders + checks, save builds (text-to-CAD allowlisted accounts only; see §6.7) |
 
 **Scopes deferred for future phases:**
 
@@ -278,6 +279,28 @@ PUT bytes, then call the add-* tool with the storageKey.
 - `materialize_add_project_circuit_wokwi` — no upload needed; pass
   a public wokwi.com URL and we iframe-embed it.
 - `materialize_delete_project_circuit` — remove a diagram by id.
+
+### 6.7 CAD (the agent writes the program, Materialize runs it)
+
+An agent on MCP is already a model, so these tools don't call one. They
+expose what the agent can't do itself: execute on the geometry sidecar,
+check the result, render it, and save it as a studio build. The studio's
+harness and an agent are two clients of the same sidecar.
+
+| Tool | Does |
+|---|---|
+| `materialize_cad_reference` | The engine's guide (vocabulary, output contract, printability rules) + the closest verified example programs for a query. `engine`: `sdf` (implicit fields + exact mesh booleans; organic, enclosures, lattices; STL) or `brep` (build123d; prismatic; STL + STEP). |
+| `materialize_cad_run` | Execute a program. Returns compile status, the exact error and script line, validity (solid / watertight / manifold), dimensions, printability (min wall vs target, overhangs, trapped voids) and rendered views as MCP image content. Saves nothing. |
+| `materialize_cad_save` | Run a finished program and save it as a new studio thread (or a project for a multi-part `parts` dict), ready to view, revise, quote and print. |
+
+**Owner-only for now.** The sidecar executes arbitrary Python. Besides the
+`cad:build` scope, every call checks the token owner against the same
+text-to-CAD allowlist as the studio (`canUseTextToCad`) and returns
+`forbidden` otherwise. Opening it up needs the sidecar hardening first: a
+hashed lockfile and locked-down egress (see `cad-runner/requirements.txt`).
+
+The MCP route's `maxDuration` is 300s so a fine-pitch organic part can
+finish; saves go through the same per-user rate limit as the studio.
 
 ## 7. Confirmation flow
 

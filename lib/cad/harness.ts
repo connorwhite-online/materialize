@@ -60,8 +60,10 @@ import {
   type CadBrief,
 } from "./brief";
 import {
+  effortBelow,
+  ladderEffort,
+  lowerEffort,
   modelForRole,
-  stepDownEffort,
   planStepEnabled,
   briefStepEnabled,
   type CadRole,
@@ -1002,8 +1004,10 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
   const deadlineHit = () =>
     !input.signal?.aborted && !!attemptSignal?.aborted;
   // Lowered one level each time a codegen response is cut off at the output
-  // limit (see stepDownEffort); unset means the role's normal effort.
+  // limit (see effortBelow); unset means the role's normal effort.
   let codegenEffortCap: CadEffort | undefined;
+  // Effort the latest codegen call actually ran at (see ladderEffort).
+  let lastAttemptEffort: CadEffort = "medium";
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     if (input.signal?.aborted) break;
@@ -1033,6 +1037,12 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
       // thereafter. Both default to the strong model until configured.
       const role: CadRole = repairNote ? "repair" : "implement";
       const model = modelForRole(role);
+      // Ladder level for this attempt (ladderEffort), never above a cut-off
+      // step-down from an earlier attempt.
+      const attemptEffort = codegenEffortCap
+        ? lowerEffort(ladderEffort(role, attempt), codegenEffortCap)
+        : ladderEffort(role, attempt);
+      lastAttemptEffort = attemptEffort;
       // On a repair turn, show the model a render of its OWN previous attempt
       // (when one exists) — text errors alone leave it blind to the actual
       // form. A render only exists once the run produced a valid solid, so
@@ -1101,7 +1111,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
             role,
             images: images.length ? images : undefined,
             signal: attemptSignal,
-            effortCap: codegenEffortCap,
+            effortCap: attemptEffort,
           })
         );
       } catch (err) {
@@ -1110,8 +1120,10 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
           // sidecar would only produce a misleading geometry error. Spend the
           // next attempt on a shorter program instead.
           repairNote = TRUNCATED_NOTE;
-          // Repair turns run on the "repair" role, so step down from that.
-          codegenEffortCap = stepDownEffort("repair", codegenEffortCap);
+          // One level below the effort that just ran out of room: stepping
+          // down from the role's full effort instead would let the ladder
+          // climb straight back past it.
+          codegenEffortCap = effortBelow(lastAttemptEffort);
           lastAttemptMs = Date.now() - attemptStartedAt;
           if (attempt < maxAttempts) {
             emit({ type: "repairing", attempt, maxAttempts, reason: repairNote });

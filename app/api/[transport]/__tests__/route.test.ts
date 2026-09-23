@@ -102,6 +102,9 @@ const EXPECTED_TOOL_SCOPES: Record<string, string> = {
   materialize_create_order: "orders:create",
   materialize_get_order: "orders:read",
   materialize_list_orders: "orders:read",
+  materialize_cad_reference: "cad:build",
+  materialize_cad_run: "cad:build",
+  materialize_cad_save: "cad:build",
 };
 
 describe("app/api/[transport]/route requireScope coverage", () => {
@@ -159,4 +162,31 @@ describe("app/api/[transport]/route requireScope coverage", () => {
       expect(parsed.error.code).not.toBe("invalid_scope");
     }
   });
+});
+
+describe("CAD tools are owner-only on top of their scope", () => {
+  it.each(["materialize_cad_reference", "materialize_cad_run", "materialize_cad_save"])(
+    "%s refuses a cad:build token whose owner isn't on the text-to-CAD allowlist",
+    async (name) => {
+      // The sidecar executes arbitrary Python, so a scope alone must not be
+      // enough: the account has to pass the same gate as the studio.
+      const tool = registered.find((r) => r.name === name);
+      expect(tool).toBeDefined();
+      const result = await tool!.handler(
+        { engine: "sdf", query: "a knob", code: "result = 1", name: "x", prompt: "x" },
+        {
+          authInfo: {
+            extra: {
+              userId: "user_test",
+              tokenId: "tok_test",
+              tokenName: "test token",
+              scopes: ["cad:build"],
+            },
+          },
+        }
+      );
+      expect(result.isError).toBe(true);
+      expect(parseResultText(result).error.code).toBe("forbidden");
+    }
+  );
 });

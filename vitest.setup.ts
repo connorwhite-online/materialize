@@ -19,6 +19,18 @@ vi.mock("@clerk/nextjs/server", () => ({
         : null
     )
   ),
+  // Backend client for code that looks a user up by id (MCP tools). The
+  // user has no email addresses, so email-allowlisted gates (text-to-CAD)
+  // deny by default under test.
+  clerkClient: vi.fn(() =>
+    Promise.resolve({
+      users: {
+        getUser: vi.fn((id: string) =>
+          Promise.resolve({ id, emailAddresses: [], primaryEmailAddressId: null })
+        ),
+      },
+    })
+  ),
 }));
 
 // Mock next/cache
