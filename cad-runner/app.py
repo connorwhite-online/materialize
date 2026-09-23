@@ -1379,6 +1379,7 @@ def _assemble_parts_payload(
     part_formats = [f for f in formats if f != "topo"]
     parts: list[dict] = []
     meshes = []
+    named_meshes: list = []
     all_ok = True
     for i, (name, shape) in enumerate(items):
         stem = "".join(
@@ -1389,6 +1390,7 @@ def _assemble_parts_payload(
         )
         if part_mesh is not None:
             meshes.append(part_mesh)
+            named_meshes.append((str(name), part_mesh))
         parts.append({"name": str(name), **entry})
         all_ok = all_ok and (
             entry["validation"]["isSolid"]
@@ -1463,6 +1465,63 @@ def _assemble_parts_payload(
     except Exception:  # noqa: BLE001
         pass
     payload["ok"] = all_ok
+    return named_meshes
+
+
+def _run_assembly_checks(named_meshes: list, checks: dict) -> dict:
+    """Checks for a multi-part build. These never ran for assemblies: only
+    the single-part path called _run_checks, so every two-piece enclosure
+    shipped without printability or component-fit verification.
+
+    DFM runs per PART, because each part prints on its own and an assembled
+    enclosure is a sealed void by design (the trapped-void probe would fail
+    every one). The per-part reports merge to the worst case in the
+    single-part shape, with the breakdown under `parts`. Fit and fluid
+    networks describe the assembled product, so they run on the union.
+    """
+    import trimesh
+
+    out: dict = {}
+    rest = {k: v for k, v in checks.items() if k != "dfm"}
+    if rest and named_meshes:
+        out = _run_checks(
+            trimesh.util.concatenate([m for _, m in named_meshes]), rest
+        )
+    dfm_spec = checks.get("dfm")
+    if dfm_spec is not None:
+        try:
+            from dfm import check_dfm
+
+            spec = dfm_spec if isinstance(dfm_spec, dict) else {}
+            per = {
+                name: _plain(check_dfm(m, spec)) for name, m in named_meshes
+            }
+            reps = list(per.values())
+
+            def all_true(key):
+                vals = [r.get(key) for r in reps]
+                if any(v is False for v in vals):
+                    return False
+                return None if any(v is None for v in vals) else True
+
+            walls = [r["minWallMm"] for r in reps if r.get("minWallMm") is not None]
+            over = [r.get("overhangAreaMm2") or 0.0 for r in reps]
+            fracs = [r["overhangFraction"] for r in reps if r.get("overhangFraction") is not None]
+            out["dfm"] = {
+                "ok": all(r.get("ok") is True for r in reps) if reps else False,
+                "probesRan": all(r.get("probesRan") for r in reps) if reps else False,
+                "watertight": all(r.get("watertight") for r in reps) if reps else False,
+                "minWallOk": all_true("minWallOk"),
+                "drainsOk": all_true("drainsOk"),
+                "minWallMm": min(walls) if walls else None,
+                "overhangAreaMm2": round(sum(over), 3),
+                "overhangFraction": max(fracs) if fracs else None,
+                "trappedVoidCount": sum(r.get("trappedVoidCount") or 0 for r in reps),
+                "parts": per,
+            }
+        except Exception as err:  # noqa: BLE001
+            out["dfm"] = {"error": str(err)}
+    return out
 
 
 def _build_run_payload(
@@ -1524,19 +1583,23 @@ def _build_run_payload(
         # `parts = {...}`. Taking `result` first used to discard a correct
         # split and leave a stacked compound in the preview.
         if isinstance(parts_ns, dict) and parts_ns:
-            _assemble_parts_payload(
+            named = _assemble_parts_payload(
                 payload, list(parts_ns.items()), formats, tmp, engine,
                 allow_remesh,
             )
+            if checks:
+                payload["checks"] = _run_assembly_checks(named, checks)
         elif single is not None:
             # B-rep multi-solid compound → promote BEFORE mesh export so each
             # part keeps editable STEP (mesh promotion can only ship STL).
             brep_parts = _explode_brep_solids(single, engine)
             if brep_parts is not None:
-                _assemble_parts_payload(
+                named = _assemble_parts_payload(
                     payload, brep_parts, formats, tmp, engine, allow_remesh
                 )
                 payload["promotedFromSingle"] = True
+                if checks:
+                    payload["checks"] = _run_assembly_checks(named, checks)
             else:
                 entry, mesh = _process_shape(
                     single, formats, tmp, "model", engine, allow_remesh,
@@ -1553,13 +1616,14 @@ def _build_run_payload(
                 ):
                     promoted = _promote_disconnected_bodies(mesh)
                 if promoted is not None:
-                    _assemble_parts_payload(
+                    named = _assemble_parts_payload(
                         payload, promoted, formats, tmp, engine, allow_remesh
                     )
                     payload["promotedFromSingle"] = True
-                    # Fit/network checks reference the whole enclosure.
-                    if checks and mesh is not None:
-                        payload["checks"] = _run_checks(mesh, checks)
+                    # Fit/network checks on the whole enclosure, DFM per
+                    # printed part (see _run_assembly_checks).
+                    if checks:
+                        payload["checks"] = _run_assembly_checks(named, checks)
                 else:
                     payload["files"] = entry["files"]
                     payload["renderPng"] = entry["renderPng"]

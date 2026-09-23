@@ -500,6 +500,24 @@ def test_run_assembly_renders_the_assembled_product():
     assert p["renderPng"] != parts[0]["renderPng"], "still mirroring part 1"
 
 
+def test_run_assembly_runs_checks_per_part():
+    """Assemblies used to skip every requested check. DFM must run per part
+    (an assembled enclosure is a sealed void by design) and merge to the
+    worst case in the single-part shape."""
+    body = {"code": PARTS_AND_RESULT_SCRIPT, "formats": ["stl"],
+            "engine": "mesh", "checks": {"dfm": {}}}
+    r = client.post("/run", json=body)
+    assert r.status_code == 200, r.text[:300]
+    p = r.json()
+    dfm = (p.get("checks") or {}).get("dfm")
+    assert dfm is not None, "assembly skipped the DFM check"
+    assert "error" not in dfm, dfm
+    assert set(dfm["parts"]) == {"housing", "cover"}, dfm.get("parts")
+    assert dfm["probesRan"] is True, dfm
+    assert dfm["trappedVoidCount"] == 0, dfm
+    assert dfm["ok"] == all(x["ok"] for x in dfm["parts"].values())
+
+
 def test_run_prefers_parts_dict_over_result_compound():
     """When both `result` and `parts` are assigned, the explicit parts dict
     wins — including the author's names — instead of promoting/failing the
@@ -621,6 +639,7 @@ def test_session_exec_timeout_kills_session():
 
 
 TESTS = [
+    test_run_assembly_runs_checks_per_part,
     test_run_assembly_renders_the_assembled_product,
     test_run_names_the_assembly_part_that_failed,
     test_run_messageless_exception_is_named,
