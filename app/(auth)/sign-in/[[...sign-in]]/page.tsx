@@ -12,7 +12,7 @@ export default function SignInPage() {
   const { isLoaded: authLoaded, isSignedIn } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectUrl = searchParams.get("redirect_url") ?? "/dashboard";
+  const redirectUrl = searchParams.get("redirect_url") ?? "/";
 
   // Users can land here already signed in — e.g. bouncing back from
   // Stripe Checkout after finishing the inline OTP signup earlier in

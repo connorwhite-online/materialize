@@ -26,10 +26,15 @@ export function SocialButtons({ mode }: SocialButtonsProps) {
     setError(null);
     setPending(strategy);
     try {
+      // Land on "/" (proxy-public, does its own username → onboarding
+      // gate), not "/dashboard". Clerk finishes OAuth with a client-side
+      // push; on that RSC request the fresh session can lag, and
+      // auth.protect() answers a non-document request with a 404
+      // rather than a sign-in redirect.
       await signIn.authenticateWithRedirect({
         strategy,
         redirectUrl: "/sso-callback",
-        redirectUrlComplete: mode === "sign-up" ? "/onboarding" : "/dashboard",
+        redirectUrlComplete: mode === "sign-up" ? "/onboarding" : "/",
       });
     } catch (err) {
       console.error("OAuth error:", err);
