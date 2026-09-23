@@ -43,6 +43,16 @@ Primitives — all take P first, return signed distance:
                                         straight-to-arc tangency break, which
                                         is exactly what makes a form read as
                                         designed rather than as a rounded box.
+  superellipsoid(P, center, radii, n, m)  a pebble: superellipse plan (n, as
+                                        sq_prism) with a rounded vertical
+                                        profile (m). n~3 and m~3.5 read as a
+                                        soft river stone; m=2 is an ellipsoid,
+                                        m>=5 gives slab sides. Use it as the
+                                        CAVITY of an organic enclosure and
+                                        offset_field it by the wall for an
+                                        even skin.
+  (sq_prism and superellipsoid return real-mm distances, so offset_field
+  and shell_field give UNIFORM walls around them.)
 Two kinds of value, and every combinator takes either:
   a DISTANCE ARRAY  what a primitive returns: sphere(P, c, r)
   a FIELD FUNCTION  a callable P -> distances, like your f
