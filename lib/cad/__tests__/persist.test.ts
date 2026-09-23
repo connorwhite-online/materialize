@@ -93,10 +93,17 @@ vi.mock("@/lib/filenames", () => ({
 const logError = vi.fn();
 vi.mock("@/lib/logger", () => ({ logError: (...args: unknown[]) => logError(...args) }));
 
-// --- @/app/actions/files: createDraftFileForPrint, per-part. ---
+// --- @/lib/files/draft-file: createDraftFileForUser, per-part. ---
+// Persist passes the build owner's id explicitly (no Clerk session: MCP
+// saves arrive on a bearer token). The mock forwards params to the same
+// spy the assertions below were written against, and records the ids.
 const createDraftFileForPrint = vi.fn();
-vi.mock("@/app/actions/files", () => ({
-  createDraftFileForPrint: (...args: unknown[]) => createDraftFileForPrint(...args),
+const draftUserIds: string[] = [];
+vi.mock("@/lib/files/draft-file", () => ({
+  createDraftFileForUser: (userId: string, ...args: unknown[]) => {
+    draftUserIds.push(userId);
+    return createDraftFileForPrint(...args);
+  },
 }));
 
 import { persistGenerationSuccess } from "@/lib/cad/persist";
@@ -261,6 +268,9 @@ describe("thread linkage (MTR-178, docs/text-to-cad/05 §A)", () => {
     expect(createDraftFileForPrint).toHaveBeenCalledWith(
       expect.objectContaining({ source: "studio" })
     );
+    // ...for the build's owner, passed explicitly rather than read from a
+    // Clerk session (MCP saves have none).
+    expect(draftUserIds.at(-1)).toBe("user-1");
 
     // Thread created with the generated title, rooted at this generation.
     expect(mockInsertValues).toHaveBeenCalledWith(
