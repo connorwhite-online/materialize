@@ -282,8 +282,10 @@ describe("runHarness output truncation", () => {
       .map((c) => (c as unknown[])[0] as { role?: string; effortCap?: string })
       .filter((o) => o.role === "implement" || o.role === "repair")
       .map((o) => o.effortCap);
-    expect(caps[0]).toBeUndefined();
-    expect(caps[1]).toBe("high");
+    // Attempt 1 drafts at the ladder's start and is cut off; attempt 2 runs
+    // one level BELOW that, not back up the ladder.
+    expect(caps[0]).toBe("medium");
+    expect(caps[1]).toBe("low");
   });
 });
 
@@ -338,5 +340,22 @@ describe("runHarness requests printability checks", () => {
   it("uses the target process's minimum wall when one is known", async () => {
     await runHarness({ prompt: "a 20mm cube", maxAttempts: 1, process: "fdm" });
     expect(dfmSpec()).toEqual({ minWall: 1.0 });
+  });
+});
+
+describe("runHarness effort ladder", () => {
+  beforeEach(() => {
+    hasModelCredentials.mockReset().mockReturnValue(true);
+    completeText.mockReset().mockResolvedValue("```python\nresult = 1\n```");
+    runCadCode.mockReset().mockResolvedValue(failingRun());
+  });
+
+  it("drafts cheap and escalates one level per failed attempt", async () => {
+    await runHarness({ prompt: "a bracket", maxAttempts: 3 });
+    const efforts = completeText.mock.calls
+      .map((c) => (c as unknown[])[0] as { role?: string; effortCap?: string })
+      .filter((o) => o.role === "implement" || o.role === "repair")
+      .map((o) => o.effortCap);
+    expect(efforts).toEqual(["medium", "high", "xhigh"]);
   });
 });
