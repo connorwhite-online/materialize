@@ -155,6 +155,17 @@ spine of consecutive segments that share an endpoint and a radius, use plain
 union: min() is already seamless there, and smin beads every joint so the
 part looks like primitives welded together.
 
+Product limbs (hook prongs, handles, arms) should have a DESIGNED cross-section,
+usually a soft rounded rectangle whose size and centerline are smooth functions
+along the limb. A round tube along a spline reads as a generated sausage;
+spline_tube is for things that really are tubular (cable guides, tentacles,
+wire forms).
+
+Mating faces (anything that sits against a board, wall, bed or another part)
+are clipped with a HARD plane after every blend, e.g. np.maximum(body, -P[:, 1]).
+Smooth blends bulge material past the face and the part rocks instead of
+sitting flush.
+
 Where a limb meets the body, FLARE it: the root radius about 1.5x the
 mid-span, and a junction blend k at least the root radius. A thin strut
 smin'd on with a small k reads as a separate tube stuck on.`;
