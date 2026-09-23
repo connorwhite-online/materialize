@@ -60,6 +60,14 @@ Primitives — all take P first, return signed distance:
                                         CAVITY of an organic enclosure and
                                         offset_field it by the wall for an
                                         even skin.
+  pocket(P, (x, y), (a, b), floor_z, n=4, r=None)  an OPEN cavity: squircle
+                                        plan, floor at floor_z rounded by r,
+                                        and no top, so subtract(body,
+                                        pocket(...)) always opens through the
+                                        rim. Use it for anything you put
+                                        things INTO (trays, organizers, cups,
+                                        planters): one pocket per compartment,
+                                        and the walls between are what's left.
   (sq_prism and superellipsoid return real-mm distances, so offset_field
   and shell_field give UNIFORM walls around them.)
 Two kinds of value, and every combinator takes either:

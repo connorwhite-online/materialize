@@ -24,8 +24,8 @@ import trimesh.sample
 
 from sdf_kit import (
     box, capsule, dual_sheet, from_mesh, gyroid, mask, mesh_cyl, mesh_rod,
-    mesh_subtract, offset_field, seal_ramp, shell_field, smax, smin, sphere,
-    sq_prism, spline_tube, superellipsoid, tapered_capsule,
+    largest_body, mesh_subtract, offset_field, pocket, seal_ramp, shell_field, smax, smin, sphere,
+    sq_prism, spline_tube, subtract, superellipsoid, tapered_capsule,
     to_mesh, tpms_dist, translate, union,
 )
 from exchanger import exchanger_core
@@ -694,7 +694,77 @@ def test_spline_tube_sweeps_smoothly_through_its_points():
         pass
 
 
+def test_pocket_is_open_with_a_rounded_floor():
+    """pocket() exists so a container can't come out closed: cut from a
+    block it opens through the top, keeps its floor, rounds the floor edge,
+    and three of them leave two walls between them."""
+    blk = lambda P: box(P, (0, 0, 20), (60, 25, 20))
+    pk = lambda P, x: pocket(P, (x, 0), (16, 20), 4.0, r=5)
+    cut = lambda P: subtract(subtract(subtract(blk(P), pk(P, -40)), pk(P, 0)), pk(P, 40))
+    m = to_mesh(cut, (-63, -28, -2), (63, 28, 43), 0.6)
+    assert m.is_watertight and len(m.split(only_watertight=False)) == 1
+    fill = m.volume / (120 * 50 * 40)
+    assert fill < 0.55, fill
+    q = lambda *p: cut(np.array([p], float))[0]
+    assert q(0, 0, 39) > 0      # open at the rim
+    assert q(0, 0, 2) < 0       # floor kept
+    assert q(-20, 0, 30) < 0    # divider between pockets
+    # rounded floor: the corner of the pocket floor stays solid
+    assert q(14.5, 18.5, 5) < 0 and pk(np.array([[0, 0, 5.0]]), 0)[0] < 0
+
+
+def test_star_import_exports_every_primitive():
+    """Generated programs only see sdf_kit through `from sdf_kit import *`,
+    so a public function missing from __all__ passes every direct-import test
+    here and is a NameError in production. pocket() shipped that way once."""
+    import inspect
+    import sdf_kit
+    public = {
+        n for n, f in inspect.getmembers(sdf_kit, inspect.isfunction)
+        if not n.startswith("_") and f.__module__ == "sdf_kit"
+    }
+    missing = public - set(sdf_kit.__all__)
+    assert not missing, sorted(missing)
+
+
+def test_opening_check_tells_open_from_closed():
+    """A container reads as one only if it opens from above. An open tray,
+    a sealed hollow (mostly empty, so a fill ratio passes it) and a solid
+    block must land on opposite sides of the blockout threshold (0.2)."""
+    from opening import check_opening
+    blk = lambda P: box(P, (0, 0, 20), (60, 25, 20))
+    pk = lambda P, x: pocket(P, (x, 0), (16, 20), 4.0, r=5)
+    tray = lambda P: subtract(subtract(subtract(blk(P), pk(P, -40)), pk(P, 0)), pk(P, 40))
+    inner = lambda P: box(P, (0, 0, 20), (56, 21, 16))
+    hollow = lambda P: subtract(blk(P), inner(P))
+    grid = ((-63, -28, -2), (63, 28, 43), 0.8)
+    o_tray = check_opening(to_mesh(tray, *grid))["openFraction"]
+    o_hollow = check_opening(to_mesh(hollow, *grid))["openFraction"]
+    o_solid = check_opening(to_mesh(blk, *grid))["openFraction"]
+    assert o_tray > 0.4, o_tray
+    assert o_hollow < 0.05 and o_solid < 0.05, (o_hollow, o_solid)
+
+
+def test_largest_body_drops_specks_not_parts():
+    """Concept blockouts drop pinhead islands; a real second body stays, so
+    the one-body gate still sees it."""
+    body = lambda P: box(P, (0, 0, 0), (20, 20, 10))
+    speck = lambda P: sphere(P, (40, 0, 0), 1.5)
+    part = lambda P: box(P, (45, 0, 0), (8, 8, 8))
+    grid = ((-22, -22, -12), (55, 22, 12), 0.5)
+    m = to_mesh(lambda P: union(body(P), speck(P)), *grid)
+    assert len(m.split(only_watertight=False)) == 2
+    kept = largest_body(m)
+    assert len(kept.split(only_watertight=False)) == 1 and kept.volume > 15_000
+    m2 = to_mesh(lambda P: union(body(P), part(P)), *grid)
+    assert largest_body(m2) is m2
+
+
 TESTS = [
+    test_largest_body_drops_specks_not_parts,
+    test_opening_check_tells_open_from_closed,
+    test_star_import_exports_every_primitive,
+    test_pocket_is_open_with_a_rounded_floor,
     test_spline_tube_sweeps_smoothly_through_its_points,
     test_tapered_capsule_is_an_exact_distance,
     test_superellipse_offsets_give_uniform_walls,

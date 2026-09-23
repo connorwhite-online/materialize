@@ -42,7 +42,7 @@ import trimesh
 __all__ = [
     "smin", "smax", "subtract", "union", "intersect",
     "sphere", "box", "capsule", "tapered_capsule", "spline_tube", "cyl_z",
-    "sq_prism",
+    "sq_prism", "pocket", "largest_body",
     "superellipsoid",
     "gyroid", "schwarz_p", "diamond",
     "tpms_dist", "seal_ramp", "dual_sheet",
@@ -241,6 +241,28 @@ def sq_prism(P, a, b, n, z0, z1):
         lambda Q: _superellipse_r(Q[:, 0], Q[:, 1], a, b, n) - 1.0, P, h
     )
     return np.maximum(d2, np.maximum(P[:, 2] - z1, z0 - P[:, 2]))
+
+
+def pocket(P, center, half, floor_z, n=4.0, r=None):
+    """An OPEN cavity: squircle plan (half = (a, b) around center (x, y)),
+    a floor at floor_z rounded by r, and NO top. It runs up through
+    everything above the floor, so subtract(body, pocket(...)) always opens
+    at the rim. Containers built from superellipsoid or box cavities kept
+    stopping just under the top surface (a closed blob), or had material
+    blended back over them; a pocket cannot close.
+
+    One pocket per compartment; the walls between them are what remains."""
+    a, b = half
+    r = min(a, b) * 0.35 if r is None else min(r, min(a, b) * 0.95)
+    Q = P - np.array([center[0], center[1], 0.0])
+    ai, bi = a - r, b - r
+    h = 1e-3 * min(ai, bi)
+    d2 = _gradient_normalized(
+        lambda X: _superellipse_r(X[:, 0], X[:, 1], ai, bi, n) - 1.0, Q, h
+    )
+    dz = (floor_z + r) - P[:, 2]
+    outside = np.sqrt(np.maximum(d2, 0.0) ** 2 + np.maximum(dz, 0.0) ** 2)
+    return outside + np.minimum(np.maximum(d2, dz), 0.0) - r
 
 
 def superellipsoid(P, center, radii, n=3.0, m=3.5):
@@ -636,6 +658,27 @@ def split_shell(body_field, cavity_field, z_split, lip_h=3.0, lip_t=1.1,
 # (over the wall/3 contract): visibly stair-stepped hoods and a real pinhole
 # risk in the printed part.
 _CELL_BUDGET = 60_000_000
+def largest_body(mesh, max_debris_frac=0.02):
+    """Drop marching-cubes specks: return the largest connected body when
+    everything else together is under `max_debris_frac` of the total volume,
+    else the mesh unchanged (a real second body still fails the one-body
+    gate). For concept blockouts, where a pinhead island beside the part is
+    noise, not a defect worth discarding the concept over. Finished parts
+    keep the strict gate."""
+    try:
+        bodies = list(mesh.split(only_watertight=False))
+    except Exception:  # noqa: BLE001
+        return mesh
+    if len(bodies) < 2:
+        return mesh
+    vols = [abs(float(b.volume)) for b in bodies]
+    total = sum(vols)
+    i = int(np.argmax(vols))
+    if total <= 0 or (total - vols[i]) > max_debris_frac * total:
+        return mesh
+    return bodies[i]
+
+
 def to_mesh(field, lo, hi, pitch=0.7):
     """Evaluate `field(P)->(N,) sdf` on a grid over [lo,hi] (mm) and
     marching-cubes the level-0 surface into a watertight trimesh. The grid is

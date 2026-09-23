@@ -16,6 +16,7 @@ import {
   blockoutCandidates,
   blockoutProblem,
   briefSpans,
+  isContainerPrompt,
   CONCEPT_BLOCKOUT_LABEL,
 } from "@/lib/cad/concept-blockout";
 
@@ -59,6 +60,49 @@ describe("blockoutProblem", () => {
   });
 });
 
+describe("container check", () => {
+  it("rejects a container that came back solid, only for containers", () => {
+    // the closed "organizer" pill: 0.72 of its box
+    const solid = run({ geometry: { dimensions: { x: 180, y: 100, z: 60 }, volume: 777_600 } });
+    expect(blockoutProblem(solid, [], { container: true })).toMatch(/solid block \(fills 72%/);
+    expect(blockoutProblem(solid, [])).toBeNull();
+    // an open organizer: 0.42
+    const open = run({ geometry: { dimensions: { x: 252, y: 80, z: 61 }, volume: 516_000 } });
+    expect(blockoutProblem(open, [], { container: true })).toBeNull();
+  });
+
+  it("prefers the sidecar's opening check, which catches sealed hollows", () => {
+    // a sealed hollow is mostly empty, so fill alone passes it (0.28)...
+    const hollow = run({
+      geometry: { dimensions: { x: 180, y: 53, z: 57 }, volume: 152_000 },
+      checks: { opening: { openFraction: 0.001 } },
+    });
+    expect(blockoutProblem(hollow, [], { container: true })).toMatch(/does not open from above/);
+    // ...and a real organizer passes even when it is fairly full
+    const open = run({
+      geometry: { dimensions: { x: 180, y: 100, z: 60 }, volume: 700_000 },
+      checks: { opening: { openFraction: 0.52 } },
+    });
+    expect(blockoutProblem(open, [], { container: true })).toBeNull();
+  });
+
+  it("asks the sidecar for the opening check only for containers", async () => {
+    completeText.mockReset().mockResolvedValue("```python\nresult = 1\n```");
+    runCadCode.mockReset().mockResolvedValue(run());
+    await blockoutCandidates({ prompt: "a desk organizer", directions: dirs.slice(0, 1) });
+    expect(runCadCode.mock.calls[0][3]).toEqual({ engine: "mesh", checks: { opening: {} } });
+    runCadCode.mockClear();
+    await blockoutCandidates({ prompt: "a knob", directions: dirs.slice(0, 1) });
+    expect(runCadCode.mock.calls[0][3]).toEqual({ engine: "mesh" });
+  });
+
+  it("recognizes containers, not enclosures", () => {
+    expect(isContainerPrompt("A desk organizer with three compartments")).toBe(true);
+    expect(isContainerPrompt("a planter for succulents")).toBe(true);
+    expect(isContainerPrompt("an enclosure for an ESP32")).toBe(false);
+  });
+});
+
 describe("briefSpans", () => {
   it("reads only bbox_span targets", () => {
     expect(
@@ -84,6 +128,9 @@ describe("blockoutCandidates", () => {
     expect(out).toHaveLength(3);
     expect(out[0].img).toEqual({ data: "PNG", mediaType: "image/png", label: CONCEPT_BLOCKOUT_LABEL });
     expect(out[0].code).toBe("result = 1");
+    // specks are dropped for the picture, but the seed code stays the model's
+    expect(runCadCode.mock.calls[0][0]).toContain("largest_body(result)");
+    expect(runCadCode.mock.calls[0][0]).toContain("except NameError");
     // runs on the mesh engine, STL only
     expect(runCadCode.mock.calls[0][3]).toEqual({ engine: "mesh" });
   });
