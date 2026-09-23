@@ -32,6 +32,8 @@ one-word edit.
 
 Importable by sidecar-exec'd model code: `from sdf_kit import *`.
 """
+import functools
+
 import numpy as np
 from scipy import ndimage
 from skimage import measure
@@ -46,29 +48,62 @@ __all__ = [
     "translate", "rotate_z",
     "from_mesh", "to_mesh", "split_shell",
     "mesh_union", "mesh_subtract", "mesh_intersect", "mesh_cyl", "mesh_box",
+    "mesh_rod",
 ]
 
 
 # ---- combinators -----------------------------------------------------------
+
+def _lift(fn):
+    """Let a combinator take field FUNCTIONS as well as evaluated arrays.
+
+    The combinators and field operators work on evaluated distances
+    (`offset_field(sphere(P, c, r), 2)`), while `to_mesh`, `from_mesh` and
+    `split_shell` deal in callables `f(P)`. Generated code mixes the two up
+    constantly, since the prompt calls the field `f`: passing `f` itself made
+    `offset_field` compute `f - d` and fail with "unsupported operand type(s)
+    for -: 'function' and 'float'" (local SDF run, 2026-09-23). Now, if any
+    argument is callable, the result is a callable that evaluates every
+    callable argument at P first. Arrays go through unchanged, so existing
+    code is unaffected.
+    """
+    @functools.wraps(fn)
+    def lifted(*args, **kwargs):
+        if not any(callable(a) for a in args):
+            return fn(*args, **kwargs)
+
+        def field(P):
+            return fn(*(a(P) if callable(a) else a for a in args), **kwargs)
+
+        return field
+
+    return lifted
+
+
+@_lift
 def smin(a, b, k):
     """Smooth union (the organic-blend workhorse). k = blend radius in mm."""
     h = np.clip(0.5 + 0.5 * (b - a) / k, 0.0, 1.0)
     return b * (1 - h) + a * h - k * h * (1 - h)
 
 
+@_lift
 def smax(a, b, k):
     """Smooth intersection."""
     return -smin(-a, -b, k)
 
 
+@_lift
 def union(a, b):
     return np.minimum(a, b)
 
 
+@_lift
 def intersect(a, b):
     return np.maximum(a, b)
 
 
+@_lift
 def subtract(d, hole):
     """Cut `hole` out of `d` (hard edge — use for exact bores/pockets)."""
     return np.maximum(d, -hole)
@@ -266,6 +301,7 @@ def dual_sheet(P, cell, wall, kind="gyroid", seal_a=0.0, seal_b=0.0):
 
 
 # ---- field operators ---------------------------------------------------------
+@_lift
 def mask(field_a, region, k=0.0):
     """Solid only where `region` < 0 — the tool for "gyroid only inside this
     jacket". k=0 is a hard clip; k>0 blends the field into the region wall over
@@ -275,12 +311,14 @@ def mask(field_a, region, k=0.0):
     return smax(field_a, region, k)
 
 
+@_lift
 def shell_field(field, t):
     """Hollow a field into a t-mm-thick wall on its surface: |field| - t/2.
     Operates on evaluated field values, like the combinators."""
     return np.abs(field) - 0.5 * t
 
 
+@_lift
 def offset_field(field, d):
     """Grow (d>0) or shrink (d<0) a field by d mm: field - d. Rounds convex
     edges by d as a side effect — that is usually the point."""
@@ -616,6 +654,22 @@ def mesh_cyl(x, y, r, z0, z1, sections=96):
     c = trimesh.creation.cylinder(radius=r, height=z1 - z0, sections=sections)
     c.apply_translation([x, y, 0.5 * (z0 + z1)])
     return c
+
+
+def mesh_rod(a, b, r, sections=96):
+    """Exactly tessellated cylinder from point `a` to point `b`, on any axis:
+    the mesh twin of `capsule`, but flat-ended. For holes that aren't
+    vertical: radial set screws, cross pins, side ports. Without it generated
+    code had no exact non-vertical cut at all, and a knob's radial M3 set-screw
+    hole came out as a square slot ("rotate not available -> use box slot",
+    local SDF run 2026-09-23). Extend past the body for a through-hole."""
+    a = np.asarray(a, float)
+    b = np.asarray(b, float)
+    if np.linalg.norm(b - a) <= 0:
+        raise ValueError(f"mesh_rod needs two distinct points, got a={a}, b={b}")
+    return trimesh.creation.cylinder(
+        radius=r, segment=np.stack([a, b]), sections=sections
+    )
 
 
 def mesh_box(center, half):

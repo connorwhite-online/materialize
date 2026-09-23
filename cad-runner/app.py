@@ -1186,6 +1186,26 @@ def _run_checks(mesh, checks: dict) -> dict:
     return out
 
 
+def _describe_exec_error(err: BaseException) -> str:
+    """The error string a failed script reports back to the repair loop.
+
+    `str(err)` alone is empty for a bare `assert`, `MemoryError()` or any
+    exception raised without a message. The run then reached the model as
+    "did not compile/run" with nothing to act on, and the repair turn was
+    spent guessing. Always name the exception, and add the generated script's
+    line number where the traceback has one.
+    """
+    import traceback
+
+    msg = str(err).strip()
+    text = f"{type(err).__name__}: {msg}" if msg else f"{type(err).__name__} (raised with no message)"
+    line = None
+    for frame in traceback.extract_tb(err.__traceback__):
+        if frame.filename in ("<generated>", "<session>"):
+            line = frame.lineno
+    return f"{text} (script line {line})" if line else text
+
+
 def _base_payload(compiled: bool = False) -> dict:
     return {
         "ok": False,
@@ -1592,7 +1612,7 @@ def _execute(
         payload = _build_run_payload(ns, formats, engine, allow_remesh, checks)
         out.put(payload)
     except Exception as err:  # noqa: BLE001
-        payload["error"] = str(err)
+        payload["error"] = _describe_exec_error(err)
         out.put(payload)
 
 
@@ -1816,7 +1836,7 @@ def _session_exec_reply(
             exec(compile(msg["code"], "<session>", "exec"), ns, ns)  # noqa: S102
     except Exception as err:  # noqa: BLE001
         reply = _base_payload()
-        reply["error"] = str(err)
+        reply["error"] = _describe_exec_error(err)
         reply["stdout"] = buf.getvalue()
         reply["namespace"] = _session_namespace_summary(ns)
         return reply

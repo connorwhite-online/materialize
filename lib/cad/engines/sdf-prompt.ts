@@ -43,14 +43,21 @@ Primitives — all take P first, return signed distance:
                                         straight-to-arc tangency break, which
                                         is exactly what makes a form read as
                                         designed rather than as a rounded box.
+Two kinds of value, and every combinator takes either:
+  a DISTANCE ARRAY  what a primitive returns: sphere(P, c, r)
+  a FIELD FUNCTION  a callable P -> distances, like your f
+Pass arrays and you get an array back; pass any function and you get a
+function back. So both of these work:
+  d = offset_field(sphere(P, c, r), 2)                    # inside f(P)
+  body = offset_field(lambda P: sphere(P, c, r), 2)       # body is a field
 Combining:
   smin(a, b, k)     smooth union (the organic workhorse; k in mm)
   smax(a, b, k)     smooth intersection
   union(a, b) / intersect(a, b) / subtract(d, hole)      hard-edged
 Field operators:
-  offset_field(f, d)    grow (d>0) or shrink the solid by d mm
-  shell_field(f, t)     hollow to a t-thick shell
-  mask(f, region, k)    apply f only inside region
+  offset_field(a, d)    grow (d>0) or shrink the solid by d mm
+  shell_field(a, t)     hollow to a t-thick shell
+  mask(a, region, k)    keep a only inside region
 Transforms warp the POINTS, so compose them on P:
   translate(P, offset) / rotate_z(P, degrees, center)
 Lattices (real-mm sheet thickness):
@@ -59,6 +66,9 @@ Lattices (real-mm sheet thickness):
 Meshing and mesh booleans:
   to_mesh(f, lo, hi, pitch)             field -> watertight trimesh
   mesh_cyl(x, y, r, z0, z1)             EXACT cylinder mesh; same arguments as cyl_z
+  mesh_rod(a, b, r)                     EXACT cylinder from point a to point b,
+                                        ANY axis: radial set-screw holes, cross
+                                        pins, side ports
   mesh_box(center, half)                EXACT box mesh; same arguments as box
   mesh_subtract(a, b) / mesh_union(a, b) / mesh_intersect(a, b)
   from_mesh(mesh, pitch)                any trimesh -> a field you can smin

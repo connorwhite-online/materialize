@@ -23,9 +23,9 @@ import trimesh
 import trimesh.sample
 
 from sdf_kit import (
-    box, capsule, dual_sheet, from_mesh, gyroid, mask, offset_field,
-    seal_ramp, shell_field, smin, sphere, to_mesh, tpms_dist, translate,
-    union,
+    box, capsule, dual_sheet, from_mesh, gyroid, mask, mesh_cyl, mesh_rod,
+    mesh_subtract, offset_field, seal_ramp, shell_field, smax, smin, sphere,
+    to_mesh, tpms_dist, translate, union,
 )
 from exchanger import exchanger_core
 from networks import check_networks
@@ -588,7 +588,49 @@ def test_promote_rejects_genuine_debris():
         "a sub-mm^3 sliver must be tolerated alongside the real parts"
 
 
+def test_combinators_accept_field_functions():
+    """Generated code passes field FUNCTIONS to offset_field & co. as often as
+    arrays (the prompt calls the field `f`). Before _lift, that failed as
+    "unsupported operand type(s) for -: 'function' and 'float'" on every
+    attempt of a local SDF knob build. A function in gives a function out that
+    matches the array path exactly."""
+    P = np.random.default_rng(0).uniform(-20, 20, (500, 3))
+    f = lambda Q: sphere(Q, (0, 0, 0), 10)
+    g = lambda Q: box(Q, (5, 0, 0), (6, 6, 6))
+    arr = offset_field(f(P), 2)
+    fn = offset_field(f, 2)
+    assert callable(fn) and np.allclose(fn(P), arr)
+    assert np.allclose(smin(f, g, 3)(P), smin(f(P), g(P), 3))
+    assert np.allclose(smax(f, g(P), 1)(P), smax(f(P), g(P), 1)), "mixed"
+    assert np.allclose(shell_field(f, 2)(P), shell_field(f(P), 2))
+    assert np.allclose(mask(f, g)(P), mask(f(P), g(P)))
+    # arrays in -> array out: existing code is untouched
+    assert isinstance(offset_field(f(P), 2), np.ndarray)
+    m = to_mesh(offset_field(f, 1.0), (-13,) * 3, (13,) * 3, 0.8)
+    assert m.is_watertight
+
+
+def test_mesh_rod_cuts_an_exact_radial_hole():
+    """The only exact cut used to be the vertical mesh_cyl, so a knob's radial
+    set-screw hole came out as a square slot. mesh_rod runs on any axis."""
+    rod = mesh_rod((0, 0, 5), (20, 0, 5), 1.7)
+    assert rod.is_watertight
+    assert abs(rod.volume - np.pi * 1.7 ** 2 * 20) / rod.volume < 0.01
+    body = mesh_cyl(0, 0, 15, 0, 18)
+    cut = mesh_subtract(body, rod)
+    assert cut.is_watertight
+    removed = body.volume - cut.volume
+    assert abs(removed - np.pi * 1.7 ** 2 * 15) / removed < 0.02, removed
+    try:
+        mesh_rod((1, 1, 1), (1, 1, 1), 2)
+        raise AssertionError("zero-length rod accepted")
+    except ValueError:
+        pass
+
+
 TESTS = [
+    test_combinators_accept_field_functions,
+    test_mesh_rod_cuts_an_exact_radial_hole,
     test_gyroid_thickness_is_real_mm,
     test_gyroid_two_isolated_networks,
     test_dual_sheet_defaults_match_sheet_gyroid,

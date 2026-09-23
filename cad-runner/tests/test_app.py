@@ -191,6 +191,19 @@ def delete_session(sid):
 
 
 # ---- tests ---------------------------------------------------------------
+def test_run_messageless_exception_is_named():
+    """A bare `assert` or MemoryError() has an empty str(). Before the fix,
+    the run came back as compiled:false with no error at all, and the repair
+    turn got "did not compile/run" and nothing else (prod SDF job,
+    2026-09-23). The exception type and script line must always come back."""
+    p = run("import numpy as np\n\nassert False\n")
+    assert p["ok"] is False
+    assert p["validation"]["compiled"] is False
+    err = p.get("error") or ""
+    assert "AssertionError" in err, err
+    assert "script line 3" in err, err
+
+
 def test_run_mesh_sphere_multiview():
     """A watertight mesh-mode sphere: ok, 4 named renders, and renderPng
     stays the threeQuarter view (docs 07 §A compatibility)."""
@@ -570,6 +583,7 @@ def test_session_exec_timeout_kills_session():
 
 
 TESTS = [
+    test_run_messageless_exception_is_named,
     test_run_mesh_sphere_multiview,
     test_run_opposed_iso_coverage_guarantee,
     test_run_hollow_part_gets_section,
