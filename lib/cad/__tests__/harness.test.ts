@@ -317,3 +317,26 @@ describe("runHarness empty response", () => {
     expect(prompts[1]).toContain("contained no Python code");
   });
 });
+
+describe("runHarness requests printability checks", () => {
+  beforeEach(() => {
+    hasModelCredentials.mockReset().mockReturnValue(false);
+    runCadCode.mockReset().mockResolvedValue(failingRun());
+  });
+
+  const dfmSpec = () =>
+    ((runCadCode.mock.calls[0] as unknown[])[3] as { checks?: { dfm?: { minWall?: number } } })
+      ?.checks?.dfm;
+
+  it("asks the sidecar for DFM on every run, against the prompt's wall rule", async () => {
+    // The harness used to request only `fit`: walls, overhangs and trapped
+    // voids were never checked in the studio.
+    await runHarness({ prompt: "a 20mm cube", maxAttempts: 1 });
+    expect(dfmSpec()).toEqual({ minWall: 2.0 }); // multi-process safe envelope
+  });
+
+  it("uses the target process's minimum wall when one is known", async () => {
+    await runHarness({ prompt: "a 20mm cube", maxAttempts: 1, process: "fdm" });
+    expect(dfmSpec()).toEqual({ minWall: 1.0 });
+  });
+});

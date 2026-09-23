@@ -9,6 +9,7 @@ import { runCadCode } from "./runner-client";
 import { extractCode, gradeRun } from "./prompt";
 import { engineFor, type CadEngineId } from "./engines";
 import { buildKnowledgeBlock, type CadProcess } from "./knowledge";
+import { MULTI_PROCESS_SAFE, PROCESS_DFM } from "./knowledge/dfm";
 import { needsExchangerRecipe } from "./knowledge/exchanger-recipe";
 import {
   needsEnclosureRecipe,
@@ -727,7 +728,18 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
   // flow through the SAME dimension-check → repair-hint machinery. Null (no
   // `checks` sent at all) when the brief names no known component.
   const fitChecks = buildFitChecksFromTargets(dimensionTargets);
-  const runChecks = fitChecks ? { fit: fitChecks } : undefined;
+  // Printability probes (cad-runner/dfm.py) on every run. The harness only
+  // ever requested `fit`, so walls, overhangs and trapped voids were checked
+  // in the bench and never in the studio: run-stats' dfm field was always
+  // null. The wall target is the SAME rule the prompt gives the model (the
+  // process table, or the conservative multi-process envelope), so a part
+  // is checked against what it was asked to meet. Recorded, not yet gated:
+  // repairs don't key on it until there is data on how often it fires.
+  const dfmTarget = input.process ? PROCESS_DFM[input.process] : MULTI_PROCESS_SAFE;
+  const runChecks = {
+    ...(fitChecks ? { fit: fitChecks } : {}),
+    dfm: { minWall: dfmTarget.minWallMm },
+  };
   // The last run's dimension-check results, surfaced on the return + used to
   // drive a dimension-specific repair turn.
   let dimensionChecks: DimensionCheckResult[] = [];
