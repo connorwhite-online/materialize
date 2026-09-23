@@ -26,6 +26,15 @@ import {
   CONCEPT_THREAD_REF_LABEL,
 } from "./concept";
 import {
+  CONCEPT_PICK_QUESTION_ID,
+} from "./types";
+import {
+  blockoutCandidates,
+  blockoutConceptsEnabled,
+  CONCEPT_BLOCKOUT_LABEL,
+  CONCEPT_BLOCKOUT_NOTE,
+} from "./concept-blockout";
+import {
   classifyConceptPhase,
   proposeConceptDirections,
   type ConceptDirection,
@@ -759,6 +768,9 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
   //     SKIP (detail edits — no card, no renders; the inherited concept
   //     reference keeps steering).
   let conceptImg: PromptImage | null = null;
+  // Blockout code behind each blockout candidate (CAD_CONCEPT_MODE=blockout),
+  // keyed by render, so the picked one can seed the implement step.
+  const blockoutCodeByImage = new Map<string, string>();
   // The thread's persisted concept target, when one is riding the refs.
   const currentConceptRef =
     userRefs.find((r) => r.label === CONCEPT_THREAD_REF_LABEL) ?? null;
@@ -815,7 +827,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
     }));
     try {
       const answer = await input.onQuestion!({
-        id: "concept-pick",
+        id: CONCEPT_PICK_QUESTION_ID,
         text,
         options,
         defaultOptionId: options[0].id,
@@ -842,7 +854,26 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
         phase: "explore",
         signal: input.signal,
       });
-      const candidates = await renderCandidates(directions, briefDesc, userRefs);
+      // Geometry-first concepts when enabled and there are no user refs to
+      // condition on (a blockout can't "keep" a photo's look; the image path
+      // stays for that). Fewer than two valid blockouts = image concepts.
+      let candidates: Array<{ direction: ConceptDirection; img: PromptImage }> = [];
+      if (blockoutConceptsEnabled() && userRefs.length === 0) {
+        const blockouts = await blockoutCandidates({
+          prompt: input.prompt,
+          directions,
+          brief,
+          briefText: briefDesc,
+          signal: input.signal,
+        });
+        if (blockouts.length >= 2) {
+          for (const b of blockouts) blockoutCodeByImage.set(b.img.data, b.code);
+          candidates = blockouts;
+        }
+      }
+      if (candidates.length === 0) {
+        candidates = await renderCandidates(directions, briefDesc, userRefs);
+      }
       conceptImg = await askConceptPick(
         "Which direction should this build aim for?",
         candidates,
@@ -901,12 +932,22 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
   // The imagery instruction for plan/generate prompts. With references AND a
   // (reference-derived) concept, both notes ride together — the derived note
   // states the references stay authoritative.
+  // The picked blockout's program, when the concept came from geometry. On
+  // the SDF engine it seeds the first implement turn: the massing is already
+  // feasible and at real scale, so the model refines it rather than starting
+  // cold. (B-rep can't reuse SDF code; it still gets the clay target.)
+  const blockoutSeed =
+    conceptImg && engine.id === "sdf"
+      ? blockoutCodeByImage.get(conceptImg.data) ?? null
+      : null;
   const imageryNote = [
     promptRefs.length ? REFERENCE_IMAGES_NOTE : "",
     conceptImg
-      ? promptRefs.length
-        ? CONCEPT_FROM_REFS_NOTE
-        : CONCEPT_IMAGE_NOTE
+      ? conceptImg.label === CONCEPT_BLOCKOUT_LABEL
+        ? CONCEPT_BLOCKOUT_NOTE
+        : promptRefs.length
+          ? CONCEPT_FROM_REFS_NOTE
+          : CONCEPT_IMAGE_NOTE
       : "",
   ]
     .filter(Boolean)
@@ -1022,7 +1063,20 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
           ]
             .filter(Boolean)
             .join("\n")
-        : buildUserPrompt(input, plan, { brief, exemplarIds, partSourcing: partSourcingBlock });
+        : [
+            buildUserPrompt(input, plan, { brief, exemplarIds, partSourcing: partSourcingBlock }),
+            blockoutSeed
+              ? [
+                  "",
+                  "The chosen concept is this BLOCKOUT (massing only, already feasible and at real scale). Start from it: keep its proportions, silhouette and cross-sections, and turn it into the finished part with every functional feature the request needs.",
+                  "```python",
+                  blockoutSeed,
+                  "```",
+                ].join("\n")
+              : "",
+          ]
+            .filter(Boolean)
+            .join("\n");
       const images: PromptImage[] = [
         ...promptRefs,
         ...(conceptImg ? [conceptImg] : []),
