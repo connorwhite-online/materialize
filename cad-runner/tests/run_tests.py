@@ -25,7 +25,7 @@ import trimesh.sample
 from sdf_kit import (
     box, capsule, dual_sheet, from_mesh, gyroid, mask, mesh_cyl, mesh_rod,
     mesh_subtract, offset_field, seal_ramp, shell_field, smax, smin, sphere,
-    sq_prism, superellipsoid,
+    sq_prism, superellipsoid, tapered_capsule,
     to_mesh, tpms_dist, translate, union,
 )
 from exchanger import exchanger_core
@@ -661,7 +661,21 @@ def test_superellipse_offsets_give_uniform_walls():
     assert m.is_watertight
 
 
+def test_tapered_capsule_is_an_exact_distance():
+    """The organic strut: equal radii must reduce to capsule, and the field
+    must agree with the meshed surface (it is an exact SDF, not a proxy)."""
+    a, b = (0, 0, 0), (40, 0, 0)
+    P = np.random.default_rng(3).uniform([-10, -10, -10], [50, 10, 10], (400, 3))
+    assert np.allclose(tapered_capsule(P, a, b, 4, 4), capsule(P, a, b, 4))
+    m = to_mesh(lambda Q: tapered_capsule(Q, a, b, 6, 3), (-8, -8, -8), (45, 8, 8), 0.3)
+    assert m.is_watertight
+    _, dist, _ = trimesh.proximity.closest_point(m, P)
+    err = np.max(np.abs(np.abs(tapered_capsule(P, a, b, 6, 3)) - dist))
+    assert err < 0.05, err
+
+
 TESTS = [
+    test_tapered_capsule_is_an_exact_distance,
     test_superellipse_offsets_give_uniform_walls,
     test_combinators_accept_field_functions,
     test_mesh_rod_cuts_an_exact_radial_hole,

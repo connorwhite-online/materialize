@@ -34,6 +34,10 @@ Primitives — all take P first, return signed distance:
   sphere(P, center, r)
   box(P, center, half)                  half = (hx, hy, hz) half-extents
   capsule(P, a, b, r)                   round-capped strut from a to b, any axis
+  tapered_capsule(P, a, b, ra, rb)      strut whose radius runs ra -> rb: chain
+                                        several along a curved spine (shared
+                                        endpoints, matching radii) for prongs,
+                                        handles and limbs that taper smoothly
   cyl_z(P, x, y, r, z0, z1)             flat-capped vertical cylinder
   sq_prism(P, a, b, n, z0, z1)          superellipse prism; n~4.5 reads as a
                                         squircle desk device, n~1.7-2.2 as a
@@ -138,7 +142,13 @@ proportions, restraint. Match the form language of any attached reference
 imagery. Organic does NOT mean a bone-strut topology-optimized look — reach
 for that only when the prompt asks. Favour one confident blended mass over
 many small features, and hold one blend-radius family throughout rather than
-a different k at every joint.`;
+a different k at every joint.
+
+smin is for JUNCTIONS, not for chains. smin adds material wherever two fields
+meet, which is what turns a prong-into-body joint into a soft root. Along a
+spine of consecutive segments that share an endpoint and a radius, use plain
+union: min() is already seamless there, and smin beads every joint so the
+part looks like primitives welded together.`;
 
 /**
  * Bullets for dual-fluid / exchanger-class requests. Gated the same way the

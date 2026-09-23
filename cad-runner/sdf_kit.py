@@ -41,7 +41,8 @@ import trimesh
 
 __all__ = [
     "smin", "smax", "subtract", "union", "intersect",
-    "sphere", "box", "capsule", "cyl_z", "sq_prism", "superellipsoid",
+    "sphere", "box", "capsule", "tapered_capsule", "cyl_z", "sq_prism",
+    "superellipsoid",
     "gyroid", "schwarz_p", "diamond",
     "tpms_dist", "seal_ramp", "dual_sheet",
     "mask", "shell_field", "offset_field",
@@ -146,6 +147,37 @@ def _gradient_normalized(F, P, h):
 
 def _superellipse_r(x, y, a, b, n):
     return (np.abs(x / a) ** n + np.abs(y / b) ** n) ** (1.0 / n)
+
+
+def tapered_capsule(P, a, b, ra, rb):
+    """A capsule whose radius runs from `ra` at point a to `rb` at point b:
+    the organic strut. Chain several (sharing endpoints, radii matching at
+    each joint) and smin them with a small k for a prong, handle or limb that
+    tapers along a curved spine, a "spline sweep" without a kernel. Exact
+    distance (the round-cone SDF), so offsets and shells stay even."""
+    a = np.asarray(a, float)
+    b = np.asarray(b, float)
+    ba = b - a
+    l2 = float(ba @ ba)
+    rr = ra - rb
+    a2 = l2 - rr * rr
+    il2 = 1.0 / l2
+    pa = P - a
+    y = pa @ ba
+    z = y - l2
+    x = pa * l2 - y[:, None] * ba
+    x2 = np.einsum("ij,ij->i", x, x)
+    y2 = y * y * l2
+    z2 = z * z * l2
+    k = np.sign(rr) * rr * rr * x2
+    d = np.empty(len(P))
+    m_b = np.sign(z) * a2 * z2 > k
+    m_a = np.sign(y) * a2 * y2 < k
+    d[m_b] = np.sqrt(x2[m_b] + z2[m_b]) * il2 - rb
+    d[m_a & ~m_b] = np.sqrt(x2[m_a & ~m_b] + y2[m_a & ~m_b]) * il2 - ra
+    rest = ~(m_a | m_b)
+    d[rest] = (np.sqrt(x2[rest] * a2 * il2) + y[rest] * rr) * il2 - ra
+    return d
 
 
 def sq_prism(P, a, b, n, z0, z1):
