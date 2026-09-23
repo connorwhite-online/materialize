@@ -99,24 +99,30 @@ export function ConceptPreview({
             />
             {withImages.length > 1 && (
               <>
-                <Button
-                  variant="outline"
-                  size="icon-sm"
-                  className="absolute top-1/2 left-2 -translate-y-1/2"
-                  onClick={() => step(-1)}
-                  aria-label="Previous option"
-                >
-                  <ChevronLeftIcon />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="icon-sm"
-                  className="absolute top-1/2 right-2 -translate-y-1/2"
-                  onClick={() => step(1)}
-                  aria-label="Next option"
-                >
-                  <ChevronRightIcon />
-                </Button>
+                {/* Centered by a WRAPPER, not the button: Button translates
+                    itself while pressed (active:translate-y-px), which
+                    replaces a -translate-y-1/2 on the same element, so the
+                    button jumped down on press and the release missed it. */}
+                <span className="absolute top-1/2 left-2 -translate-y-1/2">
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    onClick={() => step(-1)}
+                    aria-label="Previous option"
+                  >
+                    <ChevronLeftIcon />
+                  </Button>
+                </span>
+                <span className="absolute top-1/2 right-2 -translate-y-1/2">
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    onClick={() => step(1)}
+                    aria-label="Next option"
+                  >
+                    <ChevronRightIcon />
+                  </Button>
+                </span>
               </>
             )}
           </div>

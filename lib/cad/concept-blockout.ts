@@ -66,7 +66,10 @@ Rules:
     smin(a, b, k)  smax(a, b, k)  union(a, b)  subtract(d, hole)  offset_field(a, d)
   Combinators take distance arrays or field functions. For a custom section
   (e.g. a rounded-rectangle bar) compute it with numpy from P directly.
-- ONE connected body. Get the REAL overall dimensions (mm) and proportions right. Skip small functional detail (screw holes, pins, text).
+- ONE connected body. Get the REAL overall dimensions (mm) and proportions right.
+- KEEP the features that make it recognizable as the object: an organizer's compartments, a cup's opening, a hook's prongs, an enclosure's split line, a tool's handle. A closed blob is not a concept of a container.
+- Skip only SMALL functional detail: screw holes, pins, text, clearance gaps.
+- CUTTING: smin/union ADD material. To remove it use subtract(body, cavity), or smax(body, -cavity, k) for a soft rim. An open container's cavity must extend ABOVE the rim so it breaks through the top; a closed hollow reads as a solid blob. Dividers are what's left BETWEEN separate cavities: cut one cavity per compartment rather than adding walls to a cavity.
 - Product limbs get a designed cross-section, not a round tube. smin at junctions, union along chains. Mating faces are flat.
 - Orient it as the object is used (what sits on a table sits on z=0; what mounts on a wall has its back on a plane).
 - Mesh coarsely: result = to_mesh(f, lo, hi, pitch) with pitch about 1/60 of the largest dimension (min 0.6). Assign \`result\`.
