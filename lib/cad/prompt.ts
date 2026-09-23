@@ -181,7 +181,24 @@ Honor the design guidance you are given. Be concrete and terse. Do NOT write bui
 /** Pull the first fenced code block out of a model response, else return as-is. */
 export function extractCode(text: string): string {
   const fenced = text.match(/```(?:python|py)?\s*\n([\s\S]*?)```/i);
-  return (fenced ? fenced[1] : text).trim();
+  return normalizeTypography((fenced ? fenced[1] : text).trim());
+}
+
+/**
+ * Typographic characters models emit that Python rejects outright. A single
+ * U+2212 minus ("−") fails the whole program as a syntax error before it
+ * runs, so the attempt is spent on a typo: in a blockout experiment Haiku 4.5
+ * wrote it in 2 of 3 programs. Only characters with exactly one ASCII
+ * meaning are mapped; string contents are affected too, which is harmless
+ * for CAD scripts.
+ */
+export function normalizeTypography(code: string): string {
+  return code
+    .replace(/[\u2212\u2012\u2013\u2014\uFE63\uFF0D]/g, "-")
+    .replace(/[\u2018\u2019\u201A\u2032]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u2033]/g, '"')
+    .replace(/\u00D7/g, "*")
+    .replace(/\u00A0/g, " ");
 }
 
 export interface ExpectedDims {

@@ -152,3 +152,16 @@ describe("gradeRun never fails silently", () => {
     expect(g.failures.length).toBeGreaterThan(0);
   });
 });
+
+describe("extractCode normalizes typography Python rejects", () => {
+  it("turns a Unicode minus into ASCII so the program runs", () => {
+    const code = extractCode("```python\nx = \u22123.5\ny = a \u00D7 b\n```");
+    expect(code).toBe("x = -3.5\ny = a * b");
+  });
+
+  it("leaves plain ASCII untouched", () => {
+    expect(extractCode("```python\nresult = offset_field(f, -2)\n```")).toBe(
+      "result = offset_field(f, -2)"
+    );
+  });
+});
