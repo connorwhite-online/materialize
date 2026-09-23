@@ -485,6 +485,21 @@ def test_run_names_the_assembly_part_that_failed():
     assert "part 'lid'" not in err, err
 
 
+def test_run_assembly_renders_the_assembled_product():
+    """The top-level render of an assembly used to be part 1's render, so the
+    judge and the preview saw half the product. It must show every part, and
+    carry the full view set (not just threeQuarter)."""
+    p = run(PARTS_AND_RESULT_SCRIPT)
+    assert p["ok"] is True, p.get("error")
+    parts = p.get("parts") or []
+    assert len(parts) == 2
+    renders = p.get("renders") or {}
+    for view in VIEWS:
+        assert renders.get(view), f"missing assembled render {view}"
+    assert p["renderPng"] == renders["threeQuarter"]
+    assert p["renderPng"] != parts[0]["renderPng"], "still mirroring part 1"
+
+
 def test_run_prefers_parts_dict_over_result_compound():
     """When both `result` and `parts` are assigned, the explicit parts dict
     wins — including the author's names — instead of promoting/failing the
@@ -606,6 +621,7 @@ def test_session_exec_timeout_kills_session():
 
 
 TESTS = [
+    test_run_assembly_renders_the_assembled_product,
     test_run_names_the_assembly_part_that_failed,
     test_run_messageless_exception_is_named,
     test_run_mesh_sphere_multiview,

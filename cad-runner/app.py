@@ -958,28 +958,7 @@ def _process_shape(
             # threeQuarter view for compatibility. All views draw the RENDER
             # PROXY — a large TPMS mesh at full resolution costs matplotlib
             # minutes per view and was the wall-clock hog on 150mm exchangers.
-            draw = _render_proxy(mesh)
-            renders: dict = {}
-            for view, (elev, azim) in _VIEW_ANGLES.items():
-                figsize = _FULL_FIGSIZE if view == "threeQuarter" else _SMALL_FIGSIZE
-                png = _render(draw, elev=elev, azim=azim, figsize=figsize)
-                if png:
-                    renders[view] = png
-            # Section cutaway for hollow parts (MTR-199): a mid-plane slice
-            # reveals bores / channels / shell interiors that no exterior view
-            # can show. Gated on a cheap fill-ratio heuristic so solid parts
-            # don't get a pointless (and misleading) empty section. Sliced on
-            # the proxy too — pixels only.
-            try:
-                ex = mesh.extents
-                bbox_vol = float(ex[0]) * float(ex[1]) * float(ex[2])
-                fill = float(mesh.volume) / bbox_vol if bbox_vol > 0 else 1.0
-                if fill < _SECTION_FILL_RATIO:
-                    section = _render_section(draw)
-                    if section:
-                        renders["section"] = section
-            except Exception:  # noqa: BLE001
-                pass
+            renders = _multi_view_renders(mesh)
             entry["renders"] = renders
             entry["renderPng"] = renders.get("threeQuarter")
         else:
@@ -1355,6 +1334,34 @@ def _promote_disconnected_bodies(mesh):
     return _name_parts_by_z(large)
 
 
+def _multi_view_renders(mesh) -> dict:
+    """Every named view of `mesh`, plus a section cutaway when it's hollow.
+    Shared by single parts and assembled assemblies."""
+    draw = _render_proxy(mesh)
+    renders: dict = {}
+    for view, (elev, azim) in _VIEW_ANGLES.items():
+        figsize = _FULL_FIGSIZE if view == "threeQuarter" else _SMALL_FIGSIZE
+        png = _render(draw, elev=elev, azim=azim, figsize=figsize)
+        if png:
+            renders[view] = png
+    # Section cutaway for hollow parts (MTR-199): a mid-plane slice
+    # reveals bores / channels / shell interiors that no exterior view
+    # can show. Gated on a cheap fill-ratio heuristic so solid parts
+    # don't get a pointless (and misleading) empty section. Sliced on
+    # the proxy too — pixels only.
+    try:
+        ex = mesh.extents
+        bbox_vol = float(ex[0]) * float(ex[1]) * float(ex[2])
+        fill = float(mesh.volume) / bbox_vol if bbox_vol > 0 else 1.0
+        if fill < _SECTION_FILL_RATIO:
+            section = _render_section(draw)
+            if section:
+                renders["section"] = section
+    except Exception:  # noqa: BLE001
+        pass
+    return renders
+
+
 def _assemble_parts_payload(
     payload: dict,
     items: list,
@@ -1371,14 +1378,17 @@ def _assemble_parts_payload(
     The multi-view/topo consumers work on the top-level single result."""
     part_formats = [f for f in formats if f != "topo"]
     parts: list[dict] = []
+    meshes = []
     all_ok = True
     for i, (name, shape) in enumerate(items):
         stem = "".join(
             c if c.isalnum() else "-" for c in str(name)
         ).strip("-") or f"part{i}"
-        entry, _mesh = _process_shape(
+        entry, part_mesh = _process_shape(
             shape, part_formats, tmp, stem, engine, allow_remesh
         )
+        if part_mesh is not None:
+            meshes.append(part_mesh)
         parts.append({"name": str(name), **entry})
         all_ok = all_ok and (
             entry["validation"]["isSolid"]
@@ -1409,10 +1419,24 @@ def _assemble_parts_payload(
             problems.append(f"part '{part['name']}': " + ", ".join(why))
     if problems and not payload.get("error"):
         payload["error"] = "; ".join(problems)
-    # Top-level mirrors the first part for single-part consumers.
+    # Top-level mirrors the first part for single-part consumers, EXCEPT the
+    # renders: those show the assembled product. Mirroring part 1 meant the
+    # aesthetic judge, the studio preview and the repair turn only ever saw
+    # one half. A two-piece ESP32 case was scored as "a shallow soap dish"
+    # because the judge was looking at the bottom tray with no lid on it.
     first = parts[0]
     payload["files"] = first["files"]
     payload["renderPng"] = first["renderPng"]
+    if len(meshes) > 1:
+        try:
+            import trimesh
+
+            assembled = _multi_view_renders(trimesh.util.concatenate(meshes))
+            if assembled.get("threeQuarter"):
+                payload["renders"] = assembled
+                payload["renderPng"] = assembled["threeQuarter"]
+        except Exception:  # noqa: BLE001 — fall back to part 1's render
+            pass
     payload["geometry"] = first["geometry"]
     # Aggregate validity = AND across parts.
     payload["validation"] = {
