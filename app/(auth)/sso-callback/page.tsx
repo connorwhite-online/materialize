@@ -9,7 +9,7 @@ export default function SSOCallbackPage() {
   useEffect(() => {
     handleRedirectCallback({
       signUpFallbackRedirectUrl: "/onboarding",
-      signInFallbackRedirectUrl: "/dashboard",
+      signInFallbackRedirectUrl: "/",
     });
   }, [handleRedirectCallback]);
 

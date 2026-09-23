@@ -40,7 +40,7 @@ function looksLikeEmail(value: string): boolean {
 
 export function SignInForm({
   onSuccess,
-  redirectUrl = "/dashboard",
+  redirectUrl = "/",
   socialFirst = false,
 }: SignInFormProps) {
   const { signIn } = useSignIn();
