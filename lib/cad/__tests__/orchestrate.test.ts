@@ -271,6 +271,27 @@ describe("runCadGeneration spend tier", () => {
     expect(seen()).toBe("organic");
   });
 
+  it("runs an explicit-engine build inside its tier, not uncapped", async () => {
+    // Pinning the engine used to skip the classifier, and with it the effort
+    // cap: a 30mm knob ran codegen at xhigh until thinking ate the whole
+    // output budget.
+    completeText.mockResolvedValue("SIMPLE");
+    const seen = tierSeenBy(runHarness);
+    const r = await runCadGeneration({ prompt: "a 30mm knob", engine: "sdf" });
+    expect(seen()).toBe("simple");
+    // The engine still decides the path: scripted, never agentic.
+    expect(runAgenticHarness).not.toHaveBeenCalled();
+    expect(r.route).toMatch(/^engine-sdf/);
+  });
+
+  it("gives a complex explicit-engine build the complex tier", async () => {
+    completeText.mockResolvedValue("COMPLEX");
+    const seen = tierSeenBy(runHarness);
+    await runCadGeneration({ prompt: "an exchanger", engine: "brep" });
+    expect(seen()).toBe("complex");
+    expect(runAgenticHarness).not.toHaveBeenCalled();
+  });
+
   it("leaves the legacy path untiered — it promises pre-tier behavior", async () => {
     process.env.CAD_AGENTIC = "false";
     const seen = tierSeenBy(runHarness);

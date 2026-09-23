@@ -197,12 +197,25 @@ export async function runCadGeneration(
   //   The keyword router is exactly what made the implicit engine
   //   unreachable. A caller that names an engine must get it, whether or not
   //   the prompt happens to contain a trigger word.
+  //
+  // Pinning the ENGINE must not also skip the BUDGET, though. This branch used
+  // to return before the classifier, so it never ran inside a tier: no effort
+  // cap and the maximum number of attempts, for every part. A 30mm knob then
+  // ran codegen at xhigh, and Opus's adaptive thinking used the whole output
+  // budget, 16k and then 32k tokens over ~8 minutes, without writing a line
+  // of code (local SDF runs, 2026-09-23). The classifier is one cheap call on
+  // the plan model, and its verdict sizes the budget here exactly as it does
+  // for routed builds; only the path choice is overridden.
   if (input.engine) {
-    const n = !input.priorSourceCode ? bestOfN() : 1;
-    const route = `engine-${input.engine}${n > 1 ? `-bestof${n}` : ""}`;
-    note({ type: "route", route });
-    const result = await (n > 1 ? runBestOf(input, n) : runHarness(input));
-    return { ...result, route };
+    const engineId = input.engine;
+    const kind = await classifyCadRequest(input.prompt, input.signal, input.images);
+    return runWithCadTier(kind, async (): Promise<HarnessResult> => {
+      const n = !input.priorSourceCode ? bestOfN() : 1;
+      const route = `engine-${engineId}${n > 1 ? `-bestof${n}` : ""}`;
+      note({ type: "route", route });
+      const result = await (n > 1 ? runBestOf(input, n) : runHarness(input));
+      return { ...result, route };
+    });
   }
 
   if (!agenticEnabled()) {
