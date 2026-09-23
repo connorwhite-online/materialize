@@ -697,3 +697,9 @@ export class CadOutputTruncatedError extends Error {
     this.name = "CadOutputTruncatedError";
   }
 }
+
+/**
+ * Question id of the concept-direction picker. Budgeted separately from the
+ * brief's questions (see executeCadJob's onQuestion).
+ */
+export const CONCEPT_PICK_QUESTION_ID = "concept-pick";

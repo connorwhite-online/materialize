@@ -14,7 +14,7 @@ import { resolveModelCredentials } from "@/lib/cad/credentials";
 import type { PriorFeedback } from "@/lib/cad/harness";
 import type { CadProcess } from "@/lib/cad/knowledge/dfm";
 import { CadMeter, runWithCadContext } from "@/lib/cad/metering";
-import { engineFor, type CadEngineId } from "@/lib/cad/engines";
+import type { CadEngineId } from "@/lib/cad/engines";
 import {
   CadBudgetExceededError,
   tierForRoute,
@@ -42,7 +42,7 @@ import type {
   CadQuestion,
   ThreadHistoryEntry,
 } from "@/lib/cad/types";
-import { resolveStoredAnswer } from "@/lib/cad/types";
+import { CONCEPT_PICK_QUESTION_ID, resolveStoredAnswer } from "@/lib/cad/types";
 import { notifyCadBuildFinished } from "@/lib/notifications/notify";
 import { makeSnippet } from "@/lib/notifications/types";
 
@@ -349,17 +349,28 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
   // cancellation is in flight (a terminal state must not be blocked).
   const questionBudget = maxQuestionsPerJob();
   let questionsAsked = 0;
+  // The concept pick gets its OWN slot. It shared the budget with the
+  // brief's questions, and the brief asks first, so under the default
+  // budget of 1 the picker was never shown: every build silently took the
+  // first direction. A budget of 0 is still the kill switch for all
+  // questions, and CAD_CONCEPT_PICKER=false still turns the picker off.
+  let conceptPickAsked = false;
   const onQuestion = async (q: CadQuestion): Promise<string> => {
     const fallback = q.defaultOptionId ?? q.options[0]?.id ?? "";
+    const isConceptPick = q.id === CONCEPT_PICK_QUESTION_ID;
+    const exhausted = isConceptPick
+      ? questionBudget === 0 || conceptPickAsked
+      : questionsAsked >= questionBudget;
     if (
       q.options.length === 0 ||
-      questionsAsked >= questionBudget ||
+      exhausted ||
       cancelRequested ||
       controller.signal.aborted
     ) {
       return fallback;
     }
-    questionsAsked++;
+    if (isConceptPick) conceptPickAsked = true;
+    else questionsAsked++;
 
     const timeoutS = Math.min(
       Math.max(1, Math.round(q.timeoutS ?? DEFAULT_QUESTION_TIMEOUT_S)),
