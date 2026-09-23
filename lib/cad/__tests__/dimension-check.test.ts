@@ -7,6 +7,7 @@ import {
   formatDimensionRepairHints,
   dimensionTargetsFromExpectedDims,
   defaultTolerance,
+  withinTolerance,
   type DimensionTarget,
 } from "@/lib/cad/dimension-check";
 
@@ -211,5 +212,22 @@ describe("defaults + legacy bridge", () => {
     // A run matching them passes through the shared machinery.
     const res = checkDimensionTargets(run(), targets);
     expect(res.every((r) => r.ran && r.ok)).toBe(true);
+  });
+});
+
+describe("tolerance edge", () => {
+  it("passes a measurement exactly at the tolerance limit", () => {
+    // Local bracket build, 2026-09-23: a ⌀22.30 bore against 22 ±0.3 failed,
+    // because 22.3 - 22 is 0.3000000000000007 in floating point.
+    expect(withinTolerance(Math.abs(22.3 - 22), 0.3)).toBe(true);
+    const [r] = checkDimensionTargets(
+      run({ geometry: { dimensions: { x: 22.3, y: 60, z: 20 } } }),
+      [{ label: "span", kind: "bbox_span", axis: "x", value: 22, tolerance: 0.3 }]
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it("still fails anything measurably past it", () => {
+    expect(withinTolerance(0.301, 0.3)).toBe(false);
   });
 });
