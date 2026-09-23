@@ -25,6 +25,7 @@ import trimesh.sample
 from sdf_kit import (
     box, capsule, dual_sheet, from_mesh, gyroid, mask, mesh_cyl, mesh_rod,
     mesh_subtract, offset_field, seal_ramp, shell_field, smax, smin, sphere,
+    sq_prism, superellipsoid,
     to_mesh, tpms_dist, translate, union,
 )
 from exchanger import exchanger_core
@@ -628,7 +629,40 @@ def test_mesh_rod_cuts_an_exact_radial_hole():
         pass
 
 
+def _wall_along(inner, outer, direction, z=0.0):
+    """Wall thickness where the ray from the origin along `direction` crosses
+    both surfaces. Along a symmetry axis the ray is the surface normal, so
+    this is the true wall."""
+    def hit(f):
+        lo, hi = 0.0, 100.0
+        for _ in range(60):
+            mid = (lo + hi) / 2
+            v = f(np.array([[mid * direction[0], mid * direction[1], z]]))[0]
+            lo, hi = (mid, hi) if v < 0 else (lo, mid)
+        return lo
+    return hit(outer) - hit(inner)
+
+
+def test_superellipse_offsets_give_uniform_walls():
+    """sq_prism used to scale its field by min(a, b), which is only a distance
+    along the short axis: a 2mm offset of a 27x14 prism came out 3.9mm at the
+    ends. Now gradient-normalized, both axes get the wall that was asked."""
+    cav = lambda P: sq_prism(P, 27.25, 14.0, 5.5, -10, 10)
+    out = lambda P: offset_field(cav(P), 2.0)
+    for d in ((1, 0), (0, 1)):
+        w = _wall_along(cav, out, d)
+        assert abs(w - 2.0) < 0.05, (d, w)
+    peb = lambda P: superellipsoid(P, (0, 0, 0), (36, 20, 9.5), 3.0, 3.5)
+    shell = lambda P: offset_field(peb(P), 2.2)
+    for d in ((1, 0), (0, 1)):
+        w = _wall_along(peb, shell, d)
+        assert abs(w - 2.2) < 0.05, (d, w)
+    m = to_mesh(peb, (-38, -22, -11), (38, 22, 11), 0.8)
+    assert m.is_watertight
+
+
 TESTS = [
+    test_superellipse_offsets_give_uniform_walls,
     test_combinators_accept_field_functions,
     test_mesh_rod_cuts_an_exact_radial_hole,
     test_gyroid_thickness_is_real_mm,
