@@ -87,6 +87,8 @@ import {
 // Type-only: lib/cad/brief is server-only at runtime; the type is erased.
 import type { ViewerAnnotation } from "@/components/viewer/model-viewer";
 import { planComposerSubmit } from "@/components/cad/composer-submit";
+import { useEnginePreference } from "@/components/cad/engine-preference";
+import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { decodeSnapshotPoints } from "@/components/cad/snapshot-points";
 import { RESUME_STORAGE_KEY } from "@/components/cad/studio-resume";
 import {
@@ -96,6 +98,13 @@ import {
 import { useKeyboardStickyBottom } from "@/lib/hooks/use-keyboard-sticky-bottom";
 import { type CadRating } from "@/lib/cad/feedback";
 import { cn } from "@/lib/utils";
+// From engines/types, NOT the registry: the registry imports the system
+// prompts, which don't belong in the client bundle.
+import {
+  CAD_ENGINE_LABELS,
+  isCadEngineId,
+  type CadEngineId,
+} from "@/lib/cad/engines/types";
 
 // A few human-written example prompts for the empty state — plain strings that
 // prefill the composer (NOT exemplar template cards; MTR-208). Kept short and
@@ -177,6 +186,12 @@ export interface StudioTurn {
    * through.
    */
   parentGenerationId?: string | null;
+  /**
+   * Geometry engine this turn ran on (docs/text-to-cad/11). A thread runs on
+   * one engine: the root's. Revisions inherit it server-side. Absent =
+   * "brep".
+   */
+  engine?: CadEngineId;
   /**
    * Non-terminal cadJobs row still executing this (pending) generation —
    * server-derived, so a live build survives navigation/new tabs: the
@@ -385,6 +400,8 @@ type StoredJob = {
   prompt: string;
   parentId: string | null;
   rootId: string | null;
+  /** Engine the job runs on, stamped onto the turn its `done` creates. */
+  engine?: CadEngineId;
 };
 
 /** Read the persisted in-flight job, if any (no grace window — see above). */
@@ -408,6 +425,7 @@ function readStoredJob(): StoredJob | null {
       prompt: typeof job.prompt === "string" ? job.prompt : "",
       parentId: job.parentId ?? null,
       rootId: job.rootId ?? null,
+      engine: isCadEngineId(job.engine) ? job.engine : undefined,
     };
   } catch {
     return null;
@@ -456,12 +474,25 @@ export function TextToCadStudio({
   const [threads, setThreads] = useState<StudioThread[]>(initialThreads);
   // Cold visit → start a fresh build (blank canvas). Only resume the last
   // build if you were just here and came right back (see readRecentResume).
-  const [activeRootId, setActiveRootId] = useState<string | null>(
-    () => readRecentResume(initialThreads)?.rootId ?? null
-  );
-  const [viewTurnId, setViewTurnId] = useState<string | null>(
-    () => readRecentResume(initialThreads)?.viewTurnId ?? null
-  );
+  const [activeRootId, setActiveRootId] = useState<string | null>(null);
+  const [viewTurnId, setViewTurnId] = useState<string | null>(null);
+  // The resume slot lives in sessionStorage, so it can only be read once
+  // hydrated. It used to be read in the useState initializers above, which
+  // rendered "New Build" on the server and the resumed build on the client:
+  // a hydration failure on every quick return. Latched in render, once.
+  const hydrated = useHydrated();
+  const [resumeApplied, setResumeApplied] = useState(false);
+  if (hydrated && !resumeApplied) {
+    setResumeApplied(true);
+    const resume = readRecentResume(initialThreads);
+    // The mount effect that reattaches an in-flight job runs first (effects
+    // commit before this post-hydration render) and may already have picked
+    // the job's thread. That one is live, so it wins.
+    if (resume && activeRootId === null) {
+      setActiveRootId(resume.rootId ?? null);
+      setViewTurnId(resume.viewTurnId ?? null);
+    }
+  }
   const [prompt, setPrompt] = useState("");
   const [progress, setProgress] = useState<CadProgressEvent[]>([]);
   // Live cost meter (usage SSE frames, flushed mid-run by the executor):
@@ -606,6 +637,10 @@ export function TextToCadStudio({
   // cleared when the job reaches a terminal event or the user explicitly
   // abandons it — NOT on unmount, so a reload/return can reattach.
   const jobRef = useRef<StoredJob | null>(null);
+  // Engine for the NEXT fresh build (composer toggle), remembered across
+  // reloads. A thread's revisions ignore it and stay on the thread's own
+  // engine.
+  const [engineChoice, setEngineChoice] = useEnginePreference();
   // True while an SSE tail is actively streaming (set/cleared inside
   // streamJobEvents). The wake handler below reattaches a job whose tail
   // died while the tab was backgrounded (phone lock kills the socket and
@@ -642,6 +677,10 @@ export function TextToCadStudio({
   // when leaving — SPA nav (cleanup), full reload/close (pagehide), or tab hide
   // — so the grace window measures time-away, not time-since-last-click.
   useEffect(() => {
+    // Not before the resume slot has been read: on the hydration commit
+    // activeRootId is still null, and writing that would erase the very
+    // selection the post-hydration render is about to restore.
+    if (!resumeApplied) return;
     persistResume();
     const onHide = () => {
       if (document.visibilityState === "hidden") persistResume();
@@ -653,7 +692,7 @@ export function TextToCadStudio({
       document.removeEventListener("visibilitychange", onHide);
       persistResume();
     };
-  }, [activeRootId, viewTurnId, persistResume]);
+  }, [activeRootId, viewTurnId, persistResume, resumeApplied]);
 
   // Reattach on return: tail the events stream of any in-flight build —
   // replay + live tail means an already-finished job resolves instantly and
@@ -838,6 +877,8 @@ export function TextToCadStudio({
   // recomputes when the active thread's turns actually change.
   const turns = useMemo(() => activeThread?.turns ?? [], [activeThread]);
   const latestTurn = turns[turns.length - 1] ?? null;
+  // A thread runs on its root's engine (see StudioTurn.engine).
+  const threadEngine: CadEngineId = turns[0]?.engine ?? "brep";
 
   // The most recent successful turn — the thread's "latest" model, used as
   // the viewer fallback and as the solid side of the compare overlay.
@@ -1415,6 +1456,7 @@ export function TextToCadStudio({
       // paint (MTR-215).
       hasStep: ev.hasStep ?? false,
       parentGenerationId: parentId ?? null,
+      engine: jobRef.current?.engine,
     };
     const now = Date.now();
 
@@ -1679,6 +1721,11 @@ export function TextToCadStudio({
         body: JSON.stringify({
           prompt: sentPrompt,
           parentGenerationId: parentId,
+          // Only a fresh build names an engine, and only SDF. With no engine
+          // named, the router picks the path (scripted, agentic, generative);
+          // naming "brep" would pin it to the scripted loop. Revisions
+          // inherit the parent's engine server-side.
+          engine: !parentId && engineChoice === "sdf" ? "sdf" : undefined,
           // Revisions inherit the build's current name; new builds get an
           // agent-written one server-side.
           name: parentId && activeThread ? threadLabel(activeThread) : undefined,
@@ -1722,6 +1769,7 @@ export function TextToCadStudio({
         prompt: instruction,
         parentId: parentId ?? null,
         rootId: parentId ? activeRootId : generationId,
+        engine: parentId ? threadEngine : engineChoice,
       };
       persistResume();
 
@@ -3107,6 +3155,22 @@ export function TextToCadStudio({
                     )}
                   </button>
                 )}
+                {!activeThread ? (
+                  <EngineToggle
+                    value={engineChoice}
+                    onChange={setEngineChoice}
+                    disabled={generating}
+                  />
+                ) : threadEngine === "sdf" ? (
+                  // A thread can't change engine, so just say which one it
+                  // runs on. Only SDF gets a chip, since B-rep is the default.
+                  <span
+                    title={CAD_ENGINE_LABELS.sdf}
+                    className="ml-1 rounded-md bg-foreground/5 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground"
+                  >
+                    SDF
+                  </span>
+                ) : null}
               </div>
               <input
                 ref={fileInputRef}
@@ -3156,6 +3220,54 @@ export function TextToCadStudio({
           setFeedbackEditing(null);
         }}
       />
+    </div>
+  );
+}
+
+const ENGINE_OPTIONS: { id: CadEngineId; label: string }[] = [
+  { id: "brep", label: "B-rep" },
+  { id: "sdf", label: "SDF" },
+];
+
+/**
+ * Engine picker for a fresh build (docs/text-to-cad/11). This is the same
+ * choice the bake-off makes, except here the result is a normal thread: it
+ * gets saved, shows in Builds, and can be revised.
+ */
+function EngineToggle({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: CadEngineId;
+  onChange: (engine: CadEngineId) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Geometry engine"
+      className="ml-1 flex items-center rounded-lg bg-foreground/5 p-0.5"
+    >
+      {ENGINE_OPTIONS.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          role="radio"
+          aria-checked={value === o.id}
+          title={CAD_ENGINE_LABELS[o.id]}
+          disabled={disabled}
+          onClick={() => onChange(o.id)}
+          className={cn(
+            "cursor-pointer rounded-md px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-40",
+            value === o.id
+              ? "bg-background text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
     </div>
   );
 }
