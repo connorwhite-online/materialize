@@ -92,7 +92,12 @@ export const DEV_BOARDS: Record<string, ComponentSpec> = {
       },
     ],
     tallestAboveMm: 3.5,
-    pinsBelowMm: 3.0,
+    // Stock DevKitC boards ship with male headers soldered: the plastic
+    // spacer sits flush and the pins end ~8.5mm below the PCB. The old 3.0
+    // had no source (the drawing below covers the outline only) and read as
+    // bare solder tails, which told enclosures to seat the board ~5mm too
+    // low for a board with its headers on.
+    pinsBelowMm: 8.5,
     keepOuts: [
       {
         kind: "antenna",
@@ -105,7 +110,7 @@ export const DEV_BOARDS: Record<string, ComponentSpec> = {
       docRevision: "esp-idf v4.4 ESP32-DevKitC V4 getting-started dimensions figure (54.4 x 27.9)",
       dateChecked: "2026-07-05",
       verified: false,
-      note: "board outline verified from Espressif's own drawing; port position not stated there, so it stays approx",
+      note: "board outline verified from Espressif's own drawing; port position not stated there, so it stays approx. pinsBelowMm 8.5 (headers fitted) from https://electricalflux.com/mcu-general/esp32-dimensions-breadboard-enclosure-guide (third-party; matches standard 2.54mm male header geometry: 2.5mm spacer + ~6mm pin) — re-verify against Espressif's header spec",
     },
     note: "newer clones ship USB-C instead of micro-USB — worth a question when the variant is unknown",
   },

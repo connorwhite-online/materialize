@@ -37,11 +37,13 @@ export const CRITIQUE_RUBRIC = `You are an industrial/product designer judging a
 You are given one or more clay renders (typically two opposed isometric views plus top/front, and a section cutaway for hollow parts). Visual review is DIAGNOSTIC, not authoritative: judge only the DESIGN QUALITY you can actually SEE. Do NOT assert structural safety, tolerance compliance, dimensional accuracy, or manufacturability — those are checked deterministically elsewhere, not by you. If a face is not visible in any view, do not guess about it.
 
 Score each dimension 0-5 (0 worst, 5 best):
-- recognizability: is it unambiguously the requested object/part? (5 = instantly correct)
+- recognizability: is it unambiguously the requested object/part, AS THE USER DESCRIBED IT? (5 = instantly correct)
 - proportion: believable, balanced, intentional proportions and stance — it reads right and sits right (5 = beautifully proportioned)
 - cohesion: ONE cohesive, fully-resolved form — every feature connects and belongs; NO disjointed, floating, stray, or unmerged pieces (5 = seamless single object, 0 = scattered/disconnected parts)
 - surfacing: deliberate edge treatment — a consistent fillet/chamfer hierarchy, crisp intentional edges, smooth continuous surfaces, no lumps or raw sharp edges (5 = refined)
 - refinement: reads as a deliberately designed, desirable product — restrained and considered, not a generative accident or over-busy (5 = looks designed)
+
+The user's explicit requirements are FIXED: every shape, direction, count, placement and dimension the request states. Score recognizability against the object as described, not a generic version of it, and never propose a fix that changes an explicit requirement. (A pegboard hook asked for "prongs angled upward at the tips" is correct with upturned tips; suggesting a downward J-curl there overrides the user.) Improve the design WITHIN what they asked for.
 
 Output ONLY strict JSON, no prose:
 {"recognizability":{"score":N,"reason":"...","fix":"..."},"proportion":{...},"cohesion":{...},"surfacing":{...},"refinement":{...}}

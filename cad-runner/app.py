@@ -958,28 +958,7 @@ def _process_shape(
             # threeQuarter view for compatibility. All views draw the RENDER
             # PROXY — a large TPMS mesh at full resolution costs matplotlib
             # minutes per view and was the wall-clock hog on 150mm exchangers.
-            draw = _render_proxy(mesh)
-            renders: dict = {}
-            for view, (elev, azim) in _VIEW_ANGLES.items():
-                figsize = _FULL_FIGSIZE if view == "threeQuarter" else _SMALL_FIGSIZE
-                png = _render(draw, elev=elev, azim=azim, figsize=figsize)
-                if png:
-                    renders[view] = png
-            # Section cutaway for hollow parts (MTR-199): a mid-plane slice
-            # reveals bores / channels / shell interiors that no exterior view
-            # can show. Gated on a cheap fill-ratio heuristic so solid parts
-            # don't get a pointless (and misleading) empty section. Sliced on
-            # the proxy too — pixels only.
-            try:
-                ex = mesh.extents
-                bbox_vol = float(ex[0]) * float(ex[1]) * float(ex[2])
-                fill = float(mesh.volume) / bbox_vol if bbox_vol > 0 else 1.0
-                if fill < _SECTION_FILL_RATIO:
-                    section = _render_section(draw)
-                    if section:
-                        renders["section"] = section
-            except Exception:  # noqa: BLE001
-                pass
+            renders = _multi_view_renders(mesh)
             entry["renders"] = renders
             entry["renderPng"] = renders.get("threeQuarter")
         else:
@@ -1186,6 +1165,26 @@ def _run_checks(mesh, checks: dict) -> dict:
     return out
 
 
+def _describe_exec_error(err: BaseException) -> str:
+    """The error string a failed script reports back to the repair loop.
+
+    `str(err)` alone is empty for a bare `assert`, `MemoryError()` or any
+    exception raised without a message. The run then reached the model as
+    "did not compile/run" with nothing to act on, and the repair turn was
+    spent guessing. Always name the exception, and add the generated script's
+    line number where the traceback has one.
+    """
+    import traceback
+
+    msg = str(err).strip()
+    text = f"{type(err).__name__}: {msg}" if msg else f"{type(err).__name__} (raised with no message)"
+    line = None
+    for frame in traceback.extract_tb(err.__traceback__):
+        if frame.filename in ("<generated>", "<session>"):
+            line = frame.lineno
+    return f"{text} (script line {line})" if line else text
+
+
 def _base_payload(compiled: bool = False) -> dict:
     return {
         "ok": False,
@@ -1335,6 +1334,34 @@ def _promote_disconnected_bodies(mesh):
     return _name_parts_by_z(large)
 
 
+def _multi_view_renders(mesh) -> dict:
+    """Every named view of `mesh`, plus a section cutaway when it's hollow.
+    Shared by single parts and assembled assemblies."""
+    draw = _render_proxy(mesh)
+    renders: dict = {}
+    for view, (elev, azim) in _VIEW_ANGLES.items():
+        figsize = _FULL_FIGSIZE if view == "threeQuarter" else _SMALL_FIGSIZE
+        png = _render(draw, elev=elev, azim=azim, figsize=figsize)
+        if png:
+            renders[view] = png
+    # Section cutaway for hollow parts (MTR-199): a mid-plane slice
+    # reveals bores / channels / shell interiors that no exterior view
+    # can show. Gated on a cheap fill-ratio heuristic so solid parts
+    # don't get a pointless (and misleading) empty section. Sliced on
+    # the proxy too — pixels only.
+    try:
+        ex = mesh.extents
+        bbox_vol = float(ex[0]) * float(ex[1]) * float(ex[2])
+        fill = float(mesh.volume) / bbox_vol if bbox_vol > 0 else 1.0
+        if fill < _SECTION_FILL_RATIO:
+            section = _render_section(draw)
+            if section:
+                renders["section"] = section
+    except Exception:  # noqa: BLE001
+        pass
+    return renders
+
+
 def _assemble_parts_payload(
     payload: dict,
     items: list,
@@ -1351,24 +1378,67 @@ def _assemble_parts_payload(
     The multi-view/topo consumers work on the top-level single result."""
     part_formats = [f for f in formats if f != "topo"]
     parts: list[dict] = []
+    meshes = []
+    named_meshes: list = []
     all_ok = True
     for i, (name, shape) in enumerate(items):
         stem = "".join(
             c if c.isalnum() else "-" for c in str(name)
         ).strip("-") or f"part{i}"
-        entry, _mesh = _process_shape(
+        entry, part_mesh = _process_shape(
             shape, part_formats, tmp, stem, engine, allow_remesh
         )
+        if part_mesh is not None:
+            meshes.append(part_mesh)
+            named_meshes.append((str(name), part_mesh))
         parts.append({"name": str(name), **entry})
         all_ok = all_ok and (
             entry["validation"]["isSolid"]
             and entry["validation"]["isWatertight"]
             and entry["validation"].get("bodyCount", 1) == 1
         )
-    # Top-level mirrors the first part for single-part consumers.
+    # Say WHICH part failed and why. The aggregate validation below has no
+    # bodyCount, so a part with two disconnected bodies (a standoff floating
+    # clear of its shell) made the run not-ok while every flag the caller
+    # grades on read true and no error was set. The repair turn then got an
+    # empty failure reason (local ESP32 enclosure run, 2026-09-23).
+    problems = []
+    for part in parts:
+        v = part["validation"]
+        why = []
+        if not v.get("isSolid"):
+            why.append("not a solid")
+        if not v.get("isWatertight"):
+            why.append("not watertight")
+        if v.get("bodyCount", 1) != 1:
+            why.append(
+                f"{v.get('bodyCount')} disconnected bodies (every part must "
+                "be one fused solid: union anything floating into the body)"
+            )
+        if part.get("error") and not why:
+            why.append(str(part["error"]))
+        if why:
+            problems.append(f"part '{part['name']}': " + ", ".join(why))
+    if problems and not payload.get("error"):
+        payload["error"] = "; ".join(problems)
+    # Top-level mirrors the first part for single-part consumers, EXCEPT the
+    # renders: those show the assembled product. Mirroring part 1 meant the
+    # aesthetic judge, the studio preview and the repair turn only ever saw
+    # one half. A two-piece ESP32 case was scored as "a shallow soap dish"
+    # because the judge was looking at the bottom tray with no lid on it.
     first = parts[0]
     payload["files"] = first["files"]
     payload["renderPng"] = first["renderPng"]
+    if len(meshes) > 1:
+        try:
+            import trimesh
+
+            assembled = _multi_view_renders(trimesh.util.concatenate(meshes))
+            if assembled.get("threeQuarter"):
+                payload["renders"] = assembled
+                payload["renderPng"] = assembled["threeQuarter"]
+        except Exception:  # noqa: BLE001 — fall back to part 1's render
+            pass
     payload["geometry"] = first["geometry"]
     # Aggregate validity = AND across parts.
     payload["validation"] = {
@@ -1395,6 +1465,63 @@ def _assemble_parts_payload(
     except Exception:  # noqa: BLE001
         pass
     payload["ok"] = all_ok
+    return named_meshes
+
+
+def _run_assembly_checks(named_meshes: list, checks: dict) -> dict:
+    """Checks for a multi-part build. These never ran for assemblies: only
+    the single-part path called _run_checks, so every two-piece enclosure
+    shipped without printability or component-fit verification.
+
+    DFM runs per PART, because each part prints on its own and an assembled
+    enclosure is a sealed void by design (the trapped-void probe would fail
+    every one). The per-part reports merge to the worst case in the
+    single-part shape, with the breakdown under `parts`. Fit and fluid
+    networks describe the assembled product, so they run on the union.
+    """
+    import trimesh
+
+    out: dict = {}
+    rest = {k: v for k, v in checks.items() if k != "dfm"}
+    if rest and named_meshes:
+        out = _run_checks(
+            trimesh.util.concatenate([m for _, m in named_meshes]), rest
+        )
+    dfm_spec = checks.get("dfm")
+    if dfm_spec is not None:
+        try:
+            from dfm import check_dfm
+
+            spec = dfm_spec if isinstance(dfm_spec, dict) else {}
+            per = {
+                name: _plain(check_dfm(m, spec)) for name, m in named_meshes
+            }
+            reps = list(per.values())
+
+            def all_true(key):
+                vals = [r.get(key) for r in reps]
+                if any(v is False for v in vals):
+                    return False
+                return None if any(v is None for v in vals) else True
+
+            walls = [r["minWallMm"] for r in reps if r.get("minWallMm") is not None]
+            over = [r.get("overhangAreaMm2") or 0.0 for r in reps]
+            fracs = [r["overhangFraction"] for r in reps if r.get("overhangFraction") is not None]
+            out["dfm"] = {
+                "ok": all(r.get("ok") is True for r in reps) if reps else False,
+                "probesRan": all(r.get("probesRan") for r in reps) if reps else False,
+                "watertight": all(r.get("watertight") for r in reps) if reps else False,
+                "minWallOk": all_true("minWallOk"),
+                "drainsOk": all_true("drainsOk"),
+                "minWallMm": min(walls) if walls else None,
+                "overhangAreaMm2": round(sum(over), 3),
+                "overhangFraction": max(fracs) if fracs else None,
+                "trappedVoidCount": sum(r.get("trappedVoidCount") or 0 for r in reps),
+                "parts": per,
+            }
+        except Exception as err:  # noqa: BLE001
+            out["dfm"] = {"error": str(err)}
+    return out
 
 
 def _build_run_payload(
@@ -1456,19 +1583,23 @@ def _build_run_payload(
         # `parts = {...}`. Taking `result` first used to discard a correct
         # split and leave a stacked compound in the preview.
         if isinstance(parts_ns, dict) and parts_ns:
-            _assemble_parts_payload(
+            named = _assemble_parts_payload(
                 payload, list(parts_ns.items()), formats, tmp, engine,
                 allow_remesh,
             )
+            if checks:
+                payload["checks"] = _run_assembly_checks(named, checks)
         elif single is not None:
             # B-rep multi-solid compound → promote BEFORE mesh export so each
             # part keeps editable STEP (mesh promotion can only ship STL).
             brep_parts = _explode_brep_solids(single, engine)
             if brep_parts is not None:
-                _assemble_parts_payload(
+                named = _assemble_parts_payload(
                     payload, brep_parts, formats, tmp, engine, allow_remesh
                 )
                 payload["promotedFromSingle"] = True
+                if checks:
+                    payload["checks"] = _run_assembly_checks(named, checks)
             else:
                 entry, mesh = _process_shape(
                     single, formats, tmp, "model", engine, allow_remesh,
@@ -1485,13 +1616,14 @@ def _build_run_payload(
                 ):
                     promoted = _promote_disconnected_bodies(mesh)
                 if promoted is not None:
-                    _assemble_parts_payload(
+                    named = _assemble_parts_payload(
                         payload, promoted, formats, tmp, engine, allow_remesh
                     )
                     payload["promotedFromSingle"] = True
-                    # Fit/network checks reference the whole enclosure.
-                    if checks and mesh is not None:
-                        payload["checks"] = _run_checks(mesh, checks)
+                    # Fit/network checks on the whole enclosure, DFM per
+                    # printed part (see _run_assembly_checks).
+                    if checks:
+                        payload["checks"] = _run_assembly_checks(named, checks)
                 else:
                     payload["files"] = entry["files"]
                     payload["renderPng"] = entry["renderPng"]
@@ -1592,7 +1724,7 @@ def _execute(
         payload = _build_run_payload(ns, formats, engine, allow_remesh, checks)
         out.put(payload)
     except Exception as err:  # noqa: BLE001
-        payload["error"] = str(err)
+        payload["error"] = _describe_exec_error(err)
         out.put(payload)
 
 
@@ -1816,7 +1948,7 @@ def _session_exec_reply(
             exec(compile(msg["code"], "<session>", "exec"), ns, ns)  # noqa: S102
     except Exception as err:  # noqa: BLE001
         reply = _base_payload()
-        reply["error"] = str(err)
+        reply["error"] = _describe_exec_error(err)
         reply["stdout"] = buf.getvalue()
         reply["namespace"] = _session_namespace_summary(ns)
         return reply

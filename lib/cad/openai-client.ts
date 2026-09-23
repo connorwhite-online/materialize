@@ -5,6 +5,8 @@ import OpenAI from "openai";
 import { openaiApiKey } from "./provider";
 import type { PromptImage } from "./types";
 import { openaiParamsForRole, type CadRole } from "./models";
+import type { CadEffort } from "./budget";
+import { CadOutputTruncatedError } from "./types";
 
 /**
  * OpenAI call path for the CAD harness — the twin of model-client's Anthropic
@@ -172,6 +174,18 @@ function assertComplete(
   if (refusal) {
     throw new Error(`OpenAI refused the ${role} request: ${refusal}`);
   }
+  if (
+    response.status === "incomplete" &&
+    response.incomplete_details?.reason === "max_output_tokens"
+  ) {
+    // Same failure as the Anthropic transport's max_tokens stop, and the
+    // harness recovers from both the same way (shorter program, lower effort).
+    // Actual usage, not a constant: the tool loop runs on a different cap.
+    throw new CadOutputTruncatedError(
+      role,
+      response.usage?.output_tokens ?? MAX_OUTPUT_TOKENS
+    );
+  }
   if (response.status && response.status !== "completed") {
     const reason =
       response.incomplete_details?.reason ??
@@ -200,8 +214,10 @@ export async function completeTextOpenAI(opts: {
   images?: PromptImage[];
   documents?: { data: string }[];
   signal?: AbortSignal;
+  /** See CompleteTextOptions.effortCap. */
+  effortCap?: CadEffort;
 }): Promise<OpenAiCompletion> {
-  const params = openaiParamsForRole(opts.role);
+  const params = openaiParamsForRole(opts.role, opts.effortCap);
   // Streamed, then collected — the same reason the Anthropic agentic path
   // streams: a high-effort reasoning turn can think for minutes before
   // emitting its first visible token, which is exactly the shape that trips a

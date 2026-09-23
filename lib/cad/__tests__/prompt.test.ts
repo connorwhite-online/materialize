@@ -129,3 +129,39 @@ describe("gradeRun", () => {
     expect(g.failures).toContain("dimensions off target");
   });
 });
+
+describe("gradeRun never fails silently", () => {
+  const good = { compiled: true, isSolid: true, isWatertight: true, isManifold: true };
+
+  it("names a failing assembly part when the top-level flags all pass", () => {
+    const g = gradeRun({
+      ok: false,
+      files: {},
+      validation: good,
+      parts: [
+        { name: "shell_top", files: {}, validation: good },
+        { name: "shell_bottom", files: {}, validation: { ...good, bodyCount: 3 } },
+      ],
+    });
+    expect(g.pass).toBe(false);
+    expect(g.failures).toEqual(["part 'shell_bottom': 3 disconnected bodies"]);
+  });
+
+  it("still gives a reason when nothing more specific is known", () => {
+    const g = gradeRun({ ok: false, files: {}, validation: good });
+    expect(g.failures.length).toBeGreaterThan(0);
+  });
+});
+
+describe("extractCode normalizes typography Python rejects", () => {
+  it("turns a Unicode minus into ASCII so the program runs", () => {
+    const code = extractCode("```python\nx = \u22123.5\ny = a \u00D7 b\n```");
+    expect(code).toBe("x = -3.5\ny = a * b");
+  });
+
+  it("leaves plain ASCII untouched", () => {
+    expect(extractCode("```python\nresult = offset_field(f, -2)\n```")).toBe(
+      "result = offset_field(f, -2)"
+    );
+  });
+});

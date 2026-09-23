@@ -191,6 +191,19 @@ def delete_session(sid):
 
 
 # ---- tests ---------------------------------------------------------------
+def test_run_messageless_exception_is_named():
+    """A bare `assert` or MemoryError() has an empty str(). Before the fix,
+    the run came back as compiled:false with no error at all, and the repair
+    turn got "did not compile/run" and nothing else (prod SDF job,
+    2026-09-23). The exception type and script line must always come back."""
+    p = run("import numpy as np\n\nassert False\n")
+    assert p["ok"] is False
+    assert p["validation"]["compiled"] is False
+    err = p.get("error") or ""
+    assert "AssertionError" in err, err
+    assert "script line 3" in err, err
+
+
 def test_run_mesh_sphere_multiview():
     """A watertight mesh-mode sphere: ok, 4 named renders, and renderPng
     stays the threeQuarter view (docs 07 §A compatibility)."""
@@ -449,6 +462,62 @@ def test_run_debris_still_fails_fragment_gate():
     assert "disconnected solids" in (p.get("error") or ""), p.get("error")
 
 
+PARTS_WITH_FLOATING_BODY_SCRIPT = """
+import trimesh
+shell = trimesh.creation.box(extents=[40, 30, 10])
+# A standoff that never touches the shell: two bodies in one part.
+standoff = trimesh.creation.cylinder(radius=2, height=5)
+standoff.apply_translation([0, 0, 20])
+lid = trimesh.creation.box(extents=[40, 30, 2])
+lid.apply_translation([0, 0, 40])
+parts = {"base": trimesh.util.concatenate([shell, standoff]), "lid": lid}
+"""
+
+
+def test_run_names_the_assembly_part_that_failed():
+    """An assembly part with two disconnected bodies used to fail the run
+    with every aggregate flag true and NO error, so the repair turn got an
+    empty reason. The error must name the part and what is wrong with it."""
+    p = run(PARTS_WITH_FLOATING_BODY_SCRIPT)
+    assert p["ok"] is False
+    err = p.get("error") or ""
+    assert "part 'base'" in err and "disconnected" in err, err
+    assert "part 'lid'" not in err, err
+
+
+def test_run_assembly_renders_the_assembled_product():
+    """The top-level render of an assembly used to be part 1's render, so the
+    judge and the preview saw half the product. It must show every part, and
+    carry the full view set (not just threeQuarter)."""
+    p = run(PARTS_AND_RESULT_SCRIPT)
+    assert p["ok"] is True, p.get("error")
+    parts = p.get("parts") or []
+    assert len(parts) == 2
+    renders = p.get("renders") or {}
+    for view in VIEWS:
+        assert renders.get(view), f"missing assembled render {view}"
+    assert p["renderPng"] == renders["threeQuarter"]
+    assert p["renderPng"] != parts[0]["renderPng"], "still mirroring part 1"
+
+
+def test_run_assembly_runs_checks_per_part():
+    """Assemblies used to skip every requested check. DFM must run per part
+    (an assembled enclosure is a sealed void by design) and merge to the
+    worst case in the single-part shape."""
+    body = {"code": PARTS_AND_RESULT_SCRIPT, "formats": ["stl"],
+            "engine": "mesh", "checks": {"dfm": {}}}
+    r = client.post("/run", json=body)
+    assert r.status_code == 200, r.text[:300]
+    p = r.json()
+    dfm = (p.get("checks") or {}).get("dfm")
+    assert dfm is not None, "assembly skipped the DFM check"
+    assert "error" not in dfm, dfm
+    assert set(dfm["parts"]) == {"housing", "cover"}, dfm.get("parts")
+    assert dfm["probesRan"] is True, dfm
+    assert dfm["trappedVoidCount"] == 0, dfm
+    assert dfm["ok"] == all(x["ok"] for x in dfm["parts"].values())
+
+
 def test_run_prefers_parts_dict_over_result_compound():
     """When both `result` and `parts` are assigned, the explicit parts dict
     wins — including the author's names — instead of promoting/failing the
@@ -570,6 +639,10 @@ def test_session_exec_timeout_kills_session():
 
 
 TESTS = [
+    test_run_assembly_runs_checks_per_part,
+    test_run_assembly_renders_the_assembled_product,
+    test_run_names_the_assembly_part_that_failed,
+    test_run_messageless_exception_is_named,
     test_run_mesh_sphere_multiview,
     test_run_opposed_iso_coverage_guarantee,
     test_run_hollow_part_gets_section,

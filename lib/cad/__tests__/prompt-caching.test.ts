@@ -55,6 +55,7 @@ vi.mock("@/lib/cad/step-parts", () => ({
 }));
 
 import { completeText } from "@/lib/cad/model-client";
+import { CadOutputTruncatedError } from "@/lib/cad/types";
 import { runAgenticHarness } from "@/lib/cad/agentic";
 import { CadMeter, runWithCadContext } from "@/lib/cad/metering";
 
@@ -246,5 +247,61 @@ describe("reasoning params reach the request", () => {
     expect(body.model).toBe("claude-opus-5");
     expect(body.thinking).toEqual({ type: "adaptive" });
     expect(body.output_config).toEqual({ effort: "xhigh" });
+  });
+});
+
+// Local SDF build, 2026-09-23: the implement call stopped at exactly the
+// output cap, and the partial program went to the sidecar as if complete.
+describe("completeText output truncation", () => {
+  it("throws CadOutputTruncatedError instead of returning a cut-off program", async () => {
+    createMock.mockResolvedValueOnce({
+      ...textTurn("```python\nfrom sdf_kit import *\nr = 15"),
+      stop_reason: "max_tokens",
+      usage: { input_tokens: 100, output_tokens: 32_000 } as Anthropic.Usage,
+    });
+
+    await expect(
+      completeText({ system: "SYS", prompt: "a knob", role: "implement" })
+    ).rejects.toBeInstanceOf(CadOutputTruncatedError);
+  });
+
+  it("still meters the tokens a truncated call spent", async () => {
+    createMock.mockResolvedValueOnce({
+      ...textTurn("partial"),
+      stop_reason: "max_tokens",
+      usage: { input_tokens: 100, output_tokens: 32_000 } as Anthropic.Usage,
+    });
+    const meter = new CadMeter();
+    await runWithCadContext({ meter }, () =>
+      completeText({ system: "SYS", prompt: "a knob", role: "implement" })
+    ).catch(() => {});
+    expect(meter.summarize().model[0]).toMatchObject({
+      role: "implement",
+      outputTokens: 32_000,
+    });
+  });
+});
+
+describe("usage records carry the effort a call ran at", () => {
+  it("records the capped effort, not just the model", async () => {
+    createMock.mockResolvedValueOnce(textTurn("```python\nresult = 1\n```"));
+    const meter = new CadMeter();
+    await runWithCadContext({ meter }, () =>
+      completeText({
+        system: "SYS",
+        prompt: "a knob",
+        role: "implement",
+        effortCap: "medium",
+      })
+    );
+    // Whatever the role's default, the cap is what ran, and the job record
+    // has to be able to say so.
+    expect(meter.summarize().model[0]).toMatchObject({
+      role: "implement",
+      effort: "medium",
+    });
+    expect(createMock.mock.calls[0][0].output_config).toEqual({
+      effort: "medium",
+    });
   });
 });

@@ -196,6 +196,24 @@ function effortForRole(role: CadRole): CadEffort {
   return EFFORTS.indexOf(base) <= EFFORTS.indexOf(cap) ? base : cap;
 }
 
+/** `effort`, lowered to `cap` when a cap is given and is lower. */
+function clampEffort(effort: CadEffort, cap?: CadEffort): CadEffort {
+  if (!cap) return effort;
+  return EFFORTS.indexOf(effort) <= EFFORTS.indexOf(cap) ? effort : cap;
+}
+
+/**
+ * One level below the effort `role` would run at under `cap` ("low" stays
+ * "low"). The harness uses this after a response is cut off at the output
+ * limit. The thinking that filled the budget is set by effort, so telling the
+ * model to "think less" in the repair note does nothing unless the effort
+ * setting comes down with it.
+ */
+export function stepDownEffort(role: CadRole, cap?: CadEffort): CadEffort {
+  const current = clampEffort(effortForRole(role), cap);
+  return EFFORTS[Math.max(0, EFFORTS.indexOf(current) - 1)];
+}
+
 /** Request params for a role: the model plus the knobs it actually supports. */
 export interface CadModelParams {
   model: string;
@@ -213,12 +231,15 @@ export interface CadModelParams {
  * snapshot suffix — gets neither knob, so an unknown override degrades to
  * today's behavior instead of erroring.
  */
-export function modelParamsForRole(role: CadRole): CadModelParams {
+export function modelParamsForRole(
+  role: CadRole,
+  effortCap?: CadEffort
+): CadModelParams {
   const model = modelForRole(role);
   const params: CadModelParams = { model };
   if (ADAPTIVE_THINKING.test(model)) params.thinking = { type: "adaptive" };
   if (SUPPORTS_EFFORT.test(model)) {
-    const effort = effortForRole(role);
+    const effort = clampEffort(effortForRole(role), effortCap);
     params.output_config = {
       effort:
         effort === "xhigh" && !SUPPORTS_XHIGH.test(model) ? "high" : effort,
@@ -239,11 +260,14 @@ export interface OpenAiModelParams {
  * accepts. `thinking` has no counterpart — a reasoning model on the Responses
  * API always reasons, and effort is how much.
  */
-export function openaiParamsForRole(role: CadRole): OpenAiModelParams {
+export function openaiParamsForRole(
+  role: CadRole,
+  effortCap?: CadEffort
+): OpenAiModelParams {
   const model = modelForRole(role);
   const params: OpenAiModelParams = { model };
   if (OPENAI_REASONING.test(model) && !OPENAI_CHAT_TUNED.test(model)) {
-    const effort = effortForRole(role);
+    const effort = clampEffort(effortForRole(role), effortCap);
     const top = OPENAI_TOP_EFFORT.test(model);
     params.reasoning = {
       effort: !top && (effort === "xhigh" || effort === "max") ? "high" : effort,

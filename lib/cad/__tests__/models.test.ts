@@ -6,6 +6,7 @@ import {
   openaiParamsForRole,
   planStepEnabled,
   providerForRole,
+  stepDownEffort,
 } from "@/lib/cad/models";
 
 const ENV_KEYS = [
@@ -219,5 +220,19 @@ describe("openaiParamsForRole", () => {
     expect(openaiParamsForRole("implement")).toEqual({
       model: "gpt-5-chat-latest",
     });
+  });
+});
+
+describe("stepDownEffort / effort caps", () => {
+  it("steps one level below the role's effort", () => {
+    // implement/repair default to xhigh.
+    expect(stepDownEffort("repair")).toBe("high");
+    expect(stepDownEffort("repair", "high")).toBe("medium");
+    expect(stepDownEffort("repair", "low")).toBe("low");
+  });
+
+  it("a cap only ever lowers effort", () => {
+    // title defaults to low; a higher cap must not raise it.
+    expect(modelParamsForRole("title", "max").output_config?.effort ?? "low").toBe("low");
   });
 });

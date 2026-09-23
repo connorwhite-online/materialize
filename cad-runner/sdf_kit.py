@@ -32,6 +32,8 @@ one-word edit.
 
 Importable by sidecar-exec'd model code: `from sdf_kit import *`.
 """
+import functools
+
 import numpy as np
 from scipy import ndimage
 from skimage import measure
@@ -39,36 +41,71 @@ import trimesh
 
 __all__ = [
     "smin", "smax", "subtract", "union", "intersect",
-    "sphere", "box", "capsule", "cyl_z", "sq_prism",
+    "sphere", "box", "capsule", "tapered_capsule", "spline_tube", "cyl_z",
+    "sq_prism",
+    "superellipsoid",
     "gyroid", "schwarz_p", "diamond",
     "tpms_dist", "seal_ramp", "dual_sheet",
     "mask", "shell_field", "offset_field",
     "translate", "rotate_z",
     "from_mesh", "to_mesh", "split_shell",
     "mesh_union", "mesh_subtract", "mesh_intersect", "mesh_cyl", "mesh_box",
+    "mesh_rod",
 ]
 
 
 # ---- combinators -----------------------------------------------------------
+
+def _lift(fn):
+    """Let a combinator take field FUNCTIONS as well as evaluated arrays.
+
+    The combinators and field operators work on evaluated distances
+    (`offset_field(sphere(P, c, r), 2)`), while `to_mesh`, `from_mesh` and
+    `split_shell` deal in callables `f(P)`. Generated code mixes the two up
+    constantly, since the prompt calls the field `f`: passing `f` itself made
+    `offset_field` compute `f - d` and fail with "unsupported operand type(s)
+    for -: 'function' and 'float'" (local SDF run, 2026-09-23). Now, if any
+    argument is callable, the result is a callable that evaluates every
+    callable argument at P first. Arrays go through unchanged, so existing
+    code is unaffected.
+    """
+    @functools.wraps(fn)
+    def lifted(*args, **kwargs):
+        if not any(callable(a) for a in args):
+            return fn(*args, **kwargs)
+
+        def field(P):
+            return fn(*(a(P) if callable(a) else a for a in args), **kwargs)
+
+        return field
+
+    return lifted
+
+
+@_lift
 def smin(a, b, k):
     """Smooth union (the organic-blend workhorse). k = blend radius in mm."""
     h = np.clip(0.5 + 0.5 * (b - a) / k, 0.0, 1.0)
     return b * (1 - h) + a * h - k * h * (1 - h)
 
 
+@_lift
 def smax(a, b, k):
     """Smooth intersection."""
     return -smin(-a, -b, k)
 
 
+@_lift
 def union(a, b):
     return np.minimum(a, b)
 
 
+@_lift
 def intersect(a, b):
     return np.maximum(a, b)
 
 
+@_lift
 def subtract(d, hole):
     """Cut `hole` out of `d` (hard edge — use for exact bores/pockets)."""
     return np.maximum(d, -hole)
@@ -95,6 +132,95 @@ def capsule(P, a, b, r):
     return np.linalg.norm(P - (a + t * ab), axis=1) - r
 
 
+def _gradient_normalized(F, P, h):
+    """Turn an implicit function F (level 0 = surface, negative inside) into
+    an approximate distance in real mm: F / |grad F|, gradient by central
+    differences. Exact to first order near the surface, which is where
+    offsets and shells are measured. Sign is always exact."""
+    g = np.zeros((len(P), 3))
+    for k in range(3):
+        e = np.zeros(3)
+        e[k] = h
+        g[:, k] = (F(P + e) - F(P - e)) / (2.0 * h)
+    grad = np.linalg.norm(g, axis=1)
+    return F(P) / np.maximum(grad, 1e-9)
+
+
+def _superellipse_r(x, y, a, b, n):
+    return (np.abs(x / a) ** n + np.abs(y / b) ** n) ** (1.0 / n)
+
+
+def tapered_capsule(P, a, b, ra, rb):
+    """A capsule whose radius runs from `ra` at point a to `rb` at point b:
+    the organic strut. Chain several (sharing endpoints, radii matching at
+    each joint) and smin them with a small k for a prong, handle or limb that
+    tapers along a curved spine, a "spline sweep" without a kernel. Exact
+    distance (the round-cone SDF), so offsets and shells stay even."""
+    a = np.asarray(a, float)
+    b = np.asarray(b, float)
+    ba = b - a
+    l2 = float(ba @ ba)
+    rr = ra - rb
+    a2 = l2 - rr * rr
+    il2 = 1.0 / l2
+    pa = P - a
+    y = pa @ ba
+    z = y - l2
+    x = pa * l2 - y[:, None] * ba
+    x2 = np.einsum("ij,ij->i", x, x)
+    y2 = y * y * l2
+    z2 = z * z * l2
+    k = np.sign(rr) * rr * rr * x2
+    d = np.empty(len(P))
+    m_b = np.sign(z) * a2 * z2 > k
+    m_a = np.sign(y) * a2 * y2 < k
+    d[m_b] = np.sqrt(x2[m_b] + z2[m_b]) * il2 - rb
+    d[m_a & ~m_b] = np.sqrt(x2[m_a & ~m_b] + y2[m_a & ~m_b]) * il2 - ra
+    rest = ~(m_a | m_b)
+    d[rest] = (np.sqrt(x2[rest] * a2 * il2) + y[rest] * rr) * il2 - ra
+    return d
+
+
+def _catmull_rom(points, samples):
+    """Centripetal-free uniform Catmull-Rom through `points` (ends clamped),
+    returning `samples` points per span plus the last point, and the span
+    parameter of each (for interpolating radii the same way)."""
+    pts = np.asarray(points, float)
+    ext = np.vstack([pts[0], pts, pts[-1]])
+    out, ts = [], []
+    for i in range(len(pts) - 1):
+        p0, p1, p2, p3 = ext[i], ext[i + 1], ext[i + 2], ext[i + 3]
+        for t in np.linspace(0.0, 1.0, samples, endpoint=False):
+            t2, t3 = t * t, t * t * t
+            out.append(0.5 * ((2 * p1) + (-p0 + p2) * t
+                              + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2
+                              + (-p0 + 3 * p1 - 3 * p2 + p3) * t3))
+            ts.append(i + t)
+    out.append(pts[-1])
+    ts.append(float(len(pts) - 1))
+    return np.array(out), np.array(ts)
+
+
+def spline_tube(P, points, radii, samples=12):
+    """A tube swept along a smooth spline through `points`, radius running
+    through `radii` (one per point): a prong, handle, limb or cable guide
+    that flows without kinks. A hand-built chain of straight segments shows
+    an elbow at every control point; this samples a Catmull-Rom curve
+    finely and joins the pieces with union (not smin, which would bead
+    them). Radii are interpolated along the same curve."""
+    pts = np.asarray(points, float)
+    rs = np.asarray(radii, float)
+    if len(pts) != len(rs) or len(pts) < 2:
+        raise ValueError("spline_tube needs >= 2 points and one radius per point")
+    curve, t = _catmull_rom(pts, samples)
+    rad, _ = _catmull_rom(np.c_[rs, np.zeros((len(rs), 2))], samples)
+    r = np.maximum(rad[:, 0], 1e-3)
+    d = tapered_capsule(P, curve[0], curve[1], r[0], r[1])
+    for i in range(1, len(curve) - 1):
+        d = np.minimum(d, tapered_capsule(P, curve[i], curve[i + 1], r[i], r[i + 1]))
+    return d
+
+
 def sq_prism(P, a, b, n, z0, z1):
     """Superellipse prism (|x/a|^n + |y/b|^n = 1 cross-section, z-extruded) —
     the measured plan-form language of premium enclosures (see
@@ -102,11 +228,39 @@ def sq_prism(P, a, b, n, z0, z1):
     squircle desk device, n~1.7-2.2 as a handheld lens/pebble. Use this for
     organic product shells INSTEAD of a box with corner fillets — a
     superellipse has no straight-to-arc tangency breaks, which is what makes
-    the form read as designed. Pseudo-distance (monotone, ~mm near the
-    surface); pair with offset_field for uniform thin walls."""
-    r = (np.abs(P[:, 0] / a) ** n + np.abs(P[:, 1] / b) ** n) ** (1.0 / n)
-    d2 = (r - 1.0) * min(a, b)
+    the form read as designed.
+
+    Distance in real mm near the surface (gradient-normalized), so
+    offset_field and shell_field give UNIFORM walls. It used to be the
+    normalized radius scaled by min(a, b), which is only a distance along the
+    short axis: a 2mm offset of a 27x14 prism came out 3.9mm thick at the
+    ends. Every enclosure built this way had walls nearly twice as thick at
+    the ends as at the sides."""
+    h = 1e-3 * min(a, b)
+    d2 = _gradient_normalized(
+        lambda Q: _superellipse_r(Q[:, 0], Q[:, 1], a, b, n) - 1.0, P, h
+    )
     return np.maximum(d2, np.maximum(P[:, 2] - z1, z0 - P[:, 2]))
+
+
+def superellipsoid(P, center, radii, n=3.0, m=3.5):
+    """A pebble: superellipse plan (exponent n, like sq_prism) with a rounded
+    vertical profile (exponent m). n~2.5-3 plan and m~3-3.5 profile read as
+    a soft river stone; m=2 is an ellipsoid, and m>=5 gives slab sides.
+    Distance in real mm near the surface, so offset_field / shell_field give
+    an even wall: the drape-and-split enclosure recipe with an organic
+    cavity instead of a squircle box.
+
+    Flatten the base with smax(..., z0 - P[:, 2], k) for a stable footprint."""
+    c = np.asarray(center, float)
+    a, b, cz = (float(v) for v in radii)
+
+    def F(Q):
+        q = Q - c
+        rp = _superellipse_r(q[:, 0], q[:, 1], a, b, n)
+        return (rp ** m + np.abs(q[:, 2] / cz) ** m) ** (1.0 / m) - 1.0
+
+    return _gradient_normalized(F, P, 1e-3 * min(a, b, cz))
 
 
 def cyl_z(P, x, y, r, z0, z1):
@@ -266,6 +420,7 @@ def dual_sheet(P, cell, wall, kind="gyroid", seal_a=0.0, seal_b=0.0):
 
 
 # ---- field operators ---------------------------------------------------------
+@_lift
 def mask(field_a, region, k=0.0):
     """Solid only where `region` < 0 — the tool for "gyroid only inside this
     jacket". k=0 is a hard clip; k>0 blends the field into the region wall over
@@ -275,12 +430,14 @@ def mask(field_a, region, k=0.0):
     return smax(field_a, region, k)
 
 
+@_lift
 def shell_field(field, t):
     """Hollow a field into a t-mm-thick wall on its surface: |field| - t/2.
     Operates on evaluated field values, like the combinators."""
     return np.abs(field) - 0.5 * t
 
 
+@_lift
 def offset_field(field, d):
     """Grow (d>0) or shrink (d<0) a field by d mm: field - d. Rounds convex
     edges by d as a side effect — that is usually the point."""
@@ -616,6 +773,22 @@ def mesh_cyl(x, y, r, z0, z1, sections=96):
     c = trimesh.creation.cylinder(radius=r, height=z1 - z0, sections=sections)
     c.apply_translation([x, y, 0.5 * (z0 + z1)])
     return c
+
+
+def mesh_rod(a, b, r, sections=96):
+    """Exactly tessellated cylinder from point `a` to point `b`, on any axis:
+    the mesh twin of `capsule`, but flat-ended. For holes that aren't
+    vertical: radial set screws, cross pins, side ports. Without it generated
+    code had no exact non-vertical cut at all, and a knob's radial M3 set-screw
+    hole came out as a square slot ("rotate not available -> use box slot",
+    local SDF run 2026-09-23). Extend past the body for a through-hole."""
+    a = np.asarray(a, float)
+    b = np.asarray(b, float)
+    if np.linalg.norm(b - a) <= 0:
+        raise ValueError(f"mesh_rod needs two distinct points, got a={a}, b={b}")
+    return trimesh.creation.cylinder(
+        radius=r, segment=np.stack([a, b]), sections=sections
+    )
 
 
 def mesh_box(center, half):

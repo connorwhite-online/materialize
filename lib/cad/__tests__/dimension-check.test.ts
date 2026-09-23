@@ -7,6 +7,8 @@ import {
   formatDimensionRepairHints,
   dimensionTargetsFromExpectedDims,
   defaultTolerance,
+  withinTolerance,
+  countsPieces,
   type DimensionTarget,
 } from "@/lib/cad/dimension-check";
 
@@ -211,5 +213,42 @@ describe("defaults + legacy bridge", () => {
     // A run matching them passes through the shared machinery.
     const res = checkDimensionTargets(run(), targets);
     expect(res.every((r) => r.ran && r.ok)).toBe(true);
+  });
+});
+
+describe("tolerance edge", () => {
+  it("passes a measurement exactly at the tolerance limit", () => {
+    // Local bracket build, 2026-09-23: a ⌀22.30 bore against 22 ±0.3 failed,
+    // because 22.3 - 22 is 0.3000000000000007 in floating point.
+    expect(withinTolerance(Math.abs(22.3 - 22), 0.3)).toBe(true);
+    const [r] = checkDimensionTargets(
+      run({ geometry: { dimensions: { x: 22.3, y: 60, z: 20 } } }),
+      [{ label: "span", kind: "bbox_span", axis: "x", value: 22, tolerance: 0.3 }]
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it("still fails anything measurably past it", () => {
+    expect(withinTolerance(0.301, 0.3)).toBe(false);
+  });
+});
+
+describe("count targets only count pieces", () => {
+  it("reports a feature count as not run instead of failing a correct part", () => {
+    // Local pegboard hook run, 2026-09-23: two prongs fused into one body
+    // measured as "1 vs spec 2" and the repair was told to split them off.
+    const [r] = checkDimensionTargets(run(), [
+      { label: "number of prongs", kind: "count", value: 2 },
+    ]);
+    expect(r.ran).toBe(false);
+    expect(r.ok).toBeNull();
+  });
+
+  it("still checks piece counts", () => {
+    expect(countsPieces("two parts")).toBe(true);
+    expect(countsPieces("two-piece case halves")).toBe(true);
+    expect(countsPieces("one solid")).toBe(true);
+    expect(countsPieces("number of prongs")).toBe(false);
+    expect(countsPieces("four mounting holes")).toBe(false);
   });
 });

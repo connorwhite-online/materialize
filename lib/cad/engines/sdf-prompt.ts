@@ -34,6 +34,15 @@ Primitives — all take P first, return signed distance:
   sphere(P, center, r)
   box(P, center, half)                  half = (hx, hy, hz) half-extents
   capsule(P, a, b, r)                   round-capped strut from a to b, any axis
+  tapered_capsule(P, a, b, ra, rb)      strut whose radius runs ra -> rb: chain
+                                        several along a curved spine (shared
+                                        endpoints, matching radii) for prongs,
+                                        handles and limbs that taper smoothly
+  spline_tube(P, points, radii)         a tube swept along a SMOOTH spline
+                                        through the points (one radius per
+                                        point). Prefer this over a hand-built
+                                        chain: straight segments show an elbow
+                                        at every control point
   cyl_z(P, x, y, r, z0, z1)             flat-capped vertical cylinder
   sq_prism(P, a, b, n, z0, z1)          superellipse prism; n~4.5 reads as a
                                         squircle desk device, n~1.7-2.2 as a
@@ -43,14 +52,31 @@ Primitives — all take P first, return signed distance:
                                         straight-to-arc tangency break, which
                                         is exactly what makes a form read as
                                         designed rather than as a rounded box.
+  superellipsoid(P, center, radii, n, m)  a pebble: superellipse plan (n, as
+                                        sq_prism) with a rounded vertical
+                                        profile (m). n~3 and m~3.5 read as a
+                                        soft river stone; m=2 is an ellipsoid,
+                                        m>=5 gives slab sides. Use it as the
+                                        CAVITY of an organic enclosure and
+                                        offset_field it by the wall for an
+                                        even skin.
+  (sq_prism and superellipsoid return real-mm distances, so offset_field
+  and shell_field give UNIFORM walls around them.)
+Two kinds of value, and every combinator takes either:
+  a DISTANCE ARRAY  what a primitive returns: sphere(P, c, r)
+  a FIELD FUNCTION  a callable P -> distances, like your f
+Pass arrays and you get an array back; pass any function and you get a
+function back. So both of these work:
+  d = offset_field(sphere(P, c, r), 2)                    # inside f(P)
+  body = offset_field(lambda P: sphere(P, c, r), 2)       # body is a field
 Combining:
   smin(a, b, k)     smooth union (the organic workhorse; k in mm)
   smax(a, b, k)     smooth intersection
   union(a, b) / intersect(a, b) / subtract(d, hole)      hard-edged
 Field operators:
-  offset_field(f, d)    grow (d>0) or shrink the solid by d mm
-  shell_field(f, t)     hollow to a t-thick shell
-  mask(f, region, k)    apply f only inside region
+  offset_field(a, d)    grow (d>0) or shrink the solid by d mm
+  shell_field(a, t)     hollow to a t-thick shell
+  mask(a, region, k)    keep a only inside region
 Transforms warp the POINTS, so compose them on P:
   translate(P, offset) / rotate_z(P, degrees, center)
 Lattices (real-mm sheet thickness):
@@ -59,6 +85,9 @@ Lattices (real-mm sheet thickness):
 Meshing and mesh booleans:
   to_mesh(f, lo, hi, pitch)             field -> watertight trimesh
   mesh_cyl(x, y, r, z0, z1)             EXACT cylinder mesh; same arguments as cyl_z
+  mesh_rod(a, b, r)                     EXACT cylinder from point a to point b,
+                                        ANY axis: radial set-screw holes, cross
+                                        pins, side ports
   mesh_box(center, half)                EXACT box mesh; same arguments as box
   mesh_subtract(a, b) / mesh_union(a, b) / mesh_intersect(a, b)
   from_mesh(mesh, pitch)                any trimesh -> a field you can smin
@@ -118,7 +147,28 @@ proportions, restraint. Match the form language of any attached reference
 imagery. Organic does NOT mean a bone-strut topology-optimized look — reach
 for that only when the prompt asks. Favour one confident blended mass over
 many small features, and hold one blend-radius family throughout rather than
-a different k at every joint.`;
+a different k at every joint.
+
+smin is for JUNCTIONS, not for chains. smin adds material wherever two fields
+meet, which is what turns a prong-into-body joint into a soft root. Along a
+spine of consecutive segments that share an endpoint and a radius, use plain
+union: min() is already seamless there, and smin beads every joint so the
+part looks like primitives welded together.
+
+Product limbs (hook prongs, handles, arms) should have a DESIGNED cross-section,
+usually a soft rounded rectangle whose size and centerline are smooth functions
+along the limb. A round tube along a spline reads as a generated sausage;
+spline_tube is for things that really are tubular (cable guides, tentacles,
+wire forms).
+
+Mating faces (anything that sits against a board, wall, bed or another part)
+are clipped with a HARD plane after every blend, e.g. np.maximum(body, -P[:, 1]).
+Smooth blends bulge material past the face and the part rocks instead of
+sitting flush.
+
+Where a limb meets the body, FLARE it: the root radius about 1.5x the
+mid-span, and a junction blend k at least the root radius. A thin strut
+smin'd on with a small k reads as a separate tube stuck on.`;
 
 /**
  * Bullets for dual-fluid / exchanger-class requests. Gated the same way the

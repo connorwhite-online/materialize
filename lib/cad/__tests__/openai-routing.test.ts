@@ -67,6 +67,7 @@ vi.mock("@/lib/cad/step-parts", () => ({
 }));
 
 import { completeText } from "@/lib/cad/model-client";
+import { CadOutputTruncatedError } from "@/lib/cad/types";
 import { runAgenticHarness } from "@/lib/cad/agentic";
 import { CadMeter, runWithCadContext } from "@/lib/cad/metering";
 
@@ -289,7 +290,22 @@ describe("responses that did not finish", () => {
 
     await expect(
       completeText({ system: "SYS", prompt: "make a cube", role: "implement" })
-    ).rejects.toThrow(/incomplete \(max_output_tokens\)/);
+    ).rejects.toThrow(/cut off at the 32000-token output limit/);
+    // Typed, so the harness can recover (shorter program, lower effort)
+    // instead of failing the whole generation.
+    await expect(
+      (async () => {
+        responsesCreate.mockResolvedValueOnce({
+          id: "resp_2",
+          model: "gpt-6-astra",
+          status: "incomplete",
+          incomplete_details: { reason: "max_output_tokens" },
+          output: [],
+          usage: { input_tokens: 10, output_tokens: 32000 },
+        });
+        return completeText({ system: "SYS", prompt: "x", role: "implement" });
+      })()
+    ).rejects.toBeInstanceOf(CadOutputTruncatedError);
   });
 
   it("surfaces a refusal rather than an empty completion", async () => {

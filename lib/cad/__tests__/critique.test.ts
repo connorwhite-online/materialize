@@ -235,3 +235,12 @@ describe("gating", () => {
     expect(PASS_THRESHOLD).toBeLessThanOrEqual(100);
   });
 });
+
+describe("judge respects explicit requirements", () => {
+  it("tells the judge it may not override what the user explicitly asked for", () => {
+    // A studio run was steered from "prongs angled upward at the tips" toward
+    // a downward J-curl because the judge scored against a generic hook.
+    expect(CRITIQUE_RUBRIC).toMatch(/explicit requirements are FIXED/);
+    expect(CRITIQUE_RUBRIC).toMatch(/never propose a fix that changes an explicit requirement/);
+  });
+});

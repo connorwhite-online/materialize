@@ -18,6 +18,7 @@ import { generateDownloadUrl } from "@/lib/storage";
 import { canUseTextToCad } from "@/lib/features";
 import { isCadRating } from "@/lib/cad/feedback";
 import { parseFeatures } from "@/lib/cad/features";
+import { engineIdForStored } from "@/lib/cad/engines/types";
 import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
 import {
   TextToCadStudio,
@@ -92,6 +93,7 @@ export default async function TextToCadPage() {
     features: cadGenerations.features,
     parentGenerationId: cadGenerations.parentGenerationId,
     threadId: cadGenerations.threadId,
+    engine: cadGenerations.engine,
     error: cadGenerations.error,
     rating: cadGenerations.rating,
     feedbackTags: cadGenerations.feedbackTags,
@@ -294,6 +296,7 @@ export default async function TextToCadPage() {
       // STEP availability threaded so "Download STEP" renders at first paint
       // (no post-mount pop-in / row reflow, MTR-215).
       hasStep: r.fileAssetId ? assetsWithStep.has(r.fileAssetId) : false,
+      engine: engineIdForStored(r.engine),
       parentGenerationId: r.parentGenerationId,
       threadId: r.threadId,
       title: r.title,
@@ -352,6 +355,7 @@ export default async function TextToCadPage() {
     networksReport: m.networksReport,
     dimensionChecks: m.dimensionChecks,
     hasStep: m.hasStep,
+    engine: m.engine,
     parentGenerationId: m.parentGenerationId,
     activeJobId: m.activeJobId,
   });

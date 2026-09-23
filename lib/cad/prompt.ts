@@ -181,7 +181,24 @@ Honor the design guidance you are given. Be concrete and terse. Do NOT write bui
 /** Pull the first fenced code block out of a model response, else return as-is. */
 export function extractCode(text: string): string {
   const fenced = text.match(/```(?:python|py)?\s*\n([\s\S]*?)```/i);
-  return (fenced ? fenced[1] : text).trim();
+  return normalizeTypography((fenced ? fenced[1] : text).trim());
+}
+
+/**
+ * Typographic characters models emit that Python rejects outright. A single
+ * U+2212 minus ("−") fails the whole program as a syntax error before it
+ * runs, so the attempt is spent on a typo: in a blockout experiment Haiku 4.5
+ * wrote it in 2 of 3 programs. Only characters with exactly one ASCII
+ * meaning are mapped; string contents are affected too, which is harmless
+ * for CAD scripts.
+ */
+export function normalizeTypography(code: string): string {
+  return code
+    .replace(/[\u2212\u2012\u2013\u2014\uFE63\uFF0D]/g, "-")
+    .replace(/[\u2018\u2019\u201A\u2032]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u2033]/g, '"')
+    .replace(/\u00D7/g, "*")
+    .replace(/\u00A0/g, " ");
 }
 
 export interface ExpectedDims {
@@ -225,6 +242,34 @@ export function gradeRun(
       within(d.y, expectedDims.y) &&
       within(d.z, expectedDims.z);
     if (!dimsOk) failures.push("dimensions off target");
+  }
+
+  // Never fail a run without saying why. The sidecar can report ok=false
+  // while every flag above reads true (an assembly part with disconnected
+  // bodies, before the sidecar named it), and an empty failure list became an
+  // empty repair reason: attempt 2 then ran as a fresh build with nothing to
+  // fix. Fall back to the per-part verdicts, then to a generic reason.
+  if (!run.ok && failures.length === 0) {
+    const bad = (run.parts ?? []).filter(
+      (p) =>
+        !p.validation.isSolid ||
+        !p.validation.isWatertight ||
+        (p.validation.bodyCount ?? 1) !== 1 ||
+        !!p.error
+    );
+    for (const p of bad) {
+      const why = [
+        !p.validation.isSolid && "not a solid",
+        !p.validation.isWatertight && "not watertight",
+        (p.validation.bodyCount ?? 1) !== 1 &&
+          `${p.validation.bodyCount} disconnected bodies`,
+        p.error,
+      ].filter(Boolean);
+      failures.push(`part '${p.name}': ${why.join(", ")}`);
+    }
+    if (failures.length === 0) {
+      failures.push("the sidecar rejected the result without a reason");
+    }
   }
 
   return { pass: run.ok && failures.length === 0, failures, dimsOk };

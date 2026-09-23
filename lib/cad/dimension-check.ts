@@ -159,6 +159,16 @@ export function defaultTolerance(target: DimensionTarget): number {
   return Math.max(0.5, Math.abs(target.value) * 0.02);
 }
 
+/**
+ * Whether a count target's label is about separately printed pieces (what
+ * a count can measure) rather than features like holes, prongs or ribs.
+ */
+export function countsPieces(label: string): boolean {
+  return /\b(pieces?|parts?|bod(y|ies)|solids?|halves|half|shells?|lids?|bases?|covers?|components?|assembl(y|ies)|two-piece|multi-part)\b/i.test(
+    label
+  );
+}
+
 /** How many independent solids the run produced (fused body count, or parts). */
 function solidCount(run: CadRunResult): number | null {
   if (run.parts && run.parts.length > 0) return run.parts.length;
@@ -170,6 +180,21 @@ function solidCount(run: CadRunResult): number | null {
  * Evaluate dimension targets against a completed run. Deterministic — no model
  * call. Every target yields a result; unevaluable kinds report `ran: false`.
  */
+
+/**
+ * Slack for floating-point error, 1µm: far below anything a printer can
+ * resolve. A plain `delta <= tolerance` failed a bore measured at exactly the
+ * tolerance edge (22.30 against 22 ±0.3), because 22.3 - 22 is
+ * 0.3000000000000007 in floating point. The build was valid and the studio
+ * still showed it in red.
+ */
+const TOLERANCE_EPSILON_MM = 1e-6;
+
+/** True when `delta` is within `tolerance`, inclusive, allowing for float error. */
+export function withinTolerance(delta: number, tolerance: number): boolean {
+  return delta <= tolerance + TOLERANCE_EPSILON_MM;
+}
+
 export function checkDimensionTargets(
   run: CadRunResult,
   targets: DimensionTarget[] | null | undefined
@@ -232,10 +257,25 @@ export function checkDimensionTargets(
         return { target, ran: false, ok: null, tolerance, note: "no geometry stats on the run" };
       }
       const delta = Math.abs(got - target.value);
-      return { target, ran: true, ok: delta <= tolerance, got, delta, tolerance };
+      return { target, ran: true, ok: withinTolerance(delta, tolerance), got, delta, tolerance };
     }
 
     if (target.kind === "count") {
+      // A count measures separately printed pieces (fused bodies or parts).
+      // It cannot count FEATURES: two prongs fused into one hook are one
+      // body, so "number of prongs = 2" failed a correct part and the repair
+      // was pushed to split the prongs off (local pegboard hook run,
+      // 2026-09-23). Feature counts are reported as not run, honestly
+      // unverified, until there is a feature-level counter.
+      if (!countsPieces(target.label)) {
+        return {
+          target,
+          ran: false,
+          ok: null,
+          tolerance,
+          note: `"${target.label}" counts features, and only separate pieces can be counted today`,
+        };
+      }
       const of = target.of ?? "solid";
       const got = of === "part"
         ? (run.parts?.length ?? (run.ok ? 1 : null))
@@ -244,7 +284,7 @@ export function checkDimensionTargets(
         return { target, ran: false, ok: null, tolerance, note: `no ${of} count on the run` };
       }
       const delta = Math.abs(got - target.value);
-      return { target, ran: true, ok: delta <= tolerance, got, delta, tolerance };
+      return { target, ran: true, ok: withinTolerance(delta, tolerance), got, delta, tolerance };
     }
 
     // diameter / distance: measured against the B-rep topology manifest
@@ -283,7 +323,7 @@ export function checkDimensionTargets(
     return {
       target,
       ran: true,
-      ok: delta <= tolerance,
+      ok: withinTolerance(delta, tolerance),
       got: match.measured,
       delta,
       tolerance,

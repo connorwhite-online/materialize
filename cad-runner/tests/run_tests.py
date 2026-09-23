@@ -23,9 +23,10 @@ import trimesh
 import trimesh.sample
 
 from sdf_kit import (
-    box, capsule, dual_sheet, from_mesh, gyroid, mask, offset_field,
-    seal_ramp, shell_field, smin, sphere, to_mesh, tpms_dist, translate,
-    union,
+    box, capsule, dual_sheet, from_mesh, gyroid, mask, mesh_cyl, mesh_rod,
+    mesh_subtract, offset_field, seal_ramp, shell_field, smax, smin, sphere,
+    sq_prism, spline_tube, superellipsoid, tapered_capsule,
+    to_mesh, tpms_dist, translate, union,
 )
 from exchanger import exchanger_core
 from networks import check_networks
@@ -588,7 +589,117 @@ def test_promote_rejects_genuine_debris():
         "a sub-mm^3 sliver must be tolerated alongside the real parts"
 
 
+def test_combinators_accept_field_functions():
+    """Generated code passes field FUNCTIONS to offset_field & co. as often as
+    arrays (the prompt calls the field `f`). Before _lift, that failed as
+    "unsupported operand type(s) for -: 'function' and 'float'" on every
+    attempt of a local SDF knob build. A function in gives a function out that
+    matches the array path exactly."""
+    P = np.random.default_rng(0).uniform(-20, 20, (500, 3))
+    f = lambda Q: sphere(Q, (0, 0, 0), 10)
+    g = lambda Q: box(Q, (5, 0, 0), (6, 6, 6))
+    arr = offset_field(f(P), 2)
+    fn = offset_field(f, 2)
+    assert callable(fn) and np.allclose(fn(P), arr)
+    assert np.allclose(smin(f, g, 3)(P), smin(f(P), g(P), 3))
+    assert np.allclose(smax(f, g(P), 1)(P), smax(f(P), g(P), 1)), "mixed"
+    assert np.allclose(shell_field(f, 2)(P), shell_field(f(P), 2))
+    assert np.allclose(mask(f, g)(P), mask(f(P), g(P)))
+    # arrays in -> array out: existing code is untouched
+    assert isinstance(offset_field(f(P), 2), np.ndarray)
+    m = to_mesh(offset_field(f, 1.0), (-13,) * 3, (13,) * 3, 0.8)
+    assert m.is_watertight
+
+
+def test_mesh_rod_cuts_an_exact_radial_hole():
+    """The only exact cut used to be the vertical mesh_cyl, so a knob's radial
+    set-screw hole came out as a square slot. mesh_rod runs on any axis."""
+    rod = mesh_rod((0, 0, 5), (20, 0, 5), 1.7)
+    assert rod.is_watertight
+    assert abs(rod.volume - np.pi * 1.7 ** 2 * 20) / rod.volume < 0.01
+    body = mesh_cyl(0, 0, 15, 0, 18)
+    cut = mesh_subtract(body, rod)
+    assert cut.is_watertight
+    removed = body.volume - cut.volume
+    assert abs(removed - np.pi * 1.7 ** 2 * 15) / removed < 0.02, removed
+    try:
+        mesh_rod((1, 1, 1), (1, 1, 1), 2)
+        raise AssertionError("zero-length rod accepted")
+    except ValueError:
+        pass
+
+
+def _wall_along(inner, outer, direction, z=0.0):
+    """Wall thickness where the ray from the origin along `direction` crosses
+    both surfaces. Along a symmetry axis the ray is the surface normal, so
+    this is the true wall."""
+    def hit(f):
+        lo, hi = 0.0, 100.0
+        for _ in range(60):
+            mid = (lo + hi) / 2
+            v = f(np.array([[mid * direction[0], mid * direction[1], z]]))[0]
+            lo, hi = (mid, hi) if v < 0 else (lo, mid)
+        return lo
+    return hit(outer) - hit(inner)
+
+
+def test_superellipse_offsets_give_uniform_walls():
+    """sq_prism used to scale its field by min(a, b), which is only a distance
+    along the short axis: a 2mm offset of a 27x14 prism came out 3.9mm at the
+    ends. Now gradient-normalized, both axes get the wall that was asked."""
+    cav = lambda P: sq_prism(P, 27.25, 14.0, 5.5, -10, 10)
+    out = lambda P: offset_field(cav(P), 2.0)
+    for d in ((1, 0), (0, 1)):
+        w = _wall_along(cav, out, d)
+        assert abs(w - 2.0) < 0.05, (d, w)
+    peb = lambda P: superellipsoid(P, (0, 0, 0), (36, 20, 9.5), 3.0, 3.5)
+    shell = lambda P: offset_field(peb(P), 2.2)
+    for d in ((1, 0), (0, 1)):
+        w = _wall_along(peb, shell, d)
+        assert abs(w - 2.2) < 0.05, (d, w)
+    m = to_mesh(peb, (-38, -22, -11), (38, 22, 11), 0.8)
+    assert m.is_watertight
+
+
+def test_tapered_capsule_is_an_exact_distance():
+    """The organic strut: equal radii must reduce to capsule, and the field
+    must agree with the meshed surface (it is an exact SDF, not a proxy)."""
+    a, b = (0, 0, 0), (40, 0, 0)
+    P = np.random.default_rng(3).uniform([-10, -10, -10], [50, 10, 10], (400, 3))
+    assert np.allclose(tapered_capsule(P, a, b, 4, 4), capsule(P, a, b, 4))
+    m = to_mesh(lambda Q: tapered_capsule(Q, a, b, 6, 3), (-8, -8, -8), (45, 8, 8), 0.3)
+    assert m.is_watertight
+    _, dist, _ = trimesh.proximity.closest_point(m, P)
+    err = np.max(np.abs(np.abs(tapered_capsule(P, a, b, 6, 3)) - dist))
+    assert err < 0.05, err
+
+
+def test_spline_tube_sweeps_smoothly_through_its_points():
+    """A spline sweep, not a polyline: one watertight body passing through
+    every control point at that point's radius, with no elbow at interior
+    control points (the surface normal turns gradually along the sweep)."""
+    pts = [(0, 0, 0), (10, 20, 5), (30, 30, 5), (45, 35, 15)]
+    radii = [5, 4, 3.5, 3]
+    f = lambda P: spline_tube(P, pts, radii)
+    m = to_mesh(f, (-8, -8, -8), (52, 44, 24), 0.4)
+    assert m.is_watertight and len(m.split(only_watertight=False)) == 1
+    for p, r in zip(pts, radii):
+        # a point one radius away, perpendicular-ish (straight up), is on the surface
+        v = f(np.array([[p[0], p[1], p[2] + r]]))[0]
+        assert abs(v) < 0.35, (p, v)
+    try:
+        spline_tube(np.zeros((1, 3)), pts, radii[:2])
+        raise AssertionError("mismatched radii accepted")
+    except ValueError:
+        pass
+
+
 TESTS = [
+    test_spline_tube_sweeps_smoothly_through_its_points,
+    test_tapered_capsule_is_an_exact_distance,
+    test_superellipse_offsets_give_uniform_walls,
+    test_combinators_accept_field_functions,
+    test_mesh_rod_cuts_an_exact_radial_hole,
     test_gyroid_thickness_is_real_mm,
     test_gyroid_two_isolated_networks,
     test_dual_sheet_defaults_match_sheet_gyroid,

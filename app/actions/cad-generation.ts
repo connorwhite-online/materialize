@@ -49,6 +49,7 @@ import {
   persistGenerationFailure,
 } from "@/lib/cad/persist";
 import { BREP_OUTPUT_FORMATS, type CadNetworksReport } from "@/lib/cad/types";
+import { sidecarRunForStored } from "@/lib/cad/engines";
 import { extractDimensionTargets, type HarnessResult } from "@/lib/cad/harness";
 import {
   buildFitChecksFromTargets,
@@ -1008,8 +1009,9 @@ export async function rerunCadWithParams(input: {
     // re-run. Fit checks ride the sidecar request like a harness run would.
     const dimensionTargets = extractDimensionTargets(parent.brief);
     const fitChecks = buildFitChecksFromTargets(dimensionTargets);
-    const run = await runCadCode(source, BREP_OUTPUT_FORMATS, undefined, {
-      engine: parent.engine || "build123d",
+    const rerun = sidecarRunForStored(parent.engine);
+    const run = await runCadCode(source, rerun.formats, undefined, {
+      engine: rerun.engine,
       ...(fitChecks ? { checks: { fit: fitChecks } } : {}),
     });
     if (!run.ok) {
@@ -1234,8 +1236,9 @@ export async function reviseCadFeatureStatement(input: {
     // re-run. Fit checks ride the sidecar request like a harness run would.
     const dimensionTargets = extractDimensionTargets(parent.brief);
     const fitChecks = buildFitChecksFromTargets(dimensionTargets);
-    const run = await runCadCode(source, BREP_OUTPUT_FORMATS, undefined, {
-      engine: parent.engine || "build123d",
+    const rerun = sidecarRunForStored(parent.engine);
+    const run = await runCadCode(source, rerun.formats, undefined, {
+      engine: rerun.engine,
       ...(fitChecks ? { checks: { fit: fitChecks } } : {}),
     });
     if (!run.ok) {
