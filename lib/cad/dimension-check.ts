@@ -159,6 +159,16 @@ export function defaultTolerance(target: DimensionTarget): number {
   return Math.max(0.5, Math.abs(target.value) * 0.02);
 }
 
+/**
+ * Whether a count target's label is about separately printed pieces (what
+ * a count can measure) rather than features like holes, prongs or ribs.
+ */
+export function countsPieces(label: string): boolean {
+  return /\b(pieces?|parts?|bod(y|ies)|solids?|halves|half|shells?|lids?|bases?|covers?|components?|assembl(y|ies)|two-piece|multi-part)\b/i.test(
+    label
+  );
+}
+
 /** How many independent solids the run produced (fused body count, or parts). */
 function solidCount(run: CadRunResult): number | null {
   if (run.parts && run.parts.length > 0) return run.parts.length;
@@ -251,6 +261,21 @@ export function checkDimensionTargets(
     }
 
     if (target.kind === "count") {
+      // A count measures separately printed pieces (fused bodies or parts).
+      // It cannot count FEATURES: two prongs fused into one hook are one
+      // body, so "number of prongs = 2" failed a correct part and the repair
+      // was pushed to split the prongs off (local pegboard hook run,
+      // 2026-09-23). Feature counts are reported as not run, honestly
+      // unverified, until there is a feature-level counter.
+      if (!countsPieces(target.label)) {
+        return {
+          target,
+          ran: false,
+          ok: null,
+          tolerance,
+          note: `"${target.label}" counts features, and only separate pieces can be counted today`,
+        };
+      }
       const of = target.of ?? "solid";
       const got = of === "part"
         ? (run.parts?.length ?? (run.ok ? 1 : null))

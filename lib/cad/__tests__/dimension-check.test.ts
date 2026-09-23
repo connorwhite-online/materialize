@@ -8,6 +8,7 @@ import {
   dimensionTargetsFromExpectedDims,
   defaultTolerance,
   withinTolerance,
+  countsPieces,
   type DimensionTarget,
 } from "@/lib/cad/dimension-check";
 
@@ -229,5 +230,25 @@ describe("tolerance edge", () => {
 
   it("still fails anything measurably past it", () => {
     expect(withinTolerance(0.301, 0.3)).toBe(false);
+  });
+});
+
+describe("count targets only count pieces", () => {
+  it("reports a feature count as not run instead of failing a correct part", () => {
+    // Local pegboard hook run, 2026-09-23: two prongs fused into one body
+    // measured as "1 vs spec 2" and the repair was told to split them off.
+    const [r] = checkDimensionTargets(run(), [
+      { label: "number of prongs", kind: "count", value: 2 },
+    ]);
+    expect(r.ran).toBe(false);
+    expect(r.ok).toBeNull();
+  });
+
+  it("still checks piece counts", () => {
+    expect(countsPieces("two parts")).toBe(true);
+    expect(countsPieces("two-piece case halves")).toBe(true);
+    expect(countsPieces("one solid")).toBe(true);
+    expect(countsPieces("number of prongs")).toBe(false);
+    expect(countsPieces("four mounting holes")).toBe(false);
   });
 });
