@@ -25,7 +25,7 @@ import trimesh.sample
 from sdf_kit import (
     box, capsule, dual_sheet, from_mesh, gyroid, mask, mesh_cyl, mesh_rod,
     mesh_subtract, offset_field, seal_ramp, shell_field, smax, smin, sphere,
-    sq_prism, superellipsoid, tapered_capsule,
+    sq_prism, spline_tube, superellipsoid, tapered_capsule,
     to_mesh, tpms_dist, translate, union,
 )
 from exchanger import exchanger_core
@@ -674,7 +674,28 @@ def test_tapered_capsule_is_an_exact_distance():
     assert err < 0.05, err
 
 
+def test_spline_tube_sweeps_smoothly_through_its_points():
+    """A spline sweep, not a polyline: one watertight body passing through
+    every control point at that point's radius, with no elbow at interior
+    control points (the surface normal turns gradually along the sweep)."""
+    pts = [(0, 0, 0), (10, 20, 5), (30, 30, 5), (45, 35, 15)]
+    radii = [5, 4, 3.5, 3]
+    f = lambda P: spline_tube(P, pts, radii)
+    m = to_mesh(f, (-8, -8, -8), (52, 44, 24), 0.4)
+    assert m.is_watertight and len(m.split(only_watertight=False)) == 1
+    for p, r in zip(pts, radii):
+        # a point one radius away, perpendicular-ish (straight up), is on the surface
+        v = f(np.array([[p[0], p[1], p[2] + r]]))[0]
+        assert abs(v) < 0.35, (p, v)
+    try:
+        spline_tube(np.zeros((1, 3)), pts, radii[:2])
+        raise AssertionError("mismatched radii accepted")
+    except ValueError:
+        pass
+
+
 TESTS = [
+    test_spline_tube_sweeps_smoothly_through_its_points,
     test_tapered_capsule_is_an_exact_distance,
     test_superellipse_offsets_give_uniform_walls,
     test_combinators_accept_field_functions,

@@ -41,7 +41,8 @@ import trimesh
 
 __all__ = [
     "smin", "smax", "subtract", "union", "intersect",
-    "sphere", "box", "capsule", "tapered_capsule", "cyl_z", "sq_prism",
+    "sphere", "box", "capsule", "tapered_capsule", "spline_tube", "cyl_z",
+    "sq_prism",
     "superellipsoid",
     "gyroid", "schwarz_p", "diamond",
     "tpms_dist", "seal_ramp", "dual_sheet",
@@ -177,6 +178,46 @@ def tapered_capsule(P, a, b, ra, rb):
     d[m_a & ~m_b] = np.sqrt(x2[m_a & ~m_b] + y2[m_a & ~m_b]) * il2 - ra
     rest = ~(m_a | m_b)
     d[rest] = (np.sqrt(x2[rest] * a2 * il2) + y[rest] * rr) * il2 - ra
+    return d
+
+
+def _catmull_rom(points, samples):
+    """Centripetal-free uniform Catmull-Rom through `points` (ends clamped),
+    returning `samples` points per span plus the last point, and the span
+    parameter of each (for interpolating radii the same way)."""
+    pts = np.asarray(points, float)
+    ext = np.vstack([pts[0], pts, pts[-1]])
+    out, ts = [], []
+    for i in range(len(pts) - 1):
+        p0, p1, p2, p3 = ext[i], ext[i + 1], ext[i + 2], ext[i + 3]
+        for t in np.linspace(0.0, 1.0, samples, endpoint=False):
+            t2, t3 = t * t, t * t * t
+            out.append(0.5 * ((2 * p1) + (-p0 + p2) * t
+                              + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2
+                              + (-p0 + 3 * p1 - 3 * p2 + p3) * t3))
+            ts.append(i + t)
+    out.append(pts[-1])
+    ts.append(float(len(pts) - 1))
+    return np.array(out), np.array(ts)
+
+
+def spline_tube(P, points, radii, samples=12):
+    """A tube swept along a smooth spline through `points`, radius running
+    through `radii` (one per point): a prong, handle, limb or cable guide
+    that flows without kinks. A hand-built chain of straight segments shows
+    an elbow at every control point; this samples a Catmull-Rom curve
+    finely and joins the pieces with union (not smin, which would bead
+    them). Radii are interpolated along the same curve."""
+    pts = np.asarray(points, float)
+    rs = np.asarray(radii, float)
+    if len(pts) != len(rs) or len(pts) < 2:
+        raise ValueError("spline_tube needs >= 2 points and one radius per point")
+    curve, t = _catmull_rom(pts, samples)
+    rad, _ = _catmull_rom(np.c_[rs, np.zeros((len(rs), 2))], samples)
+    r = np.maximum(rad[:, 0], 1e-3)
+    d = tapered_capsule(P, curve[0], curve[1], r[0], r[1])
+    for i in range(1, len(curve) - 1):
+        d = np.minimum(d, tapered_capsule(P, curve[i], curve[i + 1], r[i], r[i + 1]))
     return d
 
 

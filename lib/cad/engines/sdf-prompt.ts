@@ -38,6 +38,11 @@ Primitives — all take P first, return signed distance:
                                         several along a curved spine (shared
                                         endpoints, matching radii) for prongs,
                                         handles and limbs that taper smoothly
+  spline_tube(P, points, radii)         a tube swept along a SMOOTH spline
+                                        through the points (one radius per
+                                        point). Prefer this over a hand-built
+                                        chain: straight segments show an elbow
+                                        at every control point
   cyl_z(P, x, y, r, z0, z1)             flat-capped vertical cylinder
   sq_prism(P, a, b, n, z0, z1)          superellipse prism; n~4.5 reads as a
                                         squircle desk device, n~1.7-2.2 as a
@@ -148,7 +153,11 @@ smin is for JUNCTIONS, not for chains. smin adds material wherever two fields
 meet, which is what turns a prong-into-body joint into a soft root. Along a
 spine of consecutive segments that share an endpoint and a radius, use plain
 union: min() is already seamless there, and smin beads every joint so the
-part looks like primitives welded together.`;
+part looks like primitives welded together.
+
+Where a limb meets the body, FLARE it: the root radius about 1.5x the
+mid-span, and a junction blend k at least the root radius. A thin strut
+smin'd on with a small k reads as a separate tube stuck on.`;
 
 /**
  * Bullets for dual-fluid / exchanger-class requests. Gated the same way the
