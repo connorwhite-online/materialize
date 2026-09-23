@@ -18,7 +18,7 @@ import {
 import { putObject, generateDownloadUrl } from "@/lib/storage";
 import { buildListingSlug } from "@/lib/filenames";
 import { logError } from "@/lib/logger";
-import { createDraftFileForPrint } from "@/app/actions/files";
+import { createDraftFileForUser } from "@/lib/files/draft-file";
 import { generateThreadTitle } from "./title";
 import { harnessConfigFingerprint } from "./fingerprint";
 import type { HarnessResult } from "./harness";
@@ -472,7 +472,7 @@ export async function persistGenerationSuccess(opts: {
   // "model.stl".
   const stem = slugStem(displayName, "model");
 
-  const draft = await createDraftFileForPrint({
+  const draft = await createDraftFileForUser(userId, {
     storageKey,
     originalFilename: `${stem}.stl`,
     format: "stl",
@@ -635,7 +635,7 @@ async function persistAssembly(opts: {
       logError("persistAssembly.upload", err);
       continue;
     }
-    const draft = await createDraftFileForPrint({
+    const draft = await createDraftFileForUser(userId, {
       storageKey,
       originalFilename: `${stem}.stl`,
       format: "stl",

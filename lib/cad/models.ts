@@ -202,16 +202,39 @@ function clampEffort(effort: CadEffort, cap?: CadEffort): CadEffort {
   return EFFORTS.indexOf(effort) <= EFFORTS.indexOf(cap) ? effort : cap;
 }
 
+/** One level below `effort` ("low" stays "low"). */
+export function effortBelow(effort: CadEffort): CadEffort {
+  return EFFORTS[Math.max(0, EFFORTS.indexOf(effort) - 1)];
+}
+
+/** The lower of two efforts. */
+export function lowerEffort(a: CadEffort, b: CadEffort): CadEffort {
+  return EFFORTS.indexOf(a) <= EFFORTS.indexOf(b) ? a : b;
+}
+
 /**
- * One level below the effort `role` would run at under `cap` ("low" stays
- * "low"). The harness uses this after a response is cut off at the output
- * limit. The thinking that filled the budget is set by effort, so telling the
- * model to "think less" in the repair note does nothing unless the effort
- * setting comes down with it.
+ * Effort for a scripted codegen attempt: start cheap, escalate on failure.
+ *
+ * Attempt 1 drafts at CAD_EFFORT_LADDER_START (default "medium") and each
+ * repair climbs one level, never above what the role would run at anyway
+ * (its default under the active tier's cap). The sidecar is the real check
+ * and a failed attempt costs about a second of execution, so paying for
+ * deep thinking before anything has been tried is the wrong way round. On
+ * local runs, medium drafted a knob in 87s where xhigh spent 8 minutes and
+ * wrote nothing.
+ *
+ * "off" disables the ladder: every attempt runs at the role's effort, which
+ * was the behaviour before this.
  */
-export function stepDownEffort(role: CadRole, cap?: CadEffort): CadEffort {
-  const current = clampEffort(effortForRole(role), cap);
-  return EFFORTS[Math.max(0, EFFORTS.indexOf(current) - 1)];
+export function ladderEffort(role: CadRole, attempt: number): CadEffort {
+  const ceiling = effortForRole(role);
+  const raw = (process.env.CAD_EFFORT_LADDER_START || "medium").toLowerCase();
+  if (raw === "off") return ceiling;
+  const start = (EFFORTS as readonly string[]).includes(raw)
+    ? (raw as CadEffort)
+    : "medium";
+  const i = EFFORTS.indexOf(start) + Math.max(0, attempt - 1);
+  return lowerEffort(EFFORTS[Math.min(i, EFFORTS.length - 1)], ceiling);
 }
 
 /** Request params for a role: the model plus the knobs it actually supports. */

@@ -38,6 +38,16 @@ import {
 } from "@/lib/mcp/internal/projects";
 import { getQuoteForUser } from "@/lib/mcp/internal/quotes";
 import {
+  assertCadAccess,
+  CadAccessError,
+  cadReference,
+  MAX_CAD_CODE_CHARS,
+  runCadForAgent,
+  runRenders,
+  saveCadForAgent,
+  summarizeRun,
+} from "@/lib/mcp/internal/cad";
+import {
   createAgentInitiatedOrder,
   getOrderForUser,
   listOrdersForUser,
@@ -101,6 +111,96 @@ function readAuthExtra(extra: {
 
 const handler = createMcpHandler(
   (server) => {
+    /* -------------------- CAD (agent writes, Materialize runs) -------------------- */
+
+    server.registerTool(
+      "materialize_cad_reference",
+      {
+        title: "CAD engine reference",
+        description:
+          "How to write a CAD program Materialize can build: the engine's full guide (vocabulary, output contract, printability rules) plus the closest verified example programs for what you're making. Read this before materialize_cad_run. Engines: 'sdf' (implicit fields + exact mesh booleans; best for organic, blended, enclosure and lattice parts; STL) and 'brep' (build123d on OpenCASCADE; crisp prismatic parts; STL + STEP).",
+        inputSchema: {
+          engine: z.enum(["sdf", "brep"]),
+          query: z.string().min(2).max(2000).describe("What you're making, in plain words; used to pick examples"),
+          examples: z.number().int().min(0).max(5).optional(),
+        },
+      },
+      async ({ engine, query, examples }, extra) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "cad:build");
+          await assertCadAccess(auth.userId);
+          return jsonResult(cadReference(engine, query, examples ?? 3));
+        } catch (err) {
+          return cadOrInternal(err, "materialize_cad_reference");
+        }
+      }
+    );
+
+    server.registerTool(
+      "materialize_cad_run",
+      {
+        title: "Run a CAD program",
+        description:
+          "Execute a CAD program on Materialize's geometry engine and get back exactly what the studio's own harness sees: whether it compiled, the exact error and script line if not, watertight/solid/manifold validity, dimensions in mm, printability (minimum wall, overhangs, trapped voids), and rendered views as images. Nothing is saved. Iterate with this, then call materialize_cad_save.",
+        inputSchema: {
+          engine: z.enum(["sdf", "brep"]),
+          code: z.string().min(1).max(MAX_CAD_CODE_CHARS).describe("The full Python program; must assign `result` (or a `parts` dict)"),
+          views: z.number().int().min(0).max(6).optional().describe("How many rendered views to return as images (default 3)"),
+        },
+      },
+      async ({ engine, code, views }, extra) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "cad:build");
+          await assertCadAccess(auth.userId);
+          const run = await runCadForAgent(code, engine);
+          const images = runRenders(run, views ?? 3);
+          return {
+            content: [
+              { type: "text" as const, text: JSON.stringify({ ...summarizeRun(run), views: images.map((i) => i.view) }, null, 2) },
+              ...images.map((i) => ({ type: "image" as const, data: i.png, mimeType: "image/png" })),
+            ],
+          };
+        } catch (err) {
+          return cadOrInternal(err, "materialize_cad_run");
+        }
+      }
+    );
+
+    server.registerTool(
+      "materialize_cad_save",
+      {
+        title: "Save a CAD build",
+        description:
+          "Run a finished CAD program and save it as a build in the user's Materialize studio (a new thread with its own file, or a project for multi-part assemblies), so it can be viewed, revised, quoted and printed. Fails without saving anything usable if the program doesn't produce a valid watertight result; fix it with materialize_cad_run first.",
+        inputSchema: {
+          engine: z.enum(["sdf", "brep"]),
+          code: z.string().min(1).max(MAX_CAD_CODE_CHARS),
+          name: z.string().min(2).max(120).describe("Build name shown in the studio"),
+          prompt: z.string().min(2).max(2000).describe("What was asked for, recorded as the build's prompt"),
+        },
+      },
+      async ({ engine, code, name, prompt }, extra) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "cad:build");
+          await assertCadAccess(auth.userId);
+          const saved = await saveCadForAgent({ userId: auth.userId, code, engine, name, prompt });
+          if (!saved.ok) {
+            return errorResult({
+              code: "build_failed",
+              message: saved.error,
+              details: saved.run ? { run: summarizeRun(saved.run) } : undefined,
+            });
+          }
+          return jsonResult(saved);
+        } catch (err) {
+          return cadOrInternal(err, "materialize_cad_save");
+        }
+      }
+    );
+
     /* -------------------- Catalog -------------------- */
 
     server.registerTool(
@@ -1296,7 +1396,9 @@ const handler = createMcpHandler(
   },
   {
     basePath: "/api",
-    maxDuration: 60,
+    // 300 (was 60): materialize_cad_run / _save execute real geometry, and a
+    // fine-pitch organic part can take tens of seconds on the sidecar.
+    maxDuration: 300,
     verboseLogs: false,
     disableSse: true,
     sessionIdGenerator: undefined,
@@ -1318,6 +1420,14 @@ const authedHandler = withMcpAuth(handler, verifyMaterializeToken, {
  * branch is untouched — that message is deliberately actionable
  * ("this token lacks scope X") and safe to return as-is.
  */
+/** scopeOrInternal, plus the CAD owner gate's own (safe, actionable) error. */
+function cadOrInternal(err: unknown, context: string) {
+  if (err instanceof CadAccessError) {
+    return errorResult({ code: "forbidden", message: err.message });
+  }
+  return scopeOrInternal(err, context);
+}
+
 function scopeOrInternal(err: unknown, context: string) {
   if (err instanceof MissingScopeError) {
     return errorResult({

@@ -6,8 +6,10 @@ import {
   openaiParamsForRole,
   planStepEnabled,
   providerForRole,
-  stepDownEffort,
+  effortBelow,
+  ladderEffort,
 } from "@/lib/cad/models";
+import { runWithCadTier } from "@/lib/cad/budget";
 
 const ENV_KEYS = [
   "CAD_MODEL_PLAN",
@@ -223,12 +225,33 @@ describe("openaiParamsForRole", () => {
   });
 });
 
-describe("stepDownEffort / effort caps", () => {
-  it("steps one level below the role's effort", () => {
-    // implement/repair default to xhigh.
-    expect(stepDownEffort("repair")).toBe("high");
-    expect(stepDownEffort("repair", "high")).toBe("medium");
-    expect(stepDownEffort("repair", "low")).toBe("low");
+describe("effort ladder", () => {
+  afterEach(() => {
+    delete process.env.CAD_EFFORT_LADDER_START;
+  });
+
+  it("drafts at medium and climbs one level per repair, up to the role's effort", () => {
+    // implement/repair default to xhigh with no tier active.
+    expect(ladderEffort("implement", 1)).toBe("medium");
+    expect(ladderEffort("repair", 2)).toBe("high");
+    expect(ladderEffort("repair", 3)).toBe("xhigh");
+    expect(ladderEffort("repair", 4)).toBe("xhigh");
+  });
+
+  it("never climbs above the tier's cap", () => {
+    expect(runWithCadTier("simple", () => ladderEffort("repair", 4))).toBe("medium");
+  });
+
+  it("can start elsewhere, or be switched off", () => {
+    process.env.CAD_EFFORT_LADDER_START = "low";
+    expect(ladderEffort("implement", 1)).toBe("low");
+    process.env.CAD_EFFORT_LADDER_START = "off";
+    expect(ladderEffort("implement", 1)).toBe("xhigh");
+  });
+
+  it("effortBelow steps down one level and bottoms out", () => {
+    expect(effortBelow("xhigh")).toBe("high");
+    expect(effortBelow("low")).toBe("low");
   });
 
   it("a cap only ever lowers effort", () => {

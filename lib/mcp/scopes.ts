@@ -7,6 +7,7 @@ export const ALL_SCOPES = [
   "quotes:read",
   "orders:create",
   "orders:read",
+  "cad:build",
 ] as const;
 
 export type Scope = (typeof ALL_SCOPES)[number];
@@ -23,6 +24,8 @@ export const SCOPE_DESCRIPTIONS: Record<Scope, string> = {
   "orders:create":
     "Create draft orders on your behalf — you still confirm and pay for each one",
   "orders:read": "Read order status, tracking, and history",
+  "cad:build":
+    "Run CAD programs on Materialize's geometry engine, see renders and printability checks, and save them as builds (text-to-CAD accounts only)",
 };
 
 export function isValidScope(s: string): s is Scope {

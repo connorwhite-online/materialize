@@ -138,7 +138,7 @@ export interface CompleteTextOptions {
   signal?: AbortSignal;
   /**
    * Upper bound on this call's effort, below the role's own. The harness sets
-   * it after a response is cut off at the output limit (see stepDownEffort).
+   * it after a response is cut off at the output limit (see effortBelow).
    */
   effortCap?: CadEffort;
 }
