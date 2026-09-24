@@ -15,7 +15,12 @@ import {
   needsEnclosureRecipe,
   ENCLOSURE_SPLIT_REPAIR_NOTE,
 } from "./knowledge/enclosure-recipe";
-import { judgeAesthetics } from "./critique";
+import {
+  judgeAesthetics,
+  judgeMode,
+  type AestheticJudgement,
+  type JudgeRequest,
+} from "./critique";
 import type { DimensionScore } from "./critique-core";
 import {
   conceptImage,
@@ -277,6 +282,12 @@ export interface HarnessResult {
    * dimension drags. Null whenever aestheticScore is null.
    */
   aestheticDims?: Record<string, DimensionScore> | null;
+  /**
+   * The judge's inputs, captured when the judge runs in the background
+   * (judgeMode, ./critique): the build did not wait for a score, and the job
+   * scores the part after `done`. Absent inline, off, and on failure.
+   */
+  pendingJudge?: JudgeRequest;
   /**
    * The design brief this generation was built against (docs/text-to-cad/06):
    * freshly built on a fresh build, the caller's priorBrief passed through
@@ -1280,10 +1291,12 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
         continue;
       }
 
-      // Geometrically valid — now judge it aesthetically. On by default with
-      // credentials (CAD_CRITIQUE=false disables); all available views go to
-      // the judge so one 3/4 view can't hide a defect.
-      const judgement = await judgeAesthetics({
+      // Geometrically valid — the part ships on the objective checks. The
+      // aesthetic judge runs in the background by default (judgeMode,
+      // ./critique): it no longer holds the result back or spends repair
+      // attempts. All available views go to it, so one 3/4 view can't hide
+      // a defect.
+      const judgeRequest: JudgeRequest = {
         renderPng: lastRun.renderPng,
         renders: lastRun.renders,
         prompt: input.prompt,
@@ -1306,8 +1319,12 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
             ? [{ ...conceptImg, label: CONCEPT_JUDGE_LABEL }]
             : []),
         ],
-        signal: input.signal,
-      });
+      };
+      const mode = judgeMode();
+      const judgement: AestheticJudgement =
+        mode === "inline"
+          ? await judgeAesthetics({ ...judgeRequest, signal: input.signal })
+          : { available: false };
       const aestheticScore = judgement.available
         ? (judgement.score ?? null)
         : null;
@@ -1315,8 +1332,8 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
         ? (judgement.perDimension ?? null)
         : null;
 
-      // Spend a repair turn on a visually-weak (but printable) result when we
-      // have budget and a model. Otherwise accept it.
+      // CAD_JUDGE=inline only: spend a repair turn on a visually-weak (but
+      // printable) result when we have budget and a model. Otherwise accept.
       if (
         judgement.available &&
         judgement.pass === false &&
@@ -1335,6 +1352,7 @@ export async function runHarness(input: HarnessInput): Promise<HarnessResult> {
         run: lastRun,
         aestheticScore,
         aestheticDims,
+        ...(mode === "background" ? { pendingJudge: judgeRequest } : {}),
         brief: resultBrief,
         // The concept this build aimed toward — the caller persists it as a
         // thread reference so revisions keep building toward the same target.

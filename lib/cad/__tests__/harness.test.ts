@@ -410,3 +410,62 @@ describe("runHarness geometry-first concepts", () => {
     expect(implement?.prompt).not.toContain("BLOCKOUT (massing only");
   });
 });
+
+// The judge ships in the background by default (judgeMode, lib/cad/critique):
+// a part that passes the objective checks returns on that attempt, and the
+// judge's inputs ride the result for the job to score after `done`.
+describe("runHarness aesthetic judge placement", () => {
+  const weakJudge = JSON.stringify(
+    Object.fromEntries(
+      ["recognizability", "proportion", "cohesion", "surfacing", "refinement"].map(
+        (d) => [d, { score: 1, reason: "r", fix: `fix ${d}` }]
+      )
+    )
+  );
+  const passingRun = (): CadRunResult => ({
+    ok: true,
+    files: { stl: "AA==" },
+    renderPng: "PNG",
+    validation: { compiled: true, isSolid: true, isWatertight: true, isManifold: true },
+  });
+  const judgeCalls = () =>
+    completeText.mock.calls.filter(
+      (c) => ((c as unknown[])[0] as { role?: string }).role === "critique"
+    ).length;
+
+  beforeEach(() => {
+    hasModelCredentials.mockReset().mockReturnValue(true);
+    completeText.mockReset().mockImplementation((async (opts: { role?: string }) =>
+      opts.role === "critique" ? weakJudge : "```python\nresult = 1\n```") as never);
+    runCadCode.mockReset().mockResolvedValue(passingRun());
+  });
+  afterEach(() => {
+    delete process.env.CAD_JUDGE;
+  });
+
+  it("ships on the objective checks and hands the judge's inputs back (default)", async () => {
+    const result = await runHarness({ prompt: "a 20mm cube", maxAttempts: 2 });
+    expect(result.ok).toBe(true);
+    expect(result.attempts).toBe(1);
+    expect(judgeCalls()).toBe(0);
+    expect(result.aestheticScore).toBeNull();
+    expect(result.pendingJudge).toMatchObject({ prompt: "a 20mm cube", renderPng: "PNG" });
+  });
+
+  it("CAD_JUDGE=inline restores the old loop: scored in-loop, weak spends a repair", async () => {
+    process.env.CAD_JUDGE = "inline";
+    const result = await runHarness({ prompt: "a 20mm cube", maxAttempts: 2 });
+    expect(result.attempts).toBe(2);
+    expect(judgeCalls()).toBe(2);
+    expect(typeof result.aestheticScore).toBe("number");
+    expect(result.pendingJudge).toBeUndefined();
+  });
+
+  it("CAD_JUDGE=off neither scores nor queues a score", async () => {
+    process.env.CAD_JUDGE = "off";
+    const result = await runHarness({ prompt: "a 20mm cube", maxAttempts: 2 });
+    expect(result.attempts).toBe(1);
+    expect(judgeCalls()).toBe(0);
+    expect(result.pendingJudge).toBeUndefined();
+  });
+});

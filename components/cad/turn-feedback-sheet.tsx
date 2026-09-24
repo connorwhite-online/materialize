@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { CheckIcon, CircleDashedIcon } from "lucide-react";
+import { CheckIcon } from "lucide-react";
 import { ChevronUp } from "@/components/icons/chevron-up";
 import { NativeSheet } from "@/components/ui/native-sheet";
 import { recordCadFeedback } from "@/app/actions/cad-generation";
@@ -43,61 +43,98 @@ export type TurnFeedbackPatch = {
   feedbackNote: string | null;
 };
 
-/** True when a turn already carries any feedback signal. */
-export function hasFeedback(turn: TurnFeedbackTarget): boolean {
-  return (
-    !!turn.rating || turn.feedbackTags.length > 0 || !!turn.feedbackNote
-  );
-}
-
 /**
- * The row that opens the sheet, sitting where the inline feedback card used
- * to live. Its leading glyph IS the status: a dotted circle while this
- * revision is unrated (an open loop — something still to do), a solid filled
- * check once feedback is saved. The trailing chevron says "this opens a sheet"
- * rather than "this navigates".
+ * One-tap rating, inline under the model: "How did this turn out? 👍 👎 ·
+ * Details". A thumb saves on tap (tap it again to clear); Details opens the
+ * sheet for failure tags and a note.
  *
- * Lives beside `hasFeedback` on purpose: the saved/unsaved rendering and the
- * predicate that decides it should never drift into different files.
+ * It replaced a trigger that opened the sheet, which auto-opened as a modal
+ * after every build and asked for a rating, tags and a note behind a Save.
+ * Six builds were ever rated. Those ratings are what calibrates the
+ * aesthetic judge (scripts/evals/calibration.ts), and the judge is kept out
+ * of the build loop until they say it tracks taste, so the rating has to cost
+ * one tap. Saving keeps any tags and note already on the turn.
  */
-export function TurnFeedbackTrigger({
+export function TurnRatingRow({
   turn,
-  onOpen,
+  onRated,
+  onOpenDetails,
 }: {
   turn: TurnFeedbackTarget;
-  onOpen: () => void;
+  onRated: (patch: TurnFeedbackPatch) => void;
+  onOpenDetails: () => void;
 }) {
-  const saved = hasFeedback(turn);
-  const ratingGlyph =
-    turn.rating === "good" ? "👍" : turn.rating === "bad" ? "👎" : null;
-  return (
+  const [saving, startSaving] = useTransition();
+  // The tapped value shows at once; the saved one takes over when it lands.
+  const [pending, setPending] = useState<CadRating | null | undefined>(undefined);
+  const [failed, setFailed] = useState(false);
+  const shown = pending !== undefined ? pending : turn.rating;
+  const tags = turn.feedbackTags.filter((t): t is CadFeedbackTag =>
+    (CAD_FEEDBACK_TAGS as readonly string[]).includes(t)
+  );
+  const hasDetails = tags.length > 0 || !!turn.feedbackNote;
+
+  function rate(value: CadRating) {
+    const next = shown === value ? null : value;
+    setPending(next);
+    setFailed(false);
+    startSaving(async () => {
+      const res = await recordCadFeedback({
+        generationId: turn.id,
+        rating: next,
+        tags,
+        note: turn.feedbackNote,
+      });
+      if ("ok" in res) {
+        onRated({ rating: next, feedbackTags: tags, feedbackNote: turn.feedbackNote });
+      } else {
+        // Say so rather than showing a rating that never saved.
+        setFailed(true);
+      }
+      setPending(undefined);
+    });
+  }
+
+  const thumb = (value: CadRating, glyph: string, label: string) => (
     <button
       type="button"
-      onClick={onOpen}
-      aria-label={saved ? "Edit feedback for this revision" : "Add feedback for this revision"}
+      onClick={() => rate(value)}
+      disabled={saving}
+      aria-pressed={shown === value}
+      aria-label={label}
       className={cn(
-        "mt-4 inline-flex items-center gap-2 rounded-full border py-1.5 pl-2 pr-2.5 text-xs transition-colors",
-        saved
-          ? "border-emerald-600/30 text-foreground hover:bg-emerald-500/10"
-          : "border-border/60 text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+        "flex size-8 items-center justify-center rounded-full border text-sm transition-colors",
+        shown === value
+          ? "border-foreground/30 bg-foreground/10"
+          : "border-border/60 opacity-70 hover:bg-foreground/5 hover:opacity-100"
       )}
     >
-      {saved ? (
-        // A real filled disc: lucide's circle-check is stroke-based, and
-        // filling that svg would flood the check path too — so the disc is
-        // the wrapper and the check sits on top of it.
-        <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-emerald-600">
-          <CheckIcon className="size-2.5 text-white" strokeWidth={3.5} />
-        </span>
-      ) : (
-        <CircleDashedIcon className="size-4 shrink-0" />
-      )}
-      <span>
-        {saved ? "Feedback saved" : "Add feedback"}
-        {ratingGlyph ? ` ${ratingGlyph}` : ""}
-      </span>
-      <ChevronUp size={12} className="shrink-0 opacity-60" />
+      {glyph}
     </button>
+  );
+
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      <span>{shown ? "Thanks for rating" : "How did this turn out?"}</span>
+      {thumb("good", "👍", "Good")}
+      {thumb("bad", "👎", "Bad")}
+      <button
+        type="button"
+        onClick={onOpenDetails}
+        className="inline-flex items-center gap-1 rounded-full px-2 py-1 hover:bg-foreground/5 hover:text-foreground"
+      >
+        {hasDetails ? (
+          <CheckIcon className="size-3 text-emerald-600" strokeWidth={3} />
+        ) : null}
+        Details
+        <ChevronUp size={12} className="opacity-60" />
+      </button>
+      {failed ? (
+        <span role="status" className="text-destructive">
+          Couldn&apos;t save
+        </span>
+      ) : null}
+    </div>
   );
 }
 

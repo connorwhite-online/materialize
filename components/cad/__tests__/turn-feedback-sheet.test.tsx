@@ -11,8 +11,7 @@ vi.mock("@/app/actions/cad-generation", () => ({
 
 import {
   TurnFeedbackSheet,
-  TurnFeedbackTrigger,
-  hasFeedback,
+  TurnRatingRow,
   type TurnFeedbackTarget,
 } from "@/components/cad/turn-feedback-sheet";
 
@@ -44,65 +43,64 @@ beforeEach(() => {
   recordCadFeedback.mockResolvedValue({ ok: true });
 });
 
-describe("hasFeedback", () => {
-  it("is false only when every signal is empty", () => {
-    expect(hasFeedback(TURN)).toBe(false);
-    expect(hasFeedback({ ...TURN, rating: "good" })).toBe(true);
-    expect(hasFeedback({ ...TURN, feedbackTags: ["wrong_dimensions"] })).toBe(true);
-    expect(hasFeedback({ ...TURN, feedbackNote: "hm" })).toBe(true);
-  });
-});
+describe("TurnRatingRow", () => {
+  function renderRow(turn: TurnFeedbackTarget = TURN) {
+    const onRated = vi.fn();
+    const onOpenDetails = vi.fn();
+    render(<TurnRatingRow turn={turn} onRated={onRated} onOpenDetails={onOpenDetails} />);
+    return { onRated, onOpenDetails };
+  }
 
-describe("TurnFeedbackTrigger", () => {
-  it("reads as an unsaved open loop before any feedback exists", () => {
-    const onOpen = vi.fn();
-    render(<TurnFeedbackTrigger turn={TURN} onOpen={onOpen} />);
-    const btn = screen.getByRole("button");
-    expect(btn.textContent).toContain("Add feedback");
-    expect(btn.getAttribute("aria-label")).toMatch(/Add feedback/);
-    // Dotted-circle glyph, not the solid saved disc.
-    expect(btn.querySelector(".bg-emerald-600")).toBeNull();
-    fireEvent.click(btn);
-    expect(onOpen).toHaveBeenCalled();
-  });
-
-  it("switches to the filled check once feedback is saved", () => {
-    render(
-      <TurnFeedbackTrigger
-        turn={{ ...TURN, rating: "good" }}
-        onOpen={vi.fn()}
-      />
+  it("asks, and saves a rating in ONE tap, keeping existing tags and note", async () => {
+    const { onRated } = renderRow({
+      ...TURN,
+      // a stale/unknown tag is dropped, a real one is kept
+      feedbackTags: ["dimensions_off", "not-a-tag"],
+      feedbackNote: "hole was tight",
+    });
+    expect(screen.getByText("How did this turn out?")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Good" }));
+    await waitFor(() =>
+      expect(recordCadFeedback).toHaveBeenCalledWith({
+        generationId: "gen-1",
+        rating: "good",
+        tags: ["dimensions_off"],
+        note: "hole was tight",
+      })
     );
-    const btn = screen.getByRole("button");
-    expect(btn.textContent).toContain("Feedback saved");
-    expect(btn.getAttribute("aria-label")).toMatch(/Edit feedback/);
-    // The disc is a filled wrapper, since a filled lucide circle-check would
-    // flood its check path too.
-    expect(btn.querySelector(".bg-emerald-600")).not.toBeNull();
+    await waitFor(() =>
+      expect(onRated).toHaveBeenCalledWith({
+        rating: "good",
+        feedbackTags: ["dimensions_off"],
+        feedbackNote: "hole was tight",
+      })
+    );
   });
 
-  it("counts a note-only or tag-only turn as saved", () => {
-    const { rerender } = render(
-      <TurnFeedbackTrigger
-        turn={{ ...TURN, feedbackNote: "hole was tight" }}
-        onOpen={vi.fn()}
-      />
+  it("shows the saved rating, and a second tap on it clears it", async () => {
+    const { onRated } = renderRow({ ...TURN, rating: "bad" });
+    const bad = screen.getByRole("button", { name: "Bad" });
+    expect(bad.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByText("Thanks for rating")).toBeTruthy();
+    fireEvent.click(bad);
+    await waitFor(() =>
+      expect(onRated).toHaveBeenCalledWith(expect.objectContaining({ rating: null }))
     );
-    expect(screen.getByRole("button").textContent).toContain("Feedback saved");
-    rerender(
-      <TurnFeedbackTrigger
-        turn={{ ...TURN, feedbackTags: ["wrong_dimensions"] }}
-        onOpen={vi.fn()}
-      />
-    );
-    expect(screen.getByRole("button").textContent).toContain("Feedback saved");
   });
 
-  it("shows the rating glyph alongside the saved label", () => {
-    render(
-      <TurnFeedbackTrigger turn={{ ...TURN, rating: "bad" }} onOpen={vi.fn()} />
-    );
-    expect(screen.getByRole("button").textContent).toContain("👎");
+  it("says so when the save fails, instead of showing a rating that never saved", async () => {
+    recordCadFeedback.mockResolvedValue({ error: "Not found" });
+    const { onRated } = renderRow();
+    fireEvent.click(screen.getByRole("button", { name: "Good" }));
+    await waitFor(() => expect(screen.getByText("Couldn't save")).toBeTruthy());
+    expect(onRated).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Good" }).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("opens the details sheet from Details", () => {
+    const { onOpenDetails } = renderRow();
+    fireEvent.click(screen.getByRole("button", { name: /Details/ }));
+    expect(onOpenDetails).toHaveBeenCalled();
   });
 });
 

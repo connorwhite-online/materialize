@@ -16,6 +16,8 @@ import {
   runGenerative,
 } from "./generative";
 import { sessionsAvailable } from "./session-client";
+import { pickBestCandidate } from "./best-of";
+import { judgeAesthetics, judgeMode } from "./critique";
 import type { CadProgressEvent } from "./types";
 import { logError } from "@/lib/logger";
 
@@ -74,8 +76,10 @@ export async function classifyCadRequest(
 
 /**
  * Best-of-N (docs/text-to-cad/07): sample N independent scripted generations
- * for a FRESH build and keep the judge's favorite — codegen variance is high,
- * and selection converts it into quality at linear cost. Default 1 (off);
+ * for a FRESH build and keep the objectively best (./best-of: fewest
+ * dimension and printability failures, the judge only as a tiebreak) —
+ * codegen variance is high, and selection converts it into quality at
+ * linear cost. Default 1 (off);
  * CAD_BEST_OF=2|3 enables. Revisions are excluded (they converge on a prior,
  * variance is the enemy there), as is the agentic path (already iterative).
  */
@@ -84,7 +88,7 @@ function bestOfN(): number {
   return Number.isFinite(n) ? Math.max(1, Math.min(3, Math.floor(n))) : 1;
 }
 
-/** Judge-selected winner among candidates; first ok result as tiebreak. */
+/** The objectively best candidate (./best-of); the judge breaks ties. */
 async function runBestOf(
   input: HarnessInput,
   n: number
@@ -140,10 +144,13 @@ async function runBestOf(
           `all ${n} best-of candidates failed: ${String(thrown?.error ?? "unknown")}`
         );
   }
-  const winner = ok.reduce((best, r) =>
-    (r.aestheticScore ?? -1) > (best.aestheticScore ?? -1) ? r : best
+  // Objective checks decide; the judge only breaks a tie (./best-of).
+  return pickBestCandidate(
+    ok,
+    judgeMode() === "off"
+      ? undefined
+      : (req) => judgeAesthetics({ ...req, signal: input.signal })
   );
-  return winner;
 }
 
 // Under a deadline, a scripted rebuild needs at least brief + plan + one

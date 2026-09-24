@@ -21,6 +21,11 @@ import {
   tokenCeilingForTier,
 } from "@/lib/cad/budget";
 import { runCadGeneration } from "@/lib/cad/orchestrate";
+import {
+  judgeAesthetics,
+  judgeMode,
+  type JudgeRequest,
+} from "@/lib/cad/critique";
 import type { PromptImage } from "@/lib/cad/model-client";
 import {
   appendConceptReference,
@@ -35,6 +40,7 @@ import { fetchRepoContext } from "@/lib/cad/repo-fetch";
 import {
   persistGenerationFailure,
   persistGenerationSuccess,
+  persistAestheticScore,
 } from "@/lib/cad/persist";
 import type {
   CadDoneEvent,
@@ -97,6 +103,9 @@ const MAX_QUESTION_TIMEOUT_S = 600;
  * disables interactive questions entirely (the asker resolves to the default
  * without ever suspending), a safe kill switch.
  */
+/** Remaining job time below which the background judge is skipped. */
+const BACKGROUND_JUDGE_MIN_MS = 90_000;
+
 export function maxQuestionsPerJob(): number {
   const n = Number(process.env.CAD_MAX_QUESTIONS_PER_JOB);
   return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 1;
@@ -338,6 +347,30 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
 
   const markJob = (patch: Partial<typeof cadJobs.$inferInsert>) =>
     db.update(cadJobs).set(patch).where(eq(cadJobs.id, jobId));
+
+  const scoreInBackground = async (
+    req: JudgeRequest,
+    genId: string,
+    credentials: Parameters<typeof runWithCadContext>[0]["credentials"]
+  ) => {
+    const deadline = jobDeadlineAt();
+    // A judge call runs ~30-45s; don't start one the platform will kill.
+    if (deadline !== undefined && deadline - Date.now() < BACKGROUND_JUDGE_MIN_MS) return;
+    try {
+      const judgement = await runWithCadContext({ meter, credentials, recorder }, () =>
+        judgeAesthetics(req)
+      );
+      if (!judgement.available) return;
+      await persistAestheticScore(
+        genId,
+        judgement.score ?? null,
+        judgement.perDimension ?? null
+      );
+      await markJob(usagePatch());
+    } catch (err) {
+      logError("executeCadJob.backgroundJudge", err);
+    }
+  };
 
   // --- Interactive questions (MTR-191) -----------------------------------
   // The harness can SUSPEND a running build to ask one multiple-choice
@@ -788,6 +821,14 @@ export async function executeCadJob(input: ExecuteCadJobInput): Promise<void> {
       generationId,
       route: result.route,
     });
+
+    // Background aesthetic score (judgeMode, ./critique): the part already
+    // shipped; this only feeds evals and judge calibration. Last, so nothing
+    // above waits on it, and inside the job's meter so its tokens are still
+    // counted (the usage row is rewritten after). Never fails the job.
+    if (result.pendingJudge && judgeMode() === "background") {
+      await scoreInBackground(result.pendingJudge, persisted.generationId, credentials);
+    }
   } catch (error) {
     if (budgetAborted) {
       // Ordered BEFORE the cancel branch: a budget abort trips the same

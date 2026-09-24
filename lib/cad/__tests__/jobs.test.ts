@@ -110,11 +110,21 @@ const persistGenerationFailure = vi.fn(async (...args: unknown[]) => ({
   generationId: args[0] as string,
 }));
 const persistGenerationSuccess = vi.fn();
+const persistAestheticScore = vi.fn(async () => undefined);
 vi.mock("@/lib/cad/persist", () => ({
   persistGenerationFailure: (...args: unknown[]) =>
     persistGenerationFailure(...args),
   persistGenerationSuccess: (...args: unknown[]) =>
     persistGenerationSuccess(...args),
+  persistAestheticScore: (...args: unknown[]) => persistAestheticScore(...(args as [])),
+}));
+
+// The judge is mocked so a job test never depends on ambient credentials.
+const judgeState = { mode: "background" as "background" | "inline" | "off" };
+const judgeAesthetics = vi.fn();
+vi.mock("@/lib/cad/critique", () => ({
+  judgeMode: () => judgeState.mode,
+  judgeAesthetics: (...args: unknown[]) => judgeAesthetics(...args),
 }));
 
 import {
@@ -160,6 +170,7 @@ beforeEach(() => {
   delete process.env.CAD_MAX_QUESTIONS_PER_JOB;
   delete process.env.CAD_CREDITS_ENABLED;
   delete process.env.CAD_CREDIT_COST_SIMPLE;
+  judgeState.mode = "background";
   persistGenerationFailure.mockImplementation(async (...args: unknown[]) => ({
     error: args[1] as string,
     generationId: args[0] as string,
@@ -758,5 +769,57 @@ describe("executeCadJob metering + credit debits", () => {
     await executeCadJob(baseInput);
 
     expect(insertValues).not.toHaveBeenCalled();
+  });
+});
+
+describe("executeCadJob background judge", () => {
+  const persisted = {
+    generationId: "gen-1",
+    fileAssetId: "asset-1",
+    fileSlug: "slug-1",
+    renderUrl: "https://example.test/r.png",
+    sourceCode: "result = 1",
+    title: "Cube",
+    remeshed: false,
+  };
+
+  it("scores the part AFTER the job is done, and records it on the generation", async () => {
+    const order: string[] = [];
+    runHarness.mockResolvedValue({ ...okHarnessResult(), pendingJudge: { prompt: "a 20mm cube" } });
+    persistGenerationSuccess.mockResolvedValue(persisted);
+    judgeAesthetics.mockImplementation(async (req: { prompt: string }) => {
+      order.push(`judge:${req.prompt}`);
+      return { available: true, score: 72, perDimension: { proportion: { score: 4 } } };
+    });
+    persistAestheticScore.mockImplementation((async () => {
+      order.push("persist-score");
+    }) as never);
+
+    await executeCadJob(baseInput);
+
+    const doneAt = updateCalls.findIndex((u) => (u as { status?: string }).status === "done");
+    expect(doneAt).toBeGreaterThanOrEqual(0);
+    expect(order).toEqual(["judge:a 20mm cube", "persist-score"]);
+    expect(persistAestheticScore).toHaveBeenCalledWith("gen-1", 72, {
+      proportion: { score: 4 },
+    });
+    // usage is rewritten after the judge so its tokens are counted
+    expect(updateCalls.slice(doneAt + 1)).toContainEqual(
+      expect.objectContaining({ usage: expect.anything() })
+    );
+  });
+
+  it("never fails a finished job when the judge throws, and skips it when off", async () => {
+    runHarness.mockResolvedValue({ ...okHarnessResult(), pendingJudge: { prompt: "x" } });
+    persistGenerationSuccess.mockResolvedValue(persisted);
+    judgeAesthetics.mockRejectedValue(new Error("judge down"));
+    await executeCadJob(baseInput);
+    expect(updateCalls).not.toContainEqual(expect.objectContaining({ status: "failed" }));
+    expect(persistAestheticScore).not.toHaveBeenCalled();
+
+    judgeAesthetics.mockClear();
+    judgeState.mode = "off";
+    await executeCadJob(baseInput);
+    expect(judgeAesthetics).not.toHaveBeenCalled();
   });
 });

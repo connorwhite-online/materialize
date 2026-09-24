@@ -14,7 +14,12 @@ import { needsExchangerRecipe } from "./knowledge/exchanger-recipe";
 import { usesInternalThreadRecipe } from "./knowledge/bd-warehouse";
 import { selectExemplars, formatExemplars } from "./knowledge/exemplars";
 import { fitTargetsForBrief } from "./knowledge/components";
-import { judgeAesthetics, type AestheticJudgement } from "./critique";
+import {
+  judgeAesthetics,
+  judgeMode,
+  type AestheticJudgement,
+  type JudgeRequest,
+} from "./critique";
 import { CAD_FEEDBACK_TAG_LABELS, type CadFeedbackTag } from "./feedback";
 import {
   checkDimensionTargets,
@@ -946,19 +951,23 @@ export async function runAgenticHarness(
     );
   }
 
-  // Grade/judge the accepted run once when the agent didn't already — keeps
-  // aestheticScore populated for the flywheel exactly like runHarness.
-  if (bestRun && !judgedBest) {
-    judgement = await judgeAesthetics({
-      renderPng: bestRun.renderPng,
-      renders: bestRun.renders,
-      prompt: input.prompt,
-      intent: { plan: agentPlan, brief: intentBrief },
-      // Raw refs — the judge applies its own goal framing, not the
-      // generate-step "match this" captions.
-      references: input.images,
-      signal: input.signal,
-    });
+  // Score the accepted run once when the agent didn't already — keeps
+  // aestheticScore populated for the flywheel exactly like runHarness: now,
+  // with CAD_JUDGE=inline; otherwise the job scores it after `done`.
+  const mode = judgeMode();
+  const judgeRequest: JudgeRequest | undefined = bestRun
+    ? {
+        renderPng: bestRun.renderPng,
+        renders: bestRun.renders,
+        prompt: input.prompt,
+        intent: { plan: agentPlan, brief: intentBrief },
+        // Raw refs — the judge applies its own goal framing, not the
+        // generate-step "match this" captions.
+        references: input.images,
+      }
+    : undefined;
+  if (judgeRequest && !judgedBest && mode === "inline") {
+    judgement = await judgeAesthetics({ ...judgeRequest, signal: input.signal });
   }
 
   // The accumulated construction features ride the accepted run in place of
@@ -975,6 +984,7 @@ export async function runAgenticHarness(
     run,
     aestheticScore: judgement?.available ? (judgement.score ?? null) : null,
     aestheticDims: judgement?.available ? (judgement.perDimension ?? null) : null,
+    ...(mode === "background" && judgeRequest ? { pendingJudge: judgeRequest } : {}),
     brief: brief ?? input.priorBrief,
     dimensionChecks,
     telemetry,
@@ -1198,18 +1208,25 @@ export async function runAgenticHarness(
         dimensionChecks = checkDimensionTargets(lastRun, dimensionTargets);
         const dimSummary = summarizeDimensionChecks(dimensionChecks);
         const dimHints = formatDimensionRepairHints(dimensionChecks);
-        judgement = await judgeAesthetics({
-          renderPng: lastRun.renderPng,
-          renders: lastRun.renders,
-          prompt: input.prompt,
-          // CoT-to-critic (MTR-223): the agent's own stated plan + the
-          // caller-threaded brief, as intent context for the judge.
-          intent: { plan: agentPlan, brief: intentBrief },
-          // Raw refs — the judge applies its own goal framing.
-          references: input.images,
-          signal: input.signal,
-        });
-        if (lastRun === bestRun) judgedBest = true;
+        // The aesthetic verdict reaches the agent only with CAD_JUDGE=inline
+        // (judgeMode, ./critique). By default the agent grades on the
+        // objective checks alone and the part is scored after the job ends:
+        // every grade call used to cost a ~40s judge round-trip.
+        judgement =
+          judgeMode() === "inline"
+            ? await judgeAesthetics({
+                renderPng: lastRun.renderPng,
+                renders: lastRun.renders,
+                prompt: input.prompt,
+                // CoT-to-critic (MTR-223): the agent's own stated plan + the
+                // caller-threaded brief, as intent context for the judge.
+                intent: { plan: agentPlan, brief: intentBrief },
+                // Raw refs — the judge applies its own goal framing.
+                references: input.images,
+                signal: input.signal,
+              })
+            : { available: false };
+        if (lastRun === bestRun && judgement.available) judgedBest = true;
         return [
           textBlock(
             JSON.stringify({
