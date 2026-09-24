@@ -549,6 +549,61 @@ describe("executeCadJob", () => {
     ).toBe(false);
   });
 
+  it("still asks the concept pick after the brief used the question budget", async () => {
+    // Shared budget = the brief asks first and the picker never showed: every
+    // build silently took the first direction.
+    doneSuccess();
+    const conceptPick = {
+      id: "concept-pick",
+      text: "Which direction?",
+      options: [
+        { id: "opt-1", label: "Soft" },
+        { id: "opt-2", label: "Crisp" },
+      ],
+      defaultOptionId: "opt-1",
+      timeoutS: 30,
+    };
+    jobRow.answers = { q1: "pico", "concept-pick": "opt-2" };
+    const chosen: (string | undefined)[] = [];
+    runHarness.mockImplementation(
+      async (input: {
+        onQuestion?: (q: typeof questionInput | typeof conceptPick) => Promise<string>;
+      }) => {
+        chosen.push(await input.onQuestion?.(questionInput)); // brief: uses the budget of 1
+        chosen.push(await input.onQuestion?.(conceptPick)); // its own slot
+        chosen.push(await input.onQuestion?.(conceptPick)); // only one pick per job
+        return okHarnessResult();
+      }
+    );
+
+    await executeCadJob(baseInput);
+
+    expect(chosen).toEqual(["pico", "opt-2", "opt-1"]);
+  });
+
+  it("budget 0 still disables the concept pick too", async () => {
+    doneSuccess();
+    process.env.CAD_MAX_QUESTIONS_PER_JOB = "0";
+    jobRow.answers = { "concept-pick": "opt-2" };
+    let chosen: string | undefined;
+    runHarness.mockImplementation(
+      async (input: { onQuestion?: (q: unknown) => Promise<string> }) => {
+        chosen = await input.onQuestion?.({
+          id: "concept-pick",
+          text: "Which direction?",
+          options: [
+            { id: "opt-1", label: "Soft" },
+            { id: "opt-2", label: "Crisp" },
+          ],
+          defaultOptionId: "opt-1",
+        });
+        return okHarnessResult();
+      }
+    );
+    await executeCadJob(baseInput);
+    expect(chosen).toBe("opt-1");
+  });
+
   it("falls back to the default when a stale answer names an option we never offered", async () => {
     doneSuccess();
     jobRow.answers = { q1: "not-an-option" };

@@ -1162,6 +1162,17 @@ def _run_checks(mesh, checks: dict) -> dict:
             out["fit"] = _plain(check_fit(mesh, fit_spec))
         except Exception as err:  # noqa: BLE001
             out["fit"] = {"error": str(err)}
+    opening_spec = checks.get("opening")
+    if opening_spec is not None:
+        # Does the part open from above (containers)? See opening.py.
+        try:
+            from opening import check_opening
+
+            out["opening"] = _plain(
+                check_opening(mesh, opening_spec if isinstance(opening_spec, dict) else {})
+            )
+        except Exception as err:  # noqa: BLE001
+            out["opening"] = {"error": str(err)}
     return out
 
 
@@ -2455,7 +2466,7 @@ def run(req: RunRequest, request: Request) -> dict:
 # have caught itself.
 _OPTIONAL_MODULES = (
     "features", "validate", "exchanger", "networks", "fea", "fit",
-    "sdf_kit", "dfm",
+    "sdf_kit", "dfm", "opening",
 )
 
 

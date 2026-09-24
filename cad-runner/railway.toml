@@ -30,6 +30,9 @@
 [build]
 builder = "dockerfile"
 dockerfilePath = "Dockerfile"
+# Rebuild only when the sidecar changes. Railway matches these from the REPO
+# root even with Root Directory = cad-runner, hence the prefix.
+watchPatterns = ["/cad-runner/**"]
 
 [deploy]
 healthcheckPath = "/health"

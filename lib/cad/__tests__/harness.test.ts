@@ -21,6 +21,16 @@ vi.mock("@/lib/cad/runner-client", () => ({
   runCadCode: (...args: Parameters<typeof runCadCode>) => runCadCode(...args),
 }));
 
+// Geometry-first concepts (CAD_CONCEPT_MODE=blockout): off unless a test
+// turns it on, so every other test keeps the default image-concept path.
+const blockoutState = { enabled: false };
+const blockoutCandidates = vi.fn();
+vi.mock("@/lib/cad/concept-blockout", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/cad/concept-blockout")>()),
+  blockoutConceptsEnabled: () => blockoutState.enabled,
+  blockoutCandidates: (...a: unknown[]) => blockoutCandidates(...a),
+}));
+
 // Aesthetic judge is gated off by default (no CAD_AESTHETIC_JUDGE flag); leave
 // it real so a passing run's judgement short-circuits to { available: false }
 // without needing further mocking.
@@ -357,5 +367,46 @@ describe("runHarness effort ladder", () => {
       .filter((o) => o.role === "implement" || o.role === "repair")
       .map((o) => o.effortCap);
     expect(efforts).toEqual(["medium", "high", "xhigh"]);
+  });
+});
+
+describe("runHarness geometry-first concepts", () => {
+  beforeEach(() => {
+    hasModelCredentials.mockReset().mockReturnValue(true);
+    completeText.mockReset().mockResolvedValue("```python\nresult = 1\n```");
+    runCadCode.mockReset().mockResolvedValue(failingRun());
+    blockoutState.enabled = true;
+  });
+  afterEach(() => {
+    blockoutState.enabled = false;
+  });
+
+  it("offers blockouts in the picker and seeds implement with the PICKED one's code (SDF)", async () => {
+    const { CONCEPT_BLOCKOUT_LABEL } = await import("@/lib/cad/concept-blockout");
+    blockoutCandidates.mockResolvedValue([
+      { direction: { label: "Soft", detail: "a" }, code: "SOFT_CODE", img: { data: "PNG_SOFT", mediaType: "image/png", label: CONCEPT_BLOCKOUT_LABEL } },
+      { direction: { label: "Crisp", detail: "b" }, code: "CRISP_CODE", img: { data: "PNG_CRISP", mediaType: "image/png", label: CONCEPT_BLOCKOUT_LABEL } },
+    ]);
+    const onQuestion = vi.fn(async (q: { options: { id: string; thumbnail?: string }[] }) => {
+      // the picker shows the blockout renders
+      expect(q.options.map((o) => o.thumbnail)).toEqual(["PNG_SOFT", "PNG_CRISP"]);
+      return q.options[1].id; // pick "Crisp"
+    });
+    await runHarness({ prompt: "a knob", maxAttempts: 1, engine: "sdf", onQuestion } as never);
+    const implement = completeText.mock.calls
+      .map((c) => (c as unknown[])[0] as { role?: string; prompt: string })
+      .find((o) => o.role === "implement");
+    expect(implement?.prompt).toContain("CRISP_CODE");
+    expect(implement?.prompt).not.toContain("SOFT_CODE");
+  });
+
+  it("falls back to image concepts when fewer than two blockouts survive", async () => {
+    blockoutCandidates.mockResolvedValue([]);
+    const onQuestion = vi.fn(async () => "opt-1");
+    await runHarness({ prompt: "a knob", maxAttempts: 1, engine: "sdf", onQuestion } as never);
+    const implement = completeText.mock.calls
+      .map((c) => (c as unknown[])[0] as { role?: string; prompt: string })
+      .find((o) => o.role === "implement");
+    expect(implement?.prompt).not.toContain("BLOCKOUT (massing only");
   });
 });

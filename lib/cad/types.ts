@@ -221,6 +221,11 @@ export interface CadRunResult {
     };
     networks?: CadNetworksReport;
     dfm?: CadDfmReport;
+    /**
+     * Share of the footprint's interior that sits deep below the top, seen
+     * from above (cad-runner/opening.py): does a container actually open.
+     */
+    opening?: { openFraction?: number; error?: string };
     [key: string]: unknown;
   };
   /** stderr / exception message when compile or export failed. */
@@ -697,3 +702,9 @@ export class CadOutputTruncatedError extends Error {
     this.name = "CadOutputTruncatedError";
   }
 }
+
+/**
+ * Question id of the concept-direction picker. Budgeted separately from the
+ * brief's questions (see executeCadJob's onQuestion).
+ */
+export const CONCEPT_PICK_QUESTION_ID = "concept-pick";

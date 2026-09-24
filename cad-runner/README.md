@@ -125,13 +125,15 @@ vars the owner enters, one set on each side):
   to the allowlist, `ANTHROPIC_API_KEY` for the model path, and confirm the
   Vercel plan allows the generate route's `maxDuration = 300`.
 
-**⚠️ Redeploy Railway on every `cad-runner/**` change.** The sidecar is a
-separate service from the Vercel app: a Vercel deploy does NOT rebuild the
-Railway image. Recent PRs changed `app.py` / `Dockerfile` / `requirements.txt`
-without a running sidecar picking them up. After merging a `cad-runner/**`
-change, trigger a Railway redeploy (or enable branch auto-deploy). CI
-(`.github/workflows/cad-runner-tests.yml`) verifies the code on every such PR,
-but only a Railway rebuild ships it.
+**Deploys follow `main`.** The sidecar is a separate service from the Vercel
+app: a Vercel deploy does NOT rebuild the Railway image. Connect the Railway
+service to this repo on branch `main` with automatic deploys on, and turn on
+**Wait for CI** so `.github/workflows/cad-runner-tests.yml` gates each deploy.
+`railway.toml` sets `watchPatterns = ["/cad-runner/**"]`, so only sidecar
+changes rebuild it (patterns match from the repo root, not the Root
+Directory). Without that connection, every merged `cad-runner/**` change
+needs a manual redeploy, and for a while several shipped to `main` without a
+running sidecar picking them up.
 
 The model path (MTR-51 blocker #2) is already resolved: `lib/cad/model-client.ts`
 calls the Anthropic Messages API directly (`@anthropic-ai/sdk`, CON-174), not the

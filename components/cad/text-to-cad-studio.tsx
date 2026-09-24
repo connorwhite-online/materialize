@@ -87,6 +87,7 @@ import {
 // Type-only: lib/cad/brief is server-only at runtime; the type is erased.
 import type { ViewerAnnotation } from "@/components/viewer/model-viewer";
 import { planComposerSubmit } from "@/components/cad/composer-submit";
+import { ConceptPreview } from "@/components/cad/concept-compare";
 import { useEnginePreference } from "@/components/cad/engine-preference";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { decodeSnapshotPoints } from "@/components/cad/snapshot-points";
@@ -3635,7 +3636,14 @@ function OptionCard({
           className="size-12 shrink-0 rounded-lg bg-background/40 object-contain"
         />
       )}
-      <span className="min-w-0 flex-1 text-sm text-foreground">{label}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm text-foreground">{label}</span>
+        {/* The direction's description, visible (it only lived in a hover
+            tooltip, which touch screens never show). */}
+        {detail && thumbnail ? (
+          <span className="block text-xs text-muted-foreground">{detail}</span>
+        ) : null}
+      </span>
       {recommended && (
         <span className="shrink-0 rounded-full border border-foreground/15 px-1.5 py-0.5 text-[10px] text-muted-foreground">
           Recommended
@@ -3695,6 +3703,16 @@ export function Questionnaire({
           {question.text}
         </p>
       </div>
+
+      <ConceptPreview
+        options={question.options}
+        armedId={usingCustom ? null : armed}
+        onArm={(id) => {
+          setArmed(id);
+          setCustom("");
+        }}
+        disabled={question.answering}
+      />
 
       <div className="mt-3 flex flex-col gap-2">
         {question.options.map((o) => (
