@@ -2466,7 +2466,7 @@ def run(req: RunRequest, request: Request) -> dict:
 # have caught itself.
 _OPTIONAL_MODULES = (
     "features", "validate", "exchanger", "networks", "fea", "fit",
-    "sdf_kit", "dfm",
+    "sdf_kit", "dfm", "opening",
 )
 
 
