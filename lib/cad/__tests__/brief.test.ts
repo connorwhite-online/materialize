@@ -107,6 +107,22 @@ describe("formatting", () => {
     expect(text).toContain("usb-c");
   });
 
+  it("says how an axis span is measured, only when the contract has one", () => {
+    const withSpan = formatBriefForPrompt({
+      ...brief,
+      dimensionTargets: [
+        { label: "knob outer diameter", kind: "bbox_span", axis: "x", value: 30, tolerance: 0.3 },
+      ],
+    } as CadBrief);
+    // a fluted knob with a groove on the axis measured 29.66 of 30 mm
+    expect(withSpan).toMatch(/CREST sits on each measured axis/);
+    const countOnly = formatBriefForPrompt({
+      ...brief,
+      dimensionTargets: [{ label: "pieces", kind: "count", of: "part", value: 2 }],
+    } as CadBrief);
+    expect(countOnly).not.toMatch(/CREST/);
+  });
+
   it("formatBriefForConcept stays a short form/envelope description", () => {
     const text = formatBriefForConcept(brief);
     expect(text.length).toBeLessThan(400);
