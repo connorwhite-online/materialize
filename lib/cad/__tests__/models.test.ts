@@ -16,6 +16,8 @@ const ENV_KEYS = [
   "CAD_MODEL_IMPLEMENT",
   "CAD_MODEL_TITLE",
   "CAD_MODEL_DEFAULT",
+  "CAD_MODEL_BLOCKOUT",
+  "CAD_EFFORT_BLOCKOUT",
   "CAD_EFFORT_IMPLEMENT",
   "CAD_EFFORT_DEFAULT",
   "CAD_PLAN_STEP",
@@ -89,6 +91,39 @@ describe("modelParamsForRole", () => {
     // CAD_MODEL_* override must degrade, not break the call.
     clearEnv();
     expect(modelParamsForRole("title")).toEqual({ model: "claude-haiku-4-5" });
+  });
+
+  it("gates the knobs on a PINNED model, not the role's default", () => {
+    clearEnv();
+    // plan's default (Opus) takes adaptive thinking; a Haiku pin must not
+    // inherit it: Haiku 4.5 rejects `adaptive`, and this is how every concept
+    // blockout would have 400'd in production.
+    expect(modelParamsForRole("plan", undefined, "claude-haiku-4-5-20251001")).toEqual({
+      model: "claude-haiku-4-5-20251001",
+    });
+    // and the reverse: an Opus pin on a Haiku role gets its knobs
+    expect(modelParamsForRole("title", undefined, "claude-opus-5-5")).toEqual({
+      model: "claude-opus-5-5",
+      thinking: { type: "adaptive" },
+      output_config: { effort: "low" },
+    });
+    expect(openaiParamsForRole("plan", undefined, "some-future-model")).toEqual({
+      model: "some-future-model",
+    });
+  });
+
+  it("runs concept blockouts on Opus at low effort, overridable per env", () => {
+    clearEnv();
+    expect(modelParamsForRole("blockout")).toEqual({
+      model: "claude-opus-5-5",
+      thinking: { type: "adaptive" },
+      output_config: { effort: "low" },
+    });
+    process.env.CAD_MODEL_BLOCKOUT = "claude-haiku-4-5-20251001";
+    expect(modelParamsForRole("blockout")).toEqual({ model: "claude-haiku-4-5-20251001" });
+    process.env.CAD_MODEL_BLOCKOUT = "claude-opus-5-5";
+    process.env.CAD_EFFORT_BLOCKOUT = "medium";
+    expect(modelParamsForRole("blockout").output_config?.effort).toBe("medium");
   });
 
   it("drops both knobs for a model id it does not recognize", () => {

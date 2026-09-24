@@ -156,7 +156,7 @@ export async function completeText(opts: CompleteTextOptions): Promise<string> {
   }
 
   const started = Date.now();
-  const params = modelParamsForRole(cadRoleOrDefault(opts.role), opts.effortCap);
+  const params = modelParamsForRole(cadRoleOrDefault(opts.role), opts.effortCap, opts.model);
   // An explicitly pinned model wins over the role's default, but keeps the
   // role's thinking/effort — the pin is a routing choice, not an opt-out of
   // reasoning. It can also cross vendors, which is what decides the transport.
@@ -164,7 +164,7 @@ export async function completeText(opts: CompleteTextOptions): Promise<string> {
   // The effort this call runs at, for the usage record (CadModelUsage.effort).
   const effort =
     providerForModel(model) === "openai"
-      ? openaiParamsForRole(cadRoleOrDefault(opts.role), opts.effortCap)
+      ? openaiParamsForRole(cadRoleOrDefault(opts.role), opts.effortCap, opts.model)
           .reasoning?.effort
       : params.output_config?.effort;
 

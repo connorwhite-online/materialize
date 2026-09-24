@@ -151,11 +151,11 @@ describe("blockoutCandidates", () => {
     expect(out).toEqual([]);
   });
 
-  it("uses a fast model with its own usage role", async () => {
+  it("runs as the blockout role, which picks the model and effort", async () => {
     await blockoutCandidates({ prompt: "a knob", directions: dirs.slice(0, 1) });
-    expect(completeText.mock.calls[0][0]).toMatchObject({
-      model: "claude-haiku-4-5-20251001",
-      role: "concept-blockout",
-    });
+    const opts = completeText.mock.calls[0][0] as { role: string; model?: string };
+    expect(opts.role).toBe("blockout");
+    // no pin at the call site: the role table (and CAD_MODEL_BLOCKOUT) decide
+    expect(opts.model).toBeUndefined();
   });
 });

@@ -43,7 +43,8 @@ export type CadRole =
   | "implement"
   | "repair"
   | "critique"
-  | "title";
+  | "title"
+  | "blockout";
 
 const ROLE_ENV: Record<CadRole, string> = {
   plan: "CAD_MODEL_PLAN",
@@ -52,6 +53,7 @@ const ROLE_ENV: Record<CadRole, string> = {
   repair: "CAD_MODEL_REPAIR",
   critique: "CAD_MODEL_CRITIQUE",
   title: "CAD_MODEL_TITLE",
+  blockout: "CAD_MODEL_BLOCKOUT",
 };
 
 const ROLE_EFFORT_ENV: Record<CadRole, string> = {
@@ -61,6 +63,7 @@ const ROLE_EFFORT_ENV: Record<CadRole, string> = {
   repair: "CAD_EFFORT_REPAIR",
   critique: "CAD_EFFORT_CRITIQUE",
   title: "CAD_EFFORT_TITLE",
+  blockout: "CAD_EFFORT_BLOCKOUT",
 };
 
 /**
@@ -88,6 +91,13 @@ const ROLE_DEFAULT_MODEL: Record<CadProvider, Record<CadRole, string>> = {
     repair: "claude-opus-5",
     critique: "claude-sonnet-5",
     title: "claude-haiku-4-5",
+    // Concept blockouts: a short SDF program per design direction, under
+    // strong constraints. Measured on 7 identical prompts, scored by the
+    // product's own checks: Opus 7/7 first try (organizers with real open
+    // compartments), Haiku 4.5 4/7 (0/3 organizers, each needing a retry).
+    // Its failures were conceptual, not a lack of deliberation, so the
+    // capable model runs at LOW effort (ROLE_DEFAULT_EFFORT).
+    blockout: "claude-opus-5-5",
   },
   openai: {
     plan: "gpt-6-astra",
@@ -96,6 +106,7 @@ const ROLE_DEFAULT_MODEL: Record<CadProvider, Record<CadRole, string>> = {
     repair: "gpt-6-astra",
     critique: "gpt-5.6-sol",
     title: "gpt-5.6-luna",
+    blockout: "gpt-6-astra",
   },
 };
 
@@ -112,6 +123,7 @@ const ROLE_DEFAULT_EFFORT: Record<CadRole, CadEffort> = {
   repair: "xhigh",
   critique: "high",
   title: "low",
+  blockout: "low",
 };
 
 /** Models that accept `thinking: { type: "adaptive" }`. */
@@ -256,9 +268,16 @@ export interface CadModelParams {
  */
 export function modelParamsForRole(
   role: CadRole,
-  effortCap?: CadEffort
+  effortCap?: CadEffort,
+  /**
+   * A model pinned at the call site. The knobs must be gated on the model
+   * actually called: they were gated on the role's default, so a Haiku pin
+   * on a role whose default is Opus was sent `thinking: adaptive`, which
+   * Haiku 4.5 rejects (every concept blockout would have 400'd in prod).
+   */
+  pinnedModel?: string
 ): CadModelParams {
-  const model = modelForRole(role);
+  const model = pinnedModel || modelForRole(role);
   const params: CadModelParams = { model };
   if (ADAPTIVE_THINKING.test(model)) params.thinking = { type: "adaptive" };
   if (SUPPORTS_EFFORT.test(model)) {
@@ -285,9 +304,11 @@ export interface OpenAiModelParams {
  */
 export function openaiParamsForRole(
   role: CadRole,
-  effortCap?: CadEffort
+  effortCap?: CadEffort,
+  /** See modelParamsForRole: knobs follow the model actually called. */
+  pinnedModel?: string
 ): OpenAiModelParams {
-  const model = modelForRole(role);
+  const model = pinnedModel || modelForRole(role);
   const params: OpenAiModelParams = { model };
   if (OPENAI_REASONING.test(model) && !OPENAI_CHAT_TUNED.test(model)) {
     const effort = clampEffort(effortForRole(role), effortCap);
