@@ -31,14 +31,15 @@ import { logError } from "@/lib/logger";
  * size. Hence validation (one watertight body, not degenerate, and within the
  * brief's size targets) with one retry per direction, and a fallback to image
  * concepts whenever fewer than two survive.
+ *
+ * The call runs as the `blockout` role (models.ts): Opus at low effort. Haiku
+ * 4.5 wrote these first, and got containers conceptually wrong (cavities cut
+ * with smin, stopped under the rim, covered back over); on the same 7 prompts
+ * Opus passed 7/7 first try to Haiku's 4/7.
  */
 
 export function blockoutConceptsEnabled(): boolean {
   return process.env.CAD_CONCEPT_MODE === "blockout" && hasModelCredentials();
-}
-
-export function blockoutModel(): string {
-  return process.env.CAD_MODEL_BLOCKOUT || "claude-haiku-4-5-20251001";
 }
 
 export const CONCEPT_BLOCKOUT_LABEL =
@@ -198,8 +199,7 @@ async function oneBlockout(opts: {
           `Direction: ${opts.direction.label} — ${opts.direction.detail}\n` +
           (feedback ? `\nYour previous blockout failed: ${feedback}. Fix that.\n` : "") +
           `Write the blockout.${opts.hint}`,
-        model: blockoutModel(),
-        role: "concept-blockout",
+        role: "blockout",
         signal: opts.signal,
       });
       const code = extractCode(text);

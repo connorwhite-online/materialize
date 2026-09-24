@@ -217,7 +217,7 @@ export async function completeTextOpenAI(opts: {
   /** See CompleteTextOptions.effortCap. */
   effortCap?: CadEffort;
 }): Promise<OpenAiCompletion> {
-  const params = openaiParamsForRole(opts.role, opts.effortCap);
+  const params = openaiParamsForRole(opts.role, opts.effortCap, opts.model);
   // Streamed, then collected — the same reason the Anthropic agentic path
   // streams: a high-effort reasoning turn can think for minutes before
   // emitting its first visible token, which is exactly the shape that trips a
@@ -310,7 +310,7 @@ export async function completeWithToolsOpenAI(opts: {
   model?: string;
   signal?: AbortSignal;
 }): Promise<OpenAiToolTurn> {
-  const params = openaiParamsForRole(opts.role);
+  const params = openaiParamsForRole(opts.role, undefined, opts.model);
   const store = process.env.CAD_OPENAI_STORE !== "false";
   const stream = openaiClient().responses.stream(
     {

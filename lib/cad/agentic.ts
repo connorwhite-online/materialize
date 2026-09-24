@@ -177,7 +177,7 @@ async function completeWithTools(opts: {
     );
   }
   const started = Date.now();
-  const params = modelParamsForRole("implement");
+  const params = modelParamsForRole("implement", undefined, opts.model);
   if (providerForModel(opts.model || params.model) === "openai") {
     return completeWithToolsViaOpenAI(opts, started);
   }
