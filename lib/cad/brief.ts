@@ -221,6 +221,14 @@ export function formatBriefForPrompt(brief: CadBrief): string {
           : "";
       lines.push(`  · ${t.label}${axis}: ${t.value}${unit}${tol} (${t.kind})${param}`);
     }
+    // How a span is measured, stated up front. A 30 mm fluted knob built
+    // with a GROOVE on the x axis measured 29.66 mm and spent a whole repair
+    // attempt (~75s) on a one-sign phase flip (job 679318fb, 2026-09-23).
+    if (brief.dimensionTargets.some((t) => t.kind === "bbox_span")) {
+      lines.push(
+        "  (A bbox_span is measured as the part's axis-aligned extent along that axis. If a rim carries flutes, lobes, knurls or teeth, phase the pattern so a CREST sits on each measured axis, or the span measures a groove.)"
+      );
+    }
   }
   for (const c of brief.components) {
     let line = `- Component "${c.name}": ${fmtVec(c.box)} mm`;
