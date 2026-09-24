@@ -244,3 +244,42 @@ describe("judge respects explicit requirements", () => {
     expect(CRITIQUE_RUBRIC).toMatch(/never propose a fix that changes an explicit requirement/);
   });
 });
+
+describe("judgeMode", () => {
+  async function modeWith(env: Record<string, string | undefined>, creds = true) {
+    vi.resetModules();
+    vi.doMock("@/lib/cad/model-client", () => ({
+      completeText: vi.fn(),
+      hasModelCredentials: () => creds,
+    }));
+    const saved = { CAD_JUDGE: process.env.CAD_JUDGE, CAD_CRITIQUE: process.env.CAD_CRITIQUE };
+    for (const [k, v] of Object.entries(env)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    try {
+      return (await import("@/lib/cad/critique")).judgeMode();
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+      vi.doUnmock("@/lib/cad/model-client");
+    }
+  }
+
+  it("runs in the background by default, out of the build loop", async () => {
+    expect(await modeWith({ CAD_JUDGE: undefined, CAD_CRITIQUE: undefined })).toBe("background");
+  });
+
+  it("honors inline and off, and treats anything else as background", async () => {
+    expect(await modeWith({ CAD_JUDGE: "inline" })).toBe("inline");
+    expect(await modeWith({ CAD_JUDGE: "off" })).toBe("off");
+    expect(await modeWith({ CAD_JUDGE: "sometimes" })).toBe("background");
+  });
+
+  it("is off whenever the judge is disabled: CAD_CRITIQUE=false or no credentials", async () => {
+    expect(await modeWith({ CAD_JUDGE: "inline", CAD_CRITIQUE: "false" })).toBe("off");
+    expect(await modeWith({ CAD_JUDGE: undefined }, false)).toBe("off");
+  });
+});

@@ -378,6 +378,22 @@ async function ensureThreadForGeneration(opts: {
 }
 
 /** Mark a generation row failed and return the error envelope. */
+/**
+ * Record a background aesthetic score (judgeMode "background", ./critique) on
+ * a generation that already shipped. The judge runs after `done`, so this is
+ * the only write of the score for most builds.
+ */
+export async function persistAestheticScore(
+  generationId: string,
+  score: number | null,
+  dims: unknown
+): Promise<void> {
+  await db
+    .update(cadGenerations)
+    .set({ aestheticScore: score, aestheticDims: dims ?? null })
+    .where(eq(cadGenerations.id, generationId));
+}
+
 export async function persistGenerationFailure(
   generationId: string,
   message: string,

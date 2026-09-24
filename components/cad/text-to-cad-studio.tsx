@@ -61,8 +61,7 @@ import { diffParams, extractParams } from "@/components/cad/param-diff";
 import { FeatureChips } from "@/components/cad/feature-chips";
 import {
   TurnFeedbackSheet,
-  TurnFeedbackTrigger,
-  hasFeedback,
+  TurnRatingRow,
 } from "@/components/cad/turn-feedback-sheet";
 import { featureIdsForFaceIds } from "@/components/cad/feature-timeline";
 import type {
@@ -551,20 +550,11 @@ export function TextToCadStudio({
   const [showBuildsMenu, setShowBuildsMenu] = useState(false);
   // Which build's three-dot menu is open in the sidebar.
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
-  // Eval feedback lives in a bottom sheet (components/cad/turn-feedback-sheet).
-  // `feedbackEditing` holds the generation id the sheet is open for — set by
-  // the layout's trigger button, and once automatically when a build finishes
-  // (`autoPromptedRef` keeps that to a single prompt per generation). It is
-  // deliberately NOT opened just because an unrated turn is on screen: that
-  // condition is true all through thread history, and as a modal it would
-  // throw a sheet in the user's face on every click back.
+  // Eval feedback: a one-tap rating row under the model, plus a bottom sheet
+  // (components/cad/turn-feedback-sheet) for tags and a note. The sheet used
+  // to auto-open as a modal after every build; the inline row replaced that.
+  // `feedbackEditing` holds the generation id the sheet is open for.
   const [feedbackEditing, setFeedbackEditing] = useState<string | null>(null);
-  const autoPromptedRef = useRef<Set<string>>(new Set());
-  // A generation that just finished and is waiting for the reveal to end
-  // before we prompt for feedback on it.
-  const [pendingFeedbackTurnId, setPendingFeedbackTurnId] = useState<
-    string | null
-  >(null);
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
@@ -845,24 +835,6 @@ export function TextToCadStudio({
     const t = setTimeout(() => setTransition(null), 550);
     return () => clearTimeout(t);
   }, [transition]);
-
-  // Auto-prompt for feedback once per finished build — AFTER the reveal, never
-  // during it: the whole point of the morph is watching the part appear, and a
-  // modal over that moment would cover the thing being judged. Waits for the
-  // transition to clear, skips a turn that already carries feedback, and marks
-  // the id so a re-render (or coming back to the turn later) never re-prompts.
-  useEffect(() => {
-    const id = pendingFeedbackTurnId;
-    if (!id || transition || generating) return;
-    setPendingFeedbackTurnId(null);
-    if (autoPromptedRef.current.has(id)) return;
-    autoPromptedRef.current.add(id);
-    const turn = threads
-      .flatMap((t) => t.turns)
-      .find((t) => t.id === id && t.status === "succeeded");
-    if (!turn || hasFeedback(turn)) return;
-    setFeedbackEditing(id);
-  }, [pendingFeedbackTurnId, transition, generating, threads]);
 
   // Auto-grow the composer textarea with its content (capped), and shrink
   // back when it's cleared after a send.
@@ -1512,9 +1484,6 @@ export function TextToCadStudio({
     setAttachError(null);
     setConcepts(null);
     setSelectedConceptId(null);
-    // Queue the feedback prompt; the effect above fires it once the reveal
-    // finishes so the sheet never covers the morph.
-    setPendingFeedbackTurnId(ev.generationId);
   }
 
   async function addFiles(files: FileList | File[] | null | undefined) {
@@ -2551,20 +2520,19 @@ export function TextToCadStudio({
             </button>
           )}
 
-          {/* Feedback — the in-the-moment eval signal (feeds /text-to-cad/eval).
-              Sits ABOVE the actions; auto-prompts after each generation until
-              rated or dismissed, then collapses to a small edit affordance. */}
+          {/* Feedback — the in-the-moment eval signal (feeds /prometheus/eval
+              and the judge's calibration). One tap to rate, inline above the
+              actions; Details opens the sheet for tags and a note. */}
           {!generating &&
             viewedTurn?.status === "succeeded" &&
             (() => {
               const vt = viewedTurn;
-              // Only the trigger lives in the layout now; the form itself is a
-              // bottom sheet (opened here, or auto-opened once after a build's
-              // reveal — see pendingFeedbackTurnId).
               return (
-                <TurnFeedbackTrigger
+                <TurnRatingRow
+                  key={vt.id}
                   turn={vt}
-                  onOpen={() => setFeedbackEditing(vt.id)}
+                  onRated={(patch) => applyFeedback(vt.id, patch)}
+                  onOpenDetails={() => setFeedbackEditing(vt.id)}
                 />
               );
             })()}
@@ -3210,8 +3178,7 @@ export function TextToCadStudio({
 
       {/* Eval feedback (rating + tags + note) as a bottom sheet. Portals to
           <body>, so its position here is only about ownership of the state,
-          not layout. Opened by the trigger under the model actions, or once
-          automatically after a build's reveal finishes. */}
+          not layout. Opened by Details on the rating row. */}
       <TurnFeedbackSheet
         open={!!feedbackTarget}
         turn={feedbackTarget}

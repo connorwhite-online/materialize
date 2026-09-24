@@ -60,6 +60,7 @@ vi.mock("@/lib/cad/session-client", () => ({
 vi.mock("@/lib/storage", () => ({ getObjectBytes: vi.fn() }));
 vi.mock("@/lib/cad/critique", () => ({
   judgeAesthetics: vi.fn(async () => ({ available: false })),
+  judgeMode: () => "inline",
 }));
 vi.mock("@/lib/cad/step-parts", () => ({
   sourcePart: vi.fn(),

@@ -50,6 +50,33 @@ export function aestheticJudgeEnabled(): boolean {
 }
 
 /**
+ * Where the aesthetic judge runs (CAD_JUDGE):
+ *   - "background" (default): never in the build loop. The part ships the
+ *     moment it passes the objective checks (build, validity, dimensions);
+ *     the job scores it after `done`, for evals and the calibration flywheel.
+ *   - "inline": the old behavior. Scored inside the loop, and a "visually
+ *     weak" verdict spends a repair attempt.
+ *   - "off": never scored.
+ *
+ * Why background: measured over nine builds, judge-triggered repairs moved
+ * the score +1, -1 and +2 out of 25 for ~2 minutes each, and the judge's
+ * scores correlated NEGATIVELY with the owner's ratings (r = -0.65, n = 6:
+ * too few to trust, but no evidence it tracks taste). It stays out of the
+ * loop until scripts/evals/calibration.ts says otherwise.
+ * CAD_CRITIQUE=false still disables it outright.
+ */
+export type JudgeMode = "background" | "inline" | "off";
+
+export function judgeMode(): JudgeMode {
+  if (!aestheticJudgeEnabled()) return "off";
+  const raw = (process.env.CAD_JUDGE || "background").toLowerCase();
+  return raw === "inline" || raw === "off" ? raw : "background";
+}
+
+/** Everything the judge needs, captured at build time and scored later. */
+export type JudgeRequest = Omit<Parameters<typeof judgeAesthetics>[0], "signal">;
+
+/**
  * Run the vision model on the render via the Messages API (completeText) — the
  * same path the generator uses. Deliberately NOT the Agent SDK query(): that
  * spawns a Claude Code subprocess that hangs when the harness itself runs
