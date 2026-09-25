@@ -365,6 +365,8 @@ const MAX_PARTICLES = 2400;
 const MIN_PARTICLES = 500;
 const LIFETIME = 0.6;
 const SAMPLES_PER_SHELL = 3000;
+/** Fraction of the shed that recoils opposite the pull. */
+const RECOIL_SHARE = 0.15;
 
 type Particle = {
   position: THREE.Vector3;
@@ -400,12 +402,19 @@ function spawnBurst(
     if (!s) continue;
     p.position.copy(s.p).applyMatrix4(s.mesh.matrixWorld);
     const out = p.position.clone().sub(centre).normalize();
-    const speed = 0.75 + Math.random() * 0.7;
+    // Most of the dust is flung the way the finger pulled; a small share
+    // kicks back the other way, slower — the recoil as the shell snaps
+    // back to centre. Outward spread is kept small so the spray reads as
+    // directional, not a radial pop.
+    const recoil = Math.random() < RECOIL_SHARE;
+    const dir = recoil ? -burst.direction : burst.direction;
+    const along =
+      push * (recoil ? 0.35 + Math.random() * 0.35 : 0.7 + Math.random() * 0.8);
+    const spread = 0.18 + Math.random() * 0.22;
     p.velocity.set(
-      out.x * speed +
-        burst.direction * push * (0.5 + Math.random() * Math.random()),
-      out.y * speed * 0.6 + (Math.random() - 0.5) * 0.8,
-      out.z * speed * 0.4,
+      dir * along + out.x * spread,
+      out.y * spread + (Math.random() - 0.5) * 0.35,
+      out.z * spread * 0.5,
     );
     p.age = 0;
     p.scale = 0.002 + Math.random() * 0.004;
