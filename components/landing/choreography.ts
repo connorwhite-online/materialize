@@ -194,6 +194,7 @@ export interface Layout {
   s0: number;
   t0: Vector3;
   s1: number;
+  splitX: number;
   splitDx: number;
   splitY: number;
   s2: number;
@@ -208,9 +209,12 @@ export function layoutFor(view: View): Layout {
     ((portrait ? 0.44 : 0.64) * view.h) / DEVICE_LONG,
     ((portrait ? 0.7 : 0.4) * view.w) / DEVICE_WIDE,
   );
-  const s1 = s0 * (portrait ? 0.72 : 0.6);
+  // Steps 1–2 share the first screen with the copy (bottom-left on
+  // desktop, the lower half on a phone), so they sit up and to the right
+  // of it just like the hero does.
+  const s1 = s0 * (portrait ? 0.6 : 0.6);
   const s2 = Math.min(
-    ((portrait ? 0.4 : 0.48) * view.h) / DEVICE_LONG,
+    ((portrait ? 0.28 : 0.46) * view.h) / DEVICE_LONG,
     ((portrait ? 0.86 : 0.62) * view.w) / EXPLODE_WIDE,
   );
   return {
@@ -220,12 +224,15 @@ export function layoutFor(view: View): Layout {
       ? new Vector3(0, view.h * 0.17, 0)
       : new Vector3(view.w * 0.17, view.h * 0.02, 0),
     s1,
+    splitX: portrait ? 0 : view.w * 0.14,
     splitDx: portrait
-      ? view.w * 0.24
-      : Math.min(view.w * 0.16, s1 * DEVICE_WIDE * 1.25),
-    splitY: view.h * (portrait ? 0.06 : 0.05),
+      ? view.w * 0.22
+      : Math.min(view.w * 0.13, s1 * DEVICE_WIDE * 1.25),
+    splitY: view.h * (portrait ? 0.2 : 0.06),
     s2,
-    t2: new Vector3(0, portrait ? view.h * 0.02 : 0, 0),
+    t2: portrait
+      ? new Vector3(0, view.h * 0.2, 0)
+      : new Vector3(view.w * 0.14, view.h * 0.04, 0),
     s3: (1.05 * view.h) / DEVICE_LONG,
     t3: portrait
       ? new Vector3(view.w * 0.1, -view.h * 0.05, 0)
@@ -281,7 +288,11 @@ function keyframe(
       if (part.id === "front" || part.id === "rear") {
         const front = part.id === "front";
         return {
-          position: new Vector3(front ? -L.splitDx : L.splitDx, L.splitY, 0),
+          position: new Vector3(
+            L.splitX + (front ? -L.splitDx : L.splitDx),
+            L.splitY,
+            0,
+          ),
           quaternion: (front ? FRONT_SPLIT_QUAT : REAR_SPLIT_QUAT).clone(),
           scale: L.s1,
           opacity: 1,
@@ -290,7 +301,13 @@ function keyframe(
       // Internals wait, invisible, where the device was — they fade up
       // out of the gap the shells leave on the way into the BOM.
       return {
-        position: place(c, mc, HERO_QUAT, L.s1, new Vector3(0, L.splitY, 0)),
+        position: place(
+          c,
+          mc,
+          HERO_QUAT,
+          L.s1,
+          new Vector3(L.splitX, L.splitY, 0),
+        ),
         quaternion: HERO_QUAT.clone(),
         scale: L.s1,
         opacity: 0,
@@ -371,5 +388,30 @@ export function sampleFrame(
       lane: view.h * 0.055,
     },
     heroCenter: L.t0.clone(),
+  };
+}
+
+/**
+ * Blend two frames — used to pull the stage's current step into the
+ * reassembled FAQ backdrop as the sheet scrolls up. Labels and the hero
+ * gate fade with the step they belong to.
+ */
+export function blendFrames(a: Frame, b: Frame, t: number): Frame {
+  const k = easeInOut(t);
+  const poses = {} as Record<PartId, Pose>;
+  for (const part of PARTS) {
+    poses[part.id] = mix(
+      a.poses[part.id],
+      b.poses[part.id],
+      k,
+      MathUtils.lerp(a.poses[part.id].opacity, b.poses[part.id].opacity, k),
+    );
+  }
+  return {
+    ...a,
+    poses,
+    hero: a.hero * (1 - k),
+    fileLabels: a.fileLabels * (1 - k),
+    bomLabels: a.bomLabels * (1 - k),
   };
 }

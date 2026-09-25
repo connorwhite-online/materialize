@@ -998,15 +998,20 @@
 }
 
 
-/* Anon landing: light snap to each enclosure stage so a scroll that
-   comes to rest near one settles on the intended camera framing
-   (components/landing/choreography.ts keyframes sit exactly at section
-   tops). `proximity`, not `mandatory` — a stop far from a boundary is
-   left alone, and the FAQ section, taller than a screen, stays freely
-   scrollable. Scoped with :has() so no other route snaps. */
-:root:has([data-landing-section]) {
-  scroll-snap-type: y proximity;
+/* Anon landing stepper: the active dot's timer. Linear on purpose — it
+   is a clock, not a gesture. The element's own animationend advances the
+   step (components/landing/landing-hero.tsx), and play state pauses it
+   in place. Reduced motion never runs it (the stepper doesn't autoplay). */
+@keyframes mz-step-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
 }
-[data-landing-section] {
-  scroll-snap-align: start;
+.mz-step-fill {
+  animation-name: mz-step-fill;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
 }

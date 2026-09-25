@@ -7,52 +7,30 @@ import { StudioEnvironment } from "@/components/viewer/studio-environment";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { useLanding } from "./landing-context";
 import { EnclosureScene } from "./enclosure-scene";
-import { MAX_PROGRESS } from "./choreography";
 
 /**
- * Scroll progress in sections: 0 at the top, k when section k's top
- * reaches the top of the viewport, linear in between, clamped at the
- * last keyframe. Measured off `[data-landing-section]` so sections can
- * be any height (the FAQ runs taller than a screen).
+ * How far the FAQ sheet has been pulled up over the stage: 0 at the top,
+ * 1 once the page has scrolled most of a screen. The first screen tells
+ * the story through the stepper; scrolling only brings the sheet in.
  */
-export function progressFor(scrollY: number, tops: number[]): number {
-  if (tops.length < 2) return 0;
-  for (let i = 0; i < tops.length - 1; i++) {
-    if (scrollY < tops[i + 1]) {
-      const span = tops[i + 1] - tops[i];
-      return i + Math.max(0, (scrollY - tops[i]) / (span || 1));
-    }
-  }
-  return tops.length - 1;
+export function zoomFor(scrollY: number, viewportH: number): number {
+  return Math.min(1, Math.max(0, scrollY / (viewportH * 0.8 || 1)));
 }
 
-function useScrollProgress() {
-  const { progressRef } = useLanding();
+function useScrollZoom() {
+  const { zoomRef } = useLanding();
   useEffect(() => {
-    let tops: number[] = [];
-    const measure = () => {
-      tops = [
-        ...document.querySelectorAll<HTMLElement>("[data-landing-section]"),
-      ]
-        .map((el) => el.getBoundingClientRect().top + window.scrollY)
-        .slice(0, MAX_PROGRESS + 1);
-      update();
-    };
     const update = () => {
-      progressRef.current = Math.min(
-        MAX_PROGRESS,
-        progressFor(window.scrollY, tops),
-      );
+      zoomRef.current = zoomFor(window.scrollY, window.innerHeight);
     };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(document.body);
+    update();
     window.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
     return () => {
-      ro.disconnect();
       window.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
     };
-  }, [progressRef]);
+  }, [zoomRef]);
 }
 
 /**
@@ -61,7 +39,7 @@ function useScrollProgress() {
  * the file-label download buttons opt back in on their own.
  */
 export function EnclosureStage() {
-  useScrollProgress();
+  useScrollZoom();
   const reducedMotion = useReducedMotion() ?? false;
   return (
     <div aria-hidden className="pointer-events-none fixed inset-0 z-0">

@@ -12,6 +12,8 @@ import { LANDING_MATERIALS } from "./landing-materials";
 import {
   PARTS,
   sampleFrame,
+  blendFrames,
+  MAX_PROGRESS,
   type Frame,
   type Geometry,
   type PartId,
@@ -148,6 +150,9 @@ function useParts(shellMaterial: THREE.MeshPhysicalMaterial) {
   }, [nodes, shellMaterial]);
 }
 
+/** Seconds to travel one step. */
+const STEP_TWEEN_S = 1.1;
+
 const SHELL_IDS = ["front", "rear"] as const;
 
 // Per-frame mutation of three.js objects lives in these plain helpers:
@@ -179,7 +184,11 @@ function lerpShell(
 }
 
 export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
-  const { material, burst, tensionRef, progressRef, setReady } = useLanding();
+  const { material, burst, tensionRef, zoomRef, step, setReady } = useLanding();
+  const stepRef = useRef(step);
+  useEffect(() => {
+    stepRef.current = step;
+  }, [step]);
   const shellMaterial = useMemo(
     () =>
       new THREE.MeshPhysicalMaterial({
@@ -198,6 +207,7 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
   const frameRef = useRef<Frame | null>(null);
   const smooth = useRef({
     progress: 0,
+    zoom: 0,
     sway: 0,
     swayV: 0,
     tilt: 0,
@@ -215,13 +225,23 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
     const delta = Math.min(rawDelta, 1 / 20);
     const st = smooth.current;
     st.clock += delta;
-    st.progress +=
-      (progressRef.current - st.progress) * (1 - Math.exp(-delta * 9));
+    // Steps travel at a steady pace and let sampleFrame's per-segment
+    // easing shape the motion; a wrap (build → print) crosses two
+    // segments, so it moves faster rather than taking twice as long.
+    const gap = stepRef.current - st.progress;
+    const speed = Math.max(
+      1 / STEP_TWEEN_S,
+      Math.abs(gap) / (STEP_TWEEN_S * 1.3),
+    );
+    st.progress += Math.sign(gap) * Math.min(Math.abs(gap), speed * delta);
+    st.zoom += (zoomRef.current - st.zoom) * (1 - Math.exp(-delta * 9));
 
-    const frame = sampleFrame(st.progress, geo, {
-      w: viewport.width,
-      h: viewport.height,
-    });
+    const view = { w: viewport.width, h: viewport.height };
+    const current = sampleFrame(st.progress, geo, view);
+    const frame =
+      st.zoom > 0.001
+        ? blendFrames(current, sampleFrame(MAX_PROGRESS, geo, view), st.zoom)
+        : current;
     frameRef.current = frame;
 
     // Swipe deformation + idle sway, both gated to the hero. The deform

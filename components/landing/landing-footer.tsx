@@ -2,8 +2,8 @@ import Link from "next/link";
 import { Wordmark } from "@/components/brand/logo";
 
 /**
- * Pull-up footer that closes the anon landing. A frosted sheet with
- * rounded top corners that rises over the enclosure backdrop. It also
+ * Footer that closes the anon landing, at the foot of the pull-up sheet
+ * that also holds the FAQ (app/page.tsx). It also
  * carries the internal links the old marketing block used to — the
  * crawlable routes into the catalog shouldn't disappear with it.
  */
@@ -30,8 +30,8 @@ const COLUMNS = [
 
 export function LandingFooter() {
   return (
-    <footer className="relative z-10 mt-24 px-3 pb-28 nav:pb-3">
-      <div className="glass-surface mx-auto max-w-6xl rounded-3xl px-6 py-10 ring-1 ring-border/70 sm:px-10">
+    <footer className="border-t border-border/60 pb-28 nav:pb-6">
+      <div className="mx-auto max-w-5xl px-5 py-10 sm:px-10">
         <div className="flex flex-col gap-10 sm:flex-row sm:justify-between">
           <div className="flex flex-col gap-3">
             <Wordmark height={14} className="text-foreground" />

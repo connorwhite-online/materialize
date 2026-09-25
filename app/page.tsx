@@ -9,7 +9,12 @@ import { HomeFaq } from "@/components/home/home-faq";
 import { EnclosureStage } from "@/components/landing/enclosure-stage-lazy";
 import { LandingProvider } from "@/components/landing/landing-context";
 import { LandingFooter } from "@/components/landing/landing-footer";
-import { HeroWord, LandingHero } from "@/components/landing/landing-hero";
+import {
+  HeroWord,
+  LandingHero,
+  StepCaption,
+  StepCarousel,
+} from "@/components/landing/landing-hero";
 import { CartProvider } from "@/components/print/cart-context";
 import { CartPanel } from "@/components/print/cart-panel";
 import { isSandboxMode } from "@/lib/env";
@@ -108,15 +113,15 @@ export default async function HomePage() {
   // an anon visitor sees on this page takes payment.
   const textToCad = await resolveTextToCadAccess();
 
-  // Plain document scroll: four screen-high sections over a fixed
-  // enclosure canvas, then the footer.
+  // One full screen (hero + stepper) over a fixed enclosure canvas, then
+  // a pull-up sheet with the FAQ and footer.
   return (
     <CartProvider>
       {/* Site-level structured data. Only the home page emits these:
           Organization and WebSite are singletons keyed by `@id`, and
           repeating them on every route gives a crawler N competing
           copies of the same entity to reconcile. FAQPage is tied to the
-          visible <HomeFaq /> rendered inside <HomeMarketing /> below —
+          visible <HomeFaq /> in the pull-up sheet below —
           both read from HOME_FAQ so the marked-up answers and the
           on-screen answers cannot drift. */}
       <script
@@ -144,68 +149,43 @@ export default async function HomePage() {
       <LandingProvider>
         <TopBar landing initialUnreadCount={0} textToCad={textToCad} />
 
-        {/* The Pneuma Q enclosure is one fixed canvas behind every section;
-          scrolling between [data-landing-section] screens drives its
-          choreography (components/landing/choreography.ts):
-          hero carousel → shells split with file labels → exploded BOM →
-          zoomed backdrop under the FAQ. Copy stays short — the model
-          does the showing. */}
+        {/* The Pneuma Q enclosure is one fixed canvas behind the page
+            (components/landing/choreography.ts). The first screen tells
+            the story on its own: the stepper walks it hero → split shells
+            with file chips → exploded BOM, no scrolling needed. Scrolling
+            only pulls the FAQ + footer sheet up over it, and the
+            enclosure reassembles and zooms in behind the glass. */}
         <EnclosureStage />
 
         <LandingHero>
-          <main className="flex flex-1 items-end justify-start px-6 pb-28 sm:px-8 nav:px-16 nav:pb-24 lg:px-24 lg:pb-28 xl:px-32">
+          <main className="flex flex-1 items-end justify-start px-6 pb-40 sm:px-8 nav:px-16 nav:pb-28 lg:px-24 xl:px-32">
             <div className="flex w-full max-w-xl flex-col items-start gap-4 text-left">
               {/* Real, selectable <h1>. The server renders "anything"; the
-                intro only swaps the word client-side and rests back on it. */}
+                  intro only swaps the word client-side and rests back on it. */}
               <h1 className="text-2xl leading-[1.1] tracking-tight sm:text-4xl">
                 Print <HeroWord />,
                 <br />
                 share your ideas
               </h1>
-              <p className="max-w-lg text-pretty text-base leading-relaxed text-foreground/90">
-                Get prints delivered to your door, and pick from 60+ materials.
-                Share your hardware projects and files.
-              </p>
+              <StepCaption />
             </div>
           </main>
+          <StepCarousel />
         </LandingHero>
 
-        <section
-          data-landing-section
-          className="pointer-events-none relative z-10 flex h-svh flex-col justify-start px-6 pt-28 sm:px-8 nav:px-16 lg:px-24 xl:px-32"
-        >
-          <h2 className="text-2xl tracking-tight sm:text-4xl">
-            Share your files
-          </h2>
-          <p className="mt-2 text-base text-muted-foreground">
-            Publish the parts. Anyone can download or print them.
-          </p>
-        </section>
-
-        <section
-          data-landing-section
-          className="pointer-events-none relative z-10 flex h-svh flex-col justify-start px-6 pt-28 sm:px-8 nav:px-16 lg:px-24 xl:px-32"
-        >
-          <h2 className="text-2xl tracking-tight sm:text-4xl">
-            Host the whole build
-          </h2>
-          <p className="mt-2 text-base text-muted-foreground">
-            Every part, with its bill of materials.
-          </p>
-        </section>
-
-        {/* FAQ floats over the zoomed enclosure. The visible answers back
-          the FAQPage JSON-LD above — both read HOME_FAQ. */}
-        <section
-          data-landing-section
-          className="relative z-10 flex min-h-svh items-center px-3 py-24 sm:px-8"
-        >
-          <div className="glass-surface mx-auto w-full max-w-5xl rounded-3xl p-5 ring-1 ring-border/70 sm:p-10">
+        {/* Pull-up sheet: FAQ then footer, on one pane of glass rising
+            over the zoomed enclosure. The visible answers back the
+            FAQPage JSON-LD above — both read HOME_FAQ. */}
+        <section className="glass-surface relative z-10 rounded-t-[2rem] ring-1 ring-border/70">
+          <div
+            aria-hidden
+            className="mx-auto mt-3 h-1 w-10 rounded-full bg-foreground/15"
+          />
+          <div className="mx-auto w-full max-w-5xl px-5 pb-10 pt-10 sm:px-10 sm:pt-14">
             <HomeFaq className="mt-0 border-t-0 pt-0 sm:mt-0 sm:pt-0" />
           </div>
+          <LandingFooter />
         </section>
-
-        <LandingFooter />
 
         <MobileNav initialUnreadCount={0} textToCad={textToCad} />
         <CartPanel />

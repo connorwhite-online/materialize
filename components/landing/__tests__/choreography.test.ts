@@ -12,7 +12,7 @@ import {
   RESTING_WORD,
   wrapIndex,
 } from "../landing-materials";
-import { progressFor } from "../enclosure-stage";
+import { zoomFor } from "../enclosure-stage";
 
 // Part centres measured off the source GLB (mm → m).
 const mm = (x: number, y: number, z: number) =>
@@ -53,8 +53,7 @@ describe.each([
 
   it("splits the shells left/right with the file labels up", () => {
     const f = sampleFrame(1, GEO, view);
-    expect(f.poses.front.position.x).toBeLessThan(0);
-    expect(f.poses.rear.position.x).toBeGreaterThan(0);
+    expect(f.poses.front.position.x).toBeLessThan(f.poses.rear.position.x);
     expect(f.fileLabels).toBe(1);
     expect(f.bomLabels).toBe(0);
     expect(f.hero).toBe(0);
@@ -68,8 +67,7 @@ describe.each([
       .sort((a, b) => a.slot - b.slot)
       .filter((p, i, arr) => i === 0 || p.slot !== arr[i - 1].slot)
       .map((p) => f.poses[p.id].position.x);
-    for (let i = 1; i < xs.length; i++)
-      expect(xs[i]).toBeLessThan(xs[i - 1]);
+    for (let i = 1; i < xs.length; i++) expect(xs[i]).toBeLessThan(xs[i - 1]);
     expect(f.bomLabels).toBe(1);
     expect(f.fileLabels).toBe(0);
   });
@@ -124,13 +122,12 @@ describe("landing intro", () => {
   });
 });
 
-describe("progressFor", () => {
-  const tops = [0, 800, 1600, 2400];
-  it("is linear between section tops and clamps at the last", () => {
-    expect(progressFor(0, tops)).toBe(0);
-    expect(progressFor(400, tops)).toBe(0.5);
-    expect(progressFor(1600, tops)).toBe(2);
-    expect(progressFor(9999, tops)).toBe(3);
+describe("zoomFor", () => {
+  it("rises from 0 at the top to 1 most of a screen down, clamped", () => {
+    expect(zoomFor(0, 800)).toBe(0);
+    expect(zoomFor(320, 800)).toBe(0.5);
+    expect(zoomFor(5000, 800)).toBe(1);
+    expect(zoomFor(-40, 800)).toBe(0);
   });
 });
 

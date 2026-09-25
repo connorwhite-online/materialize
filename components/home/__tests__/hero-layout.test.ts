@@ -22,24 +22,29 @@ const globals = readFileSync(
 );
 
 describe("anon home hero layout", () => {
-  it("runs four screen-high sections over the fixed enclosure stage", () => {
+  it("tells the story on one screen, then pulls the FAQ sheet up over it", () => {
     expect(page).toMatch(/<EnclosureStage \/>/);
-    // hero (inside <LandingHero>) + share + BOM + FAQ
-    expect(page.match(/^\s+data-landing-section$/gm)).toHaveLength(3);
-    expect(landingHero).toMatch(/data-landing-section/);
+    expect(page).toMatch(/<StepCarousel \/>/);
     expect(landingHero).toMatch(/\bh-svh\b/);
+    // No scroll-driven sections and no snapping — the stepper replaced them.
+    expect(page).not.toMatch(/data-landing-section/);
+    expect(globals).not.toMatch(/scroll-snap-type/);
+    const sheet = page.match(/<section className="([^"]*rounded-t-[^"]*)">/)?.[1];
+    expect(sheet).toMatch(/glass-surface/);
+    expect(page.indexOf("<HomeFaq className")).toBeGreaterThan(page.indexOf("rounded-t-"));
+    expect(page.indexOf("<LandingFooter")).toBeGreaterThan(page.indexOf("<HomeFaq className"));
   });
 
   it("covers the iOS unsafe areas", () => {
     expect(layout).toMatch(/viewportFit:\s*"cover"/);
   });
 
-  it("places copy below center, padded above the floating pill", () => {
+  it("places copy below center, clear of the stepper and the floating pill", () => {
     const copy = page.match(/<main className="(flex flex-1 items-end[^"]*)">/)?.[1];
     expect(copy).toBeDefined();
-    expect(copy).toMatch(/\bpb-28\b/);
-    expect(copy).toMatch(/\bnav:pb-24\b/);
-    expect(copy).not.toMatch(/\bnav:items-center\b/);
+    expect(copy).toMatch(/\bpb-40\b/);
+    expect(copy).toMatch(/\bnav:pb-28\b/);
+    expect(landingHero).toMatch(/bottom-24[^"]*nav:bottom-8/);
   });
 
   it("breaks the headline after the swapping word, and the server says 'anything'", () => {
@@ -51,13 +56,9 @@ describe("anon home hero layout", () => {
     expect(page).toMatch(/<TopBar\s+landing\b/);
   });
 
-  it("paints the subheading darker than muted-foreground", () => {
-    const sub = page.match(
-      /<p className="([^"]*)">\s*Get prints delivered to your door/
-    );
-    expect(sub?.[1]).toBeDefined();
-    expect(sub?.[1]).toMatch(/text-foreground\/90/);
-    expect(sub?.[1]).not.toMatch(/text-muted-foreground/);
+  it("server-renders the product pitch as the first step's caption", () => {
+    expect(landingHero).toMatch(/Get prints delivered to your door/);
+    expect(landingHero).toMatch(/text-foreground\/90/);
   });
 });
 
