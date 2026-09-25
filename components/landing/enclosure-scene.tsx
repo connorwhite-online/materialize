@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { Html, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
@@ -16,6 +16,71 @@ import {
 } from "./choreography";
 
 export const ENCLOSURE_URL = "/home/pneuma-q.glb";
+/**
+ * Full-detail internals (~1M tris, ~9.7MB). The main file carries
+ * heavily decimated stand-ins so the hero can render at once; this one
+ * streams in after the page is idle and replaces them in place, well
+ * before anyone scrolls to the exploded view.
+ */
+export const DETAIL_URL = "/home/pneuma-q-detail.glb";
+
+/**
+ * Give a mesh its own transparent copy of the GLB's material (so the
+ * internals can fade) — keeping the file's colour, metalness and
+ * roughness rather than a generic stand-in.
+ */
+function fadeable(mesh: THREE.Mesh): THREE.Material {
+  const m = (mesh.material as THREE.Material).clone();
+  m.transparent = true;
+  mesh.material = m;
+  return m;
+}
+
+/**
+ * Swap a part's stand-in geometry for the detailed node. Both files
+ * share model space, so the detail slots into the same recentring
+ * wrapper with no offset of its own.
+ */
+function swapInDetail(part: LoadedPart, detail: THREE.Object3D) {
+  const inner = detail.clone(true);
+  const materials: THREE.Material[] = [];
+  inner.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (mesh.isMesh) materials.push(fadeable(mesh));
+  });
+  const opacity = part.materials[0]?.opacity ?? 0;
+  for (const m of materials) m.opacity = opacity;
+  part.object.clear();
+  part.object.add(inner);
+  part.materials.splice(0, part.materials.length, ...materials);
+}
+
+/** Loads the detail file and upgrades every internal part it covers. */
+function DetailInternals({ parts }: { parts: Record<PartId, LoadedPart> }) {
+  const { nodes } = useGLTF(DETAIL_URL);
+  useEffect(() => {
+    for (const spec of PARTS) {
+      if (spec.shell) continue;
+      const detail = nodes[spec.node];
+      if (detail) swapInDetail(parts[spec.id], detail);
+    }
+  }, [nodes, parts]);
+  return null;
+}
+
+/** True once the browser has had an idle moment after mount. */
+function useIdle(): boolean {
+  const [idle, setIdle] = useState(false);
+  useEffect(() => {
+    const ric =
+      window.requestIdleCallback ??
+      ((cb: () => void) => window.setTimeout(cb, 1500));
+    const cancel = window.cancelIdleCallback ?? window.clearTimeout;
+    const id = ric(() => setIdle(true), { timeout: 3000 });
+    return () => cancel(id);
+  }, []);
+  return idle;
+}
 
 interface LoadedPart {
   id: PartId;
@@ -47,15 +112,7 @@ function useParts(shellMaterial: THREE.MeshPhysicalMaterial) {
           mesh.material = shellMaterial;
           return;
         }
-        const original = mesh.material as THREE.MeshStandardMaterial;
-        const m = new THREE.MeshStandardMaterial({
-          color: original.color ?? new THREE.Color("#666"),
-          roughness: 0.55,
-          metalness: 0.15,
-          transparent: true,
-        });
-        mesh.material = m;
-        materials.push(m);
+        materials.push(fadeable(mesh));
       });
       object.updateMatrixWorld(true);
       const box = new THREE.Box3().setFromObject(object);
@@ -138,6 +195,7 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
   });
 
   useEffect(() => setReady(true), [setReady]);
+  const idle = useIdle();
 
   const target = LANDING_MATERIALS[material];
   const targetColor = useMemo(() => new THREE.Color(target.color), [target]);
@@ -208,6 +266,11 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
           </group>
         ))}
       </group>
+      {idle && (
+        <Suspense fallback={null}>
+          <DetailInternals parts={parts} />
+        </Suspense>
+      )}
       <ShedParticles
         burst={burst}
         color={targetColor}
