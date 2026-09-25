@@ -137,6 +137,11 @@ export interface Frame {
   labelRows: { top: number; bottom: number; lane: number };
   /** Hero centre — the pivot the swipe deformation scales around. */
   heroCenter: Vector3;
+  /**
+   * Where each part sits before any drag-orbit. BOM labels hang off these
+   * so they hold still while the scene turns under them (orbitFrame).
+   */
+  anchors?: Record<PartId, Vector3>;
 }
 
 const axis = {
@@ -392,11 +397,12 @@ export function sampleFrame(
 }
 
 /**
- * Blend two frames — used to pull the stage's current step into the
- * reassembled FAQ backdrop as the sheet scrolls up. Labels and the hero
- * gate fade with the step they belong to.
+ * Crossfade two frames directly. Used two ways: pulling the current step
+ * into the FAQ backdrop as the sheet scrolls up, and jumping between
+ * non-adjacent steps (the tour wrapping from the BOM back to the hero)
+ * without walking back through the step in between.
  */
-export function blendFrames(a: Frame, b: Frame, t: number): Frame {
+export function mixFrames(a: Frame, b: Frame, t: number): Frame {
   const k = easeInOut(t);
   const poses = {} as Record<PartId, Pose>;
   for (const part of PARTS) {
@@ -410,8 +416,34 @@ export function blendFrames(a: Frame, b: Frame, t: number): Frame {
   return {
     ...a,
     poses,
-    hero: a.hero * (1 - k),
-    fileLabels: a.fileLabels * (1 - k),
-    bomLabels: a.bomLabels * (1 - k),
+    hero: MathUtils.lerp(a.hero, b.hero, k),
+    fileLabels: MathUtils.lerp(a.fileLabels, b.fileLabels, k),
+    bomLabels: MathUtils.lerp(a.bomLabels, b.bomLabels, k),
   };
+}
+
+/**
+ * Turn the whole scene about a vertical axis through the two shells'
+ * midpoint — the drag-to-orbit on the share and BOM steps. Every pose
+ * rotates rigidly; `anchors` keep the un-orbited positions so the BOM
+ * labels stay put while their leader lines follow the parts.
+ */
+export function orbitFrame(frame: Frame, yaw: number): Frame {
+  const pivot = frame.poses.front.position
+    .clone()
+    .add(frame.poses.rear.position)
+    .multiplyScalar(0.5);
+  const q = new Quaternion().setFromAxisAngle(axis.y, yaw);
+  const poses = {} as Record<PartId, Pose>;
+  const anchors = {} as Record<PartId, Vector3>;
+  for (const part of PARTS) {
+    const pose = frame.poses[part.id];
+    anchors[part.id] = frame.anchors?.[part.id] ?? pose.position.clone();
+    poses[part.id] = {
+      ...pose,
+      position: pose.position.clone().sub(pivot).applyQuaternion(q).add(pivot),
+      quaternion: q.clone().multiply(pose.quaternion),
+    };
+  }
+  return { ...frame, poses, anchors };
 }

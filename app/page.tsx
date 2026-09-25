@@ -10,10 +10,9 @@ import { EnclosureStage } from "@/components/landing/enclosure-stage-lazy";
 import { LandingProvider } from "@/components/landing/landing-context";
 import { LandingFooter } from "@/components/landing/landing-footer";
 import {
-  HeroWord,
   LandingHero,
-  StepCaption,
   StepCarousel,
+  StepCopy,
 } from "@/components/landing/landing-hero";
 import { CartProvider } from "@/components/print/cart-context";
 import { CartPanel } from "@/components/print/cart-panel";
@@ -159,16 +158,7 @@ export default async function HomePage() {
 
         <LandingHero>
           <main className="flex flex-1 items-end justify-start px-6 pb-40 sm:px-8 nav:px-16 nav:pb-28 lg:px-24 xl:px-32">
-            <div className="flex w-full max-w-xl flex-col items-start gap-4 text-left">
-              {/* Real, selectable <h1>. The server renders "anything"; the
-                  intro only swaps the word client-side and rests back on it. */}
-              <h1 className="text-2xl leading-[1.1] tracking-tight sm:text-4xl">
-                Print <HeroWord />,
-                <br />
-                share your ideas
-              </h1>
-              <StepCaption />
-            </div>
+            <StepCopy />
           </main>
           <StepCarousel />
         </LandingHero>

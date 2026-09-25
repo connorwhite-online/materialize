@@ -17,11 +17,12 @@ const VERTICAL_CANCEL = 40;
  * First screen of the anon landing — the whole story lives here, driven
  * by the stepper rather than by scrolling. Owns the horizontal swipe (the
  * canvas behind is pointer-events: none): on the first step it changes
- * the material; on the others it moves between steps. Also runs the
+ * the material; on the others it tugs the scene round (drag-orbit). Also runs the
  * load-time intro that whooshes through every material family.
  */
 export function LandingHero({ children }: { children: ReactNode }) {
-  const { material, select, tensionRef, step, goTo, interact } = useLanding();
+  const { material, select, tensionRef, orbitRef, step, interact } =
+    useLanding();
   const stepRef = useRef(step);
   useEffect(() => {
     stepRef.current = step;
@@ -64,6 +65,7 @@ export function LandingHero({ children }: { children: ReactNode }) {
     if (Math.abs(dy) > VERTICAL_CANCEL && Math.abs(dy) > Math.abs(dx)) {
       d.cancelled = true;
       tensionRef.current = 0;
+      orbitRef.current = 0;
       return;
     }
     const now = performance.now();
@@ -75,23 +77,25 @@ export function LandingHero({ children }: { children: ReactNode }) {
     d.lastX = e.clientX;
     d.lastT = now;
     // tanh asymptote = resistance that grows as the finger pulls further.
-    tensionRef.current = Math.tanh(dx / 220);
+    // First step: stretch the shell toward a material swap. Share/BOM:
+    // tug the scene round — it springs back on release.
+    if (stepRef.current === 0) tensionRef.current = Math.tanh(dx / 220);
+    else orbitRef.current = Math.tanh(dx / 260);
   };
   const onPointerUp = (e: React.PointerEvent) => {
     const d = drag.current;
     if (!d.active) return;
     d.active = false;
     tensionRef.current = 0;
+    orbitRef.current = 0;
     if (d.cancelled) return;
     const dx = e.clientX - d.startX;
-    if (Math.abs(dx) > SWIPE_THRESHOLD) {
+    if (Math.abs(dx) <= SWIPE_THRESHOLD) return;
+    // Any real drag is a manipulation: hold the tour where they are.
+    interact();
+    if (stepRef.current === 0) {
       const dir = dx > 0 ? -1 : 1;
-      if (stepRef.current === 0) {
-        select(materialRef.current + dir, dir, 0.3 + d.peak * 1.2);
-        interact();
-      } else {
-        goTo(stepRef.current + dir);
-      }
+      select(materialRef.current + dir, dir, 0.3 + d.peak * 1.2);
     }
   };
 
@@ -180,35 +184,70 @@ export function HeroWord() {
   );
 }
 
-const CAPTIONS: Record<(typeof STEPS)[number]["id"], string> = {
-  print:
-    "Get prints delivered to your door, and pick from 60+ materials. Share your hardware projects and files.",
-  share:
-    "Publish your parts. Anyone can download them, or print them in a click.",
-  build: "Host the whole build: every part, with its bill of materials.",
+const COPY: Record<
+  (typeof STEPS)[number]["id"],
+  { title: ReactNode; body: string }
+> = {
+  print: {
+    title: (
+      <>
+        Print <HeroWord />,
+        <br />
+        share your ideas
+      </>
+    ),
+    body: "Get prints delivered to your door, and pick from 60+ materials. Share your hardware projects and files.",
+  },
+  share: {
+    title: "Share your files",
+    body: "Publish the parts. Anyone can download or print them.",
+  },
+  build: {
+    title: "Host the whole build",
+    body: "Every part, with its bill of materials.",
+  },
+};
+
+const FADE = {
+  initial: { opacity: 0, filter: "blur(8px)" },
+  animate: { opacity: 1, filter: "blur(0px)" },
+  exit: { opacity: 0, filter: "blur(8px)" },
+  transition: { duration: 0.32, ease: [0.22, 0.9, 0.28, 1] as const },
 };
 
 /**
- * The subheading follows the stepper. The first step's copy is what the
- * server renders, so crawlers read the product pitch.
+ * Headline + subtext for the current step, each swapping with an
+ * opacity/blur fade. One real <h1> whose contents change; the server
+ * renders the first step, so crawlers read the product pitch. Old and
+ * new copy share a grid cell while they cross, so nothing jumps.
  */
-export function StepCaption() {
+export function StepCopy() {
   const { step } = useLanding();
   const id = STEPS[step].id;
   return (
-    <div className="grid max-w-lg">
-      <AnimatePresence mode="popLayout" initial={false}>
-        <motion.p
-          key={id}
-          initial={{ opacity: 0, y: 6, filter: "blur(6px)" }}
-          animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-          exit={{ opacity: 0, y: -6, filter: "blur(6px)" }}
-          transition={{ duration: 0.28, ease: [0.22, 0.9, 0.28, 1] }}
-          className="col-start-1 row-start-1 text-pretty text-base leading-relaxed text-foreground/90"
-        >
-          {CAPTIONS[id]}
-        </motion.p>
-      </AnimatePresence>
+    <div className="flex w-full max-w-xl flex-col items-start gap-4 text-left">
+      <h1 className="grid text-2xl leading-[1.1] tracking-tight sm:text-4xl">
+        <AnimatePresence initial={false}>
+          <motion.span
+            key={id}
+            {...FADE}
+            className="col-start-1 row-start-1 self-end"
+          >
+            {COPY[id].title}
+          </motion.span>
+        </AnimatePresence>
+      </h1>
+      <div className="grid max-w-lg">
+        <AnimatePresence initial={false}>
+          <motion.p
+            key={id}
+            {...FADE}
+            className="col-start-1 row-start-1 text-pretty text-base leading-relaxed text-foreground/90"
+          >
+            {COPY[id].body}
+          </motion.p>
+        </AnimatePresence>
+      </div>
     </div>
   );
 }

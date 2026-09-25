@@ -3,6 +3,7 @@ import { Vector3 } from "three";
 import {
   PARTS,
   sampleFrame,
+  orbitFrame,
   type Geometry,
   type PartId,
 } from "../choreography";
@@ -156,6 +157,36 @@ describe("BOM leaders", () => {
         expect(hi.bom!.side, `${hi.id} over ${lo.id}`).toBe("top");
         expect(lo.bom!.side, `${lo.id} under ${hi.id}`).toBe("bottom");
       }
+    }
+  });
+});
+
+describe("drag orbit", () => {
+  it("turns the scene rigidly while label anchors hold still", () => {
+    const f = sampleFrame(2, GEO, DESKTOP);
+    const o = orbitFrame(f, 0.4);
+    const pivot = f.poses.front.position
+      .clone()
+      .add(f.poses.rear.position)
+      .multiplyScalar(0.5);
+    for (const p of PARTS) {
+      // Same distance from the pivot, different place.
+      expect(o.poses[p.id].position.distanceTo(pivot)).toBeCloseTo(
+        f.poses[p.id].position.distanceTo(pivot),
+        6,
+      );
+      expect(o.anchors![p.id].equals(f.poses[p.id].position)).toBe(true);
+    }
+    expect(o.poses.front.position.equals(f.poses.front.position)).toBe(false);
+  });
+
+  it("is a no-op at zero yaw", () => {
+    const f = sampleFrame(1, GEO, DESKTOP);
+    const o = orbitFrame(f, 0);
+    for (const p of PARTS) {
+      expect(
+        o.poses[p.id].position.distanceTo(f.poses[p.id].position),
+      ).toBeLessThan(1e-9);
     }
   });
 });

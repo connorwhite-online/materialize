@@ -13,7 +13,8 @@ import { LANDING_MATERIALS } from "./landing-materials";
 import {
   PARTS,
   sampleFrame,
-  blendFrames,
+  mixFrames,
+  orbitFrame,
   MAX_PROGRESS,
   type Frame,
   type Geometry,
@@ -151,6 +152,13 @@ function useParts(shellMaterial: THREE.MeshPhysicalMaterial) {
   }, [nodes, shellMaterial]);
 }
 
+/**
+ * Furthest a drag can turn the share/BOM scene, radians. A tug, not a
+ * free orbit: the exploded stack already sits at 0.6 rad, and much past
+ * ~1 rad it goes end-on and every part hides behind the front shell.
+ */
+const ORBIT_MAX = 0.4;
+
 /** Seconds to travel one step. */
 const STEP_TWEEN_S = 1.1;
 
@@ -185,7 +193,8 @@ function lerpShell(
 }
 
 export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
-  const { material, burst, tensionRef, zoomRef, step, setReady } = useLanding();
+  const { material, burst, tensionRef, orbitRef, zoomRef, step, setReady } =
+    useLanding();
   const stepRef = useRef(step);
   useEffect(() => {
     stepRef.current = step;
@@ -209,6 +218,9 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
   const smooth = useRef({
     progress: 0,
     zoom: 0,
+    orbit: 0,
+    orbitV: 0,
+    jump: null as { from: number; to: number; t: number } | null,
     sway: 0,
     swayV: 0,
     tilt: 0,
@@ -226,23 +238,47 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
     const delta = Math.min(rawDelta, 1 / 20);
     const st = smooth.current;
     st.clock += delta;
-    // Steps travel at a steady pace and let sampleFrame's per-segment
-    // easing shape the motion; a wrap (build → print) crosses two
-    // segments, so it moves faster rather than taking twice as long.
-    const gap = stepRef.current - st.progress;
-    const speed = Math.max(
-      1 / STEP_TWEEN_S,
-      Math.abs(gap) / (STEP_TWEEN_S * 1.3),
-    );
-    st.progress += Math.sign(gap) * Math.min(Math.abs(gap), speed * delta);
+    const view = { w: viewport.width, h: viewport.height };
+    // Adjacent steps walk the keyframe path at a steady pace, letting
+    // sampleFrame's per-segment easing shape the motion. A jump that
+    // would pass through another step (the tour wrapping BOM → hero)
+    // crossfades straight from where we are to where we're going.
+    const goal = stepRef.current;
+    if (st.jump && st.jump.to !== goal) st.jump = null;
+    if (!st.jump && Math.abs(goal - st.progress) > 1.01) {
+      st.jump = { from: st.progress, to: goal, t: 0 };
+    }
+    let current: Frame;
+    if (st.jump) {
+      st.jump.t = Math.min(1, st.jump.t + delta / STEP_TWEEN_S);
+      current = mixFrames(
+        sampleFrame(st.jump.from, geo, view),
+        sampleFrame(st.jump.to, geo, view),
+        st.jump.t,
+      );
+      if (st.jump.t >= 1) {
+        st.progress = st.jump.to;
+        st.jump = null;
+      }
+    } else {
+      const gap = goal - st.progress;
+      st.progress +=
+        Math.sign(gap) * Math.min(Math.abs(gap), delta / STEP_TWEEN_S);
+      current = sampleFrame(st.progress, geo, view);
+    }
     st.zoom += (zoomRef.current - st.zoom) * (1 - Math.exp(-delta * 9));
 
-    const view = { w: viewport.width, h: viewport.height };
-    const current = sampleFrame(st.progress, geo, view);
-    const frame =
+    const blended =
       st.zoom > 0.001
-        ? blendFrames(current, sampleFrame(MAX_PROGRESS, geo, view), st.zoom)
+        ? mixFrames(current, sampleFrame(MAX_PROGRESS, geo, view), st.zoom)
         : current;
+    // Drag-orbit on the share/BOM steps: a spring toward the finger's pull
+    // (up to ORBIT_MAX), overshooting once when it's let go.
+    st.orbitV +=
+      ((orbitRef.current * ORBIT_MAX - st.orbit) * 90 - st.orbitV * 13) * delta;
+    st.orbit += st.orbitV * delta;
+    const yaw = st.orbit * (1 - blended.hero) * (1 - st.zoom);
+    const frame = Math.abs(yaw) > 1e-4 ? orbitFrame(blended, yaw) : blended;
     frameRef.current = frame;
 
     // Swipe deformation + idle sway, both gated to the hero. The deform
@@ -588,7 +624,10 @@ function BomLabel({
       side === "top"
         ? f.labelRows.top + lane * f.labelRows.lane
         : f.labelRows.bottom - lane * f.labelRows.lane;
-    g.position.set(pose.position.x, y, pose.position.z);
+    // The label holds its un-orbited place; only the leader's part end
+    // follows the part as the scene is dragged round.
+    const anchor = f.anchors?.[id] ?? pose.position;
+    g.position.set(anchor.x, y, anchor.z);
     const visible = f.bomLabels > 0.01;
     const line = lineRef.current;
     if (line) {
@@ -596,12 +635,7 @@ function BomLabel({
         "position",
       ) as THREE.BufferAttribute;
       pos.setXYZ(0, pose.position.x, pose.position.y, pose.position.z);
-      pos.setXYZ(
-        1,
-        pose.position.x,
-        y + (side === "top" ? -0.06 : 0.06),
-        pose.position.z,
-      );
+      pos.setXYZ(1, anchor.x, y + (side === "top" ? -0.06 : 0.06), anchor.z);
       pos.needsUpdate = true;
       (line.material as THREE.LineBasicMaterial).opacity = f.bomLabels * 0.5;
       line.visible = visible;

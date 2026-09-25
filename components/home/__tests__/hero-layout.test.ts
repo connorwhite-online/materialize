@@ -48,7 +48,8 @@ describe("anon home hero layout", () => {
   });
 
   it("breaks the headline after the swapping word, and the server says 'anything'", () => {
-    expect(page).toMatch(/Print <HeroWord \/>,\s*<br \/>\s*share your ideas/);
+    expect(landingHero).toMatch(/Print <HeroWord \/>,\s*<br \/>\s*share your ideas/);
+    expect(landingHero).toMatch(/<h1\b/);
     expect(materials).toMatch(/RESTING_WORD = "anything"/);
   });
 

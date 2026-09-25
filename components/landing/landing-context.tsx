@@ -28,6 +28,8 @@ interface LandingState {
   burst: Burst;
   /** Swipe tension in [-1, 1]; read every frame by the scene. */
   tensionRef: MutableRefObject<number>;
+  /** Drag-orbit pull on the share/BOM steps, [-1, 1]; springs back to 0. */
+  orbitRef: MutableRefObject<number>;
   /**
    * How far the FAQ sheet has been pulled up over the stage, 0 → 1;
    * written on scroll, read per frame. Drives the reassemble-and-zoom.
@@ -79,6 +81,7 @@ export function LandingProvider({ children }: { children: ReactNode }) {
   });
   const [ready, setReady] = useState(false);
   const tensionRef = useRef(0);
+  const orbitRef = useRef(0);
   const materialRef = useRef(0);
   const zoomRef = useRef(0);
   const [step, setStep] = useState(0);
@@ -133,6 +136,7 @@ export function LandingProvider({ children }: { children: ReactNode }) {
       word,
       burst,
       tensionRef,
+      orbitRef,
       zoomRef,
       step,
       playing: mode === "auto",
