@@ -4,6 +4,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { Html, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
+import { MeshSurfaceSampler } from "three/examples/jsm/math/MeshSurfaceSampler.js";
 import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { Download } from "@/components/icons/download";
 import { useLanding } from "./landing-context";
@@ -280,7 +281,9 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
       fadeMaterials(parts[spec.id].materials, pose.opacity);
     }
 
-    lerpShell(shellMaterial, target, targetColor, 1 - Math.exp(-delta * 4));
+    // Fast (~150ms): the swap should read as a snap, with the shed
+    // particles carrying the old skin away — not a slow crossfade.
+    lerpShell(shellMaterial, target, targetColor, 1 - Math.exp(-delta * 18));
   });
 
   return (
@@ -320,9 +323,12 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
 
 // ─── Particle shed ────────────────────────────────────────────────────
 
-const MAX_PARTICLES = 700;
-const MIN_PARTICLES = 60;
-const LIFETIME = 0.55;
+// Dense fine dust, not chunky confetti: thousands of tiny spheres
+// sampled across the whole shell surface.
+const MAX_PARTICLES = 2400;
+const MIN_PARTICLES = 500;
+const LIFETIME = 0.6;
+const SAMPLES_PER_SHELL = 3000;
 
 type Particle = {
   position: THREE.Vector3;
@@ -366,7 +372,7 @@ function spawnBurst(
       out.z * speed * 0.4,
     );
     p.age = 0;
-    p.scale = 0.005 + Math.random() * 0.011;
+    p.scale = 0.0035 + Math.random() * 0.0065;
     p.rotation.set(
       Math.random() * 6.3,
       Math.random() * 6.3,
@@ -434,20 +440,20 @@ function ShedParticles({
     [],
   );
   // Surface samples: vertices of each shell, in the shell's own space.
+  // Area-weighted points across each shell (vertex sampling bunched
+  // particles wherever the mesh was dense and left flat faces bare).
   const samples = useMemo(
     () =>
       sources.map((obj) => {
-        const pts: { mesh: THREE.Mesh; p: THREE.Vector3 }[] = [];
+        const pts: Sample[] = [];
+        const tmp = new THREE.Vector3();
         obj.traverse((o) => {
           const mesh = o as THREE.Mesh;
           if (!mesh.isMesh) return;
-          const pos = mesh.geometry.getAttribute("position");
-          const step = Math.max(1, Math.floor(pos.count / 400));
-          for (let i = 0; i < pos.count; i += step) {
-            pts.push({
-              mesh,
-              p: new THREE.Vector3().fromBufferAttribute(pos, i),
-            });
+          const sampler = new MeshSurfaceSampler(mesh).build();
+          for (let i = 0; i < SAMPLES_PER_SHELL; i++) {
+            sampler.sample(tmp);
+            pts.push({ mesh, p: tmp.clone() });
           }
         });
         return pts;
@@ -475,7 +481,7 @@ function ShedParticles({
       args={[undefined, undefined, MAX_PARTICLES]}
       frustumCulled={false}
     >
-      <boxGeometry args={[1, 1, 1]} />
+      <icosahedronGeometry args={[1, 1]} />
       {/* The shell sheds its OUTGOING skin: particles wear the material
           being swiped away while the surface lerps to the new one. */}
       <meshStandardMaterial

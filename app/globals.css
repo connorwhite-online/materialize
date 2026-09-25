@@ -998,16 +998,17 @@
 }
 
 
-/* Anon landing stepper: the active dot's timer. Linear on purpose — it
-   is a clock, not a gesture. The element's own animationend advances the
+/* Anon landing stepper: the active dot's timer. A full-width rounded
+   bar sliding in under the track's clip — NOT scaleX, which squashes the
+   rounded caps flat. Linear on purpose — it is a clock, not a gesture. The element's own animationend advances the
    step (components/landing/landing-hero.tsx), and play state pauses it
    in place. Reduced motion never runs it (the stepper doesn't autoplay). */
 @keyframes mz-step-fill {
   from {
-    transform: scaleX(0);
+    transform: translateX(-100%);
   }
   to {
-    transform: scaleX(1);
+    transform: translateX(0);
   }
 }
 .mz-step-fill {

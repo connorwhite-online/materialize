@@ -232,7 +232,7 @@ export function StepCarousel() {
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-24 z-10 flex justify-center nav:bottom-8">
       <div
-        className="flex items-center gap-2"
+        className="flex items-center gap-1.5"
         role="group"
         aria-label="Product tour"
       >
@@ -240,14 +240,14 @@ export function StepCarousel() {
           type="button"
           aria-label="Previous"
           onClick={() => goTo(step - 1)}
-          className={cn(CONTROL, "size-10")}
+          className={cn(CONTROL, "size-9")}
         >
-          <ChevronLeft size={16} />
+          <ChevronLeft size={20} />
         </button>
         <div
           className={cn(
             CONTROL,
-            "h-10 gap-2.5 px-4 hover:text-foreground/80 active:scale-100",
+            "h-9 gap-2 px-3 hover:text-foreground/80 active:scale-100",
           )}
         >
           {STEPS.map((s, i) => {
@@ -270,7 +270,7 @@ export function StepCarousel() {
                   <span
                     key={step}
                     onAnimationEnd={advance}
-                    className="mz-step-fill absolute inset-0 origin-left rounded-full bg-foreground"
+                    className="mz-step-fill absolute inset-0 rounded-full bg-foreground"
                     style={{
                       animationDuration: `${STEP_MS}ms`,
                       animationPlayState: running ? "running" : "paused",
@@ -285,17 +285,17 @@ export function StepCarousel() {
           type="button"
           aria-label="Next"
           onClick={() => goTo(step + 1)}
-          className={cn(CONTROL, "size-10")}
+          className={cn(CONTROL, "size-9")}
         >
-          <ChevronRight size={16} />
+          <ChevronRight size={20} />
         </button>
         <button
           type="button"
           aria-label={playing ? "Pause tour" : "Play tour"}
           onClick={togglePlay}
-          className={cn(CONTROL, "ml-1 size-10")}
+          className={cn(CONTROL, "ml-1 size-9")}
         >
-          {playing ? <Pause size={14} /> : <Play size={14} />}
+          {playing ? <Pause size={18} /> : <Play size={18} />}
         </button>
       </div>
     </div>
