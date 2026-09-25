@@ -7,6 +7,7 @@ import * as THREE from "three";
 import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { Download } from "@/components/icons/download";
 import { useLanding } from "./landing-context";
+import { buildStandIn, hasStandIn } from "./stand-ins";
 import { LANDING_MATERIALS } from "./landing-materials";
 import {
   PARTS,
@@ -69,7 +70,7 @@ function DetailInternals({ parts }: { parts: Record<PartId, LoadedPart> }) {
   const { nodes } = useGLTF(DETAIL_URL);
   useEffect(() => {
     for (const spec of PARTS) {
-      if (spec.shell) continue;
+      if (spec.shell || hasStandIn(spec.id)) continue;
       const detail = nodes[spec.node];
       if (detail) swapInDetail(parts[spec.id], detail);
     }
@@ -110,7 +111,8 @@ function useParts(shellMaterial: THREE.MeshPhysicalMaterial) {
       if (!src) throw new Error(`pneuma-q.glb: missing node ${spec.node}`);
       // Keep the node's own transform: mesh quantization stores the
       // dequantizing scale/offset there. Recentre with a wrapper instead.
-      const inner = src.clone(true);
+      // Envelope-only CAD parts get a modelled stand-in (stand-ins.ts).
+      const inner = buildStandIn(spec.id, src) ?? src.clone(true);
       const object = new THREE.Group();
       object.add(inner);
       const materials: THREE.Material[] = [];
@@ -282,7 +284,7 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
       )}
       <ShedParticles
         burst={burst}
-        color={targetColor}
+        shed={LANDING_MATERIALS[burst.from]}
         sources={SHELL_IDS.map((id) => parts[id].object)}
         frameRef={frameRef}
       />
@@ -388,12 +390,12 @@ function stepParticles(
 
 function ShedParticles({
   burst,
-  color,
+  shed,
   sources,
   frameRef,
 }: {
   burst: { key: number; direction: number; intensity: number };
-  color: THREE.Color;
+  shed: (typeof LANDING_MATERIALS)[number];
   sources: THREE.Object3D[];
   frameRef: React.MutableRefObject<Frame | null>;
 }) {
@@ -454,7 +456,13 @@ function ShedParticles({
       frustumCulled={false}
     >
       <boxGeometry args={[1, 1, 1]} />
-      <meshStandardMaterial color={color} metalness={0.4} roughness={0.3} />
+      {/* The shell sheds its OUTGOING skin: particles wear the material
+          being swiped away while the surface lerps to the new one. */}
+      <meshStandardMaterial
+        color={shed.color}
+        metalness={shed.metalness}
+        roughness={Math.max(0.2, shed.roughness)}
+      />
     </instancedMesh>
   );
 }

@@ -17,6 +17,8 @@ export interface Burst {
   /** Direction particles fly, -1 left / +1 right. */
   direction: number;
   intensity: number;
+  /** Material being swiped away — the particles are made of it. */
+  from: number;
 }
 
 interface LandingState {
@@ -43,17 +45,27 @@ export function LandingProvider({ children }: { children: ReactNode }) {
     key: 0,
     direction: 0,
     intensity: 1,
+    from: 0,
   });
   const [ready, setReady] = useState(false);
   const tensionRef = useRef(0);
+  const materialRef = useRef(0);
   const progressRef = useRef(0);
 
   const select = useCallback(
     (index: number, direction: number, intensity = 1) => {
-      setMaterial(wrapIndex(index));
       // `direction` is the carousel step (+1 next), which is opposite the
       // finger, so the spray flies with the gesture when negated.
-      setBurst((b) => ({ key: b.key + 1, direction: -direction, intensity }));
+      // Read before overwriting: the updater below runs lazily.
+      const from = materialRef.current;
+      setBurst((b) => ({
+        key: b.key + 1,
+        direction: -direction,
+        intensity,
+        from,
+      }));
+      materialRef.current = wrapIndex(index);
+      setMaterial(materialRef.current);
     },
     [],
   );

@@ -9,11 +9,7 @@ import { HomeFaq } from "@/components/home/home-faq";
 import { EnclosureStage } from "@/components/landing/enclosure-stage-lazy";
 import { LandingProvider } from "@/components/landing/landing-context";
 import { LandingFooter } from "@/components/landing/landing-footer";
-import {
-  HeroCarousel,
-  HeroWord,
-  LandingHero,
-} from "@/components/landing/landing-hero";
+import { HeroWord, LandingHero } from "@/components/landing/landing-hero";
 import { CartProvider } from "@/components/print/cart-context";
 import { CartPanel } from "@/components/print/cart-panel";
 import { isSandboxMode } from "@/lib/env";
@@ -170,7 +166,6 @@ export default async function HomePage() {
                 Get prints delivered to your door, and pick from 60+ materials.
                 Share your hardware projects and files.
               </p>
-              <HeroCarousel />
             </div>
           </main>
         </LandingHero>

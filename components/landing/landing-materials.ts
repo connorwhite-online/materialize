@@ -23,10 +23,11 @@ export const LANDING_MATERIALS: readonly LandingMaterial[] = [
     id: "plastic",
     name: "Plastics",
     word: "plastics",
-    color: "#ff6a3d",
+    // Warm white — the colour the prototype is actually printed in.
+    color: "#e9e4da",
     metalness: 0,
-    roughness: 0.45,
-    clearcoat: 0.3,
+    roughness: 0.5,
+    clearcoat: 0.2,
   },
   {
     id: "tpu",

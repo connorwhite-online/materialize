@@ -61,7 +61,7 @@ describe.each([
     for (const p of internals) expect(f.poses[p.id].opacity).toBe(0);
   });
 
-  it("explodes every part left → right in stack order, fully visible", () => {
+  it("explodes every part in stack order, front shell on the left, fully visible", () => {
     const f = sampleFrame(2, GEO, view);
     for (const p of PARTS) expect(f.poses[p.id].opacity).toBe(1);
     const xs = [...PARTS]
@@ -69,7 +69,7 @@ describe.each([
       .filter((p, i, arr) => i === 0 || p.slot !== arr[i - 1].slot)
       .map((p) => f.poses[p.id].position.x);
     for (let i = 1; i < xs.length; i++)
-      expect(xs[i]).toBeGreaterThan(xs[i - 1]);
+      expect(xs[i]).toBeLessThan(xs[i - 1]);
     expect(f.bomLabels).toBe(1);
     expect(f.fileLabels).toBe(0);
   });
@@ -81,6 +81,13 @@ describe.each([
     }
     expect(f.labelRows.top + f.labelRows.lane).toBeLessThan(view.h / 2);
     expect(f.labelRows.bottom - f.labelRows.lane).toBeGreaterThan(-view.h / 2);
+  });
+
+  it("keeps each shell on its own side from the split into the explode", () => {
+    for (const p of [1, 2]) {
+      const f = sampleFrame(p, GEO, view);
+      expect(f.poses.front.position.x).toBeLessThan(f.poses.rear.position.x);
+    }
   });
 
   it("reassembles and zooms past the viewport behind the FAQ", () => {
@@ -134,6 +141,24 @@ describe("orientation continuity", () => {
       const q = sampleFrame(p, GEO, DESKTOP).poses.main.quaternion;
       // Long axis stays in the lower hemisphere — no 180° roll between sections.
       expect(down.clone().applyQuaternion(q).y).toBeLessThan(0);
+    }
+  });
+});
+
+describe("BOM leaders", () => {
+  it("never cross between parts that share a column", () => {
+    const f = sampleFrame(2, GEO, DESKTOP);
+    const labelled = PARTS.filter((p) => p.bom);
+    for (const a of labelled) {
+      for (const b of labelled) {
+        if (a === b || a.slot !== b.slot) continue;
+        // Within a column, the higher part labels up and the lower down —
+        // otherwise one leader runs through the other part.
+        const [hi, lo] =
+          f.poses[a.id].position.y > f.poses[b.id].position.y ? [a, b] : [b, a];
+        expect(hi.bom!.side, `${hi.id} over ${lo.id}`).toBe("top");
+        expect(lo.bom!.side, `${lo.id} under ${hi.id}`).toBe("bottom");
+      }
     }
   });
 });

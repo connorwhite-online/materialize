@@ -63,14 +63,14 @@ export const PARTS: readonly PartSpec[] = [
     node: "battery",
     label: "Battery",
     slot: 2.4,
-    bom: { side: "top", lane: 1 },
+    bom: { side: "bottom", lane: 1 },
   },
   {
     id: "main",
     node: "pneuma-main",
     label: "Main board",
     slot: 2.4,
-    bom: { side: "bottom", lane: 1 },
+    bom: { side: "top", lane: 1 },
   },
   { id: "pwr", node: "pneuma-pwr", label: "Power board", slot: 2.4 },
   {
@@ -78,14 +78,14 @@ export const PARTS: readonly PartSpec[] = [
     node: "speaker",
     label: "Speaker",
     slot: 3.4,
-    bom: { side: "top", lane: 0 },
+    bom: { side: "bottom", lane: 0 },
   },
   {
     id: "lra",
     node: "lra",
     label: "Haptic motor",
     slot: 3.4,
-    bom: { side: "bottom", lane: 0 },
+    bom: { side: "top", lane: 0 },
   },
   {
     id: "camera",
@@ -153,15 +153,17 @@ const STANDING = new Quaternion().setFromRotationMatrix(
   ),
 );
 /**
- * Model → world for the exploded view: stack axis runs left → right.
+ * Model → world for the exploded view: the stack runs front shell (left)
+ * → rear shell (right), matching the split screen before it, so the
+ * shells slide straight into place instead of crossing over.
  * The long axis (model Z) must point the same way it does in STANDING
  * (world −Y); flip it and every transition into/out of the BOM slerps
  * through a 180° roll.
  */
 const LAID_OUT = new Quaternion().setFromRotationMatrix(
   new Matrix4().makeBasis(
-    new Vector3(0, 0, -1),
-    new Vector3(1, 0, 0),
+    new Vector3(0, 0, 1),
+    new Vector3(-1, 0, 0),
     new Vector3(0, -1, 0),
   ),
 );
@@ -175,7 +177,7 @@ function turn(base: Quaternion, yaw: number, pitch = 0): Quaternion {
 export const HERO_QUAT = turn(STANDING, -0.35, 0.12);
 const FRONT_SPLIT_QUAT = turn(STANDING, 0.45, 0.1);
 const REAR_SPLIT_QUAT = turn(STANDING, -0.45, 0.1);
-export const EXPLODE_QUAT = turn(LAID_OUT, -0.6, 0.08);
+export const EXPLODE_QUAT = turn(LAID_OUT, 0.6, 0.08);
 const ZOOM_QUAT = turn(STANDING, -0.4, 0.22);
 
 export function easeInOut(t: number): number {
