@@ -1,5 +1,6 @@
 import { HOME_FAQ } from "@/lib/seo/home-faq";
 import { FaqCard } from "@/components/home/faq-card";
+import { cn } from "@/lib/utils";
 
 /**
  * Visible FAQ for the anon home page, backing the `FAQPage` JSON-LD
@@ -11,11 +12,14 @@ import { FaqCard } from "@/components/home/faq-card";
  * Copy lives in `lib/seo/home-faq.ts` — do not inline it here, or the
  * markup and the visible text will drift apart.
  */
-export function HomeFaq() {
+export function HomeFaq({ className }: { className?: string } = {}) {
   return (
     <section
       aria-labelledby="faq"
-      className="mt-16 border-t border-border pt-12 sm:mt-24 sm:pt-16"
+      className={cn(
+        "mt-16 border-t border-border pt-12 sm:mt-24 sm:pt-16",
+        className
+      )}
     >
       <h2
         id="faq"

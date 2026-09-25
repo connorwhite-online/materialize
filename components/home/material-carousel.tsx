@@ -6,7 +6,7 @@ import type { MaterialMetadata } from "@/lib/materials/preset-library";
 import { cn } from "@/lib/utils";
 
 interface MaterialCarouselProps {
-  materials: MaterialMetadata[];
+  materials: readonly Pick<MaterialMetadata, "id" | "name">[];
   selectedIndex: number;
   onSelect: (index: number, direction: number) => void;
 }
@@ -54,10 +54,16 @@ export const MaterialCarousel = forwardRef<HTMLDivElement, MaterialCarouselProps
     }, [selectedIndex]);
 
     return (
-      <div className="relative w-full max-w-[420px] mx-auto">
-        {/* Edge fades */}
-        <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-20 bg-gradient-to-r from-background to-transparent" />
-        <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-20 bg-gradient-to-l from-background to-transparent" />
+      <div
+        className="relative w-full max-w-[420px] mx-auto"
+        // Edge fades as a mask, not painted overlays: the track sits over
+        // a 3D canvas / gradient, where a `from-background` wash shows as
+        // a flat rectangle.
+        style={{
+          maskImage:
+            "linear-gradient(to right, transparent, black 5rem, black calc(100% - 5rem), transparent)",
+        }}
+      >
 
         <div
           ref={trackRef}

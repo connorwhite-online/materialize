@@ -4,9 +4,16 @@ import { redirect } from "next/navigation";
 import { TopBar } from "@/components/nav/top-bar";
 import { AppShell } from "@/components/nav/app-shell";
 import { MobileNav } from "@/components/nav/mobile-nav";
-import { HeroBackground } from "@/components/home/hero-background";
 import { HomeDashboard } from "@/components/home/home-dashboard";
-import { HomeMarketing } from "@/components/home/home-marketing";
+import { HomeFaq } from "@/components/home/home-faq";
+import { EnclosureStage } from "@/components/landing/enclosure-stage-lazy";
+import { LandingProvider } from "@/components/landing/landing-context";
+import { LandingFooter } from "@/components/landing/landing-footer";
+import {
+  HeroCarousel,
+  HeroWord,
+  LandingHero,
+} from "@/components/landing/landing-hero";
 import { CartProvider } from "@/components/print/cart-context";
 import { CartPanel } from "@/components/print/cart-panel";
 import { isSandboxMode } from "@/lib/env";
@@ -105,10 +112,8 @@ export default async function HomePage() {
   // an anon visitor sees on this page takes payment.
   const textToCad = await resolveTextToCadAccess();
 
-  // The page now scrolls: a full-viewport hero followed by
-  // server-rendered marketing sections. The outer container is plain
-  // flow (no h-dvh / overflow-hidden) so the content below the fold
-  // can extend it.
+  // Plain document scroll: four screen-high sections over a fixed
+  // enclosure canvas, then the footer.
   return (
     <CartProvider>
       {/* Site-level structured data. Only the home page emits these:
@@ -139,57 +144,77 @@ export default async function HomePage() {
 
       {/* Same chrome as AppShell, minus sandbox: TopBar hides below
           `nav` (no alwaysVisible) and the morphing MobileNav takes over
-          on small screens. `landing` keeps the desktop wordmark
-          animation and swaps the nav wash for a blur over the photo. */}
-      <TopBar landing initialUnreadCount={0} textToCad={textToCad} />
+          on small screens. */}
+      <LandingProvider>
+        <TopBar landing initialUnreadCount={0} textToCad={textToCad} />
 
-      {/* Hero — the photo runs 10% past the dynamic viewport so the
-          browser chrome never exposes its bottom edge. HeroBackground
-          feathers the last 20dvh into --background before marketing
-          content begins. Copy stays h-svh, inside the first visible
-          screen rather than following the extra image runway.
+        {/* The Pneuma Q enclosure is one fixed canvas behind every section;
+          scrolling between [data-landing-section] screens drives its
+          choreography (components/landing/choreography.ts):
+          hero carousel → shells split with file labels → exploded BOM →
+          zoomed backdrop under the FAQ. Copy stays short — the model
+          does the showing. */}
+        <EnclosureStage />
 
-          Background art is absolute + object-cover. The three.js / R3F
-          showcase that used to sit in a visual slot below the copy is
-          unmounted, not deleted — hero-showcase*.tsx et al. stay in
-          the tree. */}
-      <section className="relative isolate flex h-[110dvh] min-h-[110dvh] w-full flex-col overflow-hidden">
-        <HeroBackground />
-        {/* Brand mark lives in TopBar so "Materialize" still appears
-            above the fold. The h1 states what the product does. */}
-        <main className="relative z-10 flex h-svh max-h-svh flex-col">
-          {/* Mobile: copy below center, padded above the floating pill
-              (`fixed bottom-6` plus safe-area + h-14). Top-aligned sat
-              in the light beam and the muted subheading disappeared
-              against it. Desktop (nav+): also below center —
-              left-aligned in the lower third so it clears the
-              sculpture and the light beam. */}
-          <div className="flex flex-1 items-end justify-start px-6 pb-28 sm:px-8 nav:px-16 nav:pb-24 lg:px-24 lg:pb-28 xl:px-32">
+        <LandingHero>
+          <main className="flex flex-1 items-end justify-start px-6 pb-28 sm:px-8 nav:px-16 nav:pb-24 lg:px-24 lg:pb-28 xl:px-32">
             <div className="flex w-full max-w-xl flex-col items-start gap-4 text-left">
-              {/* Real, selectable <h1> — states what the product does
-                  rather than spelling the brand. Same system stack as
-                  the rest of the app; no webfont on the critical path. */}
-              <h1 className="text-balance text-2xl leading-[1.1] tracking-tight sm:text-4xl">
-                Print anything, share your ideas
+              {/* Real, selectable <h1>. The server renders "anything"; the
+                intro only swaps the word client-side and rests back on it. */}
+              <h1 className="text-2xl leading-[1.1] tracking-tight sm:text-4xl">
+                Print <HeroWord />,
+                <br />
+                share your ideas
               </h1>
               <p className="max-w-lg text-pretty text-base leading-relaxed text-foreground/90">
-                Get prints delivered to your door, and pick from 60+
-                materials. Share your hardware projects and files.
+                Get prints delivered to your door, and pick from 60+ materials.
+                Share your hardware projects and files.
               </p>
+              <HeroCarousel />
             </div>
+          </main>
+        </LandingHero>
+
+        <section
+          data-landing-section
+          className="pointer-events-none relative z-10 flex h-svh flex-col justify-start px-6 pt-28 sm:px-8 nav:px-16 lg:px-24 xl:px-32"
+        >
+          <h2 className="text-2xl tracking-tight sm:text-4xl">
+            Share your files
+          </h2>
+          <p className="mt-2 text-base text-muted-foreground">
+            Publish the parts. Anyone can download or print them.
+          </p>
+        </section>
+
+        <section
+          data-landing-section
+          className="pointer-events-none relative z-10 flex h-svh flex-col justify-start px-6 pt-28 sm:px-8 nav:px-16 lg:px-24 xl:px-32"
+        >
+          <h2 className="text-2xl tracking-tight sm:text-4xl">
+            Host the whole build
+          </h2>
+          <p className="mt-2 text-base text-muted-foreground">
+            Every part, with its bill of materials.
+          </p>
+        </section>
+
+        {/* FAQ floats over the zoomed enclosure. The visible answers back
+          the FAQPage JSON-LD above — both read HOME_FAQ. */}
+        <section
+          data-landing-section
+          className="relative z-10 flex min-h-svh items-center px-3 py-24 sm:px-8"
+        >
+          <div className="glass-surface mx-auto w-full max-w-5xl rounded-3xl p-5 ring-1 ring-border/70 sm:p-10">
+            <HomeFaq className="mt-0 border-t-0 pt-0 sm:mt-0 sm:pt-0" />
           </div>
-        </main>
-      </section>
+        </section>
 
-      {/* Below the fold: server-rendered features + benefits + internal
-          links so crawlers and agents get real content, not the
-          JS-only hero shell. pb-28 clears the floating mobile nav. */}
-      <div className="pb-28 nav:pb-0">
-        <HomeMarketing />
-      </div>
+        <LandingFooter />
 
-      <MobileNav initialUnreadCount={0} textToCad={textToCad} />
-      <CartPanel />
+        <MobileNav initialUnreadCount={0} textToCad={textToCad} />
+        <CartPanel />
+      </LandingProvider>
     </CartProvider>
   );
 }
