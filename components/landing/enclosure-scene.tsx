@@ -4,6 +4,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { Html, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
+import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { Download } from "@/components/icons/download";
 import { useLanding } from "./landing-context";
 import { LANDING_MATERIALS } from "./landing-materials";
@@ -17,11 +18,13 @@ import {
 
 export const ENCLOSURE_URL = "/home/pneuma-q.glb";
 /**
- * Full-detail internals (~1M tris, ~9.7MB). The main file carries
- * heavily decimated stand-ins so the hero can render at once; this one
+ * Detail internals (50%, ~1.3MB). The main file carries 12%
+ * stand-ins so the hero can render at once; this one
  * streams in after the page is idle and replaces them in place, well
  * before anyone scrolls to the exploded view.
  */
+const CREASE_ANGLE = Math.PI / 6;
+
 export const DETAIL_URL = "/home/pneuma-q-detail.glb";
 
 /**
@@ -30,6 +33,12 @@ export const DETAIL_URL = "/home/pneuma-q-detail.glb";
  * roughness rather than a generic stand-in.
  */
 function fadeable(mesh: THREE.Mesh): THREE.Material {
+  // Internals ship without normals (scripts/landing-glb/build.mjs drops
+  // them so the CAD's split vertices can weld and simplify). Rebuild
+  // them creased: hard edges stay crisp, fillets stay smooth.
+  if (!mesh.geometry.getAttribute("normal")) {
+    mesh.geometry = toCreasedNormals(mesh.geometry, CREASE_ANGLE);
+  }
   const m = (mesh.material as THREE.Material).clone();
   m.transparent = true;
   mesh.material = m;

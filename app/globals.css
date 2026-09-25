@@ -997,3 +997,16 @@
   }
 }
 
+
+/* Anon landing: light snap to each enclosure stage so a scroll that
+   comes to rest near one settles on the intended camera framing
+   (components/landing/choreography.ts keyframes sit exactly at section
+   tops). `proximity`, not `mandatory` — a stop far from a boundary is
+   left alone, and the FAQ section, taller than a screen, stays freely
+   scrollable. Scoped with :has() so no other route snaps. */
+:root:has([data-landing-section]) {
+  scroll-snap-type: y proximity;
+}
+[data-landing-section] {
+  scroll-snap-align: start;
+}
