@@ -152,12 +152,17 @@ const STANDING = new Quaternion().setFromRotationMatrix(
     new Vector3(0, -1, 0),
   ),
 );
-/** Model → world for the exploded view: stack axis runs left → right. */
+/**
+ * Model → world for the exploded view: stack axis runs left → right.
+ * The long axis (model Z) must point the same way it does in STANDING
+ * (world −Y); flip it and every transition into/out of the BOM slerps
+ * through a 180° roll.
+ */
 const LAID_OUT = new Quaternion().setFromRotationMatrix(
   new Matrix4().makeBasis(
-    new Vector3(0, 0, 1),
+    new Vector3(0, 0, -1),
     new Vector3(1, 0, 0),
-    new Vector3(0, 1, 0),
+    new Vector3(0, -1, 0),
   ),
 );
 

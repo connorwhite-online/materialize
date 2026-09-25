@@ -126,3 +126,14 @@ describe("progressFor", () => {
     expect(progressFor(9999, tops)).toBe(3);
   });
 });
+
+describe("orientation continuity", () => {
+  it("keeps the device's long axis pointing the same way in every pose", () => {
+    const down = new Vector3(0, 0, 1); // model long axis
+    for (const p of [0, 1, 2, 3]) {
+      const q = sampleFrame(p, GEO, DESKTOP).poses.main.quaternion;
+      // Long axis stays in the lower hemisphere — no 180° roll between sections.
+      expect(down.clone().applyQuaternion(q).y).toBeLessThan(0);
+    }
+  });
+});
