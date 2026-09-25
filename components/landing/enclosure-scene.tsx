@@ -408,7 +408,7 @@ function spawnBurst(
       out.z * speed * 0.4,
     );
     p.age = 0;
-    p.scale = 0.0035 + Math.random() * 0.0065;
+    p.scale = 0.002 + Math.random() * 0.004;
     p.rotation.set(
       Math.random() * 6.3,
       Math.random() * 6.3,
