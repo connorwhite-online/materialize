@@ -90,19 +90,19 @@ describe.each([
     }
   });
 
-  it("closes up for the FAQ: laid near-flat across the screen, only the camera left inside", () => {
+  it("closes up for the FAQ: tipped back onto the table, only the camera left inside", () => {
     const f = sampleFrame(3, GEO, view);
     for (const p of internals) {
       expect(f.poses[p.id].opacity, p.id).toBe(p.id === "camera" ? 1 : 0);
     }
-    // Long axis spans most of the width and the face tips toward the viewer.
-    const long = new Vector3(0, 0, 1).applyQuaternion(f.poses.front.quaternion);
+    // Tipped back: the face tilts up and still toward the viewer.
     const face = new Vector3(0, 1, 0).applyQuaternion(f.poses.front.quaternion);
-    expect(Math.abs(long.x) * 0.121 * f.poses.front.scale).toBeGreaterThan(
-      view.w * 0.5,
-    );
-    expect(face.y).toBeGreaterThan(0.3); // mostly up…
-    expect(face.z).toBeGreaterThan(0.3); // …and toward the camera
+    expect(face.y).toBeGreaterThan(0.5);
+    expect(face.z).toBeGreaterThan(0.3);
+    // One natural hinge from the hero, not a corkscrew: well under a
+    // right angle of total rotation between the two poses.
+    const hero = sampleFrame(0, GEO, view).poses.front.quaternion;
+    expect(hero.angleTo(f.poses.front.quaternion)).toBeLessThan(Math.PI * 0.45);
   });
 
   it("holds internals until the shells close when crossfading to the FAQ", () => {

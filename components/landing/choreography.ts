@@ -184,22 +184,14 @@ const FRONT_SPLIT_QUAT = turn(STANDING, 0.45, 0.1);
 const REAR_SPLIT_QUAT = turn(STANDING, -0.45, 0.1);
 export const EXPLODE_QUAT = turn(LAID_OUT, 0.6, 0.08);
 /**
- * Model → world lying face-up: front face (model +Y) to the ceiling, long
- * axis (model Z) running left → right.
+ * FAQ backdrop: the device tipped back onto a table — hinged ~60° about
+ * the horizontal axis so its face tilts up toward the viewer, with a
+ * quarter-ish turn for the isometric diagonal. Reachable from the hero
+ * (standing, face on) with essentially one hinge motion; an earlier
+ * "long axis sideways" pose needed a roll AND a pitch at once, and the
+ * slerp between them corkscrewed.
  */
-const LYING = new Quaternion().setFromRotationMatrix(
-  new Matrix4().makeBasis(
-    new Vector3(0, 0, -1),
-    new Vector3(0, 1, 0),
-    new Vector3(1, 0, 0),
-  ),
-);
-/**
- * FAQ backdrop: laid almost flat and seen isometrically — tipped ~45°
- * toward the viewer, long axis on a diagonal — so the closed device
- * spans the screen behind the glass instead of a cropped close-up.
- */
-const ZOOM_QUAT = turn(LYING, -0.55, 0.78);
+const ZOOM_QUAT = turn(STANDING, -0.4, -1.05);
 
 /**
  * Internals that stay visible once the device closes: the camera shows
@@ -236,9 +228,9 @@ export function layoutFor(view: View): Layout {
     ((portrait ? 0.44 : 0.5) * view.h) / DEVICE_LONG,
     ((portrait ? 0.7 : 0.4) * view.w) / DEVICE_WIDE,
   );
-  // One centred axis on every viewport: model, then copy, then stepper,
-  // stacked. Every step sits in the upper ~two-thirds so the centred copy
-  // and stepper below it never collide with the stage.
+  // The stage is centred on every viewport (copy sits bottom-left on
+  // desktop, the stepper bottom-centre). Every step lives in the upper
+  // ~two-thirds so the copy and stepper below never collide with it.
   const s1 = s0 * (portrait ? 0.6 : 0.6);
   const s2 = Math.min(
     ((portrait ? 0.28 : 0.4) * view.h) / DEVICE_LONG,
@@ -262,8 +254,8 @@ export function layoutFor(view: View): Layout {
       : new Vector3(0, view.h * 0.07, 0),
     // Long axis on the diagonal fills most of the width (zoomed out from
     // the old cropped close-up).
-    s3: Math.min(0.6 * view.w, 1.1 * view.h) / DEVICE_LONG,
-    t3: new Vector3(0, view.h * 0.04, 0),
+    s3: Math.min(0.62 * view.w, 1.2 * view.h) / DEVICE_LONG,
+    t3: new Vector3(0, -view.h * 0.02, 0),
   };
 }
 
