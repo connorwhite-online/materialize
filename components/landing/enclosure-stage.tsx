@@ -50,7 +50,7 @@ export function EnclosureStage() {
         className="absolute inset-0"
         style={{
           background:
-            "radial-gradient(60% 55% at 62% 42%, rgba(255,196,140,0.10), transparent 70%), radial-gradient(120% 90% at 50% 110%, rgba(255,170,110,0.06), transparent 60%)",
+            "radial-gradient(60% 55% at 62% 42%, rgba(255,236,214,0.07), transparent 70%), radial-gradient(120% 90% at 50% 110%, rgba(255,228,200,0.04), transparent 60%)",
         }}
       />
       <ErrorBoundary fallback={null}>
@@ -76,7 +76,7 @@ export function EnclosureStage() {
         className="absolute inset-0"
         style={{
           background:
-            "radial-gradient(120% 100% at 50% 45%, transparent 55%, rgba(10,6,3,0.55) 100%)",
+            "radial-gradient(120% 100% at 50% 45%, transparent 55%, rgba(8,7,6,0.55) 100%)",
         }}
       />
       <div className="mz-film-grain absolute inset-0" />
@@ -85,49 +85,50 @@ export function EnclosureStage() {
 }
 
 /**
- * Warm, vintage-studio light for the landing only (the product viewer
- * keeps the neutral StudioEnvironment): a tungsten key softbox from the
- * upper left, an amber rim behind, and a faint cool fill so shadows keep
- * some depth instead of going muddy. Everything is baked into an
- * in-memory env map — no HDR fetch.
+ * Studio light for the landing only (the product viewer keeps the
+ * neutral StudioEnvironment): a soft warm-white key from the upper left,
+ * a pale warm rim behind, and a faint cool fill so shadows keep depth.
+ * Deliberately only a hint of warmth — full tungsten/amber, through ACES,
+ * pushed the white shell pink/orange. Baked into an in-memory env map,
+ * no HDR fetch.
  */
 function WarmStudio() {
   return (
     <>
-      <ambientLight intensity={0.18} color="#ffd9b0" />
-      <directionalLight position={[-4, 5, 5]} intensity={2.1} color="#ffcf98" />
-      <directionalLight position={[3, 2, -6]} intensity={1.1} color="#ffab5e" />
+      <ambientLight intensity={0.18} color="#f4ede4" />
+      <directionalLight position={[-4, 5, 5]} intensity={2.1} color="#fff0dc" />
+      <directionalLight position={[3, 2, -6]} intensity={0.8} color="#ffd9b3" />
       <directionalLight
         position={[5, -2, 3]}
-        intensity={0.22}
-        color="#a9c2ff"
+        intensity={0.35}
+        color="#c4d3ff"
       />
       <Environment resolution={256}>
         <Lightformer
           form="rect"
           intensity={2.6}
-          color="#ffd2a1"
+          color="#fff1de"
           position={[-2.5, 3, 4]}
           scale={[6, 6, 1]}
         />
         <Lightformer
           form="rect"
           intensity={1.4}
-          color="#ffae63"
+          color="#ffd6ad"
           position={[0, 1.5, -5]}
           scale={[8, 4, 1]}
         />
         <Lightformer
           form="rect"
           intensity={0.35}
-          color="#b8c9ff"
+          color="#cfdbff"
           position={[5, 0, 1]}
           scale={[2, 6, 1]}
         />
         <Lightformer
           form="ring"
           intensity={0.4}
-          color="#ffb77a"
+          color="#ffe2c6"
           position={[0, -4, 0]}
           scale={[10, 10, 1]}
         />
