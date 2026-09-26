@@ -241,7 +241,7 @@ export function layoutFor(view: View): Layout {
     s0,
     t0: portrait
       ? new Vector3(0, view.h * 0.17, 0)
-      : new Vector3(0, view.h * 0.12, 0),
+      : new Vector3(0, view.h * 0.04, 0),
     s1,
     splitX: 0,
     splitDx: portrait
