@@ -4,8 +4,6 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ChevronLeft } from "@/components/icons/chevron-left";
 import { ChevronRight } from "@/components/icons/chevron-right";
-import { Pause } from "@/components/icons/pause";
-import { Play } from "@/components/icons/play";
 import { cn } from "@/lib/utils";
 import { STEPS, STEP_MS, useLanding } from "./landing-context";
 import { INTRO_SEQUENCE, INTRO_STEP_MS } from "./landing-materials";
@@ -269,12 +267,14 @@ const CONTROL =
 /**
  * Apple-product-page stepper, centred at the bottom of the first screen:
  * chevrons either side of a dot pill whose active dot stretches into a
- * timer, plus play/pause. The fill's own `animationend` advances the
+ * timer while the tour runs. The fill's own `animationend` advances the
  * step, so the timer you see is the timer that fires. Any manipulation
- * pauses it; it picks back up after 10s untouched (landing-context).
+ * stops it and collapses the dot; after 10s untouched the dot stretches
+ * back out and the timer restarts (landing-context). No pause button:
+ * interacting is the pause.
  */
 export function StepCarousel() {
-  const { step, playing, goTo, advance, togglePlay } = useLanding();
+  const { step, playing, goTo, advance } = useLanding();
   const reduced = useReducedMotion();
   const scrolledAway = useScrolledAway();
   const running = playing && !reduced && !scrolledAway;
@@ -310,27 +310,28 @@ export function StepCarousel() {
                 aria-label={s.label}
                 aria-current={active ? "step" : undefined}
                 onClick={() => goTo(i)}
+                // Only a running timer earns the stretched pill. The moment
+                // someone interacts it collapses to a plain dot (solid =
+                // you are here); it stretches back out only when the idle
+                // window ends and the timer starts again, from zero.
                 className={cn(
                   "relative h-2 cursor-pointer overflow-hidden rounded-full transition-[width,background-color] duration-300 ease-spring",
-                  active
+                  active && running
                     ? "w-9 bg-foreground/20"
-                    : "w-2 bg-foreground/30 hover:bg-foreground/50",
+                    : active
+                      ? "w-2 bg-foreground"
+                      : "w-2 bg-foreground/30 hover:bg-foreground/50",
                 )}
               >
-                {active &&
-                  (running ? (
-                    // Keyed on the run too: resuming restarts the timer
-                    // from zero rather than finishing a stale fill.
-                    <span
-                      key={`${step}-${run}`}
-                      onAnimationEnd={advance}
-                      className="mz-step-fill absolute inset-0 rounded-full bg-foreground"
-                      style={{ animationDuration: `${STEP_MS}ms` }}
-                    />
-                  ) : (
-                    // Paused: a solid "you are here", never a stalled bar.
-                    <span className="absolute inset-0 rounded-full bg-foreground" />
-                  ))}
+                {active && running && (
+                  // Keyed on the run too: resuming restarts the timer.
+                  <span
+                    key={`${step}-${run}`}
+                    onAnimationEnd={advance}
+                    className="mz-step-fill absolute inset-0 rounded-full bg-foreground"
+                    style={{ animationDuration: `${STEP_MS}ms` }}
+                  />
+                )}
               </button>
             );
           })}
@@ -342,14 +343,6 @@ export function StepCarousel() {
           className={cn(CONTROL, "size-9")}
         >
           <ChevronRight size={20} />
-        </button>
-        <button
-          type="button"
-          aria-label={playing ? "Pause tour" : "Play tour"}
-          onClick={togglePlay}
-          className={cn(CONTROL, "ml-1 size-9")}
-        >
-          {playing ? <Pause size={18} /> : <Play size={18} />}
         </button>
       </div>
     </div>

@@ -37,14 +37,12 @@ interface LandingState {
   zoomRef: MutableRefObject<number>;
   /** Current step of the first-screen stepper (see STEPS). */
   step: number;
-  /** Autoplay is running (not paused by interaction or the user). */
+  /** Autoplay is running (not paused by interaction). */
   playing: boolean;
   /** Go to a step. Counts as interaction: pauses autoplay. */
   goTo: (step: number) => void;
   /** Autoplay tick — the active dot's fill finished. */
   advance: () => void;
-  /** Pause/play button. An explicit pause stays paused. */
-  togglePlay: () => void;
   /** Any other manipulation (a swipe): pause, resume after idle. */
   interact: () => void;
   ready: boolean;
@@ -85,16 +83,17 @@ export function LandingProvider({ children }: { children: ReactNode }) {
   const materialRef = useRef(0);
   const zoomRef = useRef(0);
   const [step, setStep] = useState(0);
-  // auto: advancing. idle: paused by a swipe/tap, resumes after
-  // RESUME_AFTER_MS without input. held: paused with the button — stays.
-  const [mode, setMode] = useState<"auto" | "idle" | "held">("auto");
+  // auto: advancing. idle: any interaction stops it; it resumes after
+  // RESUME_AFTER_MS without input. There's no manual pause — interacting
+  // is the pause.
+  const [mode, setMode] = useState<"auto" | "idle">("auto");
   const resumeTimer = useRef<number | undefined>(undefined);
 
   const interact = useCallback(() => {
-    setMode((m) => (m === "held" ? m : "idle"));
+    setMode("idle");
     window.clearTimeout(resumeTimer.current);
     resumeTimer.current = window.setTimeout(() => {
-      setMode((m) => (m === "idle" ? "auto" : m));
+      setMode("auto");
     }, RESUME_AFTER_MS);
   }, []);
   useEffect(() => () => window.clearTimeout(resumeTimer.current), []);
@@ -107,10 +106,6 @@ export function LandingProvider({ children }: { children: ReactNode }) {
     [interact],
   );
   const advance = useCallback(() => setStep((s) => wrapStep(s + 1)), []);
-  const togglePlay = useCallback(() => {
-    window.clearTimeout(resumeTimer.current);
-    setMode((m) => (m === "auto" ? "held" : "auto"));
-  }, []);
 
   const select = useCallback(
     (index: number, direction: number, intensity = 1) => {
@@ -142,26 +137,13 @@ export function LandingProvider({ children }: { children: ReactNode }) {
       playing: mode === "auto",
       goTo,
       advance,
-      togglePlay,
       interact,
       ready,
       setReady,
       setWord,
       select,
     }),
-    [
-      material,
-      word,
-      burst,
-      ready,
-      select,
-      step,
-      mode,
-      goTo,
-      advance,
-      togglePlay,
-      interact,
-    ],
+    [material, word, burst, ready, select, step, mode, goTo, advance, interact],
   );
 
   return (
