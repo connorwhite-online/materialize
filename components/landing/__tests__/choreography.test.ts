@@ -190,3 +190,11 @@ describe("drag orbit", () => {
     }
   });
 });
+
+describe("desktop BOM clears the nav", () => {
+  it("keeps the top label lane below the top bar", () => {
+    const f = sampleFrame(2, GEO, DESKTOP);
+    // Top bar is ~80px of a 900px viewport ≈ 9% of the height.
+    expect(f.labelRows.top + f.labelRows.lane).toBeLessThan(DESKTOP.h * (0.5 - 0.09));
+  });
+});

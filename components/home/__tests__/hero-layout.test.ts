@@ -43,7 +43,8 @@ describe("anon home hero layout", () => {
     const copy = page.match(/<main className="(flex flex-1 items-end[^"]*)">/)?.[1];
     expect(copy).toBeDefined();
     expect(copy).toMatch(/\bpb-40\b/);
-    expect(copy).toMatch(/\bnav:pb-28\b/);
+    expect(copy).toMatch(/\bnav:pb-24\b/);
+    expect(copy).toMatch(/\bnav:justify-center\b/);
     expect(landingHero).toMatch(/bottom-24[^"]*nav:bottom-8/);
   });
 

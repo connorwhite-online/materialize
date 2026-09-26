@@ -211,15 +211,15 @@ export interface Layout {
 export function layoutFor(view: View): Layout {
   const portrait = view.w < view.h;
   const s0 = Math.min(
-    ((portrait ? 0.44 : 0.64) * view.h) / DEVICE_LONG,
+    ((portrait ? 0.44 : 0.5) * view.h) / DEVICE_LONG,
     ((portrait ? 0.7 : 0.4) * view.w) / DEVICE_WIDE,
   );
-  // Steps 1–2 share the first screen with the copy (bottom-left on
-  // desktop, the lower half on a phone), so they sit up and to the right
-  // of it just like the hero does.
+  // One centred axis on every viewport: model, then copy, then stepper,
+  // stacked. Every step sits in the upper ~two-thirds so the centred copy
+  // and stepper below it never collide with the stage.
   const s1 = s0 * (portrait ? 0.6 : 0.6);
   const s2 = Math.min(
-    ((portrait ? 0.28 : 0.46) * view.h) / DEVICE_LONG,
+    ((portrait ? 0.28 : 0.4) * view.h) / DEVICE_LONG,
     ((portrait ? 0.86 : 0.62) * view.w) / EXPLODE_WIDE,
   );
   return {
@@ -227,17 +227,17 @@ export function layoutFor(view: View): Layout {
     s0,
     t0: portrait
       ? new Vector3(0, view.h * 0.17, 0)
-      : new Vector3(view.w * 0.17, view.h * 0.02, 0),
+      : new Vector3(0, view.h * 0.12, 0),
     s1,
-    splitX: portrait ? 0 : view.w * 0.14,
+    splitX: 0,
     splitDx: portrait
       ? view.w * 0.22
       : Math.min(view.w * 0.13, s1 * DEVICE_WIDE * 1.25),
-    splitY: view.h * (portrait ? 0.2 : 0.06),
+    splitY: view.h * (portrait ? 0.2 : 0.14),
     s2,
     t2: portrait
       ? new Vector3(0, view.h * 0.2, 0)
-      : new Vector3(view.w * 0.14, view.h * 0.04, 0),
+      : new Vector3(0, view.h * 0.07, 0),
     s3: (1.05 * view.h) / DEVICE_LONG,
     t3: portrait
       ? new Vector3(view.w * 0.1, -view.h * 0.05, 0)

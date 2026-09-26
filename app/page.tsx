@@ -157,7 +157,7 @@ export default async function HomePage() {
         <EnclosureStage />
 
         <LandingHero>
-          <main className="flex flex-1 items-end justify-start px-6 pb-40 sm:px-8 nav:px-16 nav:pb-28 lg:px-24 xl:px-32">
+          <main className="flex flex-1 items-end justify-start px-6 pb-40 sm:px-8 nav:justify-center nav:px-16 nav:pb-24">
             <StepCopy />
           </main>
           <StepCarousel />

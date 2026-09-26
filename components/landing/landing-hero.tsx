@@ -236,8 +236,8 @@ export function StepCopy() {
   const { step } = useLanding();
   const id = STEPS[step].id;
   return (
-    <div className="flex w-full max-w-xl flex-col items-start gap-4 text-left">
-      <h1 className="grid text-2xl leading-[1.1] tracking-tight sm:text-4xl">
+    <div className="flex w-full max-w-xl flex-col items-start gap-4 text-left nav:mx-auto nav:items-center nav:text-center">
+      <h1 className="grid nav:justify-items-center text-2xl leading-[1.1] tracking-tight sm:text-4xl">
         <AnimatePresence initial={false}>
           <motion.span
             key={id}
@@ -248,7 +248,7 @@ export function StepCopy() {
           </motion.span>
         </AnimatePresence>
       </h1>
-      <div className="grid max-w-lg">
+      <div className="grid max-w-lg nav:justify-items-center">
         <AnimatePresence initial={false}>
           <motion.p
             key={id}
