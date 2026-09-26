@@ -4,6 +4,7 @@ import {
   PARTS,
   sampleFrame,
   orbitFrame,
+  mixFrames,
   type Geometry,
   type PartId,
 } from "../choreography";
@@ -89,10 +90,27 @@ describe.each([
     }
   });
 
-  it("reassembles and zooms past the viewport behind the FAQ", () => {
+  it("closes up for the FAQ: laid near-flat across the screen, only the camera left inside", () => {
     const f = sampleFrame(3, GEO, view);
-    for (const p of internals) expect(f.poses[p.id].opacity).toBe(0);
-    expect(f.poses.front.scale * 0.121).toBeGreaterThan(view.h);
+    for (const p of internals) {
+      expect(f.poses[p.id].opacity, p.id).toBe(p.id === "camera" ? 1 : 0);
+    }
+    // Long axis spans most of the width and the face tips toward the viewer.
+    const long = new Vector3(0, 0, 1).applyQuaternion(f.poses.front.quaternion);
+    const face = new Vector3(0, 1, 0).applyQuaternion(f.poses.front.quaternion);
+    expect(Math.abs(long.x) * 0.121 * f.poses.front.scale).toBeGreaterThan(
+      view.w * 0.5,
+    );
+    expect(face.y).toBeGreaterThan(0.3); // mostly up…
+    expect(face.z).toBeGreaterThan(0.3); // …and toward the camera
+  });
+
+  it("holds internals until the shells close when crossfading to the FAQ", () => {
+    const a = sampleFrame(2, GEO, view);
+    const b = sampleFrame(3, GEO, view);
+    expect(mixFrames(a, b, 0.5).poses.main.opacity).toBeGreaterThan(0.9);
+    expect(mixFrames(a, b, 1).poses.main.opacity).toBe(0);
+    expect(mixFrames(a, b, 1).poses.camera.opacity).toBe(1);
   });
 
   it("clamps outside 0…3 and never produces NaN mid-transition", () => {

@@ -183,7 +183,29 @@ export const HERO_QUAT = turn(STANDING, -0.35, 0.12);
 const FRONT_SPLIT_QUAT = turn(STANDING, 0.45, 0.1);
 const REAR_SPLIT_QUAT = turn(STANDING, -0.45, 0.1);
 export const EXPLODE_QUAT = turn(LAID_OUT, 0.6, 0.08);
-const ZOOM_QUAT = turn(STANDING, -0.4, 0.22);
+/**
+ * Model → world lying face-up: front face (model +Y) to the ceiling, long
+ * axis (model Z) running left → right.
+ */
+const LYING = new Quaternion().setFromRotationMatrix(
+  new Matrix4().makeBasis(
+    new Vector3(0, 0, -1),
+    new Vector3(0, 1, 0),
+    new Vector3(1, 0, 0),
+  ),
+);
+/**
+ * FAQ backdrop: laid almost flat and seen isometrically — tipped ~45°
+ * toward the viewer, long axis on a diagonal — so the closed device
+ * spans the screen behind the glass instead of a cropped close-up.
+ */
+const ZOOM_QUAT = turn(LYING, -0.55, 0.78);
+
+/**
+ * Internals that stay visible once the device closes: the camera shows
+ * through the lens opening. Everything else fades as the shells meet.
+ */
+const SEEN_WHEN_CLOSED: ReadonlySet<PartId> = new Set(["camera"]);
 
 export function easeInOut(t: number): number {
   const c = MathUtils.clamp(t, 0, 1);
@@ -238,10 +260,10 @@ export function layoutFor(view: View): Layout {
     t2: portrait
       ? new Vector3(0, view.h * 0.2, 0)
       : new Vector3(0, view.h * 0.07, 0),
-    s3: (1.05 * view.h) / DEVICE_LONG,
-    t3: portrait
-      ? new Vector3(view.w * 0.1, -view.h * 0.05, 0)
-      : new Vector3(view.w * 0.22, -view.h * 0.1, 0),
+    // Long axis on the diagonal fills most of the width (zoomed out from
+    // the old cropped close-up).
+    s3: Math.min(0.6 * view.w, 1.1 * view.h) / DEVICE_LONG,
+    t3: new Vector3(0, view.h * 0.04, 0),
   };
 }
 
@@ -338,7 +360,7 @@ function keyframe(
         position: place(c, mc, ZOOM_QUAT, L.s3, L.t3),
         quaternion: ZOOM_QUAT.clone(),
         scale: L.s3,
-        opacity: inside,
+        opacity: part.shell || SEEN_WHEN_CLOSED.has(part.id) ? 1 : 0,
       };
   }
 }
@@ -374,7 +396,10 @@ export function sampleFrame(
       // Internals arrive late into the BOM and leave early out of it, so
       // they're never seen drifting through a closed shell.
       if (seg === 1) opacity = MathUtils.smoothstep(raw, 0.15, 0.7);
-      else if (seg === 2) opacity = 1 - MathUtils.smoothstep(raw, 0.25, 0.8);
+      else if (seg === 2)
+        opacity = SEEN_WHEN_CLOSED.has(part.id)
+          ? 1
+          : 1 - MathUtils.smoothstep(raw, 0.25, 0.8);
       else opacity = 0;
     }
     poses[part.id] = mix(a, b, t, opacity);
@@ -410,7 +435,7 @@ export function mixFrames(a: Frame, b: Frame, t: number): Frame {
       a.poses[part.id],
       b.poses[part.id],
       k,
-      MathUtils.lerp(a.poses[part.id].opacity, b.poses[part.id].opacity, k),
+      fadeLate(a.poses[part.id].opacity, b.poses[part.id].opacity, k),
     );
   }
   return {
@@ -446,4 +471,14 @@ export function orbitFrame(frame: Frame, yaw: number): Frame {
     };
   }
   return { ...frame, poses, anchors };
+}
+
+/**
+ * Opacity across a crossfade. Fading in follows the motion; fading OUT
+ * is held back to the last stretch, so internals don't vanish while the
+ * shells are still visibly apart — they go once it has closed.
+ */
+function fadeLate(from: number, to: number, k: number): number {
+  const t = to < from ? MathUtils.smoothstep(k, 0.6, 1) : k;
+  return MathUtils.lerp(from, to, t);
 }

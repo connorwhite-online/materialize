@@ -163,19 +163,18 @@ export default async function HomePage() {
           <StepCarousel />
         </LandingHero>
 
-        {/* Pull-up sheet: FAQ then footer, on one pane of glass rising
-            over the zoomed enclosure. The visible answers back the
-            FAQPage JSON-LD above — both read HOME_FAQ. */}
-        <section className="glass-surface relative z-10 rounded-t-[2rem] ring-1 ring-border/70">
-          <div
-            aria-hidden
-            className="mx-auto mt-3 h-1 w-10 rounded-full bg-foreground/15"
-          />
-          <div className="mx-auto w-full max-w-5xl px-5 pb-10 pt-10 sm:px-10 sm:pt-14">
-            <HomeFaq className="mt-0 border-t-0 pt-0 sm:mt-0 sm:pt-0" />
+        {/* FAQ: a contained glass card (not a full-width sheet) rising
+            over the closed-up enclosure, then the footer. The visible
+            answers back the FAQPage JSON-LD above — both read HOME_FAQ. */}
+        <section className="relative z-10 px-3 pb-6 sm:px-8">
+          <div className="glass-surface mx-auto w-full max-w-4xl rounded-3xl p-5 ring-1 ring-border/70 sm:p-10">
+            <HomeFaq
+              title="Any questions?"
+              className="mt-0 border-t-0 pt-0 sm:mt-0 sm:pt-0"
+            />
           </div>
-          <LandingFooter />
         </section>
+        <LandingFooter />
 
         <MobileNav initialUnreadCount={0} textToCad={textToCad} />
         <CartPanel />

@@ -29,10 +29,12 @@ describe("anon home hero layout", () => {
     // No scroll-driven sections and no snapping — the stepper replaced them.
     expect(page).not.toMatch(/data-landing-section/);
     expect(globals).not.toMatch(/scroll-snap-type/);
-    const sheet = page.match(/<section className="([^"]*rounded-t-[^"]*)">/)?.[1];
-    expect(sheet).toMatch(/glass-surface/);
-    expect(page.indexOf("<HomeFaq className")).toBeGreaterThan(page.indexOf("rounded-t-"));
-    expect(page.indexOf("<LandingFooter")).toBeGreaterThan(page.indexOf("<HomeFaq className"));
+    // Contained card, not a full-width sheet.
+    const card = page.match(/<div className="(glass-surface[^"]*)">\s*<HomeFaq/)?.[1];
+    expect(card).toMatch(/\bmax-w-4xl\b/);
+    expect(card).toMatch(/\brounded-3xl\b/);
+    expect(page).toMatch(/title="Any questions\?"/);
+    expect(page.indexOf("<LandingFooter")).toBeGreaterThan(page.indexOf("<HomeFaq"));
   });
 
   it("covers the iOS unsafe areas", () => {

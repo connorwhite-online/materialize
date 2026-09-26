@@ -12,20 +12,20 @@ import { cn } from "@/lib/utils";
  * Copy lives in `lib/seo/home-faq.ts` — do not inline it here, or the
  * markup and the visible text will drift apart.
  */
-export function HomeFaq({ className }: { className?: string } = {}) {
+export function HomeFaq({
+  className,
+  title = "3D printing on Materialize — common questions",
+}: { className?: string; title?: string } = {}) {
   return (
     <section
       aria-labelledby="faq"
       className={cn(
         "mt-16 border-t border-border pt-12 sm:mt-24 sm:pt-16",
-        className
+        className,
       )}
     >
-      <h2
-        id="faq"
-        className="text-lg font-semibold tracking-tight sm:text-xl"
-      >
-        3D printing on Materialize — common questions
+      <h2 id="faq" className="text-lg font-semibold tracking-tight sm:text-xl">
+        {title}
       </h2>
       <div className="mt-6 grid gap-3 sm:grid-cols-2">
         {HOME_FAQ.map((item) => (
