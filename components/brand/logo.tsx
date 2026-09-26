@@ -84,6 +84,9 @@ export function Wordmark({ height = 20, title, ...props }: BaseProps) {
       width={height * WORDMARK_ASPECT}
       viewBox={WORDMARK_VIEWBOX}
       fill="currentColor"
+      // The V2 export draws each counter (the holes in the "e"s) in the
+      // same winding as its outline, so it needs evenodd to punch through.
+      fillRule="evenodd"
       xmlns="http://www.w3.org/2000/svg"
       {...a11yProps(title)}
       {...props}
@@ -186,6 +189,7 @@ export function AnimatedWordmark({
         width={fallbackHeight * WORDMARK_ASPECT}
         viewBox={WORDMARK_VIEWBOX}
         fill="currentColor"
+        fillRule="evenodd"
         xmlns="http://www.w3.org/2000/svg"
         aria-hidden="true"
         focusable="false"

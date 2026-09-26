@@ -149,3 +149,14 @@ describe("wordmark sizing stays tied to the artwork", () => {
     expect(mark).toBeCloseTo(WORDMARK_MARK_WIDTH / h, 3);
   });
 });
+
+describe("wordmark counters", () => {
+  it("renders with evenodd so the letter counters (the e's) stay open", async () => {
+    const { Wordmark, AnimatedWordmark } = await import("../logo");
+    for (const el of [<Wordmark key="w" />, <AnimatedWordmark key="a" />]) {
+      const { container, unmount } = render(el);
+      expect(container.querySelector("svg")!.getAttribute("fill-rule")).toBe("evenodd");
+      unmount();
+    }
+  });
+});
