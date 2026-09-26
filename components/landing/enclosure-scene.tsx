@@ -160,7 +160,7 @@ function useParts(shellMaterial: THREE.MeshPhysicalMaterial) {
 const ORBIT_MAX = 0.4;
 
 /** Seconds to travel one step. */
-const STEP_TWEEN_S = 1.1;
+const STEP_TWEEN_S = 0.9;
 
 const SHELL_IDS = ["front", "rear"] as const;
 
@@ -367,6 +367,20 @@ const LIFETIME = 0.6;
 const SAMPLES_PER_SHELL = 3000;
 /** Fraction of the shed that recoils opposite the pull. */
 const RECOIL_SHARE = 0.15;
+/** How hard the radial burst bends toward the pull (1 ≈ a 45° cone). */
+const PULL_BIAS = 1.3;
+
+/** World-space centre of the shells as currently drawn. */
+function liveCentre(samples: Sample[][]): THREE.Vector3 {
+  const c = new THREE.Vector3();
+  const meshes = new Set(samples.flat().map((s) => s.mesh));
+  const tmp = new THREE.Vector3();
+  for (const m of meshes) {
+    if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+    c.add(m.geometry.boundingBox!.getCenter(tmp).applyMatrix4(m.matrixWorld));
+  }
+  return meshes.size ? c.divideScalar(meshes.size) : c;
+}
 
 type Particle = {
   position: THREE.Vector3;
@@ -383,39 +397,50 @@ function spawnBurst(
   particles: Particle[],
   samples: Sample[][],
   burst: { direction: number; intensity: number },
-  heroCenter: THREE.Vector3 | undefined,
 ) {
   const n = Math.min(1, burst.intensity / 1.5);
   const count = Math.round(
     MIN_PARTICLES + (MAX_PARTICLES - MIN_PARTICLES) * Math.sqrt(n),
   );
   const push = 0.8 + burst.intensity * 1.05;
-  const centre = heroCenter ?? new THREE.Vector3();
+  // Explode from where the object actually is right now — its live world
+  // transform (idle sway, tilt, drag stretch) — not the fixed hero anchor.
+  const centre = liveCentre(samples);
+  const pull = new THREE.Vector3(burst.direction, 0, 0);
+  const tmp = new THREE.Vector3();
   for (let i = 0; i < MAX_PARTICLES; i++) {
     const p = particles[i];
     if (i >= count) {
       p.age = LIFETIME + 1;
       continue;
     }
+    // Most of the burst leaves the side facing the pull; a smaller recoil
+    // burst leaves the opposite side, as the shell snaps back to centre.
+    const recoil = Math.random() < RECOIL_SHARE;
+    const facing = recoil ? -1 : 1;
     const set = samples[i % samples.length];
-    const s = set[(Math.random() * set.length) | 0];
+    let s: Sample | undefined;
+    for (let tries = 0; tries < 8; tries++) {
+      const c = set[(Math.random() * set.length) | 0];
+      if (!c) break;
+      tmp.copy(c.p).applyMatrix4(c.mesh.matrixWorld).sub(centre);
+      s = c;
+      if (tmp.dot(pull) * facing > 0) break;
+    }
     if (!s) continue;
     p.position.copy(s.p).applyMatrix4(s.mesh.matrixWorld);
+    // Radially out from the centre, bent toward the pull (or away from it
+    // for the recoil) — so it reads as the object bursting, not dust
+    // blown sideways past it.
     const out = p.position.clone().sub(centre).normalize();
-    // Most of the dust is flung the way the finger pulled; a small share
-    // kicks back the other way, slower — the recoil as the shell snaps
-    // back to centre. Outward spread is kept small so the spray reads as
-    // directional, not a radial pop.
-    const recoil = Math.random() < RECOIL_SHARE;
-    const dir = recoil ? -burst.direction : burst.direction;
-    const along =
-      push * (recoil ? 0.35 + Math.random() * 0.35 : 0.7 + Math.random() * 0.8);
-    const spread = 0.18 + Math.random() * 0.22;
-    p.velocity.set(
-      dir * along + out.x * spread,
-      out.y * spread + (Math.random() - 0.5) * 0.35,
-      out.z * spread * 0.5,
-    );
+    const speed =
+      push * (recoil ? 0.45 + Math.random() * 0.4 : 0.9 + Math.random() * 0.9);
+    p.velocity
+      .copy(out)
+      .addScaledVector(pull, facing * PULL_BIAS)
+      .normalize()
+      .multiplyScalar(speed);
+    p.velocity.z *= 0.5;
     p.age = 0;
     p.scale = 0.002 + Math.random() * 0.004;
     p.rotation.set(
@@ -510,7 +535,7 @@ function ShedParticles({
     if (burst.key === 0) return;
     const hero = frameRef.current?.hero ?? 1;
     if (hero < 0.3) return;
-    spawnBurst(particles, samples, burst, frameRef.current?.heroCenter);
+    spawnBurst(particles, samples, burst);
   }, [burst, particles, samples, frameRef]);
 
   useFrame((_, delta) => {

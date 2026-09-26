@@ -39,7 +39,7 @@ describe("Logomark", () => {
   it("derives width from height, and is hidden unless given a title", () => {
     const { container, rerender } = render(<Logomark height={40} />);
     const svg = () => container.querySelector("svg")!;
-    expect(Number(svg().getAttribute("width"))).toBeCloseTo(40 * (415 / 251));
+    expect(Number(svg().getAttribute("width"))).toBeCloseTo(40 * (415 / 251)); // standalone mark, its own artwork
     expect(svg().getAttribute("aria-hidden")).toBe("true");
 
     rerender(<Logomark height={40} title="Materialize" />);
@@ -133,5 +133,19 @@ describe("AnimatedWordmark", () => {
     expect(css).not.toMatch(
       /data-mz-expanded="false"\] > svg \{[\s\S]*?scale\(var\(--mz-mark-scale\)\)/
     );
+  });
+});
+
+describe("wordmark sizing stays tied to the artwork", () => {
+  it("pins the CSS lockup widths to the path file's viewBox and m-crop", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const css = readFileSync(resolve(__dirname, "../../../app/globals.css"), "utf8");
+    const { WORDMARK_VIEWBOX, WORDMARK_MARK_WIDTH } = await import("../logo-paths");
+    const [, , w, h] = WORDMARK_VIEWBOX.split(/\s+/).map(Number);
+    const full = Number(css.match(/--mz-w-full: calc\(var\(--mz-h, 20px\) \* ([\d.]+)\)/)?.[1]);
+    const mark = Number(css.match(/--mz-w-mark: calc\(var\(--mz-h, 20px\) \* ([\d.]+)\)/)?.[1]);
+    expect(full).toBeCloseTo(w / h, 3);
+    expect(mark).toBeCloseTo(WORDMARK_MARK_WIDTH / h, 3);
   });
 });

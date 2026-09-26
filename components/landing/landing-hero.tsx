@@ -47,6 +47,9 @@ export function LandingHero({ children }: { children: ReactNode }) {
 
   const onPointerDown = (e: React.PointerEvent) => {
     if ((e.target as Element).closest("a,button")) return;
+    // Touching the stage stops the tour at once — not just on a finished
+    // swipe — so it can't advance out from under a drag.
+    interact();
     drag.current = {
       active: true,
       startX: e.clientX,
@@ -68,6 +71,9 @@ export function LandingHero({ children }: { children: ReactNode }) {
       orbitRef.current = 0;
       return;
     }
+    // Every movement restarts the idle countdown (interact is cheap and
+    // idempotent), so a long drag never times out mid-gesture.
+    interact();
     const now = performance.now();
     const v = Math.min(
       1,
@@ -88,11 +94,11 @@ export function LandingHero({ children }: { children: ReactNode }) {
     d.active = false;
     tensionRef.current = 0;
     orbitRef.current = 0;
+    // The 10s idle clock starts from letting go.
+    interact();
     if (d.cancelled) return;
     const dx = e.clientX - d.startX;
     if (Math.abs(dx) <= SWIPE_THRESHOLD) return;
-    // Any real drag is a manipulation: hold the tour where they are.
-    interact();
     if (stepRef.current === 0) {
       const dir = dx > 0 ? -1 : 1;
       select(materialRef.current + dir, dir, 0.3 + d.peak * 1.2);
@@ -106,11 +112,16 @@ export function LandingHero({ children }: { children: ReactNode }) {
     if (!el) return;
     let sx = 0;
     let sy = 0;
+    // Never on controls: cancelling touchmove on a slightly wobbly tap
+    // swallows the click, which is how chevrons "sometimes didn't work".
+    let onControl = false;
     const start = (e: TouchEvent) => {
+      onControl = !!(e.target as Element | null)?.closest("a,button");
       sx = e.touches[0].clientX;
       sy = e.touches[0].clientY;
     };
     const move = (e: TouchEvent) => {
+      if (onControl) return;
       const dx = e.touches[0].clientX - sx;
       const dy = e.touches[0].clientY - sy;
       if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 5) e.preventDefault();
@@ -267,6 +278,7 @@ export function StepCarousel() {
   const reduced = useReducedMotion();
   const scrolledAway = useScrolledAway();
   const running = playing && !reduced && !scrolledAway;
+  const run = useRunCount(running);
 
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-24 z-10 flex justify-center nav:bottom-8">
@@ -305,17 +317,20 @@ export function StepCarousel() {
                     : "w-2 bg-foreground/30 hover:bg-foreground/50",
                 )}
               >
-                {active && (
-                  <span
-                    key={step}
-                    onAnimationEnd={advance}
-                    className="mz-step-fill absolute inset-0 rounded-full bg-foreground"
-                    style={{
-                      animationDuration: `${STEP_MS}ms`,
-                      animationPlayState: running ? "running" : "paused",
-                    }}
-                  />
-                )}
+                {active &&
+                  (running ? (
+                    // Keyed on the run too: resuming restarts the timer
+                    // from zero rather than finishing a stale fill.
+                    <span
+                      key={`${step}-${run}`}
+                      onAnimationEnd={advance}
+                      className="mz-step-fill absolute inset-0 rounded-full bg-foreground"
+                      style={{ animationDuration: `${STEP_MS}ms` }}
+                    />
+                  ) : (
+                    // Paused: a solid "you are here", never a stalled bar.
+                    <span className="absolute inset-0 rounded-full bg-foreground" />
+                  ))}
               </button>
             );
           })}
@@ -339,6 +354,17 @@ export function StepCarousel() {
       </div>
     </div>
   );
+}
+
+/** Counts transitions into running, to re-key (restart) the timer. */
+function useRunCount(running: boolean): number {
+  const [count, setCount] = useState(0);
+  const [was, setWas] = useState(running);
+  if (running !== was) {
+    setWas(running);
+    if (running) setCount((c) => c + 1);
+  }
+  return count;
 }
 
 /** Freeze the tour while the FAQ sheet is up — nobody is watching it. */

@@ -589,9 +589,11 @@
      any Tailwind utility (layered styles always lose to unlayered ones) and
      silently defeat the responsive override.
      Keep the fallback in sync with DEFAULT_LOGO_HEIGHT in components/brand/logo.tsx.
-     Both widths are the artwork's aspect ratios: 415/251 and 3479/251. */
-  --mz-w-mark: calc(var(--mz-h, 20px) * 1.65339);
-  --mz-w-full: calc(var(--mz-h, 20px) * 13.86056);
+     Both widths are the V2 wordmark's own ratios (logo-paths.ts): the "m"
+     crop, WORDMARK_MARK_WIDTH/100, and the whole word, 1122.335/100.
+     A test pins them to the path file. */
+  --mz-w-mark: calc(var(--mz-h, 20px) * 1.96575);
+  --mz-w-full: calc(var(--mz-h, 20px) * 11.22335);
   /* Collapsed mark vs the word it replaced. Paired with the lockup
      height at the call site: the nav wipes the word in at 10px and this
      lands the mark at 16px. Tune here, but check NAV_WORDMARK_HEIGHT in
@@ -667,10 +669,10 @@
   --mz-stagger-in: 14ms;
   --mz-stagger-out: 22ms;
   --mz-crop-ms: 260ms;
-  /* Blur is in SVG user units (the artwork is 251 tall), so it scales with
+  /* Blur is in SVG user units (the V2 artwork is 100 tall), so it scales with
      the logo — a 22px nav lockup and a 64px hero lockup blur by the same
      visual proportion. */
-  --mz-blur: 22px;
+  --mz-blur: 8.8px; /* was 22 on the 251-tall V1 art: same look */
   --mz-lift: 14%;
 }
 
@@ -1015,4 +1017,14 @@
   animation-name: mz-step-fill;
   animation-timing-function: linear;
   animation-fill-mode: forwards;
+}
+
+/* Anon landing: fine film grain over the enclosure stage. An inline SVG
+   turbulence tile, soft-light blended so it textures highlights and
+   shadows alike without greying the blacks. Static, so it costs nothing
+   per frame. */
+.mz-film-grain {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  mix-blend-mode: soft-light;
+  opacity: 0.22;
 }
