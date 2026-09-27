@@ -27,7 +27,9 @@ export function HomeFaq({
       <h2 id="faq" className="text-lg font-semibold tracking-tight sm:text-xl">
         {title}
       </h2>
-      <div className="mt-6 grid gap-3 sm:grid-cols-2">
+      {/* One column. In a two-column grid each row stretches to its
+          tallest card, so opening one answer ballooned its neighbour. */}
+      <div className="mt-6 grid gap-3">
         {HOME_FAQ.map((item) => (
           <FaqCard
             key={item.question}

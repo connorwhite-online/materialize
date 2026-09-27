@@ -210,6 +210,12 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
     [],
   );
   const { parts, geo } = useParts(shellMaterial);
+  // Stable across renders: the particle sampler keys off this list, and a
+  // fresh array each render re-ran its burst effect on every step change.
+  const shellObjects = useMemo(
+    () => SHELL_IDS.map((id) => parts[id].object),
+    [parts],
+  );
   const viewport = useThree((s) => s.viewport);
 
   const deformRef = useRef<THREE.Group>(null);
@@ -344,7 +350,7 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
       <ShedParticles
         burst={burst}
         shed={LANDING_MATERIALS[burst.from]}
-        sources={SHELL_IDS.map((id) => parts[id].object)}
+        sources={shellObjects}
         frameRef={frameRef}
       />
       {SHELL_IDS.map((id) => (
@@ -512,6 +518,7 @@ function ShedParticles({
   // Surface samples: vertices of each shell, in the shell's own space.
   // Area-weighted points across each shell (vertex sampling bunched
   // particles wherever the mesh was dense and left flat faces bare).
+  const spawnedKey = useRef(0);
   const samples = useMemo(
     () =>
       sources.map((obj) => {
@@ -532,7 +539,10 @@ function ShedParticles({
   );
 
   useEffect(() => {
-    if (burst.key === 0) return;
+    // Spawn once per burst. Anything else that re-runs this effect must
+    // never replay the last burst.
+    if (burst.key === 0 || burst.key === spawnedKey.current) return;
+    spawnedKey.current = burst.key;
     const hero = frameRef.current?.hero ?? 1;
     if (hero < 0.3) return;
     spawnBurst(particles, samples, burst);

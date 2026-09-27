@@ -120,7 +120,7 @@ export default async function HomePage() {
           Organization and WebSite are singletons keyed by `@id`, and
           repeating them on every route gives a crawler N competing
           copies of the same entity to reconcile. FAQPage is tied to the
-          visible <HomeFaq /> in the pull-up sheet below —
+          visible <HomeFaq /> on the FAQ screen below —
           both read from HOME_FAQ so the marked-up answers and the
           on-screen answers cannot drift. */}
       <script
