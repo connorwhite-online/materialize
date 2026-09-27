@@ -163,18 +163,23 @@ export default async function HomePage() {
           <StepCarousel />
         </LandingHero>
 
-        {/* FAQ: a contained glass card (not a full-width sheet) rising
-            over the closed-up enclosure, then the footer. The visible
-            answers back the FAQPage JSON-LD above — both read HOME_FAQ. */}
-        <section className="relative z-10 px-3 pb-6 sm:px-8">
-          <div className="glass-surface mx-auto w-full max-w-4xl rounded-3xl p-5 ring-1 ring-border/70 sm:p-10">
-            <HomeFaq
-              title="Any questions?"
-              className="mt-0 border-t-0 pt-0 sm:mt-0 sm:pt-0"
-            />
+        {/* FAQ screen: a full-height panel over the closed-up enclosure.
+            The FAQ card sits at the top (padded clear of the nav) and the
+            footer is pushed to the bottom. The visible answers back the
+            FAQPage JSON-LD above — both read HOME_FAQ. */}
+        <div className="relative z-10 flex min-h-svh flex-col gap-6 pt-24 nav:pt-28">
+          <section className="px-3 sm:px-8">
+            <div className="glass-surface mx-auto w-full max-w-4xl rounded-3xl p-5 ring-1 ring-border/70 sm:p-10">
+              <HomeFaq
+                title="Any questions?"
+                className="mt-0 border-t-0 pt-0 sm:mt-0 sm:pt-0"
+              />
+            </div>
+          </section>
+          <div className="mt-auto">
+            <LandingFooter />
           </div>
-        </section>
-        <LandingFooter />
+        </div>
 
         <MobileNav initialUnreadCount={0} textToCad={textToCad} />
         <CartPanel />

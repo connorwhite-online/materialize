@@ -34,6 +34,10 @@ describe("anon home hero layout", () => {
     expect(card).toMatch(/\bmax-w-4xl\b/);
     expect(card).toMatch(/\brounded-3xl\b/);
     expect(page).toMatch(/title="Any questions\?"/);
+    // Full-height FAQ screen: card at the top clear of the nav, footer
+    // pushed to the bottom.
+    expect(page).toMatch(/className="relative z-10 flex min-h-svh flex-col[^"]*pt-24/);
+    expect(page).toMatch(/<div className="mt-auto">\s*<LandingFooter \/>/);
     expect(page.indexOf("<LandingFooter")).toBeGreaterThan(page.indexOf("<HomeFaq"));
   });
 

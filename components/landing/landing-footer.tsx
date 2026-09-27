@@ -30,7 +30,7 @@ const COLUMNS = [
 
 export function LandingFooter() {
   return (
-    <footer className="relative z-10 px-3 pb-28 sm:px-8 nav:pb-6">
+    <footer className="px-3 pb-28 sm:px-8 nav:pb-6">
       <div className="glass-surface mx-auto max-w-4xl rounded-3xl px-6 py-10 ring-1 ring-border/70 sm:px-10">
         <div className="flex flex-col gap-10 sm:flex-row sm:justify-between">
           <div className="flex flex-col gap-3">
