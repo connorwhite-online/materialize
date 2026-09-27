@@ -1,5 +1,6 @@
 import "server-only";
 
+import { isCraftCloudTestOrder } from "@/lib/env";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import Stripe from "stripe";
@@ -328,6 +329,7 @@ export async function createAgentInitiatedOrder(
         vendor: input.vendorId,
         vendorName: input.vendorName ?? null,
         status: "awaiting_agent_approval",
+        isTest: isCraftCloudTestOrder(),
         shippingAddress: {
           email: input.shippingAddress.email,
           shipping: {

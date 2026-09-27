@@ -2,8 +2,11 @@ import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import {
   CheckCircle2Icon,
+  CircleAlertIcon,
   CreditCardIcon,
   MailOpenIcon,
+  PackageCheckIcon,
+  TruckIcon,
 } from "lucide-react";
 import { Factory } from "@/components/icons/factory";
 import {
@@ -35,6 +38,22 @@ const PENDING_STATUS: Record<PendingOrderStatus, StatusMeta> = {
   awaiting_production_payment: {
     label: "Complete payment",
     Icon: Factory,
+  },
+  ordered: {
+    label: "Order placed",
+    Icon: PackageCheckIcon,
+  },
+  in_production: {
+    label: "Printing",
+    Icon: Factory,
+  },
+  shipped: {
+    label: "Shipped",
+    Icon: TruckIcon,
+  },
+  blocked: {
+    label: "On hold",
+    Icon: CircleAlertIcon,
   },
 };
 

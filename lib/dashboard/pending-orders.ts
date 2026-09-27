@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { printOrders, printOrderItems } from "@/lib/db/schema";
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { withDbRetry } from "@/lib/db/retry";
+import { visibleOrdersFilter } from "@/lib/print/order-visibility";
 
 /**
  * In-progress print orders shown on the authed-home Orders carousel.
@@ -15,6 +16,12 @@ export const PENDING_ORDER_STATUSES = [
   "awaiting_production_payment",
   "awaiting_agent_approval",
   "auto_approved",
+  // Placed and on their way. Left out before, so an order vanished
+  // from home the moment it became real.
+  "ordered",
+  "in_production",
+  "shipped",
+  "blocked",
 ] as const;
 
 export type PendingOrderStatus = (typeof PENDING_ORDER_STATUSES)[number];
@@ -101,6 +108,7 @@ async function loadPendingOrdersOnce(userId: string): Promise<PendingOrder[]> {
     .where(
       and(
         eq(printOrders.userId, userId),
+        visibleOrdersFilter(),
         inArray(printOrders.status, [...PENDING_ORDER_STATUSES])
       )
     )
