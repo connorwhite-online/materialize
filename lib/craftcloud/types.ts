@@ -145,8 +145,15 @@ export interface Order {
   status: OrderStatus;
 }
 
+/**
+ * Our normalized view of an order's status — NOT the wire shape. See
+ * normalizeOrderStatus (order-status.ts) for how CraftCloud's
+ * per-vendor status history maps onto it. Tracking fields are never
+ * filled from the status endpoint; CraftCloud doesn't return them.
+ */
 export interface OrderStatusResponse {
   orderId: string;
+  orderNumber?: string;
   vendorStatuses: Array<{
     vendorId: string;
     status: OrderStatus;

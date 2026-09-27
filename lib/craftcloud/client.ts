@@ -38,6 +38,10 @@ import type {
   FileUnit,
 } from "./types";
 import { uploadModelToCraftCloud } from "./model-upload";
+import {
+  normalizeOrderStatus,
+  type RawOrderStatusResponse,
+} from "./order-status";
 
 const BASE_URL = process.env.CRAFTCLOUD_API_BASE_URL || "https://api.craftcloud3d.com";
 const USE_MOCK = process.env.CRAFTCLOUD_USE_MOCK !== "false";
@@ -231,7 +235,11 @@ async function realCreateOrder(params: OrderRequest): Promise<Order> {
 }
 
 async function realGetOrderStatus(orderId: string): Promise<OrderStatusResponse> {
-  return apiRequest("GET", `/v5/order/${orderId}/status`);
+  const raw = await apiRequest<RawOrderStatusResponse>(
+    "GET",
+    `/v5/order/${orderId}/status`
+  );
+  return normalizeOrderStatus(orderId, raw);
 }
 
 async function realCreateStripeCheckout(
