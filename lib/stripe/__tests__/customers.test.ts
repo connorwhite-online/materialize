@@ -41,10 +41,12 @@ vi.mock("@/lib/db/schema", () => ({
 }));
 
 const mockCustomersCreate = vi.fn();
+const mockCustomersRetrieve = vi.fn();
 vi.mock("@/lib/stripe", () => ({
   getStripe: () => ({
     customers: {
       create: (...args: unknown[]) => mockCustomersCreate(...args),
+      retrieve: (...args: unknown[]) => mockCustomersRetrieve(...args),
     },
   }),
 }));
@@ -57,15 +59,42 @@ describe("getOrCreateStripeCustomer", () => {
     selectQueue = [];
     updateReturns = [];
     mockCustomersCreate.mockResolvedValue({ id: "cus_new" });
+    mockCustomersRetrieve.mockImplementation(async (id: string) => ({ id }));
   });
 
-  it("returns the existing customer id without calling Stripe", async () => {
+  it("returns the existing customer id when Stripe still has it", async () => {
     selectQueue = [[{ stripeCustomerId: "cus_existing" }]];
 
     const id = await getOrCreateStripeCustomer("user-1");
 
     expect(id).toBe("cus_existing");
     expect(mockCustomersCreate).not.toHaveBeenCalled();
+    expect(mockUpdateSet).not.toHaveBeenCalled();
+  });
+
+  // A customer made under test keys doesn't exist once live keys are in.
+  it("replaces a customer Stripe doesn't know, dropping its saved card", async () => {
+    selectQueue = [[{ stripeCustomerId: "cus_testmode" }]];
+    updateReturns = [{ stripeCustomerId: "cus_new" }];
+    mockCustomersRetrieve.mockRejectedValueOnce(
+      Object.assign(new Error("No such customer"), { code: "resource_missing" })
+    );
+
+    const id = await getOrCreateStripeCustomer("user-1");
+
+    expect(id).toBe("cus_new");
+    expect(mockUpdateSet).toHaveBeenNthCalledWith(1, {
+      stripeCustomerId: null,
+      defaultPaymentMethod: null,
+    });
+    expect(mockUpdateSet).toHaveBeenNthCalledWith(2, { stripeCustomerId: "cus_new" });
+  });
+
+  it("does not replace the customer on an unrelated Stripe error", async () => {
+    selectQueue = [[{ stripeCustomerId: "cus_existing" }]];
+    mockCustomersRetrieve.mockRejectedValueOnce(new Error("rate limited"));
+
+    await expect(getOrCreateStripeCustomer("user-1")).rejects.toThrow("rate limited");
     expect(mockUpdateSet).not.toHaveBeenCalled();
   });
 

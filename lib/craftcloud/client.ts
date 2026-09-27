@@ -245,7 +245,21 @@ async function realGetOrderStatus(orderId: string): Promise<OrderStatusResponse>
 async function realCreateStripeCheckout(
   params: StripeCheckoutRequest
 ): Promise<StripeCheckoutResponse> {
-  return apiRequest("POST", "/v5/payment/stripe", params);
+  // The wire shape is `{ id, url }` (createStripePaymentResponse in
+  // CraftCloud's api-docs.json), not our `{ sessionId, sessionUrl }`.
+  // Returning it raw left both fields undefined, and the first live
+  // two-step checkout died persisting them ("No values to set").
+  const res = await apiRequest<{ id?: string; url?: string }>(
+    "POST",
+    "/v5/payment/stripe",
+    params
+  );
+  if (!res?.id || !res?.url) {
+    throw new Error(
+      `CraftCloud /v5/payment/stripe returned no session: ${JSON.stringify(res)}`
+    );
+  }
+  return { sessionId: res.id, sessionUrl: res.url };
 }
 
 // --- Mock client (for development without API access) ---
