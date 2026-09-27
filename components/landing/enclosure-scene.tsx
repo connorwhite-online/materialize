@@ -193,8 +193,7 @@ function lerpShell(
 }
 
 export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
-  const { material, burst, tensionRef, orbitRef, zoomRef, step, setReady } =
-    useLanding();
+  const { material, burst, tensionRef, orbitRef, zoomRef, step } = useLanding();
   const stepRef = useRef(step);
   useEffect(() => {
     stepRef.current = step;
@@ -234,7 +233,6 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
     clock: 0,
   });
 
-  useEffect(() => setReady(true), [setReady]);
   const idle = useIdle();
 
   const target = LANDING_MATERIALS[material];

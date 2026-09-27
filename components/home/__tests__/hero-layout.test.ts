@@ -56,10 +56,9 @@ describe("anon home hero layout", () => {
     expect(landingHero).toMatch(/bottom-24[^"]*nav:bottom-8/);
   });
 
-  it("breaks the headline after the swapping word, and the server says 'anything'", () => {
-    expect(landingHero).toMatch(/Print <HeroWord \/>,\s*<br \/>\s*share your ideas/);
-    expect(landingHero).toMatch(/<h1\b/);
-    expect(materials).toMatch(/RESTING_WORD = "anything"/);
+  it("renders a static headline: 'Print anything,' then a line break", () => {
+    expect(landingHero).toMatch(/Print anything,\s*<br \/>\s*share your ideas/);
+    expect(landingHero).not.toMatch(/HeroWord|INTRO_SEQUENCE/);
   });
 
   it("asks TopBar for the landing wordmark and blur feather", () => {

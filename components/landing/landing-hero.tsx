@@ -6,7 +6,6 @@ import { ChevronLeft } from "@/components/icons/chevron-left";
 import { ChevronRight } from "@/components/icons/chevron-right";
 import { cn } from "@/lib/utils";
 import { STEPS, STEP_MS, useLanding } from "./landing-context";
-import { INTRO_SEQUENCE, INTRO_STEP_MS } from "./landing-materials";
 
 const SWIPE_THRESHOLD = 30;
 const VERTICAL_CANCEL = 40;
@@ -15,8 +14,7 @@ const VERTICAL_CANCEL = 40;
  * First screen of the anon landing — the whole story lives here, driven
  * by the stepper rather than by scrolling. Owns the horizontal swipe (the
  * canvas behind is pointer-events: none): on the first step it changes
- * the material; on the others it tugs the scene round (drag-orbit). Also runs the
- * load-time intro that whooshes through every material family.
+ * the material; on the others it tugs the scene round (drag-orbit).
  */
 export function LandingHero({ children }: { children: ReactNode }) {
   const { material, select, tensionRef, orbitRef, step, interact } =
@@ -30,8 +28,6 @@ export function LandingHero({ children }: { children: ReactNode }) {
   useEffect(() => {
     materialRef.current = material;
   }, [material]);
-
-  useIntro();
 
   const drag = useRef({
     active: false,
@@ -147,52 +143,6 @@ export function LandingHero({ children }: { children: ReactNode }) {
   );
 }
 
-/** Runs the whoosh once the enclosure is on screen. */
-function useIntro() {
-  const { ready, select, setWord } = useLanding();
-  const reduced = useReducedMotion();
-  const ran = useRef(false);
-  useEffect(() => {
-    if (!ready || ran.current || reduced) return;
-    // Someone reloading mid-page shouldn't get a hero show they can't see.
-    if (window.scrollY > window.innerHeight / 2) return;
-    ran.current = true;
-    const timers = INTRO_SEQUENCE.map((step, i) =>
-      window.setTimeout(
-        () => {
-          setWord(step.word);
-          // Every step is a "next": the spray always flies the same way,
-          // so the sequence reads as one continuous whoosh.
-          if (i > 0) select(step.material, 1, 0.9);
-        },
-        250 + i * INTRO_STEP_MS,
-      ),
-    );
-    return () => timers.forEach(clearTimeout);
-  }, [ready, reduced, select, setWord]);
-}
-
-/** "Print ___," — the blank cycles during the intro, then rests on "anything". */
-export function HeroWord() {
-  const { word } = useLanding();
-  return (
-    <span className="relative inline-grid">
-      <AnimatePresence mode="popLayout" initial={false}>
-        <motion.span
-          key={word}
-          initial={{ opacity: 0, x: 18, filter: "blur(6px)" }}
-          animate={{ opacity: 1, x: 0, filter: "blur(0px)" }}
-          exit={{ opacity: 0, x: -18, filter: "blur(6px)" }}
-          transition={{ duration: 0.18, ease: [0.22, 0.9, 0.28, 1] }}
-          className="inline-block"
-        >
-          {word}
-        </motion.span>
-      </AnimatePresence>
-    </span>
-  );
-}
-
 const COPY: Record<
   (typeof STEPS)[number]["id"],
   { title: ReactNode; body: string }
@@ -200,7 +150,7 @@ const COPY: Record<
   print: {
     title: (
       <>
-        Print <HeroWord />,
+        Print anything,
         <br />
         share your ideas
       </>

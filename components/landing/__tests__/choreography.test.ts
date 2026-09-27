@@ -8,12 +8,7 @@ import {
   type Geometry,
   type PartId,
 } from "../choreography";
-import {
-  INTRO_SEQUENCE,
-  LANDING_MATERIALS,
-  RESTING_WORD,
-  wrapIndex,
-} from "../landing-materials";
+import { LANDING_MATERIALS, wrapIndex } from "../landing-materials";
 import { zoomFor } from "../enclosure-stage";
 
 // Part centres measured off the source GLB (mm → m).
@@ -128,13 +123,7 @@ describe.each([
   });
 });
 
-describe("landing intro", () => {
-  it("visits every family once, then rests on 'anything' at the first", () => {
-    const mats = INTRO_SEQUENCE.slice(0, -1).map((s) => s.material);
-    expect(mats).toEqual(LANDING_MATERIALS.map((_, i) => i));
-    expect(INTRO_SEQUENCE.at(-1)).toEqual({ material: 0, word: RESTING_WORD });
-  });
-
+describe("material carousel", () => {
   it("wraps the carousel both ways", () => {
     expect(wrapIndex(-1)).toBe(LANDING_MATERIALS.length - 1);
     expect(wrapIndex(LANDING_MATERIALS.length)).toBe(0);

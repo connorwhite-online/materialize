@@ -11,7 +11,7 @@ import {
   type MutableRefObject,
   type ReactNode,
 } from "react";
-import { RESTING_WORD, wrapIndex } from "./landing-materials";
+import { wrapIndex } from "./landing-materials";
 
 export interface Burst {
   key: number;
@@ -24,7 +24,6 @@ export interface Burst {
 
 interface LandingState {
   material: number;
-  word: string;
   burst: Burst;
   /** Swipe tension in [-1, 1]; read every frame by the scene. */
   tensionRef: MutableRefObject<number>;
@@ -45,9 +44,6 @@ interface LandingState {
   advance: () => void;
   /** Any other manipulation (a swipe): pause, resume after idle. */
   interact: () => void;
-  ready: boolean;
-  setReady: (ready: boolean) => void;
-  setWord: (word: string) => void;
   /** Jump to a material and fire the particle shed for it. */
   select: (index: number, direction: number, intensity?: number) => void;
 }
@@ -70,14 +66,12 @@ const LandingContext = createContext<LandingState | null>(null);
 
 export function LandingProvider({ children }: { children: ReactNode }) {
   const [material, setMaterial] = useState(0);
-  const [word, setWord] = useState(RESTING_WORD);
   const [burst, setBurst] = useState<Burst>({
     key: 0,
     direction: 0,
     intensity: 1,
     from: 0,
   });
-  const [ready, setReady] = useState(false);
   const tensionRef = useRef(0);
   const orbitRef = useRef(0);
   const materialRef = useRef(0);
@@ -128,7 +122,6 @@ export function LandingProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       material,
-      word,
       burst,
       tensionRef,
       orbitRef,
@@ -138,12 +131,9 @@ export function LandingProvider({ children }: { children: ReactNode }) {
       goTo,
       advance,
       interact,
-      ready,
-      setReady,
-      setWord,
       select,
     }),
-    [material, word, burst, ready, select, step, mode, goTo, advance, interact],
+    [material, burst, select, step, mode, goTo, advance, interact],
   );
 
   return (
