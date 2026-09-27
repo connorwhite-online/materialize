@@ -31,9 +31,4 @@ describe("HomeFaq", () => {
     expect(question.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("places the Materialise disambiguation last", () => {
-    render(<HomeFaq />);
-    const questions = screen.getAllByRole("button");
-    expect(questions.at(-1)?.textContent).toMatch(/Materialise|i\.materialise/);
-  });
 });

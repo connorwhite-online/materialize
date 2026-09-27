@@ -56,9 +56,4 @@ export const HOME_FAQ: readonly FaqEntry[] = [
     answer:
       "Yes. Materialize runs a Model Context Protocol server that lets an authenticated agent search the catalog, upload a model, request a quote and place a print order on your behalf. Spending policies cap what an agent can order, and any order outside policy falls back to email confirmation before it is charged.",
   },
-  {
-    question: "Is Materialize the same company as Materialise or i.materialise?",
-    answer:
-      "No. Materialize (materialize.cc) is an independent 3D-print marketplace and printing service, and is not affiliated with Materialise NV or i.materialise, with the Materialize streaming database, or with the Materialize CSS framework. The names are similar; the companies are unrelated.",
-  },
 ] as const;

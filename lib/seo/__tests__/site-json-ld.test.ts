@@ -89,14 +89,17 @@ describe("faqPageJsonLd", () => {
 });
 
 describe("HOME_FAQ content", () => {
-  it("answers the brand-collision question explicitly, last", () => {
-    // Still the highest-value disambiguation, but it sits at the
-    // bottom so product questions lead. Someone who lands here
-    // wondering whether this is the Belgian company still gets a
-    // direct answer, and so does an answer engine summarizing the page.
-    const entry = HOME_FAQ.at(-1);
-    expect(entry?.question).toMatch(/Materialise|i\.materialise/);
-    expect(entry?.answer).toMatch(/^No\./);
+  it("keeps the brand disambiguation on the Organization, not the FAQ", () => {
+    // The "same company as Materialise / i.materialise?" question was
+    // cut from the visible FAQ. Search engines still get the
+    // disambiguation from Organization.disambiguatingDescription
+    // (pinned above), so the FAQ can stay product-only.
+    for (const { question } of HOME_FAQ) {
+      expect(question).not.toMatch(/Materialise|i\.materialise/);
+    }
+    expect(organizationJsonLd().disambiguatingDescription).toMatch(
+      /Materialise NV/,
+    );
   });
 
   it("has unique questions", () => {
