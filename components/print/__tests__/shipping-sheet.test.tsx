@@ -125,6 +125,13 @@ describe("ShippingSheet", () => {
     expect(screen.getByText("embedded-address")).toBeTruthy();
   });
 
+  // A failed checkout reopens the address step; without the error there
+  // the form just reappeared with no explanation.
+  it("shows the checkout error on the address step", () => {
+    renderSheet({ step: "address", checkoutError: "Card declined" });
+    expect(screen.getByRole("alert").textContent).toBe("Card declined");
+  });
+
   it("Shipping back control returns to the shipping step", () => {
     const { onStepChange } = renderSheet({ step: "address" });
     fireEvent.click(screen.getByText("Shipping"));

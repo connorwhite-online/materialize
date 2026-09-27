@@ -354,6 +354,18 @@ export function ShippingSheet({
             </div>
           </>
         ) : (
+          <>
+          {/* A failed checkout lands back on this step (the configurator
+              reopens the address form), so the error has to show here
+              too — otherwise the form just reappears with no reason. */}
+          {checkoutError && (
+            <p
+              role="alert"
+              className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+            >
+              {checkoutError}
+            </p>
+          )}
           <ShippingAddressForm
             embedded
             onSubmit={onAddressSubmit}
@@ -362,6 +374,7 @@ export function ShippingSheet({
             anonMode={anonMode}
             savedAddress={anonMode ? null : savedAddress}
           />
+          </>
         )}
       </div>
     </NativeSheet>
