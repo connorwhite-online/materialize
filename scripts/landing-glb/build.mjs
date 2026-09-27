@@ -8,6 +8,9 @@
 //     @gltf-transform/extensions@4 meshoptimizer
 //   node scripts/landing-glb/build.mjs path/to/Pneuma-Q-shells-and-electronics.glb
 //
+// With baked AO (the shipped setup), first run bake-ao.py, then:
+//   SHELLS_UV=<workdir>/shells-uv.glb node scripts/landing-glb/build.mjs <src.glb>
+//
 // The trick that makes the boards simplifiable: CAD exports split every
 // vertex at hard edges (one normal per face), so no triangle shares a
 // vertex with its neighbour and the simplifier can't collapse anything —
@@ -17,7 +20,7 @@
 // Shells keep theirs — their smooth normals already weld.
 import { NodeIO } from "@gltf-transform/core";
 import { ALL_EXTENSIONS } from "@gltf-transform/extensions";
-import { dedup, meshopt, prune, quantize, simplify, simplifyPrimitive, weld } from "@gltf-transform/functions";
+import { dedup, meshopt, mergeDocuments, prune, quantize, simplify, simplifyPrimitive, weld } from "@gltf-transform/functions";
 import { MeshoptEncoder, MeshoptSimplifier } from "meshoptimizer";
 import { resolve } from "node:path";
 
@@ -36,6 +39,8 @@ const finish = [dedup(), prune(), quantize({ quantizeNormal: 16 }), meshopt({ en
 // Shells keep most of their triangles for the same reason — mirror
 // finishes show every facet. SHELL_RATIO overrides for experiments.
 const SHELL_RATIO = Number(process.env.SHELL_RATIO ?? 0.6);
+/** Path to the Blender-baked shells (with UVs); see bake-ao.py. */
+const SHELLS_UV = process.env.SHELLS_UV;
 
 async function internals(doc, ratio, error) {
   for (const m of doc.getRoot().listMeshes()) {
@@ -55,10 +60,33 @@ async function internals(doc, ratio, error) {
 {
   const doc = await io.read(src);
   await internals(doc, 0.12, 0.0008);
-  for (const n of doc.getRoot().listNodes()) {
-    if (!isShell(n.getName())) continue;
-    for (const p of n.getMesh().listPrimitives()) {
-      if (SHELL_RATIO < 1) simplifyPrimitive(p, { simplifier: MeshoptSimplifier, ratio: SHELL_RATIO, error: 0.0003, lockBorder: false });
+  if (SHELLS_UV) {
+    // Shells come from the Blender AO bake (scripts/landing-glb/bake-ao.py):
+    // already 60% and carrying the UVs the baked ao-*.webp maps are laid
+    // out on — so they must replace ours wholesale, never be re-simplified.
+    const uvDoc = await io.read(SHELLS_UV);
+    const copies = mergeDocuments(doc, uvDoc);
+    for (const n of doc.getRoot().listNodes()) {
+      if (!isShell(n.getName()) || copies.has(n)) continue;
+      const src = uvDoc.getRoot().listNodes().find((u) => u.getName() === n.getName());
+      if (!src) throw new Error(`SHELLS_UV has no node ${n.getName()}`);
+      const copy = copies.get(src);
+      n.setMesh(copy.getMesh()).setTranslation(copy.getTranslation()).setRotation(copy.getRotation()).setScale(copy.getScale());
+    }
+    for (const scene of doc.getRoot().listScenes().slice(1)) {
+      for (const node of scene.listChildren()) node.dispose();
+      scene.dispose();
+    }
+    // A GLB holds one buffer; the merge brought Blender's along.
+    const [buffer, ...extra] = doc.getRoot().listBuffers();
+    for (const acc of doc.getRoot().listAccessors()) acc.setBuffer(buffer);
+    for (const b of extra) b.dispose();
+  } else {
+    for (const n of doc.getRoot().listNodes()) {
+      if (!isShell(n.getName())) continue;
+      for (const p of n.getMesh().listPrimitives()) {
+        if (SHELL_RATIO < 1) simplifyPrimitive(p, { simplifier: MeshoptSimplifier, ratio: SHELL_RATIO, error: 0.0003, lockBorder: false });
+      }
     }
   }
   await doc.transform(...finish);

@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
-import { Html, useGLTF } from "@react-three/drei";
+import { Html, useGLTF, useTexture } from "@react-three/drei";
 import * as THREE from "three";
 import { MeshSurfaceSampler } from "three/examples/jsm/math/MeshSurfaceSampler.js";
 import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
@@ -31,6 +31,37 @@ export const ENCLOSURE_URL = "/home/pneuma-q.glb";
 const CREASE_ANGLE = Math.PI / 6;
 
 export const DETAIL_URL = "/home/pneuma-q-detail.glb";
+
+/**
+ * Ambient occlusion baked in Blender (scripts/landing-glb/bake-ao.py),
+ * laid out on the shells' own UVs. Colour-independent, so it survives
+ * every material swap: creases, the seam and the camera bump keep their
+ * soft contact shadow whatever the shell is made of.
+ */
+const AO_URLS = { front: "/home/ao-front.webp", rear: "/home/ao-rear.webp" };
+
+type ShellId = "front" | "rear";
+type ShellMaterials = Record<ShellId, THREE.MeshPhysicalMaterial>;
+
+function makeShellMaterials(
+  ao: Record<ShellId, THREE.Texture>,
+): ShellMaterials {
+  const make = (map: THREE.Texture) => {
+    // glTF UVs have their origin top-left; three's loader default flips.
+    map.flipY = false;
+    map.colorSpace = THREE.NoColorSpace;
+    map.needsUpdate = true;
+    return new THREE.MeshPhysicalMaterial({
+      color: LANDING_MATERIALS[0].color,
+      roughness: LANDING_MATERIALS[0].roughness,
+      metalness: LANDING_MATERIALS[0].metalness,
+      clearcoatRoughness: 0.12,
+      aoMap: map,
+      aoMapIntensity: 1.3,
+    });
+  };
+  return { front: make(ao.front), rear: make(ao.rear) };
+}
 
 /**
  * Give a mesh its own transparent copy of the GLB's material (so the
@@ -105,7 +136,7 @@ interface LoadedPart {
 }
 
 /** Clone every part out of the GLB, centred on its own pivot. */
-function useParts(shellMaterial: THREE.MeshPhysicalMaterial) {
+function useParts(shellMaterials: ShellMaterials) {
   const { nodes } = useGLTF(ENCLOSURE_URL);
   return useMemo(() => {
     const parts = {} as Record<PartId, LoadedPart>;
@@ -124,7 +155,7 @@ function useParts(shellMaterial: THREE.MeshPhysicalMaterial) {
         const mesh = o as THREE.Mesh;
         if (!mesh.isMesh) return;
         if (spec.shell) {
-          mesh.material = shellMaterial;
+          mesh.material = shellMaterials[spec.id as ShellId];
           return;
         }
         materials.push(fadeable(mesh));
@@ -149,7 +180,7 @@ function useParts(shellMaterial: THREE.MeshPhysicalMaterial) {
       modelCenter: envelope.getCenter(new THREE.Vector3()),
     };
     return { parts, geo };
-  }, [nodes, shellMaterial]);
+  }, [nodes, shellMaterials]);
 }
 
 /**
@@ -198,17 +229,11 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
   useEffect(() => {
     stepRef.current = step;
   }, [step]);
-  const shellMaterial = useMemo(
-    () =>
-      new THREE.MeshPhysicalMaterial({
-        color: LANDING_MATERIALS[0].color,
-        roughness: LANDING_MATERIALS[0].roughness,
-        metalness: LANDING_MATERIALS[0].metalness,
-        clearcoatRoughness: 0.12,
-      }),
-    [],
-  );
-  const { parts, geo } = useParts(shellMaterial);
+  const aoMaps = useTexture(AO_URLS);
+  // One material per shell: each carries its own baked AO map. Both are
+  // eased to the same target every frame, so they swap as one.
+  const shellMaterials = useMemo(() => makeShellMaterials(aoMaps), [aoMaps]);
+  const { parts, geo } = useParts(shellMaterials);
   // Stable across renders: the particle sampler keys off this list, and a
   // fresh array each render re-ran its burst effect on every step change.
   const shellObjects = useMemo(
@@ -323,7 +348,9 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
 
     // Fast (~150ms): the swap should read as a snap, with the shed
     // particles carrying the old skin away — not a slow crossfade.
-    lerpShell(shellMaterial, target, targetColor, 1 - Math.exp(-delta * 18));
+    const k = 1 - Math.exp(-delta * 18);
+    lerpShell(shellMaterials.front, target, targetColor, k);
+    lerpShell(shellMaterials.rear, target, targetColor, k);
   });
 
   return (
@@ -742,3 +769,4 @@ function useLineColor(): string {
 }
 
 useGLTF.preload(ENCLOSURE_URL);
+useTexture.preload(Object.values(AO_URLS));
