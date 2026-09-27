@@ -71,7 +71,7 @@ export function EnclosureStage() {
           </Suspense>
         </Canvas>
       </ErrorBoundary>
-      {/* Film finish: soft vignette + fine grain over the stage only. */}
+      {/* Soft vignette over the stage only. */}
       <div
         className="absolute inset-0"
         style={{
@@ -79,7 +79,6 @@ export function EnclosureStage() {
             "radial-gradient(120% 100% at 50% 45%, transparent 55%, rgba(8,7,6,0.55) 100%)",
         }}
       />
-      <div className="mz-film-grain absolute inset-0" />
     </div>
   );
 }
