@@ -67,6 +67,7 @@ vi.mock("@/lib/stripe", () => ({
   getStripe: () => ({
     customers: {
       create: (...args: unknown[]) => customerCreateMock(...args),
+      retrieve: async (id: string) => ({ id }),
     },
     checkout: {
       sessions: {

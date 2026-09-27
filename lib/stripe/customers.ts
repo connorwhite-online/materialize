@@ -31,9 +31,21 @@ export async function getOrCreateStripeCustomer(
     .where(eq(users.id, userId))
     .limit(1);
 
-  if (user?.stripeCustomerId) return user.stripeCustomerId;
-
   const stripe = getStripe();
+
+  if (user?.stripeCustomerId) {
+    if (await customerExists(user.stripeCustomerId)) return user.stripeCustomerId;
+    // Stale id — usually one created under test keys before the switch to
+    // live (Stripe test and live data are separate). Drop it and the card
+    // saved on it, then create a fresh customer below.
+    await db
+      .update(users)
+      .set({ stripeCustomerId: null, defaultPaymentMethod: null })
+      .where(
+        and(eq(users.id, userId), eq(users.stripeCustomerId, user.stripeCustomerId))
+      );
+  }
+
   const customer = await stripe.customers.create({
     email: contact?.email || undefined,
     name: contact?.name || undefined,
@@ -56,4 +68,15 @@ export async function getOrCreateStripeCustomer(
     .where(eq(users.id, userId))
     .limit(1);
   return refetched?.stripeCustomerId ?? customer.id;
+}
+
+/** False only when Stripe says the customer is gone or never existed here. */
+async function customerExists(customerId: string): Promise<boolean> {
+  try {
+    const customer = await getStripe().customers.retrieve(customerId);
+    return !("deleted" in customer && customer.deleted);
+  } catch (err) {
+    if ((err as { code?: string }).code === "resource_missing") return false;
+    throw err;
+  }
 }
