@@ -79,8 +79,8 @@ export async function reconcileProductionPayments(): Promise<ReconcileResult> {
     .where(
       and(
         eq(printOrders.status, "awaiting_production_payment"),
-        eq(printOrders.checkoutModel, "two_step")
-      )
+        eq(printOrders.checkoutModel, "two_step"),
+      ),
     )
     .orderBy(asc(printOrders.feeAuthorizedAt))
     .limit(500);
@@ -92,127 +92,8 @@ export async function reconcileProductionPayments(): Promise<ReconcileResult> {
     errors: 0,
   };
 
-  const stripe = getStripe();
-
   async function processOrder(order: (typeof rows)[number]) {
-    try {
-      // An awaiting_production_payment row without both ids is a
-      // bookkeeping bug — the webhook should have written the PI id
-      // and createPrintOrder the CraftCloud order id. Surface it and
-      // move on; there is nothing safe to do automatically.
-      if (!order.feePaymentIntentId || !order.craftCloudOrderId) {
-        logError(
-          "reconcileProductionPayments:missingIds",
-          new Error(
-            `order ${order.id} awaiting production payment but missing ` +
-              `${order.feePaymentIntentId ? "" : "feePaymentIntentId "}` +
-              `${order.craftCloudOrderId ? "" : "craftCloudOrderId"}`.trim()
-          )
-        );
-        result.errors++;
-        return;
-      }
-
-      const intent = await stripe.paymentIntents.retrieve(
-        order.feePaymentIntentId
-      );
-
-      if (intent.status === "canceled") {
-        // Terminal abandonment: the hold is already gone — either
-        // Stripe's ~7-day auto-expiry fired or someone cancelled the
-        // PI manually. Finalize our side. Conditional on the status
-        // still being awaiting_production_payment so we never clobber
-        // a row a concurrent worker already advanced.
-        await db
-          .update(printOrders)
-          .set({ status: "cancelled" })
-          .where(
-            and(
-              eq(printOrders.id, order.id),
-              eq(printOrders.status, "awaiting_production_payment")
-            )
-          );
-        result.cancelled++;
-        return;
-      }
-
-      if (intent.status === "succeeded") {
-        // Already captured but our row lagged — a crash between the
-        // capture call and the DB update on a previous sweep. Heal.
-        await db
-          .update(printOrders)
-          .set({ status: "ordered", feeCapturedAt: new Date() })
-          .where(
-            and(
-              eq(printOrders.id, order.id),
-              eq(printOrders.status, "awaiting_production_payment")
-            )
-          );
-        result.captured++;
-        return;
-      }
-
-      if (intent.status !== "requires_capture") {
-        // requires_payment_method / processing / etc — the webhook
-        // should never have marked this awaiting_production_payment.
-        // Leave it for investigation rather than guess.
-        logError(
-          "reconcileProductionPayments:unexpectedIntentStatus",
-          new Error(
-            `order ${order.id}: PaymentIntent ${order.feePaymentIntentId} ` +
-              `in unexpected status "${intent.status}"`
-          )
-        );
-        result.errors++;
-        return;
-      }
-
-      // The normal case: fee is held, waiting on CraftCloud payment.
-      const ccStatus = await getOrderStatus(order.craftCloudOrderId);
-
-      if (isProductionPaymentConfirmed(ccStatus)) {
-        // Customer paid CraftCloud — charge our fee and make the
-        // order real.
-        await captureFeeAndPlaceOrder(order.id, order.feePaymentIntentId);
-        result.captured++;
-        return;
-      }
-
-      const authorizedAt = order.feeAuthorizedAt?.getTime() ?? 0;
-      if (Date.now() - authorizedAt > ABANDONMENT_TTL_MS) {
-        // Abandoned: the customer never finished CraftCloud's hosted
-        // checkout. Cancel the PaymentIntent — this releases the card
-        // hold; the customer was NEVER charged, so there is nothing
-        // to refund. If this cron misses the cancel (crash, outage),
-        // Stripe's ~7-day auto-expiry releases the hold anyway and
-        // the next sweep's canceled-PI branch above finalizes the row.
-        try {
-          await stripe.paymentIntents.cancel(order.feePaymentIntentId);
-        } catch (cancelError) {
-          // A PI that is already canceled means the hold is already
-          // released — exactly the end state we want. Anything else
-          // is a real failure.
-          if (!isAlreadyCanceledError(cancelError)) throw cancelError;
-        }
-        await db
-          .update(printOrders)
-          .set({ status: "cancelled" })
-          .where(
-            and(
-              eq(printOrders.id, order.id),
-              eq(printOrders.status, "awaiting_production_payment")
-            )
-          );
-        result.cancelled++;
-        return;
-      }
-
-      // Unconfirmed but within the TTL — leave it for a later sweep.
-      result.pending++;
-    } catch (error) {
-      logError("reconcileProductionPayments:order", error);
-      result.errors++;
-    }
+    await reconcileRow(order, result);
   }
 
   // Bounded worker pool: each worker pulls the next unclaimed index off
@@ -229,9 +110,176 @@ export async function reconcileProductionPayments(): Promise<ReconcileResult> {
     }
   }
   await Promise.all(
-    Array.from({ length: Math.min(CONCURRENCY, rows.length) }, () => worker())
+    Array.from({ length: Math.min(CONCURRENCY, rows.length) }, () => worker()),
   );
 
+  return result;
+}
+
+interface ReconcileRow {
+  id: string;
+  craftCloudOrderId: string | null;
+  feePaymentIntentId: string | null;
+  feeAuthorizedAt: Date | null;
+}
+
+async function reconcileRow(order: ReconcileRow, result: ReconcileResult) {
+  const stripe = getStripe();
+  try {
+    // An awaiting_production_payment row without both ids is a
+    // bookkeeping bug — the webhook should have written the PI id
+    // and createPrintOrder the CraftCloud order id. Surface it and
+    // move on; there is nothing safe to do automatically.
+    if (!order.feePaymentIntentId || !order.craftCloudOrderId) {
+      logError(
+        "reconcileProductionPayments:missingIds",
+        new Error(
+          `order ${order.id} awaiting production payment but missing ` +
+            `${order.feePaymentIntentId ? "" : "feePaymentIntentId "}` +
+            `${order.craftCloudOrderId ? "" : "craftCloudOrderId"}`.trim(),
+        ),
+      );
+      result.errors++;
+      return;
+    }
+
+    const intent = await stripe.paymentIntents.retrieve(
+      order.feePaymentIntentId,
+    );
+
+    if (intent.status === "canceled") {
+      // Terminal abandonment: the hold is already gone — either
+      // Stripe's ~7-day auto-expiry fired or someone cancelled the
+      // PI manually. Finalize our side. Conditional on the status
+      // still being awaiting_production_payment so we never clobber
+      // a row a concurrent worker already advanced.
+      await db
+        .update(printOrders)
+        .set({ status: "cancelled" })
+        .where(
+          and(
+            eq(printOrders.id, order.id),
+            eq(printOrders.status, "awaiting_production_payment"),
+          ),
+        );
+      result.cancelled++;
+      return;
+    }
+
+    if (intent.status === "succeeded") {
+      // Already captured but our row lagged — a crash between the
+      // capture call and the DB update on a previous sweep. Heal.
+      await db
+        .update(printOrders)
+        .set({ status: "ordered", feeCapturedAt: new Date() })
+        .where(
+          and(
+            eq(printOrders.id, order.id),
+            eq(printOrders.status, "awaiting_production_payment"),
+          ),
+        );
+      result.captured++;
+      return;
+    }
+
+    if (intent.status !== "requires_capture") {
+      // requires_payment_method / processing / etc — the webhook
+      // should never have marked this awaiting_production_payment.
+      // Leave it for investigation rather than guess.
+      logError(
+        "reconcileProductionPayments:unexpectedIntentStatus",
+        new Error(
+          `order ${order.id}: PaymentIntent ${order.feePaymentIntentId} ` +
+            `in unexpected status "${intent.status}"`,
+        ),
+      );
+      result.errors++;
+      return;
+    }
+
+    // The normal case: fee is held, waiting on CraftCloud payment.
+    const ccStatus = await getOrderStatus(order.craftCloudOrderId);
+
+    if (isProductionPaymentConfirmed(ccStatus)) {
+      // Customer paid CraftCloud — charge our fee and make the
+      // order real.
+      await captureFeeAndPlaceOrder(order.id, order.feePaymentIntentId);
+      result.captured++;
+      return;
+    }
+
+    const authorizedAt = order.feeAuthorizedAt?.getTime() ?? 0;
+    if (Date.now() - authorizedAt > ABANDONMENT_TTL_MS) {
+      // Abandoned: the customer never finished CraftCloud's hosted
+      // checkout. Cancel the PaymentIntent — this releases the card
+      // hold; the customer was NEVER charged, so there is nothing
+      // to refund. If this cron misses the cancel (crash, outage),
+      // Stripe's ~7-day auto-expiry releases the hold anyway and
+      // the next sweep's canceled-PI branch above finalizes the row.
+      try {
+        await stripe.paymentIntents.cancel(order.feePaymentIntentId);
+      } catch (cancelError) {
+        // A PI that is already canceled means the hold is already
+        // released — exactly the end state we want. Anything else
+        // is a real failure.
+        if (!isAlreadyCanceledError(cancelError)) throw cancelError;
+      }
+      await db
+        .update(printOrders)
+        .set({ status: "cancelled" })
+        .where(
+          and(
+            eq(printOrders.id, order.id),
+            eq(printOrders.status, "awaiting_production_payment"),
+          ),
+        );
+      result.cancelled++;
+      return;
+    }
+
+    // Unconfirmed but within the TTL — leave it for a later sweep.
+    result.pending++;
+  } catch (error) {
+    logError("reconcileProductionPayments:order", error);
+    result.errors++;
+  }
+}
+
+/**
+ * Reconcile one buyer's order on demand — called when they land back
+ * from CraftCloud's payment page, so a paid order advances right away
+ * instead of waiting up to an hour for the sweep. Same logic, same
+ * conditional writes, so racing the cron is safe. Scoped to `userId`
+ * so a crafted orderId can't touch someone else's order.
+ */
+export async function reconcileOrderForUser(
+  orderId: string,
+  userId: string,
+): Promise<ReconcileResult> {
+  const result: ReconcileResult = {
+    captured: 0,
+    cancelled: 0,
+    pending: 0,
+    errors: 0,
+  };
+  const [row] = await db
+    .select({
+      id: printOrders.id,
+      craftCloudOrderId: printOrders.craftCloudOrderId,
+      feePaymentIntentId: printOrders.feePaymentIntentId,
+      feeAuthorizedAt: printOrders.feeAuthorizedAt,
+    })
+    .from(printOrders)
+    .where(
+      and(
+        eq(printOrders.id, orderId),
+        eq(printOrders.userId, userId),
+        eq(printOrders.status, "awaiting_production_payment"),
+        eq(printOrders.checkoutModel, "two_step"),
+      ),
+    )
+    .limit(1);
+  if (row) await reconcileRow(row, result);
   return result;
 }
 
@@ -251,7 +299,7 @@ export async function reconcileProductionPayments(): Promise<ReconcileResult> {
  */
 export async function captureFeeAndPlaceOrder(
   orderId: string,
-  feePaymentIntentId: string
+  feePaymentIntentId: string,
 ): Promise<void> {
   await getStripe().paymentIntents.capture(feePaymentIntentId);
   const updated = await db
@@ -260,8 +308,8 @@ export async function captureFeeAndPlaceOrder(
     .where(
       and(
         eq(printOrders.id, orderId),
-        eq(printOrders.status, "awaiting_production_payment")
-      )
+        eq(printOrders.status, "awaiting_production_payment"),
+      ),
     )
     .returning({ id: printOrders.id });
 
