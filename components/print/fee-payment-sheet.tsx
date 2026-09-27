@@ -293,7 +293,10 @@ function FeeForm({
       <PaymentElement
         onReady={() => setElementReady(true)}
         options={{
-          layout: "accordion",
+          // Open by default: the card form is the only method in
+          // here, and a collapsed accordion hid it behind a row the
+          // buyer had to know to click (seen on the first live order).
+          layout: { type: "accordion", defaultCollapsed: false },
           // The accordion is card-ONLY: the express row above owns
           // Link / Apple Pay / Google Pay, so their in-element
           // renderings are suppressed here to keep this a clean card
