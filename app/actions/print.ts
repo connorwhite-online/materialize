@@ -1032,6 +1032,10 @@ export async function completePrintOrder(params: {
    */
   feePayment?: "saved_card" | "new_card";
 }): Promise<CompletePrintOrderResult> {
+  // Held so the catch-all can release it: an unexpected throw after the
+  // claim used to leave the sentinel in place, and every retry then hit
+  // "Checkout already in progress" until the stale-order cron ran.
+  let heldClaim: string | null = null;
   try {
     const { userId } = await auth();
     if (!userId) return { error: "Unauthorized" };
@@ -1172,6 +1176,7 @@ export async function completePrintOrder(params: {
         )
       )
       .returning({ id: printOrders.id });
+    if (claimed.length > 0) heldClaim = sentinel;
 
     if (claimed.length === 0) {
       // Sibling worker beat us. Re-fetch and try to hand back what
@@ -1304,6 +1309,7 @@ export async function completePrintOrder(params: {
     return { checkoutUrl: sessionResult.url };
   } catch (error) {
     logError("completePrintOrder", error);
+    if (heldClaim) await releaseSessionClaim(params.orderId, heldClaim);
     return { error: "Failed to create checkout. Please try again." };
   }
 }
