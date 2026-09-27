@@ -30,6 +30,9 @@ let returningQueue: Array<Array<{ id: string }>> | null = null;
 const updateSet = vi.fn();
 const updateWhere = vi.fn();
 
+vi.mock("@/lib/users/checkout-phone", () => ({
+  rememberCheckoutPhone: vi.fn(async () => {}),
+}));
 vi.mock("@/lib/db", () => ({
   db: {
     select: () => ({

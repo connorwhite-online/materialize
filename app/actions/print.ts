@@ -58,6 +58,7 @@ import { promoteStudioDraftsForAssets } from "@/lib/studio-drafts";
 import { dedupeShippingByShipId } from "@/lib/pricing/shipping";
 import type { Address, Currency } from "@/lib/craftcloud/types";
 import { calcServiceFee } from "@/lib/fees";
+import { rememberCheckoutPhone } from "@/lib/users/checkout-phone";
 import {
   getVendorMinimums,
   MAX_PROBES_PER_REQUEST,
@@ -1151,6 +1152,10 @@ export async function completePrintOrder(params: {
         };
       }
     }
+
+    // Past the confirmation stop, so nothing is written until the buyer
+    // has committed to paying.
+    await rememberCheckoutPhone(userId, addressParsed.data.shipping.phoneNumber);
 
     // Atomic claim: only one tab/device can mint a new session.
     // The conditional WHERE makes this race-safe across replicas.
