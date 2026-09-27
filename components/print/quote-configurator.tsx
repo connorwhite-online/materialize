@@ -44,6 +44,7 @@ import { REGIONS, DEFAULT_REGION } from "@/lib/craftcloud/regions";
 import { MaterialPreview } from "@/components/viewer/material-preview";
 import type { PreviewView } from "@/components/viewer/preview-camera";
 import { Label } from "@/components/ui/label";
+import { useVendorMinimums } from "./use-vendor-minimums";
 import { Alert } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -292,6 +293,8 @@ export function QuoteConfigurator({
   }, []);
   const region =
     REGIONS.find((r) => r.code === regionCode) ?? DEFAULT_REGION;
+  const { minimums: vendorMinimums, request: requestVendorMinimums } =
+    useVendorMinimums(region.currency as Currency);
 
   // Checkout state
   const [step, setStep] = useState<CheckoutStep>("configure");
@@ -1551,6 +1554,8 @@ export function QuoteConfigurator({
           <MaterialPicker
             quotes={quotes}
             shipping={shipping}
+            vendorMinimums={vendorMinimums}
+            onRequestMinimums={requestVendorMinimums}
             sortQuantity={sortQuantity}
             quotesLoading={loadingPhase === "quoting"}
             quotesPartial={loadingPhase === "timeout"}

@@ -30,6 +30,9 @@ let returningQueue: Array<Array<{ id: string }>> | null = null;
 const updateSet = vi.fn();
 const updateWhere = vi.fn();
 
+vi.mock("@/lib/users/checkout-phone", () => ({
+  rememberCheckoutPhone: vi.fn(async () => {}),
+}));
 vi.mock("@/lib/db", () => ({
   db: {
     select: () => ({
@@ -183,7 +186,7 @@ vi.mock("@/lib/craftcloud/client", () => ({
 
 vi.mock("@/lib/env", () => ({
   getCheckoutModel: vi.fn(() => "two_step"),
-  isSandboxMode: vi.fn(() => true),
+  isCraftCloudTestOrder: vi.fn(() => true),
 }));
 
 vi.mock("@/lib/logger", () => ({
@@ -234,6 +237,7 @@ const baseAddress = {
     city: "London",
     zipCode: "NW15LR",
     countryCode: "GB",
+    phoneNumber: "+44 20 7946 0000",
   },
   billing: {
     firstName: "Ada",

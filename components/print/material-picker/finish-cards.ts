@@ -1,8 +1,15 @@
 import type { EnrichedQuote } from "./types";
+import {
+  effectiveUnitPrice,
+  quoteTotal,
+  type VendorMinimums,
+} from "./vendor-minimums";
 
 export interface ShippingLite {
   vendorId: string;
   price: number;
+  /** CraftCloud shipping id — needed to probe a vendor's minimum via a cart. */
+  shippingId?: string;
   /**
    * Days in transit. Optional so call sites that only care about
    * price keep compiling; treated as 0 when absent (same default
@@ -15,9 +22,9 @@ export interface FinishCard {
   finishGroupId: string;
   finishGroupName: string;
   finishGroupImage: string | null;
-  /** Cheapest single-unit production price — the "from $X" label. */
+  /** Cheapest per-unit production price, vendor minimum included — the "from $X" label. */
   cheapest: number;
-  /** Min total (production*qty + shipping) across this finish — sort key. */
+  /** Min total (production*qty + minimum fee + shipping) across this finish — sort key. */
   cheapestTotal: number;
   configCount: number;
   colorCount: number;
@@ -45,11 +52,14 @@ export function aggregateFinishCards(
   quotes: EnrichedQuote[],
   shipping: ShippingLite[],
   sortQuantity: number,
-  materialId: string
+  materialId: string,
+  minimums?: VendorMinimums
 ): FinishCard[] {
   const shippingByVendor = cheapestShippingByVendor(shipping);
   const totalCost = (q: { price: number; vendorId: string }) =>
-    q.price * sortQuantity + (shippingByVendor.get(q.vendorId) ?? 0);
+    quoteTotal(q, sortQuantity, shippingByVendor, minimums);
+  const unitPrice = (q: { price: number; vendorId: string }) =>
+    effectiveUnitPrice(q, sortQuantity, minimums);
 
   const byFinish = new Map<string, FinishCard & { colors: Set<string> }>();
   for (const q of quotes) {
@@ -61,7 +71,7 @@ export function aggregateFinishCards(
         finishGroupId: q.finishGroupId,
         finishGroupName: q.finishGroupName,
         finishGroupImage: q.finishGroupImage,
-        cheapest: q.price,
+        cheapest: unitPrice(q),
         cheapestTotal: total,
         configCount: 1,
         colorCount: 0,
@@ -70,7 +80,8 @@ export function aggregateFinishCards(
     } else {
       existing.configCount++;
       existing.colors.add(q.color);
-      if (q.price < existing.cheapest) existing.cheapest = q.price;
+      const unit = unitPrice(q);
+      if (unit < existing.cheapest) existing.cheapest = unit;
       if (total < existing.cheapestTotal) existing.cheapestTotal = total;
     }
   }

@@ -60,6 +60,8 @@ QuoteConfigurator:
 
 **Polling invariant** — `/api/craftcloud/quotes/poll` is polled by the client until CraftCloud reports `allComplete: true` AND the quote count has been stable for 4 consecutive polls (`STABLE_POLLS_REQUIRED = 4`, `POLL_INTERVAL_MS = 1500`, `HARD_CEILING_MS = 90_000`). We do NOT break on the first `allComplete: true` alone — CraftCloud will occasionally flip it true with an empty array on cached library modelIds, or while late vendors are still responding. Additional exit conditions: 3 consecutive 4xx responses = stale priceId bail (mobile tab backgrounded); 4 consecutive network errors = timeout; `"timeout"` exit reason → partial-results UI. Logic lives in `components/print/poll-quotes.ts` (shared by the quote configurator and cart re-pricing at `cart-context.tsx:234`).
 
+**Vendor minimums** — many CraftCloud vendors have a minimum order value (Panashape $33, some $180+) that only shows up on a cart, never on a quote, so a $7 part can really cost $33. The picker ranks and labels every price by what the buyer pays: `components/print/material-picker/vendor-minimums.ts` folds the fee in, and `checkVendorMinimums` (`app/actions/print.ts`) learns each vendor's minimum from one disposable cart, cached per vendor + currency (`lib/craftcloud/vendor-minimums.ts`). The minimum is per vendor, not per material (checked against live carts). CraftCloud also rejects `POST /v5/order` without `shipping.phoneNumber`, which is why checkout requires a phone. `completePrintOrder` also saves it to `users.phoneNumber` (`lib/users/checkout-phone.ts`, latest checkout wins, unverified) so phone sign-in can use it later after verifying it.
+
 **Idempotency** — the anon checkout chain (R2 → draft → order → Stripe) uses a `checkoutInFlightRef` to prevent double-fire (`quote-configurator.tsx:364`, set/cleared `:875-969`). The Stripe webhook checks `order.craftCloudOrderId` in addition to `order.status` so a retry after a partial commit doesn't re-place the CraftCloud order.
 
 **Local Stripe webhook forwarding** — the order only advances from `cart_created` → `ordered` when `/api/webhooks/stripe` runs `handlePrintOrderPayment`. In local dev, Stripe can't reach `localhost:3000` on its own, so run `stripe listen --forward-to localhost:3000/api/webhooks/stripe` in a side terminal during checkout testing. Without it, the order sits in the profile's "Carts" section with a Resume button that just relinks to the same Stripe session — easy to mistake for "payment didn't go through." The `STRIPE_WEBHOOK_SECRET` for local dev is the value the `stripe listen` command prints on startup, not the one from the Stripe dashboard.
@@ -130,17 +132,18 @@ cart_created            → ordered                (webhook claim-place, handle-
                         → cancelled              (daily cleanup >48h stale, cleanup-stale-orders/route.ts:71)
 awaiting_production_payment → ordered            (hourly reconcile capture, reconcile-production-payments.ts:167 / heal :132)
                             → cancelled          (PI canceled or >72h, :116 / :209)
-ordered                 → in_production|shipped|received|blocked|cancelled
-                                                 (checkOrderStatus, app/actions/print.ts:317-367 —
-                                                  ZERO production callers; see CON-107)
+ordered|in_production|shipped|blocked → in_production|shipped|received|blocked|cancelled
+                                                 (hourly sync-fulfillment-status cron, forward-only,
+                                                  lib/craftcloud/fulfillment-sync.ts; CON-107)
 blocked|ordered         → refunded               (app/actions/print.ts:1587)
 ```
 
 **Truths every consumer must know:**
 
 - **`quoting` is dead** — it's the column default only; no writer ever sets it, no code reads it. Ignore it.
-- **Orders sit at `ordered` forever** — `checkOrderStatus` (the only path past `ordered`) has zero callers in production. CON-107 tracks adding fulfillment sync. Do NOT document or assume post-`ordered` states are reachable today; the only live path past `ordered` is inside `requestOrderRefund` (`:1335-1347`).
-- **Three status-writing crons**: `place-auto-approved-orders` (minutely), `reconcile-production-payments` (hourly), `cleanup-stale-orders` (daily). `retry-failed-refunds` does NOT write status.
+- **Fulfillment is polled, not pushed** — CraftCloud has no webhooks (its published spec has none), so the hourly `sync-fulfillment-status` cron is how orders move past `ordered`. Transitions are forward-only (`nextFulfillmentStatus`) with `blocked`/`cancelled` as side exits, and a CraftCloud cancellation is logged for a refund check because nothing refunds it automatically. The status endpoint returns **no tracking numbers**, so `trackingInfo` stays empty. `checkOrderStatus` in `app/actions/print.ts` is still uncalled; `requestOrderRefund` also advances status on its own live read.
+- **`getOrderStatus` returns a normalized shape** — CraftCloud's wire response is per-vendor status *history* (`status[].orderStatus[]`); `normalizeOrderStatus` (`lib/craftcloud/order-status.ts`) collapses it to `vendorStatuses`. Don't read the raw payload anywhere else.
+- **Four status-writing crons**: `place-auto-approved-orders` (minutely), `reconcile-production-payments` (hourly), `sync-fulfillment-status` (hourly), `cleanup-stale-orders` (daily). `retry-failed-refunds` does NOT write status.
 
 **Consumer checklist** — every place that branches on `printOrderStatus` must be updated when states are added:
 - `app/(app)/dashboard/orders/[orderId]/page.tsx:23-33` — status label/variant map (note: duplicate map in orders-tab; both now carry `awaiting_agent_approval`/`auto_approved` labels as of CON-114 — only the map *duplication* itself remains to consolidate)

@@ -113,7 +113,8 @@ export interface Cart {
    * probe for minimums before the user commits to checkout.
    */
   minimumProductionPrice?: Record<string, {
-    price: number;
+    /** Null when the vendor has no minimum (seen live, e.g. JawsTec). */
+    price: number | null;
     productionFee: number;
   }>;
 }
@@ -145,8 +146,15 @@ export interface Order {
   status: OrderStatus;
 }
 
+/**
+ * Our normalized view of an order's status — NOT the wire shape. See
+ * normalizeOrderStatus (order-status.ts) for how CraftCloud's
+ * per-vendor status history maps onto it. Tracking fields are never
+ * filled from the status endpoint; CraftCloud doesn't return them.
+ */
 export interface OrderStatusResponse {
   orderId: string;
+  orderNumber?: string;
   vendorStatuses: Array<{
     vendorId: string;
     status: OrderStatus;

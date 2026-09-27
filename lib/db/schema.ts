@@ -202,6 +202,10 @@ export const users = pgTable("users", {
   // confirm-by-email flow regardless of token policy.
   stripeCustomerId: text("stripe_customer_id"),
   defaultPaymentMethod: text("default_payment_method"),
+  // Phone from the user's latest print checkout (shipping address).
+  // UNVERIFIED — kept on the profile so it can seed phone sign-in later,
+  // which must verify it first. Written by rememberCheckoutPhone().
+  phoneNumber: text("phone_number"),
   // Default visibility for files uploaded through implicit flows
   // (print checkout, agent MCP uploads). Explicit dashboard
   // publishes ignore this setting.

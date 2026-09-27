@@ -1,5 +1,6 @@
 import type { ShippingLite } from "./finish-cards";
 import { cheapestShippingByVendor } from "./finish-cards";
+import { quoteTotal, type VendorMinimums } from "./vendor-minimums";
 
 export interface VendorBadgeQuote {
   quoteId: string;
@@ -36,7 +37,7 @@ export function fastestDeliveryByVendor(
 /**
  * Which quotes in the *visible* vendor list win Cheapest / Fastest.
  *
- * Cheapest = min(production × qty + cheapest shipping).
+ * Cheapest = min(production × qty + vendor minimum fee + cheapest shipping).
  * Fastest  = min(productionTimeFast + fastest shipping delivery).
  *
  * Returns an empty map when there's nothing to compare (0–1 quotes)
@@ -45,7 +46,8 @@ export function fastestDeliveryByVendor(
 export function vendorQuoteBadges(
   quotes: VendorBadgeQuote[],
   shipping: ShippingLite[],
-  sortQuantity: number
+  sortQuantity: number,
+  minimums?: VendorMinimums
 ): Map<string, VendorBadges> {
   const out = new Map<string, VendorBadges>();
   if (quotes.length < 2) return out;
@@ -54,7 +56,7 @@ export function vendorQuoteBadges(
   const shipDays = fastestDeliveryByVendor(shipping);
 
   const totalCost = (q: VendorBadgeQuote) =>
-    q.price * sortQuantity + (shipPrice.get(q.vendorId) ?? 0);
+    quoteTotal(q, sortQuantity, shipPrice, minimums);
   const totalDays = (q: VendorBadgeQuote) =>
     q.productionTimeFast + (shipDays.get(q.vendorId) ?? 0);
 

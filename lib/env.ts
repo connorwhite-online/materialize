@@ -77,6 +77,7 @@ const baseServerEnvSchema = z.object({
   // defaults ON, so an unset var in prod would otherwise take real
   // Stripe money while fabricating craftCloudOrderIds).
   CRAFTCLOUD_USE_MOCK: z.string().optional(),
+  CRAFTCLOUD_MOCK_CHECKOUT: z.string().optional(),
 });
 
 /**
@@ -109,13 +110,17 @@ const serverEnvSchema = baseServerEnvSchema.superRefine((env, ctx) => {
   // ever gets placed. Require the var to be explicitly "false"
   // whenever Stripe is live.
   const stripeIsLive = (env.STRIPE_SECRET_KEY ?? "").startsWith("sk_live_");
-  const craftCloudMocked = env.CRAFTCLOUD_USE_MOCK !== "false";
+  // CRAFTCLOUD_MOCK_CHECKOUT=true mocks cart/order placement on its
+  // own even with CRAFTCLOUD_USE_MOCK=false, so it is the same hazard.
+  const craftCloudMocked =
+    env.CRAFTCLOUD_USE_MOCK !== "false" ||
+    env.CRAFTCLOUD_MOCK_CHECKOUT === "true";
   if (stripeIsLive && craftCloudMocked) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["CRAFTCLOUD_USE_MOCK"],
       message:
-        'CRAFTCLOUD_USE_MOCK must be set to "false" when STRIPE_SECRET_KEY is a live key (sk_live_*) — otherwise real Stripe charges are taken while CraftCloud orders are only mocked, never actually placed.',
+        'CRAFTCLOUD_USE_MOCK must be set to "false" (and CRAFTCLOUD_MOCK_CHECKOUT must not be "true") when STRIPE_SECRET_KEY is a live key (sk_live_*) — otherwise real Stripe charges are taken while CraftCloud orders are only mocked, never actually placed.',
     });
   }
 });
@@ -229,5 +234,30 @@ export function isSandboxMode(): boolean {
   // in lib/craftcloud/client.ts so the badge and the actual mock
   // path stay in sync.
   const craftCloudMock = process.env.CRAFTCLOUD_USE_MOCK !== "false";
-  return stripeIsTest || craftCloudMock || isCadRunnerMock();
+  const craftCloudMockCheckout =
+    process.env.CRAFTCLOUD_MOCK_CHECKOUT === "true";
+  return (
+    stripeIsTest || craftCloudMock || craftCloudMockCheckout || isCadRunnerMock()
+  );
+}
+
+/**
+ * The `isTestOrder` flag sent to CraftCloud's payment bridge. True only
+ * when the print checkout itself isn't live: Stripe on test keys, or
+ * CraftCloud (or just its checkout calls) mocked.
+ *
+ * Deliberately NOT `isSandboxMode()`: that also ORs in the CAD runner
+ * mock, which has nothing to do with printing. With it, a deployment
+ * that left CAD_RUNNER_URL unset flagged every real, live-keyed
+ * production order to CraftCloud as a test order.
+ */
+export function isCraftCloudTestOrder(): boolean {
+  const stripeIsTest = (process.env.STRIPE_SECRET_KEY ?? "").startsWith(
+    "sk_test_"
+  );
+  return (
+    stripeIsTest ||
+    process.env.CRAFTCLOUD_USE_MOCK !== "false" ||
+    process.env.CRAFTCLOUD_MOCK_CHECKOUT === "true"
+  );
 }

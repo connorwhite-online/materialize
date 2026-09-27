@@ -15,13 +15,16 @@ import {
 import { ChevronRight } from "@/components/icons/chevron-right";
 import { resolveCatalogImage } from "./catalog-image";
 import type { EnrichedQuote, OptimisticMaterial } from "./types";
+import type { ShippingLite as ShippingOptionLite } from "./finish-cards";
+import {
+  effectiveUnitPrice,
+  pickMinimumProbes,
+  quoteTotal,
+  type MinimumProbe,
+  type VendorMinimums,
+} from "./vendor-minimums";
 
 const ALL_GROUPS = "all";
-
-interface ShippingLite {
-  vendorId: string;
-  price: number;
-}
 
 interface MaterialStepProps {
   quotes: EnrichedQuote[];
@@ -32,7 +35,14 @@ interface MaterialStepProps {
    * with low shipping aren't dropped below tariff-heavy EU options
    * just because their production is more expensive.
    */
-  shipping: ShippingLite[];
+  shipping: ShippingOptionLite[];
+  /** Vendor minimum order values probed so far (see vendor-minimums.ts). */
+  vendorMinimums?: VendorMinimums;
+  /**
+   * Asks the parent to probe these vendors' minimums. Called once
+   * polling settles, for the few cheapest vendors of each material.
+   */
+  onRequestMinimums?: (probes: MinimumProbe[]) => void;
   /** Stable quantity anchor for the total-cost tiebreaker. */
   sortQuantity: number;
   quotesLoading: boolean;
@@ -83,7 +93,7 @@ interface MaterialCard {
    * push the user into a vendor step with no quotes to enumerate).
    */
   cheapest: number | null;
-  /** Min total (production*qty + shipping) — sort tiebreaker. Null until a quote arrives. */
+  /** Min total (production*qty + minimum fee + shipping) — sort tiebreaker. Null until a quote arrives. */
   cheapestTotal: number | null;
   fastestFast: number | null;
   fastestSlow: number | null;
@@ -111,6 +121,8 @@ const POPULAR_LIMIT = 6;
 export function MaterialStep({
   quotes,
   shipping,
+  vendorMinimums,
+  onRequestMinimums,
   sortQuantity,
   quotesLoading,
   quotesPartial = false,
@@ -131,7 +143,9 @@ export function MaterialStep({
       }
     }
     const totalCost = (q: { price: number; vendorId: string }) =>
-      q.price * sortQuantity + (cheapestShippingByVendor.get(q.vendorId) ?? 0);
+      quoteTotal(q, sortQuantity, cheapestShippingByVendor, vendorMinimums);
+    const unitPrice = (q: { price: number; vendorId: string }) =>
+      effectiveUnitPrice(q, sortQuantity, vendorMinimums);
 
     // Seed the map with optimistic placeholders for every viable
     // material — these stay visible regardless of whether a quote
@@ -168,7 +182,7 @@ export function MaterialStep({
           materialGroupName: q.materialGroupName,
           materialImage: q.materialImage,
           materialSortIndex: q.materialSortIndex,
-          cheapest: q.price,
+          cheapest: unitPrice(q),
           cheapestTotal: total,
           fastestFast: q.productionTimeFast,
           fastestSlow: q.productionTimeSlow,
@@ -176,8 +190,9 @@ export function MaterialStep({
         });
       } else {
         existing.configCount++;
-        if (q.price < existing.cheapest) {
-          existing.cheapest = q.price;
+        const unit = unitPrice(q);
+        if (unit < existing.cheapest) {
+          existing.cheapest = unit;
           existing.fastestFast = q.productionTimeFast;
           existing.fastestSlow = q.productionTimeSlow;
         }
@@ -243,7 +258,16 @@ export function MaterialStep({
       });
 
     return { groups, cardsByGroup, popularCards, totalCards: cards.length };
-  }, [quotes, shipping, sortQuantity, viableMaterials]);
+  }, [quotes, shipping, sortQuantity, viableMaterials, vendorMinimums]);
+
+  // Once the quote set settles, probe the few cheapest vendors of each
+  // material for their minimum order value so the "from" prices and
+  // the ranking include it. The parent dedupes vendors it has already
+  // probed, so re-running on a quantity change is cheap.
+  useEffect(() => {
+    if (quotesLoading || !onRequestMinimums || quotes.length === 0) return;
+    onRequestMinimums(pickMinimumProbes(quotes, shipping, sortQuantity));
+  }, [quotesLoading, onRequestMinimums, quotes, shipping, sortQuantity]);
 
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
 

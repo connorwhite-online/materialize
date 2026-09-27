@@ -9,6 +9,9 @@ let claimReturns: Array<{ id: string }> = [];
 const updateSet = vi.fn();
 const updateWhere = vi.fn();
 
+vi.mock("@/lib/users/checkout-phone", () => ({
+  rememberCheckoutPhone: vi.fn(async () => {}),
+}));
 vi.mock("@/lib/db", () => ({
   db: {
     select: () => ({
@@ -126,6 +129,7 @@ const baseAddress = {
     city: "London",
     zipCode: "NW15LR",
     countryCode: "GB",
+    phoneNumber: "+44 20 7946 0000",
   },
   billing: {
     firstName: "Ada",

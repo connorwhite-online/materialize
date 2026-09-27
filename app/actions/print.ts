@@ -35,6 +35,7 @@ import { db } from "@/lib/db";
 import { printOrders, printOrderItems, cartItems, fileAssets, files, users } from "@/lib/db/schema";
 import { eq, and, isNull, isNotNull, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { deriveAppUrl } from "@/lib/utils/request-url";
 import {
@@ -46,7 +47,7 @@ import {
   isMockCheckoutMode,
   CraftCloudApiError,
 } from "@/lib/craftcloud/client";
-import { getCheckoutModel, isSandboxMode } from "@/lib/env";
+import { getCheckoutModel, isCraftCloudTestOrder } from "@/lib/env";
 import { findMaterialConfig, findProvider } from "@/lib/craftcloud/catalog";
 import { getStripe } from "@/lib/stripe";
 import { printOrderSchema } from "@/lib/validations/print";
@@ -57,6 +58,11 @@ import { promoteStudioDraftsForAssets } from "@/lib/studio-drafts";
 import { dedupeShippingByShipId } from "@/lib/pricing/shipping";
 import type { Address, Currency } from "@/lib/craftcloud/types";
 import { calcServiceFee } from "@/lib/fees";
+import { rememberCheckoutPhone } from "@/lib/users/checkout-phone";
+import {
+  getVendorMinimums,
+  MAX_PROBES_PER_REQUEST,
+} from "@/lib/craftcloud/vendor-minimums";
 import { getOrCreateStripeCustomer } from "@/lib/stripe/customers";
 import { persistSavedFeeCard } from "@/lib/stripe/handle-print-order-payment";
 import { mintPayProductionToken } from "@/lib/orders/pay-production-token";
@@ -221,6 +227,43 @@ export async function checkCartPricing(params: {
   } catch (error) {
     logError("checkCartPricing", error);
     return { error: "Failed to check cart pricing" };
+  }
+}
+
+const vendorMinimumsInput = z.object({
+  currency: z.enum(["USD", "EUR", "GBP", "CAD", "AUD", "CHF", "NOK", "JPY", "ILS"]),
+  probes: z
+    .array(
+      z.object({
+        vendorId: z.string().min(1).max(100),
+        quoteId: z.string().min(1).max(200),
+        shippingId: z.string().min(1).max(200),
+      })
+    )
+    .max(MAX_PROBES_PER_REQUEST * 4),
+});
+
+/**
+ * Minimum order value per vendor, for ranking the print picker by what
+ * the buyer will actually pay. One disposable cart per unknown vendor,
+ * cached server-side (lib/craftcloud/vendor-minimums.ts). Informational
+ * only, like `checkCartPricing` — checkout re-reads the fee off its own
+ * cart. No auth: anon buyers use the picker too, and a cart places nothing.
+ */
+export async function checkVendorMinimums(
+  input: z.infer<typeof vendorMinimumsInput>
+): Promise<{ minimums: Record<string, number> } | { error: string }> {
+  const parsed = vendorMinimumsInput.safeParse(input);
+  if (!parsed.success) return { error: "Invalid request" };
+  try {
+    const minimums = await getVendorMinimums(
+      parsed.data.probes,
+      parsed.data.currency
+    );
+    return { minimums };
+  } catch (error) {
+    logError("checkVendorMinimums", error);
+    return { error: "Failed to check vendor minimums" };
   }
 }
 
@@ -1110,6 +1153,10 @@ export async function completePrintOrder(params: {
       }
     }
 
+    // Past the confirmation stop, so nothing is written until the buyer
+    // has committed to paying.
+    await rememberCheckoutPhone(userId, addressParsed.data.shipping.phoneNumber);
+
     // Atomic claim: only one tab/device can mint a new session.
     // The conditional WHERE makes this race-safe across replicas.
     const sentinel = `${SESSION_CLAIM_PREFIX}${nanoid()}`;
@@ -1763,7 +1810,7 @@ async function healMockBridgeUrl(
       orderId: craftCloudOrderId,
       returnUrl: `${appUrl}/dashboard/orders?production=paid&orderId=${orderId}`,
       cancelUrl: `${appUrl}/orders/${orderId}/pay-production`,
-      isTestOrder: isSandboxMode(),
+      isTestOrder: isCraftCloudTestOrder(),
     });
     await db
       .update(printOrders)
@@ -2024,7 +2071,7 @@ async function prepareTwoStepOrder(
         orderId: craftCloudOrderId,
         returnUrl: `${appUrl}/dashboard/orders?production=paid&orderId=${order.id}`,
         cancelUrl: `${appUrl}/orders/${order.id}/pay-production`,
-        isTestOrder: isSandboxMode(),
+        isTestOrder: isCraftCloudTestOrder(),
       });
     } catch (err) {
       logError("completePrintOrder.twoStep.createStripeCheckout", err);
@@ -2101,6 +2148,8 @@ export async function getSavedShippingAddress(): Promise<
       !saved.shipping?.city ||
       !saved.shipping?.zipCode ||
       !saved.shipping?.countryCode ||
+      // Required since CraftCloud started rejecting orders without it.
+      !saved.shipping?.phoneNumber ||
       !saved.billing
     ) {
       return null;

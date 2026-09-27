@@ -17,6 +17,10 @@
       "schedule": "0 * * * *"
     },
     {
+      "path": "/api/cron/sync-fulfillment-status",
+      "schedule": "40 * * * *"
+    },
+    {
       "path": "/api/cron/cleanup-orphan-uploads",
       "schedule": "0 3 * * *"
     },

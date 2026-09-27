@@ -95,6 +95,9 @@ function fillRequiredFields() {
   fireEvent.change(screen.getByLabelText("Postal Code"), {
     target: { value: "NW1 5LR" },
   });
+  fireEvent.change(screen.getByLabelText("Phone"), {
+    target: { value: "+44 20 7946 0000" },
+  });
 }
 
 // Drives the OTP input that input-otp renders as a single hidden
@@ -191,6 +194,28 @@ describe("ShippingAddressForm — authed mode", () => {
 
     expect(onSubmit).not.toHaveBeenCalled();
     expect(await screen.findAllByText(/Required/i)).not.toHaveLength(0);
+  });
+
+  // CraftCloud rejects an order with no shipping phone number.
+  it("blocks submission without a phone number", async () => {
+    const onSubmit = vi.fn();
+    render(
+      <ShippingAddressForm
+        onSubmit={onSubmit}
+        onBack={vi.fn()}
+        isSubmitting={false}
+      />
+    );
+
+    fillRequiredFields();
+    fireEvent.change(screen.getByLabelText("Phone"), {
+      target: { value: "" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Place Order & Pay/i }));
+
+    expect(await screen.findByText("Phone number required")).toBeTruthy();
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(document.activeElement?.id).toBe("phoneNumber");
   });
 });
 
