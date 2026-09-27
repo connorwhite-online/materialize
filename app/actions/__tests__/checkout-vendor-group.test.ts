@@ -116,7 +116,7 @@ const mockGetCheckoutModel = vi.fn(
 );
 vi.mock("@/lib/env", () => ({
   getCheckoutModel: () => mockGetCheckoutModel(),
-  isSandboxMode: vi.fn(() => true),
+  isCraftCloudTestOrder: vi.fn(() => true),
 }));
 
 vi.mock("@/lib/logger", () => ({

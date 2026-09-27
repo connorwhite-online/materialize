@@ -101,7 +101,7 @@ vi.mock("@/lib/craftcloud/client", () => ({
 
 vi.mock("@/lib/env", () => ({
   getCheckoutModel: vi.fn(() => "single"),
-  isSandboxMode: vi.fn(() => true),
+  isCraftCloudTestOrder: vi.fn(() => true),
 }));
 
 vi.mock("@/lib/logger", () => ({

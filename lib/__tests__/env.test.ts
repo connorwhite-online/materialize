@@ -5,6 +5,7 @@ import {
   requireEnv,
   isCadRunnerMock,
   isSandboxMode,
+  isCraftCloudTestOrder,
 } from "../env";
 
 // A complete, valid set of all required server vars, layered over a clean
@@ -199,6 +200,17 @@ describe("validateServerEnv", () => {
       expect(() => mod.validateServerEnv()).not.toThrow();
     });
 
+    it("throws when Stripe is live and CRAFTCLOUD_MOCK_CHECKOUT is \"true\"", async () => {
+      const env = validEnv();
+      env.STRIPE_SECRET_KEY = "sk_live_abc123";
+      env.CRAFTCLOUD_USE_MOCK = "false";
+      env.CRAFTCLOUD_MOCK_CHECKOUT = "true";
+      process.env = { ...env };
+
+      const mod = await freshValidate();
+      expect(() => mod.validateServerEnv()).toThrow(mod.EnvValidationError);
+    });
+
     it("passes when Stripe is a test key regardless of CRAFTCLOUD_USE_MOCK", async () => {
       const env = validEnv();
       env.STRIPE_SECRET_KEY = "sk_test_abc123";
@@ -279,6 +291,39 @@ describe("isSandboxMode", () => {
   it("is true when only the CAD runner is mocked", () => {
     liveEnv();
     delete process.env.CAD_RUNNER_URL;
+    expect(isSandboxMode()).toBe(true);
+  });
+});
+
+describe("isCraftCloudTestOrder", () => {
+  const original = process.env;
+  beforeEach(() => {
+    process.env = { ...original };
+    process.env.STRIPE_SECRET_KEY = "sk_live_abc";
+    process.env.CRAFTCLOUD_USE_MOCK = "false";
+    delete process.env.CRAFTCLOUD_MOCK_CHECKOUT;
+  });
+  afterEach(() => {
+    process.env = original;
+  });
+
+  it("is false for a live checkout even when the CAD runner is mocked", () => {
+    delete process.env.CAD_RUNNER_URL;
+    expect(isSandboxMode()).toBe(true);
+    expect(isCraftCloudTestOrder()).toBe(false);
+  });
+
+  it("is true on a Stripe test key", () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_abc";
+    expect(isCraftCloudTestOrder()).toBe(true);
+  });
+
+  it("is true when CraftCloud or just its checkout is mocked", () => {
+    process.env.CRAFTCLOUD_USE_MOCK = "true";
+    expect(isCraftCloudTestOrder()).toBe(true);
+    process.env.CRAFTCLOUD_USE_MOCK = "false";
+    process.env.CRAFTCLOUD_MOCK_CHECKOUT = "true";
+    expect(isCraftCloudTestOrder()).toBe(true);
     expect(isSandboxMode()).toBe(true);
   });
 });

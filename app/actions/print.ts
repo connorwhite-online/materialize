@@ -46,7 +46,7 @@ import {
   isMockCheckoutMode,
   CraftCloudApiError,
 } from "@/lib/craftcloud/client";
-import { getCheckoutModel, isSandboxMode } from "@/lib/env";
+import { getCheckoutModel, isCraftCloudTestOrder } from "@/lib/env";
 import { findMaterialConfig, findProvider } from "@/lib/craftcloud/catalog";
 import { getStripe } from "@/lib/stripe";
 import { printOrderSchema } from "@/lib/validations/print";
@@ -1763,7 +1763,7 @@ async function healMockBridgeUrl(
       orderId: craftCloudOrderId,
       returnUrl: `${appUrl}/dashboard/orders?production=paid&orderId=${orderId}`,
       cancelUrl: `${appUrl}/orders/${orderId}/pay-production`,
-      isTestOrder: isSandboxMode(),
+      isTestOrder: isCraftCloudTestOrder(),
     });
     await db
       .update(printOrders)
@@ -2024,7 +2024,7 @@ async function prepareTwoStepOrder(
         orderId: craftCloudOrderId,
         returnUrl: `${appUrl}/dashboard/orders?production=paid&orderId=${order.id}`,
         cancelUrl: `${appUrl}/orders/${order.id}/pay-production`,
-        isTestOrder: isSandboxMode(),
+        isTestOrder: isCraftCloudTestOrder(),
       });
     } catch (err) {
       logError("completePrintOrder.twoStep.createStripeCheckout", err);
