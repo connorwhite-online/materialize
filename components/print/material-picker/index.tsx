@@ -8,11 +8,8 @@ import type {
   OptimisticMaterial,
   PickerStep,
 } from "./types";
-
-interface ShippingLite {
-  vendorId: string;
-  price: number;
-}
+import type { ShippingLite } from "./finish-cards";
+import type { MinimumProbe, VendorMinimums } from "./vendor-minimums";
 
 interface MaterialPickerProps {
   quotes: EnrichedQuote[];
@@ -26,6 +23,13 @@ interface MaterialPickerProps {
    * (low production, high tariff-inflated shipping).
    */
   shipping: ShippingLite[];
+  /**
+   * Vendor minimum order values probed so far, folded into every
+   * price and ranking on both steps. See vendor-minimums.ts.
+   */
+  vendorMinimums?: VendorMinimums;
+  /** Asks the parent to probe these vendors' minimums. */
+  onRequestMinimums?: (probes: MinimumProbe[]) => void;
   /**
    * Quantity used to weight production cost in the sort score —
    * `price * sortQuantity + cheapestShipping`. Held by the parent
@@ -80,6 +84,8 @@ interface MaterialPickerProps {
 export function MaterialPicker({
   quotes,
   shipping,
+  vendorMinimums,
+  onRequestMinimums,
   sortQuantity,
   quotesLoading,
   quotesPartial = false,
@@ -138,6 +144,8 @@ export function MaterialPicker({
       <MaterialStep
         quotes={quotes}
         shipping={shipping}
+        vendorMinimums={vendorMinimums}
+        onRequestMinimums={onRequestMinimums}
         sortQuantity={sortQuantity}
         quotesLoading={quotesLoading}
         quotesPartial={quotesPartial}
@@ -159,6 +167,8 @@ export function MaterialPicker({
         key={materialId}
         quotes={quotes}
         shipping={shipping}
+        vendorMinimums={vendorMinimums}
+        onRequestMinimums={onRequestMinimums}
         sortQuantity={sortQuantity}
         materialId={materialId}
         initialFinishGroupId={

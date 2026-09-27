@@ -57,6 +57,7 @@ import { LICENSE_ENUM_VALUES } from "@/lib/licenses";
 import { DESIGN_TAG_OPTIONS } from "@/lib/validations/file";
 import { deriveAppUrl } from "@/lib/utils/request-url";
 import { logError } from "@/lib/logger";
+import { shippingPhoneSchema } from "@/lib/validations/address";
 
 /**
  * Convert any tool result into the MCP shape. We always return a
@@ -1239,7 +1240,9 @@ const handler = createMcpHandler(
             zipCode: z.string().min(1),
             stateCode: z.string().optional(),
             countryCode: z.string().length(2),
-            phoneNumber: z.string().optional(),
+            phoneNumber: shippingPhoneSchema.describe(
+              "Recipient phone number. Required: the manufacturer rejects orders without one."
+            ),
           }),
           idempotencyKey: z
             .string()

@@ -102,6 +102,7 @@ const REQUIRED_FIELD_IDS = [
   "address",
   "city",
   "zipCode",
+  "phoneNumber",
 ] as const;
 
 export function ShippingAddressForm({
@@ -193,6 +194,9 @@ export function ShippingAddressForm({
     if (!shipping.address) errs.address = "Required";
     if (!shipping.city) errs.city = "Required";
     if (!shipping.zipCode) errs.zipCode = "Required";
+    if ((shipping.phoneNumber ?? "").replace(/\D/g, "").length < 7) {
+      errs.phoneNumber = "Phone number required";
+    }
     setErrors(errs);
     return errs;
   };
@@ -797,13 +801,24 @@ export function ShippingAddressForm({
           </div>
 
           <div>
-            <Label htmlFor="phone">Phone (optional)</Label>
+            <Label htmlFor="phoneNumber">Phone</Label>
             <Input
-              id="phone"
+              id="phoneNumber"
               type="tel"
+              autoComplete="tel"
               value={shipping.phoneNumber}
               onChange={(e) => updateShipping("phoneNumber", e.target.value)}
+              aria-required="true"
+              aria-invalid={!!errors.phoneNumber}
+              aria-describedby={errors.phoneNumber ? "phoneNumber-error" : "phoneNumber-hint"}
             />
+            {errors.phoneNumber ? (
+              <p id="phoneNumber-error" className="mt-1 text-xs text-destructive">{errors.phoneNumber}</p>
+            ) : (
+              <p id="phoneNumber-hint" className="mt-1 text-xs text-muted-foreground">
+                The print shop&apos;s carrier needs it for delivery.
+              </p>
+            )}
           </div>
 
           <div className="pt-2">

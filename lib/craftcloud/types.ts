@@ -113,7 +113,8 @@ export interface Cart {
    * probe for minimums before the user commits to checkout.
    */
   minimumProductionPrice?: Record<string, {
-    price: number;
+    /** Null when the vendor has no minimum (seen live, e.g. JawsTec). */
+    price: number | null;
     productionFee: number;
   }>;
 }

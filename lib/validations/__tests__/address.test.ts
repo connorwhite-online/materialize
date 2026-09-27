@@ -61,11 +61,14 @@ describe("addressSchema", () => {
   });
 });
 
+// CraftCloud rejects an order with no shipping phone, so checkout does too.
+const validShipping = { ...validAddress, phoneNumber: "+44 20 7946 0000" };
+
 describe("checkoutAddressSchema", () => {
   it("accepts a minimal valid checkout payload", () => {
     const result = checkoutAddressSchema.safeParse({
       email: "ada@example.com",
-      shipping: validAddress,
+      shipping: validShipping,
     });
     expect(result.success).toBe(true);
     if (result.success) {
@@ -76,7 +79,7 @@ describe("checkoutAddressSchema", () => {
   it("accepts a split billing address", () => {
     const result = checkoutAddressSchema.safeParse({
       email: "ada@example.com",
-      shipping: validAddress,
+      shipping: validShipping,
       billingSameAsShipping: false,
       billing: {
         ...validAddress,
@@ -100,5 +103,24 @@ describe("checkoutAddressSchema", () => {
       email: "ada@example.com",
     });
     expect(result.success).toBe(false);
+  });
+
+  it("requires a real shipping phone number, but not a billing one", () => {
+    for (const phoneNumber of [undefined, "", "  ", "123"]) {
+      expect(
+        checkoutAddressSchema.safeParse({
+          email: "ada@example.com",
+          shipping: { ...validAddress, phoneNumber },
+        }).success
+      ).toBe(false);
+    }
+    expect(
+      checkoutAddressSchema.safeParse({
+        email: "ada@example.com",
+        shipping: { ...validAddress, phoneNumber: "(212) 555-0123" },
+        billingSameAsShipping: false,
+        billing: { ...validAddress, isCompany: false },
+      }).success
+    ).toBe(true);
   });
 });

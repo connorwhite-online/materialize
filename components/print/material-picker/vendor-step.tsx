@@ -20,6 +20,14 @@ import {
   type ShippingLite,
 } from "./finish-cards";
 import { vendorQuoteBadges } from "./vendor-badges";
+import {
+  effectiveUnitPrice,
+  minimumFee,
+  probesForQuotes,
+  quoteTotal,
+  type MinimumProbe,
+  type VendorMinimums,
+} from "./vendor-minimums";
 import type { EnrichedQuote } from "./types";
 
 /**
@@ -86,9 +94,13 @@ function vendorLocationLabel(
 interface VendorStepProps {
   quotes: EnrichedQuote[];
   shipping: ShippingLite[];
+  /** Vendor minimum order values probed so far (see vendor-minimums.ts). */
+  vendorMinimums?: VendorMinimums;
+  /** Asks the parent to probe the minimums of the vendors on screen. */
+  onRequestMinimums?: (probes: MinimumProbe[]) => void;
   /**
    * Quantity used to weight production cost in the sort score —
-   * `price * sortQuantity + cheapestShipping`. Held by the parent
+   * `price * sortQuantity + minimumFee + cheapestShipping`. Held by the parent
    * as a stable anchor that doesn't track every keystroke of the
    * qty input.
    */
@@ -114,6 +126,8 @@ interface VendorStepProps {
 export function VendorStep({
   quotes,
   shipping,
+  vendorMinimums,
+  onRequestMinimums,
   sortQuantity,
   materialId,
   initialFinishGroupId,
@@ -127,8 +141,15 @@ export function VendorStep({
   );
 
   const finishes = useMemo(
-    () => aggregateFinishCards(quotes, shipping, sortQuantity, materialId),
-    [quotes, shipping, sortQuantity, materialId]
+    () =>
+      aggregateFinishCards(
+        quotes,
+        shipping,
+        sortQuantity,
+        materialId,
+        vendorMinimums
+      ),
+    [quotes, shipping, sortQuantity, materialId, vendorMinimums]
   );
 
   const [finishGroupId, setFinishGroupId] = useState<string | null>(() =>
@@ -165,9 +186,13 @@ export function VendorStep({
     // to ship into the US — sorting by `q.price` alone hid those
     // wins. Shipping defaults to 0 for vendors whose shipping option
     // hasn't landed yet in this poll snapshot; the next snapshot
-    // will reorder them once their shipping arrives.
+    // will reorder them once their shipping arrives. A vendor's
+    // minimum order fee counts too — a $7 part at a $33-minimum
+    // vendor costs $33, whatever the quote says.
     const totalCost = (q: EnrichedQuote) =>
-      q.price * sortQuantity + (cheapestShippingByVendor.get(q.vendorId) ?? 0);
+      quoteTotal(q, sortQuantity, cheapestShippingByVendor, vendorMinimums);
+    const unitPrice = (q: EnrichedQuote) =>
+      effectiveUnitPrice(q, sortQuantity, vendorMinimums);
 
     const byColor = new Map<string, EnrichedQuote[]>();
     for (const q of filtered) {
@@ -176,8 +201,8 @@ export function VendorStep({
       byColor.set(q.color, list);
     }
 
-    // Swatch label still shows the cheapest single-unit production
-    // price ("$X per part starting at"). Sorting uses total — so
+    // Swatch label still shows the cheapest per-unit production
+    // price ("$X per part starting at"), minimum included. Sorting uses total — so
     // the cheapest-by-total color leads the rail even if a different
     // color has lower production but worse shipping.
     const cheapestPerColor = new Map<string, number>();
@@ -187,7 +212,7 @@ export function VendorStep({
         qs.sort((a, b) => totalCost(a) - totalCost(b));
         cheapestPerColor.set(
           name,
-          qs.reduce((min, q) => (q.price < min ? q.price : min), qs[0].price)
+          qs.reduce((min, q) => Math.min(min, unitPrice(q)), unitPrice(qs[0]))
         );
         cheapestTotalPerColor.set(name, totalCost(qs[0]));
         return {
@@ -209,6 +234,7 @@ export function VendorStep({
     finishGroupId,
     sortQuantity,
     cheapestShippingByVendor,
+    vendorMinimums,
   ]);
 
   const [activeColor, setActiveColor] = useState<string>(
@@ -231,9 +257,17 @@ export function VendorStep({
   // color filters change the winners. Pure helper so the scoring
   // is unit-testable without mounting the step.
   const badgesByQuoteId = useMemo(
-    () => vendorQuoteBadges(vendorQuotes, shipping, sortQuantity),
-    [vendorQuotes, shipping, sortQuantity]
+    () =>
+      vendorQuoteBadges(vendorQuotes, shipping, sortQuantity, vendorMinimums),
+    [vendorQuotes, shipping, sortQuantity, vendorMinimums]
   );
+
+  // Probe every vendor on screen for its minimum order value. The
+  // parent dedupes vendors it has already asked about.
+  useEffect(() => {
+    if (!onRequestMinimums || vendorQuotes.length === 0) return;
+    onRequestMinimums(probesForQuotes(vendorQuotes, shipping));
+  }, [onRequestMinimums, vendorQuotes, shipping]);
 
   const handleFinishChange = (id: string) => {
     setFinishGroupId(id);
@@ -332,6 +366,7 @@ export function VendorStep({
         {vendorQuotes.map((quote) => {
           const isSelected = selectedQuote?.quoteId === quote.quoteId;
           const cheapestShipping = cheapestShippingByVendor.get(quote.vendorId);
+          const fee = minimumFee(quote, sortQuantity, vendorMinimums);
           const badges = badgesByQuoteId.get(quote.quoteId);
           return (
             <button
@@ -400,6 +435,11 @@ export function VendorStep({
                   <p className="text-sm font-medium tabular-nums">
                     ${quote.price.toFixed(2)}
                   </p>
+                  {fee > 0 && (
+                    <p className="mt-0.5 text-[10px] text-amber-700 tabular-nums dark:text-amber-400">
+                      + ${fee.toFixed(2)} vendor minimum
+                    </p>
+                  )}
                   {typeof cheapestShipping === "number" && (
                     <p className="mt-0.5 text-[10px] text-muted-foreground tabular-nums">
                       + ${cheapestShipping.toFixed(2)} shipping

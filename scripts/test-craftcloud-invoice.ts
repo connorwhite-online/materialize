@@ -169,6 +169,8 @@ async function main() {
     zipCode: "10001",
     stateCode: "NY",
     countryCode: COUNTRY,
+    // Required by POST /v5/order; a 555 number is fine for an unpaid test.
+    phoneNumber: "+12125550123",
   };
   const order = await must<{ orderId: string }>("POST", "/v5/order", {
     cartId: cart.cartId,
