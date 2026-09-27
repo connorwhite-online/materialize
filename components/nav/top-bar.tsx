@@ -19,15 +19,20 @@ const NAV_LOGO_HEIGHT = 22;
 
 /**
  * Height of the animated lockup — the size the word wipes in at. The
- * collapsed mark grows past it via `--mz-mark-scale` (globals.css), so
- * these two numbers are a pair: 10px word → 16px mark. Changing this
- * without changing the scale changes where the M lands.
+ * collapsed mark grows past it via `--mz-mark-scale`, so these are a
+ * pair: 14px word → 16px mark. The desktop nav sets its own scale inline
+ * (NAV_MARK_SCALE) because the global default in globals.css is tuned
+ * for the 10px mobile pill — change one without the other and the M
+ * lands somewhere new.
  *
  * Deliberately NOT `NAV_LOGO_HEIGHT`. They were one constant until the
  * lockup was tuned to 11px, at which point bumping it to 22 for the
  * static mark silently doubled the animated one too.
  */
-const NAV_WORDMARK_HEIGHT = 10;
+const NAV_WORDMARK_HEIGHT = 14;
+/** The collapsed desktop M's rendered height, px. */
+export const NAV_COLLAPSED_MARK_PX = 16;
+const NAV_MARK_SCALE = NAV_COLLAPSED_MARK_PX / NAV_WORDMARK_HEIGHT;
 
 const ICON_GLYPH =
   "text-neutral-900 hover:text-neutral-900 dark:text-neutral-100 dark:hover:text-neutral-100";
@@ -134,6 +139,7 @@ export function TopBar({
                     animateOnMount
                     expanded={wordmarkExpanded}
                     height={NAV_WORDMARK_HEIGHT}
+                    style={{ ["--mz-mark-scale" as string]: NAV_MARK_SCALE }}
                   />
                 </span>
                 <Logomark height={NAV_LOGO_HEIGHT} className="nav:hidden" />

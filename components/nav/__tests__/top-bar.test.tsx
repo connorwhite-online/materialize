@@ -92,7 +92,7 @@ describe("TopBar landing wordmark", () => {
     // Word size stays put; the M grows via --mz-mark-scale on
     // `.mz-logo-mark` (not the whole SVG).
     expect(logo().style.getPropertyValue("--mz-h")).toBe(
-      `${LOCKUP_HEIGHT_PX}px`
+      `${DESKTOP_LOCKUP_PX}px`
     );
 
     setScrollY(0);
@@ -140,11 +140,14 @@ describe("TopBar landing wordmark", () => {
  * an unrelated static mark that shared the constant, and nothing caught
  * that the collapsed M had silently doubled to 32px.
  */
+/** Mobile pill lockup — paired with the global --mz-mark-scale. */
 const LOCKUP_HEIGHT_PX = 10;
+/** Desktop nav lockup — carries its own inline mark scale. */
+const DESKTOP_LOCKUP_PX = 14;
 const COLLAPSED_MARK_PX = 16;
 
 describe("nav lockup sizing", () => {
-  it("wipes the word in at 10px and lands the mark at 16px", () => {
+  it("mobile pill: wipes the word in at 10px and lands the mark at 16px", () => {
     const globals = readFileSync(
       resolve(__dirname, "../../../app/globals.css"),
       "utf8"
@@ -159,8 +162,19 @@ describe("nav lockup sizing", () => {
   it("keeps the static app-chrome mark off the lockup height", () => {
     const topBar = readFileSync(resolve(__dirname, "../top-bar.tsx"), "utf8");
     // One constant for both is exactly how the collapsed M doubled.
-    expect(topBar).toMatch(/NAV_WORDMARK_HEIGHT = 10/);
+    expect(topBar).toMatch(/NAV_WORDMARK_HEIGHT = 14/);
     expect(topBar).toMatch(/NAV_LOGO_HEIGHT = 22/);
     expect(topBar).toMatch(/height=\{NAV_WORDMARK_HEIGHT\}/);
+  });
+
+  it("keeps the desktop collapsed M at 16px with the bigger word", () => {
+    const topBar = readFileSync(resolve(__dirname, "../top-bar.tsx"), "utf8");
+    const word = Number(topBar.match(/NAV_WORDMARK_HEIGHT = (\d+)/)?.[1]);
+    const mark = Number(topBar.match(/NAV_COLLAPSED_MARK_PX = (\d+)/)?.[1]);
+    expect(mark).toBe(16);
+    // The scale is derived, never hand-typed, and applied inline.
+    expect(topBar).toMatch(/NAV_MARK_SCALE = NAV_COLLAPSED_MARK_PX \/ NAV_WORDMARK_HEIGHT/);
+    expect(topBar).toMatch(/"--mz-mark-scale" as string\]: NAV_MARK_SCALE/);
+    expect(word * (mark / word)).toBe(16);
   });
 });

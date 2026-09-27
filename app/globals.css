@@ -595,9 +595,10 @@
   --mz-w-mark: calc(var(--mz-h, 20px) * 1.96575);
   --mz-w-full: calc(var(--mz-h, 20px) * 11.22335);
   /* Collapsed mark vs the word it replaced. Paired with the lockup
-     height at the call site: the nav wipes the word in at 10px and this
-     lands the mark at 16px. Tune here, but check NAV_WORDMARK_HEIGHT in
-     components/nav/top-bar.tsx — the pair is the design, not either
+     height at the call site: the mobile pill wipes the word in at 10px
+     and this lands the mark at 16px. The desktop nav wipes in at 14px and
+     overrides this inline (NAV_MARK_SCALE in components/nav/top-bar.tsx)
+     so its mark also lands at 16px — the pair is the design, not either
      number alone. */
   --mz-mark-scale: 1.6;
 

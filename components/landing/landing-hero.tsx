@@ -262,7 +262,7 @@ export function StepCopy() {
 }
 
 const CONTROL =
-  "glass-surface pointer-events-auto flex items-center justify-center rounded-full ring-1 ring-border/70 text-foreground/80 transition-[color,transform] duration-150 ease-spring hover:text-foreground active:scale-95";
+  "glass-surface pointer-events-auto flex cursor-pointer items-center justify-center rounded-full ring-1 ring-border/70 text-foreground/80 transition-[color,transform] duration-150 ease-spring hover:text-foreground active:scale-95";
 
 /**
  * Apple-product-page stepper, centred at the bottom of the first screen:
