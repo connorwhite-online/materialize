@@ -163,7 +163,7 @@ const COPY: Record<
   },
   build: {
     title: "Host the whole build",
-    body: "Every part, with its bill of materials.",
+    body: "Parts, bill of materials, and wiring diagrams.",
   },
 };
 

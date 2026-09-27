@@ -1,6 +1,6 @@
 // Builds the two anon-landing enclosure files from the Pneuma Q CAD export:
 //
-//   public/home/pneuma-q.glb         shells + 12% internals — paints the hero at once
+//   public/home/pneuma-q.glb         shells (60%) + 12% internals — paints the hero at once
 //   public/home/pneuma-q-detail.glb  50% internals — streamed in on idle
 //
 // Run from anywhere with the tools ad hoc (they're not app dependencies):
@@ -30,7 +30,12 @@ const io = new NodeIO()
   .registerExtensions(ALL_EXTENSIONS)
   .registerDependencies({ "meshopt.encoder": MeshoptEncoder });
 const isShell = (name) => /soft_shell/.test(name);
-const finish = [dedup(), prune(), quantize(), meshopt({ encoder: MeshoptEncoder, level: "high" })];
+// 16-bit normals: the default 10 bits bands reflections on polished
+// metal (steel/alloy looked faceted). Costs ~1KB after meshopt.
+const finish = [dedup(), prune(), quantize({ quantizeNormal: 16 }), meshopt({ encoder: MeshoptEncoder, level: "high" })];
+// Shells keep most of their triangles for the same reason — mirror
+// finishes show every facet. SHELL_RATIO overrides for experiments.
+const SHELL_RATIO = Number(process.env.SHELL_RATIO ?? 0.6);
 
 async function internals(doc, ratio, error) {
   for (const m of doc.getRoot().listMeshes()) {
@@ -53,7 +58,7 @@ async function internals(doc, ratio, error) {
   for (const n of doc.getRoot().listNodes()) {
     if (!isShell(n.getName())) continue;
     for (const p of n.getMesh().listPrimitives()) {
-      simplifyPrimitive(p, { simplifier: MeshoptSimplifier, ratio: n.getName().startsWith("01") ? 0.35 : 0.2, error: 0.0008, lockBorder: false });
+      if (SHELL_RATIO < 1) simplifyPrimitive(p, { simplifier: MeshoptSimplifier, ratio: SHELL_RATIO, error: 0.0003, lockBorder: false });
     }
   }
   await doc.transform(...finish);
