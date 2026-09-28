@@ -18,37 +18,36 @@ import { agentClock } from "./agent-timeline";
  */
 
 const TOP = 0.228;
-/** Rim port, platform space: on the left flank (toward the monitor), turned a little to the front, so the cable comes straight in without crossing the body. */
-const PORT_ANGLE = Math.PI + 0.4;
 const PORT_Y = 0.07;
-export const PORT_LOCAL = new THREE.Vector3(
-  Math.cos(PORT_ANGLE) * 1.0,
-  PORT_Y,
-  -Math.sin(PORT_ANGLE) * 1.0,
-);
-/** Straight out of the port (radial), platform space. */
-export const PORT_OUT = new THREE.Vector3(
-  Math.cos(PORT_ANGLE),
-  0,
-  -Math.sin(PORT_ANGLE),
-);
+
+/**
+ * The rim port turns to face the monitor, wherever the layout puts it:
+ * the cable then always arrives straight on from the monitor's side and
+ * never has to pass through the platform's body. Angle in platform space
+ * (x right, z toward camera), measured like the lathe: (cos a, −sin a).
+ */
+function portAngle(f: Frame): number {
+  const d = f.desk.clone().sub(f.platform.position);
+  d.applyAxisAngle(new THREE.Vector3(0, 1, 0), -(f.orbitYaw ?? 0));
+  return Math.atan2(-d.z, d.x);
+}
 
 /** World position of the rim port, and its outward direction. */
 export function platformPort(
   f: Frame,
   out: { pos: THREE.Vector3; dir: THREE.Vector3 },
 ) {
-  // Same transform as the component: top-face pivot, tilt about x, scale.
+  // Same transform as the component: top-face pivot, tilt about x, then
+  // the drag-orbit yaw (YXZ: yaw outermost), scale.
+  const a = portAngle(f);
   const r = f.platform.radius;
-  // Tilt first, then the drag-orbit yaw (YXZ: yaw applied outermost).
-  const tilt = new THREE.Euler(f.platform.tilt, f.orbitYaw ?? 0, 0, "YXZ");
+  const rot = new THREE.Euler(f.platform.tilt, f.orbitYaw ?? 0, 0, "YXZ");
   out.pos
-    .copy(PORT_LOCAL)
-    .add(new THREE.Vector3(0, -TOP, 0))
-    .applyEuler(tilt)
+    .set(Math.cos(a), PORT_Y - TOP, -Math.sin(a))
+    .applyEuler(rot)
     .multiplyScalar(r)
     .add(f.platform.position);
-  out.dir.copy(PORT_OUT).applyEuler(tilt);
+  out.dir.set(Math.cos(a), 0, -Math.sin(a)).applyEuler(rot);
   return out;
 }
 
@@ -173,12 +172,16 @@ const UV_VERT = /* glsl */ `
 
 export function HoloPlatform({
   frameRef,
+  stepRef,
 }: {
   frameRef: MutableRefObject<Frame | null>;
+  stepRef: MutableRefObject<number>;
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const ringRef = useRef<THREE.Mesh>(null);
   const portRef = useRef<THREE.Group>(null);
+  const portMountRef = useRef<THREE.Group>(null);
+  const fade = useRef(0);
   const clock = useRef(0);
 
   const g = useMemo(
@@ -210,8 +213,14 @@ export function HoloPlatform({
     const f = frameRef.current;
     const group = groupRef.current;
     if (!f || !group) return;
-    // Only on the agents step, where it's what Claude builds on.
-    const o = THREE.MathUtils.smoothstep(f.agent, 0.3, 1);
+    // Only while the agents step is the step: fades in with its arrival,
+    // and out on its own ~150ms clock the moment the step changes — never
+    // lingering under the device on the way back to steps 1–2.
+    fade.current =
+      stepRef.current === 2
+        ? Math.max(fade.current, THREE.MathUtils.smoothstep(f.agent, 0.3, 1))
+        : Math.max(0, fade.current - Math.min(delta, 1 / 20) * 7);
+    const o = fade.current;
     group.visible = o > 0.01;
     if (!group.visible) return;
     clock.current += delta;
@@ -233,6 +242,12 @@ export function HoloPlatform({
     });
     // The port only exists for the agents step's hose; it sits on the
     // front rim, so elsewhere it would read as a stray nub.
+    const mount = portMountRef.current;
+    if (mount) {
+      const a = portAngle(f);
+      mount.position.set(Math.cos(a), PORT_Y, -Math.sin(a));
+      mount.rotation.set(0, a, 0);
+    }
     const port = portRef.current;
     if (port) {
       port.visible = f.agent > 0.01;
@@ -286,7 +301,7 @@ export function HoloPlatform({
           frustumCulled={false}
         />
         {/* Rim port: a small flush boss the hose plugs into. */}
-        <group position={PORT_LOCAL.toArray()} rotation={[0, PORT_ANGLE, 0]}>
+        <group ref={portMountRef}>
           <group ref={portRef}>
             <mesh rotation={[0, 0, Math.PI / 2]} position={[0.012, 0, 0]}>
               <cylinderGeometry args={[0.05, 0.056, 0.03, 32]} />

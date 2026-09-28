@@ -420,16 +420,19 @@ function layoutHose(
   const collarLen = radius * 2.6;
   const entry = port.pos.clone().addScaledVector(port.dir, collarLen);
   const span = start.distanceTo(entry);
+  // Both handles long and level-ish: the cable leaves the plug heading
+  // back, arcs once, and arrives along the port's axis — a single smooth
+  // S at most, never a kink (short handles + a hard sag made the elbow).
   const curve = new THREE.CubicBezierCurve3(
     start,
     start
       .clone()
-      .addScaledVector(out, span * 0.35)
-      .add(new THREE.Vector3(0, -span * 0.25, 0)),
+      .addScaledVector(out, span * 0.5)
+      .add(new THREE.Vector3(0, -span * 0.12, 0)),
     entry
       .clone()
-      .addScaledVector(port.dir, span * 0.4)
-      .add(new THREE.Vector3(0, -span * 0.12, 0)),
+      .addScaledVector(port.dir, span * 0.45)
+      .add(new THREE.Vector3(0, -span * 0.08, 0)),
     entry,
   );
   mesh.geometry?.dispose();

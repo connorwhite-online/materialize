@@ -277,10 +277,10 @@ export function layoutFor(view: View): Layout {
         : new Vector3(0, view.h * 0.02, 0),
     sA: s0 * (portrait ? 0.5 : wide ? 0.42 : 0.7),
     desk: portrait
-      ? new Vector3(-view.w * 0.2, -view.h * 0.16, view.h * 0.22)
+      ? new Vector3(-view.w * 0.16, -view.h * 0.02, view.h * 0.4)
       : wide
-        ? new Vector3(-view.w * 0.18, -view.h * 0.1, view.h * 0.15)
-        : new Vector3(-view.w * 0.24, -view.h * 0.14, view.h * 0.22),
+        ? new Vector3(-view.w * 0.14, -view.h * 0.06, view.h * 0.35)
+        : new Vector3(-view.w * 0.19, -view.h * 0.07, view.h * 0.42),
     agentUnit: portrait
       ? Math.min(view.w * 0.24, view.h * 0.11)
       : wide
@@ -411,7 +411,7 @@ function platformFor(
     };
   }
   // Agents: pulled back, the platform reads large relative to the device.
-  return under(L.stage, L.sA, DEVICE_WIDE * L.sA * 1.15, PLATFORM_TILT_AGENTS);
+  return under(L.stage, L.sA, DEVICE_WIDE * L.sA * 0.95, PLATFORM_TILT_AGENTS);
 }
 
 function mixPlatform(

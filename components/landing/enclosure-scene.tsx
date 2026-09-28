@@ -319,7 +319,7 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
         </Suspense>
       )}
       <AmbientMotes frameRef={frameRef} />
-      <HoloPlatform frameRef={frameRef} />
+      <HoloPlatform frameRef={frameRef} stepRef={stepRef} />
       <AgentDesk frameRef={frameRef} stepRef={stepRef} />
       {PARTS.filter((p) => p.bom).map((spec) => (
         <BomLabel key={spec.id} id={spec.id} frameRef={frameRef} />

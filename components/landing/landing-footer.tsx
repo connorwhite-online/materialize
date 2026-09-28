@@ -36,7 +36,7 @@ export function LandingFooter() {
           <div className="flex flex-col gap-3">
             <Wordmark height={14} className="text-foreground" />
             <p className="max-w-xs text-sm text-muted-foreground">
-              3D print files and on-demand printing, in 200+ materials.
+              File hosting and on-demand printing in 200+ materials.
             </p>
           </div>
           <nav
