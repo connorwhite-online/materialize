@@ -244,7 +244,7 @@ export function layoutFor(view: View): Layout {
   );
   // The stage is centred on every viewport. On a phone the copy owns the
   // bottom ~third (above the floating nav pill) and the stepper the top
-  // edge, so every step lives in the band between: centre ~0.15h above
+  // edge, so every step lives in the band between: centre ~0.1h above
   // the middle, ~0.5h tall. (Sized to fill the whole screen, the device
   // ran through the headline on a real iPhone.)
   const s2 = Math.min(
@@ -258,13 +258,13 @@ export function layoutFor(view: View): Layout {
     // Very wide + short (a phone on its side): the copy owns the left
     // half, so every step's stage shifts right, clear of it.
     t0: portrait
-      ? new Vector3(0, view.h * 0.15, 0)
+      ? new Vector3(0, view.h * 0.1, 0)
       : wide
         ? new Vector3(0, view.h * 0.06, 0)
         : new Vector3(0, -view.h * 0.03, 0),
     s2,
     t2: portrait
-      ? new Vector3(0, view.h * 0.14, 0)
+      ? new Vector3(0, view.h * 0.09, 0)
       : wide
         ? new Vector3(0, view.h * 0.06, 0)
         : new Vector3(0, -view.h * 0.04, 0),
@@ -273,13 +273,13 @@ export function layoutFor(view: View): Layout {
     // left and a little below centre, his hose looping back to it.
     // Portrait: platform up top, the mascot in front of it, lower-left.
     stage: portrait
-      ? new Vector3(0, view.h * 0.2, 0)
+      ? new Vector3(0, view.h * 0.15, 0)
       : wide
         ? new Vector3(0, view.h * 0.06, 0)
         : new Vector3(0, view.h * 0.02, 0),
     sA: s0 * (portrait ? 0.78 : wide ? 0.42 : 0.72),
     desk: portrait
-      ? new Vector3(-view.w * 0.29, view.h * 0.06, view.h * 0.12)
+      ? new Vector3(-view.w * 0.29, view.h * 0.01, view.h * 0.12)
       : wide
         ? new Vector3(-view.w * 0.14, -view.h * 0.06, view.h * 0.35)
         : new Vector3(-view.w * 0.19, -view.h * 0.07, view.h * 0.42),
