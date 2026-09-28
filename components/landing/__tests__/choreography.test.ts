@@ -48,22 +48,30 @@ describe.each([
     expect(gap / f.poses.front.scale).toBeLessThan(0.02);
   });
 
-  it("agents step: the device bows out, the printer takes centre stage", () => {
+  it("agents step: the shells stand apart on the hologram, internals out", () => {
     const f = sampleFrame(2, GEO, view);
     expect(f.agent).toBe(1);
     expect(f.bomLabels).toBe(0);
-    for (const p of PARTS) expect(f.poses[p.id].opacity, p.id).toBe(0);
-    // Printer centred; the mascot's monitor to its left, on screen.
-    expect(Math.abs(f.platform.position.x)).toBeLessThan(view.w * 0.02);
-    expect(f.platform.radius).toBeGreaterThan(0);
-    expect(f.desk.x).toBeLessThan(f.platform.position.x);
+    for (const p of PARTS)
+      expect(f.poses[p.id].opacity, p.id).toBe(p.shell ? 1 : 0);
+    // Pulled apart: further than when assembled on the hero.
+    const gap = (g: ReturnType<typeof sampleFrame>) =>
+      g.poses.front.position.distanceTo(g.poses.rear.position) /
+      g.poses.front.scale;
+    expect(gap(f)).toBeGreaterThan(gap(sampleFrame(0, GEO, view)) + 0.015);
+    // On the platform, seen nearly side-on; the monitor to its left.
+    const base = f.platform.position;
+    expect(base.y).toBeLessThan(f.poses.front.position.y);
+    expect(f.platform.tilt).toBeLessThan((10 * Math.PI) / 180);
+    expect(f.desk.x).toBeLessThan(base.x);
     expect(Math.abs(f.desk.x)).toBeLessThan(view.w / 2);
     expect(Math.abs(f.desk.y)).toBeLessThan(view.h / 2);
   });
 
-  it("the device is already gone a third of the way into the agents step", () => {
+  it("the internals are gone a third of the way into the agents step", () => {
     const f = sampleFrame(1.35, GEO, view);
-    for (const p of PARTS) expect(f.poses[p.id].opacity, p.id).toBe(0);
+    for (const p of PARTS)
+      if (!p.shell) expect(f.poses[p.id].opacity, p.id).toBe(0);
   });
 
   it("explodes every part in stack order, front shell on the left, fully visible", () => {

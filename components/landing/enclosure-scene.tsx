@@ -7,7 +7,7 @@ import * as THREE from "three";
 import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { useLanding } from "./landing-context";
 import { AgentDesk } from "./agent-desk";
-import { ToyPrinter } from "./toy-printer";
+import { HoloPlatform } from "./holo-platform";
 import {
   PLAIN,
   SWEEP_S,
@@ -226,6 +226,8 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
     lineMin: 0,
     lineMax: 0,
     lastStep: 0,
+    // Agents-step build: progress 0→1 (negative = waiting), -2 = none.
+    build: -2,
   });
 
   const idle = useIdle();
@@ -315,7 +317,7 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
           <DetailInternals parts={parts} />
         </Suspense>
       )}
-      <ToyPrinter frameRef={frameRef} />
+      <HoloPlatform frameRef={frameRef} />
       <AgentDesk frameRef={frameRef} stepRef={stepRef} />
       {PARTS.filter((p) => p.bom).map((spec) => (
         <BomLabel key={spec.id} id={spec.id} frameRef={frameRef} />
@@ -350,6 +352,7 @@ function runBurnSweep(
     lineMin: number;
     lineMax: number;
     lastStep: number;
+    build: number;
   },
   layers: Record<ShellId, ShellLayers>,
   step: number,
@@ -362,7 +365,43 @@ function runBurnSweep(
   // sweep — otherwise it fires while the shells are still flying home.
   if (step !== st.lastStep) {
     if (step === 0) st.sinceSweep = 0;
+    // Leaving the agents step mid-build: show the shells whole again.
+    if (st.lastStep === 2 && st.build > -2) finishBuild(st, shells);
+    if (step === 2 && !reducedMotion) {
+      // Settle any sweep in flight, then hide the shells above the edge
+      // and let the build raise it (below).
+      if (st.to >= 0) {
+        for (const l of shells) endSweep(l, st.to);
+        st.look = st.to;
+        st.to = -1;
+      }
+      for (const l of shells) {
+        startSweep(l, st.look);
+        l.a.visible = false;
+      }
+      st.build = -BUILD_DELAY_S / BUILD_S;
+    }
     st.lastStep = step;
+  }
+  // The agents step owns the edge: Claude materialises the enclosure on
+  // the hologram, bottom to top — the same electric edge as the material
+  // sweeps, with only what's below it drawn.
+  if (step === 2) {
+    if (st.build <= -2) return;
+    st.build = Math.min(1, st.build + delta / BUILD_S);
+    shellBox.makeEmpty();
+    for (const l of shells) shellBox.expandByObject(l.a);
+    const pad = (shellBox.max.y - shellBox.min.y) * 0.06;
+    const k = Math.max(0, st.build);
+    const h = THREE.MathUtils.lerp(
+      shellBox.min.y - pad,
+      shellBox.max.y + pad,
+      sweepEase(k),
+    );
+    const glow = st.build < 0 ? 0 : Math.pow(Math.sin(Math.PI * k), 0.35);
+    setSweepLine(h, shellBox.max.y - shellBox.min.y, st.clock, glow);
+    if (st.build >= 1) finishBuild(st, shells);
+    return;
   }
   if (st.to < 0) {
     const next = nextSweep(step, st.look, st.sinceSweep, false);
@@ -396,6 +435,21 @@ function runBurnSweep(
     st.to = -1;
     st.sinceSweep = 0;
   }
+}
+
+/** Seconds the build takes, and the wait for the device to land first. */
+const BUILD_S = 3.2;
+const BUILD_DELAY_S = 0.7;
+
+function finishBuild(
+  st: { look: number; build: number },
+  shells: ShellLayers[],
+) {
+  for (const l of shells) {
+    endSweep(l, st.look);
+    l.a.visible = true;
+  }
+  st.build = -2;
 }
 
 // ─── Labels ───────────────────────────────────────────────────────────

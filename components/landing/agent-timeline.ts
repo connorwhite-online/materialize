@@ -1,6 +1,6 @@
 /**
  * One clock for the agents step: bulges travel the hose (agent-desk.tsx)
- * and the printer's nozzle flares as each lands (toy-printer.tsx).
+ * and the hologram ripples as each lands (holo-platform.tsx).
  * Seconds from arriving on the step.
  */
 
@@ -11,7 +11,7 @@ export const PACKET_TRAVEL_S = 1.25;
 
 /**
  * The live agent clock, written by agent-desk.tsx each frame and read by
- * the printer (toy-printer.tsx) so its nozzle flares exactly as
+ * the hologram (holo-platform.tsx) so its ripple fires exactly as
  * a bulge lands. Module-level like the shader uniforms: one scene.
  */
 export const agentClock = {

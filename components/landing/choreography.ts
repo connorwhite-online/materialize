@@ -186,6 +186,13 @@ function turn(base: Quaternion, yaw: number, pitch = 0): Quaternion {
 
 export const HERO_QUAT = turn(STANDING, -0.35, 0.12);
 export const EXPLODE_QUAT = turn(LAID_OUT, 0.6, 0.08);
+/**
+ * Agents step: turned well round to its side, so the gap between the
+ * two shells (pulled apart on the hologram) reads from the camera.
+ */
+export const AGENT_QUAT = turn(STANDING, -1.05, 0.02);
+/** How far each shell stands off the other on the hologram, metres. */
+const AGENT_GAP = 0.012;
 
 /**
  * Internals that stay visible once the device closes: the camera shows
@@ -334,16 +341,21 @@ function keyframe(
         opacity: 1,
       };
     }
-    case 2:
-      // The device bows out: the agents step belongs to the mascot's
-      // monitor and the toy printer it feeds (toy-printer.tsx). It fades
-      // early in the transition (sampleFrame), closing up where it stands.
+    case 2: {
+      // Standing on the hologram, the two shells pulled slightly apart —
+      // what Claude is building. The scene materialises them bottom to
+      // top behind the burn edge (enclosure-scene.tsx, runBuild); the
+      // internals stay out.
+      const off =
+        part.id === "front" ? AGENT_GAP : part.id === "rear" ? -AGENT_GAP : 0;
+      const at = new Vector3(c.x, c.y + off, c.z);
       return {
-        position: place(c, mc, HERO_QUAT, L.sA, L.stage),
-        quaternion: HERO_QUAT.clone(),
+        position: place(at, mc, AGENT_QUAT, L.sA, L.stage),
+        quaternion: AGENT_QUAT.clone(),
         scale: L.sA,
-        opacity: 0,
+        opacity: part.shell ? 1 : 0,
       };
+    }
   }
 }
 
@@ -362,7 +374,9 @@ function mix(a: Pose, b: Pose, t: number, opacity: number): Pose {
  * surface, not a line); a little more on the agents step, pulled back.
  */
 export const PLATFORM_TILT = (15 * Math.PI) / 180;
-const PLATFORM_TILT_AGENTS = (24 * Math.PI) / 180;
+/** Nearly side-on: the hologram reads as a disc edge, not a table top. */
+// Negative: tipped back against the camera looking down on it.
+const PLATFORM_TILT_AGENTS = (-4 * Math.PI) / 180;
 
 /**
  * Platform under the device on each step. The device's long axis is
@@ -422,9 +436,9 @@ export function sampleFrame(
     const a = keyframe(seg, part, geo, L);
     const b = keyframe((seg + 1) as 1 | 2, part, geo, L);
     let opacity = MathUtils.lerp(a.opacity, b.opacity, t);
-    // Into the agents step everything fades out fast, before it has
+    // Into the agents step the internals fade out fast, before they've
     // travelled far enough to read as flying somewhere.
-    if (seg === 1)
+    if (seg === 1 && !part.shell)
       opacity = a.opacity * (1 - MathUtils.smoothstep(raw, 0, 0.35));
     if (!part.shell) {
       // Internals arrive late into the BOM and leave early out of it, so

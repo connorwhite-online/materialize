@@ -5,7 +5,7 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { Frame } from "./choreography";
 import { PACKET_LAUNCH_S, PACKET_TRAVEL_S, agentClock } from "./agent-timeline";
-import { printerPort } from "./toy-printer";
+import { platformPort } from "./holo-platform";
 import {
   SPRITE_COLS,
   SPRITE_FRAMES,
@@ -17,7 +17,7 @@ import {
 
 /**
  * The agents step: a little monitor, cabled into the printer platform's
- * printer (toy-printer.tsx), with the Claude Code mascot on it as a
+ * hologram platform (holo-platform.tsx), with the Claude Code mascot on it as a
  * flat 8-bit sprite: the mascot's own typing animation, transcribed
  * frame-for-frame (claude-sprite.ts) and painted into a nearest-filtered
  * canvas texture over a frosted-glass screen.
@@ -229,7 +229,7 @@ export function AgentDesk({
     if (collarRef.current) setOpacity(collarRef.current, appear);
 
     // ── Cable into the platform's front port (rebuilt when either end moves) ──
-    const port = printerPort(f, portScratch);
+    const port = platformPort(f, portScratch);
     const key = `${f.desk.x.toFixed(3)},${f.desk.y.toFixed(3)},${port.pos.x.toFixed(3)},${port.pos.y.toFixed(3)},${u.toFixed(3)}`;
     if (key !== c.layoutKey) {
       c.layoutKey = key;
@@ -380,7 +380,7 @@ const CABLE_START_LOCAL = new THREE.Vector3(0.48, -0.12, -0.19);
 
 /**
  * Cable from the plug on the back of the monitor to the port on the
- * printer's flank: one cubic Bézier whose end tangents are the plug's
+ * platform's rim: one cubic Bézier whose end tangents are the plug's
  * backward axis and the port's outward axis, so it leaves and enters
  * both straight, with a single smooth sag between (no Catmull-Rom
  * kinks). The collar sits on the port.
