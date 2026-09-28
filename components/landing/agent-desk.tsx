@@ -8,85 +8,143 @@ import { PACKET_LAUNCH_S, PACKET_TRAVEL_S, agentClock } from "./agent-timeline";
 import { platformPort } from "./holo-platform";
 
 /**
- * The agents step: the Claude Code mascot, built from voxels and toon-
- * shaded to read like its flat 2D sprite, jams on a little laptop. A hose
- * loops back from the laptop into a port on the printer platform's rim
- * (holo-platform.tsx); bulges swell along it as each piece of work is
- * sent, easing into the port, and the platform ripples as each lands
- * (agentClock in agent-timeline.ts).
+ * The agents step: a little monitor, cabled into the printer platform's
+ * front port (holo-platform.tsx), with the Claude Code mascot on it as a
+ * flat 8-bit sprite hammering a pixel keyboard. The sprite is drawn into a
+ * canvas texture — nearest-filtered, and stepped at SPRITE_FPS so it
+ * animates like a sprite, not a tween — over a frosted-glass screen.
+ * Bulges swell down the cable as each piece of work is sent, easing into
+ * the port, and the platform ripples as each lands (agentClock in
+ * agent-timeline.ts).
  *
- * Everything is authored in "agent units" (1 ≈ the mascot's height) and
- * scaled by frame.agentUnit, so desktop and phone share one model.
+ * Authored in "agent units" (1 ≈ the monitor's height) and scaled by
+ * frame.agentUnit, so desktop and phone share one model.
  */
 
-// ─── Mascot ───────────────────────────────────────────────────────────
+// ─── Sprite ───────────────────────────────────────────────────────────
 
 /**
- * Front silhouette, top row first. B body, E eye, A arm (animated), L leg.
- * Extruded 3 voxels deep. Approximates the Claude Code pixel mascot —
- * swap in the official sprite here if it's to be exact.
+ * After the Claude Code mascot's own animation: turned three-quarters to
+ * his right (the darker column is his side), tapping a tiny grey laptop
+ * drawn in profile — a flat base and a lid leaning back. Between bursts
+ * he turns to face you, arm stubs out. Grids are top row first:
+ * B body, D side (shade), E eye, A arm, L leg.
  */
-const MASCOT = [
-  "..BBBBBBBB..",
-  "..BBBBBBBB..",
-  "..BEBBBBEB..",
-  "..BEBBBBEB..",
-  "AABBBBBBBBAA", // ARM_ROW: stubs rigged as arms (mascotVoxels)
-  "..BBBBBBBB..",
-  "..BBBBBBBB..",
-  "..L.L..L.L..",
-  "..L.L..L.L..",
+const TYPING = [
+  ".DBBBBBBB.",
+  ".DBEBBBEB.",
+  ".DBBBBBBBA",
+  ".DBBBBBBB.",
+  ".L.L..L.L.",
 ];
-const DEPTH = 3;
-const V = 1 / MASCOT.length; // voxel size: mascot is 1 unit tall
+/** Same, arm down on the keys (the hand drawn separately, half a cell). */
+const TYPING_DOWN = [
+  ".DBBBBBBB.",
+  ".DBEBBBEB.",
+  ".DBBBBBBB.",
+  ".DBBBBBBBA",
+  ".L.L..L.L.",
+];
+const FRONT = [
+  ".BBBBBBBB.",
+  ".BEBBBBEB.",
+  "ABBBBBBBBA",
+  ".BBBBBBBB.",
+  ".L.L..L.L.",
+];
 const ORANGE = "#d97757";
+const SIDE = "#b65f43";
+const EYE = "#1a1a1a";
+const LAPTOP = "#8b8b8e";
+/** Canvas size in sprite pixels; one grid cell is CELL pixels. */
+const SPRITE_W = 64;
+const SPRITE_H = 36;
+const CELL = 4;
+const SPRITE_FPS = 12;
+/** Monitor, agent units. */
+const SCREEN_W = 1.45;
+const SCREEN_H = SCREEN_W * (SPRITE_H / SPRITE_W);
+const BEZEL = 0.05;
 
-interface Voxels {
-  body: THREE.Matrix4[];
-  eyes: THREE.Matrix4[];
-  armL: THREE.Matrix4[];
-  armR: THREE.Matrix4[];
+interface SpritePose {
+  /** Facing you (idle between bursts, and on Enter). */
+  front: boolean;
+  /** Hand down on the keys. */
+  down: boolean;
+  /** Hop (Enter). */
+  hop: boolean;
+  blink: boolean;
 }
 
-/** Shoulder pivots, mascot space: the body's side edge at the arm row. */
-const ARM_ROW = 4;
-const SHOULDER_Y = (MASCOT.length - 1 - ARM_ROW) * V + V / 2;
-const SHOULDER_X = 4 * V; // body spans 8 columns
-/** Forearm length in voxels — long enough to land on the keyboard. */
-const FOREARM = 2; // short, so he has to lean over the keys
-
-function mascotVoxels(): Voxels {
-  const out: Voxels = { body: [], eyes: [], armL: [], armR: [] };
-  const cols = MASCOT[0].length;
-  const m = new THREE.Matrix4();
-  MASCOT.forEach((row, r) => {
+function drawSprite(ctx: CanvasRenderingContext2D, pose: SpritePose) {
+  ctx.clearRect(0, 0, SPRITE_W, SPRITE_H);
+  const grid = pose.front ? FRONT : pose.down ? TYPING_DOWN : TYPING;
+  // Sprite + laptop span ~13 cells; centre that on the screen.
+  const ox = (SPRITE_W - 13 * CELL) / 2;
+  const floor = (SPRITE_H + grid.length * CELL) / 2; // bottom of the legs
+  const oy = floor - grid.length * CELL - (pose.hop ? CELL : 0);
+  grid.forEach((row, r) => {
     [...row].forEach((ch, c) => {
-      // Arms are rigged separately below, not part of the body mesh.
-      if (ch === "." || ch === "A") return;
-      for (let d = 0; d < DEPTH; d++) {
-        const x = (c - (cols - 1) / 2) * V;
-        const y = (MASCOT.length - 1 - r) * V + V / 2;
-        const z = (d - (DEPTH - 1) / 2) * V;
-        // Eyes only on the front face; behind them is body.
-        const kind = ch === "E" && d === DEPTH - 1 ? "eyes" : "body";
-        out[kind].push(m.clone().makeTranslation(x, y, z));
-      }
+      if (ch === ".") return;
+      ctx.fillStyle =
+        ch === "D" ? SIDE : ch === "E" && !pose.blink ? EYE : ORANGE;
+      ctx.fillRect(ox + c * CELL, oy + r * CELL, CELL, CELL);
     });
   });
-  // Each arm in its own pivot space (origin = shoulder): the signature side
-  // stub (2 voxels out), then a forearm reaching forward (+z) to the keys.
-  // Rotating the pivot about x swings the forearm down onto the keyboard.
-  for (const [side, list] of [
-    [-1, out.armL],
-    [1, out.armR],
-  ] as const) {
-    const cell = (x: number, z: number) =>
-      list.push(m.clone().makeTranslation(side * x * V, 0, z * V));
-    cell(0.5, 0);
-    cell(1.5, 0);
-    for (let i = 1; i <= FOREARM; i++) cell(1.5, i);
+  const half = CELL / 2;
+  if (!pose.front && pose.down) {
+    // The hand reaching the keys, half a cell past the arm.
+    ctx.fillStyle = ORANGE;
+    ctx.fillRect(ox + 10 * CELL, oy + 3 * CELL + half, half, half);
   }
-  return out;
+  // Laptop in profile, a half-cell line: base along the floor, lid
+  // leaning back from its far end.
+  ctx.fillStyle = LAPTOP;
+  const bx = ox + 10 * CELL;
+  ctx.fillRect(bx, floor - half, 1.5 * CELL, half);
+  for (let i = 0; i < 3; i++) {
+    ctx.fillRect(
+      bx + 1.5 * CELL + i * half,
+      floor - half - (i + 1) * half,
+      half,
+      half,
+    );
+  }
+}
+
+/** Rounded-rectangle frame (outer minus inner), extruded thin. */
+function bezelGeometry(): THREE.ExtrudeGeometry {
+  const trace = (p: THREE.Path, w: number, h: number, r: number) => {
+    const x = -w / 2;
+    const y = -h / 2;
+    p.moveTo(x + r, y);
+    p.lineTo(x + w - r, y);
+    p.quadraticCurveTo(x + w, y, x + w, y + r);
+    p.lineTo(x + w, y + h - r);
+    p.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    p.lineTo(x + r, y + h);
+    p.quadraticCurveTo(x, y + h, x, y + h - r);
+    p.lineTo(x, y + r);
+    p.quadraticCurveTo(x, y, x + r, y);
+    return p;
+  };
+  const outer = trace(
+    new THREE.Shape(),
+    SCREEN_W + BEZEL * 2,
+    SCREEN_H + BEZEL * 2,
+    0.09,
+  ) as THREE.Shape;
+  outer.holes.push(trace(new THREE.Path(), SCREEN_W, SCREEN_H, 0.05));
+  const g = new THREE.ExtrudeGeometry(outer, {
+    depth: 0.06,
+    bevelEnabled: true,
+    bevelThickness: 0.012,
+    bevelSize: 0.012,
+    bevelSegments: 3,
+    curveSegments: 10,
+  });
+  g.translate(0, 0, -0.03);
+  return g;
 }
 
 // ─── Hose ─────────────────────────────────────────────────────────────
@@ -97,7 +155,7 @@ const MAX_PACKETS = PACKET_LAUNCH_S.length;
 /** Module-level like the burn-sweep uniforms: one hose, mutated per frame. */
 const hoseUniforms = {
   uPackets: { value: new Array<number>(PACKET_LAUNCH_S.length).fill(-1) },
-  // Per-bulge size: swells leaving the laptop, squeezes down into the port.
+  // Per-bulge size: swells leaving the monitor, squeezes down into the port.
   uAmps: { value: new Array<number>(PACKET_LAUNCH_S.length).fill(0) },
   uFade: { value: 0 },
 };
@@ -167,33 +225,32 @@ export function AgentDesk({
 }) {
   const rootRef = useRef<THREE.Group>(null);
   const deskRef = useRef<THREE.Group>(null);
-  const mascotRef = useRef<THREE.Group>(null);
-  const armLRef = useRef<THREE.Group>(null);
-  const armRRef = useRef<THREE.Group>(null);
-  const eyesRef = useRef<THREE.Group>(null);
   const hoseRef = useRef<THREE.Mesh>(null);
   const collarRef = useRef<THREE.Group>(null);
-  const screenLinesRef = useRef<THREE.Group>(null);
   const clock = useRef({
     t: 0,
     onStep: false,
     layoutKey: "",
-    // Each arm eases after its target through a spring (angle, velocity),
-    // and runs its own tap phase so the hands never fall into lockstep.
-    armL: { x: ARM_REST, v: 0, phase: 0 },
-    armR: { x: ARM_REST, v: 0, phase: 1.7 },
     fade: 0,
-    body: { p: { x: 0.3, z: 0, y: 0 }, v: { x: 0, z: 0, y: 0 } },
+    frame: -1,
   });
 
-  const built = useMemo(
-    () => ({
-      vox: mascotVoxels(),
-      box: new THREE.BoxGeometry(V, V, V),
+  const built = useMemo(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = SPRITE_W;
+    canvas.height = SPRITE_H;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.NearestFilter;
+    tex.generateMipmaps = false;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return {
+      ctx: canvas.getContext("2d")!,
+      tex,
+      bezel: bezelGeometry(),
       hoseMat: hoseMaterial(hoseUniforms),
-    }),
-    [],
-  );
+    };
+  }, []);
 
   useFrame((_, rawDelta) => {
     const f = frameRef.current;
@@ -201,9 +258,8 @@ export function AgentDesk({
     if (!f || !root) return;
     const delta = Math.min(rawDelta, 1 / 20);
     const w = f.agent;
-    root.visible =
-      w > 0.01 && (stepRef.current === 2 || clock.current.fade > 0);
     const c = clock.current;
+    root.visible = w > 0.01 && (stepRef.current === 2 || c.fade > 0);
     // The clock restarts on every arrival at the agents step (2).
     const onStep = stepRef.current === 2;
     if (onStep && !c.onStep) c.t = 0;
@@ -215,23 +271,21 @@ export function AgentDesk({
     c.t += delta;
     const t = c.t;
     const u = f.agentUnit;
-    // Arriving, he fades in with the transition. Leaving, he fades out on
-    // his own clock (~150ms) the moment the step changes, BEFORE the scene
-    // moves, so he never shrinks or slides through the platform.
+    // Arriving, it fades in with the transition. Leaving, it fades out on
+    // its own clock (~150ms) the moment the step changes, BEFORE the
+    // scene moves.
     c.fade = onStep
       ? Math.max(c.fade, THREE.MathUtils.smoothstep(w, 0.4, 1))
       : Math.max(0, c.fade - delta * 7);
     const appear = c.fade;
 
     const desk = deskRef.current!;
-    // Grows in from / shrinks to nothing in place, in step with the hose
-    // fade — never a hard pop at the end of the transition.
     desk.position.copy(f.desk);
     desk.scale.setScalar(u);
     setOpacity(desk, appear);
     if (collarRef.current) setOpacity(collarRef.current, appear);
 
-    // ── Hose into the platform's rim port (rebuilt when either end moves) ──
+    // ── Cable into the platform's front port (rebuilt when either end moves) ──
     const port = platformPort(f, portScratch);
     const key = `${f.desk.x.toFixed(3)},${f.desk.y.toFixed(3)},${port.pos.x.toFixed(3)},${port.pos.y.toFixed(3)},${u.toFixed(3)}`;
     if (key !== c.layoutKey) {
@@ -239,72 +293,30 @@ export function AgentDesk({
       layoutHose(hoseRef.current, collarRef.current, f, u, port);
     }
 
-    // ── Mascot: jamming, irregularly ──
-    // Layered value noise, never a single sine, so it never visibly loops:
-    // bursts of fast typing, little pauses to think, a lean that drifts,
-    // a sway at frequencies that never line up. Each send is an Enter
-    // flourish with a proper ease (up, hold, settle back in).
-    let enter = 0;
-    for (const launch of PACKET_LAUNCH_S)
-      enter = Math.max(enter, flourish(t - launch + 0.12));
-    const typing = 1 - enter;
-    const burst = THREE.MathUtils.smoothstep(noise1(t * 0.45 + 11), 0.32, 0.62);
-    const mascot = mascotRef.current!;
-    // Short arms, typing hard: every strike is driven from the shoulders,
-    // so the whole body rocks toward whichever hand just hit, dips on
-    // each key and heaves on the busy bursts.
-    const strikes: number[] = [];
-    for (const [arm, ref, seed] of [
-      [c.armL, armLRef, 0],
-      [c.armR, armRRef, 5],
-    ] as const) {
-      // Tap rate wanders between ~10 and ~19 strikes a second.
-      arm.phase += delta * (10 + 9 * noise1(t * 0.7 + seed)) * Math.PI;
-      const strike = Math.pow(Math.max(0, Math.sin(arm.phase)), 3);
-      const hover = (1 - burst) * 0.1; // hands lift a touch while thinking
-      const target =
-        ARM_REST -
-        strike * 0.62 * burst * typing -
-        hover * typing -
-        enter * 2.1;
-      // Stiff, near-critically-damped spring: fast enough to hammer the
-      // keys, still eased so nothing snaps.
-      arm.v += ((target - arm.x) * 900 - arm.v * 52) * delta;
-      arm.x += arm.v * delta;
-      ref.current!.rotation.x = arm.x;
-      strikes.push(strike * burst * typing);
+    // ── Sprite: stepped, like the real thing ──
+    const n = Math.floor(t * SPRITE_FPS);
+    if (n !== c.frame) {
+      c.frame = n;
+      let enter = false;
+      for (const launch of PACKET_LAUNCH_S) {
+        const d = t - launch;
+        if (d > -0.25 && d < 0.3) enter = true;
+      }
+      // Bursts of tapping, now and then turning to face you between them.
+      // Within a burst the hand hits every other frame, skipping beats
+      // irregularly so it never reads as a loop.
+      const burst = noise1(t * 0.45 + 11) > 0.3;
+      const down = burst && !enter && n % 2 === 0 && hash(n) > 0.18;
+      drawSprite(built.ctx, {
+        front: enter || !burst,
+        down,
+        hop: enter && n % 4 < 2,
+        blink: blink(t),
+      });
+      markDirty(built.tex);
     }
-    const [sL, sR] = strikes;
-    // Body follows the strikes through its own spring, so the rocking
-    // lags the hands a touch, like weight.
-    const bodyTarget = {
-      x:
-        0.3 +
-        (noise1(t * 0.55 + 3) - 0.5) * 0.14 * typing +
-        (sL + sR) * 0.09 -
-        enter * 0.24,
-      z: (noise1(t * 0.8 + 7) - 0.5) * 0.12 * typing + (sR - sL) * 0.16,
-      y: (sL + sR) * V * 0.22 + enter * V * 0.7,
-    };
-    const b = c.body;
-    for (const k of ["x", "z", "y"] as const) {
-      b.v[k] += ((bodyTarget[k] - b.p[k]) * 520 - b.v[k] * 40) * delta;
-      b.p[k] += b.v[k] * delta;
-    }
-    mascot.rotation.x = b.p.x;
-    mascot.rotation.z = b.p.z;
-    mascot.rotation.y = (noise1(t * 0.35 + 21) - 0.5) * 0.16 + (sR - sL) * 0.08;
-    mascot.position.y = b.p.y;
-    eyesRef.current!.scale.y = blink(t);
 
-    const lines = screenLinesRef.current!;
-    lines.children.forEach((line, i) => {
-      const y = (i * 0.06 + t * (0.06 + 0.08 * burst)) % 0.33;
-      line.position.y = y;
-      line.visible = y < 0.3;
-    });
-
-    // ── Bulges down the hose, easing into the port ──
+    // ── Bulges down the cable, easing into the port ──
     const packets = hoseUniforms.uPackets.value;
     const amps = hoseUniforms.uAmps.value;
     let since = 10;
@@ -315,7 +327,7 @@ export function AgentDesk({
         amps[i] = 0;
       } else {
         packets[i] = easeInOutSine(p);
-        // Swell out of the laptop, squeeze down to nothing entering the
+        // Swell out of the monitor, squeeze down to nothing entering the
         // port — never a pop at either end.
         amps[i] =
           THREE.MathUtils.smoothstep(p, 0, 0.1) *
@@ -329,31 +341,41 @@ export function AgentDesk({
     agentClock.sinceArrival = since;
   });
 
-  const { vox, box, hoseMat } = built;
+  const { tex, bezel, hoseMat } = built;
   return (
     <group ref={rootRef}>
       <group ref={deskRef}>
-        {/* Turned three-quarters so the mascot's face shows over the lid. */}
-        <group rotation={[0.12, 0.55, 0]}>
-          <group ref={mascotRef}>
-            <Voxels matrices={vox.body} geometry={box} color={ORANGE} />
-            <group ref={armLRef} position={[-SHOULDER_X, SHOULDER_Y, 0]}>
-              <Voxels matrices={vox.armL} geometry={box} color={ORANGE} />
-            </group>
-            <group ref={armRRef} position={[SHOULDER_X, SHOULDER_Y, 0]}>
-              <Voxels matrices={vox.armR} geometry={box} color={ORANGE} />
-            </group>
-            <group ref={eyesRef} position={[0, 0.72, 0]}>
-              <group position={[0, -0.72, 0]}>
-                <Voxels matrices={vox.eyes} geometry={box} color="#161616" />
-              </group>
-            </group>
-          </group>
-          <Laptop linesRef={screenLinesRef} />
+        {/* Turned a little toward the platform it's plugged into. */}
+        <group rotation={[-0.04, 0.32, 0]} position={[0, 0.5, 0]}>
+          {/* Frosted glass behind the sprite: the scene blurs through. */}
+          <mesh position={[0, 0, -0.012]}>
+            <planeGeometry args={[SCREEN_W, SCREEN_H]} />
+            <meshPhysicalMaterial
+              color="#1f1c1a"
+              transmission={0.35}
+              roughness={0.6}
+              thickness={0.2}
+              ior={1.3}
+              transparent
+              userData={{ baseOpacity: 0.92 }}
+            />
+          </mesh>
+          <mesh>
+            <planeGeometry args={[SCREEN_W * 0.94, SCREEN_H * 0.94]} />
+            <meshBasicMaterial map={tex} transparent toneMapped={false} />
+          </mesh>
+          {/* A subtle frame. */}
+          <mesh geometry={bezel}>
+            <meshStandardMaterial
+              color="#1c1d21"
+              metalness={0.6}
+              roughness={0.35}
+            />
+          </mesh>
         </group>
       </group>
       <mesh ref={hoseRef} material={hoseMat} frustumCulled={false} />
-      {/* Where the hose meets the port: a short knurled metal collar. */}
+      {/* Where the cable meets the port: a short metal collar. */}
       <group ref={collarRef}>
         <mesh rotation={[Math.PI / 2, 0, 0]}>
           <cylinderGeometry args={[1.35, 1.35, 2.6, 24]} />
@@ -372,155 +394,53 @@ export function AgentDesk({
   );
 }
 
-/** Fade every material under `group` (toon voxels, laptop, collar). */
+/** Fade every material under `group` (screen, frame, collar). */
 function setOpacity(group: THREE.Object3D, o: number) {
   group.traverse((obj) => {
     const m = (obj as THREE.Mesh).material as THREE.Material | undefined;
     if (!m) return;
-    m.transparent = o < 0.999;
-    m.opacity = o;
+    m.transparent = true;
+    m.opacity = o * ((m.userData.baseOpacity as number | undefined) ?? 1);
     m.depthWrite = o > 0.5;
   });
 }
 
 const portScratch = { pos: new THREE.Vector3(), dir: new THREE.Vector3() };
 
-/** Resting arm angle: forearms laid on the keys. */
-const ARM_REST = 1.25;
+/** Re-upload a canvas texture (a module helper, for the compiler lint). */
+function markDirty(tex: THREE.Texture) {
+  tex.needsUpdate = true;
+}
+
+/** Deterministic per-frame randomness in [0, 1). */
+function hash(n: number): number {
+  const s = Math.sin(n * 91.345 + 47.853) * 43758.5453;
+  return s - Math.floor(s);
+}
 
 /** Smooth 1D value noise in [0, 1]. */
 function noise1(x: number): number {
   const i = Math.floor(x);
   const f = x - i;
-  const h = (n: number) => {
-    const s = Math.sin(n * 127.1 + 311.7) * 43758.5453;
-    return s - Math.floor(s);
-  };
   const k = f * f * (3 - 2 * f);
-  return h(i) * (1 - k) + h(i + 1) * k;
+  return hash(i) * (1 - k) + hash(i + 1) * k;
 }
 
-/** Enter flourish, 0 → 1 → 0 over ~0.6s: quick up, brief hold, eased back. */
-function flourish(x: number): number {
-  if (x <= 0 || x >= 0.62) return 0;
-  if (x < 0.16) return THREE.MathUtils.smoothstep(x, 0, 0.16);
-  if (x < 0.26) return 1;
-  return 1 - THREE.MathUtils.smoothstep(x, 0.26, 0.62);
-}
-
-/** Blinks at irregular intervals (~2.5–5s apart). */
-function blink(t: number): number {
+/** Blinks for a frame or two at irregular intervals (~2.5–5s apart). */
+function blink(t: number): boolean {
   const cycle = 3.4 + (noise1(Math.floor(t / 3.4) * 1.7) - 0.5) * 1.8;
-  return t % cycle > cycle - 0.14 ? 0.1 : 1;
-}
-
-// ─── Toon shading ─────────────────────────────────────────────────────
-
-/**
- * A hard three-step ramp: the voxels read as flat 2D shapes with a crisp
- * light and shadow band, like the mascot's sprite, not soft 3D.
- */
-const TOON_RAMP = (() => {
-  const t = new THREE.DataTexture(
-    new Uint8Array([110, 190, 255]),
-    3,
-    1,
-    THREE.RedFormat,
-  );
-  t.minFilter = THREE.NearestFilter;
-  t.magFilter = THREE.NearestFilter;
-  t.generateMipmaps = false;
-  t.needsUpdate = true;
-  return t;
-})();
-
-function Voxels({
-  matrices,
-  geometry,
-  color,
-}: {
-  matrices: THREE.Matrix4[];
-  geometry: THREE.BoxGeometry;
-  color: string;
-}) {
-  const ref = useRef<THREE.InstancedMesh>(null);
-  useFrame(() => {
-    const mesh = ref.current;
-    if (!mesh || mesh.userData.filled) return;
-    matrices.forEach((m, i) => mesh.setMatrixAt(i, m));
-    mesh.instanceMatrix.needsUpdate = true;
-    mesh.userData.filled = true;
-  });
-  return (
-    <instancedMesh ref={ref} args={[geometry, undefined, matrices.length]}>
-      <meshToonMaterial color={color} gradientMap={TOON_RAMP} />
-    </instancedMesh>
-  );
-}
-
-/**
- * Blocky laptop in front of the mascot, used the right way round: hinge
- * on the FAR side, lid leaning back away from him, screen facing him —
- * from the camera we look over the back of the lid at him working. (It
- * first shipped reversed: hinge on his side, lid leaning into him.)
- */
-function Laptop({
-  linesRef,
-}: {
-  linesRef: MutableRefObject<THREE.Group | null>;
-}) {
-  const lineWidths = [0.34, 0.22, 0.4, 0.28, 0.18, 0.36];
-  return (
-    <group position={[0, 0.02, 0.48]} scale={0.8}>
-      {/* Base */}
-      <mesh position={[0, 0.03, 0]}>
-        <boxGeometry args={[0.95, 0.06, 0.6]} />
-        <meshToonMaterial color="#b9bdc4" gradientMap={TOON_RAMP} />
-      </mesh>
-      {/* Keyboard: dark key rows on the deck, under his hands. */}
-      {[-0.16, -0.06, 0.04].map((z) => (
-        <mesh key={z} position={[0, 0.062, z]}>
-          <boxGeometry args={[0.78, 0.008, 0.07]} />
-          <meshToonMaterial color="#2c2e34" gradientMap={TOON_RAMP} />
-        </mesh>
-      ))}
-      {/* Lid on the far hinge, leaning back away from him; short enough
-          that his eyes clear it. Its back faces the camera. */}
-      <group position={[0, 0.06, 0.28]} rotation={[0.28, 0, 0]}>
-        <mesh position={[0, 0.23, 0]}>
-          <boxGeometry args={[0.95, 0.46, 0.04]} />
-          <meshToonMaterial color="#b9bdc4" gradientMap={TOON_RAMP} />
-        </mesh>
-        {/* Screen (mascot side) with scrolling code */}
-        <group position={[0, 0.07, -0.025]} rotation={[0, Math.PI, 0]}>
-          <mesh position={[0, 0.17, 0]}>
-            <planeGeometry args={[0.85, 0.38]} />
-            <meshBasicMaterial color="#0d1220" toneMapped={false} />
-          </mesh>
-          <group ref={linesRef} position={[-0.38, 0.02, 0.001]}>
-            {lineWidths.map((lw, i) => (
-              <mesh key={i} position={[lw / 2, 0, 0]}>
-                <planeGeometry args={[lw, 0.022]} />
-                <meshBasicMaterial
-                  color={i % 3 === 0 ? "#ffc27a" : "#d9774f"}
-                  toneMapped={false}
-                />
-              </mesh>
-            ))}
-          </group>
-        </group>
-      </group>
-    </group>
-  );
+  return t % cycle > cycle - 0.14;
 }
 
 function easeInOutSine(x: number): number {
   return -(Math.cos(Math.PI * x) - 1) / 2;
 }
+
 /**
- * Hose from the laptop's side, sagging down and across into the port on
- * the platform's front rim, arriving straight on (along the port's
- * outward axis) so it reads as plugged in. The collar sits on the port.
+ * Cable from the back of the monitor, sagging down and across into the
+ * port on the platform's front rim, arriving straight on (along the
+ * port's outward axis) so it reads as plugged in. The collar sits on the
+ * port.
  */
 function layoutHose(
   mesh: THREE.Mesh | null,
@@ -531,16 +451,17 @@ function layoutHose(
 ) {
   if (!mesh || !collar) return;
   const radius = HOSE_RADIUS * u;
+  // Out of the back of the monitor, low on its right-hand side.
   const start = f.desk
     .clone()
-    .add(new THREE.Vector3(0.5 * u, 0.12 * u, 0.25 * u));
+    .add(new THREE.Vector3(0.5 * u, 0.12 * u, -0.08 * u));
   const collarLen = radius * 2.6;
   const entry = port.pos.clone().addScaledVector(port.dir, collarLen);
   const span = start.distanceTo(entry);
   const curve = new THREE.CatmullRomCurve3(
     [
       start,
-      // Down off the desk in a lazy sag…
+      // Down in a lazy sag…
       start
         .clone()
         .lerp(entry, 0.4)
