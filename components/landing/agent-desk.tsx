@@ -215,10 +215,10 @@ export function AgentDesk({
     const appear = THREE.MathUtils.smoothstep(w, 0, 1);
 
     const desk = deskRef.current!;
-    desk.position
-      .copy(f.desk)
-      .add(new THREE.Vector3(0, (1 - appear) * -0.2 * u, 0));
-    desk.scale.setScalar(u * (0.85 + 0.15 * appear));
+    // Grows in from / shrinks to nothing in place, in step with the hose
+    // fade — never a hard pop at the end of the transition.
+    desk.position.copy(f.desk);
+    desk.scale.setScalar(u * Math.max(appear, 1e-3));
 
     // ── Hose into the platform's rim port (rebuilt when either end moves) ──
     const port = platformPort(f, portScratch);
@@ -476,8 +476,8 @@ function easeInOutSine(x: number): number {
   return -(Math.cos(Math.PI * x) - 1) / 2;
 }
 /**
- * Hose from the laptop's side, looping BACK behind the mascot, then round
- * to the platform's rim port, arriving straight on (along the port's
+ * Hose from the laptop's side, sagging down and across into the port on
+ * the platform's front rim, arriving straight on (along the port's
  * outward axis) so it reads as plugged in. The collar sits on the port.
  */
 function layoutHose(
@@ -498,14 +498,11 @@ function layoutHose(
   const curve = new THREE.CatmullRomCurve3(
     [
       start,
-      // Back and a little down, behind him…
+      // Down off the desk in a lazy sag…
       start
         .clone()
-        .add(new THREE.Vector3(0.1 * span, -0.12 * span, -0.45 * span)),
-      // …round toward the platform…
-      entry
-        .clone()
-        .add(new THREE.Vector3(-0.2 * span, -0.18 * span, -0.25 * span)),
+        .lerp(entry, 0.4)
+        .add(new THREE.Vector3(0, -0.22 * span, 0.12 * span)),
       // …and straight into the port.
       entry.clone().addScaledVector(port.dir, 0.25 * span),
       entry,

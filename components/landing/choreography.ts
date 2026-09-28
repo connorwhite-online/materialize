@@ -248,16 +248,16 @@ export function layoutFor(view: View): Layout {
     // Very wide + short (a phone on its side): the copy owns the left
     // half, so every step's stage shifts right, clear of it.
     t0: portrait
-      ? new Vector3(0, view.h * 0.1, 0)
+      ? new Vector3(0, view.h * 0.03, 0)
       : wide
         ? new Vector3(0, view.h * 0.06, 0)
-        : new Vector3(0, view.h * 0.02, 0),
+        : new Vector3(0, -view.h * 0.03, 0),
     s2,
     t2: portrait
-      ? new Vector3(0, view.h * 0.2, 0)
+      ? new Vector3(0, view.h * 0.12, 0)
       : wide
         ? new Vector3(0, view.h * 0.06, 0)
-        : new Vector3(0, view.h * 0.05, 0),
+        : new Vector3(0, view.h * 0.0, 0),
     // Agents step: pulled back to show the whole printer platform with
     // the device on it. Desktop: platform right of centre, the mascot
     // left and a little below centre, his hose looping back to it.
@@ -269,10 +269,10 @@ export function layoutFor(view: View): Layout {
         : new Vector3(0, view.h * 0.1, 0),
     sA: s0 * (portrait ? 0.42 : wide ? 0.34 : 0.5),
     desk: portrait
-      ? new Vector3(-view.w * 0.2, view.h * 0.05, 0.4)
+      ? new Vector3(-view.w * 0.2, view.h * 0.04, view.h * 0.3)
       : wide
         ? new Vector3(-view.w * 0.14, -view.h * 0.08, 0)
-        : new Vector3(-view.w * 0.17, -view.h * 0.1, 0),
+        : new Vector3(-view.w * 0.17, -view.h * 0.1, view.h * 0.15),
     agentUnit: portrait
       ? Math.min(view.w * 0.24, view.h * 0.11)
       : wide

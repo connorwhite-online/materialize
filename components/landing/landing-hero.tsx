@@ -197,7 +197,7 @@ export function StepCarousel() {
   const prev = usePreviousStep(step);
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 top-[calc(4.5rem+env(safe-area-inset-top,0px))] z-10 flex justify-center nav:top-auto nav:bottom-8">
+    <div className="pointer-events-none absolute inset-x-0 top-[calc(1rem+env(safe-area-inset-top,0px))] z-10 flex justify-center nav:top-auto nav:bottom-8">
       <div
         className="flex items-center gap-1.5"
         role="group"

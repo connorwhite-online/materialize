@@ -18,8 +18,8 @@ import { agentClock } from "./agent-timeline";
  */
 
 const TOP = 0.228;
-/** Rim port, platform space: back-left, on the lower band. */
-const PORT_ANGLE = Math.PI * 1.18;
+/** Rim port, platform space: the front, 6° right of centre, lower band. */
+const PORT_ANGLE = -Math.PI / 2 + (6 * Math.PI) / 180;
 const PORT_Y = 0.07;
 export const PORT_LOCAL = new THREE.Vector3(
   Math.cos(PORT_ANGLE) * 1.0,
@@ -102,7 +102,7 @@ const GLASS_FRAG = /* glsl */ `
     float ripple = exp(-pow((r - uPulse * 1.6) * 7.0, 2.0)) * exp(-uPulse * 2.2);
     // A gentle, even glow across the whole disc; the detail barely rides
     // on it, so it reads as one lit plane, not a hot spot.
-    float a = (0.2 + rings + sweep + ripple * 0.12) * (1.0 - smoothstep(0.97, 1.0, r));
+    float a = (0.62 + rings + sweep + ripple * 0.12) * (1.0 - smoothstep(0.97, 1.0, r));
     gl_FragColor = vec4(vec3(1.0, 0.52, 0.18) * a * uGlow, a * uGlow);
   }
 `;
@@ -135,6 +135,7 @@ export function HoloPlatform({
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const ringRef = useRef<THREE.Mesh>(null);
+  const portRef = useRef<THREE.Group>(null);
   const clock = useRef(0);
 
   const g = useMemo(
@@ -179,6 +180,13 @@ export function HoloPlatform({
     uniforms.uPulse.value = agentClock.sinceArrival;
     // Same brightness on every step.
     uniforms.uGlow.value = 1;
+    // The port only exists for the agents step's hose; it sits on the
+    // front rim, so elsewhere it would read as a stray nub.
+    const port = portRef.current;
+    if (port) {
+      port.visible = f.agent > 0.01;
+      port.scale.setScalar(Math.max(f.agent, 1e-3));
+    }
     const ring = ringRef.current;
     if (ring) {
       const flash = Math.exp(-agentClock.sinceArrival * 3.5);
@@ -225,18 +233,20 @@ export function HoloPlatform({
         </mesh>
         {/* Rim port: a small flush boss the hose plugs into. */}
         <group position={PORT_LOCAL.toArray()} rotation={[0, PORT_ANGLE, 0]}>
-          <mesh rotation={[0, 0, Math.PI / 2]} position={[0.012, 0, 0]}>
-            <cylinderGeometry args={[0.05, 0.056, 0.03, 32]} />
-            <meshStandardMaterial
-              color="#8d9198"
-              metalness={1}
-              roughness={0.28}
-            />
-          </mesh>
-          <mesh rotation={[0, 0, Math.PI / 2]} position={[0.028, 0, 0]}>
-            <cylinderGeometry args={[0.03, 0.03, 0.006, 24]} />
-            <meshStandardMaterial color="#0e0f12" roughness={0.6} />
-          </mesh>
+          <group ref={portRef}>
+            <mesh rotation={[0, 0, Math.PI / 2]} position={[0.012, 0, 0]}>
+              <cylinderGeometry args={[0.05, 0.056, 0.03, 32]} />
+              <meshStandardMaterial
+                color="#8d9198"
+                metalness={1}
+                roughness={0.28}
+              />
+            </mesh>
+            <mesh rotation={[0, 0, Math.PI / 2]} position={[0.028, 0, 0]}>
+              <cylinderGeometry args={[0.03, 0.03, 0.006, 24]} />
+              <meshStandardMaterial color="#0e0f12" roughness={0.6} />
+            </mesh>
+          </group>
         </group>
       </group>
     </group>
