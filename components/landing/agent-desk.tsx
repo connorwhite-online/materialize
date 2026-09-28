@@ -31,7 +31,7 @@ const MASCOT = [
   "..BBBBBBBB..",
   "..BEBBBBEB..",
   "..BEBBBBEB..",
-  "AABBBBBBBBAA",
+  "AABBBBBBBBAA", // ARM_ROW: stubs rigged as arms (mascotVoxels)
   "..BBBBBBBB..",
   "..BBBBBBBB..",
   "..L.L..L.L..",
@@ -48,32 +48,44 @@ interface Voxels {
   armR: THREE.Matrix4[];
 }
 
+/** Shoulder pivots, mascot space: the body's side edge at the arm row. */
+const ARM_ROW = 4;
+const SHOULDER_Y = (MASCOT.length - 1 - ARM_ROW) * V + V / 2;
+const SHOULDER_X = 4 * V; // body spans 8 columns
+/** Forearm length in voxels — long enough to land on the keyboard. */
+const FOREARM = 4;
+
 function mascotVoxels(): Voxels {
   const out: Voxels = { body: [], eyes: [], armL: [], armR: [] };
   const cols = MASCOT[0].length;
   const m = new THREE.Matrix4();
   MASCOT.forEach((row, r) => {
     [...row].forEach((ch, c) => {
-      if (ch === ".") return;
+      // Arms are rigged separately below, not part of the body mesh.
+      if (ch === "." || ch === "A") return;
       for (let d = 0; d < DEPTH; d++) {
         const x = (c - (cols - 1) / 2) * V;
         const y = (MASCOT.length - 1 - r) * V + V / 2;
         const z = (d - (DEPTH - 1) / 2) * V;
         // Eyes only on the front face; behind them is body.
-        const kind =
-          ch === "E"
-            ? d === DEPTH - 1
-              ? "eyes"
-              : "body"
-            : ch === "A"
-              ? c < cols / 2
-                ? "armL"
-                : "armR"
-              : "body";
+        const kind = ch === "E" && d === DEPTH - 1 ? "eyes" : "body";
         out[kind].push(m.clone().makeTranslation(x, y, z));
       }
     });
   });
+  // Each arm in its own pivot space (origin = shoulder): the signature side
+  // stub (2 voxels out), then a forearm reaching forward (+z) to the keys.
+  // Rotating the pivot about x swings the forearm down onto the keyboard.
+  for (const [side, list] of [
+    [-1, out.armL],
+    [1, out.armR],
+  ] as const) {
+    const cell = (x: number, z: number) =>
+      list.push(m.clone().makeTranslation(side * x * V, 0, z * V));
+    cell(0.5, 0);
+    cell(1.5, 0);
+    for (let i = 1; i <= FOREARM; i++) cell(1.5, i);
+  }
   return out;
 }
 
@@ -227,14 +239,28 @@ export function AgentDesk({
       .add(new THREE.Vector3(0, (1 - appear) * -0.2 * u, 0));
     desk.scale.setScalar(u * (0.85 + 0.15 * appear));
 
-    // ── Mascot: typing arms, a little bob, the odd blink ──
+    // ── Mascot: jamming on the keys ──
+    // Fast alternating taps, leaning into the screen with a little sway
+    // and bob. Each time a bulge launches he hits Enter: both arms fly up,
+    // he rocks back, then dives straight back in.
     const t = c.t;
     const mascot = mascotRef.current!;
-    mascot.position.y = Math.abs(Math.sin(t * 7)) * V * 0.35;
-    const tap = (phase: number) =>
-      Math.max(0, Math.sin(t * 14 + phase)) * V * 0.9;
-    armLRef.current!.position.y = -tap(0);
-    armRRef.current!.position.y = -tap(Math.PI);
+    let enter = 0;
+    for (const launch of PACKET_LAUNCH_S) {
+      const k = (t - launch + 0.15) / 0.55; // starts just before the send
+      if (k > 0 && k < 1) enter = Math.max(enter, Math.sin(Math.PI * k));
+    }
+    const typing = 1 - enter;
+    mascot.rotation.x = 0.1 + Math.sin(t * 2.1) * 0.04 * typing - enter * 0.22;
+    mascot.rotation.z = Math.sin(t * 1.3) * 0.05 * typing;
+    mascot.position.y =
+      Math.abs(Math.sin(t * 7)) * V * 0.25 * typing + enter * V * 0.8;
+    // Arms: resting angle lays the forearm on the keys; taps lift & strike.
+    const tap = (phase: number) => Math.max(0, Math.sin(t * 15 + phase));
+    const rest = 0.95;
+    armLRef.current!.rotation.x = rest - tap(0) * 0.28 * typing - enter * 2.1;
+    armRRef.current!.rotation.x =
+      rest - tap(Math.PI) * 0.28 * typing - enter * 2.1;
     const blink = t % 3.4 > 3.25 ? 0.1 : 1;
     eyesRef.current!.scale.y = blink;
 
@@ -283,10 +309,10 @@ export function AgentDesk({
         <group rotation={[0.12, 0.55, 0]}>
           <group ref={mascotRef}>
             <Voxels matrices={vox.body} geometry={box} color={ORANGE} />
-            <group ref={armLRef}>
+            <group ref={armLRef} position={[-SHOULDER_X, SHOULDER_Y, 0]}>
               <Voxels matrices={vox.armL} geometry={box} color={ORANGE} />
             </group>
-            <group ref={armRRef}>
+            <group ref={armRRef} position={[SHOULDER_X, SHOULDER_Y, 0]}>
               <Voxels matrices={vox.armR} geometry={box} color={ORANGE} />
             </group>
             <group ref={eyesRef} position={[0, 0.72, 0]}>
@@ -344,7 +370,12 @@ function Voxels({
   );
 }
 
-/** Blocky laptop in front of the mascot, screen towards it. */
+/**
+ * Blocky laptop in front of the mascot, used the right way round: hinge
+ * on the FAR side, lid leaning back away from him, screen facing him —
+ * from the camera we look over the back of the lid at him working. (It
+ * first shipped reversed: hinge on his side, lid leaning into him.)
+ */
 function Laptop({
   linesRef,
 }: {
@@ -352,7 +383,7 @@ function Laptop({
 }) {
   const lineWidths = [0.34, 0.22, 0.4, 0.28, 0.18, 0.36];
   return (
-    <group position={[0, 0.02, 0.66]} scale={0.8}>
+    <group position={[0, 0.02, 0.48]} scale={0.8}>
       {/* Base */}
       <mesh position={[0, 0.03, 0]}>
         <boxGeometry args={[0.95, 0.06, 0.6]} />
@@ -362,9 +393,16 @@ function Laptop({
           metalness={0.7}
         />
       </mesh>
-      {/* Lid, tilted back toward the mascot; its back faces us. */}
-      {/* Opened well back and short, so the mascot's eyes clear the lid. */}
-      <group position={[0, 0.06, -0.28]} rotation={[-0.62, 0, 0]}>
+      {/* Keyboard: dark key rows on the deck, under his hands. */}
+      {[-0.16, -0.06, 0.04].map((z) => (
+        <mesh key={z} position={[0, 0.062, z]}>
+          <boxGeometry args={[0.78, 0.008, 0.07]} />
+          <meshStandardMaterial color="#26282d" roughness={0.6} />
+        </mesh>
+      ))}
+      {/* Lid on the far hinge, leaning back away from him; short enough
+          that his eyes clear it. Its back faces the camera. */}
+      <group position={[0, 0.06, 0.28]} rotation={[0.28, 0, 0]}>
         <mesh position={[0, 0.23, 0]}>
           <boxGeometry args={[0.95, 0.46, 0.04]} />
           <meshStandardMaterial
