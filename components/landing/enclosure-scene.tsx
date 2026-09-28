@@ -7,6 +7,7 @@ import * as THREE from "three";
 import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { useLanding } from "./landing-context";
 import { AgentDesk } from "./agent-desk";
+import { HoloPlatform } from "./holo-platform";
 import {
   PLAIN,
   SWEEP_S,
@@ -314,6 +315,7 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
           <DetailInternals parts={parts} />
         </Suspense>
       )}
+      <HoloPlatform frameRef={frameRef} />
       <AgentDesk frameRef={frameRef} stepRef={stepRef} />
       {PARTS.filter((p) => p.bom).map((spec) => (
         <BomLabel key={spec.id} id={spec.id} frameRef={frameRef} />

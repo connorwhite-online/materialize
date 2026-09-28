@@ -143,8 +143,13 @@ export interface Frame {
   heroCenter: Vector3;
   /** Agents step layout, world space (see Layout). */
   desk: Vector3;
-  mark: Vector3;
   agentUnit: number;
+  /**
+   * The holographic printer platform the device stands on: centre of its
+   * top face, world space, and its radius. Under the device on every step;
+   * the agents step pulls back to show all of it.
+   */
+  platform: { position: Vector3; radius: number; tilt: number };
   /**
    * Where each part sits before any drag-orbit. BOM labels hang off these
    * so they hold still while the scene turns under them (orbitFrame).
@@ -188,12 +193,6 @@ function turn(base: Quaternion, yaw: number, pitch = 0): Quaternion {
 }
 
 export const HERO_QUAT = turn(STANDING, -0.35, 0.12);
-/**
- * Agents step: standing, tipped back with the bottom (USB-C) end toward
- * the viewer so the cable plugging into it reads, turned a little toward
- * the agent spark on the right. One hinge away from the hero.
- */
-const AGENT_QUAT = turn(STANDING, 0.35, -0.55);
 export const EXPLODE_QUAT = turn(LAID_OUT, 0.6, 0.08);
 
 /**
@@ -221,8 +220,10 @@ export interface Layout {
   t2: Vector3;
   /** Agents step: the mascot's desk, and the Materialize M it feeds. */
   desk: Vector3;
-  mark: Vector3;
-  /** World size of one unit of the agent scene (mascot, laptop, M). */
+  /** Agents step: where the device stands (on the platform), and its scale. */
+  stage: Vector3;
+  sA: number;
+  /** World size of one unit of the agent scene (mascot, laptop). */
   agentUnit: number;
 }
 
@@ -230,15 +231,15 @@ export function layoutFor(view: View): Layout {
   const portrait = view.w < view.h;
   const wide = !portrait && view.w / view.h > 1.9;
   const s0 = Math.min(
-    ((portrait ? 0.44 : 0.5) * view.h) / DEVICE_LONG,
-    ((portrait ? 0.7 : 0.4) * view.w) / DEVICE_WIDE,
+    ((portrait ? 0.54 : 0.6) * view.h) / DEVICE_LONG,
+    ((portrait ? 0.9 : 0.55) * view.w) / DEVICE_WIDE,
   );
   // The stage is centred on every viewport (copy sits bottom-left on
   // desktop, the stepper bottom-centre). Every step lives in the upper
   // ~two-thirds so the copy and stepper below never collide with it.
   const s2 = Math.min(
-    ((portrait ? 0.28 : 0.4) * view.h) / DEVICE_LONG,
-    ((portrait ? 0.86 : 0.62) * view.w) / EXPLODE_WIDE,
+    ((portrait ? 0.38 : 0.48) * view.h) / DEVICE_LONG,
+    ((portrait ? 1.05 : 0.8) * view.w) / EXPLODE_WIDE,
   );
   return {
     portrait,
@@ -247,36 +248,36 @@ export function layoutFor(view: View): Layout {
     // Very wide + short (a phone on its side): the copy owns the left
     // half, so every step's stage shifts right, clear of it.
     t0: portrait
-      ? new Vector3(0, view.h * 0.17, 0)
+      ? new Vector3(0, view.h * 0.1, 0)
       : wide
-        ? new Vector3(view.w * 0.2, view.h * 0.06, 0)
-        : new Vector3(0, view.h * 0.04, 0),
+        ? new Vector3(0, view.h * 0.06, 0)
+        : new Vector3(0, view.h * 0.02, 0),
     s2,
     t2: portrait
       ? new Vector3(0, view.h * 0.2, 0)
       : wide
-        ? new Vector3(view.w * 0.22, view.h * 0.06, 0)
-        : new Vector3(0, view.h * 0.07, 0),
-    // Agents step. Desktop: the mascot's desk lower-left of centre, the
-    // M upper-right, the hose arcing between. Phone: both up top (desk
-    // left, M right), the checklist between them and the copy.
-    // Very wide + short (a phone on its side): the copy fills the left
-    // half, so the scene moves right, above it.
+        ? new Vector3(0, view.h * 0.06, 0)
+        : new Vector3(0, view.h * 0.05, 0),
+    // Agents step: pulled back to show the whole printer platform with
+    // the device on it. Desktop: platform right of centre, the mascot
+    // left and a little below centre, his hose looping back to it.
+    // Portrait: platform up top, the mascot in front of it, lower-left.
+    stage: portrait
+      ? new Vector3(0, view.h * 0.27, 0)
+      : wide
+        ? new Vector3(0, view.h * 0.12, 0)
+        : new Vector3(0, view.h * 0.1, 0),
+    sA: s0 * (portrait ? 0.42 : wide ? 0.34 : 0.5),
     desk: portrait
-      ? new Vector3(-view.w * 0.22, view.h * 0.24, 0)
+      ? new Vector3(-view.w * 0.2, view.h * 0.05, 0.4)
       : wide
-        ? new Vector3(view.w * 0.1, view.h * 0.12, 0)
-        : new Vector3(-view.w * 0.16, -view.h * 0.02, 0),
-    mark: portrait
-      ? new Vector3(view.w * 0.25, view.h * 0.3, 0)
-      : wide
-        ? new Vector3(view.w * 0.36, view.h * 0.22, 0)
-        : new Vector3(view.w * 0.16, view.h * 0.16, 0),
+        ? new Vector3(-view.w * 0.14, -view.h * 0.08, 0)
+        : new Vector3(-view.w * 0.17, -view.h * 0.1, 0),
     agentUnit: portrait
-      ? Math.min(view.w * 0.26, view.h * 0.12)
+      ? Math.min(view.w * 0.24, view.h * 0.11)
       : wide
-        ? Math.min(view.w * 0.075, view.h * 0.22)
-        : Math.min(view.w * 0.11, view.h * 0.2),
+        ? Math.min(view.w * 0.07, view.h * 0.2)
+        : Math.min(view.w * 0.1, view.h * 0.19),
   };
 }
 
@@ -315,7 +316,9 @@ function keyframe(
 ): Pose {
   const c = geo.centers[part.id];
   const mc = geo.modelCenter;
-  const inside = part.shell ? 1 : 0;
+  // Shells, plus the camera: it shows through the bump's lens opening, so
+  // the device reads fully assembled wherever it's closed.
+  const inside = part.shell || SEEN_WHEN_CLOSED.has(part.id) ? 1 : 0;
   switch (k) {
     case 0:
       return {
@@ -340,12 +343,11 @@ function keyframe(
       };
     }
     case 2:
-      // Every part shrinks into the M — the device "materialized" by it —
-      // and grows back out of it toward the FAQ backdrop.
+      // Standing on the printer platform, pulled back to show all of it.
       return {
-        position: place(c, mc, AGENT_QUAT, L.s0 * 0.04, L.mark),
-        quaternion: AGENT_QUAT.clone(),
-        scale: L.s0 * 0.04,
+        position: place(c, mc, HERO_QUAT, L.sA, L.stage),
+        quaternion: HERO_QUAT.clone(),
+        scale: L.sA,
         opacity: part.shell || SEEN_WHEN_CLOSED.has(part.id) ? 1 : 0,
       };
   }
@@ -357,6 +359,54 @@ function mix(a: Pose, b: Pose, t: number, opacity: number): Pose {
     quaternion: a.quaternion.clone().slerp(b.quaternion, t),
     scale: MathUtils.lerp(a.scale, b.scale, t),
     opacity,
+  };
+}
+
+/**
+ * The platform's top plane is seen from 15° above it on the print and
+ * build steps (tilted toward the camera, so the hologram reads as a
+ * surface, not a line); a little more on the agents step, pulled back.
+ */
+export const PLATFORM_TILT = (15 * Math.PI) / 180;
+const PLATFORM_TILT_AGENTS = (24 * Math.PI) / 180;
+
+/**
+ * Platform under the device on each step. The device's long axis is
+ * vertical when standing, so its base sits DEVICE_LONG/2 below centre.
+ */
+function platformFor(
+  k: number,
+  L: Layout,
+): { position: Vector3; radius: number; tilt: number } {
+  const under = (at: Vector3, s: number, r: number, tilt: number) => ({
+    position: new Vector3(at.x, at.y - (DEVICE_LONG / 2) * s * 1.02, at.z),
+    radius: r,
+    tilt,
+  });
+  if (k === 0)
+    return under(L.t0, L.s0, DEVICE_WIDE * L.s0 * 1.25, PLATFORM_TILT);
+  if (k === 1) {
+    // Beneath the exploded stack, wide enough to read as its stage.
+    const half = (DEVICE_LONG / 2) * L.s2;
+    return {
+      position: new Vector3(L.t2.x, L.t2.y - half * 1.18, L.t2.z),
+      radius: EXPLODE_WIDE * L.s2 * 0.42,
+      tilt: PLATFORM_TILT,
+    };
+  }
+  // Agents: pulled back, the platform reads large relative to the device.
+  return under(L.stage, L.sA, DEVICE_WIDE * L.sA * 1.9, PLATFORM_TILT_AGENTS);
+}
+
+function mixPlatform(
+  a: { position: Vector3; radius: number; tilt: number },
+  b: { position: Vector3; radius: number; tilt: number },
+  t: number,
+) {
+  return {
+    position: a.position.clone().lerp(b.position, t),
+    radius: MathUtils.lerp(a.radius, b.radius, t),
+    tilt: MathUtils.lerp(a.tilt, b.tilt, t),
   };
 }
 
@@ -383,7 +433,7 @@ export function sampleFrame(
       // they're never seen drifting through a closed shell. The camera,
       // visible through the lens opening, stays once the device closes.
       const seen = SEEN_WHEN_CLOSED.has(part.id);
-      if (seg === 0) opacity = MathUtils.smoothstep(raw, 0.15, 0.7);
+      if (seg === 0) opacity = seen ? 1 : MathUtils.smoothstep(raw, 0.15, 0.7);
       else opacity = seen ? 1 : 1 - MathUtils.smoothstep(raw, 0.25, 0.8);
     }
     poses[part.id] = mix(a, b, t, opacity);
@@ -405,8 +455,8 @@ export function sampleFrame(
     },
     heroCenter: L.t0.clone(),
     desk: L.desk.clone(),
-    mark: L.mark.clone(),
     agentUnit: L.agentUnit,
+    platform: mixPlatform(platformFor(seg, L), platformFor(seg + 1, L), t),
   };
 }
 
@@ -432,6 +482,7 @@ export function mixFrames(a: Frame, b: Frame, t: number): Frame {
     poses,
     hero: MathUtils.lerp(a.hero, b.hero, k),
     agent: MathUtils.lerp(a.agent, b.agent, k),
+    platform: mixPlatform(a.platform, b.platform, k),
     bomLabels: MathUtils.lerp(a.bomLabels, b.bomLabels, k),
   };
 }

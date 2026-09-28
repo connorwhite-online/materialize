@@ -3,17 +3,17 @@
 import { useMemo, useRef, type MutableRefObject } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader.js";
-import { MARK_PATH, MARK_VIEWBOX } from "@/components/brand/logo-paths";
 import type { Frame } from "./choreography";
-import { PACKET_LAUNCH_S, PACKET_TRAVEL_S } from "./agent-timeline";
+import { PACKET_LAUNCH_S, PACKET_TRAVEL_S, agentClock } from "./agent-timeline";
+import { platformPort } from "./holo-platform";
 
 /**
- * The agents step: the Claude Code mascot, built from voxels to match
- * its pixel sprite, jams on a little voxel laptop. A hose runs from the
- * laptop to the Materialize M; bulges swell along it as each piece of
- * work is sent, and the M flashes as each lands (agent-timeline.ts keeps
- * the checklist in the DOM ticking on the same beats).
+ * The agents step: the Claude Code mascot, built from voxels and toon-
+ * shaded to read like its flat 2D sprite, jams on a little laptop. A hose
+ * loops back from the laptop into a port on the printer platform's rim
+ * (holo-platform.tsx); bulges swell along it as each piece of work is
+ * sent, easing into the port, and the platform ripples as each lands
+ * (agentClock in agent-timeline.ts).
  *
  * Everything is authored in "agent units" (1 ≈ the mascot's height) and
  * scaled by frame.agentUnit, so desktop and phone share one model.
@@ -53,7 +53,7 @@ const ARM_ROW = 4;
 const SHOULDER_Y = (MASCOT.length - 1 - ARM_ROW) * V + V / 2;
 const SHOULDER_X = 4 * V; // body spans 8 columns
 /** Forearm length in voxels — long enough to land on the keyboard. */
-const FOREARM = 4;
+const FOREARM = 2; // short, so he has to lean over the keys
 
 function mascotVoxels(): Voxels {
   const out: Voxels = { body: [], eyes: [], armL: [], armR: [] };
@@ -97,11 +97,14 @@ const MAX_PACKETS = PACKET_LAUNCH_S.length;
 /** Module-level like the burn-sweep uniforms: one hose, mutated per frame. */
 const hoseUniforms = {
   uPackets: { value: new Array<number>(PACKET_LAUNCH_S.length).fill(-1) },
+  // Per-bulge size: swells leaving the laptop, squeezes down into the port.
+  uAmps: { value: new Array<number>(PACKET_LAUNCH_S.length).fill(0) },
   uFade: { value: 0 },
 };
 
 function hoseMaterial(uniforms: {
   uPackets: { value: number[] };
+  uAmps: { value: number[] };
   uFade: { value: number };
 }): THREE.MeshStandardMaterial {
   const m = new THREE.MeshStandardMaterial({
@@ -114,13 +117,14 @@ function hoseMaterial(uniforms: {
     Object.assign(shader.uniforms, uniforms);
     const decl = /* glsl */ `
       uniform float uPackets[${MAX_PACKETS}];
+      uniform float uAmps[${MAX_PACKETS}];
       uniform float uFade;
       varying float vMzBulge;
       float mzBulge(float u) {
         float b = 0.0;
         for (int i = 0; i < ${MAX_PACKETS}; i++) {
           float d = (u - uPackets[i]) * 16.0;
-          b = max(b, exp(-d * d));
+          b = max(b, exp(-d * d) * uAmps[i]);
         }
         return b;
       }`;
@@ -141,7 +145,7 @@ function hoseMaterial(uniforms: {
       .replace(
         "#include <emissivemap_fragment>",
         `#include <emissivemap_fragment>
-         totalEmissiveRadiance += vec3(0.3, 0.58, 1.0) * vMzBulge * 1.6;`,
+         totalEmissiveRadiance += vec3(1.0, 0.52, 0.18) * vMzBulge * 1.6;`,
       )
       .replace(
         "#include <opaque_fragment>",
@@ -150,33 +154,6 @@ function hoseMaterial(uniforms: {
   };
   m.customProgramCacheKey = () => "mz-hose";
   return m;
-}
-
-// ─── Materialize M ───────────────────────────────────────────────────
-
-function markGeometry(): THREE.ExtrudeGeometry {
-  const [, , vw, vh] = MARK_VIEWBOX.split(/\s+/).map(Number);
-  const svg = new SVGLoader().parse(
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${MARK_VIEWBOX}"><path d="${MARK_PATH}"/></svg>`,
-  );
-  const shapes = svg.paths.flatMap((p) => SVGLoader.createShapes(p));
-  const g = new THREE.ExtrudeGeometry(shapes, {
-    depth: vh * 0.28,
-    // One-segment bevel = a flat 45° chamfer: each edge gets a crisp face
-    // that catches a clean highlight line, like machined metal.
-    bevelEnabled: true,
-    bevelThickness: vh * 0.05,
-    bevelSize: vh * 0.05,
-    bevelSegments: 1,
-    curveSegments: 10,
-  });
-  // SVG y points down. Flip it with a ROTATION, not scale(1, -1, 1): a
-  // negative scale inverts the winding, turning the mesh inside out (it lit
-  // dark navy from within). Then centre it and make it 1 unit wide.
-  g.rotateX(Math.PI);
-  g.scale(1 / vw, 1 / vw, 1 / vw);
-  g.center();
-  return g;
 }
 
 // ─── Scene ────────────────────────────────────────────────────────────
@@ -195,113 +172,133 @@ export function AgentDesk({
   const armRRef = useRef<THREE.Group>(null);
   const eyesRef = useRef<THREE.Group>(null);
   const hoseRef = useRef<THREE.Mesh>(null);
-  const markRef = useRef<THREE.Mesh>(null);
+  const collarRef = useRef<THREE.Group>(null);
   const screenLinesRef = useRef<THREE.Group>(null);
-  const clock = useRef({ t: 0, onStep: false, layoutKey: "" });
+  const clock = useRef({
+    t: 0,
+    onStep: false,
+    layoutKey: "",
+    // Each arm eases after its target through a spring (angle, velocity),
+    // and runs its own tap phase so the hands never fall into lockstep.
+    armL: { x: ARM_REST, v: 0, phase: 0 },
+    armR: { x: ARM_REST, v: 0, phase: 1.7 },
+  });
 
-  const built = useMemo(() => {
-    const vox = mascotVoxels();
-    return {
-      vox,
+  const built = useMemo(
+    () => ({
+      vox: mascotVoxels(),
       box: new THREE.BoxGeometry(V, V, V),
       hoseMat: hoseMaterial(hoseUniforms),
-      markGeo: markGeometry(),
-    };
-  }, []);
+    }),
+    [],
+  );
 
-  useFrame((_, delta) => {
+  useFrame((_, rawDelta) => {
     const f = frameRef.current;
     const root = rootRef.current;
     if (!f || !root) return;
+    const delta = Math.min(rawDelta, 1 / 20);
     const w = f.agent;
     root.visible = w > 0.01;
     const c = clock.current;
-    // The clock restarts on every arrival at the step (2), in step with
-    // the DOM checklist, which keys off the same step change.
+    // The clock restarts on every arrival at the agents step (2).
     const onStep = stepRef.current === 2;
     if (onStep && !c.onStep) c.t = 0;
     c.onStep = onStep;
-    if (!root.visible) return;
-    c.t += delta;
-
-    const u = f.agentUnit;
-    // ── Layout (rebuilt only when the viewport changes) ──
-    const key = `${f.desk.x.toFixed(3)},${f.mark.x.toFixed(3)},${u.toFixed(3)}`;
-    if (key !== c.layoutKey) {
-      c.layoutKey = key;
-      layoutHose(hoseRef.current, f, u);
+    if (!root.visible) {
+      agentClock.sinceArrival = 10;
+      return;
     }
-    // Everything eases in with the step weight: a small drop + scale.
+    c.t += delta;
+    const t = c.t;
+    const u = f.agentUnit;
     const appear = THREE.MathUtils.smoothstep(w, 0, 1);
+
     const desk = deskRef.current!;
     desk.position
       .copy(f.desk)
       .add(new THREE.Vector3(0, (1 - appear) * -0.2 * u, 0));
     desk.scale.setScalar(u * (0.85 + 0.15 * appear));
 
-    // ── Mascot: jamming on the keys ──
-    // Fast alternating taps, leaning into the screen with a little sway
-    // and bob. Each time a bulge launches he hits Enter: both arms fly up,
-    // he rocks back, then dives straight back in.
-    const t = c.t;
-    const mascot = mascotRef.current!;
-    let enter = 0;
-    for (const launch of PACKET_LAUNCH_S) {
-      const k = (t - launch + 0.15) / 0.55; // starts just before the send
-      if (k > 0 && k < 1) enter = Math.max(enter, Math.sin(Math.PI * k));
+    // ── Hose into the platform's rim port (rebuilt when either end moves) ──
+    const port = platformPort(f, portScratch);
+    const key = `${f.desk.x.toFixed(3)},${f.desk.y.toFixed(3)},${port.pos.x.toFixed(3)},${port.pos.y.toFixed(3)},${u.toFixed(3)}`;
+    if (key !== c.layoutKey) {
+      c.layoutKey = key;
+      layoutHose(hoseRef.current, collarRef.current, f, u, port);
     }
-    const typing = 1 - enter;
-    mascot.rotation.x = 0.1 + Math.sin(t * 2.1) * 0.04 * typing - enter * 0.22;
-    mascot.rotation.z = Math.sin(t * 1.3) * 0.05 * typing;
-    mascot.position.y =
-      Math.abs(Math.sin(t * 7)) * V * 0.25 * typing + enter * V * 0.8;
-    // Arms: resting angle lays the forearm on the keys; taps lift & strike.
-    const tap = (phase: number) => Math.max(0, Math.sin(t * 15 + phase));
-    const rest = 0.95;
-    armLRef.current!.rotation.x = rest - tap(0) * 0.28 * typing - enter * 2.1;
-    armRRef.current!.rotation.x =
-      rest - tap(Math.PI) * 0.28 * typing - enter * 2.1;
-    const blink = t % 3.4 > 3.25 ? 0.1 : 1;
-    eyesRef.current!.scale.y = blink;
 
-    // Screen code lines scroll.
+    // ── Mascot: jamming, irregularly ──
+    // Layered value noise, never a single sine, so it never visibly loops:
+    // bursts of fast typing, little pauses to think, a lean that drifts,
+    // a sway at frequencies that never line up. Each send is an Enter
+    // flourish with a proper ease (up, hold, settle back in).
+    let enter = 0;
+    for (const launch of PACKET_LAUNCH_S)
+      enter = Math.max(enter, flourish(t - launch + 0.12));
+    const typing = 1 - enter;
+    const burst = THREE.MathUtils.smoothstep(noise1(t * 0.45 + 11), 0.32, 0.62);
+    const mascot = mascotRef.current!;
+    mascot.rotation.x =
+      0.3 + // leaning in to reach the keys
+      (noise1(t * 0.55 + 3) - 0.5) * 0.12 * typing +
+      0.05 * burst * typing -
+      enter * 0.24;
+    mascot.rotation.z = (noise1(t * 0.8 + 7) - 0.5) * 0.14 * typing;
+    mascot.rotation.y = (noise1(t * 0.35 + 21) - 0.5) * 0.16;
+    let bob = 0;
+    for (const [arm, ref, seed] of [
+      [c.armL, armLRef, 0],
+      [c.armR, armRRef, 5],
+    ] as const) {
+      // Tap rate wanders between ~9 and ~17 strikes a second.
+      arm.phase += delta * (9 + 8 * noise1(t * 0.7 + seed)) * Math.PI;
+      const strike = Math.pow(Math.max(0, Math.sin(arm.phase)), 3);
+      const hover = (1 - burst) * 0.1; // hands lift a touch while thinking
+      const target =
+        ARM_REST - strike * 0.3 * burst * typing - hover * typing - enter * 2.1;
+      // Critically-damped-ish spring: eases every move, no snapping.
+      arm.v += ((target - arm.x) * 420 - arm.v * 36) * delta;
+      arm.x += arm.v * delta;
+      ref.current!.rotation.x = arm.x;
+      bob += strike * burst;
+    }
+    mascot.position.y = bob * V * 0.08 * typing + enter * V * 0.7;
+    eyesRef.current!.scale.y = blink(t);
+
     const lines = screenLinesRef.current!;
     lines.children.forEach((line, i) => {
-      const y = (i * 0.07 + t * 0.12) % 0.42;
+      const y = (i * 0.06 + t * (0.06 + 0.08 * burst)) % 0.33;
       line.position.y = y;
       line.visible = y < 0.3;
     });
 
-    // ── Packets down the hose ──
+    // ── Bulges down the hose, easing into the port ──
     const packets = hoseUniforms.uPackets.value;
+    const amps = hoseUniforms.uAmps.value;
+    let since = 10;
     PACKET_LAUNCH_S.forEach((launch, i) => {
       const p = (t - launch) / PACKET_TRAVEL_S;
-      packets[i] = p >= 0 && p <= 1.05 ? easeInOutSine(Math.min(p, 1)) : -1;
+      if (p < 0 || p > 1) {
+        packets[i] = -1;
+        amps[i] = 0;
+      } else {
+        packets[i] = easeInOutSine(p);
+        // Swell out of the laptop, squeeze down to nothing entering the
+        // port — never a pop at either end.
+        amps[i] =
+          THREE.MathUtils.smoothstep(p, 0, 0.1) *
+          (1 - THREE.MathUtils.smoothstep(p, 0.8, 1));
+      }
+      if (t - launch - PACKET_TRAVEL_S >= 0)
+        since = Math.min(since, t - launch - PACKET_TRAVEL_S);
     });
     hoseUniforms.uFade.value = appear;
-
-    // ── The M: breathes, flashes as each packet lands ──
-    const mark = markRef.current!;
-    mark.position.copy(f.mark);
-    mark.scale.setScalar(u * 0.95 * (0.6 + 0.4 * appear));
-    // Face turned up and toward the key softbox (upper-left, WarmStudio):
-    // polished metal is only its reflections, and facing the dark studio
-    // it rendered near-black.
-    mark.rotation.y = -0.38 + Math.sin(t * 0.8) * 0.08; // negative = toward the key (left)
-    mark.rotation.x = -0.28;
-    let flash = 0;
-    PACKET_LAUNCH_S.forEach((launch) => {
-      const since = t - (launch + PACKET_TRAVEL_S);
-      if (since > 0 && since < 0.9)
-        flash = Math.max(flash, Math.exp(-since * 5));
-    });
-    const mm = mark.material as THREE.MeshPhysicalMaterial;
-    // Blue only in the glint as a delivery lands; none at rest.
-    mm.emissiveIntensity = flash * 1.8;
-    mm.opacity = appear;
+    agentClock.t = t;
+    agentClock.sinceArrival = since;
   });
 
-  const { vox, box, hoseMat, markGeo } = built;
+  const { vox, box, hoseMat } = built;
   return (
     <group ref={rootRef}>
       <group ref={deskRef}>
@@ -325,26 +322,75 @@ export function AgentDesk({
         </group>
       </group>
       <mesh ref={hoseRef} material={hoseMat} frustumCulled={false} />
-      <mesh ref={markRef} geometry={markGeo}>
-        {/* Polished satin metal; each delivery glints it blue. */}
-        <meshPhysicalMaterial
-          // Just under fully metallic: a pure metal is ONLY its
-          // reflections and picked up the studio's cool fill as blue. A
-          // little diffuse keeps it reading neutral silver from any angle.
-          color="#d6d8dc"
-          metalness={0.82}
-          roughness={0.3}
-          clearcoat={0.5}
-          clearcoatRoughness={0.15}
-          emissive="#4f8dff"
-          emissiveIntensity={0}
-          envMapIntensity={1.8}
-          transparent
-        />
-      </mesh>
+      {/* Where the hose meets the port: a short knurled metal collar. */}
+      <group ref={collarRef}>
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[1.35, 1.35, 2.6, 24]} />
+          <meshStandardMaterial color="#9ca0a7" metalness={1} roughness={0.3} />
+        </mesh>
+        <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, -1.55]}>
+          <cylinderGeometry args={[1.12, 1.35, 0.5, 24]} />
+          <meshStandardMaterial
+            color="#7d8188"
+            metalness={1}
+            roughness={0.35}
+          />
+        </mesh>
+      </group>
     </group>
   );
 }
+
+const portScratch = { pos: new THREE.Vector3(), dir: new THREE.Vector3() };
+
+/** Resting arm angle: forearms laid on the keys. */
+const ARM_REST = 1.25;
+
+/** Smooth 1D value noise in [0, 1]. */
+function noise1(x: number): number {
+  const i = Math.floor(x);
+  const f = x - i;
+  const h = (n: number) => {
+    const s = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+    return s - Math.floor(s);
+  };
+  const k = f * f * (3 - 2 * f);
+  return h(i) * (1 - k) + h(i + 1) * k;
+}
+
+/** Enter flourish, 0 → 1 → 0 over ~0.6s: quick up, brief hold, eased back. */
+function flourish(x: number): number {
+  if (x <= 0 || x >= 0.62) return 0;
+  if (x < 0.16) return THREE.MathUtils.smoothstep(x, 0, 0.16);
+  if (x < 0.26) return 1;
+  return 1 - THREE.MathUtils.smoothstep(x, 0.26, 0.62);
+}
+
+/** Blinks at irregular intervals (~2.5–5s apart). */
+function blink(t: number): number {
+  const cycle = 3.4 + (noise1(Math.floor(t / 3.4) * 1.7) - 0.5) * 1.8;
+  return t % cycle > cycle - 0.14 ? 0.1 : 1;
+}
+
+// ─── Toon shading ─────────────────────────────────────────────────────
+
+/**
+ * A hard three-step ramp: the voxels read as flat 2D shapes with a crisp
+ * light and shadow band, like the mascot's sprite, not soft 3D.
+ */
+const TOON_RAMP = (() => {
+  const t = new THREE.DataTexture(
+    new Uint8Array([110, 190, 255]),
+    3,
+    1,
+    THREE.RedFormat,
+  );
+  t.minFilter = THREE.NearestFilter;
+  t.magFilter = THREE.NearestFilter;
+  t.generateMipmaps = false;
+  t.needsUpdate = true;
+  return t;
+})();
 
 function Voxels({
   matrices,
@@ -365,7 +411,7 @@ function Voxels({
   });
   return (
     <instancedMesh ref={ref} args={[geometry, undefined, matrices.length]}>
-      <meshStandardMaterial color={color} roughness={0.7} />
+      <meshToonMaterial color={color} gradientMap={TOON_RAMP} />
     </instancedMesh>
   );
 }
@@ -387,17 +433,13 @@ function Laptop({
       {/* Base */}
       <mesh position={[0, 0.03, 0]}>
         <boxGeometry args={[0.95, 0.06, 0.6]} />
-        <meshStandardMaterial
-          color="#9ea2a8"
-          roughness={0.35}
-          metalness={0.7}
-        />
+        <meshToonMaterial color="#b9bdc4" gradientMap={TOON_RAMP} />
       </mesh>
       {/* Keyboard: dark key rows on the deck, under his hands. */}
       {[-0.16, -0.06, 0.04].map((z) => (
         <mesh key={z} position={[0, 0.062, z]}>
           <boxGeometry args={[0.78, 0.008, 0.07]} />
-          <meshStandardMaterial color="#26282d" roughness={0.6} />
+          <meshToonMaterial color="#2c2e34" gradientMap={TOON_RAMP} />
         </mesh>
       ))}
       {/* Lid on the far hinge, leaning back away from him; short enough
@@ -405,11 +447,7 @@ function Laptop({
       <group position={[0, 0.06, 0.28]} rotation={[0.28, 0, 0]}>
         <mesh position={[0, 0.23, 0]}>
           <boxGeometry args={[0.95, 0.46, 0.04]} />
-          <meshStandardMaterial
-            color="#9ea2a8"
-            roughness={0.35}
-            metalness={0.7}
-          />
+          <meshToonMaterial color="#b9bdc4" gradientMap={TOON_RAMP} />
         </mesh>
         {/* Screen (mascot side) with scrolling code */}
         <group position={[0, 0.07, -0.025]} rotation={[0, Math.PI, 0]}>
@@ -422,7 +460,7 @@ function Laptop({
               <mesh key={i} position={[lw / 2, 0, 0]}>
                 <planeGeometry args={[lw, 0.022]} />
                 <meshBasicMaterial
-                  color={i % 3 === 0 ? "#7fb0ff" : "#d9774f"}
+                  color={i % 3 === 0 ? "#ffc27a" : "#d9774f"}
                   toneMapped={false}
                 />
               </mesh>
@@ -437,28 +475,40 @@ function Laptop({
 function easeInOutSine(x: number): number {
   return -(Math.cos(Math.PI * x) - 1) / 2;
 }
-
 /**
- * Hose from the laptop's side to the M, in world space: a lazy S that
- * dips between them. Rebuilt only when the layout changes.
+ * Hose from the laptop's side, looping BACK behind the mascot, then round
+ * to the platform's rim port, arriving straight on (along the port's
+ * outward axis) so it reads as plugged in. The collar sits on the port.
  */
-function layoutHose(mesh: THREE.Mesh | null, f: Frame, u: number) {
-  if (!mesh) return;
+function layoutHose(
+  mesh: THREE.Mesh | null,
+  collar: THREE.Group | null,
+  f: Frame,
+  u: number,
+  port: { pos: THREE.Vector3; dir: THREE.Vector3 },
+) {
+  if (!mesh || !collar) return;
+  const radius = HOSE_RADIUS * u;
   const start = f.desk
     .clone()
-    .add(new THREE.Vector3(0.62 * u, 0.1 * u, 0.3 * u));
-  const end = f.mark.clone().add(new THREE.Vector3(-0.42 * u, -0.1 * u, 0));
-  const span = start.distanceTo(end);
+    .add(new THREE.Vector3(0.5 * u, 0.12 * u, 0.25 * u));
+  const collarLen = radius * 2.6;
+  const entry = port.pos.clone().addScaledVector(port.dir, collarLen);
+  const span = start.distanceTo(entry);
   const curve = new THREE.CatmullRomCurve3(
     [
       start,
+      // Back and a little down, behind him…
       start
         .clone()
-        .add(new THREE.Vector3(0.18 * span, -0.2 * span, 0.1 * span)),
-      end
+        .add(new THREE.Vector3(0.1 * span, -0.12 * span, -0.45 * span)),
+      // …round toward the platform…
+      entry
         .clone()
-        .add(new THREE.Vector3(-0.25 * span, -0.12 * span, 0.05 * span)),
-      end,
+        .add(new THREE.Vector3(-0.2 * span, -0.18 * span, -0.25 * span)),
+      // …and straight into the port.
+      entry.clone().addScaledVector(port.dir, 0.25 * span),
+      entry,
     ],
     false,
     "centripetal",
@@ -467,8 +517,12 @@ function layoutHose(mesh: THREE.Mesh | null, f: Frame, u: number) {
   mesh.geometry = new THREE.TubeGeometry(
     curve,
     HOSE_SEGMENTS,
-    HOSE_RADIUS * u,
+    radius,
     12,
     false,
   );
+  // Collar: centred between the port face and the hose end, along the axis.
+  collar.position.copy(port.pos).addScaledVector(port.dir, collarLen / 2);
+  collar.lookAt(collar.position.clone().add(port.dir));
+  collar.scale.setScalar(radius);
 }

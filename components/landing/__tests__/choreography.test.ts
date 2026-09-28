@@ -34,33 +34,51 @@ describe.each([
   ["desktop", DESKTOP],
   ["phone", PHONE],
 ])("landing choreography (%s)", (_, view) => {
-  it("opens on the assembled shells alone", () => {
+  it("opens fully assembled: shells, and the camera showing through the bump", () => {
     const f = sampleFrame(0, GEO, view);
     expect(f.poses.front.opacity).toBe(1);
     expect(f.poses.rear.opacity).toBe(1);
-    for (const p of internals) expect(f.poses[p.id].opacity).toBe(0);
+    for (const p of internals) {
+      expect(f.poses[p.id].opacity, p.id).toBe(p.id === "camera" ? 1 : 0);
+    }
+    expect(f.platform.tilt).toBeCloseTo((15 * Math.PI) / 180, 5);
     expect(f.hero).toBe(1);
     // Assembled: the two shells sit within a device depth of each other.
     const gap = f.poses.front.position.distanceTo(f.poses.rear.position);
     expect(gap / f.poses.front.scale).toBeLessThan(0.02);
   });
 
-  it("agents step: the device has shrunk into the M, desk and M both on screen", () => {
+  it("agents step: device stands on the platform, the mascot beside it", () => {
     const f = sampleFrame(2, GEO, view);
     expect(f.agent).toBe(1);
     expect(f.bomLabels).toBe(0);
-    for (const p of PARTS) {
-      expect(f.poses[p.id].position.distanceTo(f.mark), p.id).toBeLessThan(
-        view.w * 0.05,
-      );
-      expect(f.poses[p.id].scale).toBeLessThan(
-        sampleFrame(0, GEO, view).poses[p.id].scale * 0.1,
-      );
+    // Whole, closed device (camera only inside), smaller than the hero.
+    for (const p of internals) {
+      expect(f.poses[p.id].opacity, p.id).toBe(p.id === "camera" ? 1 : 0);
     }
-    expect(f.desk.x).toBeLessThan(f.mark.x);
-    for (const v of [f.desk, f.mark]) {
-      expect(Math.abs(v.x)).toBeLessThan(view.w / 2);
-      expect(Math.abs(v.y)).toBeLessThan(view.h / 2);
+    expect(f.poses.front.scale).toBeLessThan(
+      sampleFrame(0, GEO, view).poses.front.scale,
+    );
+    // The platform sits directly under the device.
+    const base = f.platform.position;
+    expect(Math.abs(base.x - f.poses.front.position.x)).toBeLessThan(
+      view.w * 0.02,
+    );
+    expect(base.y).toBeLessThan(f.poses.front.position.y);
+    expect(f.platform.radius).toBeGreaterThan(0);
+    // The mascot sits left of the platform, on screen.
+    expect(f.desk.x).toBeLessThan(base.x);
+    expect(Math.abs(f.desk.x)).toBeLessThan(view.w / 2);
+    expect(Math.abs(f.desk.y)).toBeLessThan(view.h / 2);
+  });
+
+  it("keeps a platform under the device on every step", () => {
+    for (const p of [0, 1, 2]) {
+      const f = sampleFrame(p, GEO, view);
+      expect(f.platform.position.y, String(p)).toBeLessThan(
+        f.poses.front.position.y,
+      );
+      expect(Math.abs(f.platform.position.y)).toBeLessThan(view.h / 2);
     }
   });
 

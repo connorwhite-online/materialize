@@ -6,7 +6,7 @@ import {
 } from "./landing-materials";
 
 /**
- * The "burn" material change: a thin electric-blue band climbs the
+ * The "burn" material change: a thin warm-amber band climbs the
  * enclosure bottom → top, and the new material is left behind it — like
  * a Jacob's ladder re-skinning the part.
  *
@@ -176,8 +176,8 @@ function bandMaterial(): THREE.ShaderMaterial {
         // tints light materials blue and lights dark ones alike.
         float a = clamp((core + halo * 0.55 + fil * 0.85) * uMzGlow, 0.0, 0.95);
         if (a < 0.01) discard;
-        vec3 blue = vec3(0.22, 0.52, 1.0);
-        vec3 hot = vec3(0.86, 0.95, 1.0);
+        vec3 blue = vec3(1.0, 0.42, 0.1); // warm red-yellow glow (was blue)
+        vec3 hot = vec3(1.0, 0.9, 0.62);
         vec3 col = mix(blue, hot, clamp(core * 1.2 + fil * 0.3, 0.0, 1.0));
         gl_FragColor = vec4(col, a);
       }`,
