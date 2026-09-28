@@ -147,6 +147,8 @@ export interface Frame {
    * so they hold still while the scene turns under them (orbitFrame).
    */
   anchors?: Record<PartId, Vector3>;
+  /** Drag-orbit yaw applied to this frame (orbitFrame), radians. */
+  orbitYaw?: number;
 }
 
 const axis = {
@@ -184,13 +186,20 @@ function turn(base: Quaternion, yaw: number, pitch = 0): Quaternion {
   return q.multiply(base);
 }
 
-export const HERO_QUAT = turn(STANDING, -0.35, 0.12);
+// Upright: a pitch here is applied before the yaw and reads as the
+// device leaning over its front.
+export const HERO_QUAT = turn(STANDING, -0.35, 0);
 export const EXPLODE_QUAT = turn(LAID_OUT, 0.6, 0.08);
 /**
  * Agents step: turned well round to its side, so the gap between the
  * two shells (pulled apart on the hologram) reads from the camera.
  */
-export const AGENT_QUAT = turn(STANDING, -1.05, 0.02);
+export const AGENT_QUAT = new Quaternion()
+  // Tipped toward the camera about the SCREEN's x axis by exactly the
+  // platform's tilt, so it stands square on the hologram. (A pitch inside
+  // turn() is applied before the yaw, which reads as a sideways lean.)
+  .setFromAxisAngle(axis.x, (9 * Math.PI) / 180)
+  .multiply(turn(STANDING, -1.05, 0));
 /** How far each shell stands off the other on the hologram, metres. */
 const AGENT_GAP = 0.012;
 
@@ -266,12 +275,12 @@ export function layoutFor(view: View): Layout {
       : wide
         ? new Vector3(0, view.h * 0.06, 0)
         : new Vector3(0, view.h * 0.02, 0),
-    sA: s0 * (portrait ? 0.42 : wide ? 0.34 : 0.5),
+    sA: s0 * (portrait ? 0.5 : wide ? 0.42 : 0.7),
     desk: portrait
-      ? new Vector3(-view.w * 0.22, -view.h * 0.14, view.h * 0.1)
+      ? new Vector3(-view.w * 0.2, -view.h * 0.16, view.h * 0.22)
       : wide
-        ? new Vector3(-view.w * 0.14, -view.h * 0.08, 0)
-        : new Vector3(-view.w * 0.2, -view.h * 0.12, 0),
+        ? new Vector3(-view.w * 0.18, -view.h * 0.1, view.h * 0.15)
+        : new Vector3(-view.w * 0.24, -view.h * 0.14, view.h * 0.22),
     agentUnit: portrait
       ? Math.min(view.w * 0.24, view.h * 0.11)
       : wide
@@ -375,8 +384,7 @@ function mix(a: Pose, b: Pose, t: number, opacity: number): Pose {
  */
 export const PLATFORM_TILT = (15 * Math.PI) / 180;
 /** Nearly side-on: the hologram reads as a disc edge, not a table top. */
-// Negative: tipped back against the camera looking down on it.
-const PLATFORM_TILT_AGENTS = (-4 * Math.PI) / 180;
+const PLATFORM_TILT_AGENTS = (9 * Math.PI) / 180; // = AGENT_QUAT's tip
 
 /**
  * Platform under the device on each step. The device's long axis is
@@ -403,7 +411,7 @@ function platformFor(
     };
   }
   // Agents: pulled back, the platform reads large relative to the device.
-  return under(L.stage, L.sA, DEVICE_WIDE * L.sA * 1.9, PLATFORM_TILT_AGENTS);
+  return under(L.stage, L.sA, DEVICE_WIDE * L.sA * 1.15, PLATFORM_TILT_AGENTS);
 }
 
 function mixPlatform(
@@ -521,7 +529,19 @@ export function orbitFrame(frame: Frame, yaw: number): Frame {
       quaternion: q.clone().multiply(pose.quaternion),
     };
   }
-  return { ...frame, poses, anchors };
+  // The agents step turns as one scene: the monitor and the platform
+  // swing round the same pivot as the device (and turn in place by the
+  // same yaw — AgentDesk and HoloPlatform read orbitYaw).
+  const swing = (v: Vector3) =>
+    v.clone().sub(pivot).applyQuaternion(q).add(pivot);
+  return {
+    ...frame,
+    poses,
+    anchors,
+    desk: swing(frame.desk),
+    platform: { ...frame.platform, position: swing(frame.platform.position) },
+    orbitYaw: (frame.orbitYaw ?? 0) + yaw,
+  };
 }
 
 /**

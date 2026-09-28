@@ -9,7 +9,7 @@ import { agentClock } from "./agent-timeline";
 /**
  * The "printer": a circular, machined pedestal the device stands on, with
  * a glowing ring running in a groove around its circumference, a dark
- * glass top carrying holographic rings, and a faint beam lifting the part.
+ * glass top carrying holographic rings, and warm motes drifting up off it.
  * Only on the agents step: the enclosure materialises on it, and the
  * mascot's monitor is cabled into a port on its rim.
  *
@@ -18,8 +18,8 @@ import { agentClock } from "./agent-timeline";
  */
 
 const TOP = 0.228;
-/** Rim port, platform space: the front, 6° right of centre, lower band. */
-const PORT_ANGLE = -Math.PI / 2 + (6 * Math.PI) / 180;
+/** Rim port, platform space: on the left flank (toward the monitor), turned a little to the front, so the cable comes straight in without crossing the body. */
+const PORT_ANGLE = Math.PI + 0.4;
 const PORT_Y = 0.07;
 export const PORT_LOCAL = new THREE.Vector3(
   Math.cos(PORT_ANGLE) * 1.0,
@@ -40,7 +40,8 @@ export function platformPort(
 ) {
   // Same transform as the component: top-face pivot, tilt about x, scale.
   const r = f.platform.radius;
-  const tilt = new THREE.Euler(f.platform.tilt, 0, 0);
+  // Tilt first, then the drag-orbit yaw (YXZ: yaw applied outermost).
+  const tilt = new THREE.Euler(f.platform.tilt, f.orbitYaw ?? 0, 0, "YXZ");
   out.pos
     .copy(PORT_LOCAL)
     .add(new THREE.Vector3(0, -TOP, 0))
@@ -110,18 +111,57 @@ const GLASS_FRAG = /* glsl */ `
   }
 `;
 
-const BEAM_FRAG = /* glsl */ `
+/**
+ * Motes: warm specks rising slowly off the glass, each on its own clock,
+ * fading as they leave it. Positions are platform space (radius 1); the
+ * vertex shader loops each one's height and hands the fragment its fade.
+ */
+const MOTES = 70;
+const MOTE_VERT = /* glsl */ `
   uniform float uTime;
   uniform float uGlow;
-  varying vec2 vUv;
+  attribute float aSeed;
+  varying float vA;
   void main() {
-    // Brightest at the base, gone by the top; a print line scans upward.
-    float base = pow(1.0 - vUv.y, 2.4) * 0.05;
-    float scan = exp(-pow((vUv.y - fract(uTime * 0.35)) * 40.0, 2.0)) * 0.08;
-    float a = (base + scan) * uGlow;
-    gl_FragColor = vec4(vec3(1.0, 0.9, 0.72) * a, a);
+    float life = fract(uTime * (0.07 + 0.05 * aSeed) + aSeed * 7.13);
+    vec3 p = position;
+    p.y += life * (0.55 + 0.4 * aSeed);
+    p.x += sin(uTime * 0.6 + aSeed * 20.0) * 0.03 * life;
+    // In quickly off the glass, then gone well before the top.
+    vA = smoothstep(0.0, 0.12, life) * (1.0 - smoothstep(0.35, 1.0, life)) * uGlow;
+    vec4 mv = modelViewMatrix * vec4(p, 1.0);
+    gl_Position = projectionMatrix * mv;
+    gl_PointSize = (2.4 + 2.4 * aSeed) * (300.0 / -mv.z) * 0.02;
   }
 `;
+const MOTE_FRAG = /* glsl */ `
+  varying float vA;
+  void main() {
+    float d = length(gl_PointCoord - 0.5);
+    float a = smoothstep(0.5, 0.0, d) * vA;
+    if (a < 0.01) discard;
+    gl_FragColor = vec4(vec3(1.0, 0.86, 0.6) * a, a);
+  }
+`;
+
+function moteGeometry(): THREE.BufferGeometry {
+  const pos = new Float32Array(MOTES * 3);
+  const seed = new Float32Array(MOTES);
+  for (let i = 0; i < MOTES; i++) {
+    // Deterministic scatter over the disc (golden-angle spiral).
+    const r = 0.85 * Math.sqrt((i + 0.5) / MOTES);
+    const a = i * 2.39996;
+    pos[i * 3] = Math.cos(a) * r;
+    pos[i * 3 + 1] = 0;
+    pos[i * 3 + 2] = Math.sin(a) * r;
+    seed[i] = (Math.sin(i * 12.9898) * 43758.5453) % 1;
+    if (seed[i] < 0) seed[i] += 1;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  g.setAttribute("aSeed", new THREE.BufferAttribute(seed, 1));
+  return g;
+}
 
 const UV_VERT = /* glsl */ `
   varying vec2 vUv;
@@ -152,13 +192,13 @@ export function HoloPlatform({
         depthWrite: false,
         toneMapped: false,
       }),
-      beamMat: new THREE.ShaderMaterial({
+      motes: moteGeometry(),
+      moteMat: new THREE.ShaderMaterial({
         uniforms,
-        vertexShader: UV_VERT,
-        fragmentShader: BEAM_FRAG,
+        vertexShader: MOTE_VERT,
+        fragmentShader: MOTE_FRAG,
         transparent: true,
         depthWrite: false,
-        side: THREE.DoubleSide,
         blending: THREE.AdditiveBlending,
         toneMapped: false,
       }),
@@ -178,7 +218,7 @@ export function HoloPlatform({
     const r = f.platform.radius;
     // Pivot on the top face so the tilt keeps the device seated on it.
     group.position.copy(f.platform.position);
-    group.rotation.x = f.platform.tilt;
+    group.rotation.set(f.platform.tilt, f.orbitYaw ?? 0, 0, "YXZ");
     group.scale.setScalar(r);
 
     // Deliveries land on the shared agent clock (agent-timeline.ts).
@@ -238,10 +278,13 @@ export function HoloPlatform({
         >
           <circleGeometry args={[0.885, 96]} />
         </mesh>
-        {/* Faint lifting beam. */}
-        <mesh position={[0, TOP + 0.8, 0]} material={g.beamMat}>
-          <cylinderGeometry args={[0.62, 0.84, 1.6, 64, 1, true]} />
-        </mesh>
+        {/* Warm motes drifting up off the glass. */}
+        <points
+          geometry={g.motes}
+          material={g.moteMat}
+          position={[0, TOP, 0]}
+          frustumCulled={false}
+        />
         {/* Rim port: a small flush boss the hose plugs into. */}
         <group position={PORT_LOCAL.toArray()} rotation={[0, PORT_ANGLE, 0]}>
           <group ref={portRef}>

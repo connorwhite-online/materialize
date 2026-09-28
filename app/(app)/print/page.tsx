@@ -21,13 +21,13 @@ import { logError } from "@/lib/logger";
 export const metadata: Metadata = {
   title: "3D Printing Service — Upload a Model, Get an Instant Quote",
   description:
-    "Upload an STL, OBJ, 3MF or STEP file and get instant 3D printing quotes from vetted manufacturers. Choose from 60+ materials including PLA, resin, nylon and metal — printed and shipped to your door, no printer required.",
+    "Upload an STL, OBJ, 3MF or STEP file and get instant 3D printing quotes from vetted manufacturers. Choose from 200+ materials including PLA, resin, nylon and metal — printed and shipped to your door, no printer required.",
   alternates: { canonical: "/print" },
   openGraph: {
     type: "website",
     title: "3D Printing Service — Upload a Model, Get an Instant Quote",
     description:
-      "Upload a 3D model, compare live quotes from vetted print shops across 60+ materials, and have the finished part shipped to you.",
+      "Upload a 3D model, compare live quotes from vetted print shops across 200+ materials, and have the finished part shipped to you.",
     url: "/print",
   },
 };

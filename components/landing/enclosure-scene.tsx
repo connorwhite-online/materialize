@@ -8,6 +8,7 @@ import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.j
 import { useLanding } from "./landing-context";
 import { AgentDesk } from "./agent-desk";
 import { HoloPlatform } from "./holo-platform";
+import { AmbientMotes } from "./ambient-motes";
 import {
   PLAIN,
   SWEEP_S,
@@ -317,6 +318,7 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
           <DetailInternals parts={parts} />
         </Suspense>
       )}
+      <AmbientMotes frameRef={frameRef} />
       <HoloPlatform frameRef={frameRef} />
       <AgentDesk frameRef={frameRef} stepRef={stepRef} />
       {PARTS.filter((p) => p.bom).map((spec) => (
@@ -438,7 +440,7 @@ function runBurnSweep(
 }
 
 /** Seconds the build takes, and the wait for the device to land first. */
-const BUILD_S = 3.2;
+const BUILD_S = 5;
 const BUILD_DELAY_S = 0.7;
 
 function finishBuild(

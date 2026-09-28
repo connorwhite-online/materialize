@@ -33,7 +33,7 @@ describe("anon home hero layout", () => {
     const card = page.match(/<div className="(glass-surface[^"]*)">\s*<HomeFaq/)?.[1];
     expect(card).toMatch(/\bmax-w-4xl\b/);
     expect(card).toMatch(/\brounded-3xl\b/);
-    expect(page).toMatch(/title="Any questions\?"/);
+    expect(page).toMatch(/title="Questions & Answers"/);
     // Full-height FAQ screen: card at the top clear of the nav, footer
     // pushed to the bottom.
     expect(page).toMatch(/className="relative z-10 flex min-h-svh flex-col[^"]*pt-24/);
@@ -53,7 +53,8 @@ describe("anon home hero layout", () => {
     // Copy stays left-aligned on desktop; only the stage and stepper centre.
     expect(copy).not.toMatch(/\bnav:justify-center\b/);
     expect(landingHero).not.toMatch(/nav:text-center/);
-    expect(landingHero).toMatch(/bottom-24[^"]*nav:bottom-8/);
+    // Opposite the nav: top on mobile (bottom pill), bottom on desktop.
+    expect(landingHero).toMatch(/top-\[[^"]*nav:top-auto nav:bottom-8/);
   });
 
   it("renders a static headline: 'Print anything,' then a line break", () => {
@@ -66,7 +67,7 @@ describe("anon home hero layout", () => {
   });
 
   it("server-renders the product pitch as the first step's caption", () => {
-    expect(landingHero).toMatch(/Get prints delivered to your door/);
+    expect(landingHero).toMatch(/Print in 200\+ materials right where you keep your files/);
     expect(landingHero).toMatch(/text-foreground\/90/);
   });
 });

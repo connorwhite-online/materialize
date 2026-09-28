@@ -4,7 +4,12 @@ import { useMemo, useRef, type MutableRefObject } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { Frame } from "./choreography";
-import { PACKET_LAUNCH_S, PACKET_TRAVEL_S, agentClock } from "./agent-timeline";
+import {
+  PACKET_LAUNCH_S,
+  PACKET_LOOP_S,
+  PACKET_TRAVEL_S,
+  agentClock,
+} from "./agent-timeline";
 import { platformPort } from "./holo-platform";
 import {
   SPRITE_COLS,
@@ -225,12 +230,13 @@ export function AgentDesk({
     const desk = deskRef.current!;
     desk.position.copy(f.desk);
     desk.scale.setScalar(u);
+    desk.rotation.y = f.orbitYaw ?? 0;
     setOpacity(desk, appear);
     if (collarRef.current) setOpacity(collarRef.current, appear);
 
     // ── Cable into the platform's front port (rebuilt when either end moves) ──
     const port = platformPort(f, portScratch);
-    const key = `${f.desk.x.toFixed(3)},${f.desk.y.toFixed(3)},${port.pos.x.toFixed(3)},${port.pos.y.toFixed(3)},${u.toFixed(3)}`;
+    const key = `${(f.orbitYaw ?? 0).toFixed(3)},${f.desk.z.toFixed(3)},${f.desk.x.toFixed(3)},${f.desk.y.toFixed(3)},${port.pos.x.toFixed(3)},${port.pos.y.toFixed(3)},${u.toFixed(3)}`;
     if (key !== c.layoutKey) {
       c.layoutKey = key;
       layoutHose(hoseRef.current, collarRef.current, f, u, port);
@@ -248,8 +254,11 @@ export function AgentDesk({
     const packets = hoseUniforms.uPackets.value;
     const amps = hoseUniforms.uAmps.value;
     let since = 10;
+    // The sends repeat for as long as the step is up (they used to fire
+    // once per arrival, then the cable went quiet).
+    const tl = t % PACKET_LOOP_S;
     PACKET_LAUNCH_S.forEach((launch, i) => {
-      const p = (t - launch) / PACKET_TRAVEL_S;
+      const p = (tl - launch) / PACKET_TRAVEL_S;
       if (p < 0 || p > 1) {
         packets[i] = -1;
         amps[i] = 0;
@@ -261,8 +270,8 @@ export function AgentDesk({
           THREE.MathUtils.smoothstep(p, 0, 0.1) *
           (1 - THREE.MathUtils.smoothstep(p, 0.8, 1));
       }
-      if (t - launch - PACKET_TRAVEL_S >= 0)
-        since = Math.min(since, t - launch - PACKET_TRAVEL_S);
+      if (tl - launch - PACKET_TRAVEL_S >= 0)
+        since = Math.min(since, tl - launch - PACKET_TRAVEL_S);
     });
     hoseUniforms.uFade.value = appear;
     agentClock.t = t;
@@ -394,15 +403,20 @@ function layoutHose(
 ) {
   if (!mesh || !collar) return;
   const radius = HOSE_RADIUS * u;
+  const yaw = f.orbitYaw ?? 0;
+  const up = new THREE.Vector3(0, 1, 0);
   const toWorld = (v: THREE.Vector3) =>
     v
       .clone()
       .applyEuler(MONITOR_ROT)
       .add(MONITOR_POS)
+      .applyAxisAngle(up, yaw)
       .multiplyScalar(u)
       .add(f.desk);
   const start = toWorld(CABLE_START_LOCAL);
-  const out = new THREE.Vector3(0, 0, -1).applyEuler(MONITOR_ROT);
+  const out = new THREE.Vector3(0, 0, -1)
+    .applyEuler(MONITOR_ROT)
+    .applyAxisAngle(up, yaw);
   const collarLen = radius * 2.6;
   const entry = port.pos.clone().addScaledVector(port.dir, collarLen);
   const span = start.distanceTo(entry);
