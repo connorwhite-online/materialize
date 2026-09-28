@@ -5,7 +5,7 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { Frame } from "./choreography";
 import { PACKET_LAUNCH_S, PACKET_TRAVEL_S, agentClock } from "./agent-timeline";
-import { platformPort } from "./holo-platform";
+import { printerPort } from "./toy-printer";
 import {
   SPRITE_COLS,
   SPRITE_FRAMES,
@@ -17,7 +17,7 @@ import {
 
 /**
  * The agents step: a little monitor, cabled into the printer platform's
- * front port (holo-platform.tsx), with the Claude Code mascot on it as a
+ * printer (toy-printer.tsx), with the Claude Code mascot on it as a
  * flat 8-bit sprite: the mascot's own typing animation, transcribed
  * frame-for-frame (claude-sprite.ts) and painted into a nearest-filtered
  * canvas texture over a frosted-glass screen.
@@ -229,7 +229,7 @@ export function AgentDesk({
     if (collarRef.current) setOpacity(collarRef.current, appear);
 
     // ── Cable into the platform's front port (rebuilt when either end moves) ──
-    const port = platformPort(f, portScratch);
+    const port = printerPort(f, portScratch);
     const key = `${f.desk.x.toFixed(3)},${f.desk.y.toFixed(3)},${port.pos.x.toFixed(3)},${port.pos.y.toFixed(3)},${u.toFixed(3)}`;
     if (key !== c.layoutKey) {
       c.layoutKey = key;
@@ -274,7 +274,34 @@ export function AgentDesk({
     <group ref={rootRef}>
       <group ref={deskRef}>
         {/* Turned a little toward the platform it's plugged into. */}
-        <group rotation={[-0.04, 0.32, 0]} position={[0, 0.5, 0]}>
+        <group
+          rotation={MONITOR_ROT.toArray() as [number, number, number]}
+          position={MONITOR_POS.toArray()}
+        >
+          {/* The cable's plug: a boss on the back, low on the right, with
+              a tapered strain relief the cable leaves from. */}
+          <group position={PLUG_LOCAL.toArray()}>
+            <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, 0.012]}>
+              <cylinderGeometry args={[0.075, 0.075, 0.03, 24]} />
+              <meshStandardMaterial
+                color="#1c1d21"
+                metalness={0.6}
+                roughness={0.35}
+              />
+            </mesh>
+            <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, -0.03]}>
+              <cylinderGeometry args={[0.05, 0.06, 0.07, 24]} />
+              <meshStandardMaterial
+                color="#9ca0a7"
+                metalness={1}
+                roughness={0.3}
+              />
+            </mesh>
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, -0.1]}>
+              <cylinderGeometry args={[HOSE_RADIUS * 1.05, 0.045, 0.08, 20]} />
+              <meshStandardMaterial color="#26272c" roughness={0.5} />
+            </mesh>
+          </group>
           {/* Frosted glass behind the sprite: the scene blurs through. */}
           <mesh position={[0, 0, -0.012]}>
             <planeGeometry args={[SCREEN_W, SCREEN_H]} />
@@ -344,11 +371,19 @@ function easeInOutSine(x: number): number {
   return -(Math.cos(Math.PI * x) - 1) / 2;
 }
 
+/** The monitor's pose inside the desk group, and its plug on the back. */
+const MONITOR_POS = new THREE.Vector3(0, 0.5, 0);
+const MONITOR_ROT = new THREE.Euler(-0.04, 0.32, 0);
+const PLUG_LOCAL = new THREE.Vector3(0.48, -0.12, -0.05);
+/** Where the cable leaves the strain relief, monitor space. */
+const CABLE_START_LOCAL = new THREE.Vector3(0.48, -0.12, -0.19);
+
 /**
- * Cable from the back of the monitor, sagging down and across into the
- * port on the platform's front rim, arriving straight on (along the
- * port's outward axis) so it reads as plugged in. The collar sits on the
- * port.
+ * Cable from the plug on the back of the monitor to the port on the
+ * printer's flank: one cubic Bézier whose end tangents are the plug's
+ * backward axis and the port's outward axis, so it leaves and enters
+ * both straight, with a single smooth sag between (no Catmull-Rom
+ * kinks). The collar sits on the port.
  */
 function layoutHose(
   mesh: THREE.Mesh | null,
@@ -359,34 +394,36 @@ function layoutHose(
 ) {
   if (!mesh || !collar) return;
   const radius = HOSE_RADIUS * u;
-  // Out of the back of the monitor, low on its right-hand side.
-  const start = f.desk
-    .clone()
-    .add(new THREE.Vector3(0.5 * u, 0.12 * u, -0.08 * u));
+  const toWorld = (v: THREE.Vector3) =>
+    v
+      .clone()
+      .applyEuler(MONITOR_ROT)
+      .add(MONITOR_POS)
+      .multiplyScalar(u)
+      .add(f.desk);
+  const start = toWorld(CABLE_START_LOCAL);
+  const out = new THREE.Vector3(0, 0, -1).applyEuler(MONITOR_ROT);
   const collarLen = radius * 2.6;
   const entry = port.pos.clone().addScaledVector(port.dir, collarLen);
   const span = start.distanceTo(entry);
-  const curve = new THREE.CatmullRomCurve3(
-    [
-      start,
-      // Down in a lazy sag…
-      start
-        .clone()
-        .lerp(entry, 0.4)
-        .add(new THREE.Vector3(0, -0.22 * span, 0.12 * span)),
-      // …and straight into the port.
-      entry.clone().addScaledVector(port.dir, 0.25 * span),
-      entry,
-    ],
-    false,
-    "centripetal",
+  const curve = new THREE.CubicBezierCurve3(
+    start,
+    start
+      .clone()
+      .addScaledVector(out, span * 0.35)
+      .add(new THREE.Vector3(0, -span * 0.25, 0)),
+    entry
+      .clone()
+      .addScaledVector(port.dir, span * 0.4)
+      .add(new THREE.Vector3(0, -span * 0.12, 0)),
+    entry,
   );
   mesh.geometry?.dispose();
   mesh.geometry = new THREE.TubeGeometry(
     curve,
     HOSE_SEGMENTS,
     radius,
-    12,
+    14,
     false,
   );
   // Collar: centred between the port face and the hose end, along the axis.

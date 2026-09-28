@@ -22,7 +22,6 @@ import { MathUtils, Matrix4, Quaternion, Vector3 } from "three";
 
 export type PartId =
   | "rear"
-  | "ffc"
   | "battery"
   | "main"
   | "pwr"
@@ -53,13 +52,6 @@ export const PARTS: readonly PartSpec[] = [
     slot: 0,
     shell: true,
     bom: { side: "bottom", lane: 0 },
-  },
-  {
-    id: "ffc",
-    node: "10_Interboard_FFC",
-    label: "Flex cable",
-    slot: 1,
-    bom: { side: "top", lane: 0 },
   },
   {
     id: "battery",
@@ -269,10 +261,10 @@ export function layoutFor(view: View): Layout {
         : new Vector3(0, view.h * 0.02, 0),
     sA: s0 * (portrait ? 0.42 : wide ? 0.34 : 0.5),
     desk: portrait
-      ? new Vector3(-view.w * 0.2, -view.h * 0.06, view.h * 0.3)
+      ? new Vector3(-view.w * 0.22, -view.h * 0.14, view.h * 0.1)
       : wide
         ? new Vector3(-view.w * 0.14, -view.h * 0.08, 0)
-        : new Vector3(-view.w * 0.17, -view.h * 0.18, view.h * 0.15),
+        : new Vector3(-view.w * 0.2, -view.h * 0.12, 0),
     agentUnit: portrait
       ? Math.min(view.w * 0.24, view.h * 0.11)
       : wide
@@ -343,12 +335,14 @@ function keyframe(
       };
     }
     case 2:
-      // Standing on the printer platform, pulled back to show all of it.
+      // The device bows out: the agents step belongs to the mascot's
+      // monitor and the toy printer it feeds (toy-printer.tsx). It fades
+      // early in the transition (sampleFrame), closing up where it stands.
       return {
         position: place(c, mc, HERO_QUAT, L.sA, L.stage),
         quaternion: HERO_QUAT.clone(),
         scale: L.sA,
-        opacity: part.shell || SEEN_WHEN_CLOSED.has(part.id) ? 1 : 0,
+        opacity: 0,
       };
   }
 }
@@ -428,13 +422,16 @@ export function sampleFrame(
     const a = keyframe(seg, part, geo, L);
     const b = keyframe((seg + 1) as 1 | 2, part, geo, L);
     let opacity = MathUtils.lerp(a.opacity, b.opacity, t);
+    // Into the agents step everything fades out fast, before it has
+    // travelled far enough to read as flying somewhere.
+    if (seg === 1)
+      opacity = a.opacity * (1 - MathUtils.smoothstep(raw, 0, 0.35));
     if (!part.shell) {
       // Internals arrive late into the BOM and leave early out of it, so
       // they're never seen drifting through a closed shell. The camera,
       // visible through the lens opening, stays once the device closes.
       const seen = SEEN_WHEN_CLOSED.has(part.id);
       if (seg === 0) opacity = seen ? 1 : MathUtils.smoothstep(raw, 0.15, 0.7);
-      else opacity = seen ? 1 : 1 - MathUtils.smoothstep(raw, 0.25, 0.8);
     }
     poses[part.id] = mix(a, b, t, opacity);
   }

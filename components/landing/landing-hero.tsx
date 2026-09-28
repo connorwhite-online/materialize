@@ -178,11 +178,15 @@ export function StepCopy() {
   );
 }
 
-// `after:` grows every control's hit area past its 36px face to the
-// 44px touch minimum: a thumb landing just off a chevron used to hit
-// the stage instead, which paused the tour without stepping it.
+// `after:` grows a button's hit area past its visible face (36px → 44px
+// for the chevrons): a thumb landing just off one used to hit the stage
+// instead, which paused the tour without stepping it. Only on buttons —
+// on the dot pill's container the overlay sat on top of the dots and ate
+// every click on them.
+const HIT =
+  "after:absolute after:-inset-1 after:rounded-full after:content-['']";
 const CONTROL =
-  "glass-surface pointer-events-auto relative after:absolute after:-inset-1 after:rounded-full after:content-[''] flex cursor-pointer items-center justify-center rounded-full ring-1 ring-border/70 text-foreground/80 transition-[color,transform] duration-150 ease-spring hover:text-foreground active:scale-95";
+  "glass-surface pointer-events-auto relative flex cursor-pointer items-center justify-center rounded-full ring-1 ring-border/70 text-foreground/80 transition-[color,transform] duration-150 ease-spring hover:text-foreground active:scale-95";
 
 /**
  * Apple-product-page stepper, centred at the bottom of the first screen:
@@ -213,9 +217,10 @@ export function StepCarousel() {
           type="button"
           aria-label="Previous"
           onClick={() => goTo(step - 1)}
-          className={cn(CONTROL, "size-9")}
+          className={cn(CONTROL, HIT, "size-9")}
         >
-          <ChevronLeft size={20} />
+          {/* Optically centred: the glyph's weight sits right of its box. */}
+          <ChevronLeft size={20} className="-translate-x-px" />
         </button>
         <div
           className={cn(
@@ -239,7 +244,7 @@ export function StepCarousel() {
                 className={cn(
                   // Ease-out, no spring: the spring overshot (36→36.2px, 8→7.8px)
                   // and read as a wobble on every step change.
-                  "relative h-2 cursor-pointer overflow-hidden rounded-full transition-[width,background-color] duration-[450ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+                  "relative h-2 cursor-pointer rounded-full after:absolute after:-inset-x-1 after:-inset-y-3 after:content-[''] transition-[width,background-color] duration-[450ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
                   active && running
                     ? "w-9 bg-foreground/20"
                     : active
@@ -247,28 +252,32 @@ export function StepCarousel() {
                       : "w-2 bg-foreground/30 hover:bg-foreground/50",
                 )}
               >
-                {active && running && (
-                  // Keyed on the run too: resuming restarts the timer. It
-                  // waits out the dot's own 450ms stretch before filling,
-                  // so the bar never lurches with a width still changing.
-                  <span
-                    key={`${step}-${run}`}
-                    onAnimationEnd={advance}
-                    className="mz-step-fill absolute inset-0 rounded-full bg-foreground"
-                    style={{
-                      animationDuration: `${STEP_MS}ms`,
-                      animationDelay: "450ms",
-                    }}
-                  />
-                )}
-                {!active && i === prev && (
-                  // The step just finished: its full bar fades out while
-                  // the dot shrinks, instead of blinking white → grey.
-                  <span
-                    key={`done-${step}`}
-                    className="mz-step-done absolute inset-0 rounded-full bg-foreground"
-                  />
-                )}
+                {/* Clips the fill to the dot; the dot itself can't be
+                    overflow-hidden or its enlarged hit area is clipped. */}
+                <span className="absolute inset-0 overflow-hidden rounded-full">
+                  {active && running && (
+                    // Keyed on the run too: resuming restarts the timer. It
+                    // waits out the dot's own 450ms stretch before filling,
+                    // so the bar never lurches with a width still changing.
+                    <span
+                      key={`${step}-${run}`}
+                      onAnimationEnd={advance}
+                      className="mz-step-fill absolute inset-0 rounded-full bg-foreground"
+                      style={{
+                        animationDuration: `${STEP_MS}ms`,
+                        animationDelay: "450ms",
+                      }}
+                    />
+                  )}
+                  {!active && i === prev && (
+                    // The step just finished: its full bar fades out while
+                    // the dot shrinks, instead of blinking white → grey.
+                    <span
+                      key={`done-${step}`}
+                      className="mz-step-done absolute inset-0 rounded-full bg-foreground"
+                    />
+                  )}
+                </span>
               </button>
             );
           })}
@@ -277,9 +286,9 @@ export function StepCarousel() {
           type="button"
           aria-label="Next"
           onClick={() => goTo(step + 1)}
-          className={cn(CONTROL, "size-9")}
+          className={cn(CONTROL, HIT, "size-9")}
         >
-          <ChevronRight size={20} />
+          <ChevronRight size={20} className="translate-x-px" />
         </button>
       </div>
     </div>

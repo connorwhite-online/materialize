@@ -48,38 +48,22 @@ describe.each([
     expect(gap / f.poses.front.scale).toBeLessThan(0.02);
   });
 
-  it("agents step: device stands on the platform, the mascot beside it", () => {
+  it("agents step: the device bows out, the printer takes centre stage", () => {
     const f = sampleFrame(2, GEO, view);
     expect(f.agent).toBe(1);
     expect(f.bomLabels).toBe(0);
-    // Whole, closed device (camera only inside), smaller than the hero.
-    for (const p of internals) {
-      expect(f.poses[p.id].opacity, p.id).toBe(p.id === "camera" ? 1 : 0);
-    }
-    expect(f.poses.front.scale).toBeLessThan(
-      sampleFrame(0, GEO, view).poses.front.scale,
-    );
-    // The platform sits directly under the device.
-    const base = f.platform.position;
-    expect(Math.abs(base.x - f.poses.front.position.x)).toBeLessThan(
-      view.w * 0.02,
-    );
-    expect(base.y).toBeLessThan(f.poses.front.position.y);
+    for (const p of PARTS) expect(f.poses[p.id].opacity, p.id).toBe(0);
+    // Printer centred; the mascot's monitor to its left, on screen.
+    expect(Math.abs(f.platform.position.x)).toBeLessThan(view.w * 0.02);
     expect(f.platform.radius).toBeGreaterThan(0);
-    // The mascot sits left of the platform, on screen.
-    expect(f.desk.x).toBeLessThan(base.x);
+    expect(f.desk.x).toBeLessThan(f.platform.position.x);
     expect(Math.abs(f.desk.x)).toBeLessThan(view.w / 2);
     expect(Math.abs(f.desk.y)).toBeLessThan(view.h / 2);
   });
 
-  it("keeps a platform under the device on every step", () => {
-    for (const p of [0, 1, 2]) {
-      const f = sampleFrame(p, GEO, view);
-      expect(f.platform.position.y, String(p)).toBeLessThan(
-        f.poses.front.position.y,
-      );
-      expect(Math.abs(f.platform.position.y)).toBeLessThan(view.h / 2);
-    }
+  it("the device is already gone a third of the way into the agents step", () => {
+    const f = sampleFrame(1.35, GEO, view);
+    for (const p of PARTS) expect(f.poses[p.id].opacity, p.id).toBe(0);
   });
 
   it("explodes every part in stack order, front shell on the left, fully visible", () => {
