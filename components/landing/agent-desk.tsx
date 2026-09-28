@@ -135,7 +135,7 @@ function hoseMaterial(uniforms: {
         `#include <begin_vertex>
          vMzBulge = mzBulge(uv.x);
          // Swell outward: the bulge is a packet squeezing down the hose.
-         transformed += normal * vMzBulge * ${(HOSE_RADIUS * 1.6).toFixed(4)};`,
+         transformed += normal * vMzBulge * ${(HOSE_RADIUS * 0.75).toFixed(4)};`,
       );
     shader.fragmentShader = shader.fragmentShader
       .replace(
@@ -182,6 +182,7 @@ export function AgentDesk({
     // and runs its own tap phase so the hands never fall into lockstep.
     armL: { x: ARM_REST, v: 0, phase: 0 },
     armR: { x: ARM_REST, v: 0, phase: 1.7 },
+    body: { p: { x: 0.3, z: 0, y: 0 }, v: { x: 0, z: 0, y: 0 } },
   });
 
   const built = useMemo(
@@ -239,31 +240,51 @@ export function AgentDesk({
     const typing = 1 - enter;
     const burst = THREE.MathUtils.smoothstep(noise1(t * 0.45 + 11), 0.32, 0.62);
     const mascot = mascotRef.current!;
-    mascot.rotation.x =
-      0.3 + // leaning in to reach the keys
-      (noise1(t * 0.55 + 3) - 0.5) * 0.12 * typing +
-      0.05 * burst * typing -
-      enter * 0.24;
-    mascot.rotation.z = (noise1(t * 0.8 + 7) - 0.5) * 0.14 * typing;
-    mascot.rotation.y = (noise1(t * 0.35 + 21) - 0.5) * 0.16;
-    let bob = 0;
+    // Short arms, typing hard: every strike is driven from the shoulders,
+    // so the whole body rocks toward whichever hand just hit, dips on
+    // each key and heaves on the busy bursts.
+    const strikes: number[] = [];
     for (const [arm, ref, seed] of [
       [c.armL, armLRef, 0],
       [c.armR, armRRef, 5],
     ] as const) {
-      // Tap rate wanders between ~9 and ~17 strikes a second.
-      arm.phase += delta * (9 + 8 * noise1(t * 0.7 + seed)) * Math.PI;
+      // Tap rate wanders between ~10 and ~19 strikes a second.
+      arm.phase += delta * (10 + 9 * noise1(t * 0.7 + seed)) * Math.PI;
       const strike = Math.pow(Math.max(0, Math.sin(arm.phase)), 3);
       const hover = (1 - burst) * 0.1; // hands lift a touch while thinking
       const target =
-        ARM_REST - strike * 0.3 * burst * typing - hover * typing - enter * 2.1;
-      // Critically-damped-ish spring: eases every move, no snapping.
-      arm.v += ((target - arm.x) * 420 - arm.v * 36) * delta;
+        ARM_REST -
+        strike * 0.62 * burst * typing -
+        hover * typing -
+        enter * 2.1;
+      // Stiff, near-critically-damped spring: fast enough to hammer the
+      // keys, still eased so nothing snaps.
+      arm.v += ((target - arm.x) * 900 - arm.v * 52) * delta;
       arm.x += arm.v * delta;
       ref.current!.rotation.x = arm.x;
-      bob += strike * burst;
+      strikes.push(strike * burst * typing);
     }
-    mascot.position.y = bob * V * 0.08 * typing + enter * V * 0.7;
+    const [sL, sR] = strikes;
+    // Body follows the strikes through its own spring, so the rocking
+    // lags the hands a touch, like weight.
+    const bodyTarget = {
+      x:
+        0.3 +
+        (noise1(t * 0.55 + 3) - 0.5) * 0.14 * typing +
+        (sL + sR) * 0.09 -
+        enter * 0.24,
+      z: (noise1(t * 0.8 + 7) - 0.5) * 0.12 * typing + (sR - sL) * 0.16,
+      y: (sL + sR) * V * 0.22 + enter * V * 0.7,
+    };
+    const b = c.body;
+    for (const k of ["x", "z", "y"] as const) {
+      b.v[k] += ((bodyTarget[k] - b.p[k]) * 520 - b.v[k] * 40) * delta;
+      b.p[k] += b.v[k] * delta;
+    }
+    mascot.rotation.x = b.p.x;
+    mascot.rotation.z = b.p.z;
+    mascot.rotation.y = (noise1(t * 0.35 + 21) - 0.5) * 0.16 + (sR - sL) * 0.08;
+    mascot.position.y = b.p.y;
     eyesRef.current!.scale.y = blink(t);
 
     const lines = screenLinesRef.current!;

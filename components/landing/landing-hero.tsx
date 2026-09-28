@@ -27,7 +27,7 @@ export function LandingHero({ children }: { children: ReactNode }) {
   });
 
   const onPointerDown = (e: React.PointerEvent) => {
-    if ((e.target as Element).closest("a,button")) return;
+    if ((e.target as Element).closest("a,button,[data-tour-controls]")) return;
     // Touching the stage stops the tour at once — not just on a finished
     // swipe — so it can't advance out from under a drag.
     interact();
@@ -75,7 +75,9 @@ export function LandingHero({ children }: { children: ReactNode }) {
     // swallows the click, which is how chevrons "sometimes didn't work".
     let onControl = false;
     const start = (e: TouchEvent) => {
-      onControl = !!(e.target as Element | null)?.closest("a,button");
+      onControl = !!(e.target as Element | null)?.closest(
+        "a,button,[data-tour-controls]",
+      );
       sx = e.touches[0].clientX;
       sy = e.touches[0].clientY;
     };
@@ -176,8 +178,11 @@ export function StepCopy() {
   );
 }
 
+// `after:` grows every control's hit area past its 36px face to the
+// 44px touch minimum: a thumb landing just off a chevron used to hit
+// the stage instead, which paused the tour without stepping it.
 const CONTROL =
-  "glass-surface pointer-events-auto flex cursor-pointer items-center justify-center rounded-full ring-1 ring-border/70 text-foreground/80 transition-[color,transform] duration-150 ease-spring hover:text-foreground active:scale-95";
+  "glass-surface pointer-events-auto relative after:absolute after:-inset-1 after:rounded-full after:content-[''] flex cursor-pointer items-center justify-center rounded-full ring-1 ring-border/70 text-foreground/80 transition-[color,transform] duration-150 ease-spring hover:text-foreground active:scale-95";
 
 /**
  * Apple-product-page stepper, centred at the bottom of the first screen:
@@ -202,6 +207,7 @@ export function StepCarousel() {
         className="flex items-center gap-1.5"
         role="group"
         aria-label="Product tour"
+        data-tour-controls=""
       >
         <button
           type="button"

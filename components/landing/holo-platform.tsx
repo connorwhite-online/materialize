@@ -102,8 +102,11 @@ const GLASS_FRAG = /* glsl */ `
     float ripple = exp(-pow((r - uPulse * 1.6) * 7.0, 2.0)) * exp(-uPulse * 2.2);
     // A gentle, even glow across the whole disc; the detail barely rides
     // on it, so it reads as one lit plane, not a hot spot.
-    float a = (0.95 + rings + sweep + ripple * 0.12) * (1.0 - smoothstep(0.97, 1.0, r));
-    gl_FragColor = vec4(vec3(1.0, 0.52, 0.18) * a * uGlow, a * uGlow);
+    float a = (1.0 + rings + sweep + ripple * 0.12) * (1.0 - smoothstep(0.97, 1.0, r));
+    // Warm white, painted over the body (not added to it) so the metal's
+    // lighting — which differs with each step's tilt and scale — can't
+    // show through and make the glow read stronger on one step.
+    gl_FragColor = vec4(vec3(1.0, 0.9, 0.72) * uGlow, clamp(a * 0.85, 0.0, 1.0));
   }
 `;
 
@@ -116,7 +119,7 @@ const BEAM_FRAG = /* glsl */ `
     float base = pow(1.0 - vUv.y, 2.4) * 0.05;
     float scan = exp(-pow((vUv.y - fract(uTime * 0.35)) * 40.0, 2.0)) * 0.08;
     float a = (base + scan) * uGlow;
-    gl_FragColor = vec4(vec3(1.0, 0.55, 0.2) * a, a);
+    gl_FragColor = vec4(vec3(1.0, 0.9, 0.72) * a, a);
   }
 `;
 
@@ -147,7 +150,6 @@ export function HoloPlatform({
         fragmentShader: GLASS_FRAG,
         transparent: true,
         depthWrite: false,
-        blending: THREE.AdditiveBlending,
         toneMapped: false,
       }),
       beamMat: new THREE.ShaderMaterial({
@@ -193,8 +195,8 @@ export function HoloPlatform({
       // Warm amber, flaring toward white-hot as a delivery lands.
       (ring.material as THREE.MeshBasicMaterial).color.setRGB(
         1,
-        0.5 + flash * 0.12,
-        0.16 + flash * 0.12,
+        0.9 + flash * 0.1,
+        0.72 + flash * 0.2,
       );
     }
   });
@@ -217,7 +219,7 @@ export function HoloPlatform({
           rotation={[Math.PI / 2, 0, 0]}
         >
           <torusGeometry args={[0.957, 0.009, 10, 160]} />
-          <meshBasicMaterial color="#ff812a" toneMapped={false} />
+          <meshBasicMaterial color="#ffe6b8" toneMapped={false} />
         </mesh>
         {/* Holographic glass top. */}
         <mesh
