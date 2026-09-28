@@ -30,7 +30,14 @@ const EDGE_FADE = {
 export function EnclosureStage() {
   const reducedMotion = useReducedMotion() ?? false;
   return (
-    <div aria-hidden className="pointer-events-none fixed inset-0 z-0">
+    // Opaque, flat --background base: it covers <body>'s fixed bottom-up
+    // gradient on the landing. Safari fills the toolbar band with the
+    // body's flat colour and ignores the gradient, so the gradient's
+    // darker bottom met the band in a visible line.
+    <div
+      aria-hidden
+      className="pointer-events-none fixed inset-0 z-0 bg-background"
+    >
       {/* A warm pool of light behind the device, like a floor spot on a
           set — the canvas is transparent over it. */}
       <div
