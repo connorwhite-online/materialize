@@ -394,8 +394,14 @@ function platformFor(
   k: number,
   L: Layout,
 ): { position: Vector3; radius: number; tilt: number } {
-  const under = (at: Vector3, s: number, r: number, tilt: number) => ({
-    position: new Vector3(at.x, at.y - (DEVICE_LONG / 2) * s * 1.02, at.z),
+  const under = (
+    at: Vector3,
+    s: number,
+    r: number,
+    tilt: number,
+    lift = 1.02,
+  ) => ({
+    position: new Vector3(at.x, at.y - (DEVICE_LONG / 2) * s * lift, at.z),
     radius: r,
     tilt,
   });
@@ -411,7 +417,14 @@ function platformFor(
     };
   }
   // Agents: pulled back, the platform reads large relative to the device.
-  return under(L.stage, L.sA, DEVICE_WIDE * L.sA * 0.95, PLATFORM_TILT_AGENTS);
+  return under(
+    L.stage,
+    L.sA,
+    DEVICE_WIDE * L.sA * 0.95,
+    PLATFORM_TILT_AGENTS,
+    // Hovering a little above the glass, not standing on it.
+    1.12,
+  );
 }
 
 function mixPlatform(
@@ -432,6 +445,8 @@ export function sampleFrame(
   progress: number,
   geo: Geometry,
   view: View,
+  /** Heading back from the agents step (the shells stay whole). */
+  leavingAgents = false,
 ): Frame {
   const p = MathUtils.clamp(progress, 0, MAX_PROGRESS);
   const L = layoutFor(view);
@@ -448,6 +463,10 @@ export function sampleFrame(
     // travelled far enough to read as flying somewhere.
     if (seg === 1 && !part.shell)
       opacity = a.opacity * (1 - MathUtils.smoothstep(raw, 0, 0.35));
+    // The shells fade out too, then are rebuilt on the hologram by the
+    // burn edge (the scene hides them until it does; see runBurnSweep).
+    else if (seg === 1 && !leavingAgents)
+      opacity = raw < 0.5 ? 1 - MathUtils.smoothstep(raw, 0, 0.3) : 1;
     if (!part.shell) {
       // Internals arrive late into the BOM and leave early out of it, so
       // they're never seen drifting through a closed shell. The camera,
@@ -465,8 +484,12 @@ export function sampleFrame(
     hero: 1 - MathUtils.smoothstep(p, 0, 0.5),
     // No room for leader labels on a landscape phone: 390px of height
     // puts them into the nav and the carousel. The headline carries it.
-    bomLabels: L.wide ? 0 : MathUtils.smoothstep(bump(p, 1, 0.45), 0, 0.6),
-    agent: MathUtils.smoothstep(bump(p, 2, 0.45), 0, 0.6),
+    // Narrow: leaders go well before the parts leave, so lines never hang
+    // in space over an empty stage (filmed: they did on the way to step 3).
+    bomLabels: L.wide ? 0 : MathUtils.smoothstep(bump(p, 1, 0.3), 0.3, 0.9),
+    // Wide: the monitor and hologram arrive while the parts are still
+    // leaving, so the stage is never empty mid-transition (filmed: it was).
+    agent: MathUtils.smoothstep(bump(p, 2, 0.75), 0, 0.5),
     labelRows: {
       top: L.t2.y + bomHalf + gap,
       bottom: L.t2.y - bomHalf - gap,
@@ -475,7 +498,13 @@ export function sampleFrame(
     heroCenter: L.t0.clone(),
     desk: L.desk.clone(),
     agentUnit: L.agentUnit,
-    platform: mixPlatform(platformFor(seg, L), platformFor(seg + 1, L), t),
+    // The platform only shows on the agents step, so on the way there it
+    // takes that step's pose outright (blending from step 2's made it
+    // arrive oversized).
+    platform:
+      seg === 1
+        ? platformFor(2, L)
+        : mixPlatform(platformFor(seg, L), platformFor(seg + 1, L), t),
   };
 }
 
@@ -489,20 +518,31 @@ export function mixFrames(a: Frame, b: Frame, t: number): Frame {
   const k = easeInOut(t);
   const poses = {} as Record<PartId, Pose>;
   for (const part of PARTS) {
+    // Jumping into the agents step, internals go at once (a lone camera
+    // module used to float across the screen on its way to nowhere).
+    const intoAgents = b.agent > a.agent && !part.shell;
     poses[part.id] = mix(
       a.poses[part.id],
       b.poses[part.id],
       k,
-      fadeLate(a.poses[part.id].opacity, b.poses[part.id].opacity, k),
+      intoAgents
+        ? // On the linear clock: the eased k barely moves at first.
+          a.poses[part.id].opacity * (1 - MathUtils.smoothstep(t, 0, 0.12))
+        : fadeLate(a.poses[part.id].opacity, b.poses[part.id].opacity, k),
     );
   }
+  // The platform only exists on the agents step: take its pose from that
+  // end outright, never blend it from the hero's (a giant disc under the
+  // device, shrinking, was the ugliest frame of the 1→3 jump).
+  const platform = b.agent >= a.agent ? b.platform : a.platform;
   return {
     ...a,
     poses,
     hero: MathUtils.lerp(a.hero, b.hero, k),
     agent: MathUtils.lerp(a.agent, b.agent, k),
-    platform: mixPlatform(a.platform, b.platform, k),
-    bomLabels: MathUtils.lerp(a.bomLabels, b.bomLabels, k),
+    platform,
+    desk: b.agent >= a.agent ? b.desk : a.desk,
+    bomLabels: MathUtils.lerp(a.bomLabels, b.bomLabels, 1 - (1 - k) ** 3),
   };
 }
 

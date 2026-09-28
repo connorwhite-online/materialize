@@ -229,6 +229,7 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
     lastStep: 0,
     // Agents-step build: progress 0→1 (negative = waiting), -2 = none.
     build: -2,
+    buildWait: 0,
   });
 
   const idle = useIdle();
@@ -263,7 +264,7 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
       const gap = goal - st.progress;
       st.progress +=
         Math.sign(gap) * Math.min(Math.abs(gap), delta / STEP_TWEEN_S);
-      current = sampleFrame(st.progress, geo, view);
+      current = sampleFrame(st.progress, geo, view, gap < 0);
     }
 
     // Drag-orbit, the same on every step: a spring toward the finger's
@@ -355,6 +356,7 @@ function runBurnSweep(
     lineMax: number;
     lastStep: number;
     build: number;
+    buildWait: number;
   },
   layers: Record<ShellId, ShellLayers>,
   step: number,
@@ -368,8 +370,20 @@ function runBurnSweep(
   if (step !== st.lastStep) {
     if (step === 0) st.sinceSweep = 0;
     // Leaving the agents step mid-build: show the shells whole again.
-    if (st.lastStep === 2 && st.build > -2) finishBuild(st, shells);
+    if (st.lastStep === 2 && st.build === BUILD_PENDING) st.build = -2;
+    else if (st.lastStep === 2 && st.build > -2) finishBuild(st, shells);
     if (step === 2 && !reducedMotion) {
+      // Let the shells fade out on their way (choreography) first; the
+      // build takes over once they're gone (below).
+      st.build = BUILD_PENDING;
+      st.buildWait = SHELL_FADE_S;
+    }
+    st.lastStep = step;
+  }
+  if (step === 2 && st.build === BUILD_PENDING) {
+    st.buildWait -= delta;
+    if (st.buildWait > 0) return;
+    {
       // Settle any sweep in flight, then hide the shells above the edge
       // and let the build raise it (below).
       if (st.to >= 0) {
@@ -377,19 +391,23 @@ function runBurnSweep(
         st.look = st.to;
         st.to = -1;
       }
+      // Always build in the plain plastic: building in whatever step 1
+      // last swept to meant a second sweep (black → white) fired on the
+      // way back out.
+      st.look = PLAIN;
       for (const l of shells) {
-        startSweep(l, st.look);
+        applyLook(l.matA, LANDING_MATERIALS[PLAIN]);
+        startSweep(l, PLAIN);
         l.a.visible = false;
       }
       st.build = -BUILD_DELAY_S / BUILD_S;
     }
-    st.lastStep = step;
   }
   // The agents step owns the edge: Claude materialises the enclosure on
   // the hologram, bottom to top — the same electric edge as the material
   // sweeps, with only what's below it drawn.
   if (step === 2) {
-    if (st.build <= -2) return;
+    if (st.build === -2) return;
     st.build = Math.min(1, st.build + delta / BUILD_S);
     shellBox.makeEmpty();
     for (const l of shells) shellBox.expandByObject(l.a);
@@ -441,7 +459,11 @@ function runBurnSweep(
 
 /** Seconds the build takes, and the wait for the device to land first. */
 const BUILD_S = 5;
-const BUILD_DELAY_S = 0.7;
+const BUILD_DELAY_S = 0.3;
+/** Build states: -2 none; pending while the shells fade out first. */
+const BUILD_PENDING = -3;
+/** ≈ 30% of the step tween: the shells' fade-out (choreography). */
+const SHELL_FADE_S = 0.35;
 
 function finishBuild(
   st: { look: number; build: number },

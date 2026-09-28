@@ -32,14 +32,15 @@ const VERT = /* glsl */ `
        * (0.35 + 0.65 * aSeed) * uFade;
     vec4 mv = modelViewMatrix * vec4(p, 1.0);
     gl_Position = projectionMatrix * mv;
-    gl_PointSize = (2.0 + 2.5 * aSeed) * uDpr;
+    gl_PointSize = (3.0 + 3.5 * aSeed) * uDpr;
   }
 `;
 const FRAG = /* glsl */ `
   varying float vA;
   void main() {
     float d = length(gl_PointCoord - 0.5);
-    float a = smoothstep(0.5, 0.0, d) * vA * 0.7;
+    // Hot core plus a soft glow around it.
+    float a = (smoothstep(0.5, 0.0, d) * 0.6 + smoothstep(0.18, 0.0, d)) * vA;
     if (a < 0.01) discard;
     gl_FragColor = vec4(vec3(1.0, 0.86, 0.6) * a, a);
   }

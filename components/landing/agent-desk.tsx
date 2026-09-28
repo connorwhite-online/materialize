@@ -37,9 +37,13 @@ import {
 // ─── Sprite ───────────────────────────────────────────────────────────
 
 /** Canvas size in sprite pixels; one sprite cell is CELL pixels. */
-const CELL = 1;
-const SPRITE_W = SPRITE_COLS * CELL + 12;
-const SPRITE_H = SPRITE_ROWS * CELL + 8;
+// Painted at 6 canvas px per sprite half-cell and sampled smoothly.
+// At 1 px per cell with nearest sampling, the texture's non-integer
+// scale onto the screen drew some sprite pixels 2 screen px wide and
+// others 3 — which read as stray, uneven pixels.
+const CELL = 6;
+const SPRITE_W = SPRITE_COLS * CELL + 12 * CELL;
+const SPRITE_H = SPRITE_ROWS * CELL + 8 * CELL;
 /** Monitor, agent units. */
 const SCREEN_W = 1.45;
 const SCREEN_H = SCREEN_W * (SPRITE_H / SPRITE_W);
@@ -188,9 +192,9 @@ export function AgentDesk({
     canvas.width = SPRITE_W;
     canvas.height = SPRITE_H;
     const tex = new THREE.CanvasTexture(canvas);
-    tex.magFilter = THREE.NearestFilter;
-    tex.minFilter = THREE.NearestFilter;
-    tex.generateMipmaps = false;
+    tex.magFilter = THREE.LinearFilter;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.anisotropy = 4;
     tex.colorSpace = THREE.SRGBColorSpace;
     return {
       ctx: canvas.getContext("2d")!,
@@ -223,7 +227,7 @@ export function AgentDesk({
     // its own clock (~150ms) the moment the step changes, BEFORE the
     // scene moves.
     c.fade = onStep
-      ? Math.max(c.fade, THREE.MathUtils.smoothstep(w, 0.4, 1))
+      ? Math.max(c.fade, THREE.MathUtils.smoothstep(w, 0.1, 0.7))
       : Math.max(0, c.fade - delta * 7);
     const appear = c.fade;
 

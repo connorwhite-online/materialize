@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, type MutableRefObject } from "react";
 import { useFrame } from "@react-three/fiber";
+import { Billboard } from "@react-three/drei";
 import * as THREE from "three";
 import type { Frame } from "./choreography";
 import { agentClock } from "./agent-timeline";
@@ -86,6 +87,23 @@ const uniforms = {
   uGlow: { value: 1 },
 };
 
+/**
+ * A cheap bloom: a camera-facing ellipse of warm light spilling past the
+ * glass, additively blended. A real bloom pass would re-render the whole
+ * canvas every frame for one glowing disc; this is one quad.
+ */
+const HALO_FRAG = /* glsl */ `
+  uniform float uGlow;
+  uniform float uPulse;
+  varying vec2 vUv;
+  void main() {
+    vec2 c = (vUv - 0.5) * vec2(2.0, 2.0);
+    float d = length(c);
+    float a = pow(max(0.0, 1.0 - d), 2.2) * (0.55 + 0.35 * exp(-uPulse * 2.5)) * uGlow;
+    gl_FragColor = vec4(vec3(1.0, 0.84, 0.55) * a, a);
+  }
+`;
+
 const GLASS_FRAG = /* glsl */ `
   uniform float uTime;
   uniform float uPulse;
@@ -130,7 +148,7 @@ const MOTE_VERT = /* glsl */ `
     vA = smoothstep(0.0, 0.12, life) * (1.0 - smoothstep(0.35, 1.0, life)) * uGlow;
     vec4 mv = modelViewMatrix * vec4(p, 1.0);
     gl_Position = projectionMatrix * mv;
-    gl_PointSize = (2.4 + 2.4 * aSeed) * (300.0 / -mv.z) * 0.02;
+    gl_PointSize = (3.6 + 3.6 * aSeed) * (300.0 / -mv.z) * 0.02;
   }
 `;
 const MOTE_FRAG = /* glsl */ `
@@ -195,6 +213,19 @@ export function HoloPlatform({
         depthWrite: false,
         toneMapped: false,
       }),
+      haloMat: new THREE.ShaderMaterial({
+        uniforms,
+        vertexShader: UV_VERT,
+        fragmentShader: HALO_FRAG,
+        transparent: true,
+        depthWrite: false,
+        // It's a flat quad standing through the glass disc: depth-tested,
+        // the disc cut its lower half off in a hard line. Bloom sits over
+        // everything anyway.
+        depthTest: false,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false,
+      }),
       motes: moteGeometry(),
       moteMat: new THREE.ShaderMaterial({
         uniforms,
@@ -218,7 +249,7 @@ export function HoloPlatform({
     // lingering under the device on the way back to steps 1–2.
     fade.current =
       stepRef.current === 2
-        ? Math.max(fade.current, THREE.MathUtils.smoothstep(f.agent, 0.3, 1))
+        ? Math.max(fade.current, THREE.MathUtils.smoothstep(f.agent, 0.05, 0.6))
         : Math.max(0, fade.current - Math.min(delta, 1 / 20) * 7);
     const o = fade.current;
     group.visible = o > 0.01;
@@ -293,6 +324,12 @@ export function HoloPlatform({
         >
           <circleGeometry args={[0.885, 96]} />
         </mesh>
+        {/* Bloom: warm light spilling past the rim, facing the camera. */}
+        <Billboard position={[0, TOP + 0.05, 0]}>
+          <mesh material={g.haloMat} renderOrder={3}>
+            <planeGeometry args={[3.4, 1.5]} />
+          </mesh>
+        </Billboard>
         {/* Warm motes drifting up off the glass. */}
         <points
           geometry={g.motes}
