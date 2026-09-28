@@ -47,17 +47,23 @@ describe.each([
     expect(gap / f.poses.front.scale).toBeLessThan(0.02);
   });
 
-  it("splits the shells left/right with the file labels up", () => {
-    const f = sampleFrame(1, GEO, view);
-    expect(f.poses.front.position.x).toBeLessThan(f.poses.rear.position.x);
-    expect(f.fileLabels).toBe(1);
+  it("agents step: assembled, off to one side of the spark, camera only inside", () => {
+    const f = sampleFrame(2, GEO, view);
+    expect(f.agent).toBe(1);
     expect(f.bomLabels).toBe(0);
-    expect(f.hero).toBe(0);
-    for (const p of internals) expect(f.poses[p.id].opacity).toBe(0);
+    for (const p of internals) {
+      expect(f.poses[p.id].opacity, p.id).toBe(p.id === "camera" ? 1 : 0);
+    }
+    const gap = f.poses.front.position.distanceTo(f.poses.rear.position);
+    expect(gap / f.poses.front.scale).toBeLessThan(0.02);
+    // The device and the spark sit on opposite sides, room for the cable.
+    expect(f.poses.front.position.x).toBeLessThan(f.spark.x);
+    expect(Math.abs(f.spark.x)).toBeLessThan(view.w / 2);
+    expect(Math.abs(f.spark.y)).toBeLessThan(view.h / 2);
   });
 
   it("explodes every part in stack order, front shell on the left, fully visible", () => {
-    const f = sampleFrame(2, GEO, view);
+    const f = sampleFrame(1, GEO, view);
     for (const p of PARTS) expect(f.poses[p.id].opacity).toBe(1);
     const xs = [...PARTS]
       .sort((a, b) => a.slot - b.slot)
@@ -65,23 +71,16 @@ describe.each([
       .map((p) => f.poses[p.id].position.x);
     for (let i = 1; i < xs.length; i++) expect(xs[i]).toBeLessThan(xs[i - 1]);
     expect(f.bomLabels).toBe(1);
-    expect(f.fileLabels).toBe(0);
+    expect(f.agent).toBe(0);
   });
 
   it("keeps the exploded view inside the viewport", () => {
-    const f = sampleFrame(2, GEO, view);
+    const f = sampleFrame(1, GEO, view);
     for (const p of PARTS) {
       expect(Math.abs(f.poses[p.id].position.x)).toBeLessThan(view.w / 2);
     }
     expect(f.labelRows.top + f.labelRows.lane).toBeLessThan(view.h / 2);
     expect(f.labelRows.bottom - f.labelRows.lane).toBeGreaterThan(-view.h / 2);
-  });
-
-  it("keeps each shell on its own side from the split into the explode", () => {
-    for (const p of [1, 2]) {
-      const f = sampleFrame(p, GEO, view);
-      expect(f.poses.front.position.x).toBeLessThan(f.poses.rear.position.x);
-    }
   });
 
   it("closes up for the FAQ: tipped back onto the table, only the camera left inside", () => {
@@ -100,7 +99,7 @@ describe.each([
   });
 
   it("holds internals until the shells close when crossfading to the FAQ", () => {
-    const a = sampleFrame(2, GEO, view);
+    const a = sampleFrame(1, GEO, view);
     const b = sampleFrame(3, GEO, view);
     expect(mixFrames(a, b, 0.5).poses.main.opacity).toBeGreaterThan(0.9);
     expect(mixFrames(a, b, 1).poses.main.opacity).toBe(0);
@@ -151,7 +150,7 @@ describe("orientation continuity", () => {
 
 describe("BOM leaders", () => {
   it("never cross between parts that share a column", () => {
-    const f = sampleFrame(2, GEO, DESKTOP);
+    const f = sampleFrame(1, GEO, DESKTOP);
     const labelled = PARTS.filter((p) => p.bom);
     for (const a of labelled) {
       for (const b of labelled) {
@@ -169,7 +168,7 @@ describe("BOM leaders", () => {
 
 describe("drag orbit", () => {
   it("turns the scene rigidly while label anchors hold still", () => {
-    const f = sampleFrame(2, GEO, DESKTOP);
+    const f = sampleFrame(1, GEO, DESKTOP);
     const o = orbitFrame(f, 0.4);
     const pivot = f.poses.front.position
       .clone()
@@ -199,28 +198,10 @@ describe("drag orbit", () => {
 
 describe("desktop BOM clears the nav", () => {
   it("keeps the top label lane below the top bar", () => {
-    const f = sampleFrame(2, GEO, DESKTOP);
+    const f = sampleFrame(1, GEO, DESKTOP);
     // Top bar is ~80px of a 900px viewport ≈ 9% of the height.
     expect(f.labelRows.top + f.labelRows.lane).toBeLessThan(
       DESKTOP.h * (0.5 - 0.09),
     );
-  });
-});
-
-describe("share step file chips", () => {
-  it("spaces the shells so their fixed-width chips can't overlap", () => {
-    // Chip widths as fractions of the viewport, from enclosure-scene.tsx:
-    // desktop ~270px (checked from the 1080px nav breakpoint), phone ≤42vw.
-    const cases: [typeof DESKTOP, number][] = [
-      [{ w: 1080 / 150, h: 3.78 }, 270 / 1080],
-      [DESKTOP, 270 / 1440],
-      [PHONE, 0.42],
-    ];
-    for (const [view, chipFrac] of cases) {
-      const f = sampleFrame(1, GEO, view);
-      const centreGap =
-        (f.poses.rear.position.x - f.poses.front.position.x) / view.w;
-      expect(centreGap, JSON.stringify(view)).toBeGreaterThan(chipFrac + 0.02);
-    }
   });
 });

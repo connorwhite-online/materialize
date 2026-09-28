@@ -122,13 +122,13 @@ const COPY: Record<
     ),
     body: "Get prints delivered to your door, and pick from 60+ materials. Share your hardware projects and files.",
   },
-  share: {
-    title: "Share your files",
-    body: "Publish the parts. Anyone can download or print them.",
-  },
   build: {
     title: "Host the whole build",
     body: "Parts, bill of materials, and wiring diagrams.",
+  },
+  agents: {
+    title: "Built with agents",
+    body: "Your agent can host the project, quote it and order the print.",
   },
 };
 
@@ -300,6 +300,91 @@ function useRunCount(running: boolean): number {
     if (running) setCount((c) => c + 1);
   }
   return count;
+}
+
+/**
+ * What the agent is doing, as a live call log beside the spark: the real
+ * MCP tool names (app/api/[transport]/route.ts), in the order an agent
+ * would ship a build. Deliberately no prices: they'd be invented.
+ */
+const AGENT_CALLS = [
+  { tool: "materialize_create_project", result: "Pneuma S · 9 parts" },
+  { tool: "materialize_set_project_bom", result: "14 line items" },
+  { tool: "materialize_get_quote", result: "Hard TPU · 2 parts" },
+  { tool: "materialize_create_order", result: "Order placed" },
+] as const;
+/** First line lands once the cable's first pulse reaches the port. */
+const LOG_START_MS = 1500;
+const LOG_EVERY_MS = 650;
+
+/**
+ * Shown only on the agents step, and re-keyed per visit so each arrival
+ * replays the calls from the top.
+ */
+export function AgentLog() {
+  const { step } = useLanding();
+  const [visit, setVisit] = useState(0);
+  const [wasAgents, setWasAgents] = useState(false);
+  const onAgents = STEPS[step].id === "agents";
+  if (onAgents !== wasAgents) {
+    setWasAgents(onAgents);
+    if (onAgents) setVisit((v) => v + 1);
+  }
+  return (
+    <AnimatePresence>
+      {onAgents && <AgentLogLines key={visit} />}
+    </AnimatePresence>
+  );
+}
+
+function AgentLogLines() {
+  const [shown, setShown] = useState(0);
+  const reduced = useReducedMotion();
+  useEffect(() => {
+    const timers = AGENT_CALLS.map((_, i) =>
+      window.setTimeout(
+        () => setShown(i + 1),
+        reduced ? 0 : LOG_START_MS + i * LOG_EVERY_MS,
+      ),
+    );
+    return () => timers.forEach(clearTimeout);
+  }, [reduced]);
+  return (
+    <motion.ol
+      aria-label="Agent activity"
+      exit={{ opacity: 0, filter: "blur(6px)" }}
+      transition={{ duration: 0.25 }}
+      className="pointer-events-none absolute right-3 top-[29%] z-10 flex w-[56vw] flex-col gap-1.5 nav:left-[64%] nav:right-auto nav:top-[24%] nav:w-[min(380px,30vw)] nav:gap-2"
+    >
+      {AGENT_CALLS.slice(0, shown).map((c, i) => (
+        <motion.li
+          key={c.tool}
+          initial={{ opacity: 0, y: 6, filter: "blur(6px)" }}
+          animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+          transition={{ duration: 0.32, ease: [0.22, 0.9, 0.28, 1] }}
+          className="glass-surface flex items-center gap-2 rounded-xl px-2.5 py-1.5 font-mono text-[10px] ring-1 ring-border/70 nav:px-3 nav:py-2 nav:text-xs"
+        >
+          <span
+            aria-hidden
+            className={cn(
+              "size-1.5 shrink-0 rounded-full",
+              i === shown - 1 && shown < AGENT_CALLS.length
+                ? "animate-pulse bg-sky-400"
+                : "bg-sky-400/70",
+            )}
+          />
+          <span className="min-w-0 truncate text-foreground/90">
+            {/* The namespace eats a phone's width; the verb is the point. */}
+            <span className="hidden nav:inline">materialize_</span>
+            {c.tool.replace(/^materialize_/, "")}
+          </span>
+          <span className="ml-auto shrink-0 text-muted-foreground">
+            {c.result}
+          </span>
+        </motion.li>
+      ))}
+    </motion.ol>
+  );
 }
 
 /** Freeze the tour while the FAQ sheet is up — nobody is watching it. */

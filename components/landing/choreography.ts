@@ -130,14 +130,16 @@ export interface Frame {
   poses: Record<PartId, Pose>;
   /** 1 in the hero, 0 once it scrolls away — gates spin, drag and particles. */
   hero: number;
-  /** Opacity of the file-name labels under the split shells. */
-  fileLabels: number;
+  /** 1 on the agents step: the cable, spark and call log. */
+  agent: number;
   /** Opacity of the BOM leader labels. */
   bomLabels: number;
   /** Anchors the labels hang off, world space. */
   labelRows: { top: number; bottom: number; lane: number };
   /** Hero centre — the pivot the swipe deformation scales around. */
   heroCenter: Vector3;
+  /** Agent spark, world space: the far end of the cable. */
+  spark: Vector3;
   /**
    * Where each part sits before any drag-orbit. BOM labels hang off these
    * so they hold still while the scene turns under them (orbitFrame).
@@ -181,8 +183,12 @@ function turn(base: Quaternion, yaw: number, pitch = 0): Quaternion {
 }
 
 export const HERO_QUAT = turn(STANDING, -0.35, 0.12);
-const FRONT_SPLIT_QUAT = turn(STANDING, 0.45, 0.1);
-const REAR_SPLIT_QUAT = turn(STANDING, -0.45, 0.1);
+/**
+ * Agents step: standing, tipped back with the bottom (USB-C) end toward
+ * the viewer so the cable plugging into it reads, turned a little toward
+ * the agent spark on the right. One hinge away from the hero.
+ */
+const AGENT_QUAT = turn(STANDING, 0.35, -0.55);
 export const EXPLODE_QUAT = turn(LAID_OUT, 0.6, 0.08);
 /**
  * FAQ backdrop: the device tipped back onto a table — hinged ~60° about
@@ -213,14 +219,14 @@ export interface Layout {
   portrait: boolean;
   s0: number;
   t0: Vector3;
-  s1: number;
-  splitX: number;
-  splitDx: number;
-  splitY: number;
   s2: number;
   t2: Vector3;
   s3: number;
   t3: Vector3;
+  sA: number;
+  tA: Vector3;
+  /** Where the agent spark floats — the far end of the cable. */
+  spark: Vector3;
 }
 
 export function layoutFor(view: View): Layout {
@@ -232,7 +238,6 @@ export function layoutFor(view: View): Layout {
   // The stage is centred on every viewport (copy sits bottom-left on
   // desktop, the stepper bottom-centre). Every step lives in the upper
   // ~two-thirds so the copy and stepper below never collide with it.
-  const s1 = s0 * (portrait ? 0.6 : 0.6);
   const s2 = Math.min(
     ((portrait ? 0.28 : 0.4) * view.h) / DEVICE_LONG,
     ((portrait ? 0.86 : 0.62) * view.w) / EXPLODE_WIDE,
@@ -243,15 +248,6 @@ export function layoutFor(view: View): Layout {
     t0: portrait
       ? new Vector3(0, view.h * 0.17, 0)
       : new Vector3(0, view.h * 0.04, 0),
-    s1,
-    splitX: 0,
-    // Spaced by the VIEWPORT, not the model: the file chips under each
-    // shell are fixed-width HTML (~270px desktop, ≤42vw phone), and spacing
-    // them off the model's size let narrow windows overlap them.
-    // Desktop: centres 30% of the width apart (≥324px from the 1080px nav
-    // breakpoint up). Phone: 47% apart vs 42vw chips → a clear gap.
-    splitDx: portrait ? view.w * 0.235 : view.w * 0.15,
-    splitY: view.h * (portrait ? 0.2 : 0.14),
     s2,
     t2: portrait
       ? new Vector3(0, view.h * 0.2, 0)
@@ -260,6 +256,17 @@ export function layoutFor(view: View): Layout {
     // the old cropped close-up).
     s3: Math.min(0.62 * view.w, 1.2 * view.h) / DEVICE_LONG,
     t3: new Vector3(0, -view.h * 0.02, 0),
+    // Device left of centre, spark right, the call log beside the spark
+    // (DOM, landing-hero.tsx). Phone: device up-left, spark up-right.
+    sA: s0 * (portrait ? 0.62 : 0.78),
+    tA: portrait
+      ? new Vector3(-view.w * 0.2, view.h * 0.22, 0)
+      : new Vector3(-view.w * 0.13, view.h * 0.08, 0),
+    // Desktop: the spark sits left of the call log (which starts at 64%
+    // of the width, landing-hero.tsx), so the log never covers it.
+    spark: portrait
+      ? new Vector3(view.w * 0.26, view.h * 0.3, 0)
+      : new Vector3(view.w * 0.1, view.h * 0.2, 0),
   };
 }
 
@@ -308,35 +315,6 @@ function keyframe(
         opacity: inside,
       };
     case 1: {
-      if (part.id === "front" || part.id === "rear") {
-        const front = part.id === "front";
-        return {
-          position: new Vector3(
-            L.splitX + (front ? -L.splitDx : L.splitDx),
-            L.splitY,
-            0,
-          ),
-          quaternion: (front ? FRONT_SPLIT_QUAT : REAR_SPLIT_QUAT).clone(),
-          scale: L.s1,
-          opacity: 1,
-        };
-      }
-      // Internals wait, invisible, where the device was — they fade up
-      // out of the gap the shells leave on the way into the BOM.
-      return {
-        position: place(
-          c,
-          mc,
-          HERO_QUAT,
-          L.s1,
-          new Vector3(L.splitX, L.splitY, 0),
-        ),
-        quaternion: HERO_QUAT.clone(),
-        scale: L.s1,
-        opacity: 0,
-      };
-    }
-    case 2: {
       const origin = new Vector3(mc.x, (MAX_SLOT / 2) * SLOT_SPACING, mc.z);
       return {
         position: place(
@@ -351,6 +329,13 @@ function keyframe(
         opacity: 1,
       };
     }
+    case 2:
+      return {
+        position: place(c, mc, AGENT_QUAT, L.sA, L.tA),
+        quaternion: AGENT_QUAT.clone(),
+        scale: L.sA,
+        opacity: part.shell || SEEN_WHEN_CLOSED.has(part.id) ? 1 : 0,
+      };
     case 3:
       return {
         position: place(c, mc, ZOOM_QUAT, L.s3, L.t3),
@@ -390,13 +375,13 @@ export function sampleFrame(
     let opacity = MathUtils.lerp(a.opacity, b.opacity, t);
     if (!part.shell) {
       // Internals arrive late into the BOM and leave early out of it, so
-      // they're never seen drifting through a closed shell.
-      if (seg === 1) opacity = MathUtils.smoothstep(raw, 0.15, 0.7);
-      else if (seg === 2)
-        opacity = SEEN_WHEN_CLOSED.has(part.id)
-          ? 1
-          : 1 - MathUtils.smoothstep(raw, 0.25, 0.8);
-      else opacity = 0;
+      // they're never seen drifting through a closed shell. The camera,
+      // visible through the lens opening, stays once the device closes.
+      const seen = SEEN_WHEN_CLOSED.has(part.id);
+      if (seg === 0) opacity = MathUtils.smoothstep(raw, 0.15, 0.7);
+      else if (seg === 1)
+        opacity = seen ? 1 : 1 - MathUtils.smoothstep(raw, 0.25, 0.8);
+      else opacity = seen ? 1 : 0;
     }
     poses[part.id] = mix(a, b, t, opacity);
   }
@@ -406,14 +391,15 @@ export function sampleFrame(
   return {
     poses,
     hero: 1 - MathUtils.smoothstep(p, 0, 0.5),
-    fileLabels: MathUtils.smoothstep(bump(p, 1, 0.45), 0, 0.6),
-    bomLabels: MathUtils.smoothstep(bump(p, 2, 0.45), 0, 0.6),
+    bomLabels: MathUtils.smoothstep(bump(p, 1, 0.45), 0, 0.6),
+    agent: MathUtils.smoothstep(bump(p, 2, 0.45), 0, 0.6),
     labelRows: {
       top: L.t2.y + bomHalf + gap,
       bottom: L.t2.y - bomHalf - gap,
       lane: view.h * 0.055,
     },
     heroCenter: L.t0.clone(),
+    spark: L.spark.clone(),
   };
 }
 
@@ -438,7 +424,7 @@ export function mixFrames(a: Frame, b: Frame, t: number): Frame {
     ...a,
     poses,
     hero: MathUtils.lerp(a.hero, b.hero, k),
-    fileLabels: MathUtils.lerp(a.fileLabels, b.fileLabels, k),
+    agent: MathUtils.lerp(a.agent, b.agent, k),
     bomLabels: MathUtils.lerp(a.bomLabels, b.bomLabels, k),
   };
 }

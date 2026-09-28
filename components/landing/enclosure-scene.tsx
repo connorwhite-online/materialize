@@ -5,8 +5,8 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { Html, useGLTF, useTexture } from "@react-three/drei";
 import * as THREE from "three";
 import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { Download } from "@/components/icons/download";
 import { useLanding } from "./landing-context";
+import { AgentCable } from "./agent-cable";
 import {
   PLAIN,
   SWEEP_S,
@@ -186,8 +186,6 @@ const ORBIT_MAX = 0.4;
 /** Seconds to travel one step. */
 const STEP_TWEEN_S = 0.9;
 
-const SHELL_IDS = ["front", "rear"] as const;
-
 // Per-frame mutation of three.js objects lives in these plain helpers:
 // scene-graph objects are mutable by design, and the React compiler's
 // immutability rule can't tell a material from React state.
@@ -229,6 +227,8 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
     lineMin: 0,
     lineMax: 0,
     lastStep: 0,
+    stepTime: 0,
+    charged: false,
   });
 
   const idle = useIdle();
@@ -323,9 +323,7 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
           <DetailInternals parts={parts} />
         </Suspense>
       )}
-      {SHELL_IDS.map((id) => (
-        <FileLabel key={id} id={id} size={parts[id].size} frameRef={frameRef} />
-      ))}
+      <AgentCable frameRef={frameRef} device={parts.rear.object} />
       {PARTS.filter((p) => p.bom).map((spec) => (
         <BomLabel key={spec.id} id={spec.id} frameRef={frameRef} />
       ))}
@@ -359,6 +357,8 @@ function runBurnSweep(
     lineMin: number;
     lineMax: number;
     lastStep: number;
+    stepTime: number;
+    charged: boolean;
   },
   layers: Record<ShellId, ShellLayers>,
   step: number,
@@ -367,14 +367,24 @@ function runBurnSweep(
 ) {
   const shells = [layers.front, layers.rear];
   st.sinceSweep += delta;
+  st.stepTime += delta;
   // Arriving back on the first step, give it a full cycle before the next
   // sweep — otherwise it fires while the shells are still flying home.
   if (step !== st.lastStep) {
     if (step === 0) st.sinceSweep = 0;
     st.lastStep = step;
+    st.stepTime = 0;
+    st.charged = false;
   }
   if (st.to < 0) {
-    const next = nextSweep(step, st.look, st.sinceSweep, false);
+    let next = nextSweep(step, st.look, st.sinceSweep, false);
+    // Agents step: once the first pulse has run down the cable
+    // (agent-cable.tsx), the edge climbs the shell once in the SAME
+    // material — the device "charging" as the power reaches it.
+    if (next === null && step === 2 && !st.charged && st.stepTime > 2.3) {
+      st.charged = true;
+      next = st.look;
+    }
     // Reduced motion: no cycling on the hero; still settle to the plain
     // plastic off it, instantly.
     if (next === null || (reducedMotion && step === 0)) return;
@@ -408,77 +418,6 @@ function runBurnSweep(
 }
 
 // ─── Labels ───────────────────────────────────────────────────────────
-
-const FILES: Record<"front" | "rear", { name: string; size: string }> = {
-  front: { name: "02_Front_soft_shell.step", size: "7.3 MB" },
-  rear: { name: "01_Rear_pocketed_body.step", size: "9.5 MB" },
-};
-
-/** File-name chip under each split shell, with a download facade. */
-function FileLabel({
-  id,
-  size,
-  frameRef,
-}: {
-  id: "front" | "rear";
-  size: THREE.Vector3;
-  frameRef: React.MutableRefObject<Frame | null>;
-}) {
-  const groupRef = useRef<THREE.Group>(null);
-  const elRef = useRef<HTMLDivElement>(null);
-  const [saved, setSaved] = useState(false);
-
-  useFrame(() => {
-    const f = frameRef.current;
-    const g = groupRef.current;
-    if (!f || !g) return;
-    const pose = f.poses[id];
-    // The shell stands on its long axis (model Z) in the split pose.
-    g.position.copy(pose.position);
-    g.position.y -= (size.z * pose.scale) / 2 + 0.12;
-    if (elRef.current) {
-      elRef.current.style.opacity = String(f.fileLabels);
-      // Hidden labels leave layout entirely (no per-frame reflow).
-      elRef.current.style.display = f.fileLabels > 0.001 ? "" : "none";
-      elRef.current.style.pointerEvents = f.fileLabels > 0.6 ? "auto" : "none";
-    }
-  });
-
-  const file = FILES[id];
-  return (
-    <group ref={groupRef}>
-      <Html center zIndexRange={[5, 0]}>
-        <div
-          ref={elRef}
-          style={{ opacity: 0 }}
-          className="flex max-w-[42vw] items-center gap-2 whitespace-nowrap rounded-full bg-card/80 py-1 pl-3 pr-1 text-[11px] sm:max-w-none sm:text-xs ring-1 ring-foreground/10 backdrop-blur-md"
-        >
-          <span className="min-w-0 truncate font-mono text-foreground/90">
-            {file.name}
-          </span>
-          <span className="hidden text-muted-foreground sm:inline">
-            {file.size}
-          </span>
-          <button
-            type="button"
-            aria-label={`Download ${file.name}`}
-            onClick={() => {
-              setSaved(true);
-              window.setTimeout(() => setSaved(false), 1400);
-            }}
-            className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground text-background transition-transform duration-150 active:scale-90"
-          >
-            {saved ? (
-              <span className="text-[10px]">✓</span>
-            ) : (
-              <Download size={12} />
-            )}
-          </button>
-        </div>
-      </Html>
-    </group>
-  );
-}
 
 /** Leader line from a part in the exploded view to its BOM label. */
 function BomLabel({

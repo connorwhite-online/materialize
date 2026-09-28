@@ -35,8 +35,8 @@ interface LandingState {
 /** The first-screen stepper: one choreography keyframe per step. */
 export const STEPS = [
   { id: "print", label: "Print in any material" },
-  { id: "share", label: "Share your files" },
   { id: "build", label: "Host the whole build" },
+  { id: "agents", label: "Built with agents" },
 ] as const;
 export const STEP_MS = 6000;
 export const RESUME_AFTER_MS = 10_000;

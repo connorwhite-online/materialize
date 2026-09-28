@@ -10,6 +10,7 @@ import { EnclosureStage } from "@/components/landing/enclosure-stage-lazy";
 import { LandingProvider } from "@/components/landing/landing-context";
 import { LandingFooter } from "@/components/landing/landing-footer";
 import {
+  AgentLog,
   LandingHero,
   StepCarousel,
   StepCopy,
@@ -160,6 +161,7 @@ export default async function HomePage() {
           <main className="flex flex-1 items-end justify-start px-6 pb-40 sm:px-8 nav:px-16 nav:pb-24 lg:px-24 xl:px-32">
             <StepCopy />
           </main>
+          <AgentLog />
           <StepCarousel />
         </LandingHero>
 
