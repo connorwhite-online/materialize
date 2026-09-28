@@ -6,6 +6,8 @@ import { ChevronLeft } from "@/components/icons/chevron-left";
 import { ChevronRight } from "@/components/icons/chevron-right";
 import { cn } from "@/lib/utils";
 import { STEPS, STEP_MS, useLanding } from "./landing-context";
+import { AGENT_TASKS, PACKET_LAUNCH_S, arrivalS } from "./agent-timeline";
+import { CheckCircleFilled } from "@/components/icons/check-circle-filled";
 
 const VERTICAL_CANCEL = 40;
 
@@ -191,8 +193,8 @@ const CONTROL =
 export function StepCarousel() {
   const { step, playing, goTo, advance } = useLanding();
   const reduced = useReducedMotion();
-  const scrolledAway = useScrolledAway();
-  const running = playing && !reduced && !scrolledAway;
+  // Keeps playing while the FAQ is up: the scene is the backdrop now.
+  const running = playing && !reduced;
   const run = useRunCount(running);
   const prev = usePreviousStep(step);
 
@@ -303,23 +305,14 @@ function useRunCount(running: boolean): number {
 }
 
 /**
- * What the agent is doing, as a live call log beside the spark: the real
- * MCP tool names (app/api/[transport]/route.ts), in the order an agent
- * would ship a build. Deliberately no prices: they'd be invented.
- */
-const AGENT_CALLS = [
-  { tool: "materialize_create_project", result: "Pneuma S · 9 parts" },
-  { tool: "materialize_set_project_bom", result: "14 line items" },
-  { tool: "materialize_get_quote", result: "Hard TPU · 2 parts" },
-  { tool: "materialize_create_order", result: "Order placed" },
-] as const;
-/** First line lands once the cable's first pulse reaches the port. */
-const LOG_START_MS = 1500;
-const LOG_EVERY_MS = 650;
-
-/**
- * Shown only on the agents step, and re-keyed per visit so each arrival
- * replays the calls from the top.
+ * Agents step checklist: plain-language tasks that tick off as each bulge
+ * lands in the M (agent-timeline.ts keeps them on the 3D's beats). Each
+ * appears with a spinner when its bulge leaves the laptop and flips to a
+ * filled check as it arrives.
+ *
+ * Positioned against the agent layout in choreography.ts: desktop sits
+ * centred under the M (world x = 0.16w → 66% across); portrait spans
+ * the width between the scene and the copy.
  */
 export function AgentLog() {
   const { step } = useLanding();
@@ -332,69 +325,79 @@ export function AgentLog() {
   }
   return (
     <AnimatePresence>
-      {onAgents && <AgentLogLines key={visit} />}
+      {onAgents && <AgentChecklist key={visit} />}
     </AnimatePresence>
   );
 }
 
-function AgentLogLines() {
-  const [shown, setShown] = useState(0);
+function AgentChecklist() {
+  // 0 hidden, 1 in flight, 2 done — per task.
+  const [state, setState] = useState<number[]>(() => AGENT_TASKS.map(() => 0));
   const reduced = useReducedMotion();
   useEffect(() => {
-    const timers = AGENT_CALLS.map((_, i) =>
-      window.setTimeout(
-        () => setShown(i + 1),
-        reduced ? 0 : LOG_START_MS + i * LOG_EVERY_MS,
-      ),
+    const set = (i: number, v: number) =>
+      setState((s) => s.map((x, k) => (k === i ? v : x)));
+    const timers = AGENT_TASKS.flatMap((_, i) =>
+      reduced
+        ? [window.setTimeout(() => set(i, 2), 0)]
+        : [
+            window.setTimeout(() => set(i, 1), PACKET_LAUNCH_S[i] * 1000),
+            window.setTimeout(() => set(i, 2), arrivalS(i) * 1000),
+          ],
     );
     return () => timers.forEach(clearTimeout);
   }, [reduced]);
   return (
     <motion.ol
-      aria-label="Agent activity"
+      aria-label="What the agent did"
       exit={{ opacity: 0, filter: "blur(6px)" }}
       transition={{ duration: 0.25 }}
-      className="pointer-events-none absolute right-3 top-[29%] z-10 flex w-[56vw] flex-col gap-1.5 nav:left-[64%] nav:right-auto nav:top-[24%] nav:w-[min(380px,30vw)] nav:gap-2"
+      // Orientation, not width: choreography.ts picks the 3D layout by
+      // portrait vs landscape, so the list must too, or a landscape tablet
+      // gets desktop 3D with a phone-placed list on top of it.
+      className="pointer-events-none absolute left-[66%] top-[50%] z-10 flex w-72 -translate-x-1/2 flex-col gap-2 portrait:left-4 portrait:right-4 portrait:top-[40%] portrait:mx-auto portrait:w-auto portrait:max-w-sm portrait:translate-x-0 [@media(max-height:500px)]:hidden"
     >
-      {AGENT_CALLS.slice(0, shown).map((c, i) => (
-        <motion.li
-          key={c.tool}
-          initial={{ opacity: 0, y: 6, filter: "blur(6px)" }}
-          animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-          transition={{ duration: 0.32, ease: [0.22, 0.9, 0.28, 1] }}
-          className="glass-surface flex items-center gap-2 rounded-xl px-2.5 py-1.5 font-mono text-[10px] ring-1 ring-border/70 nav:px-3 nav:py-2 nav:text-xs"
-        >
-          <span
-            aria-hidden
-            className={cn(
-              "size-1.5 shrink-0 rounded-full",
-              i === shown - 1 && shown < AGENT_CALLS.length
-                ? "animate-pulse bg-sky-400"
-                : "bg-sky-400/70",
-            )}
-          />
-          <span className="min-w-0 truncate text-foreground/90">
-            {/* The namespace eats a phone's width; the verb is the point. */}
-            <span className="hidden nav:inline">materialize_</span>
-            {c.tool.replace(/^materialize_/, "")}
-          </span>
-          <span className="ml-auto shrink-0 text-muted-foreground">
-            {c.result}
-          </span>
-        </motion.li>
-      ))}
+      {AGENT_TASKS.map((task, i) =>
+        state[i] === 0 ? null : (
+          <motion.li
+            key={task}
+            initial={{ opacity: 0, y: 6, filter: "blur(6px)" }}
+            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            transition={{ duration: 0.32, ease: [0.22, 0.9, 0.28, 1] }}
+            className="glass-surface flex items-center gap-2.5 rounded-full py-1.5 pl-1.5 pr-4 text-sm ring-1 ring-border/70"
+          >
+            <span className="relative flex size-6 shrink-0 items-center justify-center">
+              <AnimatePresence initial={false} mode="popLayout">
+                {state[i] === 2 ? (
+                  <motion.span
+                    key="done"
+                    initial={{ scale: 0.4, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ type: "spring", stiffness: 520, damping: 26 }}
+                    className="text-sky-400"
+                  >
+                    <CheckCircleFilled size={22} />
+                  </motion.span>
+                ) : (
+                  <motion.span
+                    key="busy"
+                    exit={{ opacity: 0, scale: 0.6 }}
+                    className="size-4 animate-spin rounded-full border-2 border-sky-400/25 border-t-sky-400"
+                  />
+                )}
+              </AnimatePresence>
+            </span>
+            <span
+              className={cn(
+                "transition-colors duration-300",
+                state[i] === 2 ? "text-foreground" : "text-muted-foreground",
+              )}
+            >
+              {task}
+            </span>
+          </motion.li>
+        ),
+      )}
     </motion.ol>
   );
-}
-
-/** Freeze the tour while the FAQ sheet is up — nobody is watching it. */
-function useScrolledAway(): boolean {
-  const [away, setAway] = useState(false);
-  useEffect(() => {
-    const read = () => setAway(window.scrollY > window.innerHeight * 0.3);
-    read();
-    window.addEventListener("scroll", read, { passive: true });
-    return () => window.removeEventListener("scroll", read);
-  }, []);
-  return away;
 }

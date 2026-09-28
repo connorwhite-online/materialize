@@ -1,38 +1,12 @@
 "use client";
 
-import { Suspense, useEffect } from "react";
+import { Suspense } from "react";
 import { Canvas } from "@react-three/fiber";
 import { useReducedMotion } from "motion/react";
 import { Environment, Lightformer } from "@react-three/drei";
 import * as THREE from "three";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
-import { useLanding } from "./landing-context";
 import { EnclosureScene } from "./enclosure-scene";
-
-/**
- * How far the FAQ sheet has been pulled up over the stage: 0 at the top,
- * 1 once the page has scrolled most of a screen. The first screen tells
- * the story through the stepper; scrolling only brings the sheet in.
- */
-export function zoomFor(scrollY: number, viewportH: number): number {
-  return Math.min(1, Math.max(0, scrollY / (viewportH * 0.8 || 1)));
-}
-
-function useScrollZoom() {
-  const { zoomRef } = useLanding();
-  useEffect(() => {
-    const update = () => {
-      zoomRef.current = zoomFor(window.scrollY, window.innerHeight);
-    };
-    update();
-    window.addEventListener("scroll", update, { passive: true });
-    window.addEventListener("resize", update);
-    return () => {
-      window.removeEventListener("scroll", update);
-      window.removeEventListener("resize", update);
-    };
-  }, [zoomRef]);
-}
 
 /**
  * Fixed, full-viewport canvas behind every landing section. It never
@@ -40,7 +14,6 @@ function useScrollZoom() {
  * the file-label download buttons opt back in on their own.
  */
 export function EnclosureStage() {
-  useScrollZoom();
   const reducedMotion = useReducedMotion() ?? false;
   return (
     <div aria-hidden className="pointer-events-none fixed inset-0 z-0">

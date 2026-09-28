@@ -1,17 +1,20 @@
 import { MathUtils, Matrix4, Quaternion, Vector3 } from "three";
 
 /**
- * Scroll choreography for the anon landing's enclosure backdrop.
+ * Choreography for the anon landing's enclosure stage.
  *
- * Pure: given scroll progress (0 → 3, one unit per full-screen section)
- * and the visible viewport size at z = 0, return a world pose for every
- * part of the Pneuma Q enclosure. The scene only applies what this
- * returns, so every pose is testable without a GPU.
+ * Pure: given tour progress (0 → 2, one unit per stepper step) and the
+ * visible viewport size at z = 0, return a world pose for every part of
+ * the Pneuma S enclosure. The scene only applies what this returns, so
+ * every pose is testable without a GPU.
  *
- *   0  hero   — assembled, shells only, material carousel
- *   1  share  — front + rear shells split apart and shrink, file labels
- *   2  BOM    — horizontal exploded view, electronics revealed, leaders
- *   3  FAQ    — reassembled, zoomed into a front three-quarter backdrop
+ *   0  print  — assembled, shells only; materials burn-sweep on their own
+ *   1  build  — horizontal exploded view, electronics revealed, BOM leaders
+ *   2  agents — the device shrinks into the Materialize M, fed by the
+ *               mascot's laptop (agent-desk.tsx)
+ *
+ * Scrolling to the FAQ no longer drives the scene: the tour just keeps
+ * playing behind the glass.
  *
  * Model space is the GLB's own: metres, Y is the stack axis (rear shell
  * at -Y, front shell at +Y), Z is the long axis.
@@ -138,8 +141,10 @@ export interface Frame {
   labelRows: { top: number; bottom: number; lane: number };
   /** Hero centre — the pivot the swipe deformation scales around. */
   heroCenter: Vector3;
-  /** Agent spark, world space: the far end of the cable. */
-  spark: Vector3;
+  /** Agents step layout, world space (see Layout). */
+  desk: Vector3;
+  mark: Vector3;
+  agentUnit: number;
   /**
    * Where each part sits before any drag-orbit. BOM labels hang off these
    * so they hold still while the scene turns under them (orbitFrame).
@@ -190,15 +195,6 @@ export const HERO_QUAT = turn(STANDING, -0.35, 0.12);
  */
 const AGENT_QUAT = turn(STANDING, 0.35, -0.55);
 export const EXPLODE_QUAT = turn(LAID_OUT, 0.6, 0.08);
-/**
- * FAQ backdrop: the device tipped back onto a table — hinged ~60° about
- * the horizontal axis so its face tilts up toward the viewer, with a
- * quarter-ish turn for the isometric diagonal. Reachable from the hero
- * (standing, face on) with essentially one hinge motion; an earlier
- * "long axis sideways" pose needed a roll AND a pitch at once, and the
- * slerp between them corkscrewed.
- */
-const ZOOM_QUAT = turn(STANDING, -0.4, -1.05);
 
 /**
  * Internals that stay visible once the device closes: the camera shows
@@ -217,20 +213,22 @@ function bump(p: number, centre: number, half: number): number {
 
 export interface Layout {
   portrait: boolean;
+  /** Very wide + short (landscape phone): stages shift right, no BOM labels. */
+  wide: boolean;
   s0: number;
   t0: Vector3;
   s2: number;
   t2: Vector3;
-  s3: number;
-  t3: Vector3;
-  sA: number;
-  tA: Vector3;
-  /** Where the agent spark floats — the far end of the cable. */
-  spark: Vector3;
+  /** Agents step: the mascot's desk, and the Materialize M it feeds. */
+  desk: Vector3;
+  mark: Vector3;
+  /** World size of one unit of the agent scene (mascot, laptop, M). */
+  agentUnit: number;
 }
 
 export function layoutFor(view: View): Layout {
   const portrait = view.w < view.h;
+  const wide = !portrait && view.w / view.h > 1.9;
   const s0 = Math.min(
     ((portrait ? 0.44 : 0.5) * view.h) / DEVICE_LONG,
     ((portrait ? 0.7 : 0.4) * view.w) / DEVICE_WIDE,
@@ -244,29 +242,41 @@ export function layoutFor(view: View): Layout {
   );
   return {
     portrait,
+    wide,
     s0,
+    // Very wide + short (a phone on its side): the copy owns the left
+    // half, so every step's stage shifts right, clear of it.
     t0: portrait
       ? new Vector3(0, view.h * 0.17, 0)
-      : new Vector3(0, view.h * 0.04, 0),
+      : wide
+        ? new Vector3(view.w * 0.2, view.h * 0.06, 0)
+        : new Vector3(0, view.h * 0.04, 0),
     s2,
     t2: portrait
       ? new Vector3(0, view.h * 0.2, 0)
-      : new Vector3(0, view.h * 0.07, 0),
-    // Long axis on the diagonal fills most of the width (zoomed out from
-    // the old cropped close-up).
-    s3: Math.min(0.62 * view.w, 1.2 * view.h) / DEVICE_LONG,
-    t3: new Vector3(0, -view.h * 0.02, 0),
-    // Device left of centre, spark right, the call log beside the spark
-    // (DOM, landing-hero.tsx). Phone: device up-left, spark up-right.
-    sA: s0 * (portrait ? 0.62 : 0.78),
-    tA: portrait
-      ? new Vector3(-view.w * 0.2, view.h * 0.22, 0)
-      : new Vector3(-view.w * 0.13, view.h * 0.08, 0),
-    // Desktop: the spark sits left of the call log (which starts at 64%
-    // of the width, landing-hero.tsx), so the log never covers it.
-    spark: portrait
-      ? new Vector3(view.w * 0.26, view.h * 0.3, 0)
-      : new Vector3(view.w * 0.1, view.h * 0.2, 0),
+      : wide
+        ? new Vector3(view.w * 0.22, view.h * 0.06, 0)
+        : new Vector3(0, view.h * 0.07, 0),
+    // Agents step. Desktop: the mascot's desk lower-left of centre, the
+    // M upper-right, the hose arcing between. Phone: both up top (desk
+    // left, M right), the checklist between them and the copy.
+    // Very wide + short (a phone on its side): the copy fills the left
+    // half, so the scene moves right, above it.
+    desk: portrait
+      ? new Vector3(-view.w * 0.22, view.h * 0.24, 0)
+      : wide
+        ? new Vector3(view.w * 0.1, view.h * 0.12, 0)
+        : new Vector3(-view.w * 0.16, -view.h * 0.02, 0),
+    mark: portrait
+      ? new Vector3(view.w * 0.25, view.h * 0.3, 0)
+      : wide
+        ? new Vector3(view.w * 0.36, view.h * 0.22, 0)
+        : new Vector3(view.w * 0.16, view.h * 0.16, 0),
+    agentUnit: portrait
+      ? Math.min(view.w * 0.26, view.h * 0.12)
+      : wide
+        ? Math.min(view.w * 0.075, view.h * 0.22)
+        : Math.min(view.w * 0.11, view.h * 0.2),
   };
 }
 
@@ -298,7 +308,7 @@ function explodedCenter(part: PartSpec, geo: Geometry): Vector3 {
 }
 
 function keyframe(
-  k: 0 | 1 | 2 | 3,
+  k: 0 | 1 | 2,
   part: PartSpec,
   geo: Geometry,
   L: Layout,
@@ -330,17 +340,12 @@ function keyframe(
       };
     }
     case 2:
+      // Every part shrinks into the M — the device "materialized" by it —
+      // and grows back out of it toward the FAQ backdrop.
       return {
-        position: place(c, mc, AGENT_QUAT, L.sA, L.tA),
+        position: place(c, mc, AGENT_QUAT, L.s0 * 0.04, L.mark),
         quaternion: AGENT_QUAT.clone(),
-        scale: L.sA,
-        opacity: part.shell || SEEN_WHEN_CLOSED.has(part.id) ? 1 : 0,
-      };
-    case 3:
-      return {
-        position: place(c, mc, ZOOM_QUAT, L.s3, L.t3),
-        quaternion: ZOOM_QUAT.clone(),
-        scale: L.s3,
+        scale: L.s0 * 0.04,
         opacity: part.shell || SEEN_WHEN_CLOSED.has(part.id) ? 1 : 0,
       };
   }
@@ -355,7 +360,7 @@ function mix(a: Pose, b: Pose, t: number, opacity: number): Pose {
   };
 }
 
-export const MAX_PROGRESS = 3;
+export const MAX_PROGRESS = 2;
 
 export function sampleFrame(
   progress: number,
@@ -364,14 +369,14 @@ export function sampleFrame(
 ): Frame {
   const p = MathUtils.clamp(progress, 0, MAX_PROGRESS);
   const L = layoutFor(view);
-  const seg = Math.min(Math.floor(p), MAX_PROGRESS - 1) as 0 | 1 | 2;
+  const seg = Math.min(Math.floor(p), MAX_PROGRESS - 1) as 0 | 1;
   const raw = p - seg;
   const t = easeInOut(raw);
 
   const poses = {} as Record<PartId, Pose>;
   for (const part of PARTS) {
     const a = keyframe(seg, part, geo, L);
-    const b = keyframe((seg + 1) as 1 | 2 | 3, part, geo, L);
+    const b = keyframe((seg + 1) as 1 | 2, part, geo, L);
     let opacity = MathUtils.lerp(a.opacity, b.opacity, t);
     if (!part.shell) {
       // Internals arrive late into the BOM and leave early out of it, so
@@ -379,9 +384,7 @@ export function sampleFrame(
       // visible through the lens opening, stays once the device closes.
       const seen = SEEN_WHEN_CLOSED.has(part.id);
       if (seg === 0) opacity = MathUtils.smoothstep(raw, 0.15, 0.7);
-      else if (seg === 1)
-        opacity = seen ? 1 : 1 - MathUtils.smoothstep(raw, 0.25, 0.8);
-      else opacity = seen ? 1 : 0;
+      else opacity = seen ? 1 : 1 - MathUtils.smoothstep(raw, 0.25, 0.8);
     }
     poses[part.id] = mix(a, b, t, opacity);
   }
@@ -391,7 +394,9 @@ export function sampleFrame(
   return {
     poses,
     hero: 1 - MathUtils.smoothstep(p, 0, 0.5),
-    bomLabels: MathUtils.smoothstep(bump(p, 1, 0.45), 0, 0.6),
+    // No room for leader labels on a landscape phone: 390px of height
+    // puts them into the nav and the carousel. The headline carries it.
+    bomLabels: L.wide ? 0 : MathUtils.smoothstep(bump(p, 1, 0.45), 0, 0.6),
     agent: MathUtils.smoothstep(bump(p, 2, 0.45), 0, 0.6),
     labelRows: {
       top: L.t2.y + bomHalf + gap,
@@ -399,7 +404,9 @@ export function sampleFrame(
       lane: view.h * 0.055,
     },
     heroCenter: L.t0.clone(),
-    spark: L.spark.clone(),
+    desk: L.desk.clone(),
+    mark: L.mark.clone(),
+    agentUnit: L.agentUnit,
   };
 }
 

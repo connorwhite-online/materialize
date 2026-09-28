@@ -6,7 +6,7 @@ import { Html, useGLTF, useTexture } from "@react-three/drei";
 import * as THREE from "three";
 import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { useLanding } from "./landing-context";
-import { AgentCable } from "./agent-cable";
+import { AgentDesk } from "./agent-desk";
 import {
   PLAIN,
   SWEEP_S,
@@ -25,7 +25,6 @@ import {
   sampleFrame,
   mixFrames,
   orbitFrame,
-  MAX_PROGRESS,
   type Frame,
   type Geometry,
   type PartId,
@@ -198,7 +197,7 @@ function fadeMaterials(materials: THREE.Material[], opacity: number) {
 }
 
 export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
-  const { orbitRef, zoomRef, step } = useLanding();
+  const { orbitRef, step } = useLanding();
   const stepRef = useRef(step);
   useEffect(() => {
     stepRef.current = step;
@@ -214,7 +213,6 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
   const frameRef = useRef<Frame | null>(null);
   const smooth = useRef({
     progress: 0,
-    zoom: 0,
     orbit: 0,
     orbitV: 0,
     jump: null as { from: number; to: number; t: number } | null,
@@ -227,8 +225,6 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
     lineMin: 0,
     lineMax: 0,
     lastStep: 0,
-    stepTime: 0,
-    charged: false,
   });
 
   const idle = useIdle();
@@ -265,19 +261,14 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
         Math.sign(gap) * Math.min(Math.abs(gap), delta / STEP_TWEEN_S);
       current = sampleFrame(st.progress, geo, view);
     }
-    st.zoom += (zoomRef.current - st.zoom) * (1 - Math.exp(-delta * 9));
 
-    const blended =
-      st.zoom > 0.001
-        ? mixFrames(current, sampleFrame(MAX_PROGRESS, geo, view), st.zoom)
-        : current;
     // Drag-orbit, the same on every step: a spring toward the finger's
     // pull (up to ORBIT_MAX), overshooting once when it's let go.
     st.orbitV +=
       ((orbitRef.current * ORBIT_MAX - st.orbit) * 90 - st.orbitV * 13) * delta;
     st.orbit += st.orbitV * delta;
-    const yaw = st.orbit * (1 - st.zoom);
-    const frame = Math.abs(yaw) > 1e-4 ? orbitFrame(blended, yaw) : blended;
+    const yaw = st.orbit;
+    const frame = Math.abs(yaw) > 1e-4 ? orbitFrame(current, yaw) : current;
     frameRef.current = frame;
 
     // Idle sway, gated to the hero. The group sits on the hero centre so
@@ -323,7 +314,7 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
           <DetailInternals parts={parts} />
         </Suspense>
       )}
-      <AgentCable frameRef={frameRef} device={parts.rear.object} />
+      <AgentDesk frameRef={frameRef} stepRef={stepRef} />
       {PARTS.filter((p) => p.bom).map((spec) => (
         <BomLabel key={spec.id} id={spec.id} frameRef={frameRef} />
       ))}
@@ -357,8 +348,6 @@ function runBurnSweep(
     lineMin: number;
     lineMax: number;
     lastStep: number;
-    stepTime: number;
-    charged: boolean;
   },
   layers: Record<ShellId, ShellLayers>,
   step: number,
@@ -367,24 +356,14 @@ function runBurnSweep(
 ) {
   const shells = [layers.front, layers.rear];
   st.sinceSweep += delta;
-  st.stepTime += delta;
   // Arriving back on the first step, give it a full cycle before the next
   // sweep — otherwise it fires while the shells are still flying home.
   if (step !== st.lastStep) {
     if (step === 0) st.sinceSweep = 0;
     st.lastStep = step;
-    st.stepTime = 0;
-    st.charged = false;
   }
   if (st.to < 0) {
-    let next = nextSweep(step, st.look, st.sinceSweep, false);
-    // Agents step: once the first pulse has run down the cable
-    // (agent-cable.tsx), the edge climbs the shell once in the SAME
-    // material — the device "charging" as the power reaches it.
-    if (next === null && step === 2 && !st.charged && st.stepTime > 2.3) {
-      st.charged = true;
-      next = st.look;
-    }
+    const next = nextSweep(step, st.look, st.sinceSweep, false);
     // Reduced motion: no cycling on the hero; still settle to the plain
     // plastic off it, instantly.
     if (next === null || (reducedMotion && step === 0)) return;

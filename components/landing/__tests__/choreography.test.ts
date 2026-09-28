@@ -4,12 +4,10 @@ import {
   PARTS,
   sampleFrame,
   orbitFrame,
-  mixFrames,
   type Geometry,
   type PartId,
 } from "../choreography";
 import { LANDING_MATERIALS, wrapIndex } from "../landing-materials";
-import { zoomFor } from "../enclosure-stage";
 
 // Part centres measured off the source GLB (mm → m).
 const mm = (x: number, y: number, z: number) =>
@@ -47,19 +45,23 @@ describe.each([
     expect(gap / f.poses.front.scale).toBeLessThan(0.02);
   });
 
-  it("agents step: assembled, off to one side of the spark, camera only inside", () => {
+  it("agents step: the device has shrunk into the M, desk and M both on screen", () => {
     const f = sampleFrame(2, GEO, view);
     expect(f.agent).toBe(1);
     expect(f.bomLabels).toBe(0);
-    for (const p of internals) {
-      expect(f.poses[p.id].opacity, p.id).toBe(p.id === "camera" ? 1 : 0);
+    for (const p of PARTS) {
+      expect(f.poses[p.id].position.distanceTo(f.mark), p.id).toBeLessThan(
+        view.w * 0.05,
+      );
+      expect(f.poses[p.id].scale).toBeLessThan(
+        sampleFrame(0, GEO, view).poses[p.id].scale * 0.1,
+      );
     }
-    const gap = f.poses.front.position.distanceTo(f.poses.rear.position);
-    expect(gap / f.poses.front.scale).toBeLessThan(0.02);
-    // The device and the spark sit on opposite sides, room for the cable.
-    expect(f.poses.front.position.x).toBeLessThan(f.spark.x);
-    expect(Math.abs(f.spark.x)).toBeLessThan(view.w / 2);
-    expect(Math.abs(f.spark.y)).toBeLessThan(view.h / 2);
+    expect(f.desk.x).toBeLessThan(f.mark.x);
+    for (const v of [f.desk, f.mark]) {
+      expect(Math.abs(v.x)).toBeLessThan(view.w / 2);
+      expect(Math.abs(v.y)).toBeLessThan(view.h / 2);
+    }
   });
 
   it("explodes every part in stack order, front shell on the left, fully visible", () => {
@@ -83,34 +85,11 @@ describe.each([
     expect(f.labelRows.bottom - f.labelRows.lane).toBeGreaterThan(-view.h / 2);
   });
 
-  it("closes up for the FAQ: tipped back onto the table, only the camera left inside", () => {
-    const f = sampleFrame(3, GEO, view);
-    for (const p of internals) {
-      expect(f.poses[p.id].opacity, p.id).toBe(p.id === "camera" ? 1 : 0);
-    }
-    // Tipped back: the face tilts up and still toward the viewer.
-    const face = new Vector3(0, 1, 0).applyQuaternion(f.poses.front.quaternion);
-    expect(face.y).toBeGreaterThan(0.5);
-    expect(face.z).toBeGreaterThan(0.3);
-    // One natural hinge from the hero, not a corkscrew: well under a
-    // right angle of total rotation between the two poses.
-    const hero = sampleFrame(0, GEO, view).poses.front.quaternion;
-    expect(hero.angleTo(f.poses.front.quaternion)).toBeLessThan(Math.PI * 0.45);
-  });
-
-  it("holds internals until the shells close when crossfading to the FAQ", () => {
-    const a = sampleFrame(1, GEO, view);
-    const b = sampleFrame(3, GEO, view);
-    expect(mixFrames(a, b, 0.5).poses.main.opacity).toBeGreaterThan(0.9);
-    expect(mixFrames(a, b, 1).poses.main.opacity).toBe(0);
-    expect(mixFrames(a, b, 1).poses.camera.opacity).toBe(1);
-  });
-
-  it("clamps outside 0…3 and never produces NaN mid-transition", () => {
+  it("clamps outside 0…2 and never produces NaN mid-transition", () => {
     expect(sampleFrame(-2, GEO, view).poses.front.position).toEqual(
       sampleFrame(0, GEO, view).poses.front.position,
     );
-    for (let p = 0; p <= 3; p += 0.125) {
+    for (let p = 0; p <= 2; p += 0.125) {
       const f = sampleFrame(p, GEO, view);
       for (const part of PARTS) {
         const pose = f.poses[part.id];
@@ -125,15 +104,6 @@ describe("material carousel", () => {
   it("wraps the carousel both ways", () => {
     expect(wrapIndex(-1)).toBe(LANDING_MATERIALS.length - 1);
     expect(wrapIndex(LANDING_MATERIALS.length)).toBe(0);
-  });
-});
-
-describe("zoomFor", () => {
-  it("rises from 0 at the top to 1 most of a screen down, clamped", () => {
-    expect(zoomFor(0, 800)).toBe(0);
-    expect(zoomFor(320, 800)).toBe(0.5);
-    expect(zoomFor(5000, 800)).toBe(1);
-    expect(zoomFor(-40, 800)).toBe(0);
   });
 });
 

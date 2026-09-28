@@ -15,11 +15,6 @@ import {
 interface LandingState {
   /** Drag-orbit pull on the share/BOM steps, [-1, 1]; springs back to 0. */
   orbitRef: MutableRefObject<number>;
-  /**
-   * How far the FAQ sheet has been pulled up over the stage, 0 → 1;
-   * written on scroll, read per frame. Drives the reassemble-and-zoom.
-   */
-  zoomRef: MutableRefObject<number>;
   /** Current step of the first-screen stepper (see STEPS). */
   step: number;
   /** Autoplay is running (not paused by interaction). */
@@ -50,7 +45,6 @@ const LandingContext = createContext<LandingState | null>(null);
 
 export function LandingProvider({ children }: { children: ReactNode }) {
   const orbitRef = useRef(0);
-  const zoomRef = useRef(0);
   const [step, setStep] = useState(0);
   // auto: advancing. idle: any interaction stops it; it resumes after
   // RESUME_AFTER_MS without input. There's no manual pause — interacting
@@ -79,7 +73,6 @@ export function LandingProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       orbitRef,
-      zoomRef,
       step,
       playing: mode === "auto",
       goTo,
