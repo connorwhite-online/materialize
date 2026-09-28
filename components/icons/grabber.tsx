@@ -16,12 +16,13 @@ import { motion, useReducedMotion } from "motion/react";
  * built it from four straight strokes, which lost the family's soft tip.)
  */
 const TOP = {
-  closed: "M7 10 L10.6 6.4 Q12 5 13.4 6.4 L17 10",
-  open: "M6.5 6.5 L10.9 10.9 Q12 12 13.1 10.9 L17.5 6.5",
+  // The original grabber's geometry, exactly (its a1 arc tip as a Q).
+  closed: "M7.4 9.5 L11.3 5.6 Q12 4.9 12.7 5.6 L16.6 9.5",
+  open: "M6.8 6.8 L11.3 11.3 Q12 12 12.7 11.3 L17.2 6.8",
 };
 const BOTTOM = {
-  closed: "M7 14 L10.6 17.6 Q12 19 13.4 17.6 L17 14",
-  open: "M6.5 17.5 L10.9 13.1 Q12 12 13.1 13.1 L17.5 17.5",
+  closed: "M7.4 14.5 L11.3 18.4 Q12 19.1 12.7 18.4 L16.6 14.5",
+  open: "M6.8 17.2 L11.3 12.7 Q12 12 12.7 12.7 L17.2 17.2",
 };
 
 export function Grabber({
