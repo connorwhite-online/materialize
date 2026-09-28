@@ -13,6 +13,20 @@ import { EnclosureScene } from "./enclosure-scene";
  * takes pointer events itself — the hero section owns the swipe, and
  * the file-label download buttons opt back in on their own.
  */
+/**
+ * The glow and vignette fade out over the top and bottom 10%, so the stage
+ * meets the screen edges at exactly --background. In a Safari tab the
+ * status-bar and toolbar bands are painted with <body>'s plain colour; a
+ * stage that was brighter (bottom glow) or darker (vignette) there showed
+ * as a hard line at both bands.
+ */
+const EDGE_FADE = {
+  maskImage:
+    "linear-gradient(to bottom, transparent, black 10%, black 90%, transparent)",
+  WebkitMaskImage:
+    "linear-gradient(to bottom, transparent, black 10%, black 90%, transparent)",
+} as const;
+
 export function EnclosureStage() {
   const reducedMotion = useReducedMotion() ?? false;
   return (
@@ -24,6 +38,7 @@ export function EnclosureStage() {
         style={{
           background:
             "radial-gradient(60% 55% at 62% 42%, rgba(255,236,214,0.07), transparent 70%), radial-gradient(120% 90% at 50% 110%, rgba(255,228,200,0.04), transparent 60%)",
+          ...EDGE_FADE,
         }}
       />
       <ErrorBoundary fallback={null}>
@@ -57,6 +72,7 @@ export function EnclosureStage() {
         style={{
           background:
             "radial-gradient(120% 100% at 50% 45%, transparent 55%, rgba(8,7,6,0.55) 100%)",
+          ...EDGE_FADE,
         }}
       />
     </div>
