@@ -102,7 +102,7 @@ const GLASS_FRAG = /* glsl */ `
     float ripple = exp(-pow((r - uPulse * 1.6) * 7.0, 2.0)) * exp(-uPulse * 2.2);
     // A gentle, even glow across the whole disc; the detail barely rides
     // on it, so it reads as one lit plane, not a hot spot.
-    float a = (0.62 + rings + sweep + ripple * 0.12) * (1.0 - smoothstep(0.97, 1.0, r));
+    float a = (0.95 + rings + sweep + ripple * 0.12) * (1.0 - smoothstep(0.97, 1.0, r));
     gl_FragColor = vec4(vec3(1.0, 0.52, 0.18) * a * uGlow, a * uGlow);
   }
 `;
