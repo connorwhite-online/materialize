@@ -19,7 +19,6 @@ import { MathUtils, Matrix4, Quaternion, Vector3 } from "three";
 
 export type PartId =
   | "rear"
-  | "carrier"
   | "ffc"
   | "battery"
   | "main"
@@ -42,63 +41,64 @@ export interface PartSpec {
 }
 
 export const PARTS: readonly PartSpec[] = [
+  // Pneuma S: no rigid carrier; the boards screw straight into the rear
+  // body. `node` is each part's group in the GLB.
   {
     id: "rear",
-    node: "01_Rear_soft_shell",
-    label: "Rear shell",
+    node: "01_Rear_shell",
+    label: "Rear body",
     slot: 0,
     shell: true,
     bom: { side: "bottom", lane: 0 },
   },
   {
-    id: "carrier",
-    node: "Rigid_carrier-FIT_STAGE",
-    label: "Rigid carrier",
+    id: "ffc",
+    node: "10_Interboard_FFC",
+    label: "Flex cable",
     slot: 1,
     bom: { side: "top", lane: 0 },
   },
-  { id: "ffc", node: "ffc", label: "Flex cable", slot: 1.7 },
   {
     id: "battery",
-    node: "battery",
+    node: "05_Battery",
     label: "Battery",
-    slot: 2.4,
+    slot: 1.8,
     bom: { side: "bottom", lane: 1 },
   },
   {
     id: "main",
-    node: "pneuma-main",
+    node: "04_Main_PCB",
     label: "Main board",
-    slot: 2.4,
+    slot: 1.8,
     bom: { side: "top", lane: 1 },
   },
-  { id: "pwr", node: "pneuma-pwr", label: "Power board", slot: 2.4 },
+  { id: "pwr", node: "03_Power_PCB", label: "Power board", slot: 1.8 },
   {
     id: "speaker",
-    node: "speaker",
+    node: "06_Speaker",
     label: "Speaker",
-    slot: 3.4,
+    slot: 2.8,
     bom: { side: "bottom", lane: 0 },
   },
   {
     id: "lra",
-    node: "lra",
+    node: "07_Haptic_motor",
     label: "Haptic motor",
-    slot: 3.4,
+    slot: 2.8,
     bom: { side: "top", lane: 0 },
   },
   {
     id: "camera",
-    node: "camera-PROVISIONAL",
+    node: "08_Camera_PROVISIONAL",
     label: "Camera",
-    slot: 4.2,
+    slot: 3.6,
     bom: { side: "top", lane: 1 },
   },
   {
     id: "front",
-    node: "02_Front_soft_shell",
+    node: "09_Front_shell",
     label: "Front shell",
-    slot: 5.4,
+    slot: 4.8,
     shell: true,
     bom: { side: "bottom", lane: 1 },
   },
@@ -107,8 +107,9 @@ export const PARTS: readonly PartSpec[] = [
 /** Assembled envelope, metres. */
 export const DEVICE_LONG = 0.121;
 export const DEVICE_WIDE = 0.06;
-const SLOT_SPACING = 0.027;
-const MAX_SLOT = 5.4;
+// S has one part fewer than Q (no carrier), so its slots spread wider.
+const SLOT_SPACING = 0.032;
+const MAX_SLOT = 4.8;
 /** Horizontal footprint of the exploded view before scaling. */
 const EXPLODE_WIDE = 0.16;
 
@@ -244,9 +245,12 @@ export function layoutFor(view: View): Layout {
       : new Vector3(0, view.h * 0.04, 0),
     s1,
     splitX: 0,
-    splitDx: portrait
-      ? view.w * 0.22
-      : Math.min(view.w * 0.13, s1 * DEVICE_WIDE * 1.25),
+    // Spaced by the VIEWPORT, not the model: the file chips under each
+    // shell are fixed-width HTML (~270px desktop, ≤42vw phone), and spacing
+    // them off the model's size let narrow windows overlap them.
+    // Desktop: centres 30% of the width apart (≥324px from the 1080px nav
+    // breakpoint up). Phone: 47% apart vs 42vw chips → a clear gap.
+    splitDx: portrait ? view.w * 0.235 : view.w * 0.15,
     splitY: view.h * (portrait ? 0.2 : 0.14),
     s2,
     t2: portrait

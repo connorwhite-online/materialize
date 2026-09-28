@@ -1017,5 +1017,23 @@
 .mz-step-fill {
   animation-name: mz-step-fill;
   animation-timing-function: linear;
-  animation-fill-mode: forwards;
+  animation-fill-mode: both; /* hold at empty through the start delay */
+}
+/* The step that just finished: its full bar fades while the dot shrinks. */
+@keyframes mz-step-done {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.mz-step-done {
+  animation: mz-step-done 380ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mz-step-done {
+    animation: none;
+    opacity: 0;
+  }
 }

@@ -19,7 +19,6 @@ import {
   sweepEase,
   type ShellLayers,
 } from "./burn-sweep";
-import { buildStandIn, hasStandIn } from "./stand-ins";
 import { LANDING_MATERIALS } from "./landing-materials";
 import {
   PARTS,
@@ -95,7 +94,7 @@ function DetailInternals({ parts }: { parts: Record<PartId, LoadedPart> }) {
   const { nodes } = useGLTF(DETAIL_URL);
   useEffect(() => {
     for (const spec of PARTS) {
-      if (spec.shell || hasStandIn(spec.id)) continue;
+      if (spec.shell) continue;
       const detail = nodes[spec.node];
       if (detail) swapInDetail(parts[spec.id], detail);
     }
@@ -137,8 +136,7 @@ function useParts(ao: Record<ShellId, THREE.Texture>) {
       if (!src) throw new Error(`pneuma-q.glb: missing node ${spec.node}`);
       // Keep the node's own transform: mesh quantization stores the
       // dequantizing scale/offset there. Recentre with a wrapper instead.
-      // Envelope-only CAD parts get a modelled stand-in (stand-ins.ts).
-      const inner = buildStandIn(spec.id, src) ?? src.clone(true);
+      const inner = src.clone(true);
       const object = new THREE.Group();
       object.add(inner);
       const materials: THREE.Material[] = [];
@@ -387,7 +385,8 @@ function runBurnSweep(
     }
     shellBox.makeEmpty();
     for (const l of shells) shellBox.expandByObject(l.a);
-    const pad = (shellBox.max.y - shellBox.min.y) * 0.04;
+    // Clears the noisy edge's ±4.5% wander at both ends.
+    const pad = (shellBox.max.y - shellBox.min.y) * 0.06;
     st.lineMin = shellBox.min.y - pad;
     st.lineMax = shellBox.max.y + pad;
     st.to = next;
@@ -396,13 +395,10 @@ function runBurnSweep(
   }
   st.sweepT = Math.min(1, st.sweepT + delta / SWEEP_S);
   const h = THREE.MathUtils.lerp(st.lineMin, st.lineMax, sweepEase(st.sweepT));
-  const span = st.lineMax - st.lineMin;
-  // Jacob's-ladder flicker: a hair-thin band whose width and brightness
-  // jitter frame to frame, fading in off the bottom and out at the top.
-  const envelope = Math.sin(Math.PI * st.sweepT);
-  const width = span * (0.004 + Math.random() * 0.004);
-  const glow = envelope * (0.55 + Math.random() * 0.45);
-  for (const l of shells) setSweepLine(l, h, width, glow);
+  // Glow fades in off the bottom and out at the top; the shader supplies
+  // the flicker and the noise.
+  const glow = Math.pow(Math.sin(Math.PI * st.sweepT), 0.6);
+  setSweepLine(h, st.lineMax - st.lineMin, st.clock, glow);
   if (st.sweepT >= 1) {
     for (const l of shells) endSweep(l, st.to);
     st.look = st.to;
@@ -414,8 +410,8 @@ function runBurnSweep(
 // ─── Labels ───────────────────────────────────────────────────────────
 
 const FILES: Record<"front" | "rear", { name: string; size: string }> = {
-  front: { name: "02_Front_soft_shell.step", size: "6.4 MB" },
-  rear: { name: "01_Rear_soft_shell.step", size: "5.8 MB" },
+  front: { name: "02_Front_soft_shell.step", size: "7.3 MB" },
+  rear: { name: "01_Rear_pocketed_body.step", size: "9.5 MB" },
 };
 
 /** File-name chip under each split shell, with a download facade. */
@@ -455,7 +451,7 @@ function FileLabel({
         <div
           ref={elRef}
           style={{ opacity: 0 }}
-          className="flex max-w-[46vw] items-center gap-2 whitespace-nowrap rounded-full bg-card/80 py-1 pl-3 pr-1 text-[11px] sm:max-w-none sm:text-xs ring-1 ring-foreground/10 backdrop-blur-md"
+          className="flex max-w-[42vw] items-center gap-2 whitespace-nowrap rounded-full bg-card/80 py-1 pl-3 pr-1 text-[11px] sm:max-w-none sm:text-xs ring-1 ring-foreground/10 backdrop-blur-md"
         >
           <span className="min-w-0 truncate font-mono text-foreground/90">
             {file.name}

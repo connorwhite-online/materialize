@@ -18,7 +18,6 @@ const GEO: Geometry = {
   centers: {
     rear: mm(0.45, 2.45, 2),
     front: mm(0.45, 14.2, 1.95),
-    carrier: mm(0.45, 3.1, 5.9),
     ffc: mm(-8.2, 2.65, 9.55),
     battery: mm(-0.4, 6.4, 9),
     main: mm(1.4, 5.5, -24.55),
@@ -205,5 +204,23 @@ describe("desktop BOM clears the nav", () => {
     expect(f.labelRows.top + f.labelRows.lane).toBeLessThan(
       DESKTOP.h * (0.5 - 0.09),
     );
+  });
+});
+
+describe("share step file chips", () => {
+  it("spaces the shells so their fixed-width chips can't overlap", () => {
+    // Chip widths as fractions of the viewport, from enclosure-scene.tsx:
+    // desktop ~270px (checked from the 1080px nav breakpoint), phone ≤42vw.
+    const cases: [typeof DESKTOP, number][] = [
+      [{ w: 1080 / 150, h: 3.78 }, 270 / 1080],
+      [DESKTOP, 270 / 1440],
+      [PHONE, 0.42],
+    ];
+    for (const [view, chipFrac] of cases) {
+      const f = sampleFrame(1, GEO, view);
+      const centreGap =
+        (f.poses.rear.position.x - f.poses.front.position.x) / view.w;
+      expect(centreGap, JSON.stringify(view)).toBeGreaterThan(chipFrac + 0.02);
+    }
   });
 });

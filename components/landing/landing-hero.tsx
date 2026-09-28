@@ -194,6 +194,7 @@ export function StepCarousel() {
   const scrolledAway = useScrolledAway();
   const running = playing && !reduced && !scrolledAway;
   const run = useRunCount(running);
+  const prev = usePreviousStep(step);
 
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-24 z-10 flex justify-center nav:bottom-8">
@@ -230,7 +231,9 @@ export function StepCarousel() {
                 // you are here); it stretches back out only when the idle
                 // window ends and the timer starts again, from zero.
                 className={cn(
-                  "relative h-2 cursor-pointer overflow-hidden rounded-full transition-[width,background-color] duration-300 ease-spring",
+                  // Ease-out, no spring: the spring overshot (36→36.2px, 8→7.8px)
+                  // and read as a wobble on every step change.
+                  "relative h-2 cursor-pointer overflow-hidden rounded-full transition-[width,background-color] duration-[450ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
                   active && running
                     ? "w-9 bg-foreground/20"
                     : active
@@ -239,12 +242,25 @@ export function StepCarousel() {
                 )}
               >
                 {active && running && (
-                  // Keyed on the run too: resuming restarts the timer.
+                  // Keyed on the run too: resuming restarts the timer. It
+                  // waits out the dot's own 450ms stretch before filling,
+                  // so the bar never lurches with a width still changing.
                   <span
                     key={`${step}-${run}`}
                     onAnimationEnd={advance}
                     className="mz-step-fill absolute inset-0 rounded-full bg-foreground"
-                    style={{ animationDuration: `${STEP_MS}ms` }}
+                    style={{
+                      animationDuration: `${STEP_MS}ms`,
+                      animationDelay: "450ms",
+                    }}
+                  />
+                )}
+                {!active && i === prev && (
+                  // The step just finished: its full bar fades out while
+                  // the dot shrinks, instead of blinking white → grey.
+                  <span
+                    key={`done-${step}`}
+                    className="mz-step-done absolute inset-0 rounded-full bg-foreground"
                   />
                 )}
               </button>
@@ -262,6 +278,17 @@ export function StepCarousel() {
       </div>
     </div>
   );
+}
+
+/** The step shown before the current one (derived state, no effect). */
+function usePreviousStep(step: number): number | null {
+  const [cur, setCur] = useState(step);
+  const [prev, setPrev] = useState<number | null>(null);
+  if (step !== cur) {
+    setPrev(cur);
+    setCur(step);
+  }
+  return prev;
 }
 
 /** Counts transitions into running, to re-key (restart) the timer. */

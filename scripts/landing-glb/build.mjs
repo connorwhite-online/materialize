@@ -1,4 +1,5 @@
-// Builds the two anon-landing enclosure files from the Pneuma Q CAD export:
+// Builds the two anon-landing enclosure files from the Pneuma CAD export
+// (currently Pneuma S: 03 WEB AND RENDERS/Pneuma-S-assembled-uncompressed.glb):
 //
 //   public/home/pneuma-q.glb         shells (25%, AO UVs) + 2% internal proxies — ~365KB gz
 //   public/home/pneuma-q-detail.glb  25% internals — ~435KB gz, streamed in after first paint
@@ -32,7 +33,9 @@ await MeshoptEncoder.ready;
 const io = new NodeIO()
   .registerExtensions(ALL_EXTENSIONS)
   .registerDependencies({ "meshopt.encoder": MeshoptEncoder });
-const isShell = (name) => /soft_shell/.test(name);
+// Shell meshes: Q named both halves *_soft_shell; S's rear is a pocketed
+// solid body (01_Rear_pocketed_body) inside its 01_Rear_shell group.
+const isShell = (name) => /soft_shell|pocketed_body/.test(name);
 // 16-bit normals: the default 10 bits bands reflections on polished
 // metal (steel/alloy looked faceted). Costs ~1KB after meshopt.
 // 10-bit UVs are plenty for the 1024² AO maps (saves ~19KB vs 12).
