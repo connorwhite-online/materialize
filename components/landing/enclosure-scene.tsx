@@ -207,20 +207,28 @@ function fadeMaterials(materials: THREE.Material[], opacity: number) {
 }
 
 /** Ease the shared shell material toward a family's look (~600ms). */
+/** Exponential ease that lands exactly on its target once it's close. */
+function ease(from: number, to: number, k: number): number {
+  const next = THREE.MathUtils.lerp(from, to, k);
+  return Math.abs(next - to) < 1e-3 ? to : next;
+}
+
 function lerpShell(
   m: THREE.MeshPhysicalMaterial,
   target: (typeof LANDING_MATERIALS)[number],
   color: THREE.Color,
   k: number,
 ) {
-  const lerp = THREE.MathUtils.lerp;
   m.color.lerp(color, k);
-  m.metalness = lerp(m.metalness, target.metalness, k);
-  m.roughness = lerp(m.roughness, target.roughness, k);
-  m.clearcoat = lerp(m.clearcoat, target.clearcoat ?? 0, k);
-  m.transmission = lerp(m.transmission, target.transmission ?? 0, k);
-  m.ior = lerp(m.ior, target.ior ?? 1.5, k);
-  m.thickness = lerp(m.thickness, target.thickness ?? 0, k);
+  m.metalness = ease(m.metalness, target.metalness, k);
+  m.roughness = ease(m.roughness, target.roughness, k);
+  m.clearcoat = ease(m.clearcoat, target.clearcoat ?? 0, k);
+  // Must actually reach 0: three renders the whole scene a second time
+  // for any transmission > 0, so an asymptotic ease left that extra pass
+  // running forever after anyone looked at resin.
+  m.transmission = ease(m.transmission, target.transmission ?? 0, k);
+  m.ior = ease(m.ior, target.ior ?? 1.5, k);
+  m.thickness = ease(m.thickness, target.thickness ?? 0, k);
 }
 
 export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
@@ -416,8 +424,6 @@ function liveCentre(samples: Sample[][]): THREE.Vector3 {
 type Particle = {
   position: THREE.Vector3;
   velocity: THREE.Vector3;
-  rotation: THREE.Vector3;
-  spin: THREE.Vector3;
   age: number;
   scale: number;
 };
@@ -474,45 +480,37 @@ function spawnBurst(
     p.velocity.z *= 0.5;
     p.age = 0;
     p.scale = 0.002 + Math.random() * 0.004;
-    p.rotation.set(
-      Math.random() * 6.3,
-      Math.random() * 6.3,
-      Math.random() * 6.3,
-    );
-    p.spin.set(
-      (Math.random() - 0.5) * 8,
-      (Math.random() - 0.5) * 8,
-      (Math.random() - 0.5) * 8,
-    );
   }
 }
 
+/**
+ * Advance the live particles and pack them into the first instance slots.
+ * Returns how many are alive: the mesh draws only that many, and hides
+ * itself at 0 — so an idle hero costs no particle work at all (it used to
+ * draw all 2400 at scale 0, every frame).
+ */
 function stepParticles(
   particles: Particle[],
   mesh: THREE.InstancedMesh,
   dummy: THREE.Object3D,
   delta: number,
-) {
+): number {
+  let live = 0;
   for (let i = 0; i < MAX_PARTICLES; i++) {
     const p = particles[i];
-    if (p.age >= LIFETIME) {
-      dummy.scale.setScalar(0);
-      dummy.updateMatrix();
-      mesh.setMatrixAt(i, dummy.matrix);
-      continue;
-    }
+    if (p.age >= LIFETIME) continue;
     p.age += delta;
+    if (p.age >= LIFETIME) continue;
     p.position.addScaledVector(p.velocity, delta);
     p.velocity.multiplyScalar(0.968);
-    p.rotation.addScaledVector(p.spin, delta);
     const life = p.age / LIFETIME;
     const fade = life < 0.4 ? 1 : 1 - Math.pow((life - 0.4) / 0.6, 1.4);
     dummy.position.copy(p.position);
-    dummy.rotation.set(p.rotation.x, p.rotation.y, p.rotation.z);
     dummy.scale.setScalar(p.scale * Math.max(0, fade));
     dummy.updateMatrix();
-    mesh.setMatrixAt(i, dummy.matrix);
+    mesh.setMatrixAt(live++, dummy.matrix);
   }
+  return live;
 }
 
 function ShedParticles({
@@ -533,8 +531,6 @@ function ShedParticles({
       Array.from({ length: MAX_PARTICLES }, () => ({
         position: new THREE.Vector3(),
         velocity: new THREE.Vector3(),
-        rotation: new THREE.Vector3(),
-        spin: new THREE.Vector3(),
         age: LIFETIME + 1,
         scale: 0,
       })),
@@ -576,8 +572,10 @@ function ShedParticles({
   useFrame((_, delta) => {
     const mesh = meshRef.current;
     if (!mesh) return;
-    stepParticles(particles, mesh, dummy, delta);
-    mesh.instanceMatrix.needsUpdate = true;
+    const live = stepParticles(particles, mesh, dummy, delta);
+    mesh.count = live;
+    mesh.visible = live > 0;
+    if (live > 0) mesh.instanceMatrix.needsUpdate = true;
   });
 
   return (
@@ -586,7 +584,8 @@ function ShedParticles({
       args={[undefined, undefined, MAX_PARTICLES]}
       frustumCulled={false}
     >
-      <icosahedronGeometry args={[1, 1]} />
+      {/* 20 tris: at 2–6px a detail-1 sphere (80) is indistinguishable. */}
+      <icosahedronGeometry args={[1, 0]} />
       {/* The shell sheds its OUTGOING skin: particles wear the material
           being swiped away while the surface lerps to the new one. */}
       <meshStandardMaterial
@@ -629,6 +628,8 @@ function FileLabel({
     g.position.y -= (size.z * pose.scale) / 2 + 0.12;
     if (elRef.current) {
       elRef.current.style.opacity = String(f.fileLabels);
+      // Hidden labels leave layout entirely (no per-frame reflow).
+      elRef.current.style.display = f.fileLabels > 0.001 ? "" : "none";
       elRef.current.style.pointerEvents = f.fileLabels > 0.6 ? "auto" : "none";
     }
   });
@@ -714,7 +715,10 @@ function BomLabel({
       dot.current.visible = visible;
       (dot.current.material as THREE.MeshBasicMaterial).opacity = f.bomLabels;
     }
-    if (elRef.current) elRef.current.style.opacity = String(f.bomLabels);
+    if (elRef.current) {
+      elRef.current.style.opacity = String(f.bomLabels);
+      elRef.current.style.display = f.bomLabels > 0.001 ? "" : "none";
+    }
   });
 
   const lineColor = useLineColor();

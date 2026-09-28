@@ -3,9 +3,10 @@ Bake ambient occlusion for the landing's Pneuma Q shells (Blender 3.4+).
 
 Pipeline — run from the repo root when the CAD changes:
 
-  1. Export the shells at shipping detail, uncompressed (Blender can't read
-     meshopt): the shell-only branch of build.mjs with SHELL_RATIO=0.6, or
-     any GLB holding just 01_Rear_soft_shell / 02_Front_soft_shell.
+  1. Export the shells at shipping detail (25% — with 16-bit normals that is
+     indistinguishable from full detail even in polished steel), uncompressed
+     since Blender can't read meshopt: any GLB holding just
+     01_Rear_soft_shell / 02_Front_soft_shell, welded then simplified.
      Save it as shells-raw.glb next to this script's output dir.
   2. blender -b --python scripts/landing-glb/bake-ao.py -- <workdir>
      (<workdir> holds shells-raw.glb; outputs land there)
