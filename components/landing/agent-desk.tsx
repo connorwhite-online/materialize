@@ -6,13 +6,21 @@ import * as THREE from "three";
 import type { Frame } from "./choreography";
 import { PACKET_LAUNCH_S, PACKET_TRAVEL_S, agentClock } from "./agent-timeline";
 import { platformPort } from "./holo-platform";
+import {
+  SPRITE_COLS,
+  SPRITE_FRAMES,
+  SPRITE_PALETTE,
+  SPRITE_ROWS,
+  TICKS_PER_SECOND,
+  spriteFrameAt,
+} from "./claude-sprite";
 
 /**
  * The agents step: a little monitor, cabled into the printer platform's
  * front port (holo-platform.tsx), with the Claude Code mascot on it as a
- * flat 8-bit sprite hammering a pixel keyboard. The sprite is drawn into a
- * canvas texture — nearest-filtered, and stepped at SPRITE_FPS so it
- * animates like a sprite, not a tween — over a frosted-glass screen.
+ * flat 8-bit sprite: the mascot's own typing animation, transcribed
+ * frame-for-frame (claude-sprite.ts) and painted into a nearest-filtered
+ * canvas texture over a frosted-glass screen.
  * Bulges swell down the cable as each piece of work is sent, easing into
  * the port, and the platform ripples as each lands (agentClock in
  * agent-timeline.ts).
@@ -23,93 +31,28 @@ import { platformPort } from "./holo-platform";
 
 // ─── Sprite ───────────────────────────────────────────────────────────
 
-/**
- * After the Claude Code mascot's own animation: turned three-quarters to
- * his right (the darker column is his side), tapping a tiny grey laptop
- * drawn in profile — a flat base and a lid leaning back. Between bursts
- * he turns to face you, arm stubs out. Grids are top row first:
- * B body, D side (shade), E eye, A arm, L leg.
- */
-const TYPING = [
-  ".DBBBBBBB.",
-  ".DBEBBBEB.",
-  ".DBBBBBBBA",
-  ".DBBBBBBB.",
-  ".L.L..L.L.",
-];
-/** Same, arm down on the keys (the hand drawn separately, half a cell). */
-const TYPING_DOWN = [
-  ".DBBBBBBB.",
-  ".DBEBBBEB.",
-  ".DBBBBBBB.",
-  ".DBBBBBBBA",
-  ".L.L..L.L.",
-];
-const FRONT = [
-  ".BBBBBBBB.",
-  ".BEBBBBEB.",
-  "ABBBBBBBBA",
-  ".BBBBBBBB.",
-  ".L.L..L.L.",
-];
-const ORANGE = "#d97757";
-const SIDE = "#b65f43";
-const EYE = "#1a1a1a";
-const LAPTOP = "#8b8b8e";
-/** Canvas size in sprite pixels; one grid cell is CELL pixels. */
-const SPRITE_W = 64;
-const SPRITE_H = 36;
-const CELL = 4;
-const SPRITE_FPS = 12;
+/** Canvas size in sprite pixels; one sprite cell is CELL pixels. */
+const CELL = 1;
+const SPRITE_W = SPRITE_COLS * CELL + 12;
+const SPRITE_H = SPRITE_ROWS * CELL + 8;
 /** Monitor, agent units. */
 const SCREEN_W = 1.45;
 const SCREEN_H = SCREEN_W * (SPRITE_H / SPRITE_W);
 const BEZEL = 0.05;
 
-interface SpritePose {
-  /** Facing you (idle between bursts, and on Enter). */
-  front: boolean;
-  /** Hand down on the keys. */
-  down: boolean;
-  /** Hop (Enter). */
-  hop: boolean;
-  blink: boolean;
-}
-
-function drawSprite(ctx: CanvasRenderingContext2D, pose: SpritePose) {
+/** Paint one frame of the transcribed animation (claude-sprite.ts). */
+function drawSprite(ctx: CanvasRenderingContext2D, frame: number) {
   ctx.clearRect(0, 0, SPRITE_W, SPRITE_H);
-  const grid = pose.front ? FRONT : pose.down ? TYPING_DOWN : TYPING;
-  // Sprite + laptop span ~13 cells; centre that on the screen.
-  const ox = (SPRITE_W - 13 * CELL) / 2;
-  const floor = (SPRITE_H + grid.length * CELL) / 2; // bottom of the legs
-  const oy = floor - grid.length * CELL - (pose.hop ? CELL : 0);
-  grid.forEach((row, r) => {
-    [...row].forEach((ch, c) => {
-      if (ch === ".") return;
-      ctx.fillStyle =
-        ch === "D" ? SIDE : ch === "E" && !pose.blink ? EYE : ORANGE;
+  const ox = (SPRITE_W - SPRITE_COLS * CELL) / 2;
+  const oy = (SPRITE_H - SPRITE_ROWS * CELL) / 2;
+  SPRITE_FRAMES[frame].forEach((row, r) => {
+    for (let c = 0; c < row.length; c++) {
+      const color = SPRITE_PALETTE[row[c]];
+      if (!color) continue;
+      ctx.fillStyle = color;
       ctx.fillRect(ox + c * CELL, oy + r * CELL, CELL, CELL);
-    });
+    }
   });
-  const half = CELL / 2;
-  if (!pose.front && pose.down) {
-    // The hand reaching the keys, half a cell past the arm.
-    ctx.fillStyle = ORANGE;
-    ctx.fillRect(ox + 10 * CELL, oy + 3 * CELL + half, half, half);
-  }
-  // Laptop in profile, a half-cell line: base along the floor, lid
-  // leaning back from its far end.
-  ctx.fillStyle = LAPTOP;
-  const bx = ox + 10 * CELL;
-  ctx.fillRect(bx, floor - half, 1.5 * CELL, half);
-  for (let i = 0; i < 3; i++) {
-    ctx.fillRect(
-      bx + 1.5 * CELL + i * half,
-      floor - half - (i + 1) * half,
-      half,
-      half,
-    );
-  }
 }
 
 /** Rounded-rectangle frame (outer minus inner), extruded thin. */
@@ -293,26 +236,11 @@ export function AgentDesk({
       layoutHose(hoseRef.current, collarRef.current, f, u, port);
     }
 
-    // ── Sprite: stepped, like the real thing ──
-    const n = Math.floor(t * SPRITE_FPS);
-    if (n !== c.frame) {
-      c.frame = n;
-      let enter = false;
-      for (const launch of PACKET_LAUNCH_S) {
-        const d = t - launch;
-        if (d > -0.25 && d < 0.3) enter = true;
-      }
-      // Bursts of tapping, now and then turning to face you between them.
-      // Within a burst the hand hits every other frame, skipping beats
-      // irregularly so it never reads as a loop.
-      const burst = noise1(t * 0.45 + 11) > 0.3;
-      const down = burst && !enter && n % 2 === 0 && hash(n) > 0.18;
-      drawSprite(built.ctx, {
-        front: enter || !burst,
-        down,
-        hop: enter && n % 4 < 2,
-        blink: blink(t),
-      });
+    // ── Sprite: the real animation's frames, on its own timing ──
+    const shown = spriteFrameAt(t * TICKS_PER_SECOND);
+    if (shown !== c.frame) {
+      c.frame = shown;
+      drawSprite(built.ctx, shown);
       markDirty(built.tex);
     }
 
@@ -410,26 +338,6 @@ const portScratch = { pos: new THREE.Vector3(), dir: new THREE.Vector3() };
 /** Re-upload a canvas texture (a module helper, for the compiler lint). */
 function markDirty(tex: THREE.Texture) {
   tex.needsUpdate = true;
-}
-
-/** Deterministic per-frame randomness in [0, 1). */
-function hash(n: number): number {
-  const s = Math.sin(n * 91.345 + 47.853) * 43758.5453;
-  return s - Math.floor(s);
-}
-
-/** Smooth 1D value noise in [0, 1]. */
-function noise1(x: number): number {
-  const i = Math.floor(x);
-  const f = x - i;
-  const k = f * f * (3 - 2 * f);
-  return hash(i) * (1 - k) + hash(i + 1) * k;
-}
-
-/** Blinks for a frame or two at irregular intervals (~2.5–5s apart). */
-function blink(t: number): boolean {
-  const cycle = 3.4 + (noise1(Math.floor(t / 3.4) * 1.7) - 0.5) * 1.8;
-  return t % cycle > cycle - 0.14;
 }
 
 function easeInOutSine(x: number): number {
