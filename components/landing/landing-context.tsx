@@ -11,22 +11,8 @@ import {
   type MutableRefObject,
   type ReactNode,
 } from "react";
-import { wrapIndex } from "./landing-materials";
-
-export interface Burst {
-  key: number;
-  /** Direction particles fly, -1 left / +1 right. */
-  direction: number;
-  intensity: number;
-  /** Material being swiped away — the particles are made of it. */
-  from: number;
-}
 
 interface LandingState {
-  material: number;
-  burst: Burst;
-  /** Swipe tension in [-1, 1]; read every frame by the scene. */
-  tensionRef: MutableRefObject<number>;
   /** Drag-orbit pull on the share/BOM steps, [-1, 1]; springs back to 0. */
   orbitRef: MutableRefObject<number>;
   /**
@@ -44,8 +30,6 @@ interface LandingState {
   advance: () => void;
   /** Any other manipulation (a swipe): pause, resume after idle. */
   interact: () => void;
-  /** Jump to a material and fire the particle shed for it. */
-  select: (index: number, direction: number, intensity?: number) => void;
 }
 
 /** The first-screen stepper: one choreography keyframe per step. */
@@ -65,16 +49,7 @@ export function wrapStep(i: number): number {
 const LandingContext = createContext<LandingState | null>(null);
 
 export function LandingProvider({ children }: { children: ReactNode }) {
-  const [material, setMaterial] = useState(0);
-  const [burst, setBurst] = useState<Burst>({
-    key: 0,
-    direction: 0,
-    intensity: 1,
-    from: 0,
-  });
-  const tensionRef = useRef(0);
   const orbitRef = useRef(0);
-  const materialRef = useRef(0);
   const zoomRef = useRef(0);
   const [step, setStep] = useState(0);
   // auto: advancing. idle: any interaction stops it; it resumes after
@@ -101,29 +76,8 @@ export function LandingProvider({ children }: { children: ReactNode }) {
   );
   const advance = useCallback(() => setStep((s) => wrapStep(s + 1)), []);
 
-  const select = useCallback(
-    (index: number, direction: number, intensity = 1) => {
-      // `direction` is the carousel step (+1 next), which is opposite the
-      // finger, so the spray flies with the gesture when negated.
-      // Read before overwriting: the updater below runs lazily.
-      const from = materialRef.current;
-      setBurst((b) => ({
-        key: b.key + 1,
-        direction: -direction,
-        intensity,
-        from,
-      }));
-      materialRef.current = wrapIndex(index);
-      setMaterial(materialRef.current);
-    },
-    [],
-  );
-
   const value = useMemo(
     () => ({
-      material,
-      burst,
-      tensionRef,
       orbitRef,
       zoomRef,
       step,
@@ -131,9 +85,8 @@ export function LandingProvider({ children }: { children: ReactNode }) {
       goTo,
       advance,
       interact,
-      select,
     }),
-    [material, burst, select, step, mode, goTo, advance, interact],
+    [step, mode, goTo, advance, interact],
   );
 
   return (

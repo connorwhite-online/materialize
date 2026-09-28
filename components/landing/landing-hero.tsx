@@ -7,35 +7,22 @@ import { ChevronRight } from "@/components/icons/chevron-right";
 import { cn } from "@/lib/utils";
 import { STEPS, STEP_MS, useLanding } from "./landing-context";
 
-const SWIPE_THRESHOLD = 30;
 const VERTICAL_CANCEL = 40;
 
 /**
  * First screen of the anon landing — the whole story lives here, driven
  * by the stepper rather than by scrolling. Owns the horizontal swipe (the
- * canvas behind is pointer-events: none): on the first step it changes
- * the material; on the others it tugs the scene round (drag-orbit).
+ * canvas behind is pointer-events: none): on every step a drag tugs the
+ * scene round with some tension and springs back (drag-orbit). Materials
+ * change on their own via the burn sweep (burn-sweep.ts).
  */
 export function LandingHero({ children }: { children: ReactNode }) {
-  const { material, select, tensionRef, orbitRef, step, interact } =
-    useLanding();
-  const stepRef = useRef(step);
-  useEffect(() => {
-    stepRef.current = step;
-  }, [step]);
+  const { orbitRef, interact } = useLanding();
   const ref = useRef<HTMLElement>(null);
-  const materialRef = useRef(material);
-  useEffect(() => {
-    materialRef.current = material;
-  }, [material]);
-
   const drag = useRef({
     active: false,
     startX: 0,
     startY: 0,
-    lastX: 0,
-    lastT: 0,
-    peak: 0,
     cancelled: false,
   });
 
@@ -48,9 +35,6 @@ export function LandingHero({ children }: { children: ReactNode }) {
       active: true,
       startX: e.clientX,
       startY: e.clientY,
-      lastX: e.clientX,
-      lastT: performance.now(),
-      peak: 0,
       cancelled: false,
     };
   };
@@ -61,42 +45,23 @@ export function LandingHero({ children }: { children: ReactNode }) {
     const dy = e.clientY - d.startY;
     if (Math.abs(dy) > VERTICAL_CANCEL && Math.abs(dy) > Math.abs(dx)) {
       d.cancelled = true;
-      tensionRef.current = 0;
       orbitRef.current = 0;
       return;
     }
     // Every movement restarts the idle countdown (interact is cheap and
     // idempotent), so a long drag never times out mid-gesture.
     interact();
-    const now = performance.now();
-    const v = Math.min(
-      1,
-      Math.abs(((e.clientX - d.lastX) / Math.max(1, now - d.lastT)) * 20),
-    );
-    d.peak = Math.max(d.peak, v);
-    d.lastX = e.clientX;
-    d.lastT = now;
-    // tanh asymptote = resistance that grows as the finger pulls further.
-    // First step: stretch the shell toward a material swap. Share/BOM:
-    // tug the scene round — it springs back on release.
-    if (stepRef.current === 0) tensionRef.current = Math.tanh(dx / 220);
-    else orbitRef.current = Math.tanh(dx / 260);
+    // tanh asymptote = resistance that grows as the finger pulls further;
+    // the scene springs back on release.
+    orbitRef.current = Math.tanh(dx / 260);
   };
-  const onPointerUp = (e: React.PointerEvent) => {
+  const onPointerUp = () => {
     const d = drag.current;
     if (!d.active) return;
     d.active = false;
-    tensionRef.current = 0;
     orbitRef.current = 0;
     // The 10s idle clock starts from letting go.
     interact();
-    if (d.cancelled) return;
-    const dx = e.clientX - d.startX;
-    if (Math.abs(dx) <= SWIPE_THRESHOLD) return;
-    if (stepRef.current === 0) {
-      const dir = dx > 0 ? -1 : 1;
-      select(materialRef.current + dir, dir, 0.3 + d.peak * 1.2);
-    }
   };
 
   // Non-passive touchmove so a horizontal drag doesn't trigger iOS

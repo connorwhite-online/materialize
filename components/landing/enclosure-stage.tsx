@@ -56,6 +56,11 @@ export function EnclosureStage() {
       <ErrorBoundary fallback={null}>
         <Canvas
           camera={{ position: [0, 0, 6], fov: 35 }}
+          // The burn sweep (burn-sweep.ts) clips each shell with planes;
+          // three ignores material clipping planes unless this is on.
+          onCreated={({ gl }) => {
+            gl.localClippingEnabled = true;
+          }}
           // 1.5, not 2: this is a background. At 2 a retina laptop renders
           // ~3M pixels per frame for it; 1.5 is ~44% fewer and reads the same.
           dpr={[1, 1.5]}

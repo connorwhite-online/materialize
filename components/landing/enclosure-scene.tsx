@@ -4,10 +4,21 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { Html, useGLTF, useTexture } from "@react-three/drei";
 import * as THREE from "three";
-import { MeshSurfaceSampler } from "three/examples/jsm/math/MeshSurfaceSampler.js";
 import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { Download } from "@/components/icons/download";
 import { useLanding } from "./landing-context";
+import {
+  PLAIN,
+  SWEEP_S,
+  applyLook,
+  endSweep,
+  makeShellLayers,
+  nextSweep,
+  setSweepLine,
+  startSweep,
+  sweepEase,
+  type ShellLayers,
+} from "./burn-sweep";
 import { buildStandIn, hasStandIn } from "./stand-ins";
 import { LANDING_MATERIALS } from "./landing-materials";
 import {
@@ -41,27 +52,6 @@ export const DETAIL_URL = "/home/pneuma-q-detail.glb";
 const AO_URLS = { front: "/home/ao-front.webp", rear: "/home/ao-rear.webp" };
 
 type ShellId = "front" | "rear";
-type ShellMaterials = Record<ShellId, THREE.MeshPhysicalMaterial>;
-
-function makeShellMaterials(
-  ao: Record<ShellId, THREE.Texture>,
-): ShellMaterials {
-  const make = (map: THREE.Texture) => {
-    // glTF UVs have their origin top-left; three's loader default flips.
-    map.flipY = false;
-    map.colorSpace = THREE.NoColorSpace;
-    map.needsUpdate = true;
-    return new THREE.MeshPhysicalMaterial({
-      color: LANDING_MATERIALS[0].color,
-      roughness: LANDING_MATERIALS[0].roughness,
-      metalness: LANDING_MATERIALS[0].metalness,
-      clearcoatRoughness: 0.12,
-      aoMap: map,
-      aoMapIntensity: 1.3,
-    });
-  };
-  return { front: make(ao.front), rear: make(ao.rear) };
-}
 
 /**
  * Give a mesh its own transparent copy of the GLB's material (so the
@@ -136,10 +126,11 @@ interface LoadedPart {
 }
 
 /** Clone every part out of the GLB, centred on its own pivot. */
-function useParts(shellMaterials: ShellMaterials) {
+function useParts(ao: Record<ShellId, THREE.Texture>) {
   const { nodes } = useGLTF(ENCLOSURE_URL);
   return useMemo(() => {
     const parts = {} as Record<PartId, LoadedPart>;
+    const layers = {} as Record<ShellId, ShellLayers>;
     const envelope = new THREE.Box3();
     for (const spec of PARTS) {
       const src = nodes[spec.node];
@@ -151,15 +142,19 @@ function useParts(shellMaterials: ShellMaterials) {
       const object = new THREE.Group();
       object.add(inner);
       const materials: THREE.Material[] = [];
+      let shellMesh: THREE.Mesh | null = null;
       object.traverse((o) => {
         const mesh = o as THREE.Mesh;
         if (!mesh.isMesh) return;
-        if (spec.shell) {
-          mesh.material = shellMaterials[spec.id as ShellId];
-          return;
-        }
-        materials.push(fadeable(mesh));
+        if (spec.shell) shellMesh = mesh;
+        else materials.push(fadeable(mesh));
       });
+      if (spec.shell && shellMesh) {
+        // Built after the traverse: this adds sibling layers to the mesh.
+        const l = makeShellLayers(shellMesh, ao[spec.id as ShellId]);
+        applyLook(l.matA, LANDING_MATERIALS[PLAIN]);
+        layers[spec.id as ShellId] = l;
+      }
       object.updateMatrixWorld(true);
       const box = new THREE.Box3().setFromObject(object);
       if (spec.shell) envelope.union(box);
@@ -179,8 +174,8 @@ function useParts(shellMaterials: ShellMaterials) {
       ) as Record<PartId, THREE.Vector3>,
       modelCenter: envelope.getCenter(new THREE.Vector3()),
     };
-    return { parts, geo };
-  }, [nodes, shellMaterials]);
+    return { parts, geo, layers };
+  }, [nodes, ao]);
 }
 
 /**
@@ -206,48 +201,16 @@ function fadeMaterials(materials: THREE.Material[], opacity: number) {
   }
 }
 
-/** Ease the shared shell material toward a family's look (~600ms). */
-/** Exponential ease that lands exactly on its target once it's close. */
-function ease(from: number, to: number, k: number): number {
-  const next = THREE.MathUtils.lerp(from, to, k);
-  return Math.abs(next - to) < 1e-3 ? to : next;
-}
-
-function lerpShell(
-  m: THREE.MeshPhysicalMaterial,
-  target: (typeof LANDING_MATERIALS)[number],
-  color: THREE.Color,
-  k: number,
-) {
-  m.color.lerp(color, k);
-  m.metalness = ease(m.metalness, target.metalness, k);
-  m.roughness = ease(m.roughness, target.roughness, k);
-  m.clearcoat = ease(m.clearcoat, target.clearcoat ?? 0, k);
-  // Must actually reach 0: three renders the whole scene a second time
-  // for any transmission > 0, so an asymptotic ease left that extra pass
-  // running forever after anyone looked at resin.
-  m.transmission = ease(m.transmission, target.transmission ?? 0, k);
-  m.ior = ease(m.ior, target.ior ?? 1.5, k);
-  m.thickness = ease(m.thickness, target.thickness ?? 0, k);
-}
-
 export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
-  const { material, burst, tensionRef, orbitRef, zoomRef, step } = useLanding();
+  const { orbitRef, zoomRef, step } = useLanding();
   const stepRef = useRef(step);
   useEffect(() => {
     stepRef.current = step;
   }, [step]);
-  const aoMaps = useTexture(AO_URLS);
-  // One material per shell: each carries its own baked AO map. Both are
-  // eased to the same target every frame, so they swap as one.
-  const shellMaterials = useMemo(() => makeShellMaterials(aoMaps), [aoMaps]);
-  const { parts, geo } = useParts(shellMaterials);
-  // Stable across renders: the particle sampler keys off this list, and a
-  // fresh array each render re-ran its burst effect on every step change.
-  const shellObjects = useMemo(
-    () => SHELL_IDS.map((id) => parts[id].object),
-    [parts],
-  );
+  const aoMaps = useTexture(AO_URLS, (t) => {
+    for (const map of Array.isArray(t) ? t : [t]) prepareAo(map);
+  });
+  const { parts, geo, layers } = useParts(aoMaps);
   const viewport = useThree((s) => s.viewport);
 
   const deformRef = useRef<THREE.Group>(null);
@@ -259,17 +222,18 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
     orbit: 0,
     orbitV: 0,
     jump: null as { from: number; to: number; t: number } | null,
-    sway: 0,
-    swayV: 0,
-    tilt: 0,
-    tiltV: 0,
     clock: 0,
+    // Burn sweep: the resting look, and the one sweeping in (-1 = none).
+    look: PLAIN,
+    to: -1,
+    sweepT: 0,
+    sinceSweep: 0,
+    lineMin: 0,
+    lineMax: 0,
+    lastStep: 0,
   });
 
   const idle = useIdle();
-
-  const target = LANDING_MATERIALS[material];
-  const targetColor = useMemo(() => new THREE.Color(target.color), [target]);
 
   useFrame((_, rawDelta) => {
     const delta = Math.min(rawDelta, 1 / 20);
@@ -309,38 +273,23 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
       st.zoom > 0.001
         ? mixFrames(current, sampleFrame(MAX_PROGRESS, geo, view), st.zoom)
         : current;
-    // Drag-orbit on the share/BOM steps: a spring toward the finger's pull
-    // (up to ORBIT_MAX), overshooting once when it's let go.
+    // Drag-orbit, the same on every step: a spring toward the finger's
+    // pull (up to ORBIT_MAX), overshooting once when it's let go.
     st.orbitV +=
       ((orbitRef.current * ORBIT_MAX - st.orbit) * 90 - st.orbitV * 13) * delta;
     st.orbit += st.orbitV * delta;
-    const yaw = st.orbit * (1 - blended.hero) * (1 - st.zoom);
+    const yaw = st.orbit * (1 - st.zoom);
     const frame = Math.abs(yaw) > 1e-4 ? orbitFrame(blended, yaw) : blended;
     frameRef.current = frame;
 
-    // Swipe deformation + idle sway, both gated to the hero. The deform
-    // group sits on the hero centre so the stretch pulls around the
-    // device rather than around the screen.
+    // Idle sway, gated to the hero. The group sits on the hero centre so
+    // it turns around the device rather than around the screen.
     const deform = deformRef.current;
     if (deform) {
-      const h = frame.hero;
-      const tension = tensionRef.current * h;
-      const a = Math.abs(tension);
-      const k = 1 - Math.exp(-delta * 28);
-      deform.scale.x += (1 + a * 0.22 - deform.scale.x) * k;
-      deform.scale.y += (1 - a * 0.12 - deform.scale.y) * k;
-      deform.scale.z += (1 - a * 0.06 - deform.scale.z) * k;
-      // Damped springs so a release overshoots once and settles.
-      st.swayV += ((tension * 0.4 - st.sway) * 700 - st.swayV * 26) * delta;
-      st.sway += st.swayV * delta;
-      st.tiltV += ((tension * 0.12 - st.tilt) * 700 - st.tiltV * 26) * delta;
-      st.tilt += st.tiltV * delta;
       deform.position.copy(frame.heroCenter);
-      deform.position.x += st.sway;
-      deform.rotation.z = st.tilt;
       deform.rotation.y = reducedMotion
         ? 0
-        : Math.sin(st.clock * 0.35) * 0.5 * h;
+        : Math.sin(st.clock * 0.35) * 0.5 * frame.hero;
     }
 
     for (const spec of PARTS) {
@@ -354,11 +303,7 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
       fadeMaterials(parts[spec.id].materials, pose.opacity);
     }
 
-    // Fast (~150ms): the swap should read as a snap, with the shed
-    // particles carrying the old skin away — not a slow crossfade.
-    const k = 1 - Math.exp(-delta * 18);
-    lerpShell(shellMaterials.front, target, targetColor, k);
-    lerpShell(shellMaterials.rear, target, targetColor, k);
+    runBurnSweep(st, layers, stepRef.current, delta, reducedMotion);
   });
 
   return (
@@ -380,12 +325,6 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
           <DetailInternals parts={parts} />
         </Suspense>
       )}
-      <ShedParticles
-        burst={burst}
-        shed={LANDING_MATERIALS[burst.from]}
-        sources={shellObjects}
-        frameRef={frameRef}
-      />
       {SHELL_IDS.map((id) => (
         <FileLabel key={id} id={id} size={parts[id].size} frameRef={frameRef} />
       ))}
@@ -396,205 +335,80 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
   );
 }
 
-// ─── Particle shed ────────────────────────────────────────────────────
+// ─── Burn sweep ───────────────────────────────────────────────────────
 
-// Dense fine dust, not chunky confetti: thousands of tiny spheres
-// sampled across the whole shell surface.
-const MAX_PARTICLES = 2400;
-const MIN_PARTICLES = 500;
-const LIFETIME = 0.6;
-const SAMPLES_PER_SHELL = 3000;
-/** Fraction of the shed that recoils opposite the pull. */
-const RECOIL_SHARE = 0.15;
-/** How hard the radial burst bends toward the pull (1 ≈ a 45° cone). */
-const PULL_BIAS = 1.3;
-
-/** World-space centre of the shells as currently drawn. */
-function liveCentre(samples: Sample[][]): THREE.Vector3 {
-  const c = new THREE.Vector3();
-  const meshes = new Set(samples.flat().map((s) => s.mesh));
-  const tmp = new THREE.Vector3();
-  for (const m of meshes) {
-    if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
-    c.add(m.geometry.boundingBox!.getCenter(tmp).applyMatrix4(m.matrixWorld));
-  }
-  return meshes.size ? c.divideScalar(meshes.size) : c;
+/** AO maps: glTF UV origin is top-left; data, not colour. */
+function prepareAo(map: THREE.Texture) {
+  map.flipY = false;
+  map.colorSpace = THREE.NoColorSpace;
+  map.needsUpdate = true;
 }
 
-type Particle = {
-  position: THREE.Vector3;
-  velocity: THREE.Vector3;
-  age: number;
-  scale: number;
-};
-type Sample = { mesh: THREE.Mesh; p: THREE.Vector3 };
-
-/** Shed particles off the shell surfaces, flung along the swipe. */
-function spawnBurst(
-  particles: Particle[],
-  samples: Sample[][],
-  burst: { direction: number; intensity: number },
-) {
-  const n = Math.min(1, burst.intensity / 1.5);
-  const count = Math.round(
-    MIN_PARTICLES + (MAX_PARTICLES - MIN_PARTICLES) * Math.sqrt(n),
-  );
-  const push = 0.8 + burst.intensity * 1.05;
-  // Explode from where the object actually is right now — its live world
-  // transform (idle sway, tilt, drag stretch) — not the fixed hero anchor.
-  const centre = liveCentre(samples);
-  const pull = new THREE.Vector3(burst.direction, 0, 0);
-  const tmp = new THREE.Vector3();
-  for (let i = 0; i < MAX_PARTICLES; i++) {
-    const p = particles[i];
-    if (i >= count) {
-      p.age = LIFETIME + 1;
-      continue;
-    }
-    // Most of the burst leaves the side facing the pull; a smaller recoil
-    // burst leaves the opposite side, as the shell snaps back to centre.
-    const recoil = Math.random() < RECOIL_SHARE;
-    const facing = recoil ? -1 : 1;
-    const set = samples[i % samples.length];
-    let s: Sample | undefined;
-    for (let tries = 0; tries < 8; tries++) {
-      const c = set[(Math.random() * set.length) | 0];
-      if (!c) break;
-      tmp.copy(c.p).applyMatrix4(c.mesh.matrixWorld).sub(centre);
-      s = c;
-      if (tmp.dot(pull) * facing > 0) break;
-    }
-    if (!s) continue;
-    p.position.copy(s.p).applyMatrix4(s.mesh.matrixWorld);
-    // Radially out from the centre, bent toward the pull (or away from it
-    // for the recoil) — so it reads as the object bursting, not dust
-    // blown sideways past it.
-    const out = p.position.clone().sub(centre).normalize();
-    const speed =
-      push * (recoil ? 0.45 + Math.random() * 0.4 : 0.9 + Math.random() * 0.9);
-    p.velocity
-      .copy(out)
-      .addScaledVector(pull, facing * PULL_BIAS)
-      .normalize()
-      .multiplyScalar(speed);
-    p.velocity.z *= 0.5;
-    p.age = 0;
-    p.scale = 0.002 + Math.random() * 0.004;
-  }
-}
+const shellBox = new THREE.Box3();
 
 /**
- * Advance the live particles and pack them into the first instance slots.
- * Returns how many are alive: the mesh draws only that many, and hides
- * itself at 0 — so an idle hero costs no particle work at all (it used to
- * draw all 2400 at scale 0, every frame).
+ * Advance the burn sweep (see burn-sweep.ts). Starts one when the
+ * schedule says so, climbs the line from the shells' current bottom to
+ * top, flickers the band, and settles the new look when it arrives.
  */
-function stepParticles(
-  particles: Particle[],
-  mesh: THREE.InstancedMesh,
-  dummy: THREE.Object3D,
+function runBurnSweep(
+  st: {
+    clock: number;
+    look: number;
+    to: number;
+    sweepT: number;
+    sinceSweep: number;
+    lineMin: number;
+    lineMax: number;
+    lastStep: number;
+  },
+  layers: Record<ShellId, ShellLayers>,
+  step: number,
   delta: number,
-): number {
-  let live = 0;
-  for (let i = 0; i < MAX_PARTICLES; i++) {
-    const p = particles[i];
-    if (p.age >= LIFETIME) continue;
-    p.age += delta;
-    if (p.age >= LIFETIME) continue;
-    p.position.addScaledVector(p.velocity, delta);
-    p.velocity.multiplyScalar(0.968);
-    const life = p.age / LIFETIME;
-    const fade = life < 0.4 ? 1 : 1 - Math.pow((life - 0.4) / 0.6, 1.4);
-    dummy.position.copy(p.position);
-    dummy.scale.setScalar(p.scale * Math.max(0, fade));
-    dummy.updateMatrix();
-    mesh.setMatrixAt(live++, dummy.matrix);
+  reducedMotion: boolean,
+) {
+  const shells = [layers.front, layers.rear];
+  st.sinceSweep += delta;
+  // Arriving back on the first step, give it a full cycle before the next
+  // sweep — otherwise it fires while the shells are still flying home.
+  if (step !== st.lastStep) {
+    if (step === 0) st.sinceSweep = 0;
+    st.lastStep = step;
   }
-  return live;
-}
-
-function ShedParticles({
-  burst,
-  shed,
-  sources,
-  frameRef,
-}: {
-  burst: { key: number; direction: number; intensity: number };
-  shed: (typeof LANDING_MATERIALS)[number];
-  sources: THREE.Object3D[];
-  frameRef: React.MutableRefObject<Frame | null>;
-}) {
-  const meshRef = useRef<THREE.InstancedMesh>(null);
-  const dummy = useMemo(() => new THREE.Object3D(), []);
-  const particles = useMemo(
-    () =>
-      Array.from({ length: MAX_PARTICLES }, () => ({
-        position: new THREE.Vector3(),
-        velocity: new THREE.Vector3(),
-        age: LIFETIME + 1,
-        scale: 0,
-      })),
-    [],
-  );
-  // Surface samples: vertices of each shell, in the shell's own space.
-  // Area-weighted points across each shell (vertex sampling bunched
-  // particles wherever the mesh was dense and left flat faces bare).
-  const spawnedKey = useRef(0);
-  const samples = useMemo(
-    () =>
-      sources.map((obj) => {
-        const pts: Sample[] = [];
-        const tmp = new THREE.Vector3();
-        obj.traverse((o) => {
-          const mesh = o as THREE.Mesh;
-          if (!mesh.isMesh) return;
-          const sampler = new MeshSurfaceSampler(mesh).build();
-          for (let i = 0; i < SAMPLES_PER_SHELL; i++) {
-            sampler.sample(tmp);
-            pts.push({ mesh, p: tmp.clone() });
-          }
-        });
-        return pts;
-      }),
-    [sources],
-  );
-
-  useEffect(() => {
-    // Spawn once per burst. Anything else that re-runs this effect must
-    // never replay the last burst.
-    if (burst.key === 0 || burst.key === spawnedKey.current) return;
-    spawnedKey.current = burst.key;
-    const hero = frameRef.current?.hero ?? 1;
-    if (hero < 0.3) return;
-    spawnBurst(particles, samples, burst);
-  }, [burst, particles, samples, frameRef]);
-
-  useFrame((_, delta) => {
-    const mesh = meshRef.current;
-    if (!mesh) return;
-    const live = stepParticles(particles, mesh, dummy, delta);
-    mesh.count = live;
-    mesh.visible = live > 0;
-    if (live > 0) mesh.instanceMatrix.needsUpdate = true;
-  });
-
-  return (
-    <instancedMesh
-      ref={meshRef}
-      args={[undefined, undefined, MAX_PARTICLES]}
-      frustumCulled={false}
-    >
-      {/* 20 tris: at 2–6px a detail-1 sphere (80) is indistinguishable. */}
-      <icosahedronGeometry args={[1, 0]} />
-      {/* The shell sheds its OUTGOING skin: particles wear the material
-          being swiped away while the surface lerps to the new one. */}
-      <meshStandardMaterial
-        color={shed.color}
-        metalness={shed.metalness}
-        roughness={Math.max(0.2, shed.roughness)}
-      />
-    </instancedMesh>
-  );
+  if (st.to < 0) {
+    const next = nextSweep(step, st.look, st.sinceSweep, false);
+    // Reduced motion: no cycling on the hero; still settle to the plain
+    // plastic off it, instantly.
+    if (next === null || (reducedMotion && step === 0)) return;
+    if (reducedMotion) {
+      for (const l of shells) endSweep(l, next);
+      st.look = next;
+      return;
+    }
+    shellBox.makeEmpty();
+    for (const l of shells) shellBox.expandByObject(l.a);
+    const pad = (shellBox.max.y - shellBox.min.y) * 0.04;
+    st.lineMin = shellBox.min.y - pad;
+    st.lineMax = shellBox.max.y + pad;
+    st.to = next;
+    st.sweepT = 0;
+    for (const l of shells) startSweep(l, next);
+  }
+  st.sweepT = Math.min(1, st.sweepT + delta / SWEEP_S);
+  const h = THREE.MathUtils.lerp(st.lineMin, st.lineMax, sweepEase(st.sweepT));
+  const span = st.lineMax - st.lineMin;
+  // Jacob's-ladder flicker: a hair-thin band whose width and brightness
+  // jitter frame to frame, fading in off the bottom and out at the top.
+  const envelope = Math.sin(Math.PI * st.sweepT);
+  const width = span * (0.004 + Math.random() * 0.004);
+  const glow = envelope * (0.55 + Math.random() * 0.45);
+  for (const l of shells) setSweepLine(l, h, width, glow);
+  if (st.sweepT >= 1) {
+    for (const l of shells) endSweep(l, st.to);
+    st.look = st.to;
+    st.to = -1;
+    st.sinceSweep = 0;
+  }
 }
 
 // ─── Labels ───────────────────────────────────────────────────────────
