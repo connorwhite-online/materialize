@@ -315,18 +315,12 @@ export function AgentDesk({
               <meshStandardMaterial color="#26272c" roughness={0.5} />
             </mesh>
           </group>
-          {/* Frosted glass behind the sprite: the scene blurs through. */}
+          {/* A plain black screen behind the sprite. (It was frosted
+              glass: a transmission material re-renders the scene every
+              frame just to blur it.) */}
           <mesh position={[0, 0, -0.012]}>
             <planeGeometry args={[SCREEN_W, SCREEN_H]} />
-            <meshPhysicalMaterial
-              color="#1f1c1a"
-              transmission={0.35}
-              roughness={0.6}
-              thickness={0.2}
-              ior={1.3}
-              transparent
-              userData={{ baseOpacity: 0.92 }}
-            />
+            <meshBasicMaterial color="#0b0b0c" />
           </mesh>
           <mesh>
             <planeGeometry args={[SCREEN_W * 0.94, SCREEN_H * 0.94]} />

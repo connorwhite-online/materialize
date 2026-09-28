@@ -239,15 +239,17 @@ export function layoutFor(view: View): Layout {
   const portrait = view.w < view.h;
   const wide = !portrait && view.w / view.h > 1.9;
   const s0 = Math.min(
-    ((portrait ? 0.54 : 0.6) * view.h) / DEVICE_LONG,
-    ((portrait ? 0.9 : 0.55) * view.w) / DEVICE_WIDE,
+    ((portrait ? 0.42 : 0.6) * view.h) / DEVICE_LONG,
+    ((portrait ? 0.62 : 0.55) * view.w) / DEVICE_WIDE,
   );
-  // The stage is centred on every viewport (copy sits bottom-left on
-  // desktop, the stepper bottom-centre). Every step lives in the upper
-  // ~two-thirds so the copy and stepper below never collide with it.
+  // The stage is centred on every viewport. On a phone the copy owns the
+  // bottom ~third (above the floating nav pill) and the stepper the top
+  // edge, so every step lives in the band between: centre ~0.15h above
+  // the middle, ~0.5h tall. (Sized to fill the whole screen, the device
+  // ran through the headline on a real iPhone.)
   const s2 = Math.min(
-    ((portrait ? 0.38 : 0.48) * view.h) / DEVICE_LONG,
-    ((portrait ? 1.05 : 0.8) * view.w) / EXPLODE_WIDE,
+    ((portrait ? 0.28 : 0.48) * view.h) / DEVICE_LONG,
+    ((portrait ? 0.92 : 0.8) * view.w) / EXPLODE_WIDE,
   );
   return {
     portrait,
@@ -256,13 +258,13 @@ export function layoutFor(view: View): Layout {
     // Very wide + short (a phone on its side): the copy owns the left
     // half, so every step's stage shifts right, clear of it.
     t0: portrait
-      ? new Vector3(0, view.h * 0.03, 0)
+      ? new Vector3(0, view.h * 0.15, 0)
       : wide
         ? new Vector3(0, view.h * 0.06, 0)
         : new Vector3(0, -view.h * 0.03, 0),
     s2,
     t2: portrait
-      ? new Vector3(0, view.h * 0.05, 0)
+      ? new Vector3(0, view.h * 0.14, 0)
       : wide
         ? new Vector3(0, view.h * 0.06, 0)
         : new Vector3(0, -view.h * 0.04, 0),
@@ -271,21 +273,21 @@ export function layoutFor(view: View): Layout {
     // left and a little below centre, his hose looping back to it.
     // Portrait: platform up top, the mascot in front of it, lower-left.
     stage: portrait
-      ? new Vector3(0, view.h * 0.17, 0)
+      ? new Vector3(0, view.h * 0.2, 0)
       : wide
         ? new Vector3(0, view.h * 0.06, 0)
         : new Vector3(0, view.h * 0.02, 0),
-    sA: s0 * (portrait ? 0.5 : wide ? 0.42 : 0.7),
+    sA: s0 * (portrait ? 0.78 : wide ? 0.42 : 0.72),
     desk: portrait
-      ? new Vector3(-view.w * 0.16, -view.h * 0.02, view.h * 0.4)
+      ? new Vector3(-view.w * 0.29, view.h * 0.06, view.h * 0.12)
       : wide
         ? new Vector3(-view.w * 0.14, -view.h * 0.06, view.h * 0.35)
         : new Vector3(-view.w * 0.19, -view.h * 0.07, view.h * 0.42),
     agentUnit: portrait
-      ? Math.min(view.w * 0.24, view.h * 0.11)
+      ? Math.min(view.w * 0.15, view.h * 0.07)
       : wide
-        ? Math.min(view.w * 0.07, view.h * 0.2)
-        : Math.min(view.w * 0.1, view.h * 0.19),
+        ? Math.min(view.w * 0.06, view.h * 0.16)
+        : Math.min(view.w * 0.08, view.h * 0.15),
   };
 }
 
