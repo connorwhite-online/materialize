@@ -182,6 +182,7 @@ export function AgentDesk({
     // and runs its own tap phase so the hands never fall into lockstep.
     armL: { x: ARM_REST, v: 0, phase: 0 },
     armR: { x: ARM_REST, v: 0, phase: 1.7 },
+    fade: 0,
     body: { p: { x: 0.3, z: 0, y: 0 }, v: { x: 0, z: 0, y: 0 } },
   });
 
@@ -200,7 +201,8 @@ export function AgentDesk({
     if (!f || !root) return;
     const delta = Math.min(rawDelta, 1 / 20);
     const w = f.agent;
-    root.visible = w > 0.01;
+    root.visible =
+      w > 0.01 && (stepRef.current === 2 || clock.current.fade > 0);
     const c = clock.current;
     // The clock restarts on every arrival at the agents step (2).
     const onStep = stepRef.current === 2;
@@ -213,13 +215,21 @@ export function AgentDesk({
     c.t += delta;
     const t = c.t;
     const u = f.agentUnit;
-    const appear = THREE.MathUtils.smoothstep(w, 0, 1);
+    // Arriving, he fades in with the transition. Leaving, he fades out on
+    // his own clock (~150ms) the moment the step changes, BEFORE the scene
+    // moves, so he never shrinks or slides through the platform.
+    c.fade = onStep
+      ? Math.max(c.fade, THREE.MathUtils.smoothstep(w, 0.4, 1))
+      : Math.max(0, c.fade - delta * 7);
+    const appear = c.fade;
 
     const desk = deskRef.current!;
     // Grows in from / shrinks to nothing in place, in step with the hose
     // fade — never a hard pop at the end of the transition.
     desk.position.copy(f.desk);
-    desk.scale.setScalar(u * Math.max(appear, 1e-3));
+    desk.scale.setScalar(u);
+    setOpacity(desk, appear);
+    if (collarRef.current) setOpacity(collarRef.current, appear);
 
     // ── Hose into the platform's rim port (rebuilt when either end moves) ──
     const port = platformPort(f, portScratch);
@@ -360,6 +370,17 @@ export function AgentDesk({
       </group>
     </group>
   );
+}
+
+/** Fade every material under `group` (toon voxels, laptop, collar). */
+function setOpacity(group: THREE.Object3D, o: number) {
+  group.traverse((obj) => {
+    const m = (obj as THREE.Mesh).material as THREE.Material | undefined;
+    if (!m) return;
+    m.transparent = o < 0.999;
+    m.opacity = o;
+    m.depthWrite = o > 0.5;
+  });
 }
 
 const portScratch = { pos: new THREE.Vector3(), dir: new THREE.Vector3() };
