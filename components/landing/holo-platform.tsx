@@ -95,14 +95,14 @@ const GLASS_FRAG = /* glsl */ `
     vec2 c = vUv - 0.5;
     float r = length(c) * 2.0;
     // Fine concentric rings, a slow scan sweep, fading to the edge.
-    float rings = smoothstep(0.92, 1.0, fract(r * 14.0)) * 0.35;
+    float rings = smoothstep(0.92, 1.0, fract(r * 14.0)) * 0.05;
     float ang = atan(c.y, c.x);
-    float sweep = pow(max(0.0, cos(ang - uTime * 0.9)), 18.0) * 0.35;
+    float sweep = pow(max(0.0, cos(ang - uTime * 0.9)), 18.0) * 0.04;
     // A delivery lands: a ripple runs out from the centre.
     float ripple = exp(-pow((r - uPulse * 1.6) * 7.0, 2.0)) * exp(-uPulse * 2.2);
-    // The whole top surface glows, brightest mid-disc; detail rides on it.
-    float fill = 0.42 - 0.14 * r * r;
-    float a = (fill + rings + sweep + ripple * 1.4) * (1.0 - smoothstep(0.96, 1.0, r));
+    // A gentle, even glow across the whole disc; the detail barely rides
+    // on it, so it reads as one lit plane, not a hot spot.
+    float a = (0.2 + rings + sweep + ripple * 0.12) * (1.0 - smoothstep(0.97, 1.0, r));
     gl_FragColor = vec4(vec3(1.0, 0.52, 0.18) * a * uGlow, a * uGlow);
   }
 `;
@@ -113,8 +113,8 @@ const BEAM_FRAG = /* glsl */ `
   varying vec2 vUv;
   void main() {
     // Brightest at the base, gone by the top; a print line scans upward.
-    float base = pow(1.0 - vUv.y, 2.4) * 0.16;
-    float scan = exp(-pow((vUv.y - fract(uTime * 0.35)) * 40.0, 2.0)) * 0.22;
+    float base = pow(1.0 - vUv.y, 2.4) * 0.05;
+    float scan = exp(-pow((vUv.y - fract(uTime * 0.35)) * 40.0, 2.0)) * 0.08;
     float a = (base + scan) * uGlow;
     gl_FragColor = vec4(vec3(1.0, 0.55, 0.2) * a, a);
   }
@@ -177,16 +177,16 @@ export function HoloPlatform({
     // Deliveries land on the shared agent clock (agent-timeline.ts).
     uniforms.uTime.value = clock.current;
     uniforms.uPulse.value = agentClock.sinceArrival;
-    // A touch brighter while it's the star of the agents step.
-    uniforms.uGlow.value = 0.8 + 0.4 * f.agent;
+    // Same brightness on every step.
+    uniforms.uGlow.value = 1;
     const ring = ringRef.current;
     if (ring) {
       const flash = Math.exp(-agentClock.sinceArrival * 3.5);
       // Warm amber, flaring toward white-hot as a delivery lands.
       (ring.material as THREE.MeshBasicMaterial).color.setRGB(
         1,
-        0.5 + flash * 0.4,
-        0.16 + flash * 0.5,
+        0.5 + flash * 0.12,
+        0.16 + flash * 0.12,
       );
     }
   });
