@@ -815,6 +815,11 @@ export const printOrders = pgTable("print_orders", {
   // — not the CHECKOUT_MODEL env var — drives all lifecycle branching,
   // so flipping the env never strands in-flight orders.
   checkoutModel: text("checkout_model").notNull().default("single"),
+  // True for orders placed in sandbox mode (test Stripe keys / mocked
+  // CraftCloud), stamped from isCraftCloudTestOrder() at creation; migration 0065
+  // backfilled everything from before the live launch. Order lists hide
+  // these so a buyer's real orders aren't buried under test ones.
+  isTest: boolean("is_test").notNull().default(false),
   // Two-step only: CraftCloud-hosted Stripe session the customer pays
   // production + shipping at. Null on single-checkout orders.
   bridgeSessionId: text("bridge_session_id"),

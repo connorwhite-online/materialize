@@ -10,7 +10,8 @@ import { eq, desc, and, inArray, notInArray, asc } from "drizzle-orm";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { getMaterialById } from "@/lib/materials";
+import { resolveOrderMaterials } from "@/lib/print/order-material";
+import { visibleOrdersFilter } from "@/lib/print/order-visibility";
 import { formatOrderNumber } from "@/lib/utils/order-number";
 import { DraftCartCard } from "./draft-cart-card";
 
@@ -88,6 +89,7 @@ export async function OrdersTab({ userId }: { userId: string }) {
       .where(
         and(
           eq(printOrders.userId, userId),
+          visibleOrdersFilter(),
           inArray(printOrders.status, [...IN_PROGRESS_STATUSES])
         )
       )
@@ -111,6 +113,7 @@ export async function OrdersTab({ userId }: { userId: string }) {
       .where(
         and(
           eq(printOrders.userId, userId),
+          visibleOrdersFilter(),
           notInArray(printOrders.status, [...IN_PROGRESS_STATUSES])
         )
       )
@@ -254,6 +257,11 @@ export async function OrdersTab({ userId }: { userId: string }) {
     };
   });
 
+  const materialsById = await resolveOrderMaterials([
+    ...drafts.map((d) => d.material),
+    ...orders.map((o) => o.material),
+  ]);
+
   if (orders.length === 0 && drafts.length === 0) {
     return (
       <div className="py-16 text-center">
@@ -278,7 +286,7 @@ export async function OrdersTab({ userId }: { userId: string }) {
           <div className="flex flex-col gap-2">
             {drafts.map((draft) => {
               const materialMeta = draft.material
-                ? getMaterialById(draft.material)
+                ? materialsById.get(draft.material) ?? null
                 : null;
               return (
                 <DraftCartCard
@@ -323,7 +331,7 @@ export async function OrdersTab({ userId }: { userId: string }) {
           <div className="flex flex-col gap-2">
             {orders.map((order) => {
               const materialMeta = order.material
-                ? getMaterialById(order.material)
+                ? materialsById.get(order.material) ?? null
                 : null;
               const orderNumber = formatOrderNumber(order.id);
               const statusLabel = STATUS_LABELS[order.status] || order.status;

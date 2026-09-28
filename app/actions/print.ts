@@ -397,6 +397,7 @@ export async function createPrintOrder(params: {
         // Persisted model drives all later branching — see the
         // checkoutModel note above createPrintOrder.
         checkoutModel: getCheckoutModel(),
+        isTest: isCraftCloudTestOrder(),
       })
       .returning();
 
@@ -585,6 +586,7 @@ export async function checkoutVendorGroup(
         // Persisted model drives all later branching — see the
         // checkoutModel note above createPrintOrder.
         checkoutModel: getCheckoutModel(),
+        isTest: isCraftCloudTestOrder(),
       })
       .returning();
 
