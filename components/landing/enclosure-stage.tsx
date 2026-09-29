@@ -1,13 +1,9 @@
 "use client";
 
-import { Suspense, useState } from "react";
-import { Canvas } from "@react-three/fiber";
+import { Suspense, useRef, useState } from "react";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useReducedMotion } from "motion/react";
-import {
-  Environment,
-  Lightformer,
-  PerformanceMonitor,
-} from "@react-three/drei";
+import { Environment, Lightformer } from "@react-three/drei";
 import * as THREE from "three";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { EnclosureScene } from "./enclosure-scene";
@@ -25,20 +21,51 @@ import { EnclosureScene } from "./enclosure-scene";
  * as a hard line at both bands.
  */
 /**
- * Render resolution adapts to the device instead of a fixed cap. It
- * starts at the screen's own density (up to 2×: past that an iPhone's 3×
- * is ~2.25× the pixels for detail nobody can see at arm's length) and
- * PerformanceMonitor steps it down in 0.25 notches only while the frame
- * rate can't hold, and back up when it recovers. A flat 1.25× on phones
- * was the real cause of the soft, low-res look: on a 3× screen every
- * edge and highlight was upscaled ~2.4×. (The meshes were not: a
- * normal-map bake from the full CAD came back essentially flat — the
- * shipped 25% shells already hold all the detail the source has.)
+ * Render resolution: the screen's own density, up to 2× (past that an
+ * iPhone's 3× is ~2.25× the pixels for detail nobody sees at arm's
+ * length). A flat 1.25× on phones was what made the scene look soft.
+ *
+ * DprGovernor steps it down — only down, in 0.25 notches, never below
+ * DPR_FLOOR — if the frame rate really can't hold. It replaced drei's
+ * PerformanceMonitor, which made things worse, not better: it judged the
+ * first seconds while models decode and shaders compile, bounced, and
+ * after a few flips fell back to 1× for good. Measured: even an
+ * unthrottled desktop GPU sat at 2× for ~11s, then 1× forever.
  */
-const DPR_MIN = 1;
+const DPR_FLOOR = 1.5;
+const DPR_STEP = 0.25;
+/** Ignore the load: decode, shader compile, texture upload. */
+const WARMUP_S = 4;
+/** Judge over this long, and step down below this frame rate. */
+const WINDOW_S = 2;
+const MIN_FPS = 45;
 function maxDpr(): number {
   if (typeof window === "undefined") return 1.5;
   return Math.min(window.devicePixelRatio || 1, 2);
+}
+
+function DprGovernor({ top }: { top: number }) {
+  const setDpr = useThree((s) => s.setDpr);
+  const st = useRef({ t: 0, frames: 0, windowT: 0, dpr: top });
+  useFrame((_, delta) => {
+    const g = st.current;
+    // A backgrounded tab reports huge deltas; not the device's fault.
+    if (delta > 0.25) return;
+    g.t += delta;
+    if (g.t < WARMUP_S) return;
+    g.frames += 1;
+    g.windowT += delta;
+    if (g.windowT < WINDOW_S) return;
+    const fps = g.frames / g.windowT;
+    g.frames = 0;
+    g.windowT = 0;
+    const floor = Math.min(DPR_FLOOR, top);
+    if (fps < MIN_FPS && g.dpr > floor) {
+      g.dpr = Math.max(floor, g.dpr - DPR_STEP);
+      setDpr(g.dpr);
+    }
+  });
+  return null;
 }
 
 const EDGE_FADE = {
@@ -50,7 +77,6 @@ const EDGE_FADE = {
 
 export function EnclosureStage() {
   const [top] = useState(maxDpr);
-  const [dpr, setDpr] = useState(top);
   const reducedMotion = useReducedMotion() ?? false;
   return (
     // Opaque, flat --background base: it covers <body>'s fixed bottom-up
@@ -82,7 +108,7 @@ export function EnclosureStage() {
           onCreated={({ gl }) => {
             gl.localClippingEnabled = true;
           }}
-          dpr={dpr}
+          dpr={top}
           gl={{
             antialias: true,
             alpha: true,
@@ -91,19 +117,7 @@ export function EnclosureStage() {
             toneMappingExposure: 0.92,
           }}
         >
-          <PerformanceMonitor
-            // Judged over ~1s windows; a couple of flips and it settles.
-            flipflops={3}
-            // Start at full quality (drei defaults to 0.5, which knocked
-            // every device straight down to the middle).
-            factor={1}
-            onChange={({ factor }) => {
-              const next =
-                Math.round((DPR_MIN + (top - DPR_MIN) * factor) * 4) / 4;
-              setDpr(next);
-            }}
-            onFallback={() => setDpr(DPR_MIN)}
-          />
+          <DprGovernor top={top} />
           <WarmStudio />
           <Suspense fallback={null}>
             <EnclosureScene reducedMotion={reducedMotion} />
