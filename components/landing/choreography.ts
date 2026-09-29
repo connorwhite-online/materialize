@@ -447,8 +447,6 @@ export function sampleFrame(
   progress: number,
   geo: Geometry,
   view: View,
-  /** Heading back from the agents step (the shells stay whole). */
-  leavingAgents = false,
 ): Frame {
   const p = MathUtils.clamp(progress, 0, MAX_PROGRESS);
   const L = layoutFor(view);
@@ -467,8 +465,13 @@ export function sampleFrame(
       opacity = a.opacity * (1 - MathUtils.smoothstep(raw, 0, 0.35));
     // The shells fade out too, then are rebuilt on the hologram by the
     // burn edge (the scene hides them until it does; see runBurnSweep).
-    else if (seg === 1 && !leavingAgents)
-      opacity = raw < 0.5 ? 1 - MathUtils.smoothstep(raw, 0, 0.3) : 1;
+    // Shells: out in the first stretch, back in the last, both ways (the
+    // agents end then hands them to the build, which hides and rebuilds).
+    else if (seg === 1)
+      opacity =
+        raw < 0.5
+          ? 1 - MathUtils.smoothstep(raw, 0, 0.3)
+          : MathUtils.smoothstep(raw, 0.75, 1);
     if (!part.shell) {
       // Internals arrive late into the BOM and leave early out of it, so
       // they're never seen drifting through a closed shell. The camera,
@@ -489,9 +492,10 @@ export function sampleFrame(
     // Narrow: leaders go well before the parts leave, so lines never hang
     // in space over an empty stage (filmed: they did on the way to step 3).
     bomLabels: L.wide ? 0 : MathUtils.smoothstep(bump(p, 1, 0.3), 0.3, 0.9),
-    // Wide: the monitor and hologram arrive while the parts are still
-    // leaving, so the stage is never empty mid-transition (filmed: it was).
-    agent: MathUtils.smoothstep(bump(p, 2, 0.75), 0, 0.5),
+    // Steps 2 ↔ 3 are a clean sequence: the outgoing scene fades out in
+    // the first ~40% of the move, the incoming one fades in over the last
+    // half — the same both ways.
+    agent: MathUtils.smoothstep(bump(p, 2, 0.5), 0, 0.8),
     labelRows: {
       top: L.t2.y + bomHalf + gap,
       bottom: L.t2.y - bomHalf - gap,

@@ -264,7 +264,7 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
       const gap = goal - st.progress;
       st.progress +=
         Math.sign(gap) * Math.min(Math.abs(gap), delta / STEP_TWEEN_S);
-      current = sampleFrame(st.progress, geo, view, gap < 0);
+      current = sampleFrame(st.progress, geo, view);
     }
 
     // Drag-orbit, the same on every step: a spring toward the finger's

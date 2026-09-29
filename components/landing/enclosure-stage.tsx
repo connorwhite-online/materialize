@@ -36,7 +36,10 @@ export function EnclosureStage() {
     // darker bottom met the band in a visible line.
     <div
       aria-hidden
-      className="pointer-events-none fixed inset-0 z-0 bg-background"
+      // top-0 + h-lvh, not inset-0: sized to the LARGE viewport, the canvas
+      // never resizes as iOS Safari's toolbar collapses on scroll (it did,
+      // and the whole scene re-laid out: a visible shift/scale).
+      className="pointer-events-none fixed inset-x-0 top-0 z-0 h-lvh bg-background"
     >
       {/* A warm pool of light behind the device, like a floor spot on a
           set — the canvas is transparent over it. */}

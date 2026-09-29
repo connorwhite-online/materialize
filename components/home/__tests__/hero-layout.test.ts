@@ -48,7 +48,7 @@ describe("anon home hero layout", () => {
   it("places copy below center, clear of the stepper and the floating pill", () => {
     const copy = page.match(/<main className="(flex flex-1 items-end[^"]*)">/)?.[1];
     expect(copy).toBeDefined();
-    expect(copy).toMatch(/\bpb-32\b/);
+    expect(copy).toMatch(/\bpb-28\b/);
     expect(copy).toMatch(/\bnav:pb-24\b/);
     // Copy stays left-aligned on desktop; only the stage and stepper centre.
     expect(copy).not.toMatch(/\bnav:justify-center\b/);
