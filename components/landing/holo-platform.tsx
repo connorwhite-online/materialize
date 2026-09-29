@@ -190,10 +190,8 @@ const UV_VERT = /* glsl */ `
 
 export function HoloPlatform({
   frameRef,
-  stepRef,
 }: {
   frameRef: MutableRefObject<Frame | null>;
-  stepRef: MutableRefObject<number>;
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const ringRef = useRef<THREE.Mesh>(null);
@@ -244,13 +242,8 @@ export function HoloPlatform({
     const f = frameRef.current;
     const group = groupRef.current;
     if (!f || !group) return;
-    // Only while the agents step is the step: fades in with its arrival,
-    // and out on its own ~150ms clock the moment the step changes — never
-    // lingering under the device on the way back to steps 1–2.
-    fade.current =
-      stepRef.current === 2
-        ? Math.max(fade.current, THREE.MathUtils.smoothstep(f.agent, 0.05, 0.6))
-        : Math.max(0, fade.current - Math.min(delta, 1 / 20) * 7);
+    // On/off with the frame, swapped under the scene-wide dim.
+    fade.current = f.agent;
     const o = fade.current;
     group.visible = o > 0.01;
     if (!group.visible) return;

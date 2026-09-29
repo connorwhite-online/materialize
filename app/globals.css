@@ -402,6 +402,14 @@
     text-rendering: optimizeLegibility;
     overscroll-behavior-x: none;
   }
+  /* The anon landing paints its own flat backdrop (EnclosureStage), so
+     drop body's gradient there. iOS clips fixed elements to the visible
+     area, so under Safari's translucent toolbar it's body that shows — and
+     the gradient bottoms out near-black, a hard band against the flat
+     toolbar fill. */
+  body:has(.mz-landing-stage) {
+    background-image: none;
+  }
   html {
     /* bg-background on html (in addition to body) so iOS Safari
        fills the safe-area / over-scroll zones with the active

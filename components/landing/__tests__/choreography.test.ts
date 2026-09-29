@@ -68,10 +68,20 @@ describe.each([
     expect(Math.abs(f.desk.y)).toBeLessThan(view.h / 2);
   });
 
-  it("the internals are gone a third of the way into the agents step", () => {
-    const f = sampleFrame(1.35, GEO, view);
+  it("2 → 3 dips the whole scene: solid until the swap, swapped under it", () => {
+    const before = sampleFrame(1.35, GEO, view);
+    const after = sampleFrame(1.65, GEO, view);
+    // Before the swap: step 2 still whole, fading as one image.
+    for (const p of PARTS) expect(before.poses[p.id].opacity, p.id).toBe(1);
+    expect(before.agent).toBe(0);
+    expect(before.dim).toBeGreaterThan(0.5);
+    // After it: step 3's set, the internals gone, fading back in.
     for (const p of PARTS)
-      if (!p.shell) expect(f.poses[p.id].opacity, p.id).toBe(0);
+      if (!p.shell) expect(after.poses[p.id].opacity, p.id).toBe(0);
+    expect(after.agent).toBe(1);
+    expect(after.dim).toBeGreaterThan(0.2);
+    expect(sampleFrame(1, GEO, view).dim).toBe(0);
+    expect(sampleFrame(2, GEO, view).dim).toBe(0);
   });
 
   it("explodes every part in stack order, front shell on the left, fully visible", () => {

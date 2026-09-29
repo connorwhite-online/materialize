@@ -147,6 +147,13 @@ export interface Frame {
    * so they hold still while the scene turns under them (orbitFrame).
    */
   anchors?: Record<PartId, Vector3>;
+  /**
+   * 0..1: how far the whole rendered scene is faded out (a full-screen
+   * pass, enclosure-scene.tsx). Steps 2 ↔ 3 dip through it so every
+   * object stays solid while the scene fades as one image — fading each
+   * material instead showed the shells' insides as they went.
+   */
+  dim?: number;
   /** Drag-orbit yaw applied to this frame (orbitFrame), radians. */
   orbitYaw?: number;
 }
@@ -443,6 +450,15 @@ function mixPlatform(
 
 export const MAX_PROGRESS = 2;
 
+/** Where, in the 2 ↔ 3 move, the content swaps (the scene fully faded). */
+const DIM_SWAP = 0.5;
+/** Fade out over the first 45%, hold, fade in over the last 45%. */
+function dipFor(raw: number): number {
+  return raw < DIM_SWAP
+    ? MathUtils.smoothstep(raw, 0, 0.45)
+    : 1 - MathUtils.smoothstep(raw, 0.55, 1);
+}
+
 export function sampleFrame(
   progress: number,
   geo: Geometry,
@@ -452,26 +468,18 @@ export function sampleFrame(
   const L = layoutFor(view);
   const seg = Math.min(Math.floor(p), MAX_PROGRESS - 1) as 0 | 1;
   const raw = p - seg;
-  const t = easeInOut(raw);
+  // 2 ↔ 3 doesn't travel: each scene holds still while it fades, and the
+  // swap happens unseen at the bottom of the dip.
+  const t = seg === 1 ? (raw < DIM_SWAP ? 0 : 1) : easeInOut(raw);
 
   const poses = {} as Record<PartId, Pose>;
   for (const part of PARTS) {
     const a = keyframe(seg, part, geo, L);
     const b = keyframe((seg + 1) as 1 | 2, part, geo, L);
     let opacity = MathUtils.lerp(a.opacity, b.opacity, t);
-    // Into the agents step the internals fade out fast, before they've
-    // travelled far enough to read as flying somewhere.
-    if (seg === 1 && !part.shell)
-      opacity = a.opacity * (1 - MathUtils.smoothstep(raw, 0, 0.35));
-    // The shells fade out too, then are rebuilt on the hologram by the
-    // burn edge (the scene hides them until it does; see runBurnSweep).
-    // Shells: out in the first stretch, back in the last, both ways (the
-    // agents end then hands them to the build, which hides and rebuilds).
-    else if (seg === 1)
-      opacity =
-        raw < 0.5
-          ? 1 - MathUtils.smoothstep(raw, 0, 0.3)
-          : MathUtils.smoothstep(raw, 0.75, 1);
+    // 2 ↔ 3 swaps content at the bottom of the dim (sampleFrame's `dim`):
+    // internals are there until the scene is fully faded, gone after.
+    if (seg === 1 && !part.shell) opacity = raw < DIM_SWAP ? 1 : 0;
     if (!part.shell) {
       // Internals arrive late into the BOM and leave early out of it, so
       // they're never seen drifting through a closed shell. The camera,
@@ -492,10 +500,10 @@ export function sampleFrame(
     // Narrow: leaders go well before the parts leave, so lines never hang
     // in space over an empty stage (filmed: they did on the way to step 3).
     bomLabels: L.wide ? 0 : MathUtils.smoothstep(bump(p, 1, 0.3), 0.3, 0.9),
-    // Steps 2 ↔ 3 are a clean sequence: the outgoing scene fades out in
-    // the first ~40% of the move, the incoming one fades in over the last
-    // half — the same both ways.
-    agent: MathUtils.smoothstep(bump(p, 2, 0.62), 0, 0.8),
+    // Steps 2 ↔ 3: the agents set (monitor, hologram) is simply on or
+    // off, swapped at the bottom of the dim, like everything else there.
+    agent: p <= 1 ? 0 : p >= 2 ? 1 : seg === 1 && raw >= DIM_SWAP ? 1 : 0,
+    dim: seg === 1 ? dipFor(raw) : 0,
     labelRows: {
       top: L.t2.y + bomHalf + gap,
       bottom: L.t2.y - bomHalf - gap,
@@ -523,19 +531,19 @@ export function sampleFrame(
 export function mixFrames(a: Frame, b: Frame, t: number): Frame {
   const k = easeInOut(t);
   const poses = {} as Record<PartId, Pose>;
+  // Into or out of the agents step, a jump dips like 2 ↔ 3: each end
+  // holds still and solid, swapped at the bottom of the fade.
+  const dips = a.agent !== b.agent;
+  const late = t >= DIM_SWAP;
   for (const part of PARTS) {
-    // Jumping into the agents step, internals go at once (a lone camera
-    // module used to float across the screen on its way to nowhere).
-    const intoAgents = b.agent > a.agent && !part.shell;
-    poses[part.id] = mix(
-      a.poses[part.id],
-      b.poses[part.id],
-      k,
-      intoAgents
-        ? // On the linear clock: the eased k barely moves at first.
-          a.poses[part.id].opacity * (1 - MathUtils.smoothstep(t, 0, 0.12))
-        : fadeLate(a.poses[part.id].opacity, b.poses[part.id].opacity, k),
-    );
+    poses[part.id] = dips
+      ? { ...(late ? b : a).poses[part.id] }
+      : mix(
+          a.poses[part.id],
+          b.poses[part.id],
+          k,
+          fadeLate(a.poses[part.id].opacity, b.poses[part.id].opacity, k),
+        );
   }
   // The platform only exists on the agents step: take its pose from that
   // end outright, never blend it from the hero's (a giant disc under the
@@ -545,7 +553,13 @@ export function mixFrames(a: Frame, b: Frame, t: number): Frame {
     ...a,
     poses,
     hero: MathUtils.lerp(a.hero, b.hero, k),
-    agent: MathUtils.lerp(a.agent, b.agent, k),
+    // Jumps into or out of the agents step dip too, like 2 ↔ 3.
+    dim: a.agent !== b.agent ? dipFor(t) : 0,
+    agent: dips
+      ? late
+        ? b.agent
+        : a.agent
+      : MathUtils.lerp(a.agent, b.agent, k),
     platform,
     desk: b.agent >= a.agent ? b.desk : a.desk,
     bomLabels: MathUtils.lerp(a.bomLabels, b.bomLabels, 1 - (1 - k) ** 3),

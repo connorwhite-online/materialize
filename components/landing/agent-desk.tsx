@@ -211,7 +211,7 @@ export function AgentDesk({
     const delta = Math.min(rawDelta, 1 / 20);
     const w = f.agent;
     const c = clock.current;
-    root.visible = w > 0.01 && (stepRef.current === 2 || c.fade > 0);
+    root.visible = w > 0.01;
     // The clock restarts on every arrival at the agents step (2).
     const onStep = stepRef.current === 2;
     if (onStep && !c.onStep) c.t = 0;
@@ -223,12 +223,7 @@ export function AgentDesk({
     c.t += delta;
     const t = c.t;
     const u = f.agentUnit;
-    // Arriving, it fades in with the transition. Leaving, it fades out on
-    // its own clock (~150ms) the moment the step changes, BEFORE the
-    // scene moves.
-    c.fade = onStep
-      ? Math.max(c.fade, THREE.MathUtils.smoothstep(w, 0.1, 0.7))
-      : Math.max(0, c.fade - delta * 7);
+    c.fade = w;
     const appear = c.fade;
 
     const desk = deskRef.current!;

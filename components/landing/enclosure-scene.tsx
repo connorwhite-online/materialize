@@ -330,12 +330,63 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
         </Suspense>
       )}
       <AmbientMotes frameRef={frameRef} />
-      <HoloPlatform frameRef={frameRef} stepRef={stepRef} />
+      <HoloPlatform frameRef={frameRef} />
+      <SceneDim frameRef={frameRef} />
       <AgentDesk frameRef={frameRef} stepRef={stepRef} />
       {PARTS.filter((p) => p.bom).map((spec) => (
         <BomLabel key={spec.id} id={spec.id} frameRef={frameRef} />
       ))}
     </>
+  );
+}
+
+// ─── Scene-wide dim ───────────────────────────────────────────────────
+
+/**
+ * Fades the whole rendered scene as one image (frame.dim): a full-screen
+ * pass drawn last that scales every canvas pixel — colour and alpha,
+ * premultiplied — toward transparent, revealing the stage's backdrop
+ * evenly. Objects stay solid; fading their materials one by one showed
+ * the shells' insides through them.
+ */
+const dimUniforms = { uDim: { value: 0 } };
+function SceneDim({
+  frameRef,
+}: {
+  frameRef: React.MutableRefObject<Frame | null>;
+}) {
+  const ref = useRef<THREE.Mesh>(null);
+  const mat = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        uniforms: dimUniforms,
+        vertexShader: /* glsl */ `
+          void main() { gl_Position = vec4(position.xy * 2.0, 0.0, 1.0); }`,
+        fragmentShader: /* glsl */ `
+          uniform float uDim;
+          void main() { gl_FragColor = vec4(0.0, 0.0, 0.0, uDim); }`,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+        toneMapped: false,
+        // dst × (1 − dim), colour and alpha alike: fades toward clear.
+        blending: THREE.CustomBlending,
+        blendSrc: THREE.ZeroFactor,
+        blendDst: THREE.OneMinusSrcAlphaFactor,
+        blendSrcAlpha: THREE.ZeroFactor,
+        blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
+      }),
+    [],
+  );
+  useFrame(() => {
+    const d = frameRef.current?.dim ?? 0;
+    dimUniforms.uDim.value = d;
+    if (ref.current) ref.current.visible = d > 0.001;
+  });
+  return (
+    <mesh ref={ref} material={mat} renderOrder={10000} frustumCulled={false}>
+      <planeGeometry args={[1, 1]} />
+    </mesh>
   );
 }
 
@@ -473,7 +524,7 @@ const BUILD_DELAY_S = 0.3;
 /** Build states: -2 none; pending while the shells fade out first. */
 const BUILD_PENDING = -3;
 /** ≈ 30% of the step tween: the shells' fade-out (choreography). */
-const SHELL_FADE_S = 0.35;
+const SHELL_FADE_S = 0.52; // just before the swap (0.5 × 1.1s)
 
 function finishBuild(
   st: { look: number; build: number },
