@@ -24,6 +24,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 let mockUserId: string | null = null;
 let fileRow: Record<string, unknown> | null = null;
 let assetRow: Record<string, unknown> | null = null;
+// Several versions of one file (docs/file-versioning.md); wins over
+// assetRow when set.
+let assetRows: Record<string, unknown>[] | null = null;
 
 vi.mock("@clerk/nextjs/server", () => ({
   auth: async () => ({ userId: mockUserId }),
@@ -62,7 +65,9 @@ vi.mock("@/lib/db", () => ({
             return Promise.resolve(fileRow ? [fileRow] : []);
           }
           if (table.__name === "file_assets") {
-            return Promise.resolve(assetRow ? [assetRow] : []);
+            return Promise.resolve(
+              assetRows ?? (assetRow ? [assetRow] : [])
+            );
           }
           // purchases lookups (resolvePurchaseId) — not exercised by the
           // scenarios below (owner/anon/unpaid all short-circuit before
@@ -174,6 +179,7 @@ beforeEach(() => {
   mockUserId = null;
   fileRow = null;
   assetRow = null;
+  assetRows = null;
   mockFetch.mockReset();
   mockOwnsLoadedFile.mockReset();
   mockIsOrgMember.mockReset();
@@ -289,5 +295,59 @@ describe("GET /files/[slug]/download", () => {
     expect(res.status).toBe(404);
     expect(mockOwnsLoadedFile).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  describe("versions", () => {
+    const v1 = () =>
+      asset({ id: "asset-v1", storageKey: "uploads/creator-1/abc/v1.stl" });
+    const v2 = () =>
+      asset({ id: "asset-v2", storageKey: "uploads/creator-1/abc/v2.stl" });
+
+    it("serves the live version, not the first asset row", async () => {
+      mockUserId = "buyer-1";
+      fileRow = { ...file({ price: 0 }), currentAssetId: "asset-v2" };
+      assetRows = [v1(), v2()];
+      mockOwnsLoadedFile.mockResolvedValue(true);
+      upstreamOk();
+
+      const res = await GET(makeRequest(), makeProps("some-slug"));
+
+      expect(res.status).toBe(200);
+      const { generateDownloadUrl } = await import("@/lib/storage");
+      expect(generateDownloadUrl).toHaveBeenLastCalledWith(
+        "uploads/creator-1/abc/v2.stl",
+        expect.anything()
+      );
+    });
+
+    it("an older version is owner-only: a buyer naming it gets 404", async () => {
+      mockUserId = "buyer-1";
+      fileRow = { ...file({ price: 0 }), currentAssetId: "asset-v2" };
+      assetRows = [v1(), v2()];
+      mockOwnsLoadedFile.mockResolvedValue(true);
+
+      const res = await GET(
+        makeRequest("http://localhost/files/some-slug/download?asset=asset-v1"),
+        makeProps("some-slug")
+      );
+
+      expect(res.status).toBe(404);
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+
+    it("the owner can download an older version", async () => {
+      mockUserId = "creator-1";
+      fileRow = { ...file({ price: 0 }), currentAssetId: "asset-v2" };
+      assetRows = [v1(), v2()];
+      mockOwnsLoadedFile.mockResolvedValue(true);
+      upstreamOk();
+
+      const res = await GET(
+        makeRequest("http://localhost/files/some-slug/download?asset=asset-v1"),
+        makeProps("some-slug")
+      );
+
+      expect(res.status).toBe(200);
+    });
   });
 });

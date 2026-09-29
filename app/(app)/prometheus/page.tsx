@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { notFound } from "next/navigation";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { isCurrentAsset } from "@/lib/files/current-version";
 
 import { db } from "@/lib/db";
 import { withDbRetry } from "@/lib/db/retry";
@@ -208,7 +209,10 @@ export default async function TextToCadPage() {
             .innerJoin(projects, eq(projects.id, projectFiles.projectId))
             .innerJoin(files, eq(files.id, projectFiles.fileId))
             .innerJoin(fileAssets, eq(fileAssets.fileId, files.id))
-            .where(inArray(projectFiles.projectId, projectIds))
+            // Each part's live version only (docs/file-versioning.md).
+            .where(
+              and(inArray(projectFiles.projectId, projectIds), isCurrentAsset())
+            )
             .orderBy(projectFiles.position)
         )
       : Promise.resolve([]),

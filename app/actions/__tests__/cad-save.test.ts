@@ -3,11 +3,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 /**
  * saveCadFileToProfile / deleteCadBuild lifecycle semantics (MTR-178,
  * docs/text-to-cad/05 §C/§E): first save publishes + records the thread's
- * savedFileId; re-save re-points the SAVED file at the new generation's
- * asset (one file per design) when safe, and falls back to
- * publish-new/demote-old when order references or assemblies make the
- * re-point unsafe; deleteCadBuild sweeps render/topo R2 objects and the
- * thread row.
+ * savedFileId; re-save adds the new generation's asset to the SAVED file
+ * as its next version (one file per design, docs/file-versioning.md), and
+ * falls back to publish-new/demote-old only for assemblies; deleteCadBuild
+ * sweeps render/topo R2 objects and the thread row.
  */
 
 let allowed = true;
@@ -23,6 +22,16 @@ vi.mock("@/lib/cad/persist", () => ({
   persistGenerationFailure: vi.fn(),
   persistGenerationSuccess: vi.fn(),
 }));
+
+const { attachAssetAsVersion } = vi.hoisted(() => ({
+  attachAssetAsVersion: vi.fn(
+    async (params: { fileId: string; assetId: string }) => {
+      void params;
+      return { versionNumber: 2 };
+    }
+  ),
+}));
+vi.mock("@/lib/files/versions", () => ({ attachAssetAsVersion }));
 
 const { deleteObject } = vi.hoisted(() => ({
   deleteObject: vi.fn((_key: string) => Promise.resolve()),
@@ -164,32 +173,31 @@ describe("saveCadFileToProfile (one file per design, 05 §C)", () => {
     ]);
   });
 
-  it("re-save of an already-saved design re-points the saved file's asset (slug stable)", async () => {
+  it("re-save adds the generation's asset as the saved file's next version (slug stable)", async () => {
     selectQueue = [
       [{ fileId: "file-B", ownerId: "test-user-id" }], // new generation's file
       [{ id: "gen-3", threadId: "thread-1", projectId: null }],
       [{ id: "thread-1", savedFileId: "file-A" }], // saved earlier as file-A
       [{ id: "file-A", source: "studio" }], // prior saved file exists
-      [{ id: "asset-A" }], // saved file's assets
-      [], // printOrders refs
-      [], // printOrderItems refs
-      [], // cartItems refs
-      [], // projectFiles refs
+      [], // generation's file isn't bundled into a project
+      [], // generation's file has no assets left after the move
     ];
 
     const res = await saveCadFileToProfile({ fileAssetId: "asset-B" });
     expect(res).toEqual({ ok: true });
 
-    // Swap, crash-safe order: the NEW asset attaches to the saved file
-    // first (a crash mid-swap leaves two assets — stale but working), then
-    // the old assets park on the draft file — each file ends with one asset.
-    expect(updatesTo("file_assets")).toEqual([
-      expect.objectContaining({ fileId: "file-A" }),
-      expect.objectContaining({ fileId: "file-B" }),
-    ]);
-    // The saved file stays published; NO second file is published.
+    // The version writer owns the asset move + pointer; asset rows are
+    // never swapped around by the action itself.
+    expect(attachAssetAsVersion).toHaveBeenCalledWith({
+      fileId: "file-A",
+      assetId: "asset-B",
+    });
+    expect(updatesTo("file_assets")).toEqual([]);
+    // The saved file stays published; the emptied generation file drops
+    // back to draft so the library never shows an empty entry.
     expect(updatesTo("files")).toEqual([
       expect.objectContaining({ status: "published" }),
+      expect.objectContaining({ status: "draft" }),
     ]);
     // Thread keeps its savedFileId (unchanged) but tracks the new active
     // generation.
@@ -200,21 +208,37 @@ describe("saveCadFileToProfile (one file per design, 05 §C)", () => {
     expect(threadUpdates[0]).not.toHaveProperty("savedFileId");
   });
 
-  it("falls back to publish-new/demote-old when the saved file's asset is order-referenced", async () => {
+  it("leaves the generation's file alone when it still holds other assets", async () => {
     selectQueue = [
       [{ fileId: "file-B", ownerId: "test-user-id" }],
       [{ id: "gen-3", threadId: "thread-1", projectId: null }],
       [{ id: "thread-1", savedFileId: "file-A" }],
       [{ id: "file-A", source: "studio" }],
-      [{ id: "asset-A" }],
-      [{ id: "order-1" }], // printOrders reference → never re-point
+      [], // projectFiles
+      [{ id: "asset-old" }], // file-B still has an asset
+    ];
+
+    const res = await saveCadFileToProfile({ fileAssetId: "asset-B" });
+    expect(res).toEqual({ ok: true });
+    expect(attachAssetAsVersion).toHaveBeenCalledTimes(1);
+    expect(updatesTo("files")).toEqual([
+      expect.objectContaining({ status: "published" }),
+    ]);
+  });
+
+  it("falls back to publish-new/demote-old when the generation's file is in a project", async () => {
+    selectQueue = [
+      [{ fileId: "file-B", ownerId: "test-user-id" }],
+      [{ id: "gen-3", threadId: "thread-1", projectId: null }],
+      [{ id: "thread-1", savedFileId: "file-A" }],
+      [{ id: "file-A", source: "studio" }],
+      [{ fileId: "file-B" }], // bundled into a project
     ];
 
     const res = await saveCadFileToProfile({ fileAssetId: "asset-B" });
     expect(res).toEqual({ ok: true });
 
-    // No asset rows were touched — ordered geometry is immutable.
-    expect(updatesTo("file_assets")).toEqual([]);
+    expect(attachAssetAsVersion).not.toHaveBeenCalled();
     // New file published, old studio file demoted back to draft.
     expect(updatesTo("files")).toEqual([
       expect.objectContaining({ status: "published", visibility: "private" }),
@@ -229,21 +253,17 @@ describe("saveCadFileToProfile (one file per design, 05 §C)", () => {
     ]);
   });
 
-  it("assemblies (generation with a projectId) never re-point part files", async () => {
+  it("assemblies (generation with a projectId) don't version part files yet", async () => {
     selectQueue = [
       [{ fileId: "file-B", ownerId: "test-user-id" }],
       [{ id: "gen-3", threadId: "thread-1", projectId: "project-7" }],
       [{ id: "thread-1", savedFileId: "file-A" }],
       [{ id: "file-A", source: "studio" }],
-      [{ id: "asset-A" }],
-      [], // printOrders
-      [], // printOrderItems
-      [], // cartItems
-      [], // projectFiles
     ];
 
     const res = await saveCadFileToProfile({ fileAssetId: "asset-B" });
     expect(res).toEqual({ ok: true });
+    expect(attachAssetAsVersion).not.toHaveBeenCalled();
     expect(updatesTo("file_assets")).toEqual([]);
     expect(updatesTo("cad_threads")).toEqual([
       expect.objectContaining({ savedFileId: "file-B" }),

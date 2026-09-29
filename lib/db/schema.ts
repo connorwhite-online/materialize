@@ -349,6 +349,27 @@ export const files = pgTable("files", {
    * remix feature does.
    */
   derivedFromFileId: uuid("derived_from_file_id"),
+  /**
+   * File versioning (docs/file-versioning.md): the version this file IS
+   * right now. Every `file_assets` row attached to a file is one immutable
+   * version of it; this pointer picks the live one. It is the ONLY version
+   * the public sees — page, browse, quote flow, library tiles — so readers
+   * resolve "the file's asset" through `lib/files/current-version.ts`,
+   * never by taking the first asset row.
+   *
+   * Every writer that attaches an asset sets it, so a file with assets has
+   * a non-null pointer. Null only on a file with no assets, or after the
+   * pointed-at asset is deleted (FK in the migration, ON DELETE SET NULL,
+   * same circularity note as `coverPhotoId`); readers then fall back to the
+   * oldest asset, which is what they all picked before versions existed.
+   */
+  currentAssetId: uuid("current_asset_id"),
+  /**
+   * Owner opt-in: show this file's version history publicly. Off by
+   * default — most creators iterate privately and want one clean listing,
+   * not a public count of their attempts.
+   */
+  showVersionHistory: boolean("show_version_history").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -584,11 +605,26 @@ export const fileAssets = pgTable("file_assets", {
   bboxXUm: bigint("bbox_x_um", { mode: "number" }),
   bboxYUm: bigint("bbox_y_um", { mode: "number" }),
   bboxZUm: bigint("bbox_z_um", { mode: "number" }),
+  /**
+   * File versioning (docs/file-versioning.md): this asset's position in
+   * its file's history — 1, 2, 3… per file, assigned when the asset is
+   * attached (`lib/files/versions.ts`). Null only while unlinked
+   * (`fileId` null). Assets are immutable once attached: new geometry is
+   * a new row, which is what keeps `printOrders.fileAssetId` meaning "the
+   * geometry that was ordered".
+   */
+  versionNumber: integer("version_number"),
+  // Optional owner note for this version ("thicker walls, M3 inserts").
+  versionNote: text("version_note"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
 }, (table) => [
   index("file_assets_file_id_idx").on(table.fileId),
+  uniqueIndex("file_assets_file_version_uniq").on(
+    table.fileId,
+    table.versionNumber
+  ),
   index("file_assets_content_hash_idx").on(table.contentHash),
   index("file_assets_geometry_hash_idx").on(table.geometryHash),
   index("file_assets_coarse_fingerprint_idx").on(table.coarseFingerprint),

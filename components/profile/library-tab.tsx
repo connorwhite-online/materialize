@@ -13,6 +13,7 @@ import {
 } from "@/lib/db/schema";
 import { eq, and, asc, desc, inArray, sql } from "drizzle-orm";
 import { notUnsavedStudioDraft } from "@/lib/studio-drafts";
+import { currentAssetsByFileId } from "@/lib/files/current-version";
 import { projectHasBundledFile } from "@/lib/projects/listed";
 import { CollectionSection } from "./collection-section";
 import { LibrarySection } from "./library-section";
@@ -137,6 +138,7 @@ export async function LibraryTab({
         coverPhotoId: files.coverPhotoId,
         flaggedReason: files.flaggedReason,
         recommendedMaterialId: files.recommendedMaterialId,
+        currentAssetId: files.currentAssetId,
       })
       .from(files)
       .where(and(...fileConditions))
@@ -155,6 +157,7 @@ export async function LibraryTab({
             creatorUsername: users.username,
             creatorDisplayName: users.displayName,
             recommendedMaterialId: files.recommendedMaterialId,
+            currentAssetId: files.currentAssetId,
           })
           .from(purchases)
           .innerJoin(files, eq(purchases.fileId, files.id))
@@ -178,6 +181,7 @@ export async function LibraryTab({
             creatorUsername: string | null;
             creatorDisplayName: string | null;
             recommendedMaterialId: string | null;
+            currentAssetId: string | null;
           }>
         ),
     db
@@ -418,24 +422,13 @@ export async function LibraryTab({
     photoIdsByFileId.set(row.fileId, arr);
   }
 
-  const primaryAssetByFileId = new Map<
-    string,
-    {
-      id: string;
-      format: string;
-      fileSize: number;
-    }
-  >();
-  for (const asset of assetRows) {
-    if (!asset.fileId) continue;
-    if (!primaryAssetByFileId.has(asset.fileId)) {
-      primaryAssetByFileId.set(asset.fileId, {
-        id: asset.id,
-        format: asset.format,
-        fileSize: asset.fileSize,
-      });
-    }
-  }
+  // Live version per file (docs/file-versioning.md).
+  const primaryAssetByFileId = currentAssetsByFileId(
+    assetRows,
+    new Map(
+      [...ownedFiles, ...purchasedRows].map((f) => [f.id, f.currentAssetId])
+    )
+  );
 
   const purchasedItems: LibraryItem[] = purchasedRows.map((r) => {
     const asset = primaryAssetByFileId.get(r.id);
