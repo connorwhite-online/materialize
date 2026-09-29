@@ -8,6 +8,7 @@ import { HomeDashboard } from "@/components/home/home-dashboard";
 import { HomeFaq } from "@/components/home/home-faq";
 import { EnclosureStage } from "@/components/landing/enclosure-stage-lazy";
 import { LandingProvider } from "@/components/landing/landing-context";
+import { LandingStills } from "@/components/landing/landing-stills";
 import { LandingFooter } from "@/components/landing/landing-footer";
 import {
   LandingHero,
@@ -78,7 +79,11 @@ export const metadata: Metadata = {
 // any more and the 157KB OTF preload came off the landing page with it.
 // The file is still in /public if a future design wants it back.
 
-export default async function HomePage() {
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
   // Authed home is a jump-off dashboard (upload + pending orders +
   // recent files). Anon visitors keep the marketing hero below. A user
   // without a username is mid-onboarding — punt them there so we don't
@@ -154,7 +159,13 @@ export default async function HomePage() {
             with file chips → exploded BOM, no scrolling needed. Scrolling
             only pulls the FAQ + footer sheet up over it, and the
             enclosure reassembles and zooms in behind the glass. */}
-        <EnclosureStage />
+        {/* `?look=stills` swaps the live 3D for the Blender stills while
+            the two directions are being compared (landing-stills.tsx). */}
+        {(await searchParams).look === "stills" ? (
+          <LandingStills />
+        ) : (
+          <EnclosureStage />
+        )}
 
         <LandingHero>
           <main className="flex flex-1 items-end justify-start px-6 pb-28 sm:px-8 nav:px-16 nav:pb-24 lg:px-24 xl:px-32">
