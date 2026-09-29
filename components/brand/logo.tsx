@@ -4,7 +4,6 @@ import {
   MARK_PATH,
   MARK_VIEWBOX,
   WORDMARK_GLYPHS,
-  WORDMARK_MARK_WIDTH,
   WORDMARK_VIEWBOX,
 } from "./logo-paths";
 
@@ -23,12 +22,19 @@ import {
  * magic width alongside it.
  */
 
-/** Intrinsic artwork dimensions, from the viewBoxes. */
-const ART_HEIGHT = 251;
+/** Width / height of a "0 0 w h" viewBox. */
+function aspectOf(viewBox: string): number {
+  const [, , w, h] = viewBox.split(/\s+/).map(Number);
+  return w / h;
+}
 /** Kept in sync with the `--mz-h` default in globals.css. */
 const DEFAULT_LOGO_HEIGHT = 20;
-const MARK_ASPECT = WORDMARK_MARK_WIDTH / ART_HEIGHT; // ~1.65
-const WORDMARK_ASPECT = 3479 / ART_HEIGHT; // ~13.86
+// Derived from the artwork, never hand-typed: the mark and the wordmark
+// are separate exports with different heights (the V2 wordmark is 100
+// units tall, the mark 251), so one shared ART_HEIGHT silently mis-sized
+// whichever one changed.
+const MARK_ASPECT = aspectOf(MARK_VIEWBOX); // standalone "M"
+const WORDMARK_ASPECT = aspectOf(WORDMARK_VIEWBOX);
 
 type BaseProps = Omit<SVGProps<SVGSVGElement>, "height" | "viewBox"> & {
   /** Rendered height in px. Width follows the artwork's aspect ratio. */
@@ -78,6 +84,9 @@ export function Wordmark({ height = 20, title, ...props }: BaseProps) {
       width={height * WORDMARK_ASPECT}
       viewBox={WORDMARK_VIEWBOX}
       fill="currentColor"
+      // The V2 export draws each counter (the holes in the "e"s) in the
+      // same winding as its outline, so it needs evenodd to punch through.
+      fillRule="evenodd"
       xmlns="http://www.w3.org/2000/svg"
       {...a11yProps(title)}
       {...props}
@@ -180,6 +189,7 @@ export function AnimatedWordmark({
         width={fallbackHeight * WORDMARK_ASPECT}
         viewBox={WORDMARK_VIEWBOX}
         fill="currentColor"
+        fillRule="evenodd"
         xmlns="http://www.w3.org/2000/svg"
         aria-hidden="true"
         focusable="false"

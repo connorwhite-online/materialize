@@ -35,12 +35,15 @@ export function FaqCard({
       className={cn(
         "group/faq depth-surface rounded-2xl bg-card ring-1 ring-foreground/10",
         "transition-[box-shadow] duration-150 ease-spring hover:ring-foreground/16",
-        open && "cursor-pointer"
+        open && "cursor-pointer",
       )}
       onClick={(e) => {
         if (!open) return;
         if ((e.target as Element | null)?.closest("button")) return;
-        if (typeof window !== "undefined" && window.getSelection()?.toString()) {
+        if (
+          typeof window !== "undefined" &&
+          window.getSelection()?.toString()
+        ) {
           return;
         }
         setOpen(false);
@@ -50,7 +53,7 @@ export function FaqCard({
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full cursor-pointer items-start gap-3 px-4 py-3.5 text-left"
+        className="flex w-full cursor-pointer items-center gap-3 px-4 py-3.5 text-left"
       >
         <span className="min-w-0 flex-1 text-sm font-medium leading-snug text-foreground/90">
           {question}
@@ -59,7 +62,7 @@ export function FaqCard({
           aria-hidden
           animate={{ rotate: open ? 45 : 0 }}
           transition={snap ?? SPRING}
-          className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"
+          className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"
         >
           <Plus size={12} />
         </motion.span>

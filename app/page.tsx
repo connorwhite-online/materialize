@@ -4,9 +4,16 @@ import { redirect } from "next/navigation";
 import { TopBar } from "@/components/nav/top-bar";
 import { AppShell } from "@/components/nav/app-shell";
 import { MobileNav } from "@/components/nav/mobile-nav";
-import { HeroBackground } from "@/components/home/hero-background";
 import { HomeDashboard } from "@/components/home/home-dashboard";
-import { HomeMarketing } from "@/components/home/home-marketing";
+import { HomeFaq } from "@/components/home/home-faq";
+import { EnclosureStage } from "@/components/landing/enclosure-stage-lazy";
+import { LandingProvider } from "@/components/landing/landing-context";
+import { LandingFooter } from "@/components/landing/landing-footer";
+import {
+  LandingHero,
+  StepCarousel,
+  StepCopy,
+} from "@/components/landing/landing-hero";
 import { CartProvider } from "@/components/print/cart-context";
 import { CartPanel } from "@/components/print/cart-panel";
 import { isSandboxMode } from "@/lib/env";
@@ -105,17 +112,15 @@ export default async function HomePage() {
   // an anon visitor sees on this page takes payment.
   const textToCad = await resolveTextToCadAccess();
 
-  // The page now scrolls: a full-viewport hero followed by
-  // server-rendered marketing sections. The outer container is plain
-  // flow (no h-dvh / overflow-hidden) so the content below the fold
-  // can extend it.
+  // One full screen (hero + stepper) over a fixed enclosure canvas, then
+  // a pull-up sheet with the FAQ and footer.
   return (
     <CartProvider>
       {/* Site-level structured data. Only the home page emits these:
           Organization and WebSite are singletons keyed by `@id`, and
           repeating them on every route gives a crawler N competing
           copies of the same entity to reconcile. FAQPage is tied to the
-          visible <HomeFaq /> rendered inside <HomeMarketing /> below —
+          visible <HomeFaq /> on the FAQ screen below —
           both read from HOME_FAQ so the marked-up answers and the
           on-screen answers cannot drift. */}
       <script
@@ -139,57 +144,45 @@ export default async function HomePage() {
 
       {/* Same chrome as AppShell, minus sandbox: TopBar hides below
           `nav` (no alwaysVisible) and the morphing MobileNav takes over
-          on small screens. `landing` keeps the desktop wordmark
-          animation and swaps the nav wash for a blur over the photo. */}
-      <TopBar landing initialUnreadCount={0} textToCad={textToCad} />
+          on small screens. */}
+      <LandingProvider>
+        <TopBar landing initialUnreadCount={0} textToCad={textToCad} />
 
-      {/* Hero — the photo runs 10% past the dynamic viewport so the
-          browser chrome never exposes its bottom edge. HeroBackground
-          feathers the last 20dvh into --background before marketing
-          content begins. Copy stays h-svh, inside the first visible
-          screen rather than following the extra image runway.
+        {/* The Pneuma Q enclosure is one fixed canvas behind the page
+            (components/landing/choreography.ts). The first screen tells
+            the story on its own: the stepper walks it hero → split shells
+            with file chips → exploded BOM, no scrolling needed. Scrolling
+            only pulls the FAQ + footer sheet up over it, and the
+            enclosure reassembles and zooms in behind the glass. */}
+        <EnclosureStage />
 
-          Background art is absolute + object-cover. The three.js / R3F
-          showcase that used to sit in a visual slot below the copy is
-          unmounted, not deleted — hero-showcase*.tsx et al. stay in
-          the tree. */}
-      <section className="relative isolate flex h-[110dvh] min-h-[110dvh] w-full flex-col overflow-hidden">
-        <HeroBackground />
-        {/* Brand mark lives in TopBar so "Materialize" still appears
-            above the fold. The h1 states what the product does. */}
-        <main className="relative z-10 flex h-svh max-h-svh flex-col">
-          {/* Mobile: copy below center, padded above the floating pill
-              (`fixed bottom-6` plus safe-area + h-14). Top-aligned sat
-              in the light beam and the muted subheading disappeared
-              against it. Desktop (nav+): also below center —
-              left-aligned in the lower third so it clears the
-              sculpture and the light beam. */}
-          <div className="flex flex-1 items-end justify-start px-6 pb-28 sm:px-8 nav:px-16 nav:pb-24 lg:px-24 lg:pb-28 xl:px-32">
-            <div className="flex w-full max-w-xl flex-col items-start gap-4 text-left">
-              {/* Real, selectable <h1> — states what the product does
-                  rather than spelling the brand. Same system stack as
-                  the rest of the app; no webfont on the critical path. */}
-              <h1 className="text-balance text-2xl leading-[1.1] tracking-tight sm:text-4xl">
-                Print anything, share your ideas
-              </h1>
-              <p className="max-w-lg text-pretty text-base leading-relaxed text-foreground/90">
-                Get prints delivered to your door, and pick from 60+
-                materials. Share your hardware projects and files.
-              </p>
+        <LandingHero>
+          <main className="flex flex-1 items-end justify-start px-6 pb-28 sm:px-8 nav:px-16 nav:pb-24 lg:px-24 xl:px-32">
+            <StepCopy />
+          </main>
+          <StepCarousel />
+        </LandingHero>
+
+        {/* FAQ screen: a full-height panel over the closed-up enclosure.
+            The FAQ card sits at the top (padded clear of the nav) and the
+            footer is pushed to the bottom. The visible answers back the
+            FAQPage JSON-LD above — both read HOME_FAQ. */}
+        <div className="relative z-10 flex min-h-svh flex-col gap-6 pt-24 nav:pt-28">
+          <section className="px-3 sm:px-8">
+            <div className="glass-surface mx-auto w-full max-w-4xl rounded-3xl p-5 ring-1 ring-border/70 sm:p-10">
+              <HomeFaq
+                title="Questions & Answers"
+                className="mt-0 border-t-0 pt-0 sm:mt-0 sm:pt-0"
+              />
             </div>
+          </section>
+          <div className="mt-auto">
+            <LandingFooter />
           </div>
-        </main>
-      </section>
-
-      {/* Below the fold: server-rendered features + benefits + internal
-          links so crawlers and agents get real content, not the
-          JS-only hero shell. pb-28 clears the floating mobile nav. */}
-      <div className="pb-28 nav:pb-0">
-        <HomeMarketing />
-      </div>
-
-      <MobileNav initialUnreadCount={0} textToCad={textToCad} />
-      <CartPanel />
+        </div>
+        <MobileNav initialUnreadCount={0} textToCad={textToCad} />
+        <CartPanel />
+      </LandingProvider>
     </CartProvider>
   );
 }

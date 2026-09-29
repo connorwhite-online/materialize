@@ -1,5 +1,6 @@
 import { HOME_FAQ } from "@/lib/seo/home-faq";
 import { FaqCard } from "@/components/home/faq-card";
+import { cn } from "@/lib/utils";
 
 /**
  * Visible FAQ for the anon home page, backing the `FAQPage` JSON-LD
@@ -11,19 +12,24 @@ import { FaqCard } from "@/components/home/faq-card";
  * Copy lives in `lib/seo/home-faq.ts` — do not inline it here, or the
  * markup and the visible text will drift apart.
  */
-export function HomeFaq() {
+export function HomeFaq({
+  className,
+  title = "3D printing on Materialize — common questions",
+}: { className?: string; title?: string } = {}) {
   return (
     <section
       aria-labelledby="faq"
-      className="mt-16 border-t border-border pt-12 sm:mt-24 sm:pt-16"
+      className={cn(
+        "mt-16 border-t border-border pt-12 sm:mt-24 sm:pt-16",
+        className,
+      )}
     >
-      <h2
-        id="faq"
-        className="text-lg font-semibold tracking-tight sm:text-xl"
-      >
-        3D printing on Materialize — common questions
+      <h2 id="faq" className="text-lg font-semibold tracking-tight sm:text-xl">
+        {title}
       </h2>
-      <div className="mt-6 grid gap-3 sm:grid-cols-2">
+      {/* One column. In a two-column grid each row stretches to its
+          tallest card, so opening one answer ballooned its neighbour. */}
+      <div className="mt-6 grid gap-3">
         {HOME_FAQ.map((item) => (
           <FaqCard
             key={item.question}

@@ -14,7 +14,7 @@ import { safeJsonLdScript } from "@/lib/seo/json-ld";
 export const metadata: Metadata = {
   title: "3D Printing Materials & Finishes",
   description:
-    "Browse 60+ 3D printing materials — PLA, PETG, ABS, nylon, resin, stainless steel, aluminium and titanium — with finishes, colors and live per-material pricing from vetted manufacturers.",
+    "Browse 200+ 3D printing materials — PLA, PETG, ABS, nylon, resin, stainless steel, aluminium and titanium — with finishes, colors and live per-material pricing from vetted manufacturers.",
   alternates: { canonical: "/materials" },
 };
 

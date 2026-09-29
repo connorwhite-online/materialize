@@ -53,7 +53,7 @@ const FEATURES = [
 const BENEFITS = [
   {
     icon: Materials,
-    title: "60+ materials & finishes",
+    title: "200+ materials & finishes",
     body: "From everyday PLA to titanium and multicolor resin, with finish and color options surfaced at quote time.",
   },
   {

@@ -41,9 +41,10 @@ const VIEWPORT_GUTTER = 32;
 /** Floor for a titled collapsed pill so short titles ("Print") aren't stubby. */
 const MIN_COLLAPSED_WIDTH = 172;
 /**
- * Height the brand lockup wipes in at on the pill. Same pair as the
- * desktop nav (NAV_WORDMARK_HEIGHT in top-bar.tsx): 10px word, and
- * `--mz-mark-scale` lands the collapsed mark at 16px.
+ * Height the brand lockup wipes in at on the pill: 10px word, and the
+ * global `--mz-mark-scale` (1.6, globals.css) lands the collapsed mark at
+ * 16px. The desktop nav wipes in bigger (14px) and sets its own scale
+ * inline so its M lands at the same 16px.
  */
 const PILL_WORDMARK_HEIGHT = 10;
 
@@ -495,7 +496,7 @@ export function MobileNav({
       <div
         aria-hidden={keyboardOpen || undefined}
         className={cn(
-          "pointer-events-none fixed inset-x-0 z-50 flex justify-center px-4 nav:hidden bottom-[calc(1.5rem+env(safe-area-inset-bottom,0px))]",
+          "pointer-events-none fixed inset-x-0 z-50 flex justify-center px-4 nav:hidden bottom-[calc(1rem+env(safe-area-inset-bottom,0px))]",
           "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
           keyboardOpen && "translate-y-6 opacity-0"
         )}

@@ -402,6 +402,14 @@
     text-rendering: optimizeLegibility;
     overscroll-behavior-x: none;
   }
+  /* The anon landing paints its own flat backdrop (EnclosureStage), so
+     drop body's gradient there. iOS clips fixed elements to the visible
+     area, so under Safari's translucent toolbar it's body that shows — and
+     the gradient bottoms out near-black, a hard band against the flat
+     toolbar fill. */
+  body:has(.mz-landing-stage) {
+    background-image: none;
+  }
   html {
     /* bg-background on html (in addition to body) so iOS Safari
        fills the safe-area / over-scroll zones with the active
@@ -589,13 +597,16 @@
      any Tailwind utility (layered styles always lose to unlayered ones) and
      silently defeat the responsive override.
      Keep the fallback in sync with DEFAULT_LOGO_HEIGHT in components/brand/logo.tsx.
-     Both widths are the artwork's aspect ratios: 415/251 and 3479/251. */
-  --mz-w-mark: calc(var(--mz-h, 20px) * 1.65339);
-  --mz-w-full: calc(var(--mz-h, 20px) * 13.86056);
+     Both widths are the V2 wordmark's own ratios (logo-paths.ts): the "m"
+     crop, WORDMARK_MARK_WIDTH/100, and the whole word, 1122.335/100.
+     A test pins them to the path file. */
+  --mz-w-mark: calc(var(--mz-h, 20px) * 1.96575);
+  --mz-w-full: calc(var(--mz-h, 20px) * 11.22335);
   /* Collapsed mark vs the word it replaced. Paired with the lockup
-     height at the call site: the nav wipes the word in at 10px and this
-     lands the mark at 16px. Tune here, but check NAV_WORDMARK_HEIGHT in
-     components/nav/top-bar.tsx — the pair is the design, not either
+     height at the call site: the mobile pill wipes the word in at 10px
+     and this lands the mark at 16px. The desktop nav wipes in at 14px and
+     overrides this inline (NAV_MARK_SCALE in components/nav/top-bar.tsx)
+     so its mark also lands at 16px — the pair is the design, not either
      number alone. */
   --mz-mark-scale: 1.6;
 
@@ -667,10 +678,10 @@
   --mz-stagger-in: 14ms;
   --mz-stagger-out: 22ms;
   --mz-crop-ms: 260ms;
-  /* Blur is in SVG user units (the artwork is 251 tall), so it scales with
+  /* Blur is in SVG user units (the V2 artwork is 100 tall), so it scales with
      the logo — a 22px nav lockup and a 64px hero lockup blur by the same
      visual proportion. */
-  --mz-blur: 22px;
+  --mz-blur: 8.8px; /* was 22 on the 251-tall V1 art: same look */
   --mz-lift: 14%;
 }
 
@@ -997,3 +1008,40 @@
   }
 }
 
+
+/* Anon landing stepper: the active dot's timer. A full-width rounded
+   bar sliding in under the track's clip — NOT scaleX, which squashes the
+   rounded caps flat. Linear on purpose — it is a clock, not a gesture. The element's own animationend advances the
+   step (components/landing/landing-hero.tsx), and play state pauses it
+   in place. Reduced motion never runs it (the stepper doesn't autoplay). */
+@keyframes mz-step-fill {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+.mz-step-fill {
+  animation-name: mz-step-fill;
+  animation-timing-function: linear;
+  animation-fill-mode: both; /* hold at empty through the start delay */
+}
+/* The step that just finished: its full bar fades while the dot shrinks. */
+@keyframes mz-step-done {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.mz-step-done {
+  animation: mz-step-done 380ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mz-step-done {
+    animation: none;
+    opacity: 0;
+  }
+}
