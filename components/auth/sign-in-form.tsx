@@ -8,11 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  InputOTP,
-  InputOTPGroup,
-  InputOTPSlot,
-} from "@/components/ui/input-otp";
-import {
   MAX_USERNAME_LENGTH,
   MIN_USERNAME_LENGTH,
 } from "@/lib/handles/limits";
@@ -237,29 +232,22 @@ export function SignInForm({
         <p className="text-sm text-muted-foreground text-center">
           Enter the code we sent to {identifier}
         </p>
-        {/* Explicit row height: the slots must always reserve their own
-            space, even if input-otp's container is measured as zero-height
-            (iOS Safari), otherwise they overlap the copy and link. */}
-        <div className="flex h-12 shrink-0 justify-center">
-          <InputOTP
-            maxLength={6}
-            value={code}
-            onChange={(value) => {
-              setCode(value);
-              if (value.length === 6) handleVerifyCode(value);
-            }}
-            autoFocus
-          >
-            <InputOTPGroup>
-              <InputOTPSlot index={0} />
-              <InputOTPSlot index={1} />
-              <InputOTPSlot index={2} />
-              <InputOTPSlot index={3} />
-              <InputOTPSlot index={4} />
-              <InputOTPSlot index={5} />
-            </InputOTPGroup>
-          </InputOTP>
-        </div>
+        <Input
+          value={code}
+          onChange={(e) => {
+            const value = e.target.value.replace(/\D/g, "").slice(0, 6);
+            setCode(value);
+            if (value.length === 6) handleVerifyCode(value);
+          }}
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          pattern="[0-9]*"
+          maxLength={6}
+          aria-label="Verification code"
+          placeholder="000000"
+          className="h-12 text-center font-mono text-lg tracking-[0.5em]"
+          autoFocus
+        />
 
         {error && (
           <p className="text-xs text-destructive text-center">{error}</p>
