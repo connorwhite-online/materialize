@@ -233,11 +233,14 @@ export function SignInForm({
 
   if (step === "code") {
     return (
-      <div className="space-y-4">
+      <div className="space-y-4 pb-4">
         <p className="text-sm text-muted-foreground text-center">
           Enter the code we sent to {identifier}
         </p>
-        <div className="flex justify-center">
+        {/* Explicit row height: the slots must always reserve their own
+            space, even if input-otp's container is measured as zero-height
+            (iOS Safari), otherwise they overlap the copy and link. */}
+        <div className="flex h-12 shrink-0 justify-center">
           <InputOTP
             maxLength={6}
             value={code}
