@@ -3,6 +3,8 @@ import "server-only";
 import { db } from "@/lib/db";
 import { notifications } from "@/lib/db/schema";
 import { logError } from "@/lib/logger";
+import { pushForNotification } from "@/lib/push/message";
+import { sendPushToUser } from "@/lib/push/send";
 import { sendNotificationEmail } from "./email";
 import { shouldSendEmail } from "./email-prefs";
 import { eq } from "drizzle-orm";
@@ -22,7 +24,8 @@ export type { PurchaseSnippet } from "./types";
 
 /**
  * Insert a notification + fire the corresponding email if the
- * recipient has email notifications enabled. Both writes wrapped so a
+ * recipient has email notifications enabled, and a web push to any
+ * device they turned push on for. Both writes wrapped so a
  * transient Neon / Resend hiccup never breaks the parent action — a
  * comment posting succeeds even if the notification side-effects fail
  * (notifications are not the contract).
@@ -71,6 +74,11 @@ async function insert(
   } catch (error) {
     logError(`notify(${type}) email-pref-lookup`, error);
   }
+
+  // Push side-effect — goes to every device the recipient turned push
+  // on for. Subscribing is the opt-in, so there's no pref to check.
+  // Not awaited for the same reason as email; sendPushToUser never throws.
+  void sendPushToUser(recipientId, pushForNotification(type, payload));
 }
 
 /**
@@ -118,6 +126,14 @@ export async function notifyCadBuildFinished(opts: {
     });
     if (opts.emailEligible && (await shouldSendEmail(opts.userId, "cad_build_finished"))) {
       void sendNotificationEmail(opts.userId, "cad_build_finished", payload);
+    }
+    // Same duration gate as email: a quick build at the desk doesn't
+    // need to buzz a phone.
+    if (opts.emailEligible) {
+      void sendPushToUser(
+        opts.userId,
+        pushForNotification("cad_build_finished", payload)
+      );
     }
   } catch (error) {
     logError("notify(cad_build_finished)", error);

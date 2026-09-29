@@ -1135,6 +1135,36 @@ export const notifications = pgTable(
   ]
 );
 
+// Web Push subscriptions — one row per browser/device that opted in.
+//
+// The endpoint is the push service URL the browser handed us (Apple's,
+// Google's, Mozilla's); p256dh + auth are the keys we encrypt each
+// payload with. Unique on endpoint so re-subscribing the same device
+// upserts instead of duplicating, and a device that changes hands
+// (sign out, sign in as someone else) moves to the new user. Rows are
+// deleted when the push service answers 404/410 — the subscription is
+// gone and will never come back. See lib/push/.
+export const pushSubscriptions = pgTable(
+  "push_subscriptions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    endpoint: text("endpoint").notNull(),
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    userAgent: text("user_agent"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("push_subscriptions_endpoint_uniq").on(table.endpoint),
+    index("push_subscriptions_user_idx").on(table.userId),
+  ]
+);
+
 // Comments — public discussion on a file or project listing.
 //
 // Two parallel tables (one per target type) instead of one polymorphic

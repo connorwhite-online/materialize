@@ -4,25 +4,18 @@ import { clerkClient } from "@clerk/nextjs/server";
 import { sendEmail } from "@/lib/email/client";
 import { NotificationEmail } from "@/lib/email/templates/notification";
 import { logError } from "@/lib/logger";
+import {
+  notificationHeadline,
+  notificationSnippet,
+  type NotificationContentPayload as AnyEmailPayload,
+} from "./copy";
 import type {
   BuildOnFilePayload,
-  CollaboratorAddedToProjectPayload,
   CommentOnListingPayload,
   NotificationType,
   PrintOnFilePayload,
-  PurchaseOnListingPayload,
-  RefundOnListingPayload,
   ReplyToCommentPayload,
 } from "./types";
-
-type AnyEmailPayload =
-  | CommentOnListingPayload
-  | ReplyToCommentPayload
-  | BuildOnFilePayload
-  | PrintOnFilePayload
-  | PurchaseOnListingPayload
-  | RefundOnListingPayload
-  | CollaboratorAddedToProjectPayload;
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
@@ -51,27 +44,11 @@ export async function sendNotificationEmail(
       return;
     }
 
-    const headline = buildHeadline(type, payload);
+    const headline = notificationHeadline(type, payload);
     const subject = `Materialize — ${headline}`;
     const href = buildHref(type, payload);
     const settingsUrl = `${APP_URL}/dashboard/settings`;
-    // Comment-style payloads carry a `snippet`; print payloads carry a
-    // `materialLabel` which we surface in the email body via that
-    // same slot so the user gets one extra detail above the CTA.
-    let snippet: string | null = null;
-    if (type === "purchase_on_listing" || type === "refund_on_listing") {
-      const p = payload as
-        | PurchaseOnListingPayload
-        | RefundOnListingPayload;
-      // Format the amount as the email's "snippet" slot. Refunds
-      // get a leading minus to read as a negative in the inbox.
-      const sign = type === "refund_on_listing" ? "-" : "";
-      snippet = `${sign}$${(p.snippet.amountCents / 100).toFixed(2)} ${p.snippet.currency}`;
-    } else if ("snippet" in payload) {
-      snippet = (payload as { snippet: string | null }).snippet ?? null;
-    } else if ("materialLabel" in payload) {
-      snippet = (payload as { materialLabel: string | null }).materialLabel;
-    }
+    const snippet = notificationSnippet(type, payload);
 
     await sendEmail({
       to: email,
@@ -81,39 +58,6 @@ export async function sendNotificationEmail(
     });
   } catch (error) {
     logError(`sendNotificationEmail(${type})`, error);
-  }
-}
-
-function buildHeadline(
-  type: NotificationType,
-  payload: AnyEmailPayload
-): string {
-  // Self-notification, no external actor to name (walk-away UX).
-  if (type === "cad_build_finished") {
-    const ok = (payload as { ok?: boolean }).ok;
-    return ok
-      ? `Your build "${payload.listing.name}" is ready`
-      : `Your build "${payload.listing.name}" didn't finish`;
-  }
-  const actor =
-    payload.actor.displayName || payload.actor.username || "Someone";
-  const listing = payload.listing.name;
-  const targetWord = payload.listing.kind === "file" ? "file" : "project";
-  switch (type) {
-    case "comment_on_listing":
-      return `${actor} commented on your ${targetWord} ${listing}`;
-    case "reply_to_comment":
-      return `${actor} replied to your comment on ${listing}`;
-    case "build_on_file":
-      return `${actor} added a photo to your ${targetWord} ${listing}`;
-    case "print_on_file":
-      return `${actor} just printed your ${targetWord} ${listing}`;
-    case "purchase_on_listing":
-      return `${actor} bought your ${targetWord} ${listing}`;
-    case "refund_on_listing":
-      return `Refund issued on your ${targetWord} ${listing}`;
-    case "collaborator_added_to_project":
-      return `${actor} added you as a collaborator on ${listing}`;
   }
 }
 

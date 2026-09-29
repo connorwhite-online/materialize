@@ -106,6 +106,22 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      {
+        // The push service worker (lib/push). Never cached, so a fix to
+        // it reaches phones on their next visit instead of whenever the
+        // HTTP cache lets go.
+        source: "/sw.js",
+        headers: [
+          {
+            key: "Content-Type",
+            value: "application/javascript; charset=utf-8",
+          },
+          {
+            key: "Cache-Control",
+            value: "no-cache, no-store, must-revalidate",
+          },
+        ],
+      },
     ];
   },
 };
