@@ -185,7 +185,7 @@ function useParts(ao: Record<ShellId, THREE.Texture>) {
 const ORBIT_MAX = 0.4;
 
 /** Seconds to travel one step. */
-const STEP_TWEEN_S = 0.9;
+const STEP_TWEEN_S = 1.1;
 
 // Per-frame mutation of three.js objects lives in these plain helpers:
 // scene-graph objects are mutable by design, and the React compiler's
@@ -295,6 +295,16 @@ export function EnclosureScene({ reducedMotion }: { reducedMotion: boolean }) {
       g.scale.setScalar(pose.scale);
       g.visible = pose.opacity > 0.01;
       fadeMaterials(parts[spec.id].materials, pose.opacity);
+      // The shells render through their burn layers, whose materials
+      // aren't in parts[].materials: without this they ignored every fade
+      // and vanished in one frame (filmed on an iPhone going 2 → 3).
+      if (spec.shell) {
+        const l = layers[spec.id as ShellId];
+        for (const m of [l.matA, l.matB]) {
+          m.opacity = pose.opacity;
+          m.depthWrite = pose.opacity > 0.98;
+        }
+      }
     }
 
     runBurnSweep(st, layers, stepRef.current, delta, reducedMotion);

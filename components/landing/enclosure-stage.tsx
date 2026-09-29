@@ -20,6 +20,10 @@ import { EnclosureScene } from "./enclosure-scene";
  * stage that was brighter (bottom glow) or darker (vignette) there showed
  * as a hard line at both bands.
  */
+const COARSE =
+  typeof window !== "undefined" &&
+  window.matchMedia?.("(pointer: coarse)").matches;
+
 const EDGE_FADE = {
   maskImage:
     "linear-gradient(to bottom, transparent, black 10%, black 90%, transparent)",
@@ -61,7 +65,10 @@ export function EnclosureStage() {
           }}
           // 1.5, not 2: this is a background. At 2 a retina laptop renders
           // ~3M pixels per frame for it; 1.5 is ~44% fewer and reads the same.
-          dpr={[1, 1.5]}
+          // Phones (coarse pointer) cap at 1.25: their screens are dense
+          // enough that 1.5 is mostly spent on pixels you can't see, and the
+          // burn effects were dropping frames there.
+          dpr={[1, COARSE ? 1.25 : 1.5]}
           gl={{
             antialias: true,
             alpha: true,

@@ -97,7 +97,9 @@ const NOISE_GLSL = /* glsl */ `
   }
   float mzFbm(vec3 p) {
     float a = 0.5, s = 0.0;
-    for (int i = 0; i < 4; i++) { s += a * mzNoise(p); p *= 2.03; a *= 0.5; }
+    // 3 octaves: the 4th cost a noise lookup per pixel on every burning
+    // shell for detail nobody sees, and dropped frames on phones.
+    for (int i = 0; i < 3; i++) { s += a * mzNoise(p); p *= 2.03; a *= 0.5; }
     return s;
   }
   // World-space height of the burn edge under this point.
@@ -204,6 +206,11 @@ function shellMaterial(
   side: 1 | -1,
 ): THREE.MeshPhysicalMaterial {
   const m = new THREE.MeshPhysicalMaterial({
+    // Transparent from the start, like the internals: the shells fade on
+    // the move into step 3, and flipping `transparent` at runtime needs a
+    // shader recompile (three compiles OPAQUE, forcing alpha to 1) — so a
+    // runtime flip either did nothing or hitched.
+    transparent: true,
     clearcoatRoughness: 0.12,
     aoMap: ao,
     aoMapIntensity: 1.3,

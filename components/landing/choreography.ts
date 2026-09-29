@@ -495,7 +495,7 @@ export function sampleFrame(
     // Steps 2 ↔ 3 are a clean sequence: the outgoing scene fades out in
     // the first ~40% of the move, the incoming one fades in over the last
     // half — the same both ways.
-    agent: MathUtils.smoothstep(bump(p, 2, 0.5), 0, 0.8),
+    agent: MathUtils.smoothstep(bump(p, 2, 0.62), 0, 0.8),
     labelRows: {
       top: L.t2.y + bomHalf + gap,
       bottom: L.t2.y - bomHalf - gap,
