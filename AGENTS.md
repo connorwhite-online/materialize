@@ -241,6 +241,16 @@ Never call the DB cart a "CraftCloud cart." They are distinct: the DB cart is a 
 
 `notifications.type` is free-form text (`lib/db/schema.ts` § `notifications.type`, line 1079) — not a Postgres enum, so new types don't need a migration. Known types are in `lib/notifications/types.ts`. Master email switch: `users.emailNotificationsEnabled`; per-type opt-out: `users.emailNotificationPrefs` (jsonb, `:221-227`). `purchase_on_listing` and `refund_on_listing` are not opt-out-able. Reader: `lib/notifications/email-prefs.ts:31`.
 
+## Web Push notifications
+
+`lib/push/` + `public/sw.js`. A third channel beside the inbox and email: every `insert()` in `lib/notifications/notify.ts` also pushes (title/body from `lib/notifications/copy.ts`, the same words the email uses; link from the inbox's `buildHref`), `notifyCadBuildFinished` pushes under the same duration gate as its email, and the fulfillment sweep pushes the **buyer** when an order moves to in_production / shipped / received / blocked / cancelled (`pushForOrderStatus`). That order push is push-only: no inbox row, no email.
+
+- **Off until keys exist.** `isPushConfigured()` needs `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT`; without them sends no-op and the settings toggle renders nothing. Rotating the key pair orphans every subscription.
+- **iOS only offers push to a Home Screen install** (16.4+). In a Safari tab `PushManager` doesn't exist, so the toggle shows install instructions instead (`pushSupport()` in `lib/push/support.ts`). The permission prompt must come from a tap, which is why the service worker registers on mount and the tap handler calls `Notification.requestPermission()` first.
+- **Subscribing is the opt-in**; there are no per-type push prefs. The toggle is per device and lives in the notification settings sheet (`push-notifications-setting.tsx`).
+- **Endpoints are client-supplied URLs we POST to**, so `isAllowedPushEndpoint()` only accepts the real push services. Subscriptions a push service reports 404/410 are deleted on send.
+- **The service worker does push only** — no fetch handler, no offline cache. It always shows a notification (Safari revokes push for sites that don't) and never navigates off-origin.
+
 ## Implicit contracts — CON-165
 
 **Overloaded sentinel columns** — `printOrders.stripeSessionId` holds one of: a Stripe Checkout session id, a PaymentIntent id (auto-approved path, `lib/mcp/internal/orders.ts:353`), or a `session_claim:<nanoid>` sentinel (`app/actions/agent-orders.ts:20,88`). `printOrders.craftCloudOrderId` holds one of: a real CraftCloud order id, or a `placing:<nanoid>` sentinel (`app/api/webhooks/stripe/handle-print-order-payment.ts:56-60`). Never call `stripe.checkout.sessions.retrieve(stripeSessionId)` or treat `craftCloudOrderId` as a real id without checking prefixes first.

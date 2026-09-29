@@ -5,6 +5,7 @@ import { Gear } from "@/components/icons/gear";
 import { NativeSheet } from "@/components/ui/native-sheet";
 import { EmailNotificationsSetting } from "@/app/(app)/dashboard/settings/email-notifications-setting";
 import { getMyEmailNotificationPrefs } from "@/app/actions/profile";
+import { PushNotificationsSetting } from "@/components/notifications/push-notifications-setting";
 import type { EmailPrefMap } from "@/lib/notifications/email-prefs";
 import { cn } from "@/lib/utils";
 
@@ -24,8 +25,8 @@ interface NotificationSettingsGearProps {
 
 /**
  * Chunky gear opposite the Notifications headline. Opens a sheet with
- * email notification prefs — shared by `/notifications` and the
- * desktop bell popover.
+ * this device's push toggle and the email notification prefs — shared
+ * by `/notifications` and the desktop bell popover.
  */
 export function NotificationSettingsGear({
   initialEnabled,
@@ -82,6 +83,8 @@ export function NotificationSettingsGear({
           <h2 className="text-lg font-semibold tracking-tight">
             Notification settings
           </h2>
+
+          <PushNotificationsSetting />
 
           {error && (
             <p className="text-sm text-destructive">{error}</p>

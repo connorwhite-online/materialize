@@ -5,6 +5,7 @@ let updateReturns: Array<{ id: string }> = [{ id: "order-1" }];
 const mockUpdateSet = vi.fn();
 const getOrderStatusMock = vi.fn();
 const logErrorMock = vi.fn();
+const sendPushMock = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -34,6 +35,10 @@ vi.mock("@/lib/craftcloud/client", () => ({
 
 vi.mock("@/lib/logger", () => ({
   logError: (...args: unknown[]) => logErrorMock(...args),
+}));
+
+vi.mock("@/lib/push/send", () => ({
+  sendPushToUser: (...args: unknown[]) => sendPushMock(...args),
 }));
 
 import {
@@ -98,11 +103,12 @@ describe("syncFulfillmentStatuses", () => {
     mockUpdateSet.mockReset();
     getOrderStatusMock.mockReset();
     logErrorMock.mockReset();
+    sendPushMock.mockReset();
   });
 
   it("writes the advanced status", async () => {
     selectRows = [
-      { id: "order-1", status: "ordered", vendor: "a", craftCloudOrderId: "cc-1" },
+      { id: "order-1", userId: "buyer-1", status: "ordered", vendor: "a", craftCloudOrderId: "cc-1" },
     ];
     getOrderStatusMock.mockResolvedValue({
       orderId: "cc-1",
@@ -114,6 +120,26 @@ describe("syncFulfillmentStatuses", () => {
     expect(getOrderStatusMock).toHaveBeenCalledWith("cc-1");
     expect(mockUpdateSet).toHaveBeenCalledWith({ status: "shipped" });
     expect(result).toEqual({ scanned: 1, updated: 1, errors: 0 });
+  });
+
+  it("pushes the buyer when their order moves", async () => {
+    selectRows = [
+      { id: "order-1", userId: "buyer-1", status: "ordered", vendor: "a", craftCloudOrderId: "cc-1" },
+    ];
+    getOrderStatusMock.mockResolvedValue({
+      orderId: "cc-1",
+      vendorStatuses: [{ vendorId: "a", status: "shipped" }],
+    });
+
+    await syncFulfillmentStatuses();
+
+    expect(sendPushMock).toHaveBeenCalledWith(
+      "buyer-1",
+      expect.objectContaining({
+        title: "Your print has shipped",
+        url: "/dashboard/orders/order-1",
+      })
+    );
   });
 
   it("skips the write when nothing changed", async () => {
@@ -143,6 +169,8 @@ describe("syncFulfillmentStatuses", () => {
 
     const result = await syncFulfillmentStatuses();
     expect(result.updated).toBe(0);
+    // The other writer owns the transition, and its notification.
+    expect(sendPushMock).not.toHaveBeenCalled();
   });
 
   it("flags a vendor cancellation for a refund check", async () => {

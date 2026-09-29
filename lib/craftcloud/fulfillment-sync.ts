@@ -4,6 +4,8 @@ import { db } from "@/lib/db";
 import { printOrders } from "@/lib/db/schema";
 import { getOrderStatus } from "@/lib/craftcloud/client";
 import { logError } from "@/lib/logger";
+import { pushForOrderStatus } from "@/lib/push/message";
+import { sendPushToUser } from "@/lib/push/send";
 import type { OrderStatus, OrderStatusResponse } from "./types";
 
 /**
@@ -81,6 +83,7 @@ export async function syncFulfillmentStatuses(): Promise<FulfillmentSyncResult> 
   const rows = await db
     .select({
       id: printOrders.id,
+      userId: printOrders.userId,
       status: printOrders.status,
       vendor: printOrders.vendor,
       craftCloudOrderId: printOrders.craftCloudOrderId,
@@ -121,6 +124,12 @@ export async function syncFulfillmentStatuses(): Promise<FulfillmentSyncResult> 
         .returning({ id: printOrders.id });
       if (updated.length === 0) return;
       result.updated++;
+
+      // The buyer's only signal that their print moved: nothing else
+      // tells them it's in production or on its way. Push-only for now
+      // (no inbox row or email). Never throws.
+      const push = pushForOrderStatus(row.id, next);
+      if (push) await sendPushToUser(row.userId, push);
 
       if (next === "cancelled") {
         // The customer has already paid for this order (us under
