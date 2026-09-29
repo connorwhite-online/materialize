@@ -1,9 +1,13 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { useReducedMotion } from "motion/react";
-import { Environment, Lightformer } from "@react-three/drei";
+import {
+  Environment,
+  Lightformer,
+  PerformanceMonitor,
+} from "@react-three/drei";
 import * as THREE from "three";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { EnclosureScene } from "./enclosure-scene";
@@ -20,9 +24,22 @@ import { EnclosureScene } from "./enclosure-scene";
  * stage that was brighter (bottom glow) or darker (vignette) there showed
  * as a hard line at both bands.
  */
-const COARSE =
-  typeof window !== "undefined" &&
-  window.matchMedia?.("(pointer: coarse)").matches;
+/**
+ * Render resolution adapts to the device instead of a fixed cap. It
+ * starts at the screen's own density (up to 2×: past that an iPhone's 3×
+ * is ~2.25× the pixels for detail nobody can see at arm's length) and
+ * PerformanceMonitor steps it down in 0.25 notches only while the frame
+ * rate can't hold, and back up when it recovers. A flat 1.25× on phones
+ * was the real cause of the soft, low-res look: on a 3× screen every
+ * edge and highlight was upscaled ~2.4×. (The meshes were not: a
+ * normal-map bake from the full CAD came back essentially flat — the
+ * shipped 25% shells already hold all the detail the source has.)
+ */
+const DPR_MIN = 1;
+function maxDpr(): number {
+  if (typeof window === "undefined") return 1.5;
+  return Math.min(window.devicePixelRatio || 1, 2);
+}
 
 const EDGE_FADE = {
   maskImage:
@@ -32,6 +49,8 @@ const EDGE_FADE = {
 } as const;
 
 export function EnclosureStage() {
+  const [top] = useState(maxDpr);
+  const [dpr, setDpr] = useState(top);
   const reducedMotion = useReducedMotion() ?? false;
   return (
     // Opaque, flat --background base: it covers <body>'s fixed bottom-up
@@ -63,12 +82,7 @@ export function EnclosureStage() {
           onCreated={({ gl }) => {
             gl.localClippingEnabled = true;
           }}
-          // 1.5, not 2: this is a background. At 2 a retina laptop renders
-          // ~3M pixels per frame for it; 1.5 is ~44% fewer and reads the same.
-          // Phones (coarse pointer) cap at 1.25: their screens are dense
-          // enough that 1.5 is mostly spent on pixels you can't see, and the
-          // burn effects were dropping frames there.
-          dpr={[1, COARSE ? 1.25 : 1.5]}
+          dpr={dpr}
           gl={{
             antialias: true,
             alpha: true,
@@ -77,6 +91,19 @@ export function EnclosureStage() {
             toneMappingExposure: 0.92,
           }}
         >
+          <PerformanceMonitor
+            // Judged over ~1s windows; a couple of flips and it settles.
+            flipflops={3}
+            // Start at full quality (drei defaults to 0.5, which knocked
+            // every device straight down to the middle).
+            factor={1}
+            onChange={({ factor }) => {
+              const next =
+                Math.round((DPR_MIN + (top - DPR_MIN) * factor) * 4) / 4;
+              setDpr(next);
+            }}
+            onFallback={() => setDpr(DPR_MIN)}
+          />
           <WarmStudio />
           <Suspense fallback={null}>
             <EnclosureScene reducedMotion={reducedMotion} />
@@ -115,7 +142,9 @@ function WarmStudio() {
         intensity={0.35}
         color="#c4d3ff"
       />
-      <Environment resolution={256}>
+      {/* Rendered once, at load: 512 costs nothing per frame and keeps
+          reflections on the polished finishes crisp (256 smeared them). */}
+      <Environment resolution={512}>
         <Lightformer
           form="rect"
           intensity={2.6}
