@@ -41,16 +41,6 @@ export const LANDING_MATERIALS: readonly LandingMaterial[] = [
     roughness: 0.34,
   },
   {
-    // Satin, not mirror: a near-mirror only reflects the dark studio and
-    // reads black.
-    id: "steel",
-    name: "Steel",
-    color: "#a4a7ad",
-    metalness: 1,
-    roughness: 0.3,
-    clearcoat: 0.4,
-  },
-  {
     id: "resin",
     name: "Resin",
     color: "#a9d8e6",
