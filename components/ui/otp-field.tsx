@@ -35,8 +35,40 @@ export function OtpField({
   disabled,
   className,
 }: OtpFieldProps) {
+  const inputRef = React.useRef<HTMLInputElement>(null);
   const [focused, setFocused] = React.useState(false);
-  const activeIndex = Math.min(value.length, length - 1);
+  const [selection, setSelection] = React.useState({ start: 0, end: 0 });
+
+  // Mirror the input's selection into state so the boxes can show where the
+  // caret is, and keep a collapsed caret sitting ON a filled box as a
+  // one-character selection so typing overwrites that digit in place (the
+  // behaviour people expect from a code field) instead of inserting.
+  const syncSelection = React.useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    let start = el.selectionStart ?? el.value.length;
+    let end = el.selectionEnd ?? start;
+    if (start === end && start < el.value.length) {
+      end = start + 1;
+      el.setSelectionRange(start, end);
+    }
+    start = Math.min(start, length - 1);
+    setSelection({ start, end: Math.max(end, start) });
+  }, [length]);
+
+  // Put the caret where a box was tapped. The input covers the whole row but
+  // its text is invisible, so the browser's own caret placement is meaningless;
+  // derive the index from the tap's x position instead.
+  const placeCaretFromPointer = (e: React.MouseEvent<HTMLInputElement>) => {
+    const el = e.currentTarget;
+    const rect = el.getBoundingClientRect();
+    const index = Math.min(
+      Math.floor(((e.clientX - rect.left) / rect.width) * length),
+      el.value.length,
+    );
+    el.setSelectionRange(index, Math.min(index + 1, el.value.length));
+    syncSelection();
+  };
 
   return (
     <div className={cn("grid h-12 justify-center", className)}>
@@ -45,7 +77,11 @@ export function OtpField({
         className="col-start-1 row-start-1 flex items-center gap-1"
       >
         {Array.from({ length }, (_, i) => {
-          const isActive = focused && i === activeIndex;
+          const isActive =
+            focused &&
+            (selection.end > selection.start
+              ? i >= selection.start && i < selection.end
+              : i === selection.start);
           return (
             <div
               key={i}
@@ -64,11 +100,19 @@ export function OtpField({
         })}
       </div>
       <input
+        ref={inputRef}
         value={value}
-        onChange={(e) =>
-          onChange(e.target.value.replace(/\D/g, "").slice(0, length))
-        }
-        onFocus={() => setFocused(true)}
+        onChange={(e) => {
+          onChange(e.target.value.replace(/\D/g, "").slice(0, length));
+          // The caret moves after React commits the new value.
+          requestAnimationFrame(syncSelection);
+        }}
+        onClick={placeCaretFromPointer}
+        onSelect={syncSelection}
+        onFocus={() => {
+          setFocused(true);
+          syncSelection();
+        }}
         onBlur={() => setFocused(false)}
         inputMode="numeric"
         autoComplete="one-time-code"
