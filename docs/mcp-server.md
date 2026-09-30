@@ -49,7 +49,14 @@ Agent ─MCP─▶ mcp-server (new)
 
 ## 5. Authentication & scopes
 
-OAuth 2.0 Authorization Code + PKCE flow. The user installs an agent, the agent redirects them to `materialize.com/oauth/authorize?scopes=…&client_id=…`, the user reviews the requested scopes and approves, the agent gets a refresh token + access token tied to that user.
+Two ways in, both resolved by `verifyMaterializeToken` (`lib/mcp/auth.ts`):
+
+- **Personal access tokens** (`mtl_pat_…`), minted on `/dashboard/settings/tokens` with explicit scopes. For CLIs, scripts and any client that takes a bearer header.
+- **OAuth 2.1 through Clerk** (`lib/mcp/oauth.ts`). This is what ChatGPT apps and Claude connectors use: the user pastes `/api/mcp`, the client gets a 401 whose `WWW-Authenticate` points at `/.well-known/oauth-protected-resource`, reads Clerk as the authorization server from it, registers itself (dynamic client registration), and runs authorization code + PKCE. The consent screen is a normal Materialize sign-in. `/.well-known/oauth-authorization-server` mirrors Clerk's metadata for clients on the older (2025-03-26) spec that look on our origin. **DCR must be enabled in the Clerk dashboard** (OAuth applications → Settings) or no client can register.
+
+Each (user, OAuth client) pair is mirrored into `personal_access_tokens` as a *connection row* (`oauth_client_id` set, no usable secret), created on the first request. That gives OAuth callers a `tokenId` for the agent-order audit trail, a spending policy, `lastUsedAt`, and a Revoke button, with no second code path. Clerk has no custom scopes, so a connection gets every scope (`OAUTH_CONNECTION_SCOPES`); the CAD allowlist and order confirmation still apply. Revoking a connection blocks that client for the user permanently, because Clerk refresh tokens keep minting fresh access tokens and a time-based cutoff would silently reconnect it.
+
+Every tool also carries MCP annotations (`lib/mcp/tool-annotations.ts`: read-only, destructive, idempotent, open-world). ChatGPT prompts before any non-read-only tool and app review rejects inaccurate hints; registration throws for a tool with no entry. Results go out as `structuredContent` as well as a JSON text block.
 
 **Scopes (v1):**
 
@@ -70,7 +77,6 @@ OAuth 2.0 Authorization Code + PKCE flow. The user installs an agent, the agent 
 | `orders:auto_approve` | When agent-budget mode lands (§9) |
 | `webhooks:subscribe` | When push status updates land (§9) |
 
-**Implementation note.** Clerk supports OAuth provider mode and machine tokens; either works. Pick one early — retrofitting auth is the most painful refactor in a system like this.
 
 ## 6. Tool surface
 

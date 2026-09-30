@@ -48,8 +48,10 @@ export default async function TokensSettingsPage() {
         <p className="mt-1 text-sm text-muted-foreground">
           Personal access tokens (PATs) let agents and tools talk to the
           Materialize MCP server on your behalf. Each token is scoped — agents
-          can only do what you grant. You'll still review and pay for any print
-          order before it's placed.
+          can only do what you grant. ChatGPT and Claude can also connect with
+          just the endpoint below: they ask you to sign in, and show up here
+          once you do. You&apos;ll still review and pay for any print order before
+          it&apos;s placed.
         </p>
         <p className="mt-2 text-xs text-muted-foreground">
           MCP endpoint:{" "}

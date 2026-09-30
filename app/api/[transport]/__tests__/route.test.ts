@@ -13,7 +13,17 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // an `invalid_scope` error — i.e. requireScope ran and threw before any
 // business logic (DB/network) executed.
 
-type ToolConfig = { title?: string; description?: string };
+type ToolConfig = {
+  title?: string;
+  description?: string;
+  annotations?: {
+    title?: string;
+    readOnlyHint?: boolean;
+    destructiveHint?: boolean;
+    idempotentHint?: boolean;
+    openWorldHint?: boolean;
+  };
+};
 type ToolHandler = (
   args: Record<string, unknown>,
   extra: unknown
@@ -161,6 +171,56 @@ describe("app/api/[transport]/route requireScope coverage", () => {
       const parsed = parseResultText(result);
       expect(parsed.error.code).not.toBe("invalid_scope");
     }
+  });
+});
+
+describe("tool annotations (ChatGPT app review + Claude permission prompts)", () => {
+  beforeEach(async () => {
+    if (registered.length === 0) await import("@/app/api/[transport]/route");
+  });
+
+  it("every registered tool carries all four hints and its title", () => {
+    for (const { name, config } of registered) {
+      const a = config.annotations;
+      expect(a, name).toBeDefined();
+      expect(a!.title, name).toBe(config.title);
+      for (const hint of [
+        "readOnlyHint",
+        "destructiveHint",
+        "idempotentHint",
+        "openWorldHint",
+      ] as const) {
+        expect(typeof a![hint], `${name}.${hint}`).toBe("boolean");
+      }
+    }
+  });
+
+  it("TOOL_ANNOTATIONS has no entries for tools that no longer exist", async () => {
+    const { TOOL_ANNOTATIONS } = await import("@/lib/mcp/tool-annotations");
+    expect(Object.keys(TOOL_ANNOTATIONS).sort()).toEqual(
+      registered.map((r) => r.name).sort()
+    );
+  });
+
+  it("marks every delete, update and replace destructive, and nothing that writes read-only", () => {
+    for (const { name, config } of registered) {
+      const a = config.annotations!;
+      if (/_(delete|update)_|_set_project_bom$/.test(name)) {
+        expect(a.destructiveHint, name).toBe(true);
+      }
+      if (a.readOnlyHint) {
+        expect(a.destructiveHint, name).toBe(false);
+        expect(name, name).toMatch(/_(get|list)_|_cad_(run|reference)$/);
+      }
+    }
+  });
+
+  it("marks the tools that reach CraftCloud as open-world", () => {
+    const openWorld = registered
+      .filter((r) => r.config.annotations!.openWorldHint)
+      .map((r) => r.name)
+      .sort();
+    expect(openWorld).toEqual(["materialize_create_order", "materialize_get_quote"]);
   });
 });
 
