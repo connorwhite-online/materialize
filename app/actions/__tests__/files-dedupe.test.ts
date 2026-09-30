@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // so we hand out rows in call order.
 let innerJoinResults: unknown[][] = [];
 const mockInsertValues = vi.fn();
+const mockUpdateSet = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -20,6 +21,12 @@ vi.mock("@/lib/db", () => ({
           },
         }),
       }),
+    }),
+    update: () => ({
+      set: (v: unknown) => {
+        mockUpdateSet(v);
+        return { where: async () => undefined };
+      },
     }),
     insert: () => ({
       values: (v: unknown) => {
@@ -142,6 +149,12 @@ describe("createDraftFileForPrint self-dedupe", () => {
 
     expect(result).toHaveProperty("fileAssetId");
     expect(mockInsertValues).toHaveBeenCalled();
+    // The new asset is v1 and the file's live version
+    // (docs/file-versioning.md).
+    expect(mockInsertValues).toHaveBeenCalledWith(
+      expect.objectContaining({ versionNumber: 1 })
+    );
+    expect(mockUpdateSet).toHaveBeenCalledWith({ currentAssetId: "new-file-id" });
   });
 
   it("still rejects cross-user duplicates (anti-piracy unchanged)", async () => {

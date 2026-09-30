@@ -262,10 +262,17 @@ export async function createDraftFileForUser(
         fileUnit: params.fileUnit ?? "mm",
         fileSize: params.fileSize,
         contentHash: byteHash ?? null,
+        versionNumber: 1,
       })
       .returning({ id: fileAssets.id });
 
     claimed = true;
+
+    // v1 is the live version (docs/file-versioning.md).
+    await db
+      .update(files)
+      .set({ currentAssetId: asset.id })
+      .where(eq(files.id, file.id));
 
     // Defer the geometry parse + cross-user geometry-hash check.
     after(() =>

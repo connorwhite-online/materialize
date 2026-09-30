@@ -224,6 +224,8 @@ Two consequences of that vanity-profile pattern worth knowing: **any single-segm
 - `files` — owns listing metadata: name, slug, status, price, license, category, `recommendedMaterialId` (editorial slug), `recommendedCcMaterialId` (CraftCloud UUID).
 - `fileAssets` — owns the artifact: `storageKey`, `format`, `geometryData`, `craftCloudModelId`, hashes.
 
+**A file's assets are its versions** (`docs/file-versioning.md`). Each `fileAssets` row on a file is one immutable version (`versionNumber` 1, 2, 3…); `files.currentAssetId` picks the live one, and that is the only version the public sees. So "the file's asset" is never "the first asset row" — resolve it with `lib/files/current-version.ts` (`pickCurrentAsset`, `currentAssetsByFileId`, or `isCurrentAsset()` in a join), and add a version only through `attachAssetAsVersion` (`lib/files/versions.ts`). Never mutate an attached asset's geometry: new geometry is a new row, which is what keeps `printOrders.fileAssetId` meaning "what was ordered". Projects are not versioned; they show each bundled file's current version.
+
 ### printOrders.material stores a CraftCloud config UUID
 
 `printOrders.material` (`lib/db/schema.ts` § `printOrders.material`, line 702) stores the **CraftCloud config UUID**, not a slug. There is **no** `materialConfigId` column on `printOrders`. The real `materialConfigId` columns live on `printOrderItems` (§ `printOrderItems.materialConfigId`, line 833) and `cartItems` (§ `cartItems.materialConfigId`, line 867). The slug/UUID duality for display-catalog recommendations lives on `files`: `recommendedMaterialId` (editorial slug) vs `recommendedCcMaterialId` (CraftCloud UUID) (§ `files.recommendedMaterialId`/`recommendedCcMaterialId`, lines 290-291).

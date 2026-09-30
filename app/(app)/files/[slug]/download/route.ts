@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
+import { pickCurrentAsset } from "@/lib/files/current-version";
 import {
   files,
   fileAssets,
@@ -117,15 +118,23 @@ export async function GET(
     });
   }
 
-  const conditions = [eq(fileAssets.fileId, file.id)];
-  if (assetId) {
-    conditions.push(eq(fileAssets.id, assetId));
-  }
-
-  const [asset] = await db
+  // Versions (docs/file-versioning.md): the download is the file's live
+  // version. `?asset=` can name an older one, but earlier versions are the
+  // owner's history — only the owner or an org member can pull them.
+  const assets = await db
     .select()
     .from(fileAssets)
-    .where(and(...conditions));
+    .where(eq(fileAssets.fileId, file.id));
+  const current = pickCurrentAsset(file.currentAssetId, assets);
+  let asset = assetId ? assets.find((a) => a.id === assetId) : current;
+  if (asset && current && asset.id !== current.id) {
+    const canSeeHistory =
+      !!userId &&
+      (file.userId === userId ||
+        (!!file.organizationId &&
+          (await isOrgMember(userId, file.organizationId)).member));
+    if (!canSeeHistory) asset = undefined;
+  }
 
   if (!asset) {
     return new Response("Asset not found", { status: 404 });

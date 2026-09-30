@@ -18,6 +18,7 @@ import {
   purchases,
 } from "@/lib/db/schema";
 import { eq, and, asc, desc, inArray } from "drizzle-orm";
+import { currentAssetsByFileId } from "@/lib/files/current-version";
 import { notUnsavedStudioDraft } from "@/lib/studio-drafts";
 import { loadProjectBySlug } from "./loader";
 import { generateDownloadUrl } from "@/lib/storage";
@@ -180,6 +181,7 @@ export default async function ProjectDetailPage(props: {
         slug: files.slug,
         thumbnailUrl: files.thumbnailUrl,
         price: files.price,
+        currentAssetId: files.currentAssetId,
         position: projectFiles.position,
       })
       .from(projectFiles)
@@ -363,37 +365,31 @@ export default async function ProjectDetailPage(props: {
     },
   }));
 
-  // Primary asset per bundled file — display name + format subtitle
-  // (same owned-card treatment as the library strip; CON-19).
+  // Live version per bundled file — display name + format subtitle
+  // (same owned-card treatment as the library strip; CON-19). Projects
+  // aren't versioned themselves: each part shows its file's current
+  // version (docs/file-versioning.md), picked the same way as library-tab.
   // The display name prefers the user-entered file name and falls back
   // to the original upload filename (files auto-created by the print
-  // flow can land with an empty name). Mirrors the primary-asset pick
-  // in library-tab: first asset by createdAt.
+  // flow can land with an empty name).
   const bundledFileIds = bundledFiles.map((f) => f.id);
   const fileAssetRows = bundledFileIds.length
     ? await db
         .select({
+          id: fileAssets.id,
           fileId: fileAssets.fileId,
+          createdAt: fileAssets.createdAt,
           originalFilename: fileAssets.originalFilename,
           format: fileAssets.format,
           fileSize: fileAssets.fileSize,
         })
         .from(fileAssets)
         .where(inArray(fileAssets.fileId, bundledFileIds))
-        .orderBy(asc(fileAssets.createdAt))
     : [];
-  const primaryAssetByFileId = new Map<
-    string,
-    { originalFilename: string; format: string; fileSize: number }
-  >();
-  for (const a of fileAssetRows) {
-    if (!a.fileId || primaryAssetByFileId.has(a.fileId)) continue;
-    primaryAssetByFileId.set(a.fileId, {
-      originalFilename: a.originalFilename,
-      format: a.format,
-      fileSize: a.fileSize,
-    });
-  }
+  const primaryAssetByFileId = currentAssetsByFileId(
+    fileAssetRows,
+    new Map(bundledFiles.map((f) => [f.id, f.currentAssetId]))
+  );
   const bundledFileCards = bundledFiles.map((file) => {
     const asset = primaryAssetByFileId.get(file.id);
     return {

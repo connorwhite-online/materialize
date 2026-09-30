@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { files, fileAssets, projects, projectFiles, projectPhotos, users } from "@/lib/db/schema";
 import { eq, asc, inArray } from "drizzle-orm";
+import { currentAssetsByFileId } from "@/lib/files/current-version";
 import { withDbRetry } from "@/lib/db/retry";
 import { isOrgMember } from "@/lib/authorization";
 import { generateDownloadUrl } from "@/lib/storage";
@@ -89,6 +90,7 @@ async function loadProjectPrintTilesOnce(
       slug: files.slug,
       thumbnailUrl: files.thumbnailUrl,
       status: files.status,
+      currentAssetId: files.currentAssetId,
       position: projectFiles.position,
     })
     .from(projectFiles)
@@ -161,8 +163,8 @@ async function loadProjectPrintTilesOnce(
     return { ...projectMeta, totalFileSizeBytes: 0, tiles: [] };
   }
 
-  // Primary asset per file = first by createdAt, mirroring
-  // loadLibraryTiles and the project detail page's asset pick.
+  // Every asset of every bundled file; the live version per file is
+  // picked below, mirroring loadLibraryTiles and the project page.
   const assetRows = await db
     .select({
       id: fileAssets.id,
@@ -176,19 +178,12 @@ async function loadProjectPrintTilesOnce(
     .where(inArray(fileAssets.fileId, fileIds))
     .orderBy(asc(fileAssets.createdAt));
 
-  const primaryByFileId = new Map<
-    string,
-    { id: string; format: string; originalFilename: string; fileSize: number }
-  >();
-  for (const row of assetRows) {
-    if (!row.fileId || primaryByFileId.has(row.fileId)) continue;
-    primaryByFileId.set(row.fileId, {
-      id: row.id,
-      format: row.format,
-      originalFilename: row.originalFilename,
-      fileSize: row.fileSize,
-    });
-  }
+  // Projects aren't versioned: each part shows its file's live version
+  // (docs/file-versioning.md).
+  const primaryByFileId = currentAssetsByFileId(
+    assetRows,
+    new Map(printable.map((f) => [f.id, f.currentAssetId]))
+  );
 
   // Preserve project order — iterate `printable` (position-sorted), not
   // the asset rows (createdAt-sorted).

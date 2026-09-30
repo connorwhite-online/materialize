@@ -23,17 +23,15 @@ import { db } from "@/lib/db";
 import {
   cadGenerations,
   cadThreads,
-  cartItems,
   fileAssets,
   files,
-  printOrderItems,
-  printOrders,
   projectFiles,
 } from "@/lib/db/schema";
 import { deleteObject, generateDownloadUrl } from "@/lib/storage";
 import { logError } from "@/lib/logger";
 import { canUseTextToCad } from "@/lib/features";
 import { userOwnsFile } from "@/lib/entitlement";
+import { attachAssetAsVersion } from "@/lib/files/versions";
 import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
 import {
   isCadFeedbackTag,
@@ -96,34 +94,6 @@ const MAX_NAME_LEN = 60;
 
 export type SaveCadResult = { ok: true } | { error: string };
 
-/**
- * True when any of the given assets is referenced by a print order, an
- * order item, or a cart item. Assets with order/cart references must
- * NEVER be re-pointed or mutated — printOrders.fileAssetId has to keep
- * meaning "the geometry that was ordered" (docs/text-to-cad/05 §C).
- */
-async function anyAssetOrderReferenced(assetIds: string[]): Promise<boolean> {
-  if (assetIds.length === 0) return false;
-  const [order] = await db
-    .select({ id: printOrders.id })
-    .from(printOrders)
-    .where(inArray(printOrders.fileAssetId, assetIds))
-    .limit(1);
-  if (order) return true;
-  const [item] = await db
-    .select({ id: printOrderItems.id })
-    .from(printOrderItems)
-    .where(inArray(printOrderItems.fileAssetId, assetIds))
-    .limit(1);
-  if (item) return true;
-  const [cartItem] = await db
-    .select({ id: cartItems.id })
-    .from(cartItems)
-    .where(inArray(cartItems.fileAssetId, assetIds))
-    .limit(1);
-  return !!cartItem;
-}
-
 /** True when any of the given files is bundled into a Project. */
 async function anyFileInProject(fileIds: string[]): Promise<boolean> {
   if (fileIds.length === 0) return false;
@@ -145,17 +115,13 @@ async function anyFileInProject(fileIds: string[]): Promise<boolean> {
  * provenance (where the file came from), status is the visibility stage.
  * The design's thread records the file as its savedFileId.
  *
- * Re-save of an already-saved design (docs/text-to-cad/05 §C, one file per
- * design): instead of publishing a second library file, the SAVED file is
- * re-pointed at this generation's asset — the saved file's old asset rows move
- * onto this generation's (invisible) draft file and this generation's asset
- * moves under the saved file, so every reader that resolves "the file's asset"
- * (they all take the file's first/only asset row) sees the new geometry while
- * the saved file's id and slug stay stable. Assets referenced by print
- * orders/cart items are never moved; in that case (and for assemblies /
- * project-bundled files) we fall back to publishing this generation's file and
- * demoting the previously saved studio file back to draft, so the library
- * still shows exactly one entry per design.
+ * Re-save of an already-saved design (docs/file-versioning.md): instead of
+ * publishing a second library file, this generation's asset becomes the
+ * saved file's next VERSION and goes live — same file id and slug, earlier
+ * versions kept as its history (owner-visible). Assemblies fall back to
+ * publishing this generation's file and demoting the previously saved
+ * studio file back to draft, so the library still shows exactly one entry
+ * per design.
  *
  * Owner-only, idempotent.
  */
@@ -251,67 +217,62 @@ export async function saveCadFileToProfile(input: {
       return { ok: true };
     }
 
-    // One file per design: re-point the saved file at this generation's
-    // asset when it's safe (no order/cart references on either side, not an
-    // assembly, neither file bundled into a project).
-    const savedAssets = await db
-      .select({ id: fileAssets.id })
-      .from(fileAssets)
-      .where(eq(fileAssets.fileId, priorSavedFileId));
-
-    const canRepoint =
+    // One file per design (docs/file-versioning.md): the generation's asset
+    // becomes the saved file's next version and goes live. Versions are
+    // immutable, so an ordered asset can move files safely — the order
+    // still references exactly the geometry it bought. The saved file being
+    // bundled into a project doesn't matter either: projects aren't
+    // versioned, they show each file's current version.
+    //
+    // Assemblies (gen.projectId set) and a generation file that is itself
+    // bundled into a project keep the pre-versioning fallback below: their
+    // parts are separate files and per-part re-save isn't built yet.
+    const canVersion =
       gen != null &&
       thread != null &&
       gen.projectId === null &&
-      !(await anyAssetOrderReferenced([
-        input.fileAssetId,
-        ...savedAssets.map((a) => a.id),
-      ])) &&
-      !(await anyFileInProject([asset.fileId, priorSavedFileId]));
+      !(await anyFileInProject([asset.fileId]));
 
-    if (canRepoint) {
-      // Swap so each file keeps exactly one asset (readers resolve "the
-      // file's asset" as the first/only fileAssets row — see
-      // lib/print/library-tiles.ts and files/[slug]/page.tsx): the saved
-      // file's old assets park on this generation's invisible draft file
-      // (preserving old geometry + its generation links), and this
-      // generation's asset becomes the saved file's asset. Slug stable.
-      // ORDER MATTERS (no transaction on neon-http): attach the new asset
-      // FIRST — a crash between statements then leaves the saved file with
-      // two assets (readers resolve the older one: stale but working, and a
-      // re-save completes the swap) instead of zero (broken page + print).
-      // The park step targets the captured old-asset ids, not fileId, so it
-      // can't sweep up the freshly attached asset.
-      await db
-        .update(fileAssets)
-        .set({ fileId: priorSavedFileId })
-        .where(eq(fileAssets.id, input.fileAssetId));
-      if (savedAssets.length > 0) {
-        await db
-          .update(fileAssets)
-          .set({ fileId: asset.fileId })
-          .where(
-            inArray(
-              fileAssets.id,
-              savedAssets.map((a) => a.id)
-            )
-          );
-      }
+    if (canVersion) {
+      await attachAssetAsVersion({
+        fileId: priorSavedFileId,
+        assetId: input.fileAssetId,
+      });
       await db
         .update(files)
         .set({ status: "published", updatedAt: new Date() })
         .where(and(eq(files.id, priorSavedFileId), eq(files.userId, userId)));
+      // The generation's own studio file is now empty. If a print or
+      // download had promoted it into the library, demote it so the
+      // library doesn't show a file with nothing in it; the studio GC
+      // sweeps it like any unsaved draft.
+      const [leftover] = await db
+        .select({ id: fileAssets.id })
+        .from(fileAssets)
+        .where(eq(fileAssets.fileId, asset.fileId))
+        .limit(1);
+      if (!leftover) {
+        await db
+          .update(files)
+          .set({ status: "draft", updatedAt: new Date() })
+          .where(
+            and(
+              eq(files.id, asset.fileId),
+              eq(files.userId, userId),
+              eq(files.source, "studio")
+            )
+          );
+      }
       await db
         .update(cadThreads)
         .set({ activeGenerationId: gen.id, updatedAt: new Date() })
         .where(eq(cadThreads.id, thread.id));
     } else {
-      // Conservative fallback: publish this generation's file as THE file
-      // for the design and demote the previously saved STUDIO file back to
-      // draft (library-invisible), so the library still shows one entry per
-      // design. The demoted file (and any ordered geometry) is untouched
-      // otherwise — orders keep referencing their original assets. Only
-      // studio-sourced files are ever demoted; a real upload never is.
+      // Fallback: publish this generation's file as THE file for the design
+      // and demote the previously saved STUDIO file back to draft
+      // (library-invisible), so the library still shows one entry per
+      // design. Only studio-sourced files are ever demoted; a real upload
+      // never is.
       await db
         .update(files)
         .set({
