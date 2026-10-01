@@ -143,6 +143,13 @@ function readAuthExtra(extra: {
   return e;
 }
 
+const MCP_SERVER_INSTRUCTIONS = [
+  "Materialize gets 3D models professionally printed and shipped, and hosts models and hardware projects creators publish.",
+  "To print: get the model in with materialize_import_model (a file attached in chat or a public https URL) or materialize_request_upload_url + materialize_register_upload, price it with materialize_get_quote, then materialize_create_order.",
+  "Before materialize_create_order, show the user the price, material, vendor and lead time and get their go-ahead. Orders are physical and can't be undone once placed.",
+  "The user approves and pays at the returned confirmationUrl unless their spending policy allows the order. Don't tell them it is placed until materialize_get_order says so.",
+].join(" ");
+
 const handler = createMcpHandler(
   (server) => {
     annotateTools(server);
@@ -1496,6 +1503,10 @@ const handler = createMcpHandler(
       name: "materialize",
       version: "0.1.0",
     },
+    // Server-wide guidance every MCP client gets at initialize, so a host
+    // without the skill installed still learns the flow and the one rule
+    // that matters. Keep it short; per-tool detail lives in descriptions.
+    instructions: MCP_SERVER_INSTRUCTIONS,
   },
   {
     basePath: "/api",

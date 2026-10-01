@@ -86,6 +86,13 @@ export const PUBLIC_ROUTES = [
   // redirect here breaks the connect flow outright.
   "/.well-known/oauth-protected-resource(.*)",
   "/.well-known/oauth-authorization-server(.*)",
+  // OpenAI plugin directory domain verification. Its crawler fetches the
+  // token with no session.
+  "/.well-known/openai-apps-challenge",
+  // Static sample models (public/review/) that plugin-directory review
+  // test cases attach. The proxy matcher doesn't skip .stl, so without
+  // this a reviewer's fetch is redirected to sign-in.
+  "/review/(.*)",
   // Sentry SDK tunnels client error reports through this same-
   // origin route so ad-blockers don't drop them. No Clerk session
   // expected. Configured in next.config.ts → tunnelRoute.

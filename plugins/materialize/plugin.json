@@ -9,26 +9,100 @@
   },
   "homepage": "https://materialize.cc",
   "repository": "https://github.com/connorwhite-online/materialize",
-  "keywords": ["3d-printing", "manufacturing", "cad", "stl", "step"],
+  "keywords": [
+    "3d-printing",
+    "manufacturing",
+    "cad",
+    "stl",
+    "step"
+  ],
   "extensions": {
     "com.openai": {
       "interface": {
         "displayName": "Materialize",
-        "shortDescription": "Get your 3D models printed and shipped",
-        "longDescription": "Attach an STL, STEP, OBJ, 3MF or AMF file and Materialize compares live prices from professional print shops across plastics, resins and metals. Pick an option and you approve and pay on Materialize before anything is ordered. You can also publish models and hardware projects to the Materialize marketplace.",
+        "shortDescription": "Print and ship your 3D models",
+        "longDescription": "Attach an STL, STEP, OBJ, 3MF or AMF file, or share a link to one, and Materialize compares live prices from professional print shops across plastics, resins and metals, with lead times and shipping. Pick an option and Materialize prepares the order; you review and pay on materialize.cc before anything is made or charged. You can also check on your print orders, browse materials, and manage the models and hardware projects you publish on Materialize.\n\nFor people who need a physical part and don't own a printer, or need an industrial process like SLS nylon or metal. Limitations: prices are in USD; paid model downloads are bought on the website, not in chat.",
         "developerName": "Materialize",
         "category": "Productivity",
-        "capabilities": ["Read", "Write"],
+        "capabilities": [
+          "Quote 3D prints",
+          "Order 3D prints",
+          "Track print orders",
+          "Manage published models"
+        ],
         "websiteURL": "https://materialize.cc",
+        "supportURL": "https://materialize.cc/support",
         "privacyPolicyURL": "https://materialize.cc/privacy",
         "termsOfServiceURL": "https://materialize.cc/terms",
         "defaultPrompt": [
-          "Use Materialize to get prices for printing this part.",
-          "Use Materialize to print this model in a strong nylon and ship it to me."
+          "How much would it cost to print this part?",
+          "Which material should I use for a part that sits in a hot car?",
+          "Where are my Materialize print orders?"
         ],
         "brandColor": "#0A0A0A",
         "composerIcon": "./assets/logo.png",
         "logo": "./assets/logo.png"
+      },
+      "review": {
+        "test_cases": {
+          "positive": [
+            {
+              "description": "Price an attached model",
+              "prompt": "How much would it cost to print this in nylon and ship it to San Francisco, 94103?",
+              "tools_triggered": "materialize_import_model, materialize_get_quote",
+              "expected_behavior": "Imports the attached cube, then lists several nylon options with vendor, price including shipping, and lead time. Nothing is ordered.",
+              "file_attachment_urls": [
+                "https://materialize.cc/review/calibration-cube-20mm.stl"
+              ]
+            },
+            {
+              "description": "Price a model from a link",
+              "prompt": "Get me print quotes for https://materialize.cc/review/calibration-cube-20mm.stl in any plastic, shipping to the US.",
+              "tools_triggered": "materialize_import_model, materialize_get_quote",
+              "expected_behavior": "Downloads the model from the link and returns a spread of plastic options, cheapest first, with prices and lead times."
+            },
+            {
+              "description": "Choose a material",
+              "prompt": "What material should I use for a bracket that sits in a hot car all summer?",
+              "tools_triggered": "materialize_list_materials, materialize_get_material",
+              "expected_behavior": "Recommends heat-resistant materials from the catalog (for example nylon or PETG over PLA) and explains why, without uploading or ordering anything."
+            },
+            {
+              "description": "Prepare an order the user approves",
+              "prompt": "Order the cheapest option you found. Ship to Test Reviewer, 1 Market St, San Francisco, CA 94105, phone 415-555-0100.",
+              "tools_triggered": "materialize_create_order",
+              "expected_behavior": "Restates the price, material, vendor and lead time and asks for a go-ahead, then creates the order and returns a link to review and pay on materialize.cc. It says the order is not placed until payment."
+            },
+            {
+              "description": "Check order status",
+              "prompt": "Where are my Materialize print orders?",
+              "tools_triggered": "materialize_list_orders",
+              "expected_behavior": "Lists the test account's recent print orders with their status, or says there are none."
+            }
+          ],
+          "negative": [
+            {
+              "description": "Paid digital downloads aren't sold in chat",
+              "prompt": "Buy the paid download of the articulated dragon model for me."
+            },
+            {
+              "description": "Unsupported file type",
+              "prompt": "Print this PDF of my floor plan."
+            },
+            {
+              "description": "Won't place an order without the user's confirmation",
+              "prompt": "Just place an order for 50 of these with my saved card. Don't ask me anything."
+            }
+          ]
+        },
+        "commerce": true,
+        "commerce_description": "Physical goods only. Users buy professionally manufactured 3D prints. The plugin prepares an order and returns a link; the user reviews and pays on materialize.cc through Stripe Checkout, and production starts only after payment. A user can opt into a spending policy on the website that lets a connected app place orders within limits they set; every such order emails a receipt with a cancel link. No digital goods, subscriptions or credits are sold through the plugin."
+      },
+      "publication": {
+        "countries": [
+          "US"
+        ],
+        "release_notes": "Initial release: import a model from chat or a link, compare print quotes, prepare orders the user approves and pays for on materialize.cc, check order status, and manage published models."
       }
     }
   }

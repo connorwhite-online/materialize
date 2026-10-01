@@ -216,16 +216,16 @@ describe("tool annotations (ChatGPT app review + Claude permission prompts)", ()
     }
   });
 
-  it("marks the tools that reach outside Materialize as open-world", () => {
+  it("marks only the tool that reaches the open internet as open-world", () => {
     const openWorld = registered
       .filter((r) => r.config.annotations!.openWorldHint)
-      .map((r) => r.name)
-      .sort();
-    expect(openWorld).toEqual([
-      "materialize_create_order",
-      "materialize_get_quote",
-      "materialize_import_model",
-    ]);
+      .map((r) => r.name);
+    expect(openWorld).toEqual(["materialize_import_model"]);
+  });
+
+  it("marks create_order destructive, since a spending policy can make it a real charge", () => {
+    const order = registered.find((r) => r.name === "materialize_create_order");
+    expect(order!.config.annotations!.destructiveHint).toBe(true);
   });
 });
 

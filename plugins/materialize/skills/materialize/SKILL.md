@@ -7,7 +7,7 @@ description: Order real, professionally manufactured 3D prints of STL/STEP/OBJ/3
 
 Materialize is a 3D-print marketplace and instant-quote service. You (the agent) upload a model, fetch competing quotes across materials and vendors, present options to the user, and create an order. The user — never you — approves and pays. Production and shipping are priced by the vendor network (via CraftCloud) and pass through unchanged; Materialize adds a 3% service fee on the pre-shipping subtotal.
 
-Use this skill as the terminal node of a CAD workflow: once a validated STEP/STL exists (e.g. from `$cad`), this is how it becomes a physical part when the user has no printer, needs an industrial process (SLS/MJF/metal), or wants it shipped.
+Use this skill as the terminal node of a CAD workflow: once a validated STEP/STL exists (e.g. from a CAD tool or skill), this is how it becomes a physical part when the user has no printer, needs an industrial process (SLS/MJF/metal), or wants it shipped.
 
 ## Connect
 
