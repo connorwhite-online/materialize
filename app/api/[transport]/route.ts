@@ -99,7 +99,18 @@ function annotateTools(server: { registerTool: (...args: never[]) => unknown }) 
     }
     return register(
       name,
-      { ...config, annotations: { title: config.title, ...annotations } },
+      {
+        ...config,
+        annotations: { title: config.title, ...annotations },
+        // Every tool acts as the signed-in user. ChatGPT reads this to
+        // decide that a tool needs account linking; OpenAI asks for it per
+        // tool rather than as a server default. The MCP SDK drops unknown
+        // top-level config keys, so it travels in _meta.
+        _meta: {
+          ...(config._meta as Record<string, unknown> | undefined),
+          securitySchemes: [{ type: "oauth2", scopes: [] }],
+        },
+      },
       handler
     );
   };

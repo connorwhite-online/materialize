@@ -216,6 +216,15 @@ describe("tool annotations (ChatGPT app review + Claude permission prompts)", ()
     }
   });
 
+  it("declares OAuth on every tool and keeps tool-specific _meta", () => {
+    for (const { name, config } of registered) {
+      const meta = (config as { _meta?: Record<string, unknown> })._meta;
+      expect(meta?.securitySchemes, name).toEqual([{ type: "oauth2", scopes: [] }]);
+    }
+    const imp = registered.find((r) => r.name === "materialize_import_model");
+    expect((imp!.config as { _meta?: Record<string, unknown> })._meta?.["openai/fileParams"]).toEqual(["file"]);
+  });
+
   it("marks only the tool that reaches the open internet as open-world", () => {
     const openWorld = registered
       .filter((r) => r.config.annotations!.openWorldHint)
