@@ -88,6 +88,7 @@ const EXPECTED_TOOL_SCOPES: Record<string, string> = {
   materialize_get_material: "catalog:read",
   materialize_request_upload_url: "files:write",
   materialize_register_upload: "files:write",
+  materialize_import_model: "files:write",
   materialize_update_file: "files:write",
   materialize_list_files: "files:read",
   materialize_delete_file: "files:write",
@@ -215,12 +216,16 @@ describe("tool annotations (ChatGPT app review + Claude permission prompts)", ()
     }
   });
 
-  it("marks the tools that reach CraftCloud as open-world", () => {
+  it("marks the tools that reach outside Materialize as open-world", () => {
     const openWorld = registered
       .filter((r) => r.config.annotations!.openWorldHint)
       .map((r) => r.name)
       .sort();
-    expect(openWorld).toEqual(["materialize_create_order", "materialize_get_quote"]);
+    expect(openWorld).toEqual([
+      "materialize_create_order",
+      "materialize_get_quote",
+      "materialize_import_model",
+    ]);
   });
 });
 

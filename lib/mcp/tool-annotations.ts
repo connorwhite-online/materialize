@@ -13,7 +13,8 @@ import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
  *   Replacing fields in place (update_*, set_project_bom) counts.
  * - idempotentHint: repeating the same call has no further effect.
  * - openWorldHint: reaches outside Materialize (CraftCloud quotes and
- *   orders). Everything else only touches the user's own account.
+ *   orders, model imports from a URL). Everything else only touches the
+ *   user's own account.
  *
  * `annotateTools` (route.ts) refuses to register a tool missing from
  * this table, so a new tool can't ship unannotated.
@@ -51,6 +52,8 @@ export const TOOL_ANNOTATIONS: Record<string, ToolAnnotations> = {
   // Files. Presigning mints a URL and writes no row.
   materialize_request_upload_url: { ...CREATE, idempotentHint: true },
   materialize_register_upload: CREATE,
+  // Downloads from a caller-supplied URL, so it reaches outside.
+  materialize_import_model: { ...CREATE, openWorldHint: true },
   materialize_update_file: OVERWRITE,
   materialize_list_files: READ,
   materialize_delete_file: DELETE,

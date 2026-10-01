@@ -114,6 +114,14 @@ output: {
 
 ### 6.2 Files
 
+**`import_model`** (a file attached in ChatGPT, or any public https URL)
+```ts
+input: { file?: { download_url, file_id, file_name?, mime_type? }  // hydrated by ChatGPT via _meta["openai/fileParams"]
+         url?: string; filename?: string; fileUnit?; metadata? }
+output: same as register_upload
+```
+The server downloads the bytes itself (`lib/mcp/internal/fetch-model.ts`): https only, at most 3 redirects, 200MB cap, 60s deadline, and private/loopback/link-local addresses refused at the socket's DNS lookup so a rebinding answer can't slip past the check. This is the only upload path a chat host can use, since its model can't PUT to a presigned URL.
+
 **`request_upload_url`** (for files larger than ~5MB)
 ```ts
 input: { filename: string; sizeBytes: number; contentType: string }

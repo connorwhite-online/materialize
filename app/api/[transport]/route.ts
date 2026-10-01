@@ -20,6 +20,7 @@ import {
   setFileCoverPhotoForUser,
   requestPhotoUploadUrlForUser,
   requestCircuitUploadUrlForUser,
+  importModelFromUrlForUser,
 } from "@/lib/mcp/internal/files";
 import {
   createProjectForUser,
@@ -475,6 +476,71 @@ const handler = createMcpHandler(
           return jsonResult(result);
         } catch (err) {
           return scopeOrInternal(err, "materialize_register_upload");
+        }
+      }
+    );
+
+    // ChatGPT hydrates a declared file param into this shape when the user
+    // attaches a file (Apps SDK `openai/fileParams`). Optional because the
+    // host occasionally drops it, and other clients pass `url` instead.
+    const chatFileSchema = z
+      .object({
+        download_url: z.string().url(),
+        file_id: z.string(),
+        mime_type: z.string().optional(),
+        file_name: z.string().optional(),
+      })
+      .describe("A 3D model file the user attached in the chat");
+
+    server.registerTool(
+      "materialize_import_model",
+      {
+        title: "Import a 3D model from the chat or a link",
+        description:
+          "Add a 3D model (STL, OBJ, 3MF, STEP, AMF) to the user's Materialize library from a file they attached in this chat, or from a public https URL. Returns a fileAssetId to pass to materialize_get_quote. Prefer this over materialize_request_upload_url whenever you can't PUT the bytes yourself. Optionally pass `metadata` to name the file or set its listing details; it lands private by default.",
+        inputSchema: {
+          file: chatFileSchema.optional(),
+          url: z
+            .string()
+            .url()
+            .optional()
+            .describe("Public https URL of the model, when there's no attached file"),
+          filename: z
+            .string()
+            .max(200)
+            .optional()
+            .describe("Original filename with extension, if the URL doesn't end in one"),
+          fileUnit: z.enum(["mm", "cm", "in"]).optional(),
+          metadata: fileMetadataSchema.optional(),
+        },
+        _meta: { "openai/fileParams": ["file"] },
+      },
+      async ({ file, url, filename, fileUnit, metadata }, extra) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "files:write");
+          const source = file?.download_url ?? url;
+          if (!source) {
+            return errorResult({
+              code: "missing_file",
+              message:
+                "No file reached Materialize. Ask the user to attach the model again, or pass a public https URL as `url`.",
+              retryable: true,
+            });
+          }
+          const result = await importModelFromUrlForUser({
+            userId: auth.userId,
+            url: source,
+            filename: filename ?? file?.file_name,
+            fileUnit,
+            metadata,
+          });
+          if ("error" in result) {
+            return errorResult({ code: "import_failed", message: result.error });
+          }
+          return jsonResult(result);
+        } catch (err) {
+          return scopeOrInternal(err, "materialize_import_model");
         }
       }
     );

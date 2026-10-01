@@ -12,7 +12,13 @@ import {
   printOrderItems,
   users,
 } from "@/lib/db/schema";
-import { deleteObject, generateUploadUrl, objectExists } from "@/lib/storage";
+import {
+  deleteObject,
+  generateUploadUrl,
+  objectExists,
+  putObject,
+} from "@/lib/storage";
+import { fetchModelBytes, ModelFetchError } from "./fetch-model";
 import { notUnsavedStudioDraft } from "@/lib/studio-drafts";
 import { isCurrentAsset } from "@/lib/files/current-version";
 import { uploadModel } from "@/lib/craftcloud/client";
@@ -289,6 +295,57 @@ export async function registerUploadForUser(
     logError("registerUploadForUser", error);
     return { error: "Failed to register upload" };
   }
+}
+
+export interface ImportModelInput {
+  userId: string;
+  /** https URL to the model: ChatGPT's hydrated download_url, or any public link. */
+  url: string;
+  /** Preferred over the URL's own last segment for the name and format. */
+  filename?: string;
+  fileUnit?: SupportedUnit;
+  metadata?: FileMetadataInput;
+}
+
+/**
+ * Fetch a model from a URL into the user's R2 prefix, then register it
+ * exactly as an agent-PUT upload would be. This is the path for hosts
+ * whose model can't PUT bytes itself — chiefly ChatGPT, which hands a
+ * file the user attached to a tool as a short-lived download URL.
+ */
+export async function importModelFromUrlForUser(
+  input: ImportModelInput
+): Promise<RegisterUploadResult | { error: string }> {
+  let fetched;
+  try {
+    fetched = await fetchModelBytes(input.url, MAX_UPLOAD_BYTES);
+  } catch (err) {
+    if (err instanceof ModelFetchError) return { error: err.message };
+    throw err;
+  }
+
+  const originalFilename = (input.filename ?? fetched.urlFilename ?? "").trim();
+  const format = deriveFormat(originalFilename);
+  if (!format) {
+    return {
+      error: originalFilename
+        ? `Unsupported file format. Allowed: ${SUPPORTED_FORMATS.join(", ")}`
+        : `Pass the filename (with its extension: ${SUPPORTED_FORMATS.join(", ")}) so the format is known.`,
+    };
+  }
+
+  const storageKey = `uploads/${input.userId}/${nanoid()}/${sanitizeFilename(originalFilename)}`;
+  await putObject(storageKey, fetched.bytes, "application/octet-stream");
+
+  return registerUploadForUser({
+    userId: input.userId,
+    storageKey,
+    originalFilename,
+    format,
+    fileSize: fetched.bytes.byteLength,
+    fileUnit: input.fileUnit,
+    metadata: input.metadata,
+  });
 }
 
 /**

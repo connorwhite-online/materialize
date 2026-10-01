@@ -38,9 +38,21 @@ vi.mock("@/lib/storage", () => ({
   deleteObject: vi.fn(),
   generateUploadUrl: (...args: unknown[]) => mockGenerateUploadUrl(...args),
   objectExists: vi.fn(),
+  putObject: (...args: unknown[]) => mockPutObject(...args),
 }));
 
-import { requestPhotoUploadUrlForUser } from "../files";
+const mockPutObject = vi.fn();
+const mockFetchModelBytes = vi.fn();
+vi.mock("../fetch-model", async () => {
+  class ModelFetchError extends Error {}
+  return {
+    ModelFetchError,
+    fetchModelBytes: (...args: unknown[]) => mockFetchModelBytes(...args),
+  };
+});
+
+import { importModelFromUrlForUser, requestPhotoUploadUrlForUser } from "../files";
+import { ModelFetchError } from "../fetch-model";
 
 describe("requestPhotoUploadUrlForUser", () => {
   beforeEach(() => {
@@ -89,5 +101,50 @@ describe("requestPhotoUploadUrlForUser", () => {
 
     expect(result).toEqual({ error: "Unsupported photo content type" });
     expect(mockGenerateUploadUrl).not.toHaveBeenCalled();
+  });
+});
+
+describe("importModelFromUrlForUser", () => {
+  beforeEach(() => {
+    mockPutObject.mockReset();
+    mockFetchModelBytes.mockReset();
+  });
+
+  it("returns the fetch error as a tool error without writing to storage", async () => {
+    mockFetchModelBytes.mockRejectedValue(
+      new ModelFetchError("That URL points at a private address.")
+    );
+    const result = await importModelFromUrlForUser({
+      userId: "user_1",
+      url: "https://169.254.169.254/latest",
+    });
+    expect(result).toEqual({ error: "That URL points at a private address." });
+    expect(mockPutObject).not.toHaveBeenCalled();
+  });
+
+  it("asks for a filename when neither the caller nor the URL names one", async () => {
+    mockFetchModelBytes.mockResolvedValue({
+      bytes: new Uint8Array([1, 2, 3]),
+      urlFilename: null,
+    });
+    const result = await importModelFromUrlForUser({
+      userId: "user_1",
+      url: "https://files.example.com/download?id=abc",
+    });
+    expect(result).toMatchObject({ error: expect.stringContaining("Pass the filename") });
+    expect(mockPutObject).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unsupported extension", async () => {
+    mockFetchModelBytes.mockResolvedValue({
+      bytes: new Uint8Array([1, 2, 3]),
+      urlFilename: "notes.pdf",
+    });
+    const result = await importModelFromUrlForUser({
+      userId: "user_1",
+      url: "https://files.example.com/notes.pdf",
+    });
+    expect(result).toMatchObject({ error: expect.stringContaining("Unsupported file format") });
+    expect(mockPutObject).not.toHaveBeenCalled();
   });
 });

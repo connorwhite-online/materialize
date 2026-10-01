@@ -82,6 +82,7 @@ Load these when you reach the relevant step; do not preload:
 | --- | --- |
 | `materialize_list_materials` | Browse the material catalog (filter by group/query) |
 | `materialize_get_material` | One material's properties, build volume, finishes, colors |
+| `materialize_import_model` | Import a model from a public https URL (the server downloads it) |
 | `materialize_request_upload_url` | Presigned URL for the model bytes |
 | `materialize_register_upload` | Turn an uploaded object into a quotable `fileAssetId` |
 | `materialize_list_files` | The user's registered models |
