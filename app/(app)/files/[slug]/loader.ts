@@ -45,6 +45,7 @@ export const loadFileBySlug = cache(async function loadFileBySlug(slug: string) 
       minWallThickness: files.minWallThickness,
       visibility: files.visibility,
       coverPhotoId: files.coverPhotoId,
+      currentAssetId: files.currentAssetId,
       downloadCount: files.downloadCount,
       viewCount: files.viewCount,
       createdAt: files.createdAt,

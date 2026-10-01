@@ -14,6 +14,7 @@ import {
 } from "@/lib/db/schema";
 import { deleteObject, generateUploadUrl, objectExists } from "@/lib/storage";
 import { notUnsavedStudioDraft } from "@/lib/studio-drafts";
+import { isCurrentAsset } from "@/lib/files/current-version";
 import { uploadModel } from "@/lib/craftcloud/client";
 import { logError } from "@/lib/logger";
 import { LICENSE_ENUM_VALUES, type LicenseId } from "@/lib/licenses";
@@ -258,8 +259,15 @@ export async function registerUploadForUser(
         format: input.format,
         fileUnit: input.fileUnit ?? "mm",
         fileSize: input.fileSize,
+        versionNumber: 1,
       })
       .returning({ id: fileAssets.id });
+
+    // v1 is the live version (docs/file-versioning.md).
+    await db
+      .update(files)
+      .set({ currentAssetId: asset.id })
+      .where(eq(files.id, fileRow.id));
 
     after(() =>
       uploadAssetToCraftCloud({
@@ -607,7 +615,15 @@ export async function listFilesForUser(
     // Library listing: unsaved text-to-CAD drafts stay studio-only
     // (docs/text-to-cad/05 §B). By-id MCP lookups intentionally don't
     // filter — drafts remain printable/orderable by their owner.
-    .where(and(eq(files.userId, userId), notUnsavedStudioDraft()))
+    // One row per file: its live version (docs/file-versioning.md), not
+    // every version in its history.
+    .where(
+      and(
+        eq(files.userId, userId),
+        notUnsavedStudioDraft(),
+        isCurrentAsset()
+      )
+    )
     .orderBy(desc(fileAssets.createdAt));
 
   return rows.map((r) => ({

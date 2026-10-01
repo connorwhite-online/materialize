@@ -65,6 +65,8 @@ flag chosen at implementation time; the requirement is a **cheap, indexed discri
 
 ### C. One file per design (save updates, not multiplies)
 
+> **Superseded by `docs/file-versioning.md`** (2026-09-29): the "v2" below shipped. Re-save now adds the generation's asset as the saved file's next version and moves `files.currentAssetId`; the v1 asset swap is gone.
+
 When a thread is saved, `savedFileId` points at THE file for that design. Saving a newer
 version **re-points that same file's asset** rather than publishing a second file:
 

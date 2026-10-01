@@ -431,9 +431,18 @@ export async function createFileListing(formData: FormData) {
           fileUnit: asset.fileUnit ?? "mm",
           fileSize: asset.fileSize,
           contentHash: byteHashes[i] ?? null,
+          versionNumber: i + 1,
         }))
       )
       .returning({ id: fileAssets.id });
+
+    // The first asset is the live version (docs/file-versioning.md).
+    if (insertedAssets[0]) {
+      await db
+        .update(files)
+        .set({ currentAssetId: insertedAssets[0].id })
+        .where(eq(files.id, file.id));
+    }
 
     // Defer the geometry parse + cross-user geometry-hash check. If
     // it finds a collision, the listing gets auto-archived with a

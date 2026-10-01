@@ -19,6 +19,7 @@ import {
 } from "@/lib/db/schema";
 import { eq, and, asc, desc, inArray, count } from "drizzle-orm";
 import { loadFileBySlug, loadPreviewView } from "./loader";
+import { pickCurrentAsset } from "@/lib/files/current-version";
 import { ownsLoadedFile, userHasUsedFile } from "@/lib/entitlement";
 import { isOrgMember } from "@/lib/authorization";
 import { Card, CardContent } from "@/components/ui/card";
@@ -578,8 +579,10 @@ export default async function FileDetailPage(props: {
     author: null,
   }));
 
-  // Primary asset drives the filename / size / preview / bounding box.
-  const primaryAsset = assets[0] ?? null;
+  // The live version (docs/file-versioning.md) drives the filename / size /
+  // preview / bounding box, and the Print + Download buttons. `assets`
+  // stays the whole history: order/print stats above count every version.
+  const primaryAsset = pickCurrentAsset(file.currentAssetId, assets);
   const PREVIEWABLE = new Set(["stl", "obj", "3mf"]);
   const FINGERPRINTABLE = new Set(["stl", "obj", "3mf"]);
   const previewable =
@@ -832,11 +835,11 @@ export default async function FileDetailPage(props: {
                     Download
                   </Button>
                 )}
-                {assets[0] && (
+                {primaryAsset && (
                   <Button
                     size="xl"
                     className="min-w-0 flex-1 font-semibold"
-                    render={<Link href={`/print/${assets[0].id}`} />}
+                    render={<Link href={`/print/${primaryAsset.id}`} />}
                   >
                     <Print size={18} />
                     Print
@@ -847,9 +850,9 @@ export default async function FileDetailPage(props: {
                   actually has a persisted STEP (self-hiding for mesh-only /
                   non-CAD files, so no dead button). Same entitlement as the
                   STL download, enforced server-side in the action. */}
-              {canDownload && assets[0] && (
+              {canDownload && primaryAsset && (
                 <StepDownloadLink
-                  fileAssetId={assets[0].id}
+                  fileAssetId={primaryAsset.id}
                   className="w-full"
                 />
               )}

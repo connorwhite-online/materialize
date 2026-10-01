@@ -9,6 +9,7 @@ import {
 import { eq, and, desc, inArray, sql } from "drizzle-orm";
 import { withDbRetry } from "@/lib/db/retry";
 import { notUnsavedStudioDraft } from "@/lib/studio-drafts";
+import { currentAssetsByFileId } from "@/lib/files/current-version";
 
 // Cap owned + purchased file fetches at the same user-friendly ceiling
 // as the profile library tab (components/profile/library-tab.tsx). This
@@ -58,6 +59,7 @@ async function loadLibraryTilesOnce(userId: string): Promise<LibraryTile[]> {
         name: files.name,
         slug: files.slug,
         thumbnailUrl: files.thumbnailUrl,
+        currentAssetId: files.currentAssetId,
       })
       .from(files)
       .where(and(eq(files.userId, userId), notUnsavedStudioDraft()))
@@ -69,6 +71,7 @@ async function loadLibraryTilesOnce(userId: string): Promise<LibraryTile[]> {
         name: files.name,
         slug: files.slug,
         thumbnailUrl: files.thumbnailUrl,
+        currentAssetId: files.currentAssetId,
       })
       .from(purchases)
       .innerJoin(files, eq(purchases.fileId, files.id))
@@ -98,18 +101,14 @@ async function loadLibraryTilesOnce(userId: string): Promise<LibraryTile[]> {
     .where(inArray(fileAssets.fileId, fileIds))
     .orderBy(fileAssets.createdAt);
 
-  const primaryByFileId = new Map<
-    string,
-    { id: string; format: string; fileSize: number }
-  >();
-  for (const row of assetRows) {
-    if (!row.fileId || primaryByFileId.has(row.fileId)) continue;
-    primaryByFileId.set(row.fileId, {
-      id: row.id,
-      format: row.format,
-      fileSize: row.fileSize,
-    });
-  }
+  // Live version per file (docs/file-versioning.md).
+  const currentAssetIdByFileId = new Map<string, string | null>(
+    [...ownedFiles, ...purchasedRows].map((f) => [f.id, f.currentAssetId])
+  );
+  const primaryByFileId = currentAssetsByFileId(
+    assetRows,
+    currentAssetIdByFileId
+  );
 
   const primaryAssetIds = Array.from(primaryByFileId.values()).map((a) => a.id);
   const lastPrintedByAssetId = new Map<string, Date>();

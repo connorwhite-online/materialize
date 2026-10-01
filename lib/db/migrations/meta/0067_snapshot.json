@@ -1,6 +1,6 @@
 {
-  "id": "49d4b1a3-7d21-4b8a-a23b-2c418e302684",
-  "prevId": "9b5d1aa9-da1a-407c-b0dc-412998529b9f",
+  "id": "e9f9366c-adb3-4dc4-8bc3-8360233e9c5b",
+  "prevId": "49d4b1a3-7d21-4b8a-a23b-2c418e302684",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3433,6 +3433,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "oauth_client_id": {
+          "name": "oauth_client_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -3462,6 +3468,27 @@
           "columns": [
             {
               "expression": "token_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "personal_access_tokens_user_oauth_client_uniq": {
+          "name": "personal_access_tokens_user_oauth_client_uniq",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "oauth_client_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
