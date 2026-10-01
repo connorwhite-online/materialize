@@ -700,7 +700,7 @@ export default async function FileDetailPage(props: {
               fileName={file.name}
               hasBuyers={ownerBuyerCount > 0}
               buyerCount={ownerBuyerCount}
-              redirectTo={`/${file.username}`}
+              redirectTo="/"
               trigger={
                 <Button
                   variant="ghost"

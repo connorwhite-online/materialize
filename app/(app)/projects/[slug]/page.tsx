@@ -696,7 +696,7 @@ export default async function ProjectDetailPage(props: {
         projectName={project.name}
         hasBuyers={ownerBuyerCount > 0}
         buyerCount={ownerBuyerCount}
-        redirectTo={`/${project.username}`}
+        redirectTo="/"
         trigger={
           <Button
             variant="ghost"
