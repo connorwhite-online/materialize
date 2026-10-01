@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Get 3D models professionally printed and shipped: instant quotes from print shops across plastics, resins and metals, and orders the user approves before anything is charged.",
   "author": {
-    "name": "Materialize",
+    "name": "Connor White",
     "url": "https://www.materialize.cc"
   },
   "homepage": "https://www.materialize.cc",
@@ -21,7 +21,7 @@
         "displayName": "Materialize",
         "shortDescription": "Print and ship your 3D models",
         "longDescription": "Attach an STL, STEP, OBJ, 3MF or AMF file, or share a link to one, and Materialize compares live prices from professional print shops across plastics, resins and metals, with lead times and shipping. Pick an option and Materialize prepares the order; you review and pay on materialize.cc before anything is made or charged. You can also check on your print orders, browse materials, and manage the models and hardware projects you publish on Materialize.\n\nFor people who need a physical part and don't own a printer, or need an industrial process like SLS nylon or metal. Limitations: prices are in USD; paid model downloads are bought on the website, not in chat.",
-        "developerName": "Materialize",
+        "developerName": "Connor White",
         "category": "Productivity",
         "capabilities": [
           "Quote 3D prints",

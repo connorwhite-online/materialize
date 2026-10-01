@@ -26,6 +26,14 @@ const COLUMNS = [
     title: "Agents",
     links: [{ href: "/llms.txt", label: "llms.txt" }],
   },
+  {
+    title: "Company",
+    links: [
+      { href: "/support", label: "Support" },
+      { href: "/privacy", label: "Privacy" },
+      { href: "/terms", label: "Terms" },
+    ],
+  },
 ] as const;
 
 export function LandingFooter() {
@@ -41,7 +49,7 @@ export function LandingFooter() {
           </div>
           <nav
             aria-label="Footer"
-            className="grid grid-cols-2 gap-8 sm:grid-cols-3"
+            className="grid grid-cols-2 gap-8 sm:grid-cols-4"
           >
             {COLUMNS.map((col) => (
               <div key={col.title} className="flex flex-col gap-2.5">

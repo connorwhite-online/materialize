@@ -67,6 +67,10 @@ describe("PUBLIC_ROUTES — genuinely public surfaces", () => {
     "/.well-known/oauth-authorization-server",
     "/.well-known/openai-apps-challenge",
     "/review/calibration-cube-20mm.stl",
+    // Linked from plugin.json; directory review fetches them signed out.
+    "/privacy",
+    "/terms",
+    "/support",
   ])("%s stays reachable without a session", (path) => {
     expect(at(path)).toBe(true);
   });
