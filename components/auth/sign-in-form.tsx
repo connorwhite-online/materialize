@@ -53,6 +53,12 @@ export function SignInForm({
   const [step, setStep] = useState<Step>("identifier");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // Password sign-in exists for accounts that can't receive an email
+  // code, chiefly the app-directory reviewer account (OpenAI rejects
+  // listings whose test login needs an emailed code). Nobody else has
+  // a password, so it stays a quiet text link rather than a field.
+  const [usePassword, setUsePassword] = useState(false);
+  const [password, setPassword] = useState("");
 
   const finishSignedIn = async () => {
     const { error: finalizeError } = await signIn.finalize({
@@ -111,6 +117,29 @@ export function SignInForm({
     }
 
     setStep("code");
+    setLoading(false);
+  };
+
+  const handlePasswordSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+
+    const { error: passwordError } = await signIn.password({
+      identifier,
+      password,
+    });
+    if (passwordError) {
+      setError(errorMessage(passwordError, "Incorrect email or password"));
+      setLoading(false);
+      return;
+    }
+
+    if (signIn.status === "complete") {
+      await finishSignedIn();
+    } else {
+      setError("This account needs another sign-in step. Use an email code.");
+    }
     setLoading(false);
   };
 
@@ -284,7 +313,10 @@ export function SignInForm({
   }
 
   const identifierForm = (
-    <form onSubmit={handleSendCode} className="space-y-4">
+    <form
+      onSubmit={usePassword ? handlePasswordSignIn : handleSendCode}
+      className="space-y-4"
+    >
       <div>
         <Label htmlFor="identifier">Email or username</Label>
         <Input
@@ -298,16 +330,48 @@ export function SignInForm({
         />
       </div>
 
+      {usePassword && (
+        <div>
+          <Label htmlFor="password">Password</Label>
+          <Input
+            id="password"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+        </div>
+      )}
+
       {error && <p className="text-xs text-destructive">{error}</p>}
 
       <Button
         type="submit"
         size="xl"
         className="w-full"
-        disabled={loading || !identifier}
+        disabled={loading || !identifier || (usePassword && !password)}
       >
-        {loading ? "Sending code..." : "Continue"}
+        {usePassword
+          ? loading
+            ? "Signing in..."
+            : "Sign in"
+          : loading
+            ? "Sending code..."
+            : "Continue"}
       </Button>
+
+      <button
+        type="button"
+        onClick={() => {
+          setUsePassword((v) => !v);
+          setPassword("");
+          setError("");
+        }}
+        className="block w-full text-center text-xs text-muted-foreground hover:text-foreground"
+      >
+        {usePassword ? "Email me a code instead" : "Sign in with a password"}
+      </button>
     </form>
   );
 
