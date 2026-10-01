@@ -40,6 +40,7 @@ vi.mock("@/lib/db/schema", () => ({
     id: "id",
     thumbnailUrl: "thumbnailUrl",
     status: "status",
+    visibility: "visibility",
     userId: "userId",
     organizationId: "organizationId",
     coverPhotoId: "coverPhotoId",
@@ -424,6 +425,67 @@ describe("GET /api/thumbnails/[fileId]", () => {
       expect(res.headers.get("Content-Type")).toBe("image/webp");
       expect(mockIsOrgMember).toHaveBeenCalledWith("org-teammate", "org-1");
 
+      fetchSpy.mockRestore();
+    });
+  });
+  describe("private files", () => {
+    const fileId = "ba14f9ed-106b-46e3-8abc-123456789012";
+    const photoId = "11111111-2222-4333-8444-555555555555";
+    const privateRow = {
+      id: fileId,
+      thumbnailUrl: `/api/thumbnails/${fileId}`,
+      // Private files are usually still `published` — status alone
+      // must not open the gate.
+      status: "published",
+      visibility: "private",
+      userId: "owner-1",
+      organizationId: null,
+      coverPhotoId: null,
+      coverStorageKey: null,
+    };
+
+    it("serves the placeholder for a published private file to a stranger", async () => {
+      setMockUserId("stranger");
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      mockDbWhere.mockResolvedValueOnce([privateRow]);
+
+      const { req, context } = makeRequest(fileId);
+      const res = await GET(req, context);
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Content-Type")).toBe("image/png");
+      expect(generateDownloadUrl).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+    });
+
+    it("does not serve a private file's photos via ?photoId to an anon visitor", async () => {
+      setMockUserId(null);
+      mockDbWhere.mockResolvedValueOnce([privateRow]);
+
+      const { req, context } = makeRequest(fileId, `photoId=${photoId}`);
+      const res = await GET(req, context);
+
+      expect(res.headers.get("Content-Type")).toBe("image/png");
+      expect(generateDownloadUrl).not.toHaveBeenCalled();
+    });
+
+    it("streams the real bytes to the owner", async () => {
+      setMockUserId("owner-1");
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response("FAKE_WEBP_BYTES", {
+          status: 200,
+          headers: { "Content-Type": "image/webp" },
+        })
+      );
+      mockDbWhere.mockResolvedValueOnce([privateRow]);
+
+      const { req, context } = makeRequest(fileId);
+      const res = await GET(req, context);
+
+      expect(res.headers.get("Content-Type")).toBe("image/webp");
+      // Private bytes must never land in a shared cache.
+      expect(res.headers.get("Cache-Control")).toMatch(/^private/);
       fetchSpy.mockRestore();
     });
   });

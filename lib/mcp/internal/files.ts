@@ -19,6 +19,7 @@ import { uploadModel } from "@/lib/craftcloud/client";
 import { logError } from "@/lib/logger";
 import { LICENSE_ENUM_VALUES, type LicenseId } from "@/lib/licenses";
 import { DESIGN_TAG_OPTIONS } from "@/lib/validations/file";
+import { stripPhotoMetadata } from "@/lib/photos/strip-metadata";
 
 const SUPPORTED_FORMATS = ["stl", "obj", "3mf", "step", "amf"] as const;
 export type SupportedFormat = (typeof SUPPORTED_FORMATS)[number];
@@ -356,6 +357,10 @@ export async function addFilePhotoForUser(params: {
   );
 
   const trimmedCaption = params.caption?.trim().slice(0, 500);
+
+  // Drop GPS and other EXIF before the photo becomes visible.
+  const stripped = await stripPhotoMetadata(params.storageKey);
+  if ("error" in stripped) return stripped;
 
   const [photo] = await db
     .insert(filePhotos)

@@ -10,6 +10,7 @@ import { logError } from "@/lib/logger";
 import { userHasUsedFile } from "@/lib/entitlement";
 import { notifyBuildOnFile } from "@/lib/notifications/notify";
 import { makeSnippet } from "@/lib/notifications/types";
+import { stripPhotoMetadata } from "@/lib/photos/strip-metadata";
 
 const MAX_CAPTION_LENGTH = 500;
 
@@ -58,6 +59,10 @@ export async function addFilePhoto(params: {
       .where(eq(filePhotos.fileId, params.fileId));
 
     const maxOrder = existing.reduce((max, e) => Math.max(max, e.sortOrder), -1);
+
+    // Drop GPS and other EXIF before the photo becomes visible.
+    const stripped = await stripPhotoMetadata(params.storageKey);
+    if ("error" in stripped) return stripped;
 
     const [photo] = await db
       .insert(filePhotos)
@@ -129,6 +134,10 @@ export async function addFileBuild(params: {
     }
 
     const trimmedCaption = params.caption?.trim().slice(0, MAX_CAPTION_LENGTH);
+
+    // Drop GPS and other EXIF before the photo becomes visible.
+    const stripped = await stripPhotoMetadata(params.storageKey);
+    if ("error" in stripped) return stripped;
 
     const [photo] = await db
       .insert(filePhotos)
@@ -215,6 +224,10 @@ export async function addInlineCommentPhoto(params: {
           "Print or download this file first to attach a photo.",
       };
     }
+
+    // Drop GPS and other EXIF before the photo becomes visible.
+    const stripped = await stripPhotoMetadata(params.storageKey);
+    if ("error" in stripped) return stripped;
 
     const [photo] = await db
       .insert(filePhotos)

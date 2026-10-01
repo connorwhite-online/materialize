@@ -42,10 +42,9 @@ const UUID_RE =
  *     author-uploaded images without pre-signing URLs server-side.
  *     The photoId must belong to this file or the route 404s.
  *
- * Published thumbnails are public (this is how browse/search show
- * previews to anon visitors). For unpublished files (drafts), the
- * thumbnail is gated to the owner so a leaked fileId can't surface
- * work-in-progress artwork.
+ * Published public thumbnails are public (this is how browse/search
+ * show previews to anon visitors). Drafts and private files are gated
+ * to the owner or org members so a leaked fileId can't surface them.
  *
  * Callers that render draft/private thumbnails through next/image
  * MUST pass `unoptimized` (see `isSessionGatedImageSrc`) — the
@@ -90,6 +89,7 @@ export async function GET(
         id: files.id,
         thumbnailUrl: files.thumbnailUrl,
         status: files.status,
+        visibility: files.visibility,
         userId: files.userId,
         organizationId: files.organizationId,
         coverPhotoId: files.coverPhotoId,
@@ -109,8 +109,13 @@ export async function GET(
       return thumbnailPlaceholderResponse();
     }
 
-    const isDraft = row.status !== "published";
-    if (isDraft) {
+    // Same gate as the /files/[slug] page: drafts and private files are
+    // visible only to their writers (creator or org member). A private
+    // file is often still `published`, so gating on status alone served
+    // its thumbnail and photos to anyone holding the id.
+    const isRestricted =
+      row.status !== "published" || row.visibility === "private";
+    if (isRestricted) {
       const { userId } = await auth();
       const canView =
         !!userId &&
@@ -204,11 +209,11 @@ export async function GET(
     const headers: Record<string, string> = {
       "Content-Type": contentType,
       "X-Content-Type-Options": "nosniff",
-      // Drafts are owner-gated above so they must not enter shared
-      // caches. Published thumbnails are public — let edge + browser
+      // Drafts and private files are owner-gated above so they must
+      // not enter shared caches. Published thumbnails are public — let edge + browser
       // hold onto them for a few minutes; the optimizer cache holds
       // them much longer downstream of that.
-      "Cache-Control": isDraft
+      "Cache-Control": isRestricted
         ? "private, max-age=60"
         : "public, max-age=300, stale-while-revalidate=600",
     };
