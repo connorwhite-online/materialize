@@ -5,9 +5,9 @@
   "description": "Get 3D models professionally printed and shipped: instant quotes from print shops across plastics, resins and metals, and orders the user approves before anything is charged.",
   "author": {
     "name": "Materialize",
-    "url": "https://materialize.cc"
+    "url": "https://www.materialize.cc"
   },
-  "homepage": "https://materialize.cc",
+  "homepage": "https://www.materialize.cc",
   "keywords": [
     "3d-printing",
     "manufacturing",
@@ -29,10 +29,10 @@
           "Track print orders",
           "Manage published models"
         ],
-        "websiteURL": "https://materialize.cc",
-        "supportURL": "https://materialize.cc/support",
-        "privacyPolicyURL": "https://materialize.cc/privacy",
-        "termsOfServiceURL": "https://materialize.cc/terms",
+        "websiteURL": "https://www.materialize.cc",
+        "supportURL": "https://www.materialize.cc/support",
+        "privacyPolicyURL": "https://www.materialize.cc/privacy",
+        "termsOfServiceURL": "https://www.materialize.cc/terms",
         "defaultPrompt": [
           "How much would it cost to print this part?",
           "Which material should I use for a part that sits in a hot car?",
@@ -51,12 +51,12 @@
               "tools_triggered": "materialize_import_model, materialize_get_quote",
               "expected_behavior": "Imports the attached cube, then lists several nylon options with vendor, price including shipping, and lead time. Nothing is ordered.",
               "file_attachment_urls": [
-                "https://materialize.cc/review/calibration-cube-20mm.stl"
+                "https://www.materialize.cc/review/calibration-cube-20mm.stl"
               ]
             },
             {
               "description": "Price a model from a link",
-              "prompt": "Get me print quotes for https://materialize.cc/review/calibration-cube-20mm.stl in any plastic, shipping to the US.",
+              "prompt": "Get me print quotes for https://www.materialize.cc/review/calibration-cube-20mm.stl in any plastic, shipping to the US.",
               "tools_triggered": "materialize_import_model, materialize_get_quote",
               "expected_behavior": "Downloads the model from the link and returns a spread of plastic options, cheapest first, with prices and lead times."
             },

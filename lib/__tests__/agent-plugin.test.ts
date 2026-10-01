@@ -35,7 +35,7 @@ describe("materialize agent plugin", () => {
     const mcp = JSON.parse(readFileSync(join(pluginRoot, "mcp.json"), "utf8"));
     expect(mcp.mcpServers.materialize).toEqual({
       type: "streamable-http",
-      url: "https://materialize.cc/api/mcp",
+      url: "https://www.materialize.cc/api/mcp",
     });
   });
 

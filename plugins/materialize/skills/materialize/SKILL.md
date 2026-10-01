@@ -1,6 +1,6 @@
 ---
 name: materialize
-description: Order real, professionally manufactured 3D prints of STL/STEP/OBJ/3MF/AMF models through Materialize (materialize.cc) — instant quotes across industrial processes (FDM, SLS, MJF, resins, metals) from vetted vendors, shipped to the user's door. Use when the user wants a physical part manufactured — the fulfillment step after CAD generation. Uploads, quotes, and orders run over the Materialize MCP server; every order is approved by the human via their existing confirmation flow before money moves.
+description: Order real, professionally manufactured 3D prints of STL/STEP/OBJ/3MF/AMF models through Materialize (www.materialize.cc) — instant quotes across industrial processes (FDM, SLS, MJF, resins, metals) from vetted vendors, shipped to the user's door. Use when the user wants a physical part manufactured — the fulfillment step after CAD generation. Uploads, quotes, and orders run over the Materialize MCP server; every order is approved by the human via their existing confirmation flow before money moves.
 ---
 
 # Materialize
@@ -13,10 +13,10 @@ Use this skill as the terminal node of a CAD workflow: once a validated STEP/STL
 
 Materialize exposes an MCP server over streamable HTTP:
 
-- **Endpoint**: `<origin>/api/mcp`, where `<origin>` is the Materialize instance the user's account lives on — `https://materialize.cc/api/mcp` for the hosted service. Never assume `localhost`; if the user runs a private instance, ask for its origin.
+- **Endpoint**: `<origin>/api/mcp`, where `<origin>` is the Materialize instance the user's account lives on — `https://www.materialize.cc/api/mcp` for the hosted service. Never assume `localhost`; if the user runs a private instance, ask for its origin.
 - **Auth, installed as a ChatGPT/Codex/Claude plugin or connector**: the host signs the user in with OAuth on first use. Nothing to configure; skip the token steps below.
 - **Auth, everywhere else**: `Authorization: Bearer <personal-access-token>`. The user mints the token at `<origin>/dashboard/settings/tokens` (that page also displays the exact endpoint URL). Tokens are scoped; this workflow needs `catalog:read`, `files:read`, `files:write`, `quotes:read`, `orders:create`, `orders:read`.
-- Example (Claude Code): `claude mcp add --transport http materialize https://materialize.cc/api/mcp --header "Authorization: Bearer <token>"`.
+- Example (Claude Code): `claude mcp add --transport http materialize https://www.materialize.cc/api/mcp --header "Authorization: Bearer <token>"`.
 
 Every tool returns a single JSON text block; errors carry `{ "error": { code, message, retryable } }`. An `invalid_scope` error means the token lacks a scope — the user must mint a broader token; you cannot fix this yourself.
 

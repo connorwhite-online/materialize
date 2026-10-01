@@ -11,13 +11,24 @@ describe("GET /.well-known/oauth-protected-resource", () => {
     vi.stubEnv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", key);
     const { GET } = await import("../route");
     const res = await GET(
-      new Request("https://materialize.cc/.well-known/oauth-protected-resource/api/mcp")
+      new Request("https://www.materialize.cc/.well-known/oauth-protected-resource")
     );
     const body = await res.json();
-    expect(body.resource).toBe("https://materialize.cc/api/mcp");
+    // The MCP endpoint, not the bare origin: ChatGPT echoes it as `resource`.
+    expect(body.resource).toBe("https://www.materialize.cc/api/mcp");
     expect(body.authorization_servers).toEqual(["https://clerk.materialize.cc"]);
     expect(body.scopes_supported).toEqual(expect.arrayContaining(["openid", "email"]));
     expect(res.headers.get("content-type")).toContain("application/json");
+  });
+
+  it("serves the same document at the path-suffixed URL", async () => {
+    const key = `pk_live_${Buffer.from("clerk.materialize.cc$").toString("base64")}`;
+    vi.stubEnv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", key);
+    const { GET } = await import("../[...path]/route");
+    const res = await GET(
+      new Request("https://www.materialize.cc/.well-known/oauth-protected-resource/api/mcp")
+    );
+    expect((await res.json()).resource).toBe("https://www.materialize.cc/api/mcp");
   });
 
   it("404s without a Clerk key", async () => {

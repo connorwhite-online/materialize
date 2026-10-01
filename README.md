@@ -40,7 +40,7 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 Materialize is agent-ready in three ways:
 
 - **Skill** — coding agents (Claude Code, Codex, and compatible) can install the print-ordering skill straight from this repo: `npx skills install connorwhite-online/materialize`. It teaches the full upload → quote → order workflow with the human-approval flow built in. Source: [`skills/materialize/`](./skills/materialize/SKILL.md).
-- **MCP server** — `https://materialize.cc/api/mcp` (streamable HTTP, personal-access-token auth, `materialize_*` tools for catalog/files/quotes/orders). Mint tokens and spending policies in your dashboard settings.
-- **llms.txt** — [`https://materialize.cc/llms.txt`](https://materialize.cc/llms.txt) describes the agent-facing surface; `/llms-full.txt` dumps the material catalog.
+- **MCP server** — `https://www.materialize.cc/api/mcp` (streamable HTTP, personal-access-token auth, `materialize_*` tools for catalog/files/quotes/orders). Mint tokens and spending policies in your dashboard settings.
+- **llms.txt** — [`https://www.materialize.cc/llms.txt`](https://www.materialize.cc/llms.txt) describes the agent-facing surface; `/llms-full.txt` dumps the material catalog.
 
 Every agent-created order is gated by human approval (email confirmation, or a pre-authorized per-token spending policy) — there is no unattended-purchase mode.

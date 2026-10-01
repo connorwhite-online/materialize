@@ -3,7 +3,7 @@
   "mcpServers": {
     "materialize": {
       "type": "streamable-http",
-      "url": "https://materialize.cc/api/mcp"
+      "url": "https://www.materialize.cc/api/mcp"
     }
   }
 }
