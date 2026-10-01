@@ -1,0 +1,4 @@
+interface:
+  display_name: Materialize
+  short_description: Order professionally manufactured 3D prints of STL/STEP models with instant multi-vendor quotes.
+  default_prompt: Use $materialize to upload this model, compare print quotes, and create an order for the user to approve.

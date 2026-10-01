@@ -1,0 +1,35 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "materialize",
+  "version": "0.1.0",
+  "description": "Get 3D models professionally printed and shipped: instant quotes from print shops across plastics, resins and metals, and orders the user approves before anything is charged.",
+  "author": {
+    "name": "Materialize",
+    "url": "https://materialize.cc"
+  },
+  "homepage": "https://materialize.cc",
+  "repository": "https://github.com/connorwhite-online/materialize",
+  "keywords": ["3d-printing", "manufacturing", "cad", "stl", "step"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Materialize",
+        "shortDescription": "Get your 3D models printed and shipped",
+        "longDescription": "Attach an STL, STEP, OBJ, 3MF or AMF file and Materialize compares live prices from professional print shops across plastics, resins and metals. Pick an option and you approve and pay on Materialize before anything is ordered. You can also publish models and hardware projects to the Materialize marketplace.",
+        "developerName": "Materialize",
+        "category": "Productivity",
+        "capabilities": ["Read", "Write"],
+        "websiteURL": "https://materialize.cc",
+        "privacyPolicyURL": "https://materialize.cc/privacy",
+        "termsOfServiceURL": "https://materialize.cc/terms",
+        "defaultPrompt": [
+          "Use Materialize to get prices for printing this part.",
+          "Use Materialize to print this model in a strong nylon and ship it to me."
+        ],
+        "brandColor": "#0A0A0A",
+        "composerIcon": "./assets/logo.png",
+        "logo": "./assets/logo.png"
+      }
+    }
+  }
+}
