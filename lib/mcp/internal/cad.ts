@@ -49,6 +49,30 @@ export async function assertCadAccess(userId: string): Promise<void> {
   }
 }
 
+const CAD_ACCESS_TTL_MS = 5 * 60_000;
+const cadAccessCache = new Map<string, { allowed: boolean; at: number }>();
+
+/**
+ * Whether to *list* the CAD tools for this user. Every MCP request builds
+ * a fresh server, so this is cached briefly per user rather than costing
+ * a Clerk read per call. Listing is presentation only: each CAD tool
+ * still calls assertCadAccess itself, uncached, before it runs.
+ */
+export async function hasCadAccess(userId: string): Promise<boolean> {
+  const hit = cadAccessCache.get(userId);
+  if (hit && Date.now() - hit.at < CAD_ACCESS_TTL_MS) return hit.allowed;
+  let allowed: boolean;
+  try {
+    await assertCadAccess(userId);
+    allowed = true;
+  } catch (err) {
+    if (!(err instanceof CadAccessError)) throw err;
+    allowed = false;
+  }
+  cadAccessCache.set(userId, { allowed, at: Date.now() });
+  return allowed;
+}
+
 /** The engine's own system prompt and the closest verified exemplars. */
 export function cadReference(engine: CadEngineId, query: string, limit = 3) {
   const profile = engineFor(engine);

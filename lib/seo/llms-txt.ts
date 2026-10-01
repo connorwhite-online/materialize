@@ -13,7 +13,6 @@ export function llmsTxt(url: string): string {
 - MCP server: ${url}/api/mcp (streamable HTTP)
 - Sign-in: OAuth 2.1 with dynamic client registration. Discovery starts at ${url}/.well-known/oauth-protected-resource. ChatGPT and Claude connect this way.
 - Personal access token (scripts, CI, coding agents): the user creates one at ${url}/dashboard/settings/tokens and sends it as \`Authorization: Bearer mtl_pat_...\`.
-- Coding-agent skill: \`npx skills install connorwhite-online/materialize\` installs the upload, quote and order workflow.
 
 ## Print a model
 

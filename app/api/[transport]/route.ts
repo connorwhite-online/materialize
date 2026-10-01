@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import { z } from "zod";
 import {
@@ -5,6 +6,7 @@ import {
   requireScope,
   MissingScopeError,
   type MaterializeAuthExtra,
+  type MaterializeAuthInfo,
 } from "@/lib/mcp/auth";
 import {
   getCraftCloudCatalog,
@@ -41,6 +43,7 @@ import { getQuoteForUser } from "@/lib/mcp/internal/quotes";
 import {
   assertCadAccess,
   CadAccessError,
+  hasCadAccess,
   cadReference,
   MAX_CAD_CODE_CHARS,
   runCadForAgent,
@@ -83,6 +86,7 @@ function jsonResult(payload: object) {
  * a startup failure instead of a review rejection.
  */
 function annotateTools(server: { registerTool: (...args: never[]) => unknown }) {
+  const tools = new Map<string, unknown>();
   const register = server.registerTool.bind(server) as (
     name: string,
     config: Record<string, unknown>,
@@ -97,7 +101,7 @@ function annotateTools(server: { registerTool: (...args: never[]) => unknown }) 
     if (!annotations) {
       throw new Error(`MCP tool ${name} has no entry in TOOL_ANNOTATIONS`);
     }
-    return register(
+    const tool = register(
       name,
       {
         ...config,
@@ -113,7 +117,44 @@ function annotateTools(server: { registerTool: (...args: never[]) => unknown }) 
       },
       handler
     );
+    tools.set(name, tool);
+    return tool;
   };
+  return tools;
+}
+
+/**
+ * The verified auth for the request being served. mcp-handler builds a
+ * fresh McpServer per request but hands the init callback only the
+ * server, so the token verifier records its result here for
+ * hideUnavailableTools to read.
+ */
+const OWNER_ONLY_TOOLS = [
+  "materialize_cad_reference",
+  "materialize_cad_run",
+  "materialize_cad_save",
+];
+
+const requestAuth = new AsyncLocalStorage<{ auth?: MaterializeAuthInfo }>();
+
+async function verifyAndRecord(req: Request, bearerToken: string | undefined) {
+  const auth = await verifyMaterializeToken(req, bearerToken);
+  const slot = requestAuth.getStore();
+  if (slot) slot.auth = auth;
+  return auth;
+}
+
+/**
+ * Owner-only tools stay out of tools/list for everyone else, so a
+ * directory reviewer or a ChatGPT user never sees tools that can only
+ * refuse them. Presentation only: each tool still enforces its own gate.
+ */
+async function hideUnavailableTools(tools: Map<string, unknown>) {
+  const userId = requestAuth.getStore()?.auth?.extra?.userId;
+  if (!userId || (await hasCadAccess(userId))) return;
+  for (const name of OWNER_ONLY_TOOLS) {
+    (tools.get(name) as { disable?: () => void } | undefined)?.disable?.();
+  }
 }
 
 function errorResult(error: {
@@ -162,8 +203,8 @@ const MCP_SERVER_INSTRUCTIONS = [
 ].join(" ");
 
 const handler = createMcpHandler(
-  (server) => {
-    annotateTools(server);
+  async (server) => {
+    const tools = annotateTools(server);
 
     /* -------------------- CAD (agent writes, Materialize runs) -------------------- */
 
@@ -1508,6 +1549,8 @@ const handler = createMcpHandler(
         }
       }
     );
+
+    await hideUnavailableTools(tools);
   },
   {
     serverInfo: {
@@ -1530,9 +1573,13 @@ const handler = createMcpHandler(
   }
 );
 
-const authedHandler = withMcpAuth(handler, verifyMaterializeToken, {
+const verifiedHandler = withMcpAuth(handler, verifyAndRecord, {
   required: true,
 });
+
+function authedHandler(req: Request) {
+  return requestAuth.run({}, () => verifiedHandler(req));
+}
 
 /**
  * SEC-6 — the internal branch used to echo `err.message` straight
