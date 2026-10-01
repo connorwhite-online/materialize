@@ -49,6 +49,12 @@ export function SignInForm({
 
   const [identifier, setIdentifier] = useState("");
   const [code, setCode] = useState("");
+  // Password sign-in is a secondary path: email codes are the default
+  // and nobody signs up with a password. It exists for accounts that
+  // were given one in the Clerk dashboard, chiefly the plugin-directory
+  // reviewer, whose login can't depend on reading an inbox.
+  const [usePassword, setUsePassword] = useState(false);
+  const [password, setPassword] = useState("");
   const [username, setUsernameInput] = useState("");
   const [step, setStep] = useState<Step>("identifier");
   const [loading, setLoading] = useState(false);
@@ -111,6 +117,29 @@ export function SignInForm({
     }
 
     setStep("code");
+    setLoading(false);
+  };
+
+  const handlePasswordSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+
+    const { error: passwordError } = await signIn.password({
+      identifier,
+      password,
+    });
+    if (passwordError) {
+      setError(errorMessage(passwordError, "Incorrect email or password"));
+      setLoading(false);
+      return;
+    }
+
+    if (signIn.status === "complete") {
+      await finishSignedIn();
+    } else {
+      setError("This account needs another sign-in step. Use an email code instead.");
+    }
     setLoading(false);
   };
 
@@ -284,7 +313,10 @@ export function SignInForm({
   }
 
   const identifierForm = (
-    <form onSubmit={handleSendCode} className="space-y-4">
+    <form
+      onSubmit={usePassword ? handlePasswordSignIn : handleSendCode}
+      className="space-y-4"
+    >
       <div>
         <Label htmlFor="identifier">Email or username</Label>
         <Input
@@ -295,8 +327,23 @@ export function SignInForm({
           placeholder="you@example.com"
           required
           autoFocus
+          autoComplete="username"
         />
       </div>
+
+      {usePassword && (
+        <div>
+          <Label htmlFor="password">Password</Label>
+          <Input
+            id="password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            autoComplete="current-password"
+          />
+        </div>
+      )}
 
       {error && <p className="text-xs text-destructive">{error}</p>}
 
@@ -304,10 +351,28 @@ export function SignInForm({
         type="submit"
         size="xl"
         className="w-full"
-        disabled={loading || !identifier}
+        disabled={loading || !identifier || (usePassword && !password)}
       >
-        {loading ? "Sending code..." : "Continue"}
+        {usePassword
+          ? loading
+            ? "Signing in..."
+            : "Sign in"
+          : loading
+            ? "Sending code..."
+            : "Continue"}
       </Button>
+
+      <button
+        type="button"
+        onClick={() => {
+          setUsePassword((v) => !v);
+          setPassword("");
+          setError("");
+        }}
+        className="block w-full cursor-pointer text-center text-xs text-muted-foreground transition-colors hover:text-foreground"
+      >
+        {usePassword ? "Email me a code instead" : "Use a password"}
+      </button>
     </form>
   );
 

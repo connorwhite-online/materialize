@@ -27,6 +27,13 @@ export const PUBLIC_ROUTES = [
   "/print(.*)",
   "/collections(.*)",
   "/projects(.*)",
+  // Legal + support pages. The plugin directory links reviewers here
+  // with no session. The vanity-profile pattern below would already
+  // match these single segments; listing them keeps them public if
+  // that pattern ever narrows.
+  "/privacy",
+  "/terms",
+  "/support",
   // Mock-only payment / checkout chrome previews (3D fee card,
   // vendor checkout sheet). Each page notFound()s when CraftCloud
   // mock mode is off — listed here so that gate can run instead of
