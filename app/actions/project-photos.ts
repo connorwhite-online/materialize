@@ -20,6 +20,7 @@ import { deleteObject } from "@/lib/storage";
 import { logError } from "@/lib/logger";
 import { userOwnsProject } from "@/lib/entitlement";
 import { canWriteProject } from "@/lib/authorization";
+import { stripPhotoMetadata } from "@/lib/photos/strip-metadata";
 
 const MAX_CAPTION_LENGTH = 500;
 
@@ -63,6 +64,10 @@ export async function addProjectPhoto(params: {
       (max, e) => Math.max(max, e.sortOrder),
       -1
     );
+
+    // Drop GPS and other EXIF before the photo becomes visible.
+    const stripped = await stripPhotoMetadata(params.storageKey);
+    if ("error" in stripped) return stripped;
 
     const [photo] = await db
       .insert(projectPhotos)
@@ -122,6 +127,10 @@ export async function addProjectBuild(params: {
 
     const trimmedCaption = params.caption?.trim().slice(0, MAX_CAPTION_LENGTH);
 
+    // Drop GPS and other EXIF before the photo becomes visible.
+    const stripped = await stripPhotoMetadata(params.storageKey);
+    if ("error" in stripped) return stripped;
+
     const [photo] = await db
       .insert(projectPhotos)
       .values({
@@ -178,6 +187,10 @@ export async function addInlineProjectCommentPhoto(params: {
       };
     }
 
+    // Drop GPS and other EXIF before the photo becomes visible.
+    const stripped = await stripPhotoMetadata(params.storageKey);
+    if ("error" in stripped) return stripped;
+
     const [photo] = await db
       .insert(projectPhotos)
       .values({
@@ -222,6 +235,10 @@ export async function addProjectGuideImage(params: {
     // they reference in it.
     const access = await canWriteProject(userId, params.projectId);
     if (!access.ok) return { error: "Project not found" };
+
+    // Drop GPS and other EXIF before the photo becomes visible.
+    const stripped = await stripPhotoMetadata(params.storageKey);
+    if ("error" in stripped) return stripped;
 
     const [photo] = await db
       .insert(projectPhotos)

@@ -30,6 +30,7 @@ import { LICENSE_ENUM_VALUES, type LicenseId } from "@/lib/licenses";
 import { MAX_BUILD_GUIDE_LENGTH } from "@/lib/validations/project";
 import { sanitizeRichHtml } from "@/lib/sanitize/sanitize-html";
 import { bestEffortDeleteR2 } from "./files";
+import { stripPhotoMetadata } from "@/lib/photos/strip-metadata";
 
 /**
  * Scrub agent-submitted build-guide HTML against the shared allowlist
@@ -700,6 +701,10 @@ export async function addProjectPhotoForUser(params: {
 
   const trimmedCaption = params.caption?.trim().slice(0, MAX_CAPTION_LENGTH);
 
+  // Drop GPS and other EXIF before the photo becomes visible.
+  const stripped = await stripPhotoMetadata(params.storageKey);
+  if ("error" in stripped) return stripped;
+
   const [photo] = await db
     .insert(projectPhotos)
     .values({
@@ -736,6 +741,10 @@ export async function addProjectInlineImageForUser(params: {
   }
   const project = await ownsProject(params.userId, params.projectId);
   if (!project) return { error: "Project not found" };
+
+  // Drop GPS and other EXIF before the photo becomes visible.
+  const stripped = await stripPhotoMetadata(params.storageKey);
+  if ("error" in stripped) return stripped;
 
   const [photo] = await db
     .insert(projectPhotos)
