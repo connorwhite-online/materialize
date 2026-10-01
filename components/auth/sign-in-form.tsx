@@ -25,11 +25,6 @@ interface SignInFormProps {
   redirectUrl?: string;
   /** Social buttons above the email form (sign-in page layout). */
   socialFirst?: boolean;
-  /**
-   * Email + password only, no code and no social buttons. Used solely by
-   * the unlinked /review-sign-in page (see there for why).
-   */
-  passwordOnly?: boolean;
 }
 
 function errorMessage(
@@ -47,7 +42,6 @@ export function SignInForm({
   onSuccess,
   redirectUrl = "/",
   socialFirst = false,
-  passwordOnly = false,
 }: SignInFormProps) {
   const { signIn } = useSignIn();
   const { signUp } = useSignUp();
@@ -59,7 +53,12 @@ export function SignInForm({
   const [step, setStep] = useState<Step>("identifier");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const usePassword = passwordOnly;
+  // Password sign-in exists for the app-directory reviewer account:
+  // OpenAI rejects listings whose test login needs an emailed code, and
+  // reviewers reach this form from inside ChatGPT's connect flow. Nobody
+  // else has a password (Clerk "Sign-up with password" is off), so it is
+  // a quiet text link rather than a field.
+  const [usePassword, setUsePassword] = useState(false);
   const [password, setPassword] = useState("");
 
   const finishSignedIn = async () => {
@@ -362,17 +361,20 @@ export function SignInForm({
             ? "Sending code..."
             : "Continue"}
       </Button>
+
+      <button
+        type="button"
+        onClick={() => {
+          setUsePassword((v) => !v);
+          setPassword("");
+          setError("");
+        }}
+        className="block w-full text-center text-xs text-muted-foreground hover:text-foreground"
+      >
+        {usePassword ? "Email me a code instead" : "Use a password"}
+      </button>
     </form>
   );
-
-  if (passwordOnly) {
-    return (
-      <div className="space-y-4">
-        {identifierForm}
-        <div id="clerk-captcha" />
-      </div>
-    );
-  }
 
   const social = <SocialButtons mode="sign-in" />;
 
