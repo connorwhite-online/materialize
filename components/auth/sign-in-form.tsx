@@ -25,6 +25,11 @@ interface SignInFormProps {
   redirectUrl?: string;
   /** Social buttons above the email form (sign-in page layout). */
   socialFirst?: boolean;
+  /**
+   * Email + password only, no code and no social buttons. Used solely by
+   * the unlinked /review-sign-in page (see there for why).
+   */
+  passwordOnly?: boolean;
 }
 
 function errorMessage(
@@ -42,6 +47,7 @@ export function SignInForm({
   onSuccess,
   redirectUrl = "/",
   socialFirst = false,
+  passwordOnly = false,
 }: SignInFormProps) {
   const { signIn } = useSignIn();
   const { signUp } = useSignUp();
@@ -53,11 +59,7 @@ export function SignInForm({
   const [step, setStep] = useState<Step>("identifier");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  // Password sign-in exists for accounts that can't receive an email
-  // code, chiefly the app-directory reviewer account (OpenAI rejects
-  // listings whose test login needs an emailed code). Nobody else has
-  // a password, so it stays a quiet text link rather than a field.
-  const [usePassword, setUsePassword] = useState(false);
+  const usePassword = passwordOnly;
   const [password, setPassword] = useState("");
 
   const finishSignedIn = async () => {
@@ -360,20 +362,17 @@ export function SignInForm({
             ? "Sending code..."
             : "Continue"}
       </Button>
-
-      <button
-        type="button"
-        onClick={() => {
-          setUsePassword((v) => !v);
-          setPassword("");
-          setError("");
-        }}
-        className="block w-full text-center text-xs text-muted-foreground hover:text-foreground"
-      >
-        {usePassword ? "Email me a code instead" : "Sign in with a password"}
-      </button>
     </form>
   );
+
+  if (passwordOnly) {
+    return (
+      <div className="space-y-4">
+        {identifierForm}
+        <div id="clerk-captcha" />
+      </div>
+    );
+  }
 
   const social = <SocialButtons mode="sign-in" />;
 
