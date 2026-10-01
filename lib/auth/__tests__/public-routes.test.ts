@@ -60,6 +60,11 @@ describe("PUBLIC_ROUTES — genuinely public surfaces", () => {
     "/sitemap.xml",
     "/somehandle",
     "/orders/abc-123/pay-production",
+    // MCP OAuth discovery: fetched before the client has any session.
+    "/api/mcp",
+    "/.well-known/oauth-protected-resource",
+    "/.well-known/oauth-protected-resource/api/mcp",
+    "/.well-known/oauth-authorization-server",
   ])("%s stays reachable without a session", (path) => {
     expect(at(path)).toBe(true);
   });

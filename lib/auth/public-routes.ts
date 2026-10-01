@@ -80,6 +80,12 @@ export const PUBLIC_ROUTES = [
   // does its own bearer-token auth via withMcpAuth — Clerk session
   // cookies are not relevant here.
   "/api/mcp(.*)",
+  // OAuth discovery for that MCP server (RFC 9728 protected-resource +
+  // RFC 8414 authorization-server metadata). ChatGPT and Claude fetch
+  // these unauthenticated before they can sign anyone in; a sign-in
+  // redirect here breaks the connect flow outright.
+  "/.well-known/oauth-protected-resource(.*)",
+  "/.well-known/oauth-authorization-server(.*)",
   // Sentry SDK tunnels client error reports through this same-
   // origin route so ad-blockers don't drop them. No Clerk session
   // expected. Configured in next.config.ts → tunnelRoute.

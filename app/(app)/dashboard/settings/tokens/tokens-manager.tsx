@@ -202,9 +202,17 @@ export function TokensManager({ initialTokens, hasPaymentMethod }: Props) {
               <div className="flex items-center justify-between gap-2">
                 <div>
                   <div className="text-sm font-medium">{t.name}</div>
-                  <code className="text-xs font-mono text-muted-foreground">
-                    {t.prefix}…
-                  </code>
+                  {t.prefix === "oauth" ? (
+                    // OAuth connection row (lib/mcp/oauth.ts): ChatGPT or
+                    // Claude signed in, so there is no token to recognise.
+                    <span className="text-xs text-muted-foreground">
+                      Signed in with your Materialize account
+                    </span>
+                  ) : (
+                    <code className="text-xs font-mono text-muted-foreground">
+                      {t.prefix}…
+                    </code>
+                  )}
                 </div>
                 {!t.revokedAt && (
                   <Button

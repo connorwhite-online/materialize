@@ -1442,6 +1442,12 @@ export const personalAccessTokens = pgTable(
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    // Set on OAuth connection rows (ChatGPT apps, Claude connectors):
+    // the Clerk OAuth client this row mirrors. Such rows hold no usable
+    // secret; they exist so OAuth callers get a tokenId for the
+    // agent-order audit trail, spending policy and Revoke button. See
+    // lib/mcp/oauth.ts. Null for ordinary personal access tokens.
+    oauthClientId: text("oauth_client_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -1449,6 +1455,10 @@ export const personalAccessTokens = pgTable(
   (table) => [
     index("personal_access_tokens_user_id_idx").on(table.userId),
     uniqueIndex("personal_access_tokens_token_hash_uniq").on(table.tokenHash),
+    uniqueIndex("personal_access_tokens_user_oauth_client_uniq").on(
+      table.userId,
+      table.oauthClientId
+    ),
   ]
 );
 

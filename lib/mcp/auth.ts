@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { personalAccessTokens } from "@/lib/db/schema";
 import { hashToken, looksLikeMaterializeToken } from "./tokens";
 import { type Scope } from "./scopes";
+import { verifyOAuthAccessToken } from "./oauth";
 
 export interface MaterializeAuthExtra extends Record<string, unknown> {
   userId: string;
@@ -22,7 +23,12 @@ export async function verifyMaterializeToken(
   _req: Request,
   bearerToken: string | undefined
 ): Promise<MaterializeAuthInfo | undefined> {
-  if (!bearerToken || !looksLikeMaterializeToken(bearerToken)) return undefined;
+  if (!bearerToken) return undefined;
+  // Anything that isn't a personal access token is tried as a Clerk
+  // OAuth access token (ChatGPT apps, Claude connectors). See oauth.ts.
+  if (!looksLikeMaterializeToken(bearerToken)) {
+    return verifyOAuthAccessToken(bearerToken);
+  }
 
   const tokenHash = hashToken(bearerToken);
   const [row] = await db

@@ -58,17 +58,49 @@ import { DESIGN_TAG_OPTIONS } from "@/lib/validations/file";
 import { deriveAppUrl } from "@/lib/utils/request-url";
 import { logError } from "@/lib/logger";
 import { shippingPhoneSchema } from "@/lib/validations/address";
+import { TOOL_ANNOTATIONS } from "@/lib/mcp/tool-annotations";
 
 /**
- * Convert any tool result into the MCP shape. We always return a
- * single text block whose body is JSON so agents can parse a stable
- * structure without needing schema-by-schema content typing.
+ * Convert any tool result into the MCP shape. The payload goes out
+ * twice: as `structuredContent` (what ChatGPT apps and Claude's MCP Apps
+ * hand to widgets, and what current clients read first) and as one
+ * JSON text block for clients that predate structured output.
  */
-function jsonResult(payload: unknown) {
+function jsonResult(payload: object) {
   return {
     content: [
       { type: "text" as const, text: JSON.stringify(payload, null, 2) },
     ],
+    structuredContent: payload as Record<string, unknown>,
+  };
+}
+
+/**
+ * Attach each tool's annotations from TOOL_ANNOTATIONS at registration,
+ * and refuse to register one that has none. Patching registerTool keeps
+ * every call site below unchanged while making "forgot the annotations"
+ * a startup failure instead of a review rejection.
+ */
+function annotateTools(server: { registerTool: (...args: never[]) => unknown }) {
+  const register = server.registerTool.bind(server) as (
+    name: string,
+    config: Record<string, unknown>,
+    handler: unknown
+  ) => unknown;
+  (server as { registerTool: typeof register }).registerTool = (
+    name,
+    config,
+    handler
+  ) => {
+    const annotations = TOOL_ANNOTATIONS[name];
+    if (!annotations) {
+      throw new Error(`MCP tool ${name} has no entry in TOOL_ANNOTATIONS`);
+    }
+    return register(
+      name,
+      { ...config, annotations: { title: config.title, ...annotations } },
+      handler
+    );
   };
 }
 
@@ -112,6 +144,8 @@ function readAuthExtra(extra: {
 
 const handler = createMcpHandler(
   (server) => {
+    annotateTools(server);
+
     /* -------------------- CAD (agent writes, Materialize runs) -------------------- */
 
     server.registerTool(
