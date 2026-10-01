@@ -15,5 +15,5 @@
 -- already have applied the earlier copy, hence IF NOT EXISTS throughout.
 --
 -- Idempotent per the 0039+ convention.
-ALTER TABLE "personal_access_tokens" ADD COLUMN IF NOT EXISTS "oauth_client_id" text;
+ALTER TABLE "personal_access_tokens" ADD COLUMN IF NOT EXISTS "oauth_client_id" text;--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "personal_access_tokens_user_oauth_client_uniq" ON "personal_access_tokens" USING btree ("user_id","oauth_client_id");
