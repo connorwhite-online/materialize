@@ -1,0 +1,20 @@
+{
+  "name": "materialize",
+  "interface": {
+    "displayName": "Materialize"
+  },
+  "plugins": [
+    {
+      "name": "materialize",
+      "source": {
+        "source": "local",
+        "path": "./plugins/materialize"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

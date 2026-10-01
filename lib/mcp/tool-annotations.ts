@@ -12,8 +12,10 @@ import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
  * - destructiveHint: can delete or overwrite something the user made.
  *   Replacing fields in place (update_*, set_project_bom) counts.
  * - idempotentHint: repeating the same call has no further effect.
- * - openWorldHint: reaches outside Materialize (CraftCloud quotes and
- *   orders). Everything else only touches the user's own account.
+ * - openWorldHint: reaches the open internet. OpenAI's plugin guidance
+ *   is explicit that a bounded service isn't open-world just because it
+ *   is hosted elsewhere, so CraftCloud quotes and orders are not; only
+ *   importing a model from an arbitrary URL is.
  *
  * `annotateTools` (route.ts) refuses to register a tool missing from
  * this table, so a new tool can't ship unannotated.
@@ -51,6 +53,8 @@ export const TOOL_ANNOTATIONS: Record<string, ToolAnnotations> = {
   // Files. Presigning mints a URL and writes no row.
   materialize_request_upload_url: { ...CREATE, idempotentHint: true },
   materialize_register_upload: CREATE,
+  // Downloads from a caller-supplied URL, so it reaches outside.
+  materialize_import_model: { ...CREATE, openWorldHint: true },
   materialize_update_file: OVERWRITE,
   materialize_list_files: READ,
   materialize_delete_file: DELETE,
@@ -76,12 +80,13 @@ export const TOOL_ANNOTATIONS: Record<string, ToolAnnotations> = {
   materialize_add_project_inline_image: CREATE,
   materialize_set_project_cover_photo: { ...CREATE, idempotentHint: true },
 
-  // Quotes and orders reach CraftCloud.
-  materialize_get_quote: { ...READ, openWorldHint: true },
-  // A draft the user confirms and pays for on the web, unless their
-  // spending policy auto-approves it. The idempotencyKey makes a retry
-  // return the same order.
-  materialize_create_order: { ...CREATE, idempotentHint: true, openWorldHint: true },
+  materialize_get_quote: READ,
+  // Usually a draft the user confirms and pays for on the web, but a
+  // spending policy can auto-approve it: a real charge and a physical
+  // order, hard to reverse after the cancellation window. That is what
+  // destructiveHint means, so hosts confirm before calling it. The
+  // idempotencyKey makes a retry return the same order.
+  materialize_create_order: { ...CREATE, destructiveHint: true, idempotentHint: true },
   materialize_get_order: READ,
   materialize_list_orders: READ,
 };

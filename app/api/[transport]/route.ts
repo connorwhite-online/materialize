@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import { z } from "zod";
 import {
@@ -5,6 +6,7 @@ import {
   requireScope,
   MissingScopeError,
   type MaterializeAuthExtra,
+  type MaterializeAuthInfo,
 } from "@/lib/mcp/auth";
 import {
   getCraftCloudCatalog,
@@ -20,6 +22,7 @@ import {
   setFileCoverPhotoForUser,
   requestPhotoUploadUrlForUser,
   requestCircuitUploadUrlForUser,
+  importModelFromUrlForUser,
 } from "@/lib/mcp/internal/files";
 import {
   createProjectForUser,
@@ -40,6 +43,7 @@ import { getQuoteForUser } from "@/lib/mcp/internal/quotes";
 import {
   assertCadAccess,
   CadAccessError,
+  hasCadAccess,
   cadReference,
   MAX_CAD_CODE_CHARS,
   runCadForAgent,
@@ -82,6 +86,7 @@ function jsonResult(payload: object) {
  * a startup failure instead of a review rejection.
  */
 function annotateTools(server: { registerTool: (...args: never[]) => unknown }) {
+  const tools = new Map<string, unknown>();
   const register = server.registerTool.bind(server) as (
     name: string,
     config: Record<string, unknown>,
@@ -96,12 +101,60 @@ function annotateTools(server: { registerTool: (...args: never[]) => unknown }) 
     if (!annotations) {
       throw new Error(`MCP tool ${name} has no entry in TOOL_ANNOTATIONS`);
     }
-    return register(
+    const tool = register(
       name,
-      { ...config, annotations: { title: config.title, ...annotations } },
+      {
+        ...config,
+        annotations: { title: config.title, ...annotations },
+        // Every tool acts as the signed-in user. ChatGPT reads this to
+        // decide that a tool needs account linking; OpenAI asks for it per
+        // tool rather than as a server default. The MCP SDK drops unknown
+        // top-level config keys, so it travels in _meta.
+        _meta: {
+          ...(config._meta as Record<string, unknown> | undefined),
+          securitySchemes: [{ type: "oauth2", scopes: [] }],
+        },
+      },
       handler
     );
+    tools.set(name, tool);
+    return tool;
   };
+  return tools;
+}
+
+/**
+ * The verified auth for the request being served. mcp-handler builds a
+ * fresh McpServer per request but hands the init callback only the
+ * server, so the token verifier records its result here for
+ * hideUnavailableTools to read.
+ */
+const OWNER_ONLY_TOOLS = [
+  "materialize_cad_reference",
+  "materialize_cad_run",
+  "materialize_cad_save",
+];
+
+const requestAuth = new AsyncLocalStorage<{ auth?: MaterializeAuthInfo }>();
+
+async function verifyAndRecord(req: Request, bearerToken: string | undefined) {
+  const auth = await verifyMaterializeToken(req, bearerToken);
+  const slot = requestAuth.getStore();
+  if (slot) slot.auth = auth;
+  return auth;
+}
+
+/**
+ * Owner-only tools stay out of tools/list for everyone else, so a
+ * directory reviewer or a ChatGPT user never sees tools that can only
+ * refuse them. Presentation only: each tool still enforces its own gate.
+ */
+async function hideUnavailableTools(tools: Map<string, unknown>) {
+  const userId = requestAuth.getStore()?.auth?.extra?.userId;
+  if (!userId || (await hasCadAccess(userId))) return;
+  for (const name of OWNER_ONLY_TOOLS) {
+    (tools.get(name) as { disable?: () => void } | undefined)?.disable?.();
+  }
 }
 
 function errorResult(error: {
@@ -142,9 +195,16 @@ function readAuthExtra(extra: {
   return e;
 }
 
+const MCP_SERVER_INSTRUCTIONS = [
+  "Materialize gets 3D models professionally printed and shipped, and hosts models and hardware projects creators publish.",
+  "To print: get the model in with materialize_import_model (a file attached in chat or a public https URL) or materialize_request_upload_url + materialize_register_upload, price it with materialize_get_quote, then materialize_create_order.",
+  "Before materialize_create_order, show the user the price, material, vendor and lead time and get their go-ahead. Orders are physical and can't be undone once placed.",
+  "The user approves and pays at the returned confirmationUrl unless their spending policy allows the order. Don't tell them it is placed until materialize_get_order says so.",
+].join(" ");
+
 const handler = createMcpHandler(
-  (server) => {
-    annotateTools(server);
+  async (server) => {
+    const tools = annotateTools(server);
 
     /* -------------------- CAD (agent writes, Materialize runs) -------------------- */
 
@@ -475,6 +535,71 @@ const handler = createMcpHandler(
           return jsonResult(result);
         } catch (err) {
           return scopeOrInternal(err, "materialize_register_upload");
+        }
+      }
+    );
+
+    // ChatGPT hydrates a declared file param into this shape when the user
+    // attaches a file (Apps SDK `openai/fileParams`). Optional because the
+    // host occasionally drops it, and other clients pass `url` instead.
+    const chatFileSchema = z
+      .object({
+        download_url: z.string().url(),
+        file_id: z.string(),
+        mime_type: z.string().optional(),
+        file_name: z.string().optional(),
+      })
+      .describe("A 3D model file the user attached in the chat");
+
+    server.registerTool(
+      "materialize_import_model",
+      {
+        title: "Import a 3D model from the chat or a link",
+        description:
+          "Add a 3D model (STL, OBJ, 3MF, STEP, AMF) to the user's Materialize library from a file they attached in this chat, or from a public https URL. Returns a fileAssetId to pass to materialize_get_quote. Prefer this over materialize_request_upload_url whenever you can't PUT the bytes yourself. Optionally pass `metadata` to name the file or set its listing details; it lands private by default.",
+        inputSchema: {
+          file: chatFileSchema.optional(),
+          url: z
+            .string()
+            .url()
+            .optional()
+            .describe("Public https URL of the model, when there's no attached file"),
+          filename: z
+            .string()
+            .max(200)
+            .optional()
+            .describe("Original filename with extension, if the URL doesn't end in one"),
+          fileUnit: z.enum(["mm", "cm", "in"]).optional(),
+          metadata: fileMetadataSchema.optional(),
+        },
+        _meta: { "openai/fileParams": ["file"] },
+      },
+      async ({ file, url, filename, fileUnit, metadata }, extra) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "files:write");
+          const source = file?.download_url ?? url;
+          if (!source) {
+            return errorResult({
+              code: "missing_file",
+              message:
+                "No file reached Materialize. Ask the user to attach the model again, or pass a public https URL as `url`.",
+              retryable: true,
+            });
+          }
+          const result = await importModelFromUrlForUser({
+            userId: auth.userId,
+            url: source,
+            filename: filename ?? file?.file_name,
+            fileUnit,
+            metadata,
+          });
+          if ("error" in result) {
+            return errorResult({ code: "import_failed", message: result.error });
+          }
+          return jsonResult(result);
+        } catch (err) {
+          return scopeOrInternal(err, "materialize_import_model");
         }
       }
     );
@@ -1424,12 +1549,18 @@ const handler = createMcpHandler(
         }
       }
     );
+
+    await hideUnavailableTools(tools);
   },
   {
     serverInfo: {
       name: "materialize",
       version: "0.1.0",
     },
+    // Server-wide guidance every MCP client gets at initialize, so a host
+    // without the skill installed still learns the flow and the one rule
+    // that matters. Keep it short; per-tool detail lives in descriptions.
+    instructions: MCP_SERVER_INSTRUCTIONS,
   },
   {
     basePath: "/api",
@@ -1442,9 +1573,13 @@ const handler = createMcpHandler(
   }
 );
 
-const authedHandler = withMcpAuth(handler, verifyMaterializeToken, {
+const verifiedHandler = withMcpAuth(handler, verifyAndRecord, {
   required: true,
 });
+
+function authedHandler(req: Request) {
+  return requestAuth.run({}, () => verifiedHandler(req));
+}
 
 /**
  * SEC-6 — the internal branch used to echo `err.message` straight

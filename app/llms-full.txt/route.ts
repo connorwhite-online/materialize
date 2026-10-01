@@ -5,11 +5,10 @@
  */
 
 import { getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
-
-const APP_URL =
-  process.env.NEXT_PUBLIC_APP_URL ?? "https://materialize.cc";
+import { deriveAppUrl } from "@/lib/utils/request-url";
 
 export async function GET() {
+  const APP_URL = await deriveAppUrl();
   const catalog = await getCraftCloudCatalog();
   const lines: string[] = [];
   lines.push("# Materialize — full catalog dump");

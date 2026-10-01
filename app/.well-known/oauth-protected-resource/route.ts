@@ -1,4 +1,5 @@
 import {
+  getPublicOrigin,
   metadataCorsOptionsRequestHandler,
   protectedResourceHandler,
 } from "mcp-handler";
@@ -12,10 +13,32 @@ import { clerkIssuerUrl } from "@/lib/mcp/oauth";
  * origin (forwarding headers included), never from NEXT_PUBLIC_APP_URL —
  * see "Stripe redirect URL" in AGENTS.md for why.
  */
-export function GET(req: Request) {
+/**
+ * OpenAI's plugin review requires OAuth servers to advertise `openid` and
+ * `email`, so a workspace can restrict sign-in to its own email domain
+ * (Clerk's UserInfo endpoint returns `email` + `email_verified`). Both
+ * scopes must also be enabled for OAuth applications in the Clerk
+ * dashboard; advertising them here doesn't turn them on.
+ */
+const SCOPES_SUPPORTED = ["openid", "email"];
+
+export async function GET(req: Request) {
   const issuer = clerkIssuerUrl();
   if (!issuer) return new Response("Not found", { status: 404 });
-  return protectedResourceHandler({ authServerUrls: [issuer] })(req);
+  // The resource is the MCP endpoint itself, not the bare origin: ChatGPT
+  // sends this exact value as the OAuth `resource` parameter, and the
+  // plugin's mcp.json names /api/mcp. Served at both the origin-level path
+  // (what our 401 challenge points at) and the path-suffixed one
+  // (../[...path]/route.ts), which RFC 9728 clients try first.
+  const res = protectedResourceHandler({
+    authServerUrls: [issuer],
+    resourceUrl: `${getPublicOrigin(req)}/api/mcp`,
+  })(req);
+  const metadata = await res.json();
+  return new Response(
+    JSON.stringify({ ...metadata, scopes_supported: SCOPES_SUPPORTED }),
+    { status: res.status, headers: res.headers }
+  );
 }
 
 export const OPTIONS = metadataCorsOptionsRequestHandler();
