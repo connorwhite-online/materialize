@@ -11,6 +11,7 @@
 // already set (e.g. when run directly by `npm run build`). On
 // Vercel the env var is injected by the platform so the fallback is
 // a no-op.
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { neon } from "@neondatabase/serverless";
@@ -102,6 +103,48 @@ async function main() {
       ? "Done — nothing applied."
       : `Done — applied ${applied.length}: ${applied.map((e) => e.tag).join(", ")}`
   );
+
+  // CATCH THE SILENT SKIP. Drizzle only compares `when` against the newest
+  // recorded created_at, so if any other branch's build (a Vercel preview
+  // sharing this DATABASE_URL) recorded a migration with an equal or later
+  // `when`, a journal entry here is skipped forever while the log says
+  // "nothing pending". That shipped 0066_file_versions to production without
+  // its column (every authed page 500'd on files.current_asset_id). Compare
+  // by content hash instead — the same sha256 drizzle records.
+  const missing = await unrecordedMigrations(sql);
+  if (missing.length > 0) {
+    console.warn(
+      `WARNING: ${missing.length} journal migration(s) are NOT recorded in ` +
+        `drizzle.__drizzle_migrations: ${missing.join(", ")}. Either the ` +
+        "file was edited after it was applied, or a newer `when` from " +
+        "another branch made the migrator skip it. Check the columns exist."
+    );
+  }
+}
+
+/** Journal tags (0039+, the idempotent era) whose file hash drizzle never recorded. */
+async function unrecordedMigrations(
+  sql: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>
+): Promise<string[]> {
+  let recorded: Set<string>;
+  try {
+    const rows = (await sql`
+      SELECT hash FROM drizzle.__drizzle_migrations
+    `) as { hash: string }[];
+    recorded = new Set(rows.map((r) => r.hash));
+  } catch {
+    return [];
+  }
+  return journalEntries()
+    .filter((e) => Number(e.tag.slice(0, 4)) >= 39)
+    .filter((e) => {
+      const body = fs.readFileSync(
+        path.resolve("lib/db/migrations", `${e.tag}.sql`),
+        "utf8"
+      );
+      return !recorded.has(createHash("sha256").update(body).digest("hex"));
+    })
+    .map((e) => e.tag);
 }
 
 main().then(
