@@ -1,17 +1,28 @@
 import Link from "next/link";
+
+import { Oops } from "@/components/icons/oops";
 import { Button } from "@/components/ui/button";
+import { StatusScreen } from "@/components/ui/page";
 
 export default function NotFound() {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center px-4">
-      <h1 className="text-6xl font-bold text-muted-foreground/20">404</h1>
-      <h2 className="mt-4 text-xl font-semibold">Page not found</h2>
-      <p className="mt-2 text-muted-foreground">
-        The page you&apos;re looking for doesn&apos;t exist.
-      </p>
-      <Button className="mt-6" render={<Link href="/" />}>
-        Go home
-      </Button>
-    </div>
+    <main className="flex min-h-svh items-center">
+      <StatusScreen
+        code="404"
+        icon={<Oops size={28} />}
+        title="Nothing printed here"
+        description="This page doesn't exist, or it was moved. The good stuff is a tap away."
+        actions={
+          <>
+            <Button size="lg" render={<Link href="/" />}>
+              Go home
+            </Button>
+            <Button size="lg" variant="outline" render={<Link href="/files" />}>
+              Browse files
+            </Button>
+          </>
+        }
+      />
+    </main>
   );
 }

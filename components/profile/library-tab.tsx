@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   files,
   fileAssets,
@@ -590,7 +591,8 @@ export async function LibraryTab({
       )}
 
       {(ownedTruncated || purchasedTruncated) && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+        <Alert variant="warning">
+          <AlertDescription>
           Showing your most recent {LIBRARY_MAX_FILES}{" "}
           {ownedTruncated && purchasedTruncated
             ? "owned and purchased files"
@@ -598,7 +600,8 @@ export async function LibraryTab({
               ? "uploads"
               : "purchases"}
           . Older items aren&apos;t shown here yet — reach out if you need a full export.
-        </div>
+          </AlertDescription>
+        </Alert>
       )}
 
       {/* Collections */}

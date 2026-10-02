@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/ui/page";
 
 const LIBRARY_LIMIT = 60;
 
@@ -222,7 +223,7 @@ function Section({
     return (
       <div className="mt-8">
         <h2 className="text-lg font-semibold">{title}</h2>
-        <p className="mt-2 text-sm text-muted-foreground">{empty}</p>
+        <EmptyState className="mt-3 py-8" title={empty} />
       </div>
     );
   }

@@ -5,7 +5,15 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { printOrders, fileAssets, files } from "@/lib/db/schema";
 import { findMaterialConfig, findProvider } from "@/lib/craftcloud/catalog";
+import { BotIcon } from "lucide-react";
 import { ConfirmOrderForm } from "./confirm-form";
+import { Page, PageHeader } from "@/components/ui/page";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  SummaryCard,
+  SummaryRow,
+  formatUsd,
+} from "@/components/ui/summary-list";
 
 interface PageProps {
   params: Promise<{ orderId: string }>;
@@ -22,7 +30,9 @@ export default async function ConfirmAgentOrderPage({
 
   const { userId } = await auth();
   if (!userId) {
-    const next = encodeURIComponent(`/orders/${orderId}/confirm?token=${token}`);
+    const next = encodeURIComponent(
+      `/orders/${orderId}/confirm?token=${token}`
+    );
     redirect(`/sign-in?redirect_url=${next}`);
   }
 
@@ -41,7 +51,9 @@ export default async function ConfirmAgentOrderPage({
     order.confirmationExpiresAt.getTime() < Date.now();
 
   const [materialEntry, providerEntry, fileRow] = await Promise.all([
-    order.material ? findMaterialConfig(order.material).catch(() => null) : null,
+    order.material
+      ? findMaterialConfig(order.material).catch(() => null)
+      : null,
     order.vendor && !order.vendorName
       ? findProvider(order.vendor).catch(() => null)
       : null,
@@ -69,28 +81,27 @@ export default async function ConfirmAgentOrderPage({
   const color = materialEntry?.config.color ?? null;
 
   return (
-    <div className="mx-auto max-w-xl px-4 py-12 space-y-6">
-      <div>
-        <p className="text-xs uppercase tracking-wide text-muted-foreground">
-          Print order — agent-initiated
-        </p>
-        <h1 className="mt-1 text-2xl font-bold">
-          Confirm and pay
-        </h1>
-        {order.agentName && (
-          <p className="mt-2 text-sm text-muted-foreground">
-            <span className="font-medium text-foreground">
-              {order.agentName}
-            </span>{" "}
-            prepared this order on your behalf. Review the details and confirm
-            to pay — the order will only be placed after payment.
-          </p>
-        )}
-      </div>
+    <Page width="narrow" className="max-w-xl gap-6">
+      <PageHeader
+        icon={<BotIcon />}
+        eyebrow="Print order · from your agent"
+        title="Confirm and pay"
+        description={
+          order.agentName ? (
+            <>
+              <span className="font-medium text-foreground">
+                {order.agentName}
+              </span>{" "}
+              prepared this order on your behalf. Review the details and confirm
+              to pay — the order will only be placed after payment.
+            </>
+          ) : undefined
+        }
+      />
 
-      <div className="rounded-lg border border-border p-4 space-y-3 text-sm">
-        <Row label="File" value={fileDisplayName} />
-        <Row
+      <SummaryCard>
+        <SummaryRow label="File" value={fileDisplayName} />
+        <SummaryRow
           label="Material"
           value={
             materialName
@@ -98,34 +109,32 @@ export default async function ConfirmAgentOrderPage({
               : "(unknown)"
           }
         />
-        <Row label="Vendor" value={vendorName ?? "(unknown)"} />
-        <Row
+        <SummaryRow label="Vendor" value={vendorName ?? "(unknown)"} />
+        <SummaryRow
           label="Quantity"
           value={order.quantity ? String(order.quantity) : "1"}
         />
-        <Row
+        <SummaryRow
           label="Material subtotal"
-          value={fmt(
+          value={formatUsd(
             (order.materialSubtotal ?? 0) * (order.quantity ?? 1)
           )}
         />
-        <Row label="Shipping" value={fmt(order.shippingSubtotal ?? 0)} />
-        <Row label="Service fee" value={fmt(order.serviceFee)} />
-        <div className="pt-2 mt-2 border-t border-border">
-          <Row
-            label="Total"
-            value={fmt(order.totalPrice + order.serviceFee)}
-            bold
-          />
-        </div>
-      </div>
+        <SummaryRow
+          label="Shipping"
+          value={formatUsd(order.shippingSubtotal ?? 0)}
+        />
+        <SummaryRow label="Service fee" value={formatUsd(order.serviceFee)} />
+        <SummaryRow
+          total
+          label="Total"
+          value={formatUsd(order.totalPrice + order.serviceFee)}
+        />
+      </SummaryCard>
 
       {order.shippingAddress?.shipping && (
-        <div className="rounded-lg border border-border p-4 text-sm">
-          <div className="text-xs uppercase tracking-wide text-muted-foreground">
-            Ship to
-          </div>
-          <div className="mt-1.5 leading-relaxed">
+        <SummaryCard title="Ship to">
+          <div className="leading-relaxed">
             {order.shippingAddress.shipping.firstName}{" "}
             {order.shippingAddress.shipping.lastName}
             <br />
@@ -143,15 +152,17 @@ export default async function ConfirmAgentOrderPage({
             <br />
             {order.shippingAddress.shipping.countryCode}
           </div>
-        </div>
+        </SummaryCard>
       )}
 
       {order.status === "awaiting_agent_approval" && !expired ? (
         <>
           {payment === "cancelled" && (
-            <p className="text-xs text-muted-foreground">
-              Payment was cancelled. You can try again below.
-            </p>
+            <Alert>
+              <AlertDescription>
+                Payment was cancelled. You can try again below.
+              </AlertDescription>
+            </Alert>
           )}
           <ConfirmOrderForm orderId={order.id} confirmationToken={token} />
           <p className="text-xs text-muted-foreground">
@@ -166,63 +177,39 @@ export default async function ConfirmAgentOrderPage({
           </p>
         </>
       ) : (
-        <div className="rounded-lg border border-border bg-muted/30 p-4 text-sm">
-          {expired ? (
-            <>
-              This confirmation link has expired. Ask the agent to create a
-              fresh order.
-            </>
-          ) : order.status === "cart_created" ? (
-            <>
-              This order is awaiting payment.{" "}
-              <Link
-                href={`/dashboard/orders`}
-                className="underline hover:text-foreground"
-              >
-                View in your orders
-              </Link>
-              .
-            </>
-          ) : (
-            <>
-              This order is no longer awaiting approval (status:{" "}
-              <code className="font-mono text-xs">{order.status}</code>).
-              <Link
-                href={`/dashboard/orders/${order.id}`}
-                className="ml-2 underline hover:text-foreground"
-              >
-                View order
-              </Link>
-            </>
-          )}
-        </div>
+        <Alert>
+          <AlertDescription>
+            {expired ? (
+              <>
+                This confirmation link has expired. Ask the agent to create a
+                fresh order.
+              </>
+            ) : order.status === "cart_created" ? (
+              <>
+                This order is awaiting payment.{" "}
+                <Link
+                  href={`/dashboard/orders`}
+                  className="underline hover:text-foreground"
+                >
+                  View in your orders
+                </Link>
+                .
+              </>
+            ) : (
+              <>
+                This order is no longer awaiting approval (status:{" "}
+                <code className="font-mono text-xs">{order.status}</code>).
+                <Link
+                  href={`/dashboard/orders/${order.id}`}
+                  className="ml-2 underline hover:text-foreground"
+                >
+                  View order
+                </Link>
+              </>
+            )}
+          </AlertDescription>
+        </Alert>
       )}
-    </div>
+    </Page>
   );
-}
-
-function Row({
-  label,
-  value,
-  bold,
-}: {
-  label: string;
-  value: string;
-  bold?: boolean;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-2">
-      <span className={bold ? "font-semibold" : "text-muted-foreground"}>
-        {label}
-      </span>
-      <span className={bold ? "font-semibold" : ""}>{value}</span>
-    </div>
-  );
-}
-
-function fmt(cents: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-  }).format(cents / 100);
 }

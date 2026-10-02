@@ -10,6 +10,9 @@ import { eq, desc, and, inArray, notInArray, asc } from "drizzle-orm";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { EmptyState } from "@/components/ui/page";
+import { Print } from "@/components/icons/print";
 import { resolveOrderMaterials } from "@/lib/print/order-material";
 import { visibleOrdersFilter } from "@/lib/print/order-visibility";
 import { formatOrderNumber } from "@/lib/utils/order-number";
@@ -264,12 +267,14 @@ export async function OrdersTab({ userId }: { userId: string }) {
 
   if (orders.length === 0 && drafts.length === 0) {
     return (
-      <div className="py-16 text-center">
-        <p className="text-muted-foreground">No print orders yet.</p>
-        <Button variant="outline" className="mt-4" render={<Link href="/print" />}>
-          Print a file
-        </Button>
-      </div>
+      <EmptyState
+        icon={<Print />}
+        title="No print orders yet"
+        description="Upload a model or pick one from the marketplace, choose a material, and it ships to your door."
+        action={
+          <Button render={<Link href="/print" />}>Print a file</Button>
+        }
+      />
     );
   }
 
@@ -319,11 +324,13 @@ export async function OrdersTab({ userId }: { userId: string }) {
             <h3 className="text-sm font-medium">Orders</h3>
           )}
           {ordersTruncated && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-              Showing your most recent {ORDERS_MAX} orders. Older orders
-              aren&apos;t shown here yet — reach out if you need a full
-              export.
-            </div>
+            <Alert variant="warning">
+              <AlertDescription>
+                Showing your most recent {ORDERS_MAX} orders. Older orders
+                aren&apos;t shown here yet — reach out if you need a full
+                export.
+              </AlertDescription>
+            </Alert>
           )}
           {/* flex+gap (not space-y): each row is a Link, and space-y's
               margin-top does not land on a default-inline <a>, so cards

@@ -16,7 +16,7 @@ import {
 import { eq, and, sum, count, isNull, inArray, desc, or } from "drizzle-orm";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Alert } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { swallow } from "@/lib/utils/swallow";
 import { PRINTED_STATUSES } from "@/lib/print-statuses";
 import { timeAgo } from "@/lib/utils/time";
@@ -308,13 +308,14 @@ export async function EarningsTab({ userId }: { userId: string }) {
   return (
     <div className="space-y-6">
       {!hasStripe && (
-        <Alert className="border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950">
-          <p className="text-sm text-amber-800 dark:text-amber-200">
-            Set up Stripe to receive payouts from file and project sales.
-          </p>
+        <Alert variant="warning">
+          <AlertTitle>Payouts aren&apos;t set up yet</AlertTitle>
+          <AlertDescription>
+            Connect Stripe to receive money from file and project sales.
+          </AlertDescription>
           <Button
             size="sm"
-            className="mt-2"
+            className="mt-2.5 w-fit"
             render={<Link href="/dashboard/settings/payouts" />}
           >
             Set up payouts
@@ -324,7 +325,7 @@ export async function EarningsTab({ userId }: { userId: string }) {
 
       <div className="grid gap-4 sm:grid-cols-3">
         <Card>
-          <CardContent className="p-6">
+          <CardContent className="px-5">
             <p className="text-sm text-muted-foreground">Net earnings</p>
             <p className="mt-1 text-3xl font-semibold tabular-nums">
               ${(netEarnings / 100).toFixed(2)}
@@ -337,7 +338,7 @@ export async function EarningsTab({ userId }: { userId: string }) {
           </CardContent>
         </Card>
         <Card>
-          <CardContent className="p-6">
+          <CardContent className="px-5">
             <p className="text-sm text-muted-foreground">Gross sales</p>
             <p className="mt-1 text-3xl font-semibold tabular-nums">
               ${(totalEarnings / 100).toFixed(2)}
@@ -348,7 +349,7 @@ export async function EarningsTab({ userId }: { userId: string }) {
           </CardContent>
         </Card>
         <Card>
-          <CardContent className="p-6">
+          <CardContent className="px-5">
             <p className="text-sm text-muted-foreground">Refunded</p>
             <p className="mt-1 text-3xl font-semibold tabular-nums text-destructive">
               −${(totalRefunded / 100).toFixed(2)}
@@ -449,7 +450,7 @@ function StatCard({
 }) {
   const inner = (
     <Card>
-      <CardContent className="p-4">
+      <CardContent className="px-5">
         <p className="text-xs text-muted-foreground">{label}</p>
         <p className="mt-1 text-2xl font-semibold tabular-nums">
           {value.toLocaleString()}

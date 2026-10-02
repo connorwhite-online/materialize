@@ -1,5 +1,6 @@
 "use client";
 
+import { DottedSpinner } from "@/components/icons/dotted-spinner";
 import { useMemo, useRef, useState } from "react";
 import { useUser } from "@clerk/nextjs";
 import { useCart, type LocalCartItem } from "./cart-context";
@@ -197,10 +198,12 @@ function CartPanelInner({ checkoutModel }: { checkoutModel: CheckoutModel }) {
         </div>
 
         {loading && isEmpty ? (
-          <div className="px-4 pb-6 pt-4">
-            <p className="text-sm text-muted-foreground text-center">
-              Loading...
-            </p>
+          <div
+            role="status"
+            className="flex items-center justify-center gap-2 px-4 pt-4 pb-6 text-sm text-muted-foreground"
+          >
+            <DottedSpinner />
+            Loading your cart…
           </div>
         ) : isEmpty ? (
           <div className="px-4 pb-6 pt-4 text-center">

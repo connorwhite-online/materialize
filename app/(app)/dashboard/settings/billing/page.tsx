@@ -1,6 +1,9 @@
-import Link from "next/link";
+import { redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
-import { ChevronLeft } from "@/components/icons/chevron-left";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Card, CardContent } from "@/components/ui/card";
+import { Page, PageHeader } from "@/components/ui/page";
+import { CreditCardIcon } from "lucide-react";
 import { getPaymentMethodSummary } from "@/app/actions/billing";
 import { PaymentCard } from "@/components/print/payment-card";
 import { BillingActions } from "./billing-actions";
@@ -11,71 +14,67 @@ export default async function BillingSettingsPage({
   searchParams: Promise<{ status?: string }>;
 }) {
   const { userId } = await auth();
-  if (!userId) return null;
+  if (!userId) redirect("/");
 
   const summary = await getPaymentMethodSummary();
   const sp = await searchParams;
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8 space-y-6">
-      <Link
-        href="/dashboard/settings"
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <ChevronLeft size={16} />
-        Settings
-      </Link>
-
-      <div>
-        <h1 className="text-2xl font-bold">Saved card</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Keep a card on file for print checkout and agent orders. Agents
-          within a spending policy can charge it automatically; everything
-          else still asks you to confirm.
-        </p>
-      </div>
+    <Page width="narrow">
+      <PageHeader
+        back={{ href: "/dashboard/settings", label: "Settings" }}
+        icon={<CreditCardIcon />}
+        title="Saved card"
+        description="Keep a card on file for print checkout and agent orders. Agents within a spending policy can charge it automatically; everything else still asks you to confirm."
+      />
 
       {sp.status === "success" && !summary && (
-        <div className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm">
-          Saving your card. This usually takes a few seconds — refresh if it
-          doesn&apos;t appear shortly.
-        </div>
+        <Alert>
+          <AlertDescription>
+            Saving your card. This usually takes a few seconds — refresh if it
+            doesn&apos;t appear shortly.
+          </AlertDescription>
+        </Alert>
       )}
       {sp.status === "cancelled" && (
-        <div className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
-          Setup was cancelled. Your previous card (if any) is unchanged.
-        </div>
+        <Alert>
+          <AlertDescription>
+            Setup was cancelled. Your previous card (if any) is unchanged.
+          </AlertDescription>
+        </Alert>
       )}
 
-      <div className="rounded-2xl border border-border p-5">
-        <div className="text-sm font-medium">Payment method</div>
-        <div className="mt-4">
-          <PaymentCard
-            brand={summary?.brand}
-            last4={summary?.last4 ?? null}
-            saved={Boolean(summary)}
-          />
-        </div>
-        {summary ? (
-          <div className="mt-4 flex flex-col gap-3">
-            <p className="text-sm text-muted-foreground">
-              <span className="font-medium capitalize text-foreground">
-                {summary.brand}
-              </span>{" "}
-              ending in {summary.last4}
-            </p>
-            <BillingActions hasCard />
+      <Card>
+        <CardContent className="px-5 py-1">
+          <div className="text-sm font-medium">Payment method</div>
+          <div className="mt-4">
+            <PaymentCard
+              brand={summary?.brand}
+              last4={summary?.last4 ?? null}
+              saved={Boolean(summary)}
+            />
           </div>
-        ) : (
-          <div className="mt-4 flex flex-col gap-3">
-            <p className="text-sm text-muted-foreground">
-              No card on file. You can add one here for one-tap checkout and
-              agent auto-charge.
-            </p>
-            <BillingActions hasCard={false} />
-          </div>
-        )}
-      </div>
-    </div>
+          {summary ? (
+            <div className="mt-4 flex flex-col gap-3">
+              <p className="text-sm text-muted-foreground">
+                <span className="font-medium capitalize text-foreground">
+                  {summary.brand}
+                </span>{" "}
+                ending in {summary.last4}
+              </p>
+              <BillingActions hasCard />
+            </div>
+          ) : (
+            <div className="mt-4 flex flex-col gap-3">
+              <p className="text-sm text-muted-foreground">
+                No card on file. You can add one here for one-tap checkout and
+                agent auto-charge.
+              </p>
+              <BillingActions hasCard={false} />
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </Page>
   );
 }

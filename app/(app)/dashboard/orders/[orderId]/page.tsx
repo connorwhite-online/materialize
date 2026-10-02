@@ -13,7 +13,7 @@ import { OrderStatusTracker } from "@/components/print/order-status-tracker";
 import { OrderModelPreview } from "@/components/print/order-model-preview";
 import { loadPreviewView } from "@/lib/files/load-preview-view";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Alert } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -152,22 +152,22 @@ export default async function OrderDetailPage(props: {
   );
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
+    <div className="mz-enter mx-auto max-w-3xl px-4 py-8 sm:py-12">
       {searchParams.payment === "success" && (
-        <Alert className="mb-6 border-green-200 bg-green-50 text-green-800 dark:border-green-800 dark:bg-green-950 dark:text-green-200">
-          <p className="text-sm font-medium">Payment confirmed</p>
-          <p className="text-xs mt-1">
+        <Alert variant="success" className="mb-6">
+          <AlertTitle>Payment confirmed</AlertTitle>
+          <AlertDescription>
             Your print has been sent to production. We&apos;ll keep you updated.
-          </p>
+          </AlertDescription>
         </Alert>
       )}
 
       {searchParams.payment === "cancelled" && (
         <Alert variant="destructive" className="mb-6">
-          <p className="text-sm font-medium">Payment cancelled</p>
-          <p className="text-xs mt-1">
+          <AlertTitle>Payment cancelled</AlertTitle>
+          <AlertDescription>
             No charges were made. You can retry from your orders page.
-          </p>
+          </AlertDescription>
         </Alert>
       )}
 
@@ -231,18 +231,16 @@ export default async function OrderDetailPage(props: {
           The tracker below renders all-pending for this status, so
           spell out what's owed and link the payment interstitial. */}
       {order.status === "awaiting_production_payment" && (
-        <Alert className="mt-6 border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950">
-          <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-            Awaiting production payment
-          </p>
-          <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+        <Alert variant="warning" className="mt-6">
+          <AlertTitle>Awaiting production payment</AlertTitle>
+          <AlertDescription>
             Service fee authorized — finish paying CraftCloud for production.
             Your card hold for the Materialize service fee is only charged once your
             order is confirmed.
-          </p>
+          </AlertDescription>
           <Button
             size="sm"
-            className="mt-3"
+            className="mt-3 w-fit"
             render={<Link href={`/orders/${order.id}/pay-production`} />}
           >
             Complete payment

@@ -9,6 +9,13 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { updateTokenSpendingPolicy } from "@/app/actions/tokens";
 import type { SpendingPolicy } from "@/lib/billing/policy";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+
+// Matches <Input>'s field treatment. Keeps NumberInput's own 16px
+// `field-text` (no text-xs override — that let iOS zoom on focus) and its
+// pr-7 chevron gutter (a px-* override let digits run under the arrows).
+const FIELD_CLASS =
+  "mt-1 h-9 w-full rounded-xl border border-input/80 bg-muted/35 pl-3 shadow-sunken outline-none transition-[background-color,box-shadow,border-color] duration-150 focus-visible:border-ring focus-visible:bg-background focus-visible:shadow-input-focus dark:bg-input/30";
 
 interface Props {
   tokenId: string;
@@ -89,7 +96,7 @@ export function TokenPolicyEditor({
   const handleSave = () => persist(policy);
 
   return (
-    <div className="mt-3 rounded border border-dashed border-border p-3 space-y-3">
+    <div className="mt-3 space-y-3 rounded-2xl bg-muted/40 p-3.5 ring-1 ring-foreground/5">
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1">
           <div className="text-xs font-medium">Auto-approve within policy</div>
@@ -107,7 +114,7 @@ export function TokenPolicyEditor({
       </div>
 
       {enabled && !hasPaymentMethod && (
-        <div className="rounded bg-muted/40 px-3 py-2 text-[11px]">
+        <div className="rounded-xl bg-card px-3 py-2 text-[11px] ring-1 ring-foreground/8">
           No payment method on file. Auto-approval needs a saved card to
           actually charge —{" "}
           <Link
@@ -140,7 +147,7 @@ export function TokenPolicyEditor({
                   const c = centsFromDollars(e.target.value);
                   if (c != null) update("perOrderLimitCents", c);
                 }}
-                className="mt-1 h-8 w-full rounded-lg border border-input bg-background px-3 text-xs shadow-xs focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/50 depth-sunken"
+                className={FIELD_CLASS}
                 disabled={disabled || pending}
               />
             </div>
@@ -161,7 +168,7 @@ export function TokenPolicyEditor({
                   const c = centsFromDollars(e.target.value);
                   if (c != null) update("periodBudgetCents", c);
                 }}
-                className="mt-1 h-8 w-full rounded-lg border border-input bg-background px-3 text-xs shadow-xs focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/50 depth-sunken"
+                className={FIELD_CLASS}
                 disabled={disabled || pending}
               />
             </div>
@@ -171,23 +178,17 @@ export function TokenPolicyEditor({
             <Label className="text-[11px] text-muted-foreground">
               Budget window
             </Label>
-            <div className="mt-1 flex gap-1">
-              {(["day", "week", "month"] as const).map((w) => (
-                <button
-                  key={w}
-                  type="button"
-                  onClick={() => update("periodWindow", w)}
-                  disabled={disabled || pending}
-                  className={`rounded border px-2 py-1 text-[11px] capitalize transition-colors disabled:opacity-50 ${
-                    policy.periodWindow === w
-                      ? "border-foreground bg-foreground text-background"
-                      : "border-border hover:bg-muted"
-                  }`}
-                >
-                  {w}
-                </button>
-              ))}
-            </div>
+            <SegmentedControl
+              className="mt-1"
+              listClassName="w-fit"
+              value={policy.periodWindow}
+              onValueChange={(w) => update("periodWindow", w)}
+              items={(["day", "week", "month"] as const).map((w) => ({
+                value: w,
+                label: <span className="capitalize">{w}</span>,
+                disabled: disabled || pending,
+              }))}
+            />
           </div>
 
           <div>
@@ -216,7 +217,7 @@ export function TokenPolicyEditor({
                 const c = centsFromDollars(e.target.value);
                 if (c != null) update("confirmAboveCents", c);
               }}
-              className="mt-1 h-8 w-full rounded-lg border border-input bg-background px-3 text-xs shadow-xs focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/50 depth-sunken"
+              className={FIELD_CLASS}
               disabled={disabled || pending}
             />
           </div>
@@ -230,7 +231,6 @@ export function TokenPolicyEditor({
               size="sm"
               onClick={handleSave}
               disabled={disabled || pending}
-              className="h-7 px-3 text-xs"
             >
               Save policy
             </Button>

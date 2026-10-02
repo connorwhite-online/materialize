@@ -6,6 +6,14 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { printOrders } from "@/lib/db/schema";
 import { verifyPayProductionToken } from "@/lib/orders/pay-production-token";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Page, PageHeader } from "@/components/ui/page";
+import {
+  SummaryCard,
+  SummaryRow,
+  formatUsd,
+} from "@/components/ui/summary-list";
 
 /**
  * Two-step checkout interstitial (CON-118). The fee Checkout's
@@ -97,23 +105,24 @@ export default async function PayProductionPage({
 
   if (order.status === "cancelled") {
     return (
-      <div className="mx-auto max-w-xl px-4 py-12 space-y-6">
-        <div>
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">
-            Print order
-          </p>
-          <h1 className="mt-1 text-2xl font-bold">This checkout expired</h1>
-        </div>
-        <div className="rounded-lg border border-border bg-muted/30 p-4 text-sm">
-          The production payment for this order was never completed, so the
-          checkout expired and the hold on your card was released — you were
-          not charged anything.{" "}
-          <Link href="/print" className="underline hover:text-foreground">
-            Start a new print
-          </Link>
-          .
-        </div>
-      </div>
+      <Page width="narrow" className="max-w-xl gap-6">
+        <PageHeader
+          icon={<FactoryIcon />}
+          eyebrow="Print order"
+          title="This checkout expired"
+        />
+        <Alert>
+          <AlertDescription>
+            The production payment for this order was never completed, so the
+            checkout expired and the hold on your card was released — you were
+            not charged anything.{" "}
+            <Link href="/print" className="underline hover:text-foreground">
+              Start a new print
+            </Link>
+            .
+          </AlertDescription>
+        </Alert>
+      </Page>
     );
   }
 
@@ -154,62 +163,66 @@ export default async function PayProductionPage({
   const quantity = order.quantity ?? 1;
 
   return (
-    <div className="mx-auto max-w-xl px-4 py-12 space-y-6">
-      <div>
-        <div className="flex items-center gap-3">
-          <div
-            aria-hidden="true"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-orange-100 text-orange-600 dark:bg-orange-950 dark:text-orange-400"
-          >
-            <FactoryIcon className="h-6 w-6" strokeWidth={2.5} />
-          </div>
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">
-            Print order
-          </p>
-        </div>
-        <h1 className="mt-3 text-2xl font-bold">
-          One more step — pay for production
-        </h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          {fee === "authorized" && (
-            <>
-              <span className="font-medium text-foreground">
-                Your service fee is authorized.
-              </span>{" "}
-            </>
-          )}
-          The service fee is only a card authorization for now — it becomes a
-          charge only after your print order is placed. Production and
-          shipping are paid directly to CraftCloud, our manufacturing
-          partner, so their charge will appear separately on your statement.
-        </p>
-      </div>
+    <Page width="narrow" className="max-w-xl gap-6">
+      <PageHeader
+        icon={<FactoryIcon />}
+        eyebrow="Print order"
+        title="One more step — pay for production"
+        description={
+          <>
+            {fee === "authorized" && (
+              <>
+                <span className="font-medium text-foreground">
+                  Your service fee is authorized.
+                </span>{" "}
+              </>
+            )}
+            The service fee is only a card authorization for now — it becomes a
+            charge only after your print order is placed. Production and
+            shipping are paid directly to CraftCloud, our manufacturing partner,
+            so their charge will appear separately on your statement.
+          </>
+        }
+      />
 
-      <div className="rounded-lg border border-border p-4 space-y-3 text-sm">
+      <SummaryCard>
         {order.materialSubtotal != null && (
-          <Row
+          <SummaryRow
             label={`Material${quantity > 1 ? ` × ${quantity}` : ""}`}
-            value={fmt(order.materialSubtotal * quantity)}
+            value={formatUsd(order.materialSubtotal * quantity)}
           />
         )}
         {order.shippingSubtotal != null && (
-          <Row label="Shipping" value={fmt(order.shippingSubtotal)} />
+          <SummaryRow
+            label="Shipping"
+            value={formatUsd(order.shippingSubtotal)}
+          />
         )}
-        <div className="pt-2 mt-2 border-t border-border">
-          <Row label="Paid to CraftCloud" value={fmt(paidToCraftCloud)} bold />
-        </div>
-        <Row
-          label="Service fee (authorized — charged when your order is placed)"
-          value={fmt(order.serviceFee)}
+        <SummaryRow
+          total
+          label="Paid to CraftCloud"
+          value={formatUsd(paidToCraftCloud)}
         />
-      </div>
+        <SummaryRow
+          label={
+            <>
+              Service fee
+              <span className="block text-xs text-muted-foreground/80">
+                Authorized — charged when your order is placed
+              </span>
+            </>
+          }
+          value={formatUsd(order.serviceFee)}
+        />
+      </SummaryCard>
 
-      <a
-        href={order.bridgeSessionUrl}
-        className="block w-full rounded-md bg-primary px-4 py-2.5 text-center text-sm font-medium text-primary-foreground hover:bg-primary/90"
+      <Button
+        size="xl"
+        className="w-full"
+        render={<a href={order.bridgeSessionUrl} />}
       >
         Continue to CraftCloud payment
-      </a>
+      </Button>
 
       <p className="text-xs text-muted-foreground">
         Your order goes into production once CraftCloud confirms the payment.
@@ -222,7 +235,7 @@ export default async function PayProductionPage({
         </Link>
         .
       </p>
-    </div>
+    </Page>
   );
 }
 
@@ -242,7 +255,7 @@ function WaitingCard({
   reload?: boolean;
 }) {
   return (
-    <div className="mx-auto max-w-xl px-4 py-12 space-y-6">
+    <Page width="narrow" className="max-w-xl gap-6">
       {reload && (
         <script
           // Plain reload loop — the page is a server component, so a
@@ -254,41 +267,10 @@ function WaitingCard({
           }}
         />
       )}
-      <div>
-        <p className="text-xs uppercase tracking-wide text-muted-foreground">
-          Print order
-        </p>
-        <h1 className="mt-1 text-2xl font-bold">{title}</h1>
-      </div>
-      <div className="rounded-lg border border-border bg-muted/30 p-4 text-sm">
-        {body}
-      </div>
-    </div>
+      <PageHeader icon={<FactoryIcon />} eyebrow="Print order" title={title} />
+      <Alert>
+        <AlertDescription>{body}</AlertDescription>
+      </Alert>
+    </Page>
   );
-}
-
-function Row({
-  label,
-  value,
-  bold,
-}: {
-  label: string;
-  value: string;
-  bold?: boolean;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-2">
-      <span className={bold ? "font-semibold" : "text-muted-foreground"}>
-        {label}
-      </span>
-      <span className={bold ? "font-semibold" : ""}>{value}</span>
-    </div>
-  );
-}
-
-function fmt(cents: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-  }).format(cents / 100);
 }

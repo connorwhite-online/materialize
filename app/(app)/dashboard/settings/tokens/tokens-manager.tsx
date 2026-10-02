@@ -103,13 +103,13 @@ export function TokensManager({ initialTokens, hasPaymentMethod }: Props) {
   return (
     <div className="space-y-6">
       {revealed && (
-        <div className="rounded-lg border border-border bg-muted/30 p-4">
+        <div className="mz-enter rounded-2xl bg-emerald-500/8 p-4 ring-1 ring-emerald-500/25">
           <h3 className="text-sm font-semibold">New token</h3>
           <p className="mt-1 text-xs text-muted-foreground">
             Copy this token now. You won&apos;t be able to see it again.
           </p>
           <div className="mt-3 flex items-center gap-2">
-            <code className="flex-1 truncate rounded bg-background px-2 py-1.5 font-mono text-xs">
+            <code className="flex-1 truncate rounded-lg bg-background px-2.5 py-2 font-mono text-xs ring-1 ring-foreground/8 select-all">
               {revealed.raw}
             </code>
             <Button
@@ -131,7 +131,7 @@ export function TokensManager({ initialTokens, hasPaymentMethod }: Props) {
       )}
 
       {showCreate ? (
-        <div className="rounded-lg border border-border p-4 space-y-4">
+        <div className="mz-enter space-y-4 rounded-2xl bg-card p-4 shadow-surface ring-1 ring-foreground/10">
           <div>
             <Label htmlFor="token-name">Token name</Label>
             <Input
@@ -197,7 +197,7 @@ export function TokensManager({ initialTokens, hasPaymentMethod }: Props) {
           {tokens.map((t) => (
             <div
               key={t.id}
-              className={`rounded-lg border border-border p-3 ${t.revokedAt ? "opacity-50" : ""}`}
+              className={`rounded-2xl bg-card px-4 py-3 shadow-surface ring-1 ring-foreground/10 ${t.revokedAt ? "opacity-50" : ""}`}
             >
               <div className="flex items-center justify-between gap-2">
                 <div>
