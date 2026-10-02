@@ -6,6 +6,14 @@ import { db } from "@/lib/db";
 import { printOrders, fileAssets, files } from "@/lib/db/schema";
 import { findMaterialConfig, findProvider } from "@/lib/craftcloud/catalog";
 import { CancelOrderForm } from "./cancel-form";
+import { BotIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Page, PageHeader } from "@/components/ui/page";
+import {
+  SummaryCard,
+  SummaryRow,
+  formatUsd,
+} from "@/components/ui/summary-list";
 
 interface PageProps {
   params: Promise<{ orderId: string }>;
@@ -44,7 +52,9 @@ export default async function CancelAgentOrderPage({
   const alreadyCancelled = order.status === "cancelled";
 
   const [materialEntry, providerEntry, fileRow] = await Promise.all([
-    order.material ? findMaterialConfig(order.material).catch(() => null) : null,
+    order.material
+      ? findMaterialConfig(order.material).catch(() => null)
+      : null,
     order.vendor && !order.vendorName
       ? findProvider(order.vendor).catch(() => null)
       : null,
@@ -72,46 +82,47 @@ export default async function CancelAgentOrderPage({
   const color = materialEntry?.config.color ?? null;
 
   return (
-    <div className="mx-auto max-w-xl px-4 py-12 space-y-6">
-      <div>
-        <p className="text-xs uppercase tracking-wide text-muted-foreground">
-          Print order — agent-initiated
-        </p>
-        <h1 className="mt-1 text-2xl font-bold">
-          {alreadyCancelled
+    <Page width="narrow" className="max-w-xl gap-6">
+      <PageHeader
+        icon={<BotIcon />}
+        eyebrow="Print order · from your agent"
+        title={
+          alreadyCancelled
             ? "Order cancelled"
             : inWindow
               ? "Cancel this order?"
-              : "Cancellation window closed"}
-        </h1>
-        {order.agentName && (
-          <p className="mt-2 text-sm text-muted-foreground">
-            <span className="font-medium text-foreground">
-              {order.agentName}
-            </span>{" "}
-            placed this order on your behalf and your saved card was charged.
-            {inWindow && (
-              <>
-                {" "}
-                You can cancel and get a full refund until{" "}
-                <span className="font-medium text-foreground">
-                  {order.autoApprovedUntil!.toLocaleString()}
-                </span>
-                .
-              </>
-            )}
-            {alreadyCancelled &&
-              " The order was cancelled and a refund has been issued."}
-            {!inWindow &&
-              !alreadyCancelled &&
-              " The cancellation window has closed and the order is being placed with the print vendor. Refunds after this point go through your dashboard."}
-          </p>
-        )}
-      </div>
+              : "Cancellation window closed"
+        }
+        description={
+          order.agentName ? (
+            <>
+              <span className="font-medium text-foreground">
+                {order.agentName}
+              </span>{" "}
+              placed this order on your behalf and your saved card was charged.
+              {inWindow && (
+                <>
+                  {" "}
+                  You can cancel and get a full refund until{" "}
+                  <span className="font-medium text-foreground">
+                    {order.autoApprovedUntil!.toLocaleString()}
+                  </span>
+                  .
+                </>
+              )}
+              {alreadyCancelled &&
+                " The order was cancelled and a refund has been issued."}
+              {!inWindow &&
+                !alreadyCancelled &&
+                " The cancellation window has closed and the order is being placed with the print vendor. Refunds after this point go through your dashboard."}
+            </>
+          ) : undefined
+        }
+      />
 
-      <div className="rounded-lg border border-border p-4 space-y-3 text-sm">
-        <Row label="File" value={fileDisplayName} />
-        <Row
+      <SummaryCard>
+        <SummaryRow label="File" value={fileDisplayName} />
+        <SummaryRow
           label="Material"
           value={
             materialName
@@ -119,56 +130,30 @@ export default async function CancelAgentOrderPage({
               : "(unknown)"
           }
         />
-        <Row label="Vendor" value={vendorName ?? "(unknown)"} />
-        <Row
+        <SummaryRow label="Vendor" value={vendorName ?? "(unknown)"} />
+        <SummaryRow
           label="Quantity"
           value={order.quantity ? String(order.quantity) : "1"}
         />
-        <div className="pt-2 mt-2 border-t border-border">
-          <Row
-            label={alreadyCancelled ? "Refunded" : "Charged"}
-            value={fmt(order.totalPrice + order.serviceFee)}
-            bold
-          />
-        </div>
-      </div>
+        <SummaryRow
+          total
+          label={alreadyCancelled ? "Refunded" : "Charged"}
+          value={formatUsd(order.totalPrice + order.serviceFee)}
+        />
+      </SummaryCard>
 
       {inWindow ? (
         <CancelOrderForm orderId={orderId} confirmationToken={token} />
       ) : (
-        <div className="flex justify-center">
-          <Link
-            href="/dashboard/orders"
-            className="text-sm underline text-muted-foreground hover:text-foreground"
-          >
-            Back to your orders →
-          </Link>
-        </div>
+        <Button
+          variant="outline"
+          size="lg"
+          className="w-full"
+          render={<Link href="/dashboard/orders" />}
+        >
+          Back to your orders
+        </Button>
       )}
-    </div>
+    </Page>
   );
-}
-
-function Row({
-  label,
-  value,
-  bold,
-}: {
-  label: string;
-  value: string;
-  bold?: boolean;
-}) {
-  return (
-    <div className="flex items-center justify-between">
-      <span className="text-muted-foreground">{label}</span>
-      <span className={bold ? "font-semibold" : ""}>{value}</span>
-    </div>
-  );
-}
-
-function fmt(cents: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-  }).format(cents / 100);
 }

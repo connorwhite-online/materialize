@@ -2,7 +2,9 @@ import Link from "next/link";
 import { db } from "@/lib/db";
 import { notifications } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/page";
+import { Bell } from "@/components/icons/bell";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { timeAgo } from "@/lib/utils/time";
 import { swallow } from "@/lib/utils/swallow";
@@ -69,12 +71,11 @@ export async function NotificationsTab({ userId }: { userId: string }) {
 
   if (items.length === 0) {
     return (
-      <Card>
-        <CardContent className="py-10 text-center text-sm text-muted-foreground">
-          No notifications yet. Activity on your listings and replies to
-          your comments will land here.
-        </CardContent>
-      </Card>
+      <EmptyState
+        icon={<Bell />}
+        title="You're all caught up"
+        description="Activity on your listings and replies to your comments will land here."
+      />
     );
   }
 

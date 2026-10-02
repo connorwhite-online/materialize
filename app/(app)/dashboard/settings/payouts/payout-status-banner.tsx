@@ -1,3 +1,6 @@
+import { TriangleAlertIcon } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+
 interface Status {
   connected: boolean;
   onboarded: boolean;
@@ -5,7 +8,6 @@ interface Status {
   disabledReason: string | null;
   pendingRequirements: number;
 }
-
 /**
  * Contextual banner shown when a connected account is in a non-
  * healthy state. Three cases:
@@ -30,21 +32,17 @@ export function PayoutStatusBanner({ status }: { status: Status }) {
   );
 
   return (
-    <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
-      <p className="font-medium text-amber-900 dark:text-amber-200">
-        {headline}
-      </p>
-      <p className="mt-1 text-xs text-amber-800/80 dark:text-amber-200/80">
-        {body}
-      </p>
-      <p className="mt-1 text-xs text-amber-800/80 dark:text-amber-200/80">
-        Open the Stripe dashboard below to{" "}
+    <Alert variant="warning">
+      <TriangleAlertIcon />
+      <AlertTitle>{headline}</AlertTitle>
+      <AlertDescription>
+        {body} Open the Stripe dashboard below to{" "}
         {status.pendingRequirements > 0
           ? "submit the missing information"
           : "review the account"}
         .
-      </p>
-    </div>
+      </AlertDescription>
+    </Alert>
   );
 }
 

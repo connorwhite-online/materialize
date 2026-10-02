@@ -1,8 +1,9 @@
-import Link from "next/link";
+import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { eq } from "drizzle-orm";
 import { auth } from "@clerk/nextjs/server";
-import { ChevronLeft } from "@/components/icons/chevron-left";
+import { Page, PageHeader } from "@/components/ui/page";
+import { BotIcon } from "lucide-react";
 import { listPersonalAccessTokens } from "@/app/actions/tokens";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
@@ -10,7 +11,7 @@ import { TokensManager } from "./tokens-manager";
 
 export default async function TokensSettingsPage() {
   const { userId } = await auth();
-  if (!userId) return null;
+  if (!userId) redirect("/");
 
   const [tokens, [billingRow]] = await Promise.all([
     listPersonalAccessTokens(),
@@ -31,35 +32,33 @@ export default async function TokensSettingsPage() {
   const proto = h.get("x-forwarded-proto") ?? "https";
   const baseUrl = host
     ? `${proto}://${host}`
-    : process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    : (process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000");
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8 space-y-6">
-      <Link
-        href="/dashboard/settings"
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <ChevronLeft size={16} />
-        Settings
-      </Link>
-
-      <div>
-        <h1 className="text-2xl font-bold">Connected agents</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Personal access tokens (PATs) let agents and tools talk to the
-          Materialize MCP server on your behalf. Each token is scoped — agents
-          can only do what you grant. ChatGPT and Claude can also connect with
-          just the endpoint below: they ask you to sign in, and show up here
-          once you do. You&apos;ll still review and pay for any print order before
-          it&apos;s placed.
-        </p>
-        <p className="mt-2 text-xs text-muted-foreground">
-          MCP endpoint:{" "}
-          <code className="rounded bg-muted px-1 py-0.5">
-            {baseUrl}/api/mcp
-          </code>
-        </p>
-      </div>
+    <Page width="narrow">
+      <PageHeader
+        back={{ href: "/dashboard/settings", label: "Settings" }}
+        icon={<BotIcon />}
+        title="Connected agents"
+        description={
+          <>
+            Personal access tokens (PATs) let agents and tools talk to the
+            Materialize MCP server on your behalf. Each token is scoped — agents
+            can only do what you grant. ChatGPT and Claude can also connect with
+            just the endpoint below: they ask you to sign in, and show up here
+            once you do. You&apos;ll still review and pay for any print order
+            before it&apos;s placed.
+            <span className="mt-3 flex w-fit max-w-full items-center gap-2 rounded-full bg-muted/60 py-1 pr-3 pl-1 text-xs ring-1 ring-foreground/5">
+              <span className="rounded-full bg-card px-2 py-0.5 font-medium text-foreground shadow-raised">
+                MCP
+              </span>
+              <code className="truncate font-mono select-all">
+                {baseUrl}/api/mcp
+              </code>
+            </span>
+          </>
+        }
+      />
 
       <TokensManager
         hasPaymentMethod={hasPaymentMethod}
@@ -71,6 +70,6 @@ export default async function TokensSettingsPage() {
           revokedAt: t.revokedAt?.toISOString() ?? null,
         }))}
       />
-    </div>
+    </Page>
   );
 }

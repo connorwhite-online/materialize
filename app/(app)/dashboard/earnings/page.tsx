@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { EarningsTab } from "@/components/profile/earnings-tab";
+import { Page, PageHeader } from "@/components/ui/page";
+import { Download } from "@/components/icons/download";
 
 export default async function EarningsPage() {
   const { userId } = await auth();
@@ -9,9 +11,13 @@ export default async function EarningsPage() {
   if (!user?.username) redirect("/onboarding");
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8">
-      <h1 className="mb-6 text-2xl font-bold">Earnings</h1>
+    <Page>
+      <PageHeader
+        icon={<Download />}
+        title="Earnings"
+        description="Sales of your files, and the downloads and prints they drove."
+      />
       <EarningsTab userId={userId} />
-    </div>
+    </Page>
   );
 }
