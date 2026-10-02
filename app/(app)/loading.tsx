@@ -4,6 +4,9 @@
  * honestly as "something's loading" without pretending to be a
  * specific page layout — pages that need a faithful placeholder
  * should define their own loading.tsx.
+ *
+ * `@keyframes loading-bar` lives in app/globals.css (with its
+ * reduced-motion override) — it used to be re-declared inline here.
  */
 export default function AppLoading() {
   return (
@@ -11,12 +14,6 @@ export default function AppLoading() {
       <div className="relative h-0.5 w-40 overflow-hidden rounded-full bg-muted">
         <div className="absolute inset-y-0 left-0 w-1/3 animate-[loading-bar_1.1s_ease-in-out_infinite] rounded-full bg-foreground/60" />
       </div>
-      <style>{`
-        @keyframes loading-bar {
-          0% { transform: translateX(-100%); }
-          100% { transform: translateX(300%); }
-        }
-      `}</style>
     </div>
   );
 }

@@ -446,6 +446,14 @@
   }
 }
 
+/* Indeterminate bar for app/(app)/loading.tsx. Declared here (not inline
+   in the component) so the reduced-motion override below can replace it —
+   an inline <style> lands later in the cascade and silently won. */
+@keyframes loading-bar {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
 /* Reduce motion for vestibular-disorder users (CON-158).
    MotionConfig reducedMotion="user" handles motion/react animations;
    this covers CSS keyframe loaders (loading bars, spinners, pulse
@@ -1043,5 +1051,72 @@
   .mz-step-done {
     animation: none;
     opacity: 0;
+  }
+}
+
+/* -------------------------------------------------------------------------
+   Surface entrance — the shared "settle in" used by <Page>, <EmptyState>,
+   <StatusScreen> and anything tagged `.mz-enter` (components/ui/page.tsx).
+
+   One gesture app-wide: a short lift, a fade and a 4px blur that sharpens
+   as it lands — the same vocabulary as the mobile nav's menu rows, so a
+   page arriving and a menu opening read as one hand. Children marked
+   `.mz-enter-item` cascade in after the container on a per-item `--mz-i`
+   (set inline, 0-based), 40ms apart and capped at 8 so a long list never
+   makes the last row wait. Compositor-only (opacity / transform / filter);
+   no JS. Reduced motion lands everything instantly.
+   ------------------------------------------------------------------------- */
+:root {
+  --mz-enter-ms: 360ms;
+  --mz-enter-lift: 8px;
+  --mz-enter-step: 40ms;
+}
+
+@keyframes mz-enter {
+  from {
+    opacity: 0;
+    transform: translateY(var(--mz-enter-lift));
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+/* Status glyphs (error / 404 / empty) pop with a little overshoot — the
+   one place a spring earns it, because the glyph is the whole message. */
+@keyframes mz-enter-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.6) rotate(-8deg);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+.mz-enter,
+.mz-enter-item {
+  animation: mz-enter var(--mz-enter-ms) var(--ease-out-soft) both;
+}
+.mz-enter-item {
+  animation-delay: calc(
+    80ms + min(var(--mz-i, 0), 8) * var(--mz-enter-step)
+  );
+}
+.mz-enter-pop {
+  animation: mz-enter-pop 520ms var(--ease-spring) 60ms both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mz-enter,
+  .mz-enter-item,
+  .mz-enter-pop {
+    animation: none;
   }
 }
