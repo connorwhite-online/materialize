@@ -155,12 +155,12 @@ describe("GET /api/thumbnails/projects/[projectId]", () => {
     fetchSpy.mockRestore();
   });
 
-  it("serves a placeholder for an empty public project to an anonymous viewer", async () => {
+  it("serves a placeholder for a private project to an anonymous viewer", async () => {
     setMockUserId(null);
     projectRow = draftProject({
       status: "published",
-      visibility: "public",
-      fileCount: 0,
+      visibility: "private",
+      fileCount: 1,
     });
 
     const { req, context } = makeRequest(PROJECT_ID);

@@ -172,8 +172,7 @@ export async function createProject(formData: FormData) {
     // Both inserts happen atomically when files are supplied — a
     // failure between them (e.g. an FK violation from a file deleted
     // after the viewerCanAttachAllFiles check above) must not leave a
-    // half-created project. Empty shells are allowed; they stay
-    // hidden from other users until a file is attached.
+    // half-created project. Projects with no files are fully listed.
     const project = await db.transaction(async (tx) => {
       const [p] = await tx
         .insert(projects)

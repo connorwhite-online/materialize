@@ -147,7 +147,7 @@ async function userOwnsAllFiles(
 export interface CreateProjectInput {
   userId: string;
   /** Files to bundle. Agent must own every one. At least 1. */
-  fileIds: string[];
+  fileIds?: string[];
   /** Required — defaults aren't acceptable for project names. */
   name: string;
   description?: string | null;
@@ -167,17 +167,16 @@ export interface CreateProjectResult {
 export async function createProjectForUser(
   input: CreateProjectInput
 ): Promise<CreateProjectResult | { error: string }> {
-  if (!input.fileIds || input.fileIds.length === 0) {
-    return { error: "fileIds: at least one file is required" };
-  }
-  if (input.fileIds.length > 50) {
+  const requestedFileIds = input.fileIds ?? [];
+  if (requestedFileIds.length > 50) {
     return { error: "fileIds: too many files (max 50)" };
   }
   if (!input.name || !input.name.trim()) {
     return { error: "name is required" };
   }
-  const fileIds = Array.from(new Set(input.fileIds));
-  if (!(await userOwnsAllFiles(input.userId, fileIds))) {
+  const fileIds = Array.from(new Set(requestedFileIds));
+  // Files are optional: a board-and-wiring project has nothing to print.
+  if (fileIds.length > 0 && !(await userOwnsAllFiles(input.userId, fileIds))) {
     return { error: "One or more files are not yours" };
   }
   try {
@@ -217,13 +216,15 @@ export async function createProjectForUser(
       })
       .returning();
 
-    await db.insert(projectFiles).values(
-      fileIds.map((fileId, i) => ({
-        projectId: project.id,
-        fileId,
-        position: i,
-      }))
-    );
+    if (fileIds.length > 0) {
+      await db.insert(projectFiles).values(
+        fileIds.map((fileId, i) => ({
+          projectId: project.id,
+          fileId,
+          position: i,
+        }))
+      );
+    }
 
     return { projectId: project.id, slug: project.slug };
   } catch (error) {

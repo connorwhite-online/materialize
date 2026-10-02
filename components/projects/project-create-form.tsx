@@ -164,7 +164,7 @@ export function ProjectCreateForm({
             </Select>
             <p className="mt-1 text-xs text-muted-foreground">
               {visibility === "public"
-                ? "Appears in browse and search once it has at least one file."
+                ? "Appears in browse and search."
                 : "Hidden from browse and search. Only you can see it."}
             </p>
           </div>

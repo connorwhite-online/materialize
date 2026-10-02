@@ -26,7 +26,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ExpandableDescription } from "@/components/ui/expandable-description";
 import { Button } from "@/components/ui/button";
 import { Download } from "@/components/icons/download";
-import { ImagePlaceholder } from "@/components/icons/image-placeholder";
+import { ProjectCoverFallback } from "@/components/projects/project-cover-fallback";
 import { Print } from "@/components/icons/print";
 import { OwnerBar } from "@/components/ui/owner-bar";
 import { DeleteProjectButton } from "@/components/projects/delete-project-button";
@@ -72,7 +72,7 @@ import {
   fileCardOwnedSubtitle,
 } from "@/components/files/file-card";
 import { ProjectTabEmptyWell } from "@/components/projects/project-tab-empty-well";
-import { BoxIcon, BookOpenIcon, PackageIcon } from "lucide-react";
+import { BookOpenIcon, PackageIcon } from "lucide-react";
 
 function truncate(s: string, n: number) {
   return s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s;
@@ -441,9 +441,8 @@ export default async function ProjectDetailPage(props: {
   }
 
   // JSON-LD for crawlers — emitted only for the public, indexable
-  // form (published + public + ≥1 file). Mirrors the listing gate
-  // so Google never sees a graph entry for a draft, private, or
-  // empty shell.
+  // form (published + public). Mirrors the listing gate
+  // so Google never sees a graph entry for a draft or private row.
   const jsonLd =
     isProjectListedToOthers({
       status: project.status,
@@ -475,51 +474,41 @@ export default async function ProjectDetailPage(props: {
   // (always present) anchors it.
   const tabs: ProjectTab[] = [];
 
-  tabs.push({
-    value: "files",
-    label: "Files",
-    content: (
-      <div>
-        {canWrite && bundledFiles.length === 0 ? (
-          <AddProjectFilesDialog
-            projectId={project.id}
-            availableFiles={availableFilesToAdd}
-            trigger={
-              <ProjectTabEmptyWell
-                icon={<BoxIcon className="size-4" />}
-                title="Add files"
-                description="Bundle the printable parts for this project."
+  // Projects don't need files (boards, wiring and code only, enclosure
+  // later), so the Files tab only exists once something is bundled.
+  // Editors with an empty project get an "Add files" entry point in the
+  // action row instead (see below), so the tab isn't the only way in.
+  if (bundledFiles.length > 0) {
+    tabs.push({
+      value: "files",
+      label: "Files",
+      content: (
+        <div>
+          {canWrite && (
+            <div className="mb-3 flex items-center justify-end">
+              <AddProjectFilesDialog
+                projectId={project.id}
+                availableFiles={availableFilesToAdd}
               />
-            }
-          />
-        ) : (
-          <>
-            {canWrite && (
-              <div className="mb-3 flex items-center justify-end">
-                <AddProjectFilesDialog
-                  projectId={project.id}
-                  availableFiles={availableFilesToAdd}
-                />
-              </div>
-            )}
-            <div className="grid gap-3 grid-cols-2 sm:grid-cols-3">
-              {bundledFileCards.map((file) => (
-                <FileCard
-                  key={file.id}
-                  href={`/files/${file.slug}`}
-                  title={file.displayName}
-                  thumbnailUrl={file.thumbnailUrl}
-                  placeholder="No preview"
-                  overlay={<FileCardPriceBadge priceCents={file.price} />}
-                  subtitle={fileCardOwnedSubtitle(file.fileSizeBytes)}
-                />
-              ))}
             </div>
-          </>
-        )}
-      </div>
-    ),
-  });
+          )}
+          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3">
+            {bundledFileCards.map((file) => (
+              <FileCard
+                key={file.id}
+                href={`/files/${file.slug}`}
+                title={file.displayName}
+                thumbnailUrl={file.thumbnailUrl}
+                placeholder="No preview"
+                overlay={<FileCardPriceBadge priceCents={file.price} />}
+                subtitle={fileCardOwnedSubtitle(file.fileSizeBytes)}
+              />
+            ))}
+          </div>
+        </div>
+      ),
+    });
+  }
 
   // Build guide — owner/collaborator-authored HTML with chapters +
   // inline media. Read-only here; editing happens on the focused
@@ -784,14 +773,9 @@ export default async function ProjectDetailPage(props: {
                 <FileThumbnailStack thumbnails={fileThumbs} />
               </div>
             ) : (
-              <div
-                className="flex aspect-[4/3] items-center justify-center rounded-2xl bg-gradient-to-br from-muted to-muted/50"
-                role="img"
-                aria-label="No cover image"
-              >
-                <ImagePlaceholder
-                  size={48}
-                  className="text-muted-foreground/40"
+              <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl">
+                <ProjectCoverFallback
+                  addCoverHref={canWrite ? "#project-photos" : undefined}
                 />
               </div>
             )}
@@ -843,6 +827,12 @@ export default async function ProjectDetailPage(props: {
                 </Button>
               </div>
             )}
+            {canWrite && bundledFiles.length === 0 && (
+              <AddProjectFilesDialog
+                projectId={project.id}
+                availableFiles={availableFilesToAdd}
+              />
+            )}
           </div>
         </div>
 
@@ -852,8 +842,8 @@ export default async function ProjectDetailPage(props: {
             <ExpandableDescription source={project.description} />
           )}
 
-          {isOwner && (
-            <div className="space-y-2">
+          {canWrite && (
+            <div id="project-photos" className="scroll-mt-24 space-y-2">
               <PhotosFeed
                 photos={curatorPhotos}
                 targetType="project"

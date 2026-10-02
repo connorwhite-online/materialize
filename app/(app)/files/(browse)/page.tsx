@@ -35,8 +35,8 @@ import {
   fileCandidateColumns,
   fileNotInAnyProjectCondition,
 } from "@/lib/discovery/browse-pool";
-import { projectHasBundledFile } from "@/lib/projects/listed";
 import { recentDownloadCounts } from "@/lib/discovery/signals";
+import { ProjectCoverFallback } from "@/components/projects/project-cover-fallback";
 import { getAvatarGradient } from "@/lib/utils/avatar-gradient";
 import { BUBBLE_SHADOW } from "@/components/nav/bubble-shadow";
 import {
@@ -133,8 +133,7 @@ const getIdleBrowseData = unstable_cache(
         .where(
           and(
             eq(projects.status, "published"),
-            eq(projects.visibility, "public"),
-            projectHasBundledFile()
+            eq(projects.visibility, "public")
           )
         )
         .groupBy(projects.id, users.username, users.displayName, users.avatarUrl, projects.createdAt)
@@ -584,7 +583,6 @@ export default async function BrowsePage(props: {
         and(
           eq(projects.status, "published"),
           eq(projects.visibility, "public"),
-          projectHasBundledFile(),
           projectMatch,
           category ? eq(projects.category, category) : undefined
         )
@@ -870,6 +868,8 @@ function ProjectCard({ project }: { project: ProjectRow }) {
               alt=""
               size="sm"
             />
+          ) : thumbs.length === 0 ? (
+            <ProjectCoverFallback size="sm" />
           ) : (
             <div className="flex h-full w-full items-center justify-center">
               {/* Stacked-file placeholder */}
@@ -934,7 +934,9 @@ function ProjectCard({ project }: { project: ProjectRow }) {
             </span>
           </p>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {project.fileCount} {project.fileCount === 1 ? "file" : "files"}
+            {project.fileCount === 0
+              ? "Project"
+              : `${project.fileCount} ${project.fileCount === 1 ? "file" : "files"}`}
           </p>
         </CardContent>
       </Card>

@@ -11,7 +11,6 @@ import {
 } from "@/lib/db/schema";
 import { and, count, desc, eq } from "drizzle-orm";
 import { notUnsavedStudioDraft } from "@/lib/studio-drafts";
-import { projectHasBundledFile } from "@/lib/projects/listed";
 import { isOrgMember } from "@/lib/authorization";
 import { loadOrgByHandle } from "@/app/(app)/[handle]/loader";
 import { Button } from "@/components/ui/button";
@@ -53,7 +52,6 @@ export async function OrgProfileView({ handle }: { handle: string }) {
     fileConditions.push(eq(files.visibility, "public"));
     projectConditions.push(eq(projects.status, "published"));
     projectConditions.push(eq(projects.visibility, "public"));
-    projectConditions.push(projectHasBundledFile());
     collectionConditions.push(eq(collections.visibility, "public"));
   }
 

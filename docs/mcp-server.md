@@ -250,8 +250,8 @@ output: { orders: Array<GetOrderOutput>; nextCursor?: string }
 ### 6.5 Projects + BOM + firmware repo
 
 Scope: `projects:read`, `projects:write`.
-
-**`materialize_create_project`** — bundle N existing files into a
+**`materialize_create_project`** — create a project listing, optionally
+bundling N existing files. Accepts name, optional fileIds plus all the listing
 project listing. Accepts name + fileIds plus all the listing
 metadata (description, license, price, tags, visibility) and the
 optional `repoUrl` for the "View code" button on the project page.
