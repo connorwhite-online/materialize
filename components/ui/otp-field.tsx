@@ -11,6 +11,10 @@ interface OtpFieldProps {
   autoFocus?: boolean;
   disabled?: boolean;
   className?: string;
+  /** Accessible name; defaults to "Verification code". */
+  "aria-label"?: string;
+  "aria-invalid"?: boolean;
+  "aria-describedby"?: string;
 }
 
 /**
@@ -34,6 +38,9 @@ export function OtpField({
   autoFocus,
   disabled,
   className,
+  "aria-label": ariaLabel = "Verification code",
+  "aria-invalid": ariaInvalid,
+  "aria-describedby": ariaDescribedBy,
 }: OtpFieldProps) {
   const inputRef = React.useRef<HTMLInputElement>(null);
   const [focused, setFocused] = React.useState(false);
@@ -71,7 +78,7 @@ export function OtpField({
   };
 
   return (
-    <div className={cn("grid h-12 justify-center", className)}>
+    <div className={cn("group/otp grid h-12 justify-center", className)}>
       <div
         aria-hidden
         className="col-start-1 row-start-1 flex items-center gap-1"
@@ -87,7 +94,7 @@ export function OtpField({
               key={i}
               data-slot="otp-field-slot"
               data-active={isActive}
-              className="relative flex h-12 w-10 items-center justify-center rounded-xl border border-foreground/25 bg-muted/60 text-base font-medium text-foreground shadow-sunken transition-[color,box-shadow,border-color] duration-150 ease-out data-[active=true]:z-10 data-[active=true]:border-ring data-[active=true]:shadow-input-focus dark:border-foreground/30 dark:bg-input/30"
+              className="relative flex h-12 w-10 items-center justify-center rounded-xl border border-foreground/25 bg-muted/60 text-base font-medium text-foreground shadow-sunken transition-[color,box-shadow,border-color] duration-150 ease-out data-[active=true]:z-10 data-[active=true]:border-ring data-[active=true]:shadow-input-focus group-aria-invalid/otp:border-destructive dark:border-foreground/30 dark:bg-input/30"
             >
               {value[i]}
               {isActive && !value[i] && (
@@ -118,7 +125,9 @@ export function OtpField({
         autoComplete="one-time-code"
         pattern="[0-9]*"
         maxLength={length}
-        aria-label="Verification code"
+        aria-label={ariaLabel}
+        aria-invalid={ariaInvalid}
+        aria-describedby={ariaDescribedBy}
         autoFocus={autoFocus}
         disabled={disabled}
         className="field-text col-start-1 row-start-1 h-full w-full cursor-text appearance-none border-0 bg-transparent p-0 text-transparent caret-transparent opacity-0 outline-none"

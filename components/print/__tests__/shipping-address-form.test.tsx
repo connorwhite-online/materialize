@@ -8,10 +8,7 @@ import {
   act,
 } from "@testing-library/react";
 
-// input-otp leans on browser APIs jsdom doesn't ship — ResizeObserver
-// at mount and a late-firing pointer heuristic via
-// document.elementFromPoint. Neither is used by the assertions; no-op
-// stubs are enough and keep the run free of unhandled rejections.
+// Harmless browser-API stubs for jsdom (ResizeObserver, elementFromPoint).
 if (typeof globalThis.ResizeObserver === "undefined") {
   globalThis.ResizeObserver = class {
     observe() {}
@@ -100,7 +97,7 @@ function fillRequiredFields() {
   });
 }
 
-// Drives the OTP input that input-otp renders as a single hidden
+// Drives the OTP field's single real (invisible) numeric
 // <input>. Firing a change with the full 6-char value is enough — the
 // form's onChange short-circuits on val.length === 6 and calls
 // handleVerifyOtp directly, so we don't need to type per-character.

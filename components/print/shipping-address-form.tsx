@@ -15,11 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CheckboxField } from "@/components/ui/checkbox";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  InputOTP,
-  InputOTPGroup,
-  InputOTPSlot,
-} from "@/components/ui/input-otp";
+import { OtpField } from "@/components/ui/otp-field";
 import { ChevronLeft } from "@/components/icons/chevron-left";
 
 interface Address {
@@ -578,30 +574,18 @@ export function ShippingAddressForm({
             ? "Enter it to finish setting up your account and place your order."
             : "Looks like you already have an account — enter the code to sign in and place your order."}
         </p>
-        <div className="flex justify-center">
-          <InputOTP
-            maxLength={6}
-            value={otpCode}
-            onChange={(val) => {
-              setOtpCode(val);
-              if (val.length === 6) handleVerifyOtp(val);
-            }}
-            autoFocus
-            disabled={otpVerifying || isSubmitting}
-            aria-label="6-digit verification code"
-            aria-invalid={!!otpError}
-            aria-describedby={otpError ? "otp-error" : undefined}
-          >
-            <InputOTPGroup>
-              <InputOTPSlot index={0} />
-              <InputOTPSlot index={1} />
-              <InputOTPSlot index={2} />
-              <InputOTPSlot index={3} />
-              <InputOTPSlot index={4} />
-              <InputOTPSlot index={5} />
-            </InputOTPGroup>
-          </InputOTP>
-        </div>
+        <OtpField
+          value={otpCode}
+          onChange={(val) => {
+            setOtpCode(val);
+            if (val.length === 6) handleVerifyOtp(val);
+          }}
+          autoFocus
+          disabled={otpVerifying || isSubmitting}
+          aria-label="6-digit verification code"
+          aria-invalid={!!otpError}
+          aria-describedby={otpError ? "otp-error" : undefined}
+        />
         {otpError && (
           <p
             id="otp-error"
