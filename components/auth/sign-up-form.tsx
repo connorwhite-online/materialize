@@ -6,11 +6,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  InputOTP,
-  InputOTPGroup,
-  InputOTPSlot,
-} from "@/components/ui/input-otp";
+import { OtpField } from "@/components/ui/otp-field";
 import { SocialButtons } from "./social-buttons";
 import { setUsername } from "@/app/actions/onboarding";
 import {
@@ -171,26 +167,14 @@ export function SignUpForm({
         <p className="text-sm text-muted-foreground text-center">
           We sent a code to {value}
         </p>
-        <div className="flex justify-center">
-          <InputOTP
-            maxLength={6}
-            value={code}
-            onChange={(codeValue) => {
-              setCode(codeValue);
-              if (codeValue.length === 6) handleVerifyCode(codeValue);
-            }}
-            autoFocus
-          >
-            <InputOTPGroup>
-              <InputOTPSlot index={0} />
-              <InputOTPSlot index={1} />
-              <InputOTPSlot index={2} />
-              <InputOTPSlot index={3} />
-              <InputOTPSlot index={4} />
-              <InputOTPSlot index={5} />
-            </InputOTPGroup>
-          </InputOTP>
-        </div>
+        <OtpField
+          value={code}
+          onChange={(codeValue) => {
+            setCode(codeValue);
+            if (codeValue.length === 6) handleVerifyCode(codeValue);
+          }}
+          autoFocus
+        />
 
         {error && (
           <p className="text-xs text-destructive text-center">{error}</p>
