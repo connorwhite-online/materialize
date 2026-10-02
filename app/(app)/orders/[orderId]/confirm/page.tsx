@@ -31,7 +31,7 @@ export default async function ConfirmAgentOrderPage({
   const { userId } = await auth();
   if (!userId) {
     const next = encodeURIComponent(
-      `/orders/${orderId}/confirm?token=${token}`,
+      `/orders/${orderId}/confirm?token=${token}`
     );
     redirect(`/sign-in?redirect_url=${next}`);
   }
@@ -117,7 +117,7 @@ export default async function ConfirmAgentOrderPage({
         <SummaryRow
           label="Material subtotal"
           value={formatUsd(
-            (order.materialSubtotal ?? 0) * (order.quantity ?? 1),
+            (order.materialSubtotal ?? 0) * (order.quantity ?? 1)
           )}
         />
         <SummaryRow

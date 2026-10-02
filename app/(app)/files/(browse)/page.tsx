@@ -14,6 +14,10 @@ import { eq, desc, ilike, and, or, sql, inArray, isNotNull, type SQL } from "dri
 import { unstable_cache } from "next/cache";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/page";
+import { Browse } from "@/components/icons/browse";
+import { Oops } from "@/components/icons/oops";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { BrowseSearchBar } from "@/components/browse/browse-search-bar";
 import { CategoryFilterBar } from "@/components/browse/category-filter-bar";
@@ -458,7 +462,11 @@ export default async function BrowsePage(props: {
             Files
           </h2>
           {filesWithPhotos.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No files published yet</p>
+            <EmptyState
+              icon={<Browse />}
+              title="No files published yet"
+              description="Be the first: upload a model and list it for the community."
+            />
           ) : (
             <FileGrid files={filesWithPhotos} />
           )}
@@ -726,11 +734,17 @@ export default async function BrowsePage(props: {
       )}
 
       {totalHits === 0 ? (
-        <div className="mt-12 text-center">
-          <p className="text-sm text-muted-foreground">
-            No results for {scopeLabel}
-          </p>
-        </div>
+        <EmptyState
+          className="mt-10"
+          icon={<Oops size={22} />}
+          title={<>No results for {scopeLabel}</>}
+          description="Try a shorter search, a different spelling, or browse a category instead."
+          action={
+            <Button variant="outline" render={<Link href="/files" />}>
+              Clear search
+            </Button>
+          }
+        />
       ) : (
         <div className="mt-8 space-y-10">
           {userRows.length > 0 && (

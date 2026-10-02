@@ -76,10 +76,12 @@ export default function OnboardingPage() {
 
             <Button
               type="submit"
+              size="lg"
               className="w-full"
-              disabled={loading || username.length < MIN_USERNAME_LENGTH}
+              loading={loading}
+              disabled={username.length < MIN_USERNAME_LENGTH}
             >
-              {loading ? "Setting up..." : "Continue to dashboard"}
+              {loading ? "Setting up…" : "Continue"}
             </Button>
           </form>
         </CardContent>

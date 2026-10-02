@@ -13,6 +13,9 @@ import { eq, and, isNotNull, inArray, sql, asc } from "drizzle-orm";
 import { auth } from "@clerk/nextjs/server";
 import { isOrgMember } from "@/lib/authorization";
 import { OwnerBar } from "@/components/ui/owner-bar";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { EmptyState } from "@/components/ui/page";
+import { FolderOpenIcon } from "lucide-react";
 import { CollectionSettingsMenu } from "@/components/profile/collection-settings-menu";
 import { getLicenseMeta } from "@/lib/licenses";
 import {
@@ -210,7 +213,9 @@ export default async function CollectionPage(props: {
         </div>
       )}
       <div className="mb-8">
-        <h1 className="text-2xl font-bold">{collection.name}</h1>
+        <h1 className="text-2xl leading-tight font-semibold tracking-tight text-balance">
+          {collection.name}
+        </h1>
         {collection.description && (
           <p className="mt-2 text-muted-foreground">{collection.description}</p>
         )}
@@ -228,7 +233,8 @@ export default async function CollectionPage(props: {
       </div>
 
       {itemsTruncated && (
-        <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+        <Alert variant="warning" className="mb-6">
+          <AlertDescription>
           Showing the first {COLLECTION_MAX_ITEMS}{" "}
           {fileRowsTruncated && projectRowsTruncated
             ? "files and projects"
@@ -236,11 +242,20 @@ export default async function CollectionPage(props: {
               ? "files"
               : "projects"}
           . Older items aren&apos;t shown here yet — reach out if you need a full export.
-        </div>
+          </AlertDescription>
+        </Alert>
       )}
 
       {items.length === 0 ? (
-        <p className="text-muted-foreground">This collection is empty.</p>
+        <EmptyState
+          icon={<FolderOpenIcon />}
+          title="This collection is empty"
+          description={
+            isOwner
+              ? "Use “Add to collection” on any file or project page to fill this shelf."
+              : "Nothing on this shelf yet. Check back soon."
+          }
+        />
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {items.map((item) => {
