@@ -72,7 +72,7 @@ import {
   fileCardOwnedSubtitle,
 } from "@/components/files/file-card";
 import { ProjectTabEmptyWell } from "@/components/projects/project-tab-empty-well";
-import { BoxIcon, BookOpenIcon, PackageIcon } from "lucide-react";
+import { BookOpenIcon, PackageIcon } from "lucide-react";
 
 function truncate(s: string, n: number) {
   return s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s;
