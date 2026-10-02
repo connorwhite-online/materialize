@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { CardImageCarousel } from "@/components/photos/card-image-carousel";
+import { ProjectCoverFallback } from "@/components/projects/project-cover-fallback";
 import { FileThumbnailStack } from "@/components/projects/file-thumbnail-stack";
 import { PrivateCardMark } from "@/components/ui/visibility-mark";
 import {
@@ -67,9 +68,7 @@ export function LibraryProjectCard({ item }: LibraryProjectCardProps) {
           ) : item.fileThumbnails.length > 0 ? (
             <FileThumbnailStack thumbnails={item.fileThumbnails} />
           ) : (
-            <div className="flex h-full w-full items-center justify-center">
-              <span className="text-xs text-muted-foreground/50">Project</span>
-            </div>
+            <ProjectCoverFallback size="sm" />
           )}
 
           {(isPrivate || item.price > 0) && (
@@ -92,7 +91,9 @@ export function LibraryProjectCard({ item }: LibraryProjectCardProps) {
           </p>
           <div className="mt-0.5 flex items-center gap-1.5">
             <span className="text-xs text-muted-foreground">
-              {item.fileCount} {item.fileCount === 1 ? "file" : "files"}
+              {item.fileCount === 0
+                ? "Project"
+                : `${item.fileCount} ${item.fileCount === 1 ? "file" : "files"}`}
             </span>
             {item.source === "purchased" && (
               <Badge variant="secondary" className="text-[10px]">

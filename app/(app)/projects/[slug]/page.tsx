@@ -26,7 +26,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ExpandableDescription } from "@/components/ui/expandable-description";
 import { Button } from "@/components/ui/button";
 import { Download } from "@/components/icons/download";
-import { ImagePlaceholder } from "@/components/icons/image-placeholder";
+import { ProjectCoverFallback } from "@/components/projects/project-cover-fallback";
 import { Print } from "@/components/icons/print";
 import { OwnerBar } from "@/components/ui/owner-bar";
 import { DeleteProjectButton } from "@/components/projects/delete-project-button";
@@ -773,14 +773,9 @@ export default async function ProjectDetailPage(props: {
                 <FileThumbnailStack thumbnails={fileThumbs} />
               </div>
             ) : (
-              <div
-                className="flex aspect-[4/3] items-center justify-center rounded-2xl bg-gradient-to-br from-muted to-muted/50"
-                role="img"
-                aria-label="No cover image"
-              >
-                <ImagePlaceholder
-                  size={48}
-                  className="text-muted-foreground/40"
+              <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl">
+                <ProjectCoverFallback
+                  addCoverHref={canWrite ? "#project-photos" : undefined}
                 />
               </div>
             )}
@@ -847,8 +842,8 @@ export default async function ProjectDetailPage(props: {
             <ExpandableDescription source={project.description} />
           )}
 
-          {isOwner && (
-            <div className="space-y-2">
+          {canWrite && (
+            <div id="project-photos" className="scroll-mt-24 space-y-2">
               <PhotosFeed
                 photos={curatorPhotos}
                 targetType="project"
