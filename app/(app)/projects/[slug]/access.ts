@@ -13,8 +13,8 @@ import { isProjectListedToOthers } from "@/lib/projects/listed";
 
 /**
  * Can the viewer see this project at all? A published + public project
- * with at least one file is open to everyone; empty shells, drafts,
- * private, and archived rows require write access — owner, org member,
+ * is open to everyone (files are optional); drafts, private, and
+ * archived rows require write access — owner, org member,
  * or per-project collaborator, all folded into the single `canWrite`
  * flag computed via `canWriteProject` in the page.
  */

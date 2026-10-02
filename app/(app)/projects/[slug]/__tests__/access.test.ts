@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { resolveProjectVisibility } from "../access";
 
 // MTR-237 / CON-38: pins the visibility decision the project detail
-// page makes before rendering — published + public + ≥1 file stays
-// open to everyone; empty shells, drafts, and private rows require
+// page makes before rendering — published + public stays open to
+// everyone (files optional); drafts and private rows require
 // canWrite (owner / org member / per-project collaborator).
 
 describe("resolveProjectVisibility", () => {
@@ -18,7 +18,7 @@ describe("resolveProjectVisibility", () => {
     ).toBe(true);
   });
 
-  it("is NOT visible for an anonymous viewer on an empty public published project", () => {
+  it("is visible for an anonymous viewer on a public published project with no files", () => {
     expect(
       resolveProjectVisibility({
         status: "published",
@@ -26,7 +26,7 @@ describe("resolveProjectVisibility", () => {
         canWrite: false,
         fileCount: 0,
       })
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("is visible for the owner on an empty public project", () => {

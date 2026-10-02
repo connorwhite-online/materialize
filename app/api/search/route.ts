@@ -15,7 +15,6 @@ import { arrayTextIlike } from "@/lib/db/search";
 import { categoryIdsMatchingQuery } from "@/lib/categories";
 import { logError } from "@/lib/logger";
 import { rankSearchRows } from "@/lib/discovery";
-import { projectHasBundledFile } from "@/lib/projects/listed";
 
 const PER_CATEGORY_LIMIT = 8;
 /**
@@ -191,7 +190,6 @@ const searchDb = unstable_cache(
           and(
             eq(projects.status, "published"),
             eq(projects.visibility, "public"),
-            projectHasBundledFile(),
             or(
               ilike(projects.name, pattern),
               arrayTextIlike(projects.tags, pattern),

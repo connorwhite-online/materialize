@@ -816,12 +816,12 @@ const handler = createMcpHandler(
     server.registerTool(
       "materialize_create_project",
       {
-        title: "Create a project bundling one or more files",
+        title: "Create a project, optionally bundling files",
         description:
-          "Create a project that bundles N existing files the agent owns. Projects can carry a build guide (long-form markdown how-to), a BOM, wiring diagrams, a firmware repo URL, and curator photos — set those at create time or via the followup tools (materialize_update_project, materialize_set_project_bom, materialize_add_project_circuit_*, materialize_add_project_photo, materialize_add_project_inline_image).",
+          "Create a project, optionally bundling N existing files the agent owns. Files are optional: pass none for a project with no 3D-printable parts (boards, wiring, code) and attach an enclosure later. Projects can carry a build guide (long-form markdown how-to), a BOM, wiring diagrams, a firmware repo URL, and curator photos — set those at create time or via the followup tools (materialize_update_project, materialize_set_project_bom, materialize_add_project_circuit_*, materialize_add_project_photo, materialize_add_project_inline_image).",
         inputSchema: {
           name: z.string().min(1).max(200),
-          fileIds: z.array(z.string().uuid()).min(1).max(50),
+          fileIds: z.array(z.string().uuid()).max(50).optional(),
           description: z.string().max(5000).nullable().optional(),
           buildGuide: z
             .string()

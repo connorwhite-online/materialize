@@ -4,7 +4,6 @@ import { db } from "@/lib/db";
 import { files, projects, users } from "@/lib/db/schema";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { logError } from "@/lib/logger";
-import { projectHasBundledFile } from "@/lib/projects/listed";
 import { CATEGORIES } from "@/lib/categories";
 
 /**
@@ -113,8 +112,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       .where(
         and(
           eq(projects.status, "published"),
-          eq(projects.visibility, "public"),
-          projectHasBundledFile()
+          eq(projects.visibility, "public")
         )
       );
     projectEntries = rows.map((r) => ({

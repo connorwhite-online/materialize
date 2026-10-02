@@ -83,8 +83,7 @@ export const createProjectSchema = z.object({
     .optional()
     .or(z.literal("").transform(() => undefined)),
   // Empty is allowed — create the project first, add files later.
-  // Visitor-facing listings hide a project until it has ≥1 file
-  // (`isProjectListedToOthers` / `projectHasBundledFile`).
+  // A project needs no files to be listed (`isProjectListedToOthers`).
   fileIds: z
     .array(z.string().uuid())
     .max(MAX_PROJECT_FILES, `A project can bundle at most ${MAX_PROJECT_FILES} files`)

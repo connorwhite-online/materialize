@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { isProjectListedToOthers, projectHasBundledFile } from "../listed";
+import { isProjectListedToOthers } from "../listed";
 
 describe("isProjectListedToOthers", () => {
-  it("is listed only when published, public, and has at least one file", () => {
+  it("lists a published public project with files", () => {
     expect(
       isProjectListedToOthers({
         status: "published",
@@ -12,14 +12,17 @@ describe("isProjectListedToOthers", () => {
     ).toBe(true);
   });
 
-  it("hides an empty public published project from other users", () => {
+  it("lists a published public project with no files", () => {
     expect(
       isProjectListedToOthers({
         status: "published",
         visibility: "public",
         fileCount: 0,
       })
-    ).toBe(false);
+    ).toBe(true);
+    expect(
+      isProjectListedToOthers({ status: "published", visibility: "public" })
+    ).toBe(true);
   });
 
   it("hides private and draft projects even when they have files", () => {
@@ -37,23 +40,5 @@ describe("isProjectListedToOthers", () => {
         fileCount: 2,
       })
     ).toBe(false);
-  });
-
-  it("coerces a numeric string fileCount the way Neon/drizzle sometimes returns counts", () => {
-    expect(
-      isProjectListedToOthers({
-        status: "published",
-        visibility: "public",
-        fileCount: "3" as unknown as number,
-      })
-    ).toBe(true);
-  });
-});
-
-describe("projectHasBundledFile", () => {
-  it("returns a drizzle SQL fragment (not a boolean)", () => {
-    const frag = projectHasBundledFile();
-    expect(frag).toBeTruthy();
-    expect(typeof frag).toBe("object");
   });
 });
