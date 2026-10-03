@@ -85,16 +85,18 @@ export default async function HomePage() {
   // render a logged-in shell over an incomplete account.
   const { userId } = await auth();
   if (userId) {
-    const user = await currentUser();
+    // currentUser() is a Clerk Backend API round trip; the other two
+    // reads don't depend on it, so overlap them rather than stacking
+    // ~one network hop each before the first byte.
+    const [user, textToCad, initialUnreadCount] = await Promise.all([
+      currentUser(),
+      resolveTextToCadAccess(),
+      getMyUnreadNotificationCount(),
+    ]);
     if (!user?.username) {
       redirect("/onboarding");
     }
-
-    const [textToCad, sandbox, initialUnreadCount] = await Promise.all([
-      resolveTextToCadAccess(),
-      Promise.resolve(isSandboxMode()),
-      getMyUnreadNotificationCount(),
-    ]);
+    const sandbox = isSandboxMode();
 
     return (
       <AppShell
