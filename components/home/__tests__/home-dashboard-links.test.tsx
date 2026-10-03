@@ -26,7 +26,7 @@ vi.mock("@/components/home/feathered-carousel", () => ({
 
 import { loadPendingOrders } from "@/lib/dashboard/pending-orders";
 import { loadLibraryTiles } from "@/lib/print/library-tiles";
-import { HomeDashboard } from "../home-dashboard";
+import { HomeRecentFiles } from "../home-dashboard";
 
 const tile: LibraryTile = {
   fileAssetId: "asset-hook",
@@ -44,7 +44,7 @@ describe("HomeDashboard recent file destinations", () => {
   });
 
   it("links Recent cards to /files/{slug}, not /print/{fileAssetId}", async () => {
-    render(await HomeDashboard({ userId: "user-1" }));
+    render(await HomeRecentFiles({ userId: "user-1" }));
 
     expect(
       screen.getByRole("heading", { name: "Recent files" })
