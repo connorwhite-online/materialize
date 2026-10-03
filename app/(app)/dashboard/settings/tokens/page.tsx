@@ -7,7 +7,6 @@ import { listPersonalAccessTokens } from "@/app/actions/tokens";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { TokensManager } from "./tokens-manager";
-import { RobotIcon } from "@/components/icons/oai";
 
 export default async function TokensSettingsPage() {
   const { userId } = await auth();
@@ -38,7 +37,6 @@ export default async function TokensSettingsPage() {
     <Page width="narrow">
       <PageHeader
         back={{ href: "/dashboard/settings", label: "Settings" }}
-        icon={<RobotIcon />}
         title="Connected agents"
         description={
           <>

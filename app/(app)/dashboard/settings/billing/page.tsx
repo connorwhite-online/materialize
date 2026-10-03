@@ -6,7 +6,6 @@ import { Page, PageHeader } from "@/components/ui/page";
 import { getPaymentMethodSummary } from "@/app/actions/billing";
 import { PaymentCard } from "@/components/print/payment-card";
 import { BillingActions } from "./billing-actions";
-import { CreditCardIcon } from "@/components/icons/oai";
 
 export default async function BillingSettingsPage({
   searchParams,
@@ -23,7 +22,6 @@ export default async function BillingSettingsPage({
     <Page width="narrow">
       <PageHeader
         back={{ href: "/dashboard/settings", label: "Settings" }}
-        icon={<CreditCardIcon />}
         title="Saved card"
         description="Keep a card on file for print checkout and agent orders. Agents within a spending policy can charge it automatically; everything else still asks you to confirm."
       />

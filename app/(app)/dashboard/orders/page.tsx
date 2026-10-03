@@ -3,7 +3,6 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 import { PartyPopperIcon, SparklesIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Page, PageHeader } from "@/components/ui/page";
-import { Print } from "@/components/icons/print";
 import { OrdersTab } from "@/components/profile/orders-tab";
 import { reconcileOrderForUser } from "@/lib/stripe/reconcile-production-payments";
 import { logError } from "@/lib/logger";
@@ -44,7 +43,6 @@ export default async function OrdersPage({
   return (
     <Page>
       <PageHeader
-        icon={<Print />}
         title="Orders"
         description="Prints on their way to you, and carts you haven't checked out yet."
       />

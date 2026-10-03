@@ -4,7 +4,6 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import { NotificationsTab } from "@/components/profile/notifications-tab";
 import { Page, PageHeader } from "@/components/ui/page";
-import { Bell } from "@/components/icons/bell";
 import { NotificationSettingsGear } from "@/components/notifications/notification-settings-gear";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
@@ -41,7 +40,6 @@ export default async function NotificationsPage() {
   return (
     <Page width="narrow">
       <PageHeader
-        icon={<Bell />}
         title="Notifications"
         description="Sales, comments and order updates."
         actions={
