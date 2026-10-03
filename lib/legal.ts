@@ -2,13 +2,13 @@
  * Facts the legal and support pages state, in one place so the privacy
  * policy, terms and support page can't disagree with each other.
  *
- * The operator is an individual until the LLC exists. When it does,
- * change OPERATOR here and bump LEGAL_LAST_UPDATED; the plugin's
- * `developerName` (plugins/materialize/plugin.json) must match whoever
- * is verified on the OpenAI platform, which is a separate change.
+ * The legal name is exactly "Materialize LLC". If OPERATOR changes,
+ * bump LEGAL_LAST_UPDATED; the plugin's `developerName`
+ * (plugins/materialize/plugin.json) must match whoever is verified on
+ * the OpenAI platform.
  */
-export const OPERATOR = "Connor White";
+export const OPERATOR = "Materialize LLC, a California limited liability company";
 export const SUPPORT_EMAIL = "support@materialize.cc";
 export const GOVERNING_LAW = "California";
 export const MINIMUM_AGE = 13;
-export const LEGAL_LAST_UPDATED = "October 1, 2026";
+export const LEGAL_LAST_UPDATED = "October 3, 2026";
