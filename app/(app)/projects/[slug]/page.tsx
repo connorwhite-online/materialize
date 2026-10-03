@@ -784,7 +784,7 @@ export default async function ProjectDetailPage(props: {
           {/* Project info + actions */}
           <div className="flex flex-col gap-4">
             <div>
-              <h1 className="text-2xl font-bold">{project.name}</h1>
+              <h1 className="text-2xl font-semibold">{project.name}</h1>
               <div className="mt-2">{renderByline()}</div>
               {project.category && getCategoryLabel(project.category) && (
                 <div className="mt-3">

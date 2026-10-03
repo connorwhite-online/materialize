@@ -72,7 +72,7 @@ export default async function SandboxCraftCloudPayPage({
             <FactoryIcon className="h-6 w-6" strokeWidth={2.5} />
           </div>
           <div>
-            <h1 className="text-lg font-bold leading-tight">
+            <h1 className="text-lg font-semibold leading-tight">
               CraftCloud payment
             </h1>
             <p className="text-xs text-muted-foreground">

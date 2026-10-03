@@ -144,7 +144,7 @@ export async function UserProfileView({
           />
           <div className="min-w-0 flex-1">
             <div>
-              <h1 className="text-2xl font-bold">
+              <h1 className="text-2xl font-semibold">
                 {user.displayName || user.username}
               </h1>
               {user.username && (

@@ -11,8 +11,9 @@ describe("DiscussionEmptyBanner", () => {
     const button = screen.getByRole("button", {
       name: /share your build/i,
     });
-    expect(button.className).toMatch(/bg-gradient-to-r/);
-    expect(button.className).toMatch(/from-emerald-50/);
+    // Flat composer-style row, not a tinted gradient card.
+    expect(button.className).toMatch(/bg-muted/);
+    expect(button.className).not.toMatch(/gradient/);
     button.click();
     expect(onStart).toHaveBeenCalledOnce();
   });

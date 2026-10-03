@@ -15,13 +15,13 @@ import { isOrgMember } from "@/lib/authorization";
 import { OwnerBar } from "@/components/ui/owner-bar";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { EmptyState } from "@/components/ui/page";
-import { FolderOpenIcon } from "lucide-react";
 import { CollectionSettingsMenu } from "@/components/profile/collection-settings-menu";
 import { getLicenseMeta } from "@/lib/licenses";
 import {
   FileCard,
   FileCardPriceBadge,
 } from "@/components/files/file-card";
+import { FolderOpenIcon } from "@/components/icons/oai";
 
 type FileItem = {
   kind: "file";

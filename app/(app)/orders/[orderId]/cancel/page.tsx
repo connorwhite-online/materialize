@@ -6,7 +6,6 @@ import { db } from "@/lib/db";
 import { printOrders, fileAssets, files } from "@/lib/db/schema";
 import { findMaterialConfig, findProvider } from "@/lib/craftcloud/catalog";
 import { CancelOrderForm } from "./cancel-form";
-import { BotIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Page, PageHeader } from "@/components/ui/page";
 import {
@@ -14,6 +13,7 @@ import {
   SummaryRow,
   formatUsd,
 } from "@/components/ui/summary-list";
+import { RobotIcon } from "@/components/icons/oai";
 
 interface PageProps {
   params: Promise<{ orderId: string }>;
@@ -84,7 +84,7 @@ export default async function CancelAgentOrderPage({
   return (
     <Page width="narrow" className="max-w-xl gap-6">
       <PageHeader
-        icon={<BotIcon />}
+        icon={<RobotIcon />}
         eyebrow="Print order · from your agent"
         title={
           alreadyCancelled

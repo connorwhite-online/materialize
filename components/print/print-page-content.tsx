@@ -347,7 +347,7 @@ export function PrintPageContent({
     <div className="mx-auto max-w-7xl px-4 py-8">
       {!isActive && (
         <div className={centeredIdle ? "mx-auto mb-6 max-w-3xl" : "mb-6"}>
-          <h1 className="text-2xl font-bold">{headline}</h1>
+          <h1 className="text-2xl font-semibold">{headline}</h1>
           <p className="mt-2 text-muted-foreground">{subheadline}</p>
         </div>
       )}

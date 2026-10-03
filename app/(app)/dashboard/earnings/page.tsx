@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { EarningsTab } from "@/components/profile/earnings-tab";
 import { Page, PageHeader } from "@/components/ui/page";
-import { Download } from "@/components/icons/download";
+import { DollarCircleIcon } from "@/components/icons/oai";
 
 export default async function EarningsPage() {
   const { userId } = await auth();
@@ -13,7 +13,7 @@ export default async function EarningsPage() {
   return (
     <Page>
       <PageHeader
-        icon={<Download />}
+        icon={<DollarCircleIcon />}
         title="Earnings"
         description="Sales of your files, and the downloads and prints they drove."
       />

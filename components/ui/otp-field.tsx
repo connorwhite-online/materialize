@@ -94,7 +94,7 @@ export function OtpField({
               key={i}
               data-slot="otp-field-slot"
               data-active={isActive}
-              className="relative flex h-12 w-10 items-center justify-center rounded-xl border border-foreground/25 bg-muted/60 text-base font-medium text-foreground shadow-sunken transition-[color,box-shadow,border-color] duration-150 ease-out data-[active=true]:z-10 data-[active=true]:border-ring data-[active=true]:shadow-input-focus group-aria-invalid/otp:border-destructive dark:border-foreground/30 dark:bg-input/30"
+              className="relative flex h-12 w-10 items-center justify-center rounded-xl border border-input bg-background text-base font-medium text-foreground transition-[color,box-shadow,border-color] duration-150 ease-out data-[active=true]:z-10 data-[active=true]:border-ring data-[active=true]:shadow-input-focus group-aria-invalid/otp:border-destructive dark:border-foreground/30 dark:bg-input/30"
             >
               {value[i]}
               {isActive && !value[i] && (

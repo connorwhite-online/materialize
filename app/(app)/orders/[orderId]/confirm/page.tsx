@@ -5,7 +5,6 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { printOrders, fileAssets, files } from "@/lib/db/schema";
 import { findMaterialConfig, findProvider } from "@/lib/craftcloud/catalog";
-import { BotIcon } from "lucide-react";
 import { ConfirmOrderForm } from "./confirm-form";
 import { Page, PageHeader } from "@/components/ui/page";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -14,6 +13,7 @@ import {
   SummaryRow,
   formatUsd,
 } from "@/components/ui/summary-list";
+import { RobotIcon } from "@/components/icons/oai";
 
 interface PageProps {
   params: Promise<{ orderId: string }>;
@@ -83,7 +83,7 @@ export default async function ConfirmAgentOrderPage({
   return (
     <Page width="narrow" className="max-w-xl gap-6">
       <PageHeader
-        icon={<BotIcon />}
+        icon={<RobotIcon />}
         eyebrow="Print order · from your agent"
         title="Confirm and pay"
         description={

@@ -20,7 +20,7 @@ export function CreateFormHeader({
         <span className="flex shrink-0" aria-hidden="true">
           {icon}
         </span>
-        <h1 className="text-2xl font-bold">{title}</h1>
+        <h1 className="text-2xl font-semibold">{title}</h1>
       </div>
       <p className="mt-1 text-sm text-muted-foreground">{description}</p>
     </div>

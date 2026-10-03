@@ -148,7 +148,7 @@ export default async function MaterialDetailPage(props: {
         </div>
 
         <div>
-          <h1 className="text-3xl font-bold">{material.name}</h1>
+          <h1 className="text-3xl font-semibold">{material.name}</h1>
 
           <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
             <div className="flex items-center gap-1.5">

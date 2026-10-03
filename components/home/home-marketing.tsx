@@ -83,7 +83,7 @@ export function HomeMarketing() {
         <section aria-labelledby="how-it-works" className="space-y-3">
           <h2
             id="how-it-works"
-            className="text-2xl font-bold leading-tight sm:text-3xl"
+            className="text-2xl font-semibold leading-tight sm:text-3xl"
           >
             From a digital model to a printed part
           </h2>
@@ -126,7 +126,7 @@ export function HomeMarketing() {
         <section aria-labelledby="why-materialize" className="mt-16 sm:mt-24">
           <h2
             id="why-materialize"
-            className="text-2xl font-bold leading-tight sm:text-3xl"
+            className="text-2xl font-semibold leading-tight sm:text-3xl"
           >
             Why makers and creators choose Materialize
           </h2>
@@ -159,7 +159,7 @@ export function HomeMarketing() {
             and a clear next step for readers. */}
         <section className="mt-16 flex flex-col items-start gap-4 rounded-2xl border border-border bg-card p-8 sm:mt-24 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-1">
-            <h2 className="text-xl font-bold leading-tight sm:text-2xl">
+            <h2 className="text-xl font-semibold leading-tight sm:text-2xl">
               Ready to print something?
             </h2>
             <p className="text-sm text-muted-foreground leading-relaxed">

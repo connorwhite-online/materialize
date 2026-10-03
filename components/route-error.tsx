@@ -3,9 +3,9 @@
 import Link from "next/link";
 import { useEffect } from "react";
 
-import { Frown } from "@/components/icons/frown";
 import { Button } from "@/components/ui/button";
 import { StatusScreen } from "@/components/ui/page";
+import { WarningIcon } from "@/components/icons/oai";
 
 /**
  * Shared body for every `error.tsx` boundary. Shows a friendly sentence
@@ -19,7 +19,7 @@ export function RouteError({
   error,
   reset,
   title = "Something went wrong",
-  description = "That didn't load. Give it another try — if it keeps happening, we're on it.",
+  description = "This page didn't load. Try again, or come back in a moment.",
   fallback,
 }: {
   error: Error & { digest?: string };
@@ -34,13 +34,13 @@ export function RouteError({
 
   return (
     <StatusScreen
-      icon={<Frown size={28} />}
+      icon={<WarningIcon />}
       title={title}
       description={
         <>
           {description}
           {error.digest && (
-            <span className="mt-3 block font-mono text-xs text-muted-foreground/70 select-all">
+            <span className="mt-3 block font-mono text-xs text-subtle-foreground select-all">
               Ref {error.digest}
             </span>
           )}
@@ -48,12 +48,11 @@ export function RouteError({
       }
       actions={
         <>
-          <Button size="lg" onClick={reset}>
+          <Button onClick={reset}>
             Try again
           </Button>
           {fallback && (
             <Button
-              size="lg"
               variant="outline"
               render={<Link href={fallback.href} />}
             >

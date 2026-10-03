@@ -217,7 +217,8 @@ export function TokensManager({ initialTokens, hasPaymentMethod }: Props) {
                 {!t.revokedAt && (
                   <Button
                     size="sm"
-                    variant="destructive"
+                    variant="outline"
+                    className="text-destructive"
                     onClick={() => onRevoke(t.id)}
                   >
                     Revoke

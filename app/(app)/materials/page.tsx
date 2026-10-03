@@ -85,7 +85,7 @@ export default async function MaterialsPage() {
         dangerouslySetInnerHTML={{ __html: safeJsonLdScript(jsonLd) }}
       />
       <div className="mb-8">
-        <h1 className="text-2xl font-bold">Materials</h1>
+        <h1 className="text-2xl font-semibold">Materials</h1>
         <p className="mt-1 text-muted-foreground">
           {unavailable
             ? "Our material catalog is temporarily unavailable. Please check back in a moment."

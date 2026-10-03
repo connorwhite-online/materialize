@@ -44,6 +44,10 @@
   --color-glass: var(--glass);
   --color-glass-border: var(--glass-border);
   --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-subtle-foreground: var(--subtle-foreground);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -61,169 +65,156 @@
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  /* ChatGPT's radius ramp: 6 · 8 · 10 · 12 · 16 · 20 · 24. */
+  --radius-xl: calc(var(--radius) * 1.2);
+  --radius-2xl: calc(var(--radius) * 1.6);
+  --radius-3xl: calc(var(--radius) * 2);
+  --radius-4xl: calc(var(--radius) * 2.4);
   /* Springy settle — a hair of overshoot, no wobble. Same curve as
      `--mz-ease` on the wordmark. Use as `ease-spring` / `ease-out-soft`. */
   --ease-spring: cubic-bezier(0.22, 1.15, 0.32, 1);
   --ease-out-soft: cubic-bezier(0.22, 0.9, 0.28, 1);
+  /* ChatGPT's enter/exit pair: long glide in, quick accelerate out. */
+  --ease-enter: cubic-bezier(0.19, 1, 0.22, 1);
+  --ease-exit: cubic-bezier(0.8, 0, 0.4, 1);
 }
 
-/* Neutral tokens carry a very subtle warm bias — hue 80, tiny chroma.
-   Enough to feel like "not clinical cold gray" without reading as beige.
-   Background is intentionally a hair below pure white so card/popover
-   surfaces (which stay at full white) read as "lifted" without needing
-   to fight gravity through shadow alone. */
+/* Neutral tokens follow ChatGPT's Apps SDK UI palette (MIT, © 2025
+   OpenAI): a true neutral gray ramp, pure white canvas, borders as black
+   alpha so they sit correctly on any fill, and one blue reserved for
+   focus. Ramp for reference (light): 25 #fcfcfc · 50 #f9f9f9 · 75 #f3f3f3
+   · 100 #ededed · 150 #dfdfdf · 200 #cdcdcd · 300 #afafaf · 400 #8f8f8f ·
+   500 #5d5d5d · 600 #414141 · 700 #303030 · 800 #212121 · 1000 #0d0d0d.
+   Hierarchy comes from fill steps and hairlines, not from a tinted
+   canvas or a page gradient. */
 :root {
-  --background: oklch(0.975 0.006 80);
-  --background-translucent: oklch(0.975 0.006 80 / 0.72);
+  --background: #ffffff;
+  --background-translucent: rgb(255 255 255 / 0.72);
   /* Shared opaque endpoint for the hero feather and HomeMarketing.
      Both surfaces must resolve to the exact same pixel or their join
      reads as a horizontal band. */
-  --home-marketing: color-mix(
-    in oklch,
-    var(--muted) 20%,
-    var(--background)
-  );
-  /* Bottom-to-top page gradient. Bottom sits a hair darker + slightly
-     warmer than --background, fading up to the current near-white.
-     Lightness delta is intentionally tiny (~0.02) so the page reads
-     as flat-with-a-hint-of-depth rather than visibly graded. Used on
-     <body>; <html> stays solid --background so iOS safe-area fills
-     match the active theme. */
-  --background-gradient: linear-gradient(
-    to top,
-    oklch(0.92 0.014 80),
-    oklch(0.975 0.006 80) 70%
-  );
-  --foreground: oklch(0.145 0.008 80);
-  --card: oklch(1 0.006 80);
-  --card-foreground: oklch(0.145 0.008 80);
-  --popover: oklch(1 0.006 80);
-  --popover-foreground: oklch(0.145 0.008 80);
-  /* Translucent surface fills for frosted-glass floating layers
-     (dialogs, popovers, dropdowns). Pair with backdrop-blur — the
-     blur is what turns the opacity into glass. Tuned to ~0.72 so
-     content reads through softly without losing contrast on text. */
-  --card-translucent: oklch(1 0.006 80 / 0.7);
-  --popover-translucent: oklch(1 0.006 80 / 0.82);
-  --primary: oklch(0.205 0.008 80);
-  --primary-foreground: oklch(0.985 0.006 80);
-  --secondary: oklch(0.95 0.008 80);
-  --secondary-foreground: oklch(0.205 0.008 80);
-  --muted: oklch(0.93 0.008 80);
-  --muted-foreground: oklch(0.556 0.012 80);
-  --accent: oklch(0.95 0.008 80);
-  --accent-foreground: oklch(0.205 0.008 80);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0.01 80);
-  --input: oklch(0.922 0.01 80);
-  --ring: oklch(0.708 0.012 80);
-  /* Frosted-glass surface: translucent + blurred (apply via `.glass`).
-     More see-through than --card so it reads as glass over content. */
-  --glass: oklch(0.99 0.006 80 / 0.55);
-  --glass-border: oklch(0.922 0.01 80 / 0.6);
-  --chart-1: oklch(0.87 0.01 80);
-  --chart-2: oklch(0.556 0.012 80);
-  --chart-3: oklch(0.439 0.012 80);
-  --chart-4: oklch(0.371 0.012 80);
-  --chart-5: oklch(0.269 0.01 80);
+  --home-marketing: #f9f9f9;
+  /* Flat canvas. Kept as a token (body reads it) so a surface can opt
+     back into a wash without touching the base layer. */
+  --background-gradient: none;
+  --foreground: #0d0d0d;
+  --card: #ffffff;
+  --card-foreground: #0d0d0d;
+  --popover: #ffffff;
+  --popover-foreground: #0d0d0d;
+  /* Translucent fills for frosted floating layers (dialogs, popovers,
+     the mobile nav). Pair with backdrop-blur. */
+  --card-translucent: rgb(255 255 255 / 0.72);
+  --popover-translucent: rgb(255 255 255 / 0.86);
+  --primary: #0d0d0d;
+  --primary-foreground: #ffffff;
+  --secondary: #f3f3f3;
+  --secondary-foreground: #0d0d0d;
+  --muted: #f3f3f3;
+  --muted-foreground: #5d5d5d;
+  /* Third text tier — timestamps, placeholders, captions. */
+  --subtle-foreground: #8f8f8f;
+  --accent: #f3f3f3;
+  --accent-foreground: #0d0d0d;
+  --destructive: #e02e2a;
+  --success: #00a240;
+  --warning: #e25507;
+  --info: #0169cc;
+  --border: rgb(0 0 0 / 0.1);
+  --input: rgb(0 0 0 / 0.14);
+  --ring: #0169cc;
+  --glass: rgb(255 255 255 / 0.6);
+  --glass-border: rgb(0 0 0 / 0.08);
+  --chart-1: #cdcdcd;
+  --chart-2: #8f8f8f;
+  --chart-3: #5d5d5d;
+  --chart-4: #414141;
+  --chart-5: #212121;
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0.006 80);
-  --sidebar-foreground: oklch(0.145 0.008 80);
-  --sidebar-primary: oklch(0.205 0.008 80);
-  --sidebar-primary-foreground: oklch(0.985 0.006 80);
-  --sidebar-accent: oklch(0.97 0.008 80);
-  --sidebar-accent-foreground: oklch(0.205 0.008 80);
-  --sidebar-border: oklch(0.922 0.01 80);
-  --sidebar-ring: oklch(0.708 0.012 80);
+  --sidebar: #f9f9f9;
+  --sidebar-foreground: #0d0d0d;
+  --sidebar-primary: #0d0d0d;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ededed;
+  --sidebar-accent-foreground: #0d0d0d;
+  --sidebar-border: rgb(0 0 0 / 0.1);
+  --sidebar-ring: #0169cc;
 }
 
 .dark {
-  /* Dark-mode warmth is slightly more restrained (lower chroma) so
-     the darks don't drift toward brown. */
-  --background: oklch(0.145 0.005 80);
-  --background-translucent: oklch(0.145 0.005 80 / 0.7);
-  /* Dark-mode page gradient. Subtle "ground glow" feel — bottom is
-     ever so slightly lighter than --background, fading down to the
-     baseline at the top. Same lightness delta (~0.02) as light mode
-     for symmetry. */
-  --background-gradient: linear-gradient(
-    to top,
-    oklch(0.085 0.005 80),
-    oklch(0.145 0.005 80) 70%
-  );
-  --foreground: oklch(0.985 0.005 80);
-  --card: oklch(0.205 0.006 80);
-  --card-foreground: oklch(0.985 0.005 80);
-  --popover: oklch(0.205 0.006 80);
-  --popover-foreground: oklch(0.985 0.005 80);
-  /* Dark-mode glass sits a touch more opaque (0.78/0.8) — dark
-     translucent surfaces lose legibility faster than light ones. */
-  --card-translucent: oklch(0.205 0.006 80 / 0.78);
-  --popover-translucent: oklch(0.205 0.006 80 / 0.88);
-  --primary: oklch(0.922 0.005 80);
-  --primary-foreground: oklch(0.205 0.006 80);
-  --secondary: oklch(0.269 0.007 80);
-  --secondary-foreground: oklch(0.985 0.005 80);
-  --muted: oklch(0.269 0.007 80);
-  --muted-foreground: oklch(0.708 0.008 80);
-  --accent: oklch(0.269 0.007 80);
-  --accent-foreground: oklch(0.985 0.005 80);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0.008 80);
-  --glass: oklch(0.22 0.006 80 / 0.5);
-  --glass-border: oklch(1 0 0 / 0.14);
-  --chart-1: oklch(0.87 0.008 80);
-  --chart-2: oklch(0.556 0.008 80);
-  --chart-3: oklch(0.439 0.008 80);
-  --chart-4: oklch(0.371 0.008 80);
-  --chart-5: oklch(0.269 0.007 80);
-  --sidebar: oklch(0.205 0.006 80);
-  --sidebar-foreground: oklch(0.985 0.005 80);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0.005 80);
-  --sidebar-accent: oklch(0.269 0.007 80);
-  --sidebar-accent-foreground: oklch(0.985 0.005 80);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0.008 80);
+  /* ChatGPT's dark canvas is gray-800 (#212121), not near-black; raised
+     surfaces step UP the ramp (#282828 → #303030) rather than relying on
+     shadow, which reads as nothing on a dark ground. */
+  --background: #212121;
+  --background-translucent: rgb(33 33 33 / 0.72);
+  --home-marketing: #1c1c1c;
+  --background-gradient: none;
+  --foreground: #ffffff;
+  --card: #282828;
+  --card-foreground: #ffffff;
+  --popover: #303030;
+  --popover-foreground: #ffffff;
+  --card-translucent: rgb(40 40 40 / 0.8);
+  --popover-translucent: rgb(48 48 48 / 0.88);
+  --primary: #f3f3f3;
+  --primary-foreground: #0d0d0d;
+  --secondary: #303030;
+  --secondary-foreground: #ffffff;
+  --muted: #303030;
+  --muted-foreground: #afafaf;
+  --subtle-foreground: #8f8f8f;
+  --accent: #303030;
+  --accent-foreground: #ffffff;
+  --destructive: #fa423e;
+  --success: #04b84c;
+  --warning: #fb6a22;
+  --info: #0285ff;
+  --border: rgb(255 255 255 / 0.1);
+  --input: rgb(255 255 255 / 0.14);
+  --ring: #0285ff;
+  --glass: rgb(40 40 40 / 0.55);
+  --glass-border: rgb(255 255 255 / 0.1);
+  --chart-1: #414141;
+  --chart-2: #5d5d5d;
+  --chart-3: #8f8f8f;
+  --chart-4: #afafaf;
+  --chart-5: #ededed;
+  --sidebar: #181818;
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: #f3f3f3;
+  --sidebar-primary-foreground: #0d0d0d;
+  --sidebar-accent: #303030;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgb(255 255 255 / 0.1);
+  --sidebar-ring: #0285ff;
 }
 
-/* Surface system — frosted floats + symmetric control shadows.
-   Floating layers (cards, dialogs, popovers) get soft elevation via
-   `--shadow-surface`. Clickable controls and text fields share zero-
-   offset shadows: an even outer glow for buttons, an even inset for
-   inputs — no directional bevel or top-only sheen. */
+/* Surface system, after ChatGPT: controls are flat (no glow, no inset
+   well) and get their feedback from fill changes; floating layers get a
+   1px hairline plus a short, tight drop. The control-shadow tokens stay
+   defined (as none) so every existing `shadow-raised*` / `shadow-sunken`
+   utility resolves to the flat look without a sweep of call sites. */
 :root {
-  /* Controls — symmetric shadows (zero offset): even glow around the
-     perimeter for elevation, even inset for recessed fields. */
-  --shadow-raised: 0 0 6px -1px oklch(0 0 0 / 0.08);
-  --shadow-raised-hover: 0 0 10px -1px oklch(0 0 0 / 0.12);
-  /* Floating surfaces (cards, dialogs, popovers) keep real elevation,
-     but as a clean soft drop shadow — no inset bevel highlight, which
-     was the main "3D pillow" tell. Layered transparency reads natural
-     across light/dark and any background. */
+  --shadow-raised: none;
+  --shadow-raised-hover: none;
   --shadow-surface:
-    0 1px 2px -1px oklch(0 0 0 / 0.05),
-    0 4px 12px -4px oklch(0 0 0 / 0.06),
-    0 10px 28px -10px oklch(0 0 0 / 0.05);
-  /* Recessed text fields — uniform inset around the interior. */
-  --shadow-sunken: inset 0 0 4px oklch(0 0 0 / 0.12);
-  --shadow-input-focus: var(--shadow-sunken), var(--shadow-focus-ring);
-  /* Focus ring — a crisp outer ring (not an inset glow), matching the
-     ring buttons already use so focus reads consistently across every
-     control. Composes as a box-shadow so it can stack with utilities. */
-  --shadow-focus-ring: 0 0 0 3px oklch(0.708 0.012 80 / 0.4);
-  /* Dark-filled buttons (primary in light mode). */
-  --shadow-raised-on-dark: 0 0 8px -2px oklch(0 0 0 / 0.32);
-  --shadow-raised-on-dark-hover: 0 0 12px -2px oklch(0 0 0 / 0.38);
-  --shadow-control-pressed: inset 0 0 4px oklch(0 0 0 / 0.16);
-  /* Gradients retired — flat fills only. Kept as `none` so the
-     .depth-* utilities that reference them become no-ops. */
+    0 0 0 1px rgb(0 0 0 / 0.06),
+    0 1px 2px -1px rgb(0 0 0 / 0.08),
+    0 2px 4px -1px rgb(0 0 0 / 0.04);
+  /* Popovers, menus, dialogs — ChatGPT's popover elevation. */
+  --shadow-float:
+    0 0 0 1px rgb(0 0 0 / 0.08),
+    0 10px 15px -3px rgb(0 0 0 / 0.1),
+    0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --shadow-sunken: none;
+  /* Fields focus as a blue border plus a soft halo, not a hard ring. */
+  --shadow-input-focus: 0 0 0 3px rgb(1 105 204 / 0.16);
+  /* Focus — the one place blue appears. Crisp 2px ring, offset by a
+     1px gap of canvas so it reads on dark fills too. */
+  --shadow-focus-ring: 0 0 0 1px var(--background), 0 0 0 3px var(--ring);
+  --shadow-raised-on-dark: none;
+  --shadow-raised-on-dark-hover: none;
+  --shadow-control-pressed: none;
   --gradient-raised-on-dark: none;
   --gradient-raised: none;
   --gradient-surface: none;
@@ -231,20 +222,22 @@
 }
 
 .dark {
-  --shadow-raised: 0 0 6px -1px oklch(0 0 0 / 0.35);
-  --shadow-raised-hover: 0 0 10px -1px oklch(0 0 0 / 0.42);
-  /* Dark surfaces lean on a deeper, softer drop shadow to separate
-     from the near-black canvas. Still flat — no inset highlight. */
+  --shadow-raised: none;
+  --shadow-raised-hover: none;
   --shadow-surface:
-    0 1px 2px -1px oklch(0 0 0 / 0.5),
-    0 6px 16px -4px oklch(0 0 0 / 0.45),
-    0 16px 32px -12px oklch(0 0 0 / 0.4);
-  --shadow-sunken: inset 0 0 5px oklch(0 0 0 / 0.55);
-  --shadow-input-focus: var(--shadow-sunken), var(--shadow-focus-ring);
-  --shadow-focus-ring: 0 0 0 3px oklch(0.556 0.008 80 / 0.5);
-  --shadow-raised-on-dark: 0 0 8px -2px oklch(0 0 0 / 0.5);
-  --shadow-raised-on-dark-hover: 0 0 12px -2px oklch(0 0 0 / 0.55);
-  --shadow-control-pressed: inset 0 0 4px oklch(0 0 0 / 0.35);
+    0 0 0 1px rgb(255 255 255 / 0.08),
+    0 1px 2px -1px rgb(0 0 0 / 0.2),
+    0 2px 4px -1px rgb(0 0 0 / 0.2);
+  --shadow-float:
+    0 0 0 1px rgb(255 255 255 / 0.1),
+    0 10px 15px -3px rgb(0 0 0 / 0.36),
+    0 4px 6px -4px rgb(0 0 0 / 0.3);
+  --shadow-sunken: none;
+  --shadow-input-focus: 0 0 0 3px rgb(2 133 255 / 0.28);
+  --shadow-focus-ring: 0 0 0 1px var(--background), 0 0 0 3px var(--ring);
+  --shadow-raised-on-dark: none;
+  --shadow-raised-on-dark-hover: none;
+  --shadow-control-pressed: none;
   --gradient-raised-on-dark: none;
   --gradient-raised: none;
   --gradient-surface: none;
@@ -301,6 +294,7 @@
      composes with `ring-*` through Tailwind's shared shadow chain —
      a component-layer box-shadow would be clobbered by the ring. */
   --shadow-surface: var(--shadow-surface);
+  --shadow-float: var(--shadow-float);
   /* Custom breakpoint used to swap the mobile tab bar for the
      desktop top bar. Sits between Tailwind's lg (1024px) and xl
      (1280px) — at 1024 the page already feels cramped with logo +
@@ -1058,59 +1052,54 @@
    Surface entrance — the shared "settle in" used by <Page>, <EmptyState>,
    <StatusScreen> and anything tagged `.mz-enter` (components/ui/page.tsx).
 
-   One gesture app-wide: a short lift, a fade and a 4px blur that sharpens
-   as it lands — the same vocabulary as the mobile nav's menu rows, so a
-   page arriving and a menu opening read as one hand. Children marked
-   `.mz-enter-item` cascade in after the container on a per-item `--mz-i`
-   (set inline, 0-based), 40ms apart and capped at 8 so a long list never
-   makes the last row wait. Compositor-only (opacity / transform / filter);
-   no JS. Reduced motion lands everything instantly.
+   Deliberately quiet, after ChatGPT: a fade and a 4px rise on the long
+   `--ease-enter` glide, nothing that bounces, spins or blurs. A page
+   arriving should read as "there", not as an event. Children marked
+   `.mz-enter-item` follow the container on a per-item `--mz-i` (set
+   inline, 0-based), 30ms apart and capped at 8 so a long list never
+   makes the last row wait. `.mz-enter-pop` is the same gesture as a
+   scale from 0.95 — ChatGPT's menu/popover entrance — for a glyph that
+   leads a status screen. Compositor-only; reduced motion is instant.
    ------------------------------------------------------------------------- */
 :root {
-  --mz-enter-ms: 360ms;
-  --mz-enter-lift: 8px;
-  --mz-enter-step: 40ms;
+  --mz-enter-ms: 320ms;
+  --mz-enter-lift: 4px;
+  --mz-enter-step: 30ms;
 }
 
 @keyframes mz-enter {
   from {
     opacity: 0;
     transform: translateY(var(--mz-enter-lift));
-    filter: blur(4px);
   }
   to {
     opacity: 1;
     transform: none;
-    filter: none;
   }
 }
 
-/* Status glyphs (error / 404 / empty) pop with a little overshoot — the
-   one place a spring earns it, because the glyph is the whole message. */
 @keyframes mz-enter-pop {
   from {
     opacity: 0;
-    transform: scale(0.6) rotate(-8deg);
-    filter: blur(4px);
+    transform: scale(0.95);
   }
   to {
     opacity: 1;
     transform: none;
-    filter: none;
   }
 }
 
 .mz-enter,
 .mz-enter-item {
-  animation: mz-enter var(--mz-enter-ms) var(--ease-out-soft) both;
+  animation: mz-enter var(--mz-enter-ms) var(--ease-enter) both;
 }
 .mz-enter-item {
   animation-delay: calc(
-    80ms + min(var(--mz-i, 0), 8) * var(--mz-enter-step)
+    40ms + min(var(--mz-i, 0), 8) * var(--mz-enter-step)
   );
 }
 .mz-enter-pop {
-  animation: mz-enter-pop 520ms var(--ease-spring) 60ms both;
+  animation: mz-enter-pop 240ms var(--ease-enter) both;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -3,10 +3,10 @@ import { auth } from "@clerk/nextjs/server";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent } from "@/components/ui/card";
 import { Page, PageHeader } from "@/components/ui/page";
-import { CreditCardIcon } from "lucide-react";
 import { getPaymentMethodSummary } from "@/app/actions/billing";
 import { PaymentCard } from "@/components/print/payment-card";
 import { BillingActions } from "./billing-actions";
+import { CreditCardIcon } from "@/components/icons/oai";
 
 export default async function BillingSettingsPage({
   searchParams,

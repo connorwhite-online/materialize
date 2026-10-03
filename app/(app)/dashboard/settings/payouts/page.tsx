@@ -3,13 +3,13 @@ import { auth } from "@clerk/nextjs/server";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent } from "@/components/ui/card";
 import { Page, PageHeader } from "@/components/ui/page";
-import { LandmarkIcon } from "lucide-react";
 import {
   getStripePayoutStatus,
   refreshStripePayoutStatus,
 } from "@/app/actions/payouts";
 import { PayoutActions } from "./payout-actions";
 import { PayoutStatusBanner } from "./payout-status-banner";
+import { PaidIcon } from "@/components/icons/oai";
 
 export default async function PayoutsSettingsPage({
   searchParams,
@@ -34,7 +34,7 @@ export default async function PayoutsSettingsPage({
     <Page width="narrow">
       <PageHeader
         back={{ href: "/dashboard/settings", label: "Settings" }}
-        icon={<LandmarkIcon />}
+        icon={<PaidIcon />}
         title="Payouts"
         description="Connect a Stripe account to receive payouts when someone buys one of your paid files or projects. Materialize takes a 3% service fee; the rest goes to your connected account."
       />

@@ -175,7 +175,7 @@ export default async function OrderDetailPage(props: {
       <div className="flex items-start justify-between">
         <div>
           <p className="text-sm text-muted-foreground">Order {orderNumber}</p>
-          <h1 className="text-2xl font-bold mt-0.5">
+          <h1 className="text-2xl font-semibold mt-0.5">
             {displayFilename
               ? extraItemCount > 0
                 ? `${displayFilename} + ${extraItemCount} more`

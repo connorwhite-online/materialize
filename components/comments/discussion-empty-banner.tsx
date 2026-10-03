@@ -12,9 +12,11 @@ type Props = {
 
 /**
  * Compact empty-state for Discussion when there are no comments or
- * photo posts yet — and the viewer is not the owner. Soft green
- * wash + chunky chat icon; owners never see this (their empty
- * Discussion section is omitted entirely).
+ * photo posts yet — and the viewer is not the owner. Reads like a
+ * composer you haven't typed into yet (ChatGPT's prompt-row shape): a
+ * flat soft-gray row, glyph and invitation on the left, the action on
+ * the right. Owners never see this (their empty Discussion section is
+ * omitted entirely).
  */
 export function DiscussionEmptyBanner({
   className,
@@ -24,26 +26,26 @@ export function DiscussionEmptyBanner({
   const content = (
     <>
       <span
-        className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-200"
+        className="flex size-9 shrink-0 items-center justify-center rounded-[10px] bg-background text-foreground ring-1 ring-border"
         aria-hidden="true"
       >
-        <MessageCircleIcon className="size-5" strokeWidth={2.4} absoluteStrokeWidth />
+        <MessageCircleIcon className="size-[18px]" />
       </span>
-      <span className="text-sm font-semibold tracking-tight text-foreground">
-        Share your build!
+      <span className="min-w-0 flex-1 text-left">
+        <span className="block text-sm font-semibold text-foreground">
+          Share your build
+        </span>
+        <span className="block text-sm text-muted-foreground">
+          Post a photo or tell people how it printed.
+        </span>
       </span>
     </>
   );
 
   const classes = cn(
-    "flex w-full items-center justify-center gap-2.5 rounded-2xl px-5 py-4 text-center transition-[background-color,box-shadow]",
-    "bg-gradient-to-r from-emerald-50/70 via-muted/40 to-teal-50/50",
-    "shadow-sm ring-1 ring-emerald-900/[0.06]",
-    "dark:from-emerald-950/35 dark:via-muted/20 dark:to-teal-950/30",
-    "dark:ring-emerald-100/[0.06]",
-    "hover:shadow-md hover:ring-emerald-900/10",
-    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-    "dark:hover:ring-emerald-100/10",
+    "flex w-full items-center gap-3 rounded-2xl bg-muted/70 px-4 py-3 transition-colors duration-150",
+    "hover:bg-muted",
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
     className
   );
 

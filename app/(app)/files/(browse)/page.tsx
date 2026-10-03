@@ -17,7 +17,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/page";
 import { Browse } from "@/components/icons/browse";
-import { Oops } from "@/components/icons/oops";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { BrowseSearchBar } from "@/components/browse/browse-search-bar";
 import { CategoryFilterBar } from "@/components/browse/category-filter-bar";
@@ -54,6 +53,7 @@ import {
   FILE_CARD_TITLE_CLASS,
   FILE_CARD_WELL_CLASS,
 } from "@/components/files/file-card";
+import { SearchIcon } from "@/components/icons/oai";
 
 // Shared with the ranking inspector, which marks this cutoff — see
 // BROWSE_FILES_SHOWN. Also the per-section cap for projects,
@@ -736,7 +736,7 @@ export default async function BrowsePage(props: {
       {totalHits === 0 ? (
         <EmptyState
           className="mt-10"
-          icon={<Oops size={22} />}
+          icon={<SearchIcon />}
           title={<>No results for {scopeLabel}</>}
           description="Try a shorter search, a different spelling, or browse a category instead."
           action={

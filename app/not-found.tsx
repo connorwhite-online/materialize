@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { Oops } from "@/components/icons/oops";
+import { CompassIcon } from "@/components/icons/oai";
 import { Button } from "@/components/ui/button";
 import { StatusScreen } from "@/components/ui/page";
 
@@ -9,15 +9,13 @@ export default function NotFound() {
     <main className="flex min-h-svh items-center">
       <StatusScreen
         code="404"
-        icon={<Oops size={28} />}
-        title="Nothing printed here"
-        description="This page doesn't exist, or it was moved. The good stuff is a tap away."
+        icon={<CompassIcon />}
+        title="Page not found"
+        description="The link may be broken, or the page may have moved."
         actions={
           <>
-            <Button size="lg" render={<Link href="/" />}>
-              Go home
-            </Button>
-            <Button size="lg" variant="outline" render={<Link href="/files" />}>
+            <Button render={<Link href="/" />}>Go home</Button>
+            <Button variant="outline" render={<Link href="/files" />}>
               Browse files
             </Button>
           </>

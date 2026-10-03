@@ -752,7 +752,7 @@ export default async function FileDetailPage(props: {
           <div className="flex flex-col gap-4">
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-2xl font-bold">{file.name}</h1>
+                <h1 className="text-2xl font-semibold">{file.name}</h1>
                 {verifying && <VerifyingPill />}
               </div>
               <div className="mt-2 space-y-1">

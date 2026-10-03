@@ -1,6 +1,5 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import { FactoryIcon } from "lucide-react";
 import { auth } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -14,6 +13,7 @@ import {
   SummaryRow,
   formatUsd,
 } from "@/components/ui/summary-list";
+import { BuildingIcon } from "@/components/icons/oai";
 
 /**
  * Two-step checkout interstitial (CON-118). The fee Checkout's
@@ -107,7 +107,7 @@ export default async function PayProductionPage({
     return (
       <Page width="narrow" className="max-w-xl gap-6">
         <PageHeader
-          icon={<FactoryIcon />}
+          icon={<BuildingIcon />}
           eyebrow="Print order"
           title="This checkout expired"
         />
@@ -165,7 +165,7 @@ export default async function PayProductionPage({
   return (
     <Page width="narrow" className="max-w-xl gap-6">
       <PageHeader
-        icon={<FactoryIcon />}
+        icon={<BuildingIcon />}
         eyebrow="Print order"
         title="One more step — pay for production"
         description={
@@ -267,7 +267,7 @@ function WaitingCard({
           }}
         />
       )}
-      <PageHeader icon={<FactoryIcon />} eyebrow="Print order" title={title} />
+      <PageHeader icon={<BuildingIcon />} eyebrow="Print order" title={title} />
       <Alert>
         <AlertDescription>{body}</AlertDescription>
       </Alert>

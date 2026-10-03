@@ -21,7 +21,7 @@ export default async function NewOrganizationPage() {
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold">Create an organization</h1>
+        <h1 className="text-2xl font-semibold">Create an organization</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Organizations let hardware teams share files, projects, and
           collections privately across members.

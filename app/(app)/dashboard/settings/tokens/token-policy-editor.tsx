@@ -15,7 +15,7 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 // `field-text` (no text-xs override — that let iOS zoom on focus) and its
 // pr-7 chevron gutter (a px-* override let digits run under the arrows).
 const FIELD_CLASS =
-  "mt-1 h-9 w-full rounded-xl border border-input/80 bg-muted/35 pl-3 shadow-sunken outline-none transition-[background-color,box-shadow,border-color] duration-150 focus-visible:border-ring focus-visible:bg-background focus-visible:shadow-input-focus dark:bg-input/30";
+  "mt-1 h-9 w-full rounded-xl border border-input bg-background pl-3 outline-none transition-[background-color,box-shadow,border-color] duration-150 focus-visible:border-ring focus-visible:shadow-input-focus";
 
 interface Props {
   tokenId: string;
