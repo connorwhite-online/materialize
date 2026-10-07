@@ -9,10 +9,19 @@ import { Button } from "@/components/ui/button";
 /**
  * Authed-home create cluster: a featured file dropzone (uploads to R2,
  * becomes a draft listing, lands on `/print/[fileAssetId]` — same chain
- * as the /print idle pane) plus New Project / New Collection. Both
+ * as the /print idle pane) plus New project / New collection. Both
  * navigate to their create pages (`/projects/new`, `/collections/new`).
  */
-export function HomeDropzone() {
+export function HomeDropzone({
+  showCreateActions = true,
+}: {
+  /**
+   * Show the New project / New collection pair under the dropzone.
+   * The signed-in home dashboard renders its own quick-actions row
+   * and passes `false`.
+   */
+  showCreateActions?: boolean;
+} = {}) {
   const { start, phase, progress, error } = useStartPrintFlow();
   const busy = phase === "uploading" || phase === "saving";
 
@@ -39,26 +48,18 @@ export function HomeDropzone() {
         )}
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <Button
-          variant="outline"
-          size="lg"
-          className="h-11 min-w-0 w-full"
-          render={<Link href="/projects/new" />}
-        >
-          <LayersIcon className="size-4" />
-          New Project
-        </Button>
-        <Button
-          variant="outline"
-          size="lg"
-          className="h-11 min-w-0 w-full"
-          render={<Link href="/collections/new" />}
-        >
-          <FolderOpenIcon className="size-4" />
-          New Collection
-        </Button>
-      </div>
+      {showCreateActions && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button variant="secondary" render={<Link href="/projects/new" />}>
+            <LayersIcon className="size-4" />
+            New project
+          </Button>
+          <Button variant="secondary" render={<Link href="/collections/new" />}>
+            <FolderOpenIcon className="size-4" />
+            New collection
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
