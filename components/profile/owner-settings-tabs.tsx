@@ -63,6 +63,7 @@ export function OwnerSettingsTabs({
         });
       }}
       items={TABS}
+      listClassName="w-fit"
     />
   );
 }

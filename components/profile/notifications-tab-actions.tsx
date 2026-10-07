@@ -17,8 +17,8 @@ export function NotificationsTabActions() {
   return (
     <Button
       variant="ghost"
-      size="xs"
-      disabled={pending}
+      size="sm"
+      loading={pending}
       onClick={() =>
         startTransition(async () => {
           await markAllNotificationsRead();
@@ -26,7 +26,7 @@ export function NotificationsTabActions() {
         })
       }
     >
-      {pending ? "Marking…" : "Mark all read"}
+      Mark all read
     </Button>
   );
 }

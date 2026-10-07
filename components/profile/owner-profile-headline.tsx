@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { SettingsGroup, SettingsRow } from "@/components/ui/field";
 import {
   updateAvatar,
   updateProfile,
@@ -16,13 +17,14 @@ import {
   type SocialPlatform,
 } from "@/components/profile/social-platforms";
 import { cn } from "@/lib/utils";
+import { CameraIcon } from "lucide-react";
 
 const PLATFORMS = [
   { key: "website", placeholder: "yoursite.com" },
   { key: "twitter", placeholder: "username" },
   { key: "github", placeholder: "username" },
   { key: "instagram", placeholder: "username" },
-  { key: "youtube", placeholder: "channel or @handle" },
+  { key: "youtube", placeholder: "@handle" },
 ] as const satisfies ReadonlyArray<{
   key: SocialPlatform;
   placeholder: string;
@@ -52,7 +54,6 @@ interface OwnerProfileHeadlineProps {
   displayName: string;
   bio: string;
   avatarUrl: string | null;
-  socialLinks: Array<{ platform: string; url: string }>;
 }
 
 /**
@@ -67,7 +68,6 @@ export function OwnerProfileHeadline({
   displayName: initialDisplayName,
   bio: initialBio,
   avatarUrl: initialAvatarUrl,
-  socialLinks,
 }: OwnerProfileHeadlineProps) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -135,153 +135,176 @@ export function OwnerProfileHeadline({
   };
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-start gap-6">
-        <div className="relative shrink-0">
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/jpeg,image/png,image/webp,image/gif"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) handleAvatar(file);
-              e.target.value = "";
-            }}
+    <header className="flex items-center gap-4 sm:gap-6">
+      <div className="relative w-fit shrink-0">
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleAvatar(file);
+            e.target.value = "";
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={pending}
+          aria-label="Change photo"
+          className="group relative block cursor-pointer rounded-full focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none"
+        >
+          <UserAvatar
+            seed={username}
+            imageUrl={shownAvatar}
+            displayName={shownName}
+            className="size-16 text-2xl sm:size-20"
           />
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            disabled={pending}
-            aria-label="Change photo"
-            className="group relative cursor-pointer rounded-full"
+          {/* Always-visible camera chip: the old hover-only "Change"
+              overlay never showed on touch, so phones had no hint the
+              photo was editable. */}
+          <span
+            aria-hidden="true"
+            className="absolute right-0 bottom-0 flex size-7 items-center justify-center rounded-full bg-background text-foreground ring-1 ring-border transition-colors group-hover:bg-muted"
           >
-            <UserAvatar
-              seed={username}
-              imageUrl={shownAvatar}
-              displayName={shownName}
-              className="h-20 w-20 text-2xl"
-            />
-            <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/45 text-xs font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
-              Change
-            </span>
-          </button>
-        </div>
+            <CameraIcon className="size-3.5" strokeWidth={2} />
+          </span>
+        </button>
+      </div>
 
-        <div className="min-w-0 flex-1 space-y-1">
-          {editing === "name" ? (
+      <div className="flex min-w-0 flex-1 flex-col">
+        {editing === "name" ? (
+          <Input
+            autoFocus
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            onBlur={() => {
+              setEditing(null);
+              if (displayName !== initialDisplayName) {
+                saveProfile({ displayName });
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              if (e.key === "Escape") {
+                setDisplayName(initialDisplayName);
+                setEditing(null);
+              }
+            }}
+            className="-ml-2 h-9 max-w-sm px-2 text-2xl leading-7 font-semibold md:text-2xl"
+            aria-label="Display name"
+          />
+        ) : (
+          <h1 className="text-2xl leading-7 font-semibold">
+            <button
+              type="button"
+              onClick={() => setEditing("name")}
+              title="Edit name"
+              className={cn(
+                EDITABLE,
+                "truncate py-1",
+                !displayName && "text-subtle-foreground"
+              )}
+            >
+              {displayName || "Add your name"}
+            </button>
+          </h1>
+        )}
+
+        {editing === "username" ? (
+          <div className="-ml-2 flex w-full max-w-xs items-center rounded-[10px]">
             <Input
               autoFocus
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
               onBlur={() => {
                 setEditing(null);
-                if (displayName !== initialDisplayName) {
-                  saveProfile({ displayName });
+                if (username !== initialUsername) {
+                  saveProfile({ username });
                 }
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") (e.target as HTMLInputElement).blur();
                 if (e.key === "Escape") {
-                  setDisplayName(initialDisplayName);
+                  setUsername(initialUsername);
                   setEditing(null);
                 }
               }}
-              className="h-auto px-1 py-0.5 text-2xl font-bold"
-              aria-label="Display name"
+              className="h-8 px-2"
+              aria-label="Username"
             />
-          ) : (
-            <h1 className="text-2xl font-semibold">
-              <button
-                type="button"
-                onClick={() => setEditing("name")}
-                className={cn(
-                  "block w-full cursor-text rounded-md px-1 py-0.5 text-left hover:bg-muted/50",
-                  !displayName && "text-muted-foreground"
-                )}
-              >
-                {displayName || "Add a display name"}
-              </button>
-            </h1>
-          )}
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setEditing("username")}
+            title="Edit username"
+            className={cn(EDITABLE, "truncate text-sm text-muted-foreground")}
+          >
+            @{username}
+          </button>
+        )}
 
-          {editing === "username" ? (
-            <div className="flex items-center gap-0.5 px-1">
-              <span className="text-muted-foreground">@</span>
-              <Input
-                autoFocus
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                onBlur={() => {
-                  setEditing(null);
-                  if (username !== initialUsername) {
-                    saveProfile({ username });
-                  }
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                  if (e.key === "Escape") {
-                    setUsername(initialUsername);
-                    setEditing(null);
-                  }
-                }}
-                className="h-auto px-1 py-0.5"
-                aria-label="Username"
-              />
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setEditing("username")}
-              className="block w-full cursor-text rounded-md px-1 py-0.5 text-left text-muted-foreground hover:bg-muted/50"
-            >
-              @{username}
-            </button>
-          )}
-
-          {editing === "bio" ? (
-            <Textarea
-              autoFocus
-              value={bio}
-              rows={3}
-              onChange={(e) => setBio(e.target.value)}
-              onBlur={() => {
+        {editing === "bio" ? (
+          <Textarea
+            autoFocus
+            value={bio}
+            rows={3}
+            onChange={(e) => setBio(e.target.value)}
+            onBlur={() => {
+              setEditing(null);
+              if (bio !== initialBio) saveProfile({ bio });
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setBio(initialBio);
                 setEditing(null);
-                if (bio !== initialBio) saveProfile({ bio });
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  setBio(initialBio);
-                  setEditing(null);
-                }
-              }}
-              placeholder="Tell others about yourself…"
-              className="mt-2"
-              aria-label="Bio"
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={() => setEditing("bio")}
-              className={cn(
-                "mt-2 block w-full max-w-xl cursor-text rounded-md px-1 py-1 text-left text-sm leading-relaxed hover:bg-muted/50",
-                bio ? "" : "text-muted-foreground"
-              )}
-            >
-              {bio || "Add a bio"}
-            </button>
-          )}
-        </div>
+              }
+            }}
+            placeholder="A line about what you make"
+            className="-ml-2 mt-2 max-w-xl"
+            aria-label="Bio"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setEditing("bio")}
+            title="Edit bio"
+            className={cn(
+              EDITABLE,
+              "mt-2 max-w-xl text-sm leading-5 text-pretty",
+              bio ? "" : "text-subtle-foreground"
+            )}
+          >
+            {bio || "Add a bio"}
+          </button>
+        )}
+
+        {error && (
+          <p role="alert" className="mt-2 text-[13px] leading-[18px] text-destructive">
+            {error}
+          </p>
+        )}
       </div>
-
-      <SocialLinksEditor initial={socialLinks} />
-
-      {error && <p className="pt-1 text-xs text-destructive">{error}</p>}
-    </div>
+    </header>
   );
 }
 
-function SocialLinksEditor({
+/**
+ * Tap-to-edit text: reads as plain profile text, gains a soft fill on
+ * hover so it's discoverable without drawing input boxes around
+ * everything. Negative margin keeps the text flush with the column.
+ */
+const EDITABLE =
+  "-ml-2 block w-fit max-w-[calc(100%+0.5rem)] cursor-text rounded-lg px-2 py-0.5 text-left transition-colors duration-150 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none";
+
+/**
+ * Profile links as settings rows: platform on the left, handle field on
+ * the right, saved on blur. Lives in the Settings tab (not under the
+ * headline) so the header reads as a profile, not a form.
+ */
+export function SocialLinksEditor({
   initial,
 }: {
   initial: Array<{ platform: string; url: string }>;
@@ -294,44 +317,99 @@ function SocialLinksEditor({
     }
     return map;
   });
+  const lastSaved = useRef(JSON.stringify(urls));
+  const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">(
+    "idle"
+  );
   const [, startTransition] = useTransition();
 
   const commit = (next: Record<string, string>) => {
+    const snapshot = JSON.stringify(next);
+    // Blur without a change shouldn't round-trip (or flash "Saved").
+    if (snapshot === lastSaved.current) return;
     const links = PLATFORMS.filter((p) => next[p.key].trim()).map((p) => ({
       platform: p.key,
       url: normalizeUrl(p.key, next[p.key]),
     }));
+    setStatus("saving");
     startTransition(async () => {
-      await updateSocialLinks(JSON.stringify(links));
+      try {
+        const result: unknown = await updateSocialLinks(JSON.stringify(links));
+        if (result && typeof result === "object" && "error" in result) {
+          setStatus("error");
+          return;
+        }
+      } catch {
+        setStatus("error");
+        return;
+      }
+      lastSaved.current = snapshot;
+      setStatus("saved");
     });
   };
 
   return (
-    <div className="max-w-md space-y-2">
+    <SettingsGroup
+      title={
+        <span className="flex items-baseline justify-between gap-3">
+          Links
+          <span
+            aria-live="polite"
+            className={cn(
+              "text-xs font-normal",
+              status === "error" ? "text-destructive" : "text-subtle-foreground"
+            )}
+          >
+            {status === "saving"
+              ? "Saving…"
+              : status === "saved"
+                ? "Saved"
+                : status === "error"
+                  ? "Couldn't save"
+                  : null}
+          </span>
+        </span>
+      }
+      description="Shown on your public profile."
+    >
       {PLATFORMS.map((p) => {
         const label = platformLabel(p.key);
+        const id = `social-${p.key}`;
         return (
-          <div key={p.key} className="flex items-center gap-2">
-            <span
-              className="flex h-8 w-8 shrink-0 items-center justify-center text-muted-foreground"
-              title={label}
-              aria-hidden="true"
-            >
-              <SocialPlatformIcon platform={p.key} size={16} />
-            </span>
-            <Input
-              value={urls[p.key]}
-              placeholder={p.placeholder}
-              onChange={(e) =>
-                setUrls((prev) => ({ ...prev, [p.key]: e.target.value }))
-              }
-              onBlur={() => commit(urls)}
-              className="h-8"
-              aria-label={label}
-            />
-          </div>
+          <SettingsRow
+            key={p.key}
+            htmlFor={id}
+            title={
+              <span className="flex items-center gap-2.5">
+                <SocialPlatformIcon
+                  platform={p.key}
+                  size={16}
+                  className="shrink-0 text-muted-foreground"
+                />
+                {label}
+              </span>
+            }
+            control={
+              <Input
+                id={id}
+                value={urls[p.key]}
+                placeholder={p.placeholder}
+                onChange={(e) =>
+                  setUrls((prev) => ({ ...prev, [p.key]: e.target.value }))
+                }
+                onBlur={() => commit(urls)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                }}
+                className="w-44 sm:w-64"
+                autoComplete="off"
+                autoCapitalize="none"
+                spellCheck={false}
+              />
+            }
+          />
         );
       })}
-    </div>
+    </SettingsGroup>
   );
 }

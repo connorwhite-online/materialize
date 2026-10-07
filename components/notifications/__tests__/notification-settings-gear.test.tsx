@@ -34,7 +34,7 @@ describe("NotificationSettingsGear", () => {
     vi.clearAllMocks();
   });
 
-  it("renders a chunky settings control opposite the headline affordance", () => {
+  it("renders a quiet icon button opposite the headline", () => {
     render(
       <NotificationSettingsGear initialEnabled initialPrefs={null} />
     );
@@ -42,8 +42,8 @@ describe("NotificationSettingsGear", () => {
       name: "Notification settings",
     });
     expect(button).toBeTruthy();
-    expect(button.className).toMatch(/rounded-\[14px\]/);
-    expect(button.className).toMatch(/h-11/);
+    expect(button.className).toMatch(/rounded-full/);
+    expect(button.className).toMatch(/size-9/);
   });
 
   it("opens the settings sheet with email prefs", async () => {

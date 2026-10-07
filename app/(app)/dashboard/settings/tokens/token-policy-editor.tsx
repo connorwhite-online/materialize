@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { NumberInput } from "@/components/ui/number-input";
-import { Label } from "@/components/ui/label";
+import { Field } from "@/components/ui/field";
 import { Switch } from "@/components/ui/switch";
 import { updateTokenSpendingPolicy } from "@/app/actions/tokens";
 import type { SpendingPolicy } from "@/lib/billing/policy";
@@ -14,7 +14,7 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 // `field-text` (no text-xs override — that let iOS zoom on focus) and its
 // pr-7 chevron gutter (a px-* override let digits run under the arrows).
 const FIELD_CLASS =
-  "mt-1 h-9 w-full rounded-xl border border-input bg-background pl-3 outline-none transition-[background-color,box-shadow,border-color] duration-150 focus-visible:border-ring focus-visible:shadow-input-focus";
+  "h-9 w-full rounded-[10px] border border-input bg-background pl-6 tabular-nums outline-none transition-[background-color,box-shadow,border-color] duration-150 hover:border-foreground/25 focus-visible:border-ring focus-visible:shadow-input-focus";
 
 interface Props {
   tokenId: string;
@@ -95,90 +95,76 @@ export function TokenPolicyEditor({
   const handleSave = () => persist(policy);
 
   return (
-    <div className="mt-3 space-y-3 rounded-2xl bg-muted/40 p-3.5 ring-1 ring-foreground/5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex-1">
-          <div className="text-xs font-medium">Auto-approve within policy</div>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">
-            When on, agent orders that fit will charge your saved card without
-            asking. Anything outside falls back to the email-confirmation flow.
+    <div className="flex flex-col gap-3">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <label
+            htmlFor={`auto-approve-${tokenId}`}
+            className="block text-sm leading-5 font-medium"
+          >
+            Auto-approve orders
+          </label>
+          <p className="mt-0.5 text-[13px] leading-[18px] text-pretty text-muted-foreground">
+            Orders inside these limits charge your saved card without asking.
+            Anything else waits for your email confirmation.
           </p>
         </div>
         <Switch
+          id={`auto-approve-${tokenId}`}
           checked={enabled}
           onCheckedChange={handleToggle}
           disabled={disabled || pending}
-          size="sm"
+          className="mt-0.5"
         />
       </div>
 
       {enabled && !hasPaymentMethod && (
-        <div className="rounded-xl bg-card px-3 py-2 text-[11px] ring-1 ring-foreground/8">
-          No payment method on file. Auto-approval needs a saved card to
-          actually charge —{" "}
+        <p className="text-[13px] leading-[18px] text-warning">
+          No saved card yet, so nothing can be charged.{" "}
           <Link
             href="/dashboard/settings/billing"
-            className="underline hover:text-foreground"
+            className="underline underline-offset-2 hover:no-underline"
           >
-            add a saved card
-          </Link>
-          . The policy will start working as soon as you do.
-        </div>
+            Add a card
+          </Link>{" "}
+          and the limits apply right away.
+        </p>
       )}
 
       {enabled && (
-        <div className="space-y-2">
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <Label
-                htmlFor={`per-order-${tokenId}`}
-                className="text-[11px] text-muted-foreground"
-              >
-                Per-order limit
-              </Label>
-              <NumberInput
+        <div className="mz-enter flex flex-col gap-4">
+          <div className="grid grid-cols-2 gap-3 sm:max-w-md">
+            <Field label="Per order" htmlFor={`per-order-${tokenId}`}>
+              <DollarInput
                 id={`per-order-${tokenId}`}
-                inputMode="decimal"
-                step="0.01"
                 min="0.50"
                 value={dollarsFromCents(policy.perOrderLimitCents)}
-                onChange={(e) => {
-                  const c = centsFromDollars(e.target.value);
+                onChange={(v) => {
+                  const c = centsFromDollars(v);
                   if (c != null) update("perOrderLimitCents", c);
                 }}
-                className={FIELD_CLASS}
                 disabled={disabled || pending}
               />
-            </div>
-            <div>
-              <Label
-                htmlFor={`period-budget-${tokenId}`}
-                className="text-[11px] text-muted-foreground"
-              >
-                Per-{policy.periodWindow} budget
-              </Label>
-              <NumberInput
+            </Field>
+            <Field
+              label={`Per ${policy.periodWindow}`}
+              htmlFor={`period-budget-${tokenId}`}
+            >
+              <DollarInput
                 id={`period-budget-${tokenId}`}
-                inputMode="decimal"
-                step="0.01"
                 min="0.50"
                 value={dollarsFromCents(policy.periodBudgetCents)}
-                onChange={(e) => {
-                  const c = centsFromDollars(e.target.value);
+                onChange={(v) => {
+                  const c = centsFromDollars(v);
                   if (c != null) update("periodBudgetCents", c);
                 }}
-                className={FIELD_CLASS}
                 disabled={disabled || pending}
               />
-            </div>
+            </Field>
           </div>
 
-          <div>
-            <Label className="text-[11px] text-muted-foreground">
-              Budget window
-            </Label>
+          <Field label="Budget resets every">
             <SegmentedControl
-              className="mt-1"
               listClassName="w-fit"
               value={policy.periodWindow}
               onValueChange={(w) => update("periodWindow", w)}
@@ -188,57 +174,101 @@ export function TokenPolicyEditor({
                 disabled: disabled || pending,
               }))}
             />
-          </div>
+          </Field>
 
-          <div>
-            <Label
-              htmlFor={`confirm-above-${tokenId}`}
-              className="text-[11px] text-muted-foreground"
-            >
-              Confirm anything above (optional)
-            </Label>
-            <NumberInput
+          <Field
+            label="Always confirm above"
+            htmlFor={`confirm-above-${tokenId}`}
+            optional
+            hint="Orders over this still ask you first, even within budget."
+            className="sm:max-w-[17rem]"
+          >
+            <DollarInput
               id={`confirm-above-${tokenId}`}
-              inputMode="decimal"
-              step="0.01"
               min="0"
-              placeholder="e.g. 25.00"
+              placeholder="25.00"
               value={
                 policy.confirmAboveCents != null
                   ? dollarsFromCents(policy.confirmAboveCents)
                   : ""
               }
-              onChange={(e) => {
-                if (e.target.value === "") {
+              onChange={(v) => {
+                if (v === "") {
                   update("confirmAboveCents", undefined);
                   return;
                 }
-                const c = centsFromDollars(e.target.value);
+                const c = centsFromDollars(v);
                 if (c != null) update("confirmAboveCents", c);
               }}
-              className={FIELD_CLASS}
               disabled={disabled || pending}
             />
-          </div>
+          </Field>
 
           {error && (
-            <p className="text-[11px] text-destructive">{error}</p>
+            <p role="alert" className="text-[13px] leading-[18px] text-destructive">
+              {error}
+            </p>
           )}
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <Button
               size="sm"
+              variant="secondary"
               onClick={handleSave}
               disabled={disabled || pending}
             >
-              Save policy
+              Save limits
             </Button>
             {savedFlash && (
-              <span className="text-[11px] text-muted-foreground">Saved.</span>
+              <span
+                aria-live="polite"
+                className="text-[13px] text-muted-foreground"
+              >
+                Saved
+              </span>
             )}
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Dollar amount field: "$" prefix inside the box, numeric keypad. */
+function DollarInput({
+  id,
+  value,
+  onChange,
+  min,
+  placeholder,
+  disabled,
+}: {
+  id: string;
+  value: string;
+  onChange: (value: string) => void;
+  min: string;
+  placeholder?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="relative">
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute top-1/2 left-3 z-10 -translate-y-1/2 text-sm text-muted-foreground"
+      >
+        $
+      </span>
+      <NumberInput
+        id={id}
+        inputMode="decimal"
+        step="0.01"
+        min={min}
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={FIELD_CLASS}
+        disabled={disabled}
+      />
     </div>
   );
 }

@@ -14,9 +14,8 @@ import {
   users,
 } from "@/lib/db/schema";
 import { eq, and, sum, count, isNull, inArray, desc, or } from "drizzle-orm";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { formatUsd } from "@/components/ui/summary-list";
 import { swallow } from "@/lib/utils/swallow";
 import { PRINTED_STATUSES } from "@/lib/print-statuses";
 import { timeAgo } from "@/lib/utils/time";
@@ -35,7 +34,14 @@ import { timeAgo } from "@/lib/utils/time";
  * any one card doesn't 500 the tab.
  */
 export async function EarningsTab({ userId }: { userId: string }) {
-  const [user] = await db.select().from(users).where(eq(users.id, userId));
+  // Only the column this tab reads — a bare select() pulled every users
+  // column, so any column a stale DB lacked took the whole page down.
+  const [user] = await swallow(
+    db
+      .select({ stripeOnboardingComplete: users.stripeOnboardingComplete })
+      .from(users)
+      .where(eq(users.id, userId))
+  );
 
   // Owned listings — needed for several engagement queries that count
   // events on the creator's files / projects.
@@ -306,86 +312,92 @@ export async function EarningsTab({ userId }: { userId: string }) {
   const hasStripe = user?.stripeOnboardingComplete;
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-10">
       {!hasStripe && (
-        <Alert variant="warning">
-          <AlertTitle>Payouts aren&apos;t set up yet</AlertTitle>
-          <AlertDescription>
-            Connect Stripe to receive money from file and project sales.
-          </AlertDescription>
+        <div className="flex flex-col gap-3 rounded-2xl bg-muted px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-sm leading-5 font-medium">
+              Payouts aren&apos;t set up
+            </p>
+            <p className="text-[13px] leading-[18px] text-muted-foreground">
+              Connect Stripe to get paid for file and project sales.
+            </p>
+          </div>
           <Button
             size="sm"
-            className="mt-2.5 w-fit"
+            variant="outline"
+            className="w-fit shrink-0"
             render={<Link href="/dashboard/settings/payouts" />}
           >
             Set up payouts
           </Button>
-        </Alert>
+        </div>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Card>
-          <CardContent className="px-5">
-            <p className="text-sm text-muted-foreground">Net earnings</p>
-            <p className="mt-1 text-3xl font-semibold tabular-nums">
-              ${(netEarnings / 100).toFixed(2)}
-            </p>
-            {netEarnings === 0 && totalEarnings === 0 && (
-              <p className="mt-2 text-xs text-muted-foreground">
-                No sales yet. Share your listings to start earning.
-              </p>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="px-5">
-            <p className="text-sm text-muted-foreground">Gross sales</p>
-            <p className="mt-1 text-3xl font-semibold tabular-nums">
-              ${(totalEarnings / 100).toFixed(2)}
-            </p>
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              Before refunds
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="px-5">
-            <p className="text-sm text-muted-foreground">Refunded</p>
-            <p className="mt-1 text-3xl font-semibold tabular-nums text-destructive">
-              −${(totalRefunded / 100).toFixed(2)}
-            </p>
-            {totalRefunded === 0 && (
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                Nothing refunded
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+      {/* One headline number with its breakdown underneath, instead of
+          three equal cards competing — net is the number people mean. */}
+      <section className="flex flex-col gap-1">
+        <p className="text-[13px] text-muted-foreground">Net earnings</p>
+        <p className="text-4xl leading-none font-semibold tabular-nums">
+          {formatUsd(netEarnings)}
+        </p>
+        <p className="mt-2 text-[13px] text-muted-foreground tabular-nums">
+          {totalEarnings === 0 && totalRefunded === 0 ? (
+            "No sales yet. Share a listing to make your first one."
+          ) : (
+            <>
+              {formatUsd(totalEarnings)} gross
+              {" · "}
+              <span className={totalRefunded > 0 ? "text-destructive" : ""}>
+                {formatUsd(totalRefunded)} refunded
+              </span>
+            </>
+          )}
+        </p>
+      </section>
 
-      {recentActivity.length > 0 && (
-        <div>
-          <h3 className="mb-3 text-sm font-medium">Recent sales</h3>
-          <Card className="gap-0 py-0 overflow-hidden">
-            <div>
-              {recentActivity.map((a) => {
-                const isRefund = a.status === "refunded";
-                const href =
-                  a.listingType === "file"
-                    ? `/files/${a.listingSlug}`
-                    : `/projects/${a.listingSlug}`;
-                return (
+      <section className="flex flex-col gap-3">
+        <h2 className="text-base leading-6 font-semibold">Engagement</h2>
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-4">
+          <Stat label="Prints" value={printsTotal} hint="Orders of your files" />
+          <Stat label="Downloads" value={downloads} hint="Of your files" />
+          <Stat
+            label="Comments"
+            value={commentsTotal}
+            hint="On files and projects"
+            href="/notifications"
+          />
+          <Stat label="Builds" value={builds} hint="Community photos" />
+        </dl>
+      </section>
+
+      <section className="flex flex-col gap-2">
+        <h2 className="text-base leading-6 font-semibold">Recent sales</h2>
+        {recentActivity.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Sales and refunds will show up here.
+          </p>
+        ) : (
+          <ul className="-mx-3 flex flex-col">
+            {recentActivity.map((a) => {
+              const isRefund = a.status === "refunded";
+              const href =
+                a.listingType === "file"
+                  ? `/files/${a.listingSlug}`
+                  : `/projects/${a.listingSlug}`;
+              return (
+                <li key={a.id}>
                   <Link
-                    key={a.id}
                     href={href}
-                    className="flex items-center justify-between gap-4 border-b border-border/60 px-4 py-3 last:border-b-0 transition-colors hover:bg-muted/40"
+                    className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors duration-150 hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                   >
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">
+                      <p className="truncate text-sm leading-5 font-medium">
                         {a.listingName}
                       </p>
-                      <p className="mt-0.5 text-[11px] text-muted-foreground capitalize">
-                        {a.listingType} · {isRefund ? "Refund" : "Sale"} ·{" "}
+                      <p className="text-[13px] leading-[18px] text-muted-foreground">
+                        {isRefund ? "Refund" : "Sale"} ·{" "}
+                        {a.listingType === "file" ? "File" : "Project"} ·{" "}
                         {timeAgo(a.createdAt)}
                       </p>
                     </div>
@@ -394,50 +406,21 @@ export async function EarningsTab({ userId }: { userId: string }) {
                         isRefund ? "text-destructive" : ""
                       }`}
                     >
-                      {isRefund ? "−" : "+"}${(a.amount / 100).toFixed(2)}
+                      {isRefund ? "−" : "+"}
+                      {formatUsd(a.amount)}
                     </p>
                   </Link>
-                );
-              })}
-            </div>
-          </Card>
-        </div>
-      )}
-
-      <div>
-        <h3 className="mb-3 text-sm font-medium">Engagement</h3>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard
-            label="Prints"
-            value={printsTotal}
-            href={null}
-            hint="Print orders on your files"
-          />
-          <StatCard
-            label="Downloads"
-            value={downloads}
-            href={null}
-            hint="Logged downloads on your files"
-          />
-          <StatCard
-            label="Comments"
-            value={commentsTotal}
-            href="/notifications"
-            hint="On your files + projects"
-          />
-          <StatCard
-            label="Builds"
-            value={builds}
-            href={null}
-            hint="Community-printed photos"
-          />
-        </div>
-      </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }
 
-function StatCard({
+function Stat({
   label,
   value,
   hint,
@@ -446,24 +429,26 @@ function StatCard({
   label: string;
   value: number;
   hint: string;
-  href: string | null;
+  href?: string;
 }) {
-  const inner = (
-    <Card>
-      <CardContent className="px-5">
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="mt-1 text-2xl font-semibold tabular-nums">
-          {value.toLocaleString()}
-        </p>
-        <p className="mt-1 text-[11px] text-muted-foreground">{hint}</p>
-      </CardContent>
-    </Card>
+  const number = (
+    <span className="text-2xl leading-7 font-semibold tabular-nums">
+      {value.toLocaleString()}
+    </span>
   );
-  return href ? (
-    <Link href={href} className="block transition-opacity hover:opacity-80">
-      {inner}
-    </Link>
-  ) : (
-    inner
+  return (
+    <div className="flex flex-col gap-0.5 border-l border-border pl-4">
+      <dt className="text-[13px] text-muted-foreground">{label}</dt>
+      <dd>
+        {href ? (
+          <Link href={href} className="hover:underline hover:underline-offset-4">
+            {number}
+          </Link>
+        ) : (
+          number
+        )}
+      </dd>
+      <dd className="text-xs text-subtle-foreground">{hint}</dd>
+    </div>
   );
 }

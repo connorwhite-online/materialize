@@ -1,4 +1,8 @@
 import { Suspense } from "react";
+import Link from "next/link";
+import { PlusIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Page } from "@/components/ui/page";
 import { HomeDropzone } from "@/components/home/home-dropzone";
 import { FeatheredCarousel } from "@/components/home/feathered-carousel";
 import { PendingOrderTile } from "@/components/home/pending-order-tile";
@@ -14,8 +18,9 @@ import { logError } from "@/lib/logger";
 const RECENT_MAX = 12;
 
 /**
- * Authed home: in-progress orders (if any; attention-needed first),
- * upload, recent files (if any), then the full library. Not a jump-off
+ * Authed home: title + quick creates, the upload dropzone (the one
+ * primary action), in-progress orders (if any; attention-needed first)
+ * as rows, recent files (if any), then the full library. Not a jump-off
  * to other routes — those sections live on this page.
  *
  * Every data section streams behind its own Suspense boundary. This is
@@ -27,17 +32,43 @@ const RECENT_MAX = 12;
  */
 export function HomeDashboard({ userId }: { userId: string }) {
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-4 py-8 sm:py-12">
-      <h1 className="sr-only">Home</h1>
+    <Page className="gap-10">
+      <div className="flex flex-col gap-4">
+        {/* Title row with the two secondary creates at natural width on
+            the right; the dropzone below is the page's one primary
+            action. The pair used to be a full-width 50/50 button bar
+            under the dropzone, competing with it. */}
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-2xl leading-7 font-semibold">Home</h1>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              render={<Link href="/projects/new" />}
+            >
+              <PlusIcon />
+              Project
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              render={<Link href="/collections/new" />}
+            >
+              <PlusIcon />
+              Collection
+            </Button>
+          </div>
+        </div>
+
+        <section>
+          <h2 className="sr-only">Add to your library</h2>
+          <HomeDropzone showCreateActions={false} />
+        </section>
+      </div>
 
       <Suspense fallback={null}>
         <HomePendingOrders userId={userId} />
       </Suspense>
-
-      <section>
-        <h2 className="sr-only">Add to your library</h2>
-        <HomeDropzone />
-      </section>
 
       <Suspense fallback={null}>
         <HomeRecentFiles userId={userId} />
@@ -46,7 +77,7 @@ export function HomeDashboard({ userId }: { userId: string }) {
       <Suspense fallback={null}>
         <LibraryTab userId={userId} isOwner compact />
       </Suspense>
-    </div>
+    </Page>
   );
 }
 
@@ -64,13 +95,21 @@ export async function HomePendingOrders({ userId }: { userId: string }) {
   if (pending.length === 0) return null;
 
   return (
-    <section>
-      <h2 className="mb-3 text-sm font-medium">Orders</h2>
-      <FeatheredCarousel>
+    <section className="flex flex-col gap-2">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-sm leading-5 font-semibold">Orders</h2>
+        <Link
+          href="/dashboard/orders"
+          className="text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+        >
+          All orders
+        </Link>
+      </div>
+      <div className="flex flex-col">
         {pending.map((order) => (
           <PendingOrderTile key={order.id} order={order} />
         ))}
-      </FeatheredCarousel>
+      </div>
     </section>
   );
 }
@@ -91,8 +130,8 @@ export async function HomeRecentFiles({ userId }: { userId: string }) {
   if (recent.length === 0) return null;
 
   return (
-    <section>
-      <h2 className="mb-3 text-sm font-medium">Recent files</h2>
+    <section className="flex flex-col gap-3">
+      <h2 className="text-sm leading-5 font-semibold">Recent files</h2>
       <FeatheredCarousel>
         {recent.map((tile) => (
           <FileCard

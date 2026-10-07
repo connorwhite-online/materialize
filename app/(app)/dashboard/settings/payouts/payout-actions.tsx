@@ -48,20 +48,16 @@ export function PayoutActions({ connected, onboarded }: Props) {
   };
 
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap gap-2">
+    <div className="flex flex-col items-start gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {!onboarded && (
-          <Button onClick={startOnboarding} disabled={pending}>
-            {pending
-              ? "Opening Stripe…"
-              : connected
-                ? "Finish onboarding"
-                : "Set up payouts"}
+          <Button onClick={startOnboarding} loading={pending}>
+            {connected ? "Finish onboarding" : "Set up payouts"}
           </Button>
         )}
         {connected && (
           <Button
-            variant="outline"
+            variant="secondary"
             onClick={openDashboard}
             disabled={pending}
           >
@@ -69,7 +65,11 @@ export function PayoutActions({ connected, onboarded }: Props) {
           </Button>
         )}
       </div>
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && (
+        <p role="alert" className="text-[13px] leading-[18px] text-destructive">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

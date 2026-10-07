@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { loadUserByHandle } from "@/app/(app)/[handle]/loader";
 import { UserAvatar } from "@/components/auth/user-avatar";
+import { Page } from "@/components/ui/page";
 import { LibraryTab } from "@/components/profile/library-tab";
 import { OwnerSettingsTabs } from "@/components/profile/owner-settings-tabs";
 import { resolveOwnerSettingsTab } from "@/lib/profile/owner-settings-tabs";
@@ -91,31 +92,29 @@ export async function UserProfileView({
     const activeTab = resolveOwnerSettingsTab(rawTab);
 
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
+      <Page width="narrow" className="gap-10">
         <OwnerProfileHeadline
           username={user.username || handle}
           displayName={user.displayName || ""}
           bio={user.bio || ""}
           avatarUrl={user.avatarUrl}
-          socialLinks={user.socialLinks ?? []}
         />
-        <div className="mt-10">
+        <div className="flex flex-col gap-8">
           <OwnerSettingsTabs username={handle} activeTab={activeTab} />
-          <div className="mt-8">
-            {activeTab === "agents" ? (
-              <AgentSettings />
-            ) : activeTab === "payments" ? (
-              <PaymentSettings />
-            ) : (
-              <GeneralSettings
-                defaultUploadVisibility={
-                  settings?.defaultUploadVisibility ?? "private"
-                }
-              />
-            )}
-          </div>
+          {activeTab === "agents" ? (
+            <AgentSettings userId={user.id} />
+          ) : activeTab === "payments" ? (
+            <PaymentSettings userId={user.id} />
+          ) : (
+            <GeneralSettings
+              defaultUploadVisibility={
+                settings?.defaultUploadVisibility ?? "private"
+              }
+              socialLinks={user.socialLinks ?? []}
+            />
+          )}
         </div>
-      </div>
+      </Page>
     );
   }
 
@@ -126,61 +125,61 @@ export async function UserProfileView({
     bio: user.bio,
   });
 
+  const name = user.displayName || user.username;
+  const links = sortSocialLinks(user.socialLinks ?? []);
+
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8">
+    <Page width="wide" className="gap-10">
       {jsonLd && (
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: safeJsonLdScript(jsonLd) }}
         />
       )}
-      <div className="space-y-3">
-        <div className="flex items-start gap-6">
-          <UserAvatar
-            seed={user.username || user.id}
-            imageUrl={user.avatarUrl}
-            displayName={user.displayName || user.username}
-            className="h-20 w-20 text-2xl"
-          />
-          <div className="min-w-0 flex-1">
-            <div>
-              <h1 className="text-2xl font-semibold">
-                {user.displayName || user.username}
-              </h1>
-              {user.username && (
-                <p className="text-muted-foreground">@{user.username}</p>
-              )}
-            </div>
-            {user.bio && (
-              <p className="mt-2 max-w-xl text-sm leading-relaxed">{user.bio}</p>
-            )}
-          </div>
+      <header className="flex items-center gap-4 sm:gap-6">
+        <UserAvatar
+          seed={user.username || user.id}
+          imageUrl={user.avatarUrl}
+          displayName={name}
+          className="size-16 shrink-0 text-2xl sm:size-20"
+        />
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-2xl leading-7 font-semibold">{name}</h1>
+          {user.username && (
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              @{user.username}
+            </p>
+          )}
+          {user.bio && (
+            <p className="mt-2 max-w-xl text-sm leading-5 text-pretty">
+              {user.bio}
+            </p>
+          )}
+          {links.length > 0 && (
+            <ul className="mt-3 -ml-2 flex flex-wrap items-center gap-0.5">
+              {links.map((link) => {
+                const label = platformLabel(link.platform);
+                return (
+                  <li key={link.platform}>
+                    <a
+                      href={link.url}
+                      target="_blank"
+                      rel="noopener noreferrer me"
+                      title={label}
+                      aria-label={label}
+                      className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                    >
+                      <SocialPlatformIcon platform={link.platform} size={16} />
+                    </a>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
-        {user.socialLinks && user.socialLinks.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {sortSocialLinks(user.socialLinks).map((link) => {
-              const label = platformLabel(link.platform);
-              return (
-                <a
-                  key={link.platform}
-                  href={link.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title={label}
-                  aria-label={label}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
-                >
-                  <SocialPlatformIcon platform={link.platform} size={16} />
-                </a>
-              );
-            })}
-          </div>
-        )}
-      </div>
+      </header>
 
-      <div className="my-6" />
-
-      <LibraryTab userId={user.id} isOwner={false} />
-    </div>
+      <LibraryTab userId={user.id} isOwner={false} layout="grid" />
+    </Page>
   );
 }

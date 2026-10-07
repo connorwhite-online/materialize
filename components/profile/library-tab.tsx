@@ -29,12 +29,19 @@ import { BoxIcon, LayersIcon } from "lucide-react";
 import { LibraryAddMenu } from "./library-add-menu";
 import { LibraryEmptyState } from "./library-empty-state";
 import { FeatheredCarousel } from "@/components/home/feathered-carousel";
+import { EmptyState } from "@/components/ui/page";
 
 interface LibraryTabProps {
   userId: string;
   isOwner: boolean;
   /** Smaller carousel tiles for the authed home, where the column is narrower. */
   compact?: boolean;
+  /**
+   * `grid` lays every section out as a wrapping grid — the public
+   * profile, where the page is wide and the work is the point.
+   * `carousel` (default) keeps the one-row shelves for the home column.
+   */
+  layout?: "carousel" | "grid";
 }
 
 type LibraryItem = LibraryFileCardItem;
@@ -96,6 +103,7 @@ export async function LibraryTab({
   userId,
   isOwner,
   compact = false,
+  layout = "carousel",
 }: LibraryTabProps) {
   // Unsaved text-to-CAD drafts live in the studio, not the library —
   // even for the owner (docs/text-to-cad/05 §B).
@@ -565,14 +573,16 @@ export async function LibraryTab({
       return <LibraryEmptyState />;
     }
     return (
-      <div className="rounded-2xl bg-muted/50 py-16 text-center">
-        <p className="text-muted-foreground">Nothing to show.</p>
-      </div>
+      <EmptyState
+        icon={<BoxIcon />}
+        title="Nothing published yet"
+        description="Files and projects this creator shares will show up here."
+      />
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className={layout === "grid" ? "flex flex-col gap-10" : "flex flex-col gap-8"}>
       {compact && (
         <h2 className="sr-only">Library</h2>
       )}
@@ -621,9 +631,11 @@ export async function LibraryTab({
             compact={compact}
           >
             {colFiles.length > 0 ? (
-              <FileCarousel items={colFiles} isOwner={isOwner} compact={compact} />
+              <FileCarousel items={colFiles} isOwner={isOwner} compact={compact} layout={layout} />
             ) : (
-              <p className="text-sm text-muted-foreground">Empty collection</p>
+              <p className="text-[13px] text-muted-foreground">
+                Add files to this collection from any file&apos;s page.
+              </p>
             )}
           </CollectionSection>
         );
@@ -638,16 +650,24 @@ export async function LibraryTab({
           icon={<LayersIcon className={compact ? "size-4" : "size-5"} />}
           compact={compact}
         >
-          <FeatheredCarousel>
-            {projectGridItems.map((p) => (
-              <div
-                key={p.id}
-                className={compact ? "w-28 shrink-0" : "w-40 shrink-0"}
-              >
-                <LibraryProjectCard item={p} />
-              </div>
-            ))}
-          </FeatheredCarousel>
+          {layout === "grid" ? (
+            <div className={GRID_CLASS}>
+              {projectGridItems.map((p) => (
+                <LibraryProjectCard key={p.id} item={p} />
+              ))}
+            </div>
+          ) : (
+            <FeatheredCarousel>
+              {projectGridItems.map((p) => (
+                <div
+                  key={p.id}
+                  className={compact ? "w-28 shrink-0" : "w-40 shrink-0"}
+                >
+                  <LibraryProjectCard item={p} />
+                </div>
+              ))}
+            </FeatheredCarousel>
+          )}
         </LibrarySection>
       )}
 
@@ -660,22 +680,36 @@ export async function LibraryTab({
           icon={<BoxIcon className={compact ? "size-4" : "size-5"} />}
           compact={compact}
         >
-          <FileCarousel items={mainGridItems} isOwner={isOwner} compact={compact} />
+          <FileCarousel items={mainGridItems} isOwner={isOwner} compact={compact} layout={layout} />
         </LibrarySection>
       )}
     </div>
   );
 }
 
+const GRID_CLASS =
+  "grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5";
+
 function FileCarousel({
   items,
   isOwner,
   compact = false,
+  layout = "carousel",
 }: {
   items: LibraryItem[];
   isOwner: boolean;
   compact?: boolean;
+  layout?: "carousel" | "grid";
 }) {
+  if (layout === "grid") {
+    return (
+      <div className={GRID_CLASS}>
+        {items.map((item) => (
+          <LibraryFileCard key={item.id} item={item} isOwner={isOwner} />
+        ))}
+      </div>
+    );
+  }
   return (
     <FeatheredCarousel>
       {items.map((item) => (

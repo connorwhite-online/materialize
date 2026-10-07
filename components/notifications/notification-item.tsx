@@ -43,8 +43,7 @@ export function NotificationItem({
         router.push(href);
       }}
       className={cn(
-        "flex w-full items-start gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/50",
-        isUnread && "bg-primary/5"
+        "flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-colors duration-150 hover:bg-muted/70"
       )}
     >
       <UserAvatar
@@ -55,9 +54,11 @@ export function NotificationItem({
       />
       <div className="min-w-0 flex-1 space-y-0.5">
         <div className="flex items-baseline gap-1.5 text-sm">
-          <span className="truncate font-medium">{name}</span>
+          <span className={cn("truncate", isUnread ? "font-semibold" : "font-medium")}>
+            {name}
+          </span>
           <span className="truncate text-muted-foreground">{message}</span>
-          <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
+          <span className="ml-auto shrink-0 text-xs text-subtle-foreground tabular-nums">
             {timeAgo(row.createdAt)}
           </span>
         </div>
@@ -72,7 +73,7 @@ export function NotificationItem({
       </div>
       {isUnread && (
         <span
-          className="mt-2 size-2 shrink-0 rounded-full bg-primary"
+          className="mt-2 size-2 shrink-0 rounded-full bg-destructive"
           aria-label="Unread"
         />
       )}

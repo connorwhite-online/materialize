@@ -2,7 +2,6 @@ import Link from "next/link";
 import { db } from "@/lib/db";
 import { notifications } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
-import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/page";
 import { Bell } from "@/components/icons/bell";
 import { UserAvatar } from "@/components/auth/user-avatar";
@@ -80,22 +79,24 @@ export async function NotificationsTab({ userId }: { userId: string }) {
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground tabular-nums">
+    <div className="flex flex-col gap-2">
+      <div className="flex min-h-8 items-center justify-between gap-3">
+        <p className="text-[13px] text-muted-foreground tabular-nums">
           {unreadCount > 0
             ? `${unreadCount} unread · ${items.length} total`
             : `${items.length} total`}
         </p>
         {unreadCount > 0 && <NotificationsTabActions />}
       </div>
-      <Card className="gap-0 py-0 overflow-hidden">
-        <div>
-          {items.map((row) => (
-            <NotificationRow key={row.id} row={row} />
-          ))}
-        </div>
-      </Card>
+      {/* Unboxed rows (rulebook § Lists). Unread is the app-wide red dot plus a
+          heavier name, not a tinted wash across the whole row. */}
+      <ul className="-mx-3 flex flex-col">
+        {items.map((row) => (
+          <li key={row.id}>
+            <NotificationRow row={row} />
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -111,42 +112,44 @@ function NotificationRow({ row }: { row: NotificationRow }) {
   return (
     <Link
       href={href}
-      className={cn(
-        "flex items-start gap-3 border-b border-border/60 px-4 py-3 last:border-b-0 transition-colors hover:bg-muted/40",
-        isUnread && "bg-primary/5"
-      )}
+      className="flex items-start gap-3 rounded-xl px-3 py-2.5 transition-colors duration-150 hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
     >
       <UserAvatar
         seed={actor.username || actor.id}
         imageUrl={actor.avatarUrl}
         displayName={name}
-        className="h-8 w-8 shrink-0"
+        className="size-9 shrink-0"
       />
-      <div className="min-w-0 flex-1 space-y-0.5">
-        <div className="flex items-baseline gap-1.5 text-sm">
-          <span className="truncate font-medium">{name}</span>
-          <span className="text-muted-foreground">{message}</span>
-          <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-3">
+          <p className="min-w-0 flex-1 text-sm leading-5">
+            <span className={cn(isUnread ? "font-semibold" : "font-medium")}>
+              {name}
+            </span>{" "}
+            <span className="text-muted-foreground">{message}</span>
+          </p>
+          <span className="shrink-0 text-xs text-subtle-foreground tabular-nums">
             {timeAgo(row.createdAt)}
           </span>
         </div>
         {listing && (
-          <div className="text-xs text-muted-foreground">
-            on <span className="font-medium">{listing.name}</span>
-          </div>
+          <p className="truncate text-[13px] leading-[18px] text-muted-foreground">
+            on <span className="text-foreground">{listing.name}</span>
+          </p>
         )}
         {snippet && (
-          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+          <p className="mt-1 line-clamp-2 text-[13px] leading-[18px] text-muted-foreground">
             {snippet}
           </p>
         )}
       </div>
-      {isUnread && (
-        <span
-          className="mt-2 size-2 shrink-0 rounded-full bg-primary"
-          aria-label="Unread"
-        />
-      )}
+      <span
+        className={cn(
+          "mt-2 size-2 shrink-0 rounded-full",
+          isUnread ? "bg-destructive" : "bg-transparent"
+        )}
+        aria-label={isUnread ? "Unread" : undefined}
+      />
     </Link>
   );
 }

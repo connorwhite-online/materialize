@@ -1,25 +1,31 @@
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { eq } from "drizzle-orm";
-import { auth } from "@clerk/nextjs/server";
+import { auth, currentUser } from "@clerk/nextjs/server";
 import { Page, PageHeader } from "@/components/ui/page";
 import { listPersonalAccessTokens } from "@/app/actions/tokens";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { TokensManager } from "./tokens-manager";
+import { McpEndpoint } from "./mcp-endpoint";
+import { ownerSettingsHref } from "@/lib/profile/owner-settings-tabs";
 
 export default async function TokensSettingsPage() {
   const { userId } = await auth();
   if (!userId) redirect("/");
 
-  const [tokens, [billingRow]] = await Promise.all([
+  const [tokens, [billingRow], user] = await Promise.all([
     listPersonalAccessTokens(),
     db
       .select({ defaultPaymentMethod: users.defaultPaymentMethod })
       .from(users)
       .where(eq(users.id, userId))
       .limit(1),
+    currentUser(),
   ]);
+  const backHref = user?.username
+    ? ownerSettingsHref(user.username, "agents")
+    : "/dashboard/settings";
   const hasPaymentMethod = !!billingRow?.defaultPaymentMethod;
 
   // Derive the MCP endpoint URL from the live request rather than a
@@ -34,29 +40,23 @@ export default async function TokensSettingsPage() {
     : (process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000");
 
   return (
-    <Page width="narrow">
+    <Page width="narrow" className="gap-10">
       <PageHeader
-        back={{ href: "/dashboard/settings", label: "Settings" }}
+        back={{ href: backHref, label: "Agents" }}
         title="Connected agents"
-        description={
-          <>
-            Personal access tokens (PATs) let agents and tools talk to the
-            Materialize MCP server on your behalf. Each token is scoped — agents
-            can only do what you grant. ChatGPT and Claude can also connect with
-            just the endpoint below: they ask you to sign in, and show up here
-            once you do. You&apos;ll still review and pay for any print order
-            before it&apos;s placed.
-            <span className="mt-3 flex w-fit max-w-full items-center gap-2 rounded-full bg-muted/60 py-1 pr-3 pl-1 text-xs ring-1 ring-foreground/5">
-              <span className="rounded-full bg-card px-2 py-0.5 font-medium text-foreground shadow-raised">
-                MCP
-              </span>
-              <code className="truncate font-mono select-all">
-                {baseUrl}/api/mcp
-              </code>
-            </span>
-          </>
-        }
+        description="Let ChatGPT, Claude or your own tools browse, quote and draft orders for you. Every order still waits for your OK unless you turn on auto-approve."
       />
+
+      <section className="flex flex-col gap-3">
+        <div>
+          <h2 className="text-base leading-6 font-semibold">Server URL</h2>
+          <p className="mt-0.5 text-sm text-pretty text-muted-foreground">
+            Add this to ChatGPT or Claude. They&apos;ll ask you to sign in,
+            then show up below.
+          </p>
+        </div>
+        <McpEndpoint url={`${baseUrl}/api/mcp`} />
+      </section>
 
       <TokensManager
         hasPaymentMethod={hasPaymentMethod}

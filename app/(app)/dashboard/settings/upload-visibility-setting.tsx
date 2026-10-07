@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { Switch } from "@/components/ui/switch";
+import { SettingsRow } from "@/components/ui/field";
 import { updateDefaultUploadVisibility } from "@/app/actions/profile";
 
 export function UploadVisibilitySetting({
@@ -25,25 +26,18 @@ export function UploadVisibilitySetting({
   };
 
   return (
-    <div className="border-t border-border pt-6">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1">
-          <div className="text-sm font-medium">
-            Auto-publish print uploads to my profile
-          </div>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            When on, files uploaded through the print flow or by connected
-            agents are added to your public profile as free listings. Off by
-            default — explicit listings published from your dashboard are
-            unaffected either way.
-          </p>
-        </div>
+    <SettingsRow
+      htmlFor="auto-publish-uploads"
+      title="Auto-publish print uploads"
+      description="Files you upload to print, or that agents upload for you, appear on your profile as free listings."
+      control={
         <Switch
+          id="auto-publish-uploads"
           checked={value === "public"}
           onCheckedChange={handleChange}
           disabled={pending}
         />
-      </div>
-    </div>
+      }
+    />
   );
 }

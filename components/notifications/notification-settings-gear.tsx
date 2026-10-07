@@ -23,7 +23,7 @@ interface NotificationSettingsGearProps {
 }
 
 /**
- * Chunky gear opposite the Notifications headline. Opens a sheet with
+ * Quiet gear (ghost icon button) opposite the Notifications headline. Opens a sheet with
  * email notification prefs — shared by `/notifications` and the
  * desktop bell popover.
  */
@@ -65,12 +65,12 @@ export function NotificationSettingsGear({
           setOpen(true);
         }}
         className={cn(
-          "inline-flex shrink-0 cursor-pointer items-center justify-center rounded-[14px] bg-muted text-foreground transition-[transform,background-color,box-shadow] hover:bg-muted/80 active:scale-[0.96]",
-          compact ? "h-9 w-9" : "h-11 w-11",
+          "inline-flex shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-[transform,background-color,color] duration-150 hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none active:scale-[0.96]",
+          compact ? "size-8" : "size-9",
           className
         )}
       >
-        <Gear size={compact ? 18 : 20} />
+        <Gear size={compact ? 16 : 18} />
       </button>
 
       <NativeSheet
@@ -78,8 +78,8 @@ export function NotificationSettingsGear({
         onClose={() => setOpen(false)}
         ariaLabel="Notification settings"
       >
-        <div className="space-y-4 px-5 pb-2 pt-1">
-          <h2 className="text-lg font-semibold tracking-tight">
+        <div className="flex flex-col gap-3 px-5 pt-1 pb-2">
+          <h2 className="text-lg leading-6 font-semibold">
             Notification settings
           </h2>
 

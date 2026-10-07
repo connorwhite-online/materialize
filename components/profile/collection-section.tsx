@@ -1,7 +1,5 @@
-import { FolderOpenIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { CollectionSettingsMenu } from "./collection-settings-menu";
-import { cn } from "@/lib/utils";
 
 interface CollectionSectionProps {
   collectionId: string;
@@ -16,9 +14,9 @@ interface CollectionSectionProps {
 }
 
 /**
- * Collection shelf in the profile Library view. Header is the
- * folder glyph + name, with a right-aligned visibility chip and
- * owner settings. Files outside a collection render in the Files
+ * Collection shelf in the profile Library view. Header is the name
+ * with a muted count (same as LibrarySection), a "Private" chip only
+ * when it isn't public, and the owner settings menu on the right. Files outside a collection render in the Files
  * carousel below.
  */
 export function CollectionSection({
@@ -35,66 +33,49 @@ export function CollectionSection({
   const countLabel =
     fileCount === 0
       ? "Empty"
-      : `${fileCount} ${fileCount === 1 ? "File" : "Files"}`;
+      : `${fileCount} ${fileCount === 1 ? "file" : "files"}`;
 
   return (
-    <section>
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 flex-1 items-center gap-2 text-muted-foreground">
-          <span className="flex shrink-0">
-            <FolderOpenIcon className={compact ? "size-4" : "size-5"} />
-          </span>
+    <section className="flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-1 items-baseline gap-2">
           <h2
             className={
               compact
-                ? "min-w-0 truncate text-sm font-semibold"
-                : "min-w-0 truncate text-lg font-semibold"
+                ? "min-w-0 truncate text-sm leading-5 font-semibold"
+                : "min-w-0 truncate text-base leading-6 font-semibold"
             }
           >
             {name}
           </h2>
-          <Badge
-            variant="outline"
-            className={cn(
-              "ml-4 h-6 shrink-0 px-2.5",
-              // The "Empty" pill on mobile reads as clutter — phone
-              // users can see at a glance that there's nothing
-              // beneath the section header. Keep the count badge
-              // ("3 Files") on every viewport, but hide the empty
-              // state's badge below sm.
-              fileCount === 0 && "hidden sm:inline-flex"
-            )}
-          >
+          <span className="shrink-0 text-sm text-subtle-foreground tabular-nums">
             {countLabel}
-          </Badge>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {showVisibilityBadge && (
-            <Badge variant="outline" className="h-6 px-2.5 capitalize">
+          </span>
+          {showVisibilityBadge && visibility !== "public" && (
+            <Badge variant="secondary" className="shrink-0 capitalize">
               {visibility}
             </Badge>
           )}
-          {isOwner && (
-            <CollectionSettingsMenu
-              collectionId={collectionId}
-              name={name}
-              description={description ?? null}
-              visibility={
-                visibility === "public" || visibility === "private"
-                  ? visibility
-                  : "private"
-              }
-            />
-          )}
         </div>
-      </div>
-
-      <div className="pt-4">
-        {description && (
-          <p className="mb-4 text-xs text-muted-foreground">{description}</p>
+        {isOwner && (
+          <CollectionSettingsMenu
+            collectionId={collectionId}
+            name={name}
+            description={description ?? null}
+            visibility={
+              visibility === "public" || visibility === "private"
+                ? visibility
+                : "private"
+            }
+          />
         )}
-        {children}
       </div>
+      {description && (
+        <p className="-mt-1.5 text-[13px] leading-[18px] text-muted-foreground">
+          {description}
+        </p>
+      )}
+      {children}
     </section>
   );
 }

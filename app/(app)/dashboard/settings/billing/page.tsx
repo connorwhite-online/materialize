@@ -1,11 +1,12 @@
 import { redirect } from "next/navigation";
-import { auth } from "@clerk/nextjs/server";
+import { auth, currentUser } from "@clerk/nextjs/server";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Card, CardContent } from "@/components/ui/card";
+import Link from "next/link";
 import { Page, PageHeader } from "@/components/ui/page";
 import { getPaymentMethodSummary } from "@/app/actions/billing";
 import { PaymentCard } from "@/components/print/payment-card";
 import { BillingActions } from "./billing-actions";
+import { ownerSettingsHref } from "@/lib/profile/owner-settings-tabs";
 
 export default async function BillingSettingsPage({
   searchParams,
@@ -15,15 +16,23 @@ export default async function BillingSettingsPage({
   const { userId } = await auth();
   if (!userId) redirect("/");
 
-  const summary = await getPaymentMethodSummary();
-  const sp = await searchParams;
+  const [summary, sp, user] = await Promise.all([
+    getPaymentMethodSummary(),
+    searchParams,
+    currentUser(),
+  ]);
+  // Back to the Payments tab this page was opened from, not the
+  // Settings tab /dashboard/settings redirects to.
+  const backHref = user?.username
+    ? ownerSettingsHref(user.username, "payments")
+    : "/dashboard/settings";
 
   return (
     <Page width="narrow">
       <PageHeader
-        back={{ href: "/dashboard/settings", label: "Settings" }}
+        back={{ href: backHref, label: "Payments" }}
         title="Saved card"
-        description="Keep a card on file for print checkout and agent orders. Agents within a spending policy can charge it automatically; everything else still asks you to confirm."
+        description="Used for one-tap print checkout. Agents can charge it only within the spending limit you set for them; everything else asks you first."
       />
 
       {sp.status === "success" && !summary && (
@@ -42,37 +51,55 @@ export default async function BillingSettingsPage({
         </Alert>
       )}
 
-      <Card>
-        <CardContent className="px-5 py-1">
-          <div className="text-sm font-medium">Payment method</div>
-          <div className="mt-4">
-            <PaymentCard
-              brand={summary?.brand}
-              last4={summary?.last4 ?? null}
-              saved={Boolean(summary)}
-            />
-          </div>
+      {/* The card is the object, so it gets the visual; the actions sit
+          beside it at natural width instead of a full-width bar inside
+          a page-wide box. */}
+      <section className="flex flex-col gap-6 sm:flex-row sm:items-center sm:gap-8">
+        <PaymentCard
+          className="mx-0 max-w-[15rem] shrink-0"
+          brand={summary?.brand}
+          last4={summary?.last4 ?? null}
+          saved={Boolean(summary)}
+        />
+        <div className="flex min-w-0 flex-col items-start gap-1">
           {summary ? (
-            <div className="mt-4 flex flex-col gap-3">
-              <p className="text-sm text-muted-foreground">
-                <span className="font-medium capitalize text-foreground">
-                  {summary.brand}
-                </span>{" "}
-                ending in {summary.last4}
+            <>
+              <p className="text-base leading-6 font-semibold">
+                <span className="capitalize">{summary.brand}</span> ending in{" "}
+                <span className="tabular-nums">{summary.last4}</span>
               </p>
-              <BillingActions hasCard />
-            </div>
+              <p className="text-[13px] leading-[18px] text-muted-foreground tabular-nums">
+                Expires {String(summary.expMonth).padStart(2, "0")}/
+                {String(summary.expYear).slice(-2)}
+              </p>
+            </>
           ) : (
-            <div className="mt-4 flex flex-col gap-3">
-              <p className="text-sm text-muted-foreground">
-                No card on file. You can add one here for one-tap checkout and
-                agent auto-charge.
+            <>
+              <p className="text-base leading-6 font-semibold">
+                No card on file
               </p>
-              <BillingActions hasCard={false} />
-            </div>
+              <p className="text-[13px] leading-[18px] text-pretty text-muted-foreground">
+                Add one to skip card entry at checkout. Stripe stores it; we
+                never see the number.
+              </p>
+            </>
           )}
-        </CardContent>
-      </Card>
+          <div className="mt-3">
+            <BillingActions hasCard={Boolean(summary)} />
+          </div>
+        </div>
+      </section>
+
+      <p className="text-[13px] leading-[18px] text-muted-foreground">
+        Spending limits for agents live in{" "}
+        <Link
+          href="/dashboard/settings/tokens"
+          className="text-foreground underline underline-offset-2 hover:no-underline"
+        >
+          Connected agents
+        </Link>
+        .
+      </p>
     </Page>
   );
 }

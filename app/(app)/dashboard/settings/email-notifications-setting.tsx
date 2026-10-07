@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { Switch } from "@/components/ui/switch";
+import { SettingsRow } from "@/components/ui/field";
 import {
   updateEmailNotificationsEnabled,
   updateEmailNotificationPref,
@@ -51,31 +52,39 @@ export function EmailNotificationsSetting({ initial, initialPrefs }: Props) {
   };
 
   return (
-    <div>
-      <div className="flex items-center justify-between gap-4">
-        <div className="text-sm font-medium">Email notifications</div>
-        <Switch checked={master} onCheckedChange={handleMaster} />
-      </div>
-
-      {master && (
-        <div className="mt-4 space-y-1 rounded-xl border border-border bg-muted/50 p-2">
-          {EVENT_TYPES.map(({ key, label }) => {
-            const enabled = prefs[key] !== false;
-            return (
-              <div
-                key={key}
-                className="flex items-center justify-between gap-4 rounded-lg px-2 py-2.5"
-              >
-                <div className="text-sm">{label}</div>
+    <div className="flex flex-col divide-y divide-border">
+      <SettingsRow
+        htmlFor="email-notifications-master"
+        title="Email notifications"
+        description="Activity on your listings and replies to your comments."
+        control={
+          <Switch
+            id="email-notifications-master"
+            checked={master}
+            onCheckedChange={handleMaster}
+          />
+        }
+      />
+      {master &&
+        EVENT_TYPES.map(({ key, label }) => {
+          const enabled = prefs[key] !== false;
+          const id = `email-pref-${key}`;
+          return (
+            <SettingsRow
+              key={key}
+              htmlFor={id}
+              title={<span className="font-normal">{label}</span>}
+              className="min-h-12 py-2.5"
+              control={
                 <Switch
+                  id={id}
                   checked={enabled}
                   onCheckedChange={(v) => handleType(key, v)}
                 />
-              </div>
-            );
-          })}
-        </div>
-      )}
+              }
+            />
+          );
+        })}
     </div>
   );
 }

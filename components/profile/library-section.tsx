@@ -1,5 +1,3 @@
-import { Badge } from "@/components/ui/badge";
-
 interface LibrarySectionProps {
   name: string;
   /** Count shown in the header pill. */
@@ -9,8 +7,8 @@ interface LibrarySectionProps {
    * Not shown in the chip — the heading already names the section.
    */
   countNoun: string;
-  /** Empty-library glyph prepended to the heading (box / layers). */
-  icon: React.ReactNode;
+  /** Kept for callers; section titles are text-only per the rulebook. */
+  icon?: React.ReactNode;
   /** Smaller heading for the authed-home column. */
   compact?: boolean;
   children: React.ReactNode;
@@ -26,7 +24,6 @@ export function LibrarySection({
   name,
   count,
   countNoun,
-  icon,
   compact = false,
   children,
 }: LibrarySectionProps) {
@@ -36,27 +33,25 @@ export function LibrarySection({
       : `${count} ${count === 1 ? countNoun : `${countNoun}s`}`;
 
   return (
-    <section>
-      <div className="flex w-full items-center gap-2 text-muted-foreground">
-        <span className="flex shrink-0">{icon}</span>
+    <section className="flex flex-col gap-3">
+      <div className="flex items-baseline gap-2">
         <h2
           className={
             compact
-              ? "min-w-0 truncate text-sm font-semibold"
-              : "min-w-0 truncate text-lg font-semibold"
+              ? "min-w-0 truncate text-sm leading-5 font-semibold"
+              : "min-w-0 truncate text-base leading-6 font-semibold"
           }
         >
           {name}
         </h2>
-        <Badge
-          variant="outline"
+        <span
           aria-label={countAria}
-          className="ml-3 h-7 min-w-7 shrink-0 px-2.5 text-sm font-semibold tabular-nums"
+          className="shrink-0 text-sm text-subtle-foreground tabular-nums"
         >
           {count === 0 ? "Empty" : count}
-        </Badge>
+        </span>
       </div>
-      <div className="pt-4">{children}</div>
+      {children}
     </section>
   );
 }

@@ -20,11 +20,12 @@ export function SignOutButton() {
   return (
     <Button
       type="button"
-      variant="outline"
+      variant="secondary"
+      size="sm"
       onClick={handleClick}
-      disabled={pending}
+      loading={pending}
     >
-      {pending ? "Signing out…" : "Sign out"}
+      Sign out
     </Button>
   );
 }

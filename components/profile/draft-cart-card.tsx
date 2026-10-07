@@ -2,7 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Card, CardContent } from "@/components/ui/card";
+import { formatUsd } from "@/components/ui/summary-list";
+import { MaterialSwatch } from "./material-swatch";
 import { Button } from "@/components/ui/button";
 import { discardDraftOrder, resumePrintOrder } from "@/app/actions/print";
 
@@ -97,66 +98,57 @@ export function DraftCartCard({
   };
 
   return (
-    // py-0: Card defaults to py-4; CardContent already pads the row.
-    <Card className="py-0 transition-colors">
-      <CardContent className="flex items-center justify-between gap-3 p-4">
-        <div className="flex min-w-0 items-center gap-3">
-          {materialColor && (
-            <div
-              className="h-8 w-8 shrink-0 rounded-md border border-border"
-              style={{
-                background: `linear-gradient(135deg, ${materialColor}, ${materialColor}dd)`,
-              }}
-            />
+    <div className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <MaterialSwatch color={materialColor} />
+        <div className="min-w-0">
+          <p className="truncate text-sm leading-5 font-medium">
+            {fileName ?? "3D Print"}
+          </p>
+          <p className="truncate text-[13px] leading-[18px] text-muted-foreground">
+            {awaitingProductionPayment ? (
+              <span className="text-warning">Pay CraftCloud to start production</span>
+            ) : (
+              <>
+                {materialName ?? "Material"}
+                {materialMethod ? ` · ${materialMethod}` : ""}
+                {vendorName ? (
+                  <span className="hidden sm:inline">{` · ${vendorName}`}</span>
+                ) : null}
+              </>
+            )}
+          </p>
+          {resumeError && (
+            <p role="alert" className="mt-0.5 text-[13px] leading-[18px] text-destructive">
+              {resumeError}
+            </p>
           )}
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium">
-              {fileName ?? "3D Print"}
-            </p>
-            <p className="truncate text-xs text-muted-foreground">
-              {vendorName ? `${vendorName} · ` : ""}
-              {materialName ?? "Material"}
-              {materialMethod ? ` · ${materialMethod}` : ""}
-              {total > 0 ? ` · $${(total / 100).toFixed(2)}` : ""}
-            </p>
-            {awaitingProductionPayment && (
-              <div className="mt-0.5 text-xs text-amber-700 dark:text-amber-300">
-                <p className="truncate font-medium">
-                  Awaiting production payment
-                </p>
-                <p className="truncate">
-                  Service fee authorized — finish paying CraftCloud for
-                  production
-                </p>
-              </div>
-            )}
-            {resumeError && (
-              <p className="mt-0.5 truncate text-xs text-destructive">
-                {resumeError}
-              </p>
-            )}
-          </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {/* awaiting_production_payment rows are already placed at
-              CraftCloud — only cart_created drafts can be discarded
-              (matches the guard in discardDraftOrder). */}
-          {!awaitingProductionPayment && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleDiscard}
-              loading={pending}
-              className="text-destructive"
-            >
-              Discard
-            </Button>
-          )}
-          <Button size="sm" onClick={handleResume} loading={resuming}>
-            {awaitingProductionPayment ? "Complete payment" : "Resume"}
+        {total > 0 && (
+          <p className="ml-auto shrink-0 pl-2 text-sm font-medium tabular-nums">
+            {formatUsd(total)}
+          </p>
+        )}
+      </div>
+      <div className="flex shrink-0 items-center gap-2 pl-12 sm:pl-0">
+        {/* awaiting_production_payment rows are already placed at
+            CraftCloud — only cart_created drafts can be discarded
+            (matches the guard in discardDraftOrder). */}
+        {!awaitingProductionPayment && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleDiscard}
+            loading={pending}
+            className="text-muted-foreground"
+          >
+            Discard
           </Button>
-        </div>
-      </CardContent>
-    </Card>
+        )}
+        <Button size="sm" onClick={handleResume} loading={resuming}>
+          {awaitingProductionPayment ? "Complete payment" : "Resume"}
+        </Button>
+      </div>
+    </div>
   );
 }

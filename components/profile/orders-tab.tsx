@@ -7,8 +7,8 @@ import {
   files,
 } from "@/lib/db/schema";
 import { eq, desc, and, inArray, notInArray, asc } from "drizzle-orm";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { ChevronRight } from "@/components/icons/chevron-right";
+import { formatUsd } from "@/components/ui/summary-list";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { EmptyState } from "@/components/ui/page";
@@ -17,18 +17,19 @@ import { resolveOrderMaterials } from "@/lib/print/order-material";
 import { visibleOrdersFilter } from "@/lib/print/order-visibility";
 import { formatOrderNumber } from "@/lib/utils/order-number";
 import { DraftCartCard } from "./draft-cart-card";
+import { MaterialSwatch } from "./material-swatch";
 
 export const STATUS_LABELS: Record<string, string> = {
   quoting: "Quoting",
-  awaiting_agent_approval: "Awaiting Approval",
-  auto_approved: "Approved — Placing Soon",
-  cart_created: "Pending Payment",
+  awaiting_agent_approval: "Awaiting approval",
+  auto_approved: "Approved, placing soon",
+  cart_created: "Pending payment",
   awaiting_production_payment: "Awaiting production payment",
   ordered: "Confirmed",
-  in_production: "In Production",
+  in_production: "In production",
   shipped: "Shipped",
   received: "Delivered",
-  blocked: "Needs Attention",
+  blocked: "Needs attention",
   refunded: "Refunded",
   cancelled: "Cancelled",
 };
@@ -49,6 +50,14 @@ export const STATUS_VARIANT: Record<
   blocked: "destructive",
   refunded: "secondary",
   cancelled: "destructive",
+};
+
+/** Status as coloured text (rulebook: status is text, not a panel). */
+const STATUS_TONE: Record<(typeof STATUS_VARIANT)[string], string> = {
+  default: "text-success",
+  secondary: "text-muted-foreground",
+  outline: "text-warning",
+  destructive: "text-destructive",
 };
 
 // In-progress rows that surface in the "Carts" section with a Resume /
@@ -279,49 +288,50 @@ export async function OrdersTab({ userId }: { userId: string }) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-8">
       {drafts.length > 0 && (
-        <section className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-medium">Carts</h3>
-            <p className="text-xs text-muted-foreground">
+        <section className="flex flex-col gap-2">
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="text-base leading-6 font-semibold">Carts</h2>
+            <p className="text-[13px] text-muted-foreground tabular-nums">
               {drafts.length} in progress
             </p>
           </div>
-          <div className="flex flex-col gap-2">
+          <ul className="flex flex-col divide-y divide-border">
             {drafts.map((draft) => {
               const materialMeta = draft.material
                 ? materialsById.get(draft.material) ?? null
                 : null;
               return (
-                <DraftCartCard
-                  key={draft.id}
-                  orderId={draft.id}
-                  // Safe narrow: the drafts query filters on
-                  // IN_PROGRESS_STATUSES, drizzle just can't carry
-                  // that through the row type.
-                  status={
-                    draft.status as (typeof IN_PROGRESS_STATUSES)[number]
-                  }
-                  fileAssetId={draft.fileAssetId}
-                  fileName={draft.fileName}
-                  vendorName={draft.vendorName ?? draft.vendor ?? null}
-                  materialId={draft.material}
-                  materialName={materialMeta?.name ?? null}
-                  materialMethod={materialMeta?.method ?? null}
-                  materialColor={materialMeta?.color ?? null}
-                  total={draft.totalPrice + draft.serviceFee}
-                />
+                <li key={draft.id}>
+                  <DraftCartCard
+                    orderId={draft.id}
+                    // Safe narrow: the drafts query filters on
+                    // IN_PROGRESS_STATUSES, drizzle just can't carry
+                    // that through the row type.
+                    status={
+                      draft.status as (typeof IN_PROGRESS_STATUSES)[number]
+                    }
+                    fileAssetId={draft.fileAssetId}
+                    fileName={draft.fileName}
+                    vendorName={draft.vendorName ?? draft.vendor ?? null}
+                    materialId={draft.material}
+                    materialName={materialMeta?.name ?? null}
+                    materialMethod={materialMeta?.method ?? null}
+                    materialColor={materialMeta?.color ?? null}
+                    total={draft.totalPrice + draft.serviceFee}
+                  />
+                </li>
               );
             })}
-          </div>
+          </ul>
         </section>
       )}
 
       {orders.length > 0 && (
-        <section className="space-y-3">
+        <section className="flex flex-col gap-2">
           {drafts.length > 0 && (
-            <h3 className="text-sm font-medium">Orders</h3>
+            <h2 className="text-base leading-6 font-semibold">Orders</h2>
           )}
           {ordersTruncated && (
             <Alert variant="warning">
@@ -332,69 +342,53 @@ export async function OrdersTab({ userId }: { userId: string }) {
               </AlertDescription>
             </Alert>
           )}
-          {/* flex+gap (not space-y): each row is a Link, and space-y's
-              margin-top does not land on a default-inline <a>, so cards
-              sat flush. SettingsLink uses the same block Link pattern. */}
-          <div className="flex flex-col gap-2">
+          {/* Rows are flex Links (block-level), so the CON-30 trap —
+              space-y margins not landing on inline <a> — can't recur. */}
+          <ul className="-mx-3 flex flex-col">
             {orders.map((order) => {
               const materialMeta = order.material
                 ? materialsById.get(order.material) ?? null
                 : null;
               const orderNumber = formatOrderNumber(order.id);
               const statusLabel = STATUS_LABELS[order.status] || order.status;
-              const variant = STATUS_VARIANT[order.status] || "outline";
+              const tone =
+                STATUS_TONE[STATUS_VARIANT[order.status] || "outline"];
+              const vendor = order.vendorName ?? order.vendor;
 
               return (
-                <Link
-                  key={order.id}
-                  href={`/dashboard/orders/${order.id}`}
-                  className="block"
-                >
-                  {/* py-0: Card defaults to py-4; CardContent already
-                      pads the row, so the default doubled the height. */}
-                  <Card className="py-0 transition-colors hover:border-primary/30">
-                    <CardContent className="flex items-center justify-between p-4">
-                      <div className="flex items-center gap-3">
-                        {materialMeta && (
-                          <div
-                            className="h-8 w-8 shrink-0 rounded-md border border-border"
-                            style={{
-                              background: `linear-gradient(135deg, ${materialMeta.color}, ${materialMeta.color}dd)`,
-                            }}
-                          />
-                        )}
-                        <div>
-                          <p className="text-sm font-medium">
-                            {order.fileName ||
-                              materialMeta?.name ||
-                              order.material ||
-                              "3D Print"}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {orderNumber}
-                            {order.vendorName || order.vendor
-                              ? ` · ${order.vendorName ?? order.vendor}`
-                              : ""}
-                            {materialMeta ? ` · ${materialMeta.method}` : ""}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <Badge variant={variant}>{statusLabel}</Badge>
-                        <p className="w-20 text-right text-sm font-medium tabular-nums">
-                          $
-                          {(
-                            (order.totalPrice + order.serviceFee) /
-                            100
-                          ).toFixed(2)}
-                        </p>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </Link>
+                <li key={order.id}>
+                  <Link
+                    href={`/dashboard/orders/${order.id}`}
+                    className="group flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors duration-150 hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                  >
+                    <MaterialSwatch color={materialMeta?.color ?? null} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm leading-5 font-medium">
+                        {order.fileName ||
+                          materialMeta?.name ||
+                          order.material ||
+                          "3D Print"}
+                      </p>
+                      <p className="truncate text-[13px] leading-[18px] text-muted-foreground">
+                        <span className={tone}>{statusLabel}</span>
+                        {` · ${orderNumber}`}
+                        {vendor ? (
+                          <span className="hidden sm:inline">{` · ${vendor}`}</span>
+                        ) : null}
+                      </p>
+                    </div>
+                    <p className="shrink-0 text-sm font-medium tabular-nums">
+                      {formatUsd(order.totalPrice + order.serviceFee)}
+                    </p>
+                    <ChevronRight
+                      size={14}
+                      className="shrink-0 text-subtle-foreground transition-colors group-hover:text-foreground"
+                    />
+                  </Link>
+                </li>
               );
             })}
-          </div>
+          </ul>
         </section>
       )}
     </div>

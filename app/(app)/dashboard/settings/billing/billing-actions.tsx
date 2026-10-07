@@ -41,33 +41,31 @@ export function BillingActions({ hasCard }: { hasCard: boolean }) {
   };
 
   return (
-    <div className="flex w-full flex-col gap-1">
-      <div
-        className={
-          hasCard ? "grid w-full grid-cols-2 gap-2" : "flex w-full"
-        }
-      >
+    <div className="flex flex-col items-start gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          variant={hasCard ? "secondary" : "default"}
+          onClick={handleAddOrReplace}
+          loading={pending}
+        >
+          {hasCard ? "Replace card" : "Add card"}
+        </Button>
         {hasCard && (
           <Button
-            variant="outline"
-            size="sm"
-            className="w-full"
+            variant="ghost"
+            className="text-destructive hover:text-destructive"
             onClick={handleRemove}
             disabled={pending}
           >
             Remove
           </Button>
         )}
-        <Button
-          onClick={handleAddOrReplace}
-          disabled={pending}
-          size="sm"
-          className="w-full"
-        >
-          {hasCard ? "Replace card" : "Add card"}
-        </Button>
       </div>
-      {error && <div className="text-xs text-destructive">{error}</div>}
+      {error && (
+        <p role="alert" className="text-[13px] leading-[18px] text-destructive">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

@@ -14,13 +14,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Field, FieldGroup } from "@/components/ui/field";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { MoreHorizontalIcon } from "lucide-react";
 import {
   updateCollection,
   deleteCollection,
@@ -101,30 +103,42 @@ export function CollectionSettingsMenu({
 
   return (
     <>
-      <Button
-        variant="outline"
-        size="sm"
-        aria-label="Edit collection"
-        onClick={() => {
-          resetEdit();
-          setActive("edit");
-        }}
-      >
-        Edit
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        aria-label="Delete collection"
-        className="text-destructive hover:text-destructive"
-        onClick={() => {
-          setConfirmName("");
-          setDeleteError(null);
-          setActive("delete");
-        }}
-      >
-        Delete
-      </Button>
+      {/* One quiet overflow menu instead of an Edit + red Delete pair on
+          every shelf header — the destructive action shouldn't sit one
+          mis-tap away on a phone. */}
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`Collection options for ${name}`}
+            >
+              <MoreHorizontalIcon />
+            </Button>
+          }
+        />
+        <DropdownMenuContent align="end" sideOffset={6} className="min-w-40">
+          <DropdownMenuItem
+            onClick={() => {
+              resetEdit();
+              setActive("edit");
+            }}
+          >
+            Edit collection
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            variant="destructive"
+            onClick={() => {
+              setConfirmName("");
+              setDeleteError(null);
+              setActive("delete");
+            }}
+          >
+            Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       <Dialog
         open={active === "edit"}
@@ -136,51 +150,46 @@ export function CollectionSettingsMenu({
           <DialogHeader>
             <DialogTitle>Edit collection</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleEditSubmit} className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="collection-name" className="text-xs">
-                Name
-              </Label>
-              <Input
-                id="collection-name"
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                required
-                maxLength={100}
-                autoFocus
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="collection-description" className="text-xs">
-                Description
-              </Label>
-              <Textarea
-                id="collection-description"
-                value={editDescription}
-                onChange={(e) => setEditDescription(e.target.value)}
-                rows={3}
-                maxLength={500}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="collection-visibility" className="text-xs">
-                Visibility
-              </Label>
-              <Select
-                value={editVisibility}
-                onValueChange={(v) =>
-                  setEditVisibility(v as "public" | "private")
+          <form onSubmit={handleEditSubmit} className="flex flex-col gap-5">
+            <FieldGroup className="max-w-none">
+              <Field label="Name" htmlFor="collection-name">
+                <Input
+                  id="collection-name"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  required
+                  maxLength={100}
+                  autoFocus
+                />
+              </Field>
+              <Field label="Description" htmlFor="collection-description" optional>
+                <Textarea
+                  id="collection-description"
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  rows={3}
+                  maxLength={500}
+                />
+              </Field>
+              <Field
+                label="Visibility"
+                hint={
+                  editVisibility === "public"
+                    ? "Shown on your public profile."
+                    : "Only you can see it."
                 }
               >
-                <SelectTrigger id="collection-visibility">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="public">Public</SelectItem>
-                  <SelectItem value="private">Private</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+                <SegmentedControl
+                  value={editVisibility}
+                  onValueChange={(v) => setEditVisibility(v)}
+                  listClassName="w-fit"
+                  items={[
+                    { value: "public", label: "Public" },
+                    { value: "private", label: "Private" },
+                  ]}
+                />
+              </Field>
+            </FieldGroup>
             {editError && (
               <p className="text-sm text-destructive">{editError}</p>
             )}
@@ -193,8 +202,8 @@ export function CollectionSettingsMenu({
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={editPending}>
-                {editPending ? "Saving…" : "Save changes"}
+              <Button type="submit" loading={editPending}>
+                Save changes
               </Button>
             </DialogFooter>
           </form>
@@ -245,9 +254,10 @@ export function CollectionSettingsMenu({
             <Button
               variant="destructive"
               onClick={handleDeleteConfirm}
-              disabled={confirmName.trim() !== name || deletePending}
+              disabled={confirmName.trim() !== name}
+              loading={deletePending}
             >
-              {deletePending ? "Deleting…" : "Delete permanently"}
+              Delete collection
             </Button>
           </DialogFooter>
         </DialogContent>
