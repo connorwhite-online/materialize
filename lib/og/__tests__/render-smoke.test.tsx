@@ -90,15 +90,15 @@ describe("OG card rendering", () => {
     expectPng(buf);
   }, 30000);
 
-  it("renders a full-bleed card with the wordmark bottom-left", async () => {
+  it("renders a full-bleed card with the M mark bottom-left", async () => {
     const buf = await save(
-      "site-wordmark",
+      "site-mark",
       await renderOgCard({
         title: "Materialize",
         layout: "full",
         fit: "cover",
         imageUrl: photo,
-        wordmark: true,
+        mark: true,
       })
     );
     expectPng(buf);

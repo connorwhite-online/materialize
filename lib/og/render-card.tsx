@@ -1,10 +1,7 @@
 import { ImageResponse } from "next/og";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import {
-  WORDMARK_GLYPHS,
-  WORDMARK_VIEWBOX,
-} from "@/components/brand/logo-paths";
+import { MARK_PATH, MARK_VIEWBOX } from "@/components/brand/logo-paths";
 import {
   resolveImageUrl,
   shouldFullBleed,
@@ -95,38 +92,29 @@ type CardProps = {
    */
   images?: string[] | null;
   /**
-   * Paint the Materialize wordmark bottom-left of a full-bleed card. For
-   * cards where the artwork IS the brand (the site-wide card); per-entity
-   * cards leave it off because the title and domain already sit beneath
-   * the image in every client.
+   * Paint the Materialize "M" bottom-left of a full-bleed card. For cards
+   * where the artwork IS the brand (the site-wide card); per-entity cards
+   * leave it off because the title and domain already sit beneath the
+   * image in every client.
    */
-  wordmark?: boolean;
+  mark?: boolean;
 };
 
-const WORDMARK_HEIGHT = 34;
-const WORDMARK_INSET = 52;
-const WORDMARK_WIDTH = Math.round(
-  (WORDMARK_HEIGHT * 1122.335342) / 100
-);
+const MARK_HEIGHT = 56;
+const MARK_INSET = 56;
+const MARK_WIDTH = Math.round((MARK_HEIGHT * 415) / 251);
 
-/** The brand wordmark as satori-safe inline SVG (paths from logo-paths.ts). */
-function OgWordmark() {
+/** The brand "M" as satori-safe inline SVG (path from logo-paths.ts). */
+function OgMark() {
   return (
     <svg
-      width={WORDMARK_WIDTH}
-      height={WORDMARK_HEIGHT}
-      viewBox={WORDMARK_VIEWBOX}
+      width={MARK_WIDTH}
+      height={MARK_HEIGHT}
+      viewBox={MARK_VIEWBOX}
       fill="#fafafa"
-      fillRule="evenodd"
-      style={{
-        position: "absolute",
-        left: WORDMARK_INSET,
-        bottom: WORDMARK_INSET,
-      }}
+      style={{ position: "absolute", left: MARK_INSET, bottom: MARK_INSET }}
     >
-      {WORDMARK_GLYPHS.map((g, i) => (
-        <path key={i} d={g.d} />
-      ))}
+      <path d={MARK_PATH} />
     </svg>
   );
 }
@@ -279,7 +267,7 @@ export async function renderOgCard(props: CardProps): Promise<ImageResponse> {
               objectFit: props.fit ?? "cover",
             }}
           />
-          {props.wordmark ? <OgWordmark /> : null}
+          {props.mark ? <OgMark /> : null}
         </div>
       ),
       {

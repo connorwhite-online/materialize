@@ -20,7 +20,7 @@ import { OG_CONTENT_TYPE, OG_SIZE, renderOgCard } from "@/lib/og/render-card";
  * The art is the landing hero's "Host the whole build" step — the
  * Pneuma S enclosure exploded, captured from the real 3D scene
  * (`public/og/landing-exploded.png`, see `public/og/README.md`) — with the
- * wordmark bottom-left. Dark only, like every other OG card: link previews
+ * "M" bottom-left. Dark only, like every other OG card: link previews
  * have no theme to follow, and the scene itself is shot on `#0a0a0a`-ish
  * black.
  *
@@ -42,6 +42,6 @@ export default async function Image() {
     imageUrl: `data:image/png;base64,${art.toString("base64")}`,
     layout: "full",
     fit: "cover",
-    wordmark: true,
+    mark: true,
   });
 }
