@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Factory } from "@/components/icons/factory";
-import { Frown } from "@/components/icons/frown";
+import { CheckIcon, InfoIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { ChevronRight } from "@/components/icons/chevron-right";
 import { Label } from "@/components/ui/label";
 import {
@@ -55,14 +56,14 @@ function countryNameFromCode(code: string | null | undefined): string | null {
  */
 function stateNameFromCode(
   stateCode: string | null | undefined,
-  countryCode: string | null | undefined
+  countryCode: string | null | undefined,
 ): string | null {
   if (!stateCode) return null;
   if (!countryCode) return stateCode;
   try {
     const dn = new Intl.DisplayNames(["en"], { type: "region" });
     const resolved = dn.of(
-      `${countryCode.toUpperCase()}-${stateCode.toUpperCase()}`
+      `${countryCode.toUpperCase()}-${stateCode.toUpperCase()}`,
     );
     // DisplayNames returns the input unchanged when it can't
     // resolve — detect and fall back to the bare state code so
@@ -83,7 +84,7 @@ function stateNameFromCode(
  */
 function vendorLocationLabel(
   countryCode: string | null | undefined,
-  stateCode: string | null | undefined
+  stateCode: string | null | undefined,
 ): string | null {
   const country = countryNameFromCode(countryCode);
   const state = stateNameFromCode(stateCode, countryCode);
@@ -105,6 +106,13 @@ interface VendorStepProps {
    * qty input.
    */
   sortQuantity: number;
+  /**
+   * Live quantity for the prices shown on each row. Ranking keeps
+   * using the stable `sortQuantity` anchor so rows don't reshuffle
+   * under the cursor; the numbers themselves should be current.
+   * Falls back to `sortQuantity`.
+   */
+  quantity?: number;
   materialId: string;
   /**
    * Preferred finish when the user arrived via Print-with-X. Ignored
@@ -129,15 +137,17 @@ export function VendorStep({
   vendorMinimums,
   onRequestMinimums,
   sortQuantity,
+  quantity,
   materialId,
   initialFinishGroupId,
   selectedQuote,
   onPick,
   onBack,
 }: VendorStepProps) {
+  const displayQuantity = quantity ?? sortQuantity;
   const cheapestShippingByVendor = useMemo(
     () => shippingMap(shipping),
-    [shipping]
+    [shipping],
   );
 
   const finishes = useMemo(
@@ -147,16 +157,16 @@ export function VendorStep({
         shipping,
         sortQuantity,
         materialId,
-        vendorMinimums
+        vendorMinimums,
       ),
-    [quotes, shipping, sortQuantity, materialId, vendorMinimums]
+    [quotes, shipping, sortQuantity, materialId, vendorMinimums],
   );
 
   const [finishGroupId, setFinishGroupId] = useState<string | null>(() =>
     pickDefaultFinishGroupId(
       finishes,
-      initialFinishGroupId ?? selectedQuote?.finishGroupId
-    )
+      initialFinishGroupId ?? selectedQuote?.finishGroupId,
+    ),
   );
 
   // Quotes grow as polling snapshots land. Keep the user's finish
@@ -169,14 +179,14 @@ export function VendorStep({
       }
       return pickDefaultFinishGroupId(
         finishes,
-        initialFinishGroupId ?? selectedQuote?.finishGroupId
+        initialFinishGroupId ?? selectedQuote?.finishGroupId,
       );
     });
   }, [finishes, initialFinishGroupId, selectedQuote?.finishGroupId]);
 
   const { materialName, colors, cheapestPerColor } = useMemo(() => {
     const filtered = quotes.filter(
-      (q) => q.materialId === materialId && q.finishGroupId === finishGroupId
+      (q) => q.materialId === materialId && q.finishGroupId === finishGroupId,
     );
     const materialName = filtered[0]?.materialName ?? "Material";
 
@@ -212,7 +222,7 @@ export function VendorStep({
         qs.sort((a, b) => totalCost(a) - totalCost(b));
         cheapestPerColor.set(
           name,
-          qs.reduce((min, q) => Math.min(min, unitPrice(q)), unitPrice(qs[0]))
+          qs.reduce((min, q) => Math.min(min, unitPrice(q)), unitPrice(qs[0])),
         );
         cheapestTotalPerColor.set(name, totalCost(qs[0]));
         return {
@@ -224,7 +234,7 @@ export function VendorStep({
       .sort(
         (a, b) =>
           cheapestTotalPerColor.get(a.name)! -
-          cheapestTotalPerColor.get(b.name)!
+          cheapestTotalPerColor.get(b.name)!,
       );
 
     return { materialName, colors, cheapestPerColor };
@@ -238,7 +248,7 @@ export function VendorStep({
   ]);
 
   const [activeColor, setActiveColor] = useState<string>(
-    selectedQuote?.color ?? colors[0]?.name ?? ""
+    selectedQuote?.color ?? colors[0]?.name ?? "",
   );
 
   // Focus the heading on mount so step transitions land AT users here (CON-157).
@@ -259,7 +269,7 @@ export function VendorStep({
   const badgesByQuoteId = useMemo(
     () =>
       vendorQuoteBadges(vendorQuotes, shipping, sortQuantity, vendorMinimums),
-    [vendorQuotes, shipping, sortQuantity, vendorMinimums]
+    [vendorQuotes, shipping, sortQuantity, vendorMinimums],
   );
 
   // Probe every vendor on screen for its minimum order value. The
@@ -274,13 +284,18 @@ export function VendorStep({
     setActiveColor("");
   };
 
+  const fromPrice = vendorQuotes.reduce<number | null>((min, q) => {
+    const unit = effectiveUnitPrice(q, sortQuantity, vendorMinimums);
+    return min === null || unit < min ? unit : min;
+  }, null);
+
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-5">
       <div>
         <button
           type="button"
           onClick={onBack}
-          className="inline-flex cursor-pointer items-center gap-1 rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+          className="-ml-2 inline-flex h-8 cursor-pointer items-center gap-1 rounded-lg pr-2.5 pl-1.5 text-sm text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         >
           <ChevronRight size={14} className="rotate-180" />
           All materials
@@ -288,169 +303,203 @@ export function VendorStep({
         <h2
           ref={headingRef}
           tabIndex={-1}
-          className="mt-2 text-lg font-semibold outline-none"
+          className="mt-2 text-base leading-6 font-semibold outline-none"
         >
           {materialName}
         </h2>
-        <p className="text-xs text-muted-foreground">Pick a vendor</p>
-      </div>
-
-      <FinishSelect
-        finishes={finishes}
-        value={finishGroupId}
-        onChange={handleFinishChange}
-      />
-
-      {colors.length > 1 && (
-        <div>
-          <Label htmlFor="color-select">Color</Label>
-          <Select
-            value={activeColor || (colors[0]?.name ?? null)}
-            onValueChange={(v) => v && setActiveColor(v)}
-          >
-            <SelectTrigger id="color-select" className="w-full">
-              <SelectValue>
-                {(value) => {
-                  const c = colors.find((c) => c.name === value);
-                  if (!c) return "Select a color";
-                  // From-price lives on the dropdown options only —
-                  // same rule as the finish trigger.
-                  return (
-                    <>
-                      <span
-                        className="size-4 shrink-0 rounded-full border border-border/60"
-                        style={{ backgroundColor: c.colorCode }}
-                      />
-                      <span className="truncate">{c.name}</span>
-                    </>
-                  );
-                }}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {colors.map((c) => (
-                <SelectItem key={c.name} value={c.name}>
-                  <span
-                    className="size-3.5 shrink-0 rounded-full border border-border/60"
-                    style={{ backgroundColor: c.colorCode }}
-                  />
-                  <span>{c.name}</span>
-                  <span className="ml-auto text-muted-foreground tabular-nums">
-                    ${cheapestPerColor.get(c.name)!.toFixed(2)}
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-
-      {/* Tariff notice — covers why shipping has gotten rough on
-          US-bound orders from most of CraftCloud's roster. Sits in
-          the same column as the vendor cards so the width lines up. */}
-      <div className="flex items-start gap-3 rounded-xl border border-border bg-muted/40 p-3 text-muted-foreground">
-        <Frown className="mt-0.5 size-5 shrink-0 text-primary" />
-        <p className="text-xs leading-snug">
-          <span className="font-medium text-primary">
-            Heads up — shipping prices from most vendors are higher than usual
-          </span>{" "}
-          due to new US import tariffs. We&apos;re surfacing every quote as it
-          comes in so you can still pick the best one.
+        <p className="mt-0.5 text-[13px] leading-[18px] text-muted-foreground">
+          {vendorQuotes.length > 0
+            ? `${vendorQuotes.length} ${vendorQuotes.length === 1 ? "manufacturer" : "manufacturers"}${fromPrice !== null ? ` · from $${fromPrice.toFixed(2)}` : ""}`
+            : "Pick a manufacturer"}
         </p>
       </div>
 
-      {/* Vendor quotes for the selected color. Extra vertical gap
-          so the Cheapest/Fastest chips hanging off the top edge
-          don't collide with the card above. */}
-      <div className="space-y-3 pt-1">
-        {vendorQuotes.map((quote) => {
-          const isSelected = selectedQuote?.quoteId === quote.quoteId;
-          const cheapestShipping = cheapestShippingByVendor.get(quote.vendorId);
-          const fee = minimumFee(quote, sortQuantity, vendorMinimums);
-          const badges = badgesByQuoteId.get(quote.quoteId);
-          return (
-            <button
-              key={quote.quoteId}
-              type="button"
-              onClick={() => onPick(quote)}
-              aria-pressed={isSelected}
-              aria-label={[
-                quote.vendorName,
-                badges?.cheapest ? "Cheapest" : null,
-                badges?.fastest ? "Fastest" : null,
-              ]
-                .filter(Boolean)
-                .join(", ")}
-              className={`relative flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors ${
-                isSelected
-                  ? "border-primary bg-primary/5"
-                  : "border-border bg-card hover:border-primary/30"
-              }`}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <FinishSelect
+          finishes={finishes}
+          value={finishGroupId}
+          onChange={handleFinishChange}
+        />
+
+        {colors.length > 1 && (
+          <div className="flex flex-col">
+            <Label htmlFor="color-select">Color</Label>
+            <Select
+              value={activeColor || (colors[0]?.name ?? null)}
+              onValueChange={(v) => v && setActiveColor(v)}
             >
-              {badges && (badges.cheapest || badges.fastest) && (
-                <div className="absolute -top-2 left-0 z-10 flex gap-1">
-                  {badges.cheapest && (
-                    <span className="inline-flex items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium leading-none text-emerald-900 ring-1 ring-emerald-300 dark:bg-emerald-950/70 dark:text-emerald-200 dark:ring-emerald-800">
-                      Cheapest
-                    </span>
-                  )}
-                  {badges.fastest && (
-                    <span className="inline-flex items-center rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium leading-none text-sky-900 ring-1 ring-sky-300 dark:bg-sky-950/70 dark:text-sky-200 dark:ring-sky-800">
-                      Fastest
-                    </span>
-                  )}
-                </div>
-              )}
-              <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted/80 to-muted/30 text-muted-foreground">
-                <Factory className="size-7" />
-              </div>
-              <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">
-                    {quote.vendorName}
-                  </p>
-                  {(() => {
-                    const location = vendorLocationLabel(
-                      quote.vendorCountryCode,
-                      quote.vendorStateCode
-                    );
-                    if (!location) return null;
+              <SelectTrigger
+                id="color-select"
+                className="h-14 w-full rounded-xl"
+              >
+                <SelectValue>
+                  {(value) => {
+                    const c = colors.find((c) => c.name === value);
+                    if (!c) return "Select a color";
+                    // From-price lives on the dropdown options only —
+                    // same rule as the finish trigger.
                     return (
-                      <p className="truncate text-[11px] text-muted-foreground">
-                        {location}
-                      </p>
+                      <>
+                        <span
+                          className="size-5 shrink-0 rounded-full ring-1 ring-border ring-inset"
+                          style={{ backgroundColor: c.colorCode }}
+                        />
+                        <span className="truncate">{c.name}</span>
+                      </>
                     );
-                  })()}
-                  <p className="mt-0.5 text-[11px] text-muted-foreground">
-                    {quote.productionTimeFast}-{quote.productionTimeSlow} day
-                    production
-                    {typeof quote.scale === "number" && quote.scale !== 1 && (
-                      <span className="ml-1.5 text-amber-600 dark:text-amber-400">
-                        · ×{quote.scale.toFixed(2)} scaled
-                      </span>
-                    )}
-                  </p>
-                </div>
-                <div className="shrink-0 text-right">
-                  <p className="text-sm font-medium tabular-nums">
-                    ${quote.price.toFixed(2)}
-                  </p>
-                  {fee > 0 && (
-                    <p className="mt-0.5 text-[10px] text-amber-700 tabular-nums dark:text-amber-400">
-                      + ${fee.toFixed(2)} vendor minimum
-                    </p>
-                  )}
-                  {typeof cheapestShipping === "number" && (
-                    <p className="mt-0.5 text-[10px] text-muted-foreground tabular-nums">
-                      + ${cheapestShipping.toFixed(2)} shipping
-                    </p>
-                  )}
-                </div>
-              </div>
-            </button>
-          );
-        })}
+                  }}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {colors.map((c) => (
+                  <SelectItem key={c.name} value={c.name}>
+                    <span
+                      className="size-3.5 shrink-0 rounded-full ring-1 ring-border ring-inset"
+                      style={{ backgroundColor: c.colorCode }}
+                    />
+                    <span>{c.name}</span>
+                    <span className="ml-auto text-muted-foreground tabular-nums">
+                      ${cheapestPerColor.get(c.name)!.toFixed(2)}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </div>
+
+      <div>
+        <div className="mb-1 flex items-baseline justify-between gap-3">
+          <h3 className="text-sm font-medium">Manufacturer</h3>
+          <p className="text-xs text-subtle-foreground">
+            Total with cheapest shipping
+          </p>
+        </div>
+        <ul className="-mx-3 flex flex-col">
+          {vendorQuotes.map((quote) => {
+            const isSelected = selectedQuote?.quoteId === quote.quoteId;
+            const cheapestShipping = cheapestShippingByVendor.get(
+              quote.vendorId,
+            );
+            const fee = minimumFee(quote, displayQuantity, vendorMinimums);
+            const badges = badgesByQuoteId.get(quote.quoteId);
+            const location = vendorLocationLabel(
+              quote.vendorCountryCode,
+              quote.vendorStateCode,
+            );
+            const meta = [
+              `${quote.productionTimeFast === quote.productionTimeSlow ? quote.productionTimeFast : `${quote.productionTimeFast}–${quote.productionTimeSlow}`} days`,
+              location,
+            ]
+              .filter(Boolean)
+              .join(" · ");
+            return (
+              <li key={quote.quoteId}>
+                <button
+                  type="button"
+                  data-slot="vendor-option"
+                  onClick={() => onPick(quote)}
+                  aria-pressed={isSelected}
+                  aria-label={[
+                    quote.vendorName,
+                    badges?.cheapest ? "Cheapest" : null,
+                    badges?.fastest ? "Fastest" : null,
+                  ]
+                    .filter(Boolean)
+                    .join(", ")}
+                  className={cn(
+                    "group flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+                    isSelected ? "bg-muted" : "hover:bg-muted/70",
+                  )}
+                >
+                  <div className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-muted text-muted-foreground group-hover:bg-background group-aria-pressed:bg-background">
+                    <Factory className="size-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <p className="truncate text-sm font-medium">
+                        {quote.vendorName}
+                      </p>
+                      {badges?.cheapest && (
+                        <span className="inline-flex h-5 shrink-0 items-center rounded-full bg-success/10 px-1.5 text-[11px] font-medium text-success">
+                          Cheapest
+                        </span>
+                      )}
+                      {badges?.fastest && (
+                        <span className="inline-flex h-5 shrink-0 items-center rounded-full bg-info/10 px-1.5 text-[11px] font-medium text-info">
+                          Fastest
+                        </span>
+                      )}
+                    </div>
+                    <p className="truncate text-[13px] leading-[18px] text-muted-foreground">
+                      {meta}
+                      {typeof quote.scale === "number" && quote.scale !== 1 && (
+                        <span className="text-warning">
+                          {" "}
+                          · scaled ×{quote.scale.toFixed(2)}
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    {/* Lead with what the buyer pays — the same total
+                        the list is ranked by — so the order reads as
+                        sorted. The parts of it sit underneath. */}
+                    <p className="text-sm font-medium tabular-nums">
+                      $
+                      {quoteTotal(
+                        quote,
+                        displayQuantity,
+                        cheapestShippingByVendor,
+                        vendorMinimums,
+                      ).toFixed(2)}
+                    </p>
+                    <p className="text-xs text-muted-foreground tabular-nums">
+                      {(() => {
+                        const each =
+                          displayQuantity > 1
+                            ? `$${quote.price.toFixed(2)} × ${displayQuantity}`
+                            : null;
+                        if (typeof cheapestShipping !== "number") return each;
+                        if (cheapestShipping === 0) {
+                          return each ? `${each} · free ship` : "Free shipping";
+                        }
+                        return `${each ?? `$${quote.price.toFixed(2)}`} + $${cheapestShipping.toFixed(2)} ship`;
+                      })()}
+                    </p>
+                    {fee > 0 && (
+                      <p className="text-xs text-warning tabular-nums">
+                        incl. ${fee.toFixed(2)} vendor minimum
+                      </p>
+                    )}
+                  </div>
+                  {isSelected ? (
+                    <CheckIcon
+                      aria-hidden="true"
+                      className="size-4 shrink-0 text-foreground"
+                    />
+                  ) : (
+                    <ChevronRight
+                      size={14}
+                      className="shrink-0 text-subtle-foreground group-hover:text-foreground"
+                    />
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+
+      {/* Tariff note — why US-bound shipping is pricier than people
+          expect. A footnote to the list, not a banner over it. */}
+      <p className="flex items-start gap-2 text-[13px] leading-[18px] text-muted-foreground">
+        <InfoIcon aria-hidden="true" className="mt-px size-3.5 shrink-0" />
+        Shipping from most manufacturers costs more than usual because of new US
+        import tariffs. Every quote is shown as it arrives so you can still pick
+        the best one.
+      </p>
     </div>
   );
 }

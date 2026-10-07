@@ -9,17 +9,17 @@ vi.mock("@/components/home/dropzone-primitives-lazy", () => ({
 import { FileUploader } from "../file-uploader";
 
 describe("FileUploader", () => {
-  it("uses the featured Add a File well by default", () => {
+  it("uses the featured drop well by default", () => {
     const { container } = render(
       <FileUploader onFileSelected={() => {}} />
     );
-    const title = screen.getByText("Add a File");
-    expect(title).toBeTruthy();
-    expect(title.className).toMatch(/bg-card\/35/);
-    expect(title.className).toMatch(/backdrop-blur/);
-    expect(title.className).toMatch(/border-border/);
-    expect(title.className).toMatch(/rounded-full/);
-    expect(title.className).not.toMatch(/blue-/);
+    expect(screen.getByText("Drop a 3D model here")).toBeTruthy();
+    const cta = screen.getByText("Choose file");
+    expect(cta.className).toMatch(/rounded-full/);
+    expect(cta.className).not.toMatch(/blue-/);
+    expect(
+      screen.getByText("STL, OBJ, 3MF, STEP or AMF · up to 200 MB")
+    ).toBeTruthy();
     expect(screen.getByTestId("dropzone-primitives")).toBeTruthy();
     expect(
       screen.queryByText("STL, OBJ, 3MF, STEP, AMF — Max 200MB")

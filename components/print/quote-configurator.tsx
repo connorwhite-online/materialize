@@ -1,6 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+  type ReactNode,
+} from "react";
 import type { PendingItem } from "./cart-slot-stack";
 import { MaterialPicker } from "./material-picker";
 import type {
@@ -13,10 +20,7 @@ import { PriceDisplay, type MinimumFeeInfo } from "./price-display";
 import type { CheckoutModel } from "@/lib/env";
 import type { Currency } from "@/lib/craftcloud/types";
 import { type SavedCheckoutAddress } from "./shipping-address-form";
-import {
-  ShippingSheet,
-  type CheckoutSheetStep,
-} from "./shipping-sheet";
+import { ShippingSheet, type CheckoutSheetStep } from "./shipping-sheet";
 import {
   cheapestShippingForVendor,
   type ShippingOption,
@@ -43,7 +47,10 @@ import { checkGeometry } from "@/lib/geometry-checks";
 import { REGIONS, DEFAULT_REGION } from "@/lib/craftcloud/regions";
 import { MaterialPreview } from "@/components/viewer/material-preview";
 import type { PreviewView } from "@/components/viewer/preview-camera";
-import { Label } from "@/components/ui/label";
+import { Field } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { DottedSpinner } from "@/components/icons/dotted-spinner";
 import { useVendorMinimums } from "./use-vendor-minimums";
 import { Alert } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -166,6 +173,12 @@ interface QuoteConfiguratorProps {
    * for files still on the automatic head-on capture.
    */
   initialView?: PreviewView | null;
+  /**
+   * Caption the viewer with the model's dimensions. The anon /print
+   * header already shows them beside the units picker, so it passes
+   * false to avoid saying it twice.
+   */
+  showDimensions?: boolean;
 }
 
 type CheckoutStep = "configure" | "processing";
@@ -195,6 +208,7 @@ export function QuoteConfigurator({
   headerSlot,
   checkoutModel = "single",
   initialView,
+  showDimensions = true,
 }: QuoteConfiguratorProps) {
   const isDraft = !!draftMode;
 
@@ -217,7 +231,7 @@ export function QuoteConfigurator({
   const [loadingPhase, setLoadingPhase] = useState<LoadingPhase | null>(
     // In draft mode the model is already on CraftCloud — skip straight
     // to quoting instead of sitting on the upload spinner.
-    isDraft ? "quoting" : "uploading"
+    isDraft ? "quoting" : "uploading",
   );
   const [error, setError] = useState<string | null>(null);
   const [quotes, setQuotes] = useState<Quote[]>([]);
@@ -291,8 +305,7 @@ export function QuoteConfigurator({
       setRegionCode(stored);
     }
   }, []);
-  const region =
-    REGIONS.find((r) => r.code === regionCode) ?? DEFAULT_REGION;
+  const region = REGIONS.find((r) => r.code === regionCode) ?? DEFAULT_REGION;
   const { minimums: vendorMinimums, request: requestVendorMinimums } =
     useVendorMinimums(region.currency as Currency);
 
@@ -317,7 +330,7 @@ export function QuoteConfigurator({
   // on success either navigates (saved card authorized) or swaps in
   // the Payment Element sheet (different card / one-tap declined).
   const resumeWithFeePayment = async (
-    feePayment: "saved_card" | "new_card"
+    feePayment: "saved_card" | "new_card",
   ): Promise<{ error: string } | void> => {
     if (!savedCardConfirm) return { error: "Nothing to confirm." };
     const { payload, address } = savedCardConfirm;
@@ -357,13 +370,13 @@ export function QuoteConfigurator({
   // - File-asset mode: a stable same-origin proxy URL — no JSON
   //   round-trip needed, the proxy enforces access on each request.
   const [previewModelUrl, setPreviewModelUrl] = useState<string | null>(() =>
-    fileAssetId ? `/api/files/preview/${fileAssetId}` : null
+    fileAssetId ? `/api/files/preview/${fileAssetId}` : null,
   );
 
   useEffect(() => {
     if (!draftMode) {
       setPreviewModelUrl(
-        fileAssetId ? `/api/files/preview/${fileAssetId}` : null
+        fileAssetId ? `/api/files/preview/${fileAssetId}` : null,
       );
       return;
     }
@@ -498,7 +511,7 @@ export function QuoteConfigurator({
   // still configuring so it's ready the moment the address step
   // mounts (the form decides saved-vs-blank once, at its mount).
   const [savedAddress, setSavedAddress] = useState<SavedCheckoutAddress | null>(
-    null
+    null,
   );
   useEffect(() => {
     if (!isSignedIn) {
@@ -527,11 +540,12 @@ export function QuoteConfigurator({
   // option isn't present in the current quote's shipping set.
   const existingVendorCartShippingId =
     selectedQuote && cart
-      ? cart.items.find((i) => i.vendorId === selectedQuote.vendorId)
-          ?.shippingId ?? null
+      ? (cart.items.find((i) => i.vendorId === selectedQuote.vendorId)
+          ?.shippingId ?? null)
       : null;
   const lockedShippingOption = existingVendorCartShippingId
-    ? shipping.find((s) => s.shippingId === existingVendorCartShippingId) ?? null
+    ? (shipping.find((s) => s.shippingId === existingVendorCartShippingId) ??
+      null)
     : null;
   useEffect(() => {
     if (
@@ -551,7 +565,7 @@ export function QuoteConfigurator({
     if (lockedShippingOption) return;
     const cheapest = cheapestShippingForVendor(
       shipping,
-      selectedQuote.vendorId
+      selectedQuote.vendorId,
     );
     if (cheapest) setSelectedShipping(cheapest);
   }, [
@@ -565,17 +579,18 @@ export function QuoteConfigurator({
   const handleSelectQuote = useCallback(
     (quote: Quote) => {
       setSelectedQuote(quote);
-      const existingId = cart?.items.find((i) => i.vendorId === quote.vendorId)
-        ?.shippingId;
+      const existingId = cart?.items.find(
+        (i) => i.vendorId === quote.vendorId,
+      )?.shippingId;
       const locked = existingId
-        ? shipping.find((s) => s.shippingId === existingId) ?? null
+        ? (shipping.find((s) => s.shippingId === existingId) ?? null)
         : null;
       const cheapest = cheapestShippingForVendor(shipping, quote.vendorId);
       setSelectedShipping(locked ?? cheapest);
       setCheckoutSheetStep("shipping");
       setShippingSheetOpen(true);
     },
-    [cart, shipping]
+    [cart, shipping],
   );
 
   const dismissCheckoutSheet = useCallback(() => {
@@ -628,7 +643,7 @@ export function QuoteConfigurator({
   // only available from CraftCloud's /v5/cart response, not in the
   // quote-level data, so we check as soon as both are selected.
   const [minimumFeeInfo, setMinimumFeeInfo] = useState<MinimumFeeInfo | null>(
-    null
+    null,
   );
   const [checkingMinimum, setCheckingMinimum] = useState(false);
 
@@ -695,7 +710,9 @@ export function QuoteConfigurator({
   const handleAddToCart = useCallback(async () => {
     if (!selectedQuote || !selectedShipping || !cart) return;
     if (!priceId) {
-      setCheckoutError("Quotes are still loading. Please try again in a moment.");
+      setCheckoutError(
+        "Quotes are still loading. Please try again in a moment.",
+      );
       return;
     }
     setIsAddingToCart(true);
@@ -749,7 +766,19 @@ export function QuoteConfigurator({
     } finally {
       setIsAddingToCart(false);
     }
-  }, [selectedQuote, selectedShipping, priceId, fileAssetId, draftMode, cart, quantity, region.code, filename, onAddedToCart, dismissCheckoutSheet]);
+  }, [
+    selectedQuote,
+    selectedShipping,
+    priceId,
+    fileAssetId,
+    draftMode,
+    cart,
+    quantity,
+    region.code,
+    filename,
+    onAddedToCart,
+    dismissCheckoutSheet,
+  ]);
 
   // Active material scope for the CraftCloud price request. Starts
   // as the preselectMaterialId (from /materials/[slug] → Print with
@@ -757,7 +786,7 @@ export function QuoteConfigurator({
   // navigates back to the full material grid, which then refetches
   // the unscoped quote set.
   const [scopedMaterialId, setScopedMaterialId] = useState<string | null>(
-    preselectMaterialId ?? null
+    preselectMaterialId ?? null,
   );
   useEffect(() => {
     // If the parent passes a new preselect on a subsequent render
@@ -809,7 +838,9 @@ export function QuoteConfigurator({
       });
       if (!startRes.ok) {
         const data = await startRes.json().catch(() => ({}));
-        const startError = new Error(data.error || "Failed to start quote request");
+        const startError = new Error(
+          data.error || "Failed to start quote request",
+        );
         reportClientError("quote.start-failed", startError, {
           fileAssetId,
           draftModelId: draftMode?.modelId,
@@ -945,7 +976,7 @@ export function QuoteConfigurator({
           .filter(
             (m) =>
               m.maxDimensions !== null &&
-              modelFitsInVolume(modelDims, m.maxDimensions)
+              modelFitsInVolume(modelDims, m.maxDimensions),
           )
           .map<OptimisticMaterial>((m) => ({
             id: m.id,
@@ -967,7 +998,6 @@ export function QuoteConfigurator({
       controller.abort();
     };
   }, [dimsReady, dims, scopedMaterialId]);
-
 
   const handleCheckout = async () => {
     if (!selectedQuote || !selectedShipping) return;
@@ -1002,7 +1032,9 @@ export function QuoteConfigurator({
       }
 
       if (!priceId) {
-        setCheckoutError("Quotes are still loading. Please try again in a moment.");
+        setCheckoutError(
+          "Quotes are still loading. Please try again in a moment.",
+        );
         return;
       }
 
@@ -1246,15 +1278,32 @@ export function QuoteConfigurator({
   // data and the quote polling happens in the background.
   if (loadingPhase === "uploading") {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="text-center">
-          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-muted border-t-foreground" />
-          <p className="mt-3 text-sm text-muted-foreground">
-            Preparing your file for manufacturing...
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground/60">
-            This may take a moment for large files
-          </p>
+      <div role="status" className="flex flex-col gap-6">
+        {headerSlot}
+        <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,27rem)] lg:gap-10 xl:grid-cols-[minmax(0,1fr)_minmax(0,30rem)]">
+          <div className="flex aspect-[16/10] w-full flex-col items-center justify-center gap-2 rounded-2xl bg-muted px-6 text-center lg:aspect-[3/2]">
+            <p className="flex items-center gap-2 text-sm font-medium">
+              <DottedSpinner size={14} />
+              Preparing your file for manufacturing
+            </p>
+            <p className="text-[13px] leading-[18px] text-muted-foreground">
+              Large files can take a minute.
+            </p>
+          </div>
+          <div className="flex flex-col gap-3">
+            <Skeleton className="h-5 w-40" />
+            <Skeleton className="h-9 w-full rounded-[10px]" />
+            {Array.from({ length: 5 }, (_, i) => (
+              <div key={i} className="flex items-center gap-3 py-2">
+                <Skeleton className="size-10 rounded-[10px]" />
+                <div className="flex-1 space-y-1.5">
+                  <Skeleton className="h-3.5 w-1/3" />
+                  <Skeleton className="h-3 w-1/4" />
+                </div>
+                <Skeleton className="h-4 w-14" />
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     );
@@ -1262,37 +1311,50 @@ export function QuoteConfigurator({
 
   if (error) {
     return (
-      <Alert variant="destructive" className="flex flex-col items-start gap-3">
-        <div>
-          <p className="text-sm font-medium">We couldn&apos;t load quotes for this file</p>
-          <p className="mt-1 text-xs opacity-90">{error}</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => {
-            setError(null);
-            // A failed CraftCloud upload leaves no modelId anywhere —
-            // retrying fetchQuotes alone would 409 ("File not yet
-            // uploaded for printing") on every click, forever. Re-run
-            // the upload first when it never completed.
-            const needsUpload = !isDraft && !modelUploadedRef.current;
-            setLoadingPhase(needsUpload ? "uploading" : "quoting");
-            (async () => {
-              if (needsUpload) {
-                await ensureModelUploaded();
-                modelUploadedRef.current = true;
-              }
-              await fetchQuotes();
-            })().catch((err) => {
-              setError(err instanceof Error ? err.message : "Something went wrong");
-              setLoadingPhase("done");
-            });
-          }}
-          className="rounded-md border border-current/30 bg-background/60 px-3 py-1 text-xs font-medium hover:bg-background/90"
+      <div className="flex flex-col gap-6">
+        {headerSlot}
+        <Alert
+          variant="destructive"
+          className="flex flex-col items-start gap-3"
         >
-          Retry
-        </button>
-      </Alert>
+          <div>
+            <p className="text-sm font-medium">
+              We couldn&apos;t load quotes for this file
+            </p>
+            <p className="mt-1 text-[13px] leading-[18px] opacity-90">
+              {error}
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              setError(null);
+              // A failed CraftCloud upload leaves no modelId anywhere —
+              // retrying fetchQuotes alone would 409 ("File not yet
+              // uploaded for printing") on every click, forever. Re-run
+              // the upload first when it never completed.
+              const needsUpload = !isDraft && !modelUploadedRef.current;
+              setLoadingPhase(needsUpload ? "uploading" : "quoting");
+              (async () => {
+                if (needsUpload) {
+                  await ensureModelUploaded();
+                  modelUploadedRef.current = true;
+                }
+                await fetchQuotes();
+              })().catch((err) => {
+                setError(
+                  err instanceof Error ? err.message : "Something went wrong",
+                );
+                setLoadingPhase("done");
+              });
+            }}
+          >
+            Retry
+          </Button>
+        </Alert>
+      </div>
     );
   }
 
@@ -1326,7 +1388,11 @@ export function QuoteConfigurator({
           </Alert>
         )}
         {step === "processing" && !feeSheet && !savedCardConfirm && (
-          <p role="status" className="text-sm text-muted-foreground">
+          <p
+            role="status"
+            className="inline-flex items-center gap-2 text-sm text-muted-foreground"
+          >
+            <DottedSpinner size={14} />
             Placing your order…
           </p>
         )}
@@ -1352,17 +1418,14 @@ export function QuoteConfigurator({
     );
   }
 
-  const dimensionsText =
+  const shownDims =
     geometryData?.dimensions &&
     typeof geometryData.dimensions.x === "number" &&
     typeof geometryData.dimensions.y === "number" &&
-    typeof geometryData.dimensions.z === "number" ? (
-      <div className="text-sm text-muted-foreground">
-        Dimensions: {geometryData.dimensions.x.toFixed(1)} ×{" "}
-        {geometryData.dimensions.y.toFixed(1)} ×{" "}
-        {geometryData.dimensions.z.toFixed(1)} mm
-      </div>
-    ) : null;
+    typeof geometryData.dimensions.z === "number"
+      ? geometryData.dimensions
+      : null;
+  const geometryHints = checkGeometry(geometryData);
 
   return (
     <div>
@@ -1378,32 +1441,22 @@ export function QuoteConfigurator({
       <div role="status" aria-live="polite" className="sr-only">
         {statusMessage}
       </div>
-      <div className="grid items-start gap-8 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          {/*
-            Mobile-only render of the page header above the sub-grid
-            so reading order on a phone stays top-down: header →
-            viewer → controls → picker. On desktop we hide this copy
-            and render a second copy inside the right side-panel
-            below, alongside the controls.
-          */}
-          {headerSlot && <div className="mb-6 lg:hidden">{headerSlot}</div>}
 
-          {/*
-            Upper sub-grid splits into viewer (left) + side-panel
-            (right) on lg+. The viewer used to take the full width
-            of the col-span-2 area and dominate the upper half;
-            shrinking it to ~60% lets the file metadata, dimensions,
-            and quantity/region controls sit beside it instead of
-            stacking below.
+      {headerSlot && <div className="mb-6">{headerSlot}</div>}
 
-            On mobile this collapses to a single column — viewer
-            then side-panel — which preserves the previous reading
-            order (after the mobile-only header above).
-          */}
-          <div className="grid gap-6 lg:grid-cols-[3fr_2fr] lg:items-start">
-            {previewModelUrl && previewableFormat && (
-              <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
+      {/*
+        Object left, decision right (DESIGN_SYSTEM § Space and layout).
+        The left column — the part itself plus the two inputs that
+        change every price (quantity, destination) — is sticky on
+        desktop, so it stays in view while the buyer scrolls the
+        material and manufacturer lists on the right. Phones stack
+        them in reading order: part → inputs → material.
+      */}
+      <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,27rem)] lg:gap-10 xl:grid-cols-[minmax(0,1fr)_minmax(0,30rem)]">
+        <div className="flex min-w-0 flex-col gap-5 lg:sticky lg:top-6">
+          {previewModelUrl && previewableFormat && (
+            <figure className="flex flex-col gap-2">
+              <div className="aspect-[16/10] w-full overflow-hidden rounded-2xl bg-muted lg:aspect-[3/2]">
                 <MaterialPreview
                   modelUrl={previewModelUrl}
                   format={format as "stl" | "obj" | "3mf"}
@@ -1414,156 +1467,153 @@ export function QuoteConfigurator({
                   initialView={initialView}
                 />
               </div>
+              {shownDims && showDimensions && (
+                <figcaption className="text-xs text-subtle-foreground tabular-nums">
+                  {shownDims.x.toFixed(1)} × {shownDims.y.toFixed(1)} ×{" "}
+                  {shownDims.z.toFixed(1)} mm
+                </figcaption>
+              )}
+            </figure>
+          )}
+          {!(previewModelUrl && previewableFormat) &&
+            shownDims &&
+            showDimensions && (
+              <p className="text-sm text-muted-foreground tabular-nums">
+                {shownDims.x.toFixed(1)} × {shownDims.y.toFixed(1)} ×{" "}
+                {shownDims.z.toFixed(1)} mm
+              </p>
             )}
 
-            <div className="space-y-4">
-              {/* Desktop-only header — twin of the lg:hidden copy
-                  above, rendered here so it sits beside the viewer
-                  on wide layouts. Static markup, safe to duplicate. */}
-              {headerSlot && (
-                <div className="hidden lg:block">{headerSlot}</div>
-              )}
-
-              {dimensionsText}
-
-              {/*
-                Stack the controls on mobile, side-by-side from sm+.
-                At 390px the row's natural width (~395px content)
-                exceeds the available 358px, and flex-wrap behavior
-                with the select's min-w-44 produced an x-scroll on
-                iOS Safari instead of cleanly wrapping. flex-col
-                below sm sidesteps it entirely and reads better at
-                phone widths anyway.
-              */}
-              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
-                <div className="flex items-center gap-2">
-                  <Label
-                    htmlFor="quantity"
-                    className="mb-0 text-sm font-medium leading-none"
-                  >
-                    Quantity
-                  </Label>
-                  {/*
-                    Plain input rather than <Input> so it can wear the
-                    same flat frosted pill as the Ship-to <Select>
-                    sitting next to it (translucent card fill + blur +
-                    crisp focus ring). Same height, padding, radius, and
-                    focus treatment as SelectTrigger so the two line up
-                    as a matched pair.
-                  */}
-                  <input
-                    id="quantity"
-                    type="number"
-                    min={1}
-                    max={100}
-                    value={quantity}
-                    aria-describedby="quantity-range-hint"
-                    onChange={(e) => {
-                      // Clamp to [1, 100] and reject NaN — empty/
-                      // invalid text falls back to 1 so the quote
-                      // pipeline never sees a non-finite number.
-                      const raw = Number(e.target.value);
-                      const clamped = Number.isFinite(raw)
-                        ? Math.min(100, Math.max(1, Math.trunc(raw)))
-                        : 1;
-                      // Announce a silent clamp through the shared
-                      // status region (CON-64). Only when the typed
-                      // value was finite AND fell outside [1,100] — a
-                      // plain in-range edit shouldn't speak. Clear
-                      // first so an identical repeat clamp re-fires.
-                      if (Number.isFinite(raw) && Math.trunc(raw) !== clamped) {
-                        setStatusMessage("");
-                        setStatusMessage(
-                          `Quantity must be between 1 and 100. Adjusted to ${clamped}.`
-                        );
-                      }
-                      setQuantity(clamped);
+          <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-3 sm:max-w-md">
+            <Field label="Quantity" htmlFor="quantity">
+              <Input
+                id="quantity"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={100}
+                value={quantity}
+                aria-describedby="quantity-range-hint"
+                onChange={(e) => {
+                  // Clamp to [1, 100] and reject NaN — empty/
+                  // invalid text falls back to 1 so the quote
+                  // pipeline never sees a non-finite number.
+                  const raw = Number(e.target.value);
+                  const clamped = Number.isFinite(raw)
+                    ? Math.min(100, Math.max(1, Math.trunc(raw)))
+                    : 1;
+                  // Announce a silent clamp through the shared
+                  // status region (CON-64). Only when the typed
+                  // value was finite AND fell outside [1,100] — a
+                  // plain in-range edit shouldn't speak. Clear
+                  // first so an identical repeat clamp re-fires.
+                  if (Number.isFinite(raw) && Math.trunc(raw) !== clamped) {
+                    setStatusMessage("");
+                    setStatusMessage(
+                      `Quantity must be between 1 and 100. Adjusted to ${clamped}.`,
+                    );
+                  }
+                  setQuantity(clamped);
+                }}
+                className="tabular-nums"
+              />
+              <span id="quantity-range-hint" className="sr-only">
+                Enter a quantity between 1 and 100.
+              </span>
+            </Field>
+            <Field label="Ship to" htmlFor="region">
+              <Select
+                value={regionCode}
+                onValueChange={(value) => {
+                  if (!value) return;
+                  setRegionCode(value);
+                  if (typeof window !== "undefined") {
+                    window.localStorage.setItem("print-region", value);
+                  }
+                }}
+              >
+                <SelectTrigger id="region" className="w-full">
+                  <SelectValue>
+                    {(value) => {
+                      const r = REGIONS.find((r) => r.code === value);
+                      if (!r) return DEFAULT_REGION.name;
+                      return (
+                        <span className="truncate">
+                          {r.name}{" "}
+                          <span className="text-muted-foreground">
+                            {r.currency}
+                          </span>
+                        </span>
+                      );
                     }}
-                    // field-text keeps 16px on phones (iOS auto-zooms below
-                    // that); text-sm on md+ to match the rest of the row.
-                    className="field-text h-10 w-20 rounded-xl border border-border bg-card/60 backdrop-blur-sm px-3.5 py-1 md:text-sm outline-none transition-[color,box-shadow,border-color] duration-150 ease-out hover:bg-card focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 dark:border-input dark:bg-input/30"
-                  />
-                  <span id="quantity-range-hint" className="sr-only">
-                    Enter a quantity between 1 and 100.
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Label
-                    htmlFor="region"
-                    className="mb-0 text-sm font-medium leading-none"
-                  >
-                    Ship to
-                  </Label>
-                  <Select
-                    value={regionCode}
-                    onValueChange={(value) => {
-                      if (!value) return;
-                      setRegionCode(value);
-                      if (typeof window !== "undefined") {
-                        window.localStorage.setItem("print-region", value);
-                      }
-                    }}
-                  >
-                    <SelectTrigger id="region" className="min-w-44">
-                      <SelectValue>
-                        {(value) => {
-                          const r = REGIONS.find((r) => r.code === value);
-                          if (!r) return DEFAULT_REGION.name;
-                          return `${r.name} (${r.currency})`;
-                        }}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {REGIONS.map((r) => (
-                        <SelectItem key={r.code} value={r.code}>
-                          {r.name} ({r.currency})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {/* Geometry hints — soft warnings, never blocking */}
-              {(() => {
-                const hints = checkGeometry(geometryData);
-                if (hints.length === 0) return null;
-                return (
-                  <div className="space-y-2">
-                    {hints.map((hint, i) => (
-                      <div
-                        key={i}
-                        className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-800 dark:bg-amber-950"
-                      >
-                        <p className="text-xs font-medium text-amber-800 dark:text-amber-200">
-                          {hint.message}
-                        </p>
-                        <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
-                          {hint.detail}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })()}
-            </div>
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {REGIONS.map((r) => (
+                    <SelectItem key={r.code} value={r.code}>
+                      {r.name} ({r.currency})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
           </div>
 
-          <div className="my-6 border-t border-border" />
+          {/* Geometry hints — soft warnings, never blocking */}
+          {geometryHints.length > 0 && (
+            <div className="flex flex-col gap-2">
+              {geometryHints.map((hint, i) => (
+                <Alert key={i} variant="warning" role="note">
+                  <p className="text-sm font-medium">{hint.message}</p>
+                  <p className="text-[13px] leading-[18px] opacity-80">
+                    {hint.detail}
+                  </p>
+                </Alert>
+              ))}
+            </div>
+          )}
 
+          {/* Live totals mirror the open checkout sheet on desktop,
+              where the sheet doesn't cover the page. Nothing to show
+              before a manufacturer is picked, so nothing renders. */}
+          {selectedQuote && (
+            <div className="hidden lg:block">
+              <PriceDisplay
+                selectedQuote={selectedQuote}
+                selectedShipping={selectedShipping}
+                quantity={quantity}
+                checkoutError={checkoutError}
+                minimumFeeInfo={minimumFeeInfo}
+                checkingMinimum={checkingMinimum}
+                shippingLocked={!!lockedShippingOption}
+                shippingLockedNotice={
+                  lockedShippingOption && selectedQuote
+                    ? `Shipping matches your ${selectedQuote.vendorName} cart`
+                    : null
+                }
+                checkoutModel={checkoutModel}
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="flex min-w-0 flex-col gap-8">
           <MaterialPicker
             quotes={quotes}
             shipping={shipping}
             vendorMinimums={vendorMinimums}
             onRequestMinimums={requestVendorMinimums}
             sortQuantity={sortQuantity}
+            quantity={quantity}
             quotesLoading={loadingPhase === "quoting"}
             quotesPartial={loadingPhase === "timeout"}
             viableMaterials={viableMaterials}
             onRetryQuotes={() => {
               setLoadingPhase(isDraft ? "quoting" : "uploading");
               fetchQuotes().catch((err) => {
-                setError(err instanceof Error ? err.message : "Something went wrong");
+                setError(
+                  err instanceof Error ? err.message : "Something went wrong",
+                );
                 setLoadingPhase("done");
               });
             }}
@@ -1572,24 +1622,6 @@ export function QuoteConfigurator({
             preselectMaterialId={preselectMaterialId}
             preselectFinishGroupId={preselectFinishGroupId}
             onClearPreselectScope={() => setScopedMaterialId(null)}
-          />
-        </div>
-
-        <div className="lg:sticky lg:top-6 space-y-4">
-          <PriceDisplay
-            selectedQuote={selectedQuote}
-            selectedShipping={selectedShipping}
-            quantity={quantity}
-            checkoutError={checkoutError}
-            minimumFeeInfo={minimumFeeInfo}
-            checkingMinimum={checkingMinimum}
-            shippingLocked={!!lockedShippingOption}
-            shippingLockedNotice={
-              lockedShippingOption && selectedQuote
-                ? `Shipping matches your ${selectedQuote.vendorName} cart`
-                : null
-            }
-            checkoutModel={checkoutModel}
           />
           <ShippingSheet
             open={shippingSheetOpen}

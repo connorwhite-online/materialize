@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
-import { XIcon } from "lucide-react";
 import { useStartPrintFlow } from "@/components/upload/use-start-print-flow";
 import { usePendingPrintFile } from "@/components/upload/pending-print-file";
 import { uploadFileToR2 } from "@/components/upload/upload-file-to-r2";
@@ -14,6 +13,9 @@ import { WhatNextPane } from "@/components/print/what-next-pane";
 import { ProjectFileChecklist } from "@/components/print/project-file-checklist";
 import { CartSlotStack } from "@/components/print/cart-slot-stack";
 import { useCart } from "@/components/print/cart-context";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { DottedSpinner } from "@/components/icons/dotted-spinner";
 import {
   Select,
   SelectContent,
@@ -165,7 +167,7 @@ export function PrintPageContent({
   // then overwritten when the user finishes an Add to Cart in this
   // session.
   const [expandedVendorId, setExpandedVendorId] = useState<string | null>(
-    initialExpandVendorId ?? null
+    initialExpandVendorId ?? null,
   );
 
   // Strip ?expand= from the URL once we've consumed it — otherwise
@@ -286,7 +288,7 @@ export function PrintPageContent({
         });
       }
     },
-    []
+    [],
   );
 
   useEffect(() => {
@@ -301,15 +303,7 @@ export function PrintPageContent({
     }
 
     uploadWithUnit(picked, unit);
-  }, [
-    picked,
-    isSignedIn,
-    isLoaded,
-    start,
-    uploadWithUnit,
-    unit,
-    unitHydrated,
-  ]);
+  }, [picked, isSignedIn, isLoaded, start, uploadWithUnit, unit, unitHydrated]);
 
   const handleUnitChange = (next: Unit) => {
     if (next === unit) return;
@@ -344,25 +338,35 @@ export function PrintPageContent({
   const centeredIdle = !isActive && !hasCartContent;
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8">
+    <div className="mz-enter mx-auto w-full max-w-7xl px-4 py-8 sm:py-10">
       {!isActive && (
-        <div className={centeredIdle ? "mx-auto mb-6 max-w-3xl" : "mb-6"}>
-          <h1 className="text-2xl font-semibold">{headline}</h1>
-          <p className="mt-2 text-muted-foreground">{subheadline}</p>
-        </div>
+        <header className={centeredIdle ? "mx-auto mb-6 max-w-3xl" : "mb-6"}>
+          <h1 className="text-2xl leading-7 font-semibold text-balance">
+            {headline}
+          </h1>
+          <p className="mt-1 text-sm leading-5 text-pretty text-muted-foreground">
+            {subheadline}
+          </p>
+        </header>
       )}
 
       <div
         className={
-          centeredIdle
-            ? "mx-auto max-w-3xl"
-            : "grid items-start gap-8 lg:grid-cols-3"
+          isActive
+            ? undefined
+            : centeredIdle
+              ? "mx-auto max-w-3xl"
+              : "grid items-start gap-8 lg:grid-cols-3"
         }
       >
         {/* min-w-0 so the recent-files carousel's overflow-x-auto
             scrolls inside the column instead of blowing out the grid
             track and forcing horizontal page scroll on mobile. */}
-        <div className={centeredIdle ? "min-w-0" : "min-w-0 lg:col-span-2"}>
+        <div
+          className={
+            isActive || centeredIdle ? "min-w-0" : "min-w-0 lg:col-span-2"
+          }
+        >
           {isActive && picked ? (
             <ActiveColumn
               picked={picked}
@@ -399,10 +403,12 @@ export function PrintPageContent({
           )}
         </div>
         {/* Kept mounted even when empty (hidden) so its on-mount cart
-            refresh runs and `hasCartContent` can flip to true. */}
+            refresh runs and `hasCartContent` can flip to true. While a
+            file is being quoted the configurator carries its own copy
+            in its right column, so this one steps aside. */}
         <div
           className={
-            centeredIdle ? "hidden" : "min-w-0 lg:sticky lg:top-6"
+            centeredIdle || isActive ? "hidden" : "min-w-0 lg:sticky lg:top-6"
           }
         >
           <CartSlotStack expandedVendorId={expandedVendorId} />
@@ -460,15 +466,15 @@ function ActiveColumn({
           authedActive
             ? phase === "uploading"
               ? `Uploading · ${progress}%`
-              : "Preparing…"
+              : "Preparing"
             : anonUploading
-              ? "Preparing for manufacturing…"
+              ? "Preparing for manufacturing"
               : null
         }
       />
 
       {anonReady && draftConfig && draft?.status === "ready" && (
-        <div className="mt-6">
+        <div className="mt-8">
           <QuoteConfigurator
             draftMode={draftConfig}
             filename={draft.file.file.name}
@@ -484,6 +490,7 @@ function ActiveColumn({
             }
             preselectMaterialId={preselectMaterialId}
             checkoutModel={checkoutModel}
+            showDimensions={false}
             onAddedToCart={onAddedToCart}
             rightAnnex={({ pendingItem }) => (
               <CartSlotStack pendingItem={pendingItem} />
@@ -492,19 +499,15 @@ function ActiveColumn({
         </div>
       )}
 
-      {authedActive && (
-        <div className="mt-6 rounded-xl border border-border bg-card p-6 text-center">
-          <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-muted border-t-foreground" />
-          <p className="mt-3 text-sm font-medium">
-            {phase === "uploading"
-              ? `Uploading ${picked.file.name} — ${progress}%`
-              : "Preparing quote configurator…"}
-          </p>
-        </div>
-      )}
-
-      {draft?.status === "error" && (
-        <p className="mt-4 text-xs text-destructive">{draft.message}</p>
+      {(authedActive || anonUploading) && (
+        <PreparingPlaceholder
+          label={
+            authedActive && phase === "uploading"
+              ? `Uploading · ${progress}%`
+              : "Preparing your file for manufacturing"
+          }
+          progress={authedActive && phase === "uploading" ? progress : null}
+        />
       )}
     </>
   );
@@ -548,43 +551,105 @@ function FileContextBar({
   })();
 
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-3">
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted/60 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-        .{format}
+    <header className="flex flex-wrap items-center gap-x-4 gap-y-3">
+      <div className="flex min-w-0 flex-1 basis-64 items-center gap-3">
+        <span
+          aria-hidden="true"
+          className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-muted text-[11px] font-medium text-muted-foreground uppercase"
+        >
+          {format}
+        </span>
+        <div className="min-w-0">
+          <h1 className="truncate text-lg leading-6 font-semibold">
+            {file.name}
+          </h1>
+          <p className="flex items-center gap-1.5 text-[13px] leading-[18px] text-muted-foreground tabular-nums">
+            {statusLabel && <DottedSpinner size={12} className="shrink-0" />}
+            <span className="truncate">{metaLine}</span>
+          </p>
+        </div>
       </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{file.name}</p>
-        <p className="mt-0.5 text-[11px] text-muted-foreground">{metaLine}</p>
-      </div>
-      {showUnitPicker && (
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            Source units
-          </span>
+      <div className="flex shrink-0 items-center gap-2">
+        {showUnitPicker && (
           <Select
             value={unit}
             onValueChange={(v) => onUnitChange(v as Unit)}
             disabled={unitPickerDisabled}
           >
-            <SelectTrigger className="h-8 w-[72px] text-xs">
-              <SelectValue />
+            <SelectTrigger size="sm" aria-label="Model units">
+              <SelectValue>
+                {(value) => (
+                  <span>
+                    <span className="text-muted-foreground">Units </span>
+                    {value as string}
+                  </span>
+                )}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="mm">mm</SelectItem>
-              <SelectItem value="cm">cm</SelectItem>
-              <SelectItem value="in">in</SelectItem>
+              <SelectItem value="mm">Millimeters (mm)</SelectItem>
+              <SelectItem value="cm">Centimeters (cm)</SelectItem>
+              <SelectItem value="in">Inches (in)</SelectItem>
             </SelectContent>
           </Select>
-        </div>
-      )}
-      <button
-        type="button"
-        onClick={onReset}
-        aria-label="Use a different file"
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-      >
-        <XIcon className="size-4" />
-      </button>
+        )}
+        <Button variant="secondary" size="sm" onClick={onReset}>
+          Change file
+        </Button>
+      </div>
+    </header>
+  );
+}
+
+/**
+ * Stand-in for the configurator while the file is staged and handed
+ * to CraftCloud — the same two-column shape the quotes land in, so
+ * nothing jumps when they do.
+ */
+function PreparingPlaceholder({
+  label,
+  progress,
+}: {
+  label: string;
+  progress: number | null;
+}) {
+  return (
+    <div
+      role="status"
+      className="mt-8 grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,27rem)] lg:gap-10 xl:grid-cols-[minmax(0,1fr)_minmax(0,30rem)]"
+    >
+      <div className="flex aspect-[16/10] w-full flex-col items-center justify-center gap-3 rounded-2xl bg-muted px-6 text-center lg:aspect-[3/2]">
+        <p className="flex items-center gap-2 text-sm font-medium">
+          <DottedSpinner size={14} />
+          {label}
+        </p>
+        {progress !== null ? (
+          <div className="h-1 w-40 overflow-hidden rounded-full bg-foreground/10">
+            <div
+              className="h-full rounded-full bg-foreground transition-[width] duration-200"
+              style={{ width: `${Math.max(4, Math.min(100, progress))}%` }}
+            />
+          </div>
+        ) : (
+          <p className="text-[13px] leading-[18px] text-muted-foreground">
+            Quotes start arriving in a few seconds.
+          </p>
+        )}
+      </div>
+      <div className="flex flex-col gap-3" aria-hidden="true">
+        <Skeleton className="h-5 w-40" />
+        <Skeleton className="h-9 w-full rounded-[10px]" />
+        {Array.from({ length: 5 }, (_, i) => (
+          <div key={i} className="flex items-center gap-3 py-2">
+            <Skeleton className="size-10 rounded-[10px]" />
+            <div className="flex-1 space-y-1.5">
+              <Skeleton className="h-3.5 w-1/3" />
+              <Skeleton className="h-3 w-1/4" />
+            </div>
+            <Skeleton className="h-4 w-14" />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

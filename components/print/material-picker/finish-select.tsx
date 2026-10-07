@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Image from "next/image";
+import { CheckIcon } from "lucide-react";
 import { ChevronRight } from "@/components/icons/chevron-right";
 import { Label } from "@/components/ui/label";
 import { NativeSheet } from "@/components/ui/native-sheet";
@@ -16,13 +17,13 @@ interface FinishSelectProps {
 
 function FinishThumb({ image }: { image: string | null }) {
   return (
-    <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-border bg-muted/60">
+    <div className="relative size-10 shrink-0 overflow-hidden rounded-lg bg-muted">
       {image && (
         <Image
           src={resolveCatalogImage(image)}
           alt=""
           fill
-          sizes="48px"
+          sizes="40px"
           className="object-cover"
         />
       )}
@@ -39,21 +40,19 @@ function FinishMeta({
   showPrice?: boolean;
 }) {
   return (
-    <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
+    <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
       <div className="min-w-0">
         <p className="truncate text-sm font-medium">{card.finishGroupName}</p>
-        <p className="mt-0.5 text-[11px] text-muted-foreground">
+        <p className="truncate text-[13px] leading-[18px] text-muted-foreground">
           {card.colorCount} {card.colorCount === 1 ? "color" : "colors"} ·{" "}
           {card.configCount} {card.configCount === 1 ? "option" : "options"}
         </p>
       </div>
       {showPrice && (
-        <div className="shrink-0 text-right">
-          <p className="text-[10px] text-muted-foreground">from</p>
-          <p className="text-sm font-medium tabular-nums">
-            ${card.cheapest.toFixed(2)}
-          </p>
-        </div>
+        <p className="shrink-0 text-sm tabular-nums">
+          <span className="text-[13px] text-muted-foreground">from </span>
+          <span className="font-medium">${card.cheapest.toFixed(2)}</span>
+        </p>
       )}
     </div>
   );
@@ -75,7 +74,7 @@ export function FinishSelect({ finishes, value, onChange }: FinishSelectProps) {
   const canChange = finishes.length > 1;
 
   return (
-    <div>
+    <div className="flex min-w-0 flex-col">
       <Label htmlFor="finish-select">Finish</Label>
       {canChange ? (
         <button
@@ -85,7 +84,7 @@ export function FinishSelect({ finishes, value, onChange }: FinishSelectProps) {
           aria-expanded={open}
           aria-label={`Finish, ${selected.finishGroupName}`}
           onClick={() => setOpen(true)}
-          className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-border bg-card/60 p-2.5 text-left backdrop-blur-sm transition-colors hover:bg-card focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 focus-visible:outline-none dark:border-input dark:bg-input/30 dark:hover:bg-input/50"
+          className="flex h-14 w-full cursor-pointer items-center gap-3 rounded-xl border border-input bg-background px-2 text-left transition-[border-color,box-shadow] duration-150 hover:border-foreground/25 focus-visible:border-ring focus-visible:shadow-input-focus focus-visible:outline-none"
         >
           <FinishThumb image={selected.finishGroupImage} />
           <FinishMeta card={selected} />
@@ -97,7 +96,7 @@ export function FinishSelect({ finishes, value, onChange }: FinishSelectProps) {
       ) : (
         <div
           id="finish-select"
-          className="flex w-full items-center gap-3 rounded-xl border border-border bg-card/60 p-2.5 dark:border-input dark:bg-input/30"
+          className="flex h-14 w-full items-center gap-3 rounded-xl border border-input bg-background px-2"
         >
           <FinishThumb image={selected.finishGroupImage} />
           <FinishMeta card={selected} />
@@ -111,11 +110,11 @@ export function FinishSelect({ finishes, value, onChange }: FinishSelectProps) {
           ariaLabel="Choose a finish"
         >
           <div className="px-6 pb-2">
-            <h2 className="text-lg font-semibold leading-tight">Finish</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
+            <h2 className="text-base leading-6 font-semibold">Finish</h2>
+            <p className="mt-0.5 text-[13px] leading-[18px] text-muted-foreground">
               How the part is processed after printing
             </p>
-            <div className="mt-4 space-y-2">
+            <div className="-mx-3 mt-3 flex flex-col">
               {finishes.map((card) => {
                 const isSelected =
                   card.finishGroupId === selected.finishGroupId;
@@ -129,14 +128,16 @@ export function FinishSelect({ finishes, value, onChange }: FinishSelectProps) {
                       onChange(card.finishGroupId);
                       setOpen(false);
                     }}
-                    className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition-colors ${
-                      isSelected
-                        ? "border-primary bg-primary/5"
-                        : "border-border bg-card hover:border-primary/30"
+                    className={`flex w-full cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors duration-150 ${
+                      isSelected ? "bg-muted" : "hover:bg-muted/70"
                     }`}
                   >
                     <FinishThumb image={card.finishGroupImage} />
                     <FinishMeta card={card} showPrice />
+                    <CheckIcon
+                      aria-hidden="true"
+                      className={`size-4 shrink-0 ${isSelected ? "" : "invisible"}`}
+                    />
                   </button>
                 );
               })}

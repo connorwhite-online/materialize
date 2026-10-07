@@ -565,7 +565,7 @@ export async function LibraryTab({
   const hasAnyContent = totalItems > 0 || userCollections.length > 0;
 
   if (!hasAnyContent) {
-    // Authed home already has Add a File / New Project / New Collection.
+    // Authed home already has the dropzone plus + Project / + Collection.
     // The explanatory empty state is redundant there and is getting a
     // dedicated pass later — don't render a second copy under the dropzone.
     if (compact) return null;
@@ -586,7 +586,7 @@ export async function LibraryTab({
       {compact && (
         <h2 className="sr-only">Library</h2>
       )}
-      {/* Authed home already has Add a File / New Project / New Collection
+      {/* Authed home already has the dropzone plus + Project / + Collection
           at the top, so the item-count + Add row is redundant there.
           Profile library (not compact) keeps it. */}
       {isOwner && !compact && (

@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
-import { AnimatePresence, motion } from "motion/react";
+import { SearchIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
@@ -13,6 +14,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ChevronRight } from "@/components/icons/chevron-right";
+import { DottedSpinner } from "@/components/icons/dotted-spinner";
+import { cn } from "@/lib/utils";
 import { resolveCatalogImage } from "./catalog-image";
 import type { EnrichedQuote, OptimisticMaterial } from "./types";
 import type { ShippingLite as ShippingOptionLite } from "./finish-cards";
@@ -24,7 +27,10 @@ import {
   type VendorMinimums,
 } from "./vendor-minimums";
 
-const ALL_GROUPS = "all";
+/** Sentinel view ids — CraftCloud group ids are UUIDs, so no clash. */
+const POPULAR = "__popular__";
+const ALL = "__all__";
+type MaterialView = string;
 
 interface MaterialStepProps {
   quotes: EnrichedQuote[];
@@ -105,11 +111,11 @@ interface MaterialCard {
  * the top of the picker. CraftCloud's editorial sortIndex puts PLA,
  * SLS Nylon PA12, 316L Steel, Aluminum, and a couple of resins in
  * the first 8 slots — exactly the canonical "what should I pick?"
- * shortlist for a new buyer. Six is enough headroom that the
+ * shortlist for a new buyer. Eight is enough headroom that the
  * shortlist still has variety after a couple of slots are eaten by
  * resins the user might not be looking for.
  */
-const POPULAR_LIMIT = 6;
+const POPULAR_LIMIT = 8;
 
 /**
  * Step 1 — pick a material. Cards are derived from whatever quotes
@@ -269,7 +275,14 @@ export function MaterialStep({
     onRequestMinimums(pickMinimumProbes(quotes, shipping, sortQuantity));
   }, [quotesLoading, onRequestMinimums, quotes, shipping, sortQuantity]);
 
-  const [activeGroup, setActiveGroup] = useState<string | null>(null);
+  // What the list is showing. "popular" is the short default — the
+  // handful of materials most people print in — so the step opens on
+  // eight rows, not two hundred. "all" shows every family, each
+  // trimmed to a preview with a way into the full family. A group id
+  // shows that one family in full.
+  const [view, setView] = useState<MaterialView>(POPULAR);
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<MaterialSort>("recommended");
 
   // Focus the heading on mount so returning to the material step via
   // "Back" moves keyboard/SR focus here (CON-157).
@@ -278,11 +291,45 @@ export function MaterialStep({
     headingRef.current?.focus();
   }, []);
 
+  // Once polling is done, a material with no quote can't be ordered —
+  // drop it rather than leave a row of dashes. While polling, it stays
+  // as a skeleton-priced row so the list doesn't jump around.
+  const isListed = (card: MaterialCard) =>
+    card.cheapest !== null || quotesLoading;
+
+  const sortCards = (cards: MaterialCard[]) => {
+    if (sort === "recommended") return cards;
+    const key = (c: MaterialCard) =>
+      sort === "price" ? c.cheapestTotal : c.fastestFast;
+    return [...cards].sort((a, b) => {
+      const ka = key(a);
+      const kb = key(b);
+      if (ka === null && kb === null) return 0;
+      if (ka === null) return 1;
+      if (kb === null) return -1;
+      return ka - kb;
+    });
+  };
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const searchResults = normalizedQuery
+    ? sortCards(
+        Array.from(cardsByGroup.values())
+          .flat()
+          .filter(
+            (c) =>
+              isListed(c) &&
+              (c.materialName.toLowerCase().includes(normalizedQuery) ||
+                c.materialGroupName.toLowerCase().includes(normalizedQuery)),
+          ),
+      )
+    : null;
+
   // Nothing at all to render — fall back to the thin loader. This
   // path now only fires when (a) we don't have viableMaterials yet
   // (dimensions unknown, manifest still in flight, or scoped) AND
   // (b) no real quotes have arrived. With viableMaterials in hand,
-  // totalCards > 0 and we render the optimistic skeleton grid below.
+  // totalCards > 0 and we render the optimistic skeleton list below.
   if (quotesLoading && totalCards === 0) {
     return <MaterialStepLoading />;
   }
@@ -309,351 +356,483 @@ export function MaterialStep({
   if (!quotesLoading && quotes.length === 0) {
     if (quotesPartial) {
       return (
-        <div
-          role="status"
-          className="rounded-xl border border-border bg-muted/20 p-6 text-center"
-        >
-          <p className="text-sm font-medium">
-            Couldn&apos;t reach all vendors in time
-          </p>
-          <p className="mx-auto mt-1.5 max-w-sm text-xs text-muted-foreground">
-            CraftCloud is slow to respond right now. Retry — most quotes
-            will arrive within a few seconds.
-          </p>
-          {onRetryQuotes && (
-            <Button
-              variant="outline"
-              className="mt-3"
-              onClick={onRetryQuotes}
-            >
-              Retry
-            </Button>
-          )}
-        </div>
+        <PickerNotice
+          title="Couldn't reach every manufacturer in time"
+          description="Quotes are slow to come back right now. Retrying usually works within a few seconds."
+          actions={
+            onRetryQuotes && (
+              <Button variant="secondary" onClick={onRetryQuotes}>
+                Retry
+              </Button>
+            )
+          }
+        />
       );
     }
     if (materialScoped) {
       return (
-        <div
-          role="status"
-          className="rounded-xl border border-border bg-muted/20 p-6 text-center"
-        >
-          <p className="text-sm font-medium">
-            No vendors are quoting this material right now
-          </p>
-          <p className="mx-auto mt-1.5 max-w-sm text-xs text-muted-foreground">
-            Specialty materials are produced by a handful of vendors and
-            sometimes none respond in time. Retry, or browse other
-            materials that work for your model.
-          </p>
-          <div className="mt-3 flex flex-wrap justify-center gap-2">
-            {onRetryQuotes && (
-              <Button variant="outline" onClick={onRetryQuotes}>
-                Retry
-              </Button>
-            )}
-            {onClearScope && (
-              <Button variant="ghost" onClick={onClearScope}>
-                Try a different material
-              </Button>
-            )}
-          </div>
-        </div>
+        <PickerNotice
+          title="No one is quoting this material right now"
+          description="Specialty materials come from a handful of manufacturers, and sometimes none respond in time. Retry, or see what else works for your model."
+          actions={
+            <>
+              {onClearScope && (
+                <Button variant="secondary" onClick={onClearScope}>
+                  Try a different material
+                </Button>
+              )}
+              {onRetryQuotes && (
+                <Button variant="ghost" onClick={onRetryQuotes}>
+                  Retry
+                </Button>
+              )}
+            </>
+          }
+        />
       );
     }
     return (
-      <div
-        role="status"
-        className="rounded-xl border border-border bg-muted/20 p-6 text-center"
-      >
-        <p className="text-sm font-medium">No quotes available for this file</p>
-        <p className="mx-auto mt-1.5 max-w-sm text-xs text-muted-foreground">
-          This usually means the model exceeds every vendor&apos;s print volume,
-          or no vendor in the selected region can produce it. Try changing
-          the &quot;Ship to&quot; region above, or scaling the model down.
-        </p>
-      </div>
+      <PickerNotice
+        title="No quotes for this file"
+        description="The model is probably larger than any manufacturer can print, or no one ships to the selected region. Try another Ship to region, or scale the model down."
+      />
     );
   }
 
-  const visibleGroups = activeGroup
-    ? groups.filter((g) => g.id === activeGroup)
-    : groups;
+  const listedCount = Array.from(cardsByGroup.values())
+    .flat()
+    .filter(isListed).length;
+
+  // Chips: Popular, All, then every family that still has rows.
+  const chipGroups = groups.filter((g) =>
+    (cardsByGroup.get(g.id) ?? []).some(isListed),
+  );
+  // A family can vanish once polling settles; fall back to Popular.
+  const activeView =
+    view === POPULAR || view === ALL || chipGroups.some((g) => g.id === view)
+      ? view
+      : POPULAR;
+  const popularListed = popularCards.filter(isListed);
+  const showPopularChip = popularListed.length > 0;
+  const effectiveView =
+    activeView === POPULAR && !showPopularChip ? ALL : activeView;
+
+  const subtitle = quotesLoading
+    ? "Collecting quotes. More appear as manufacturers respond."
+    : `${listedCount} ${listedCount === 1 ? "material" : "materials"} can print this file.`;
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-4">
       <div>
-        <h2 ref={headingRef} tabIndex={-1} className="text-lg font-semibold outline-none">Select a material</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          {quotesLoading
-            ? "Still collecting quotes — more options will appear as vendors respond."
-            : "Pick a material family, then a vendor."}
-        </p>
+        <div>
+          <h2
+            ref={headingRef}
+            tabIndex={-1}
+            className="text-base leading-6 font-semibold outline-none"
+          >
+            Choose a material
+          </h2>
+          <p className="mt-0.5 flex items-center gap-1.5 text-[13px] leading-[18px] text-muted-foreground">
+            {quotesLoading && <DottedSpinner size={13} className="shrink-0" />}
+            {subtitle}
+          </p>
+        </div>
       </div>
 
-      {quotesLoading && <LoadingBar />}
-
       {!quotesLoading && quotesPartial && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-          <span className="font-medium">Showing partial results.</span>{" "}
-          Some vendors didn&apos;t respond in time — a cheaper option may
-          appear if you{" "}
-          {onRetryQuotes ? (
+        <p className="text-[13px] leading-[18px] text-muted-foreground">
+          Some manufacturers didn&apos;t respond in time, so a cheaper option
+          may be missing.{" "}
+          {onRetryQuotes && (
             <button
               type="button"
               onClick={onRetryQuotes}
-              className="underline underline-offset-2 hover:text-amber-700"
+              className="cursor-pointer font-medium text-foreground underline underline-offset-2"
             >
-              retry
+              Retry
             </button>
-          ) : (
-            "retry"
           )}
-          .
+        </p>
+      )}
+
+      <div className="flex gap-2">
+        <div className="relative min-w-0 flex-1">
+          <SearchIcon
+            aria-hidden="true"
+            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-subtle-foreground"
+          />
+          <Input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search materials"
+            aria-label="Search materials"
+            className="pl-9 [&::-webkit-search-cancel-button]:hidden"
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery("")}
+              aria-label="Clear search"
+              className="absolute top-1/2 right-1.5 flex size-6 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <XIcon className="size-3.5" />
+            </button>
+          )}
+        </div>
+        <Select
+          value={sort}
+          onValueChange={(v) => v && setSort(v as MaterialSort)}
+        >
+          <SelectTrigger
+            aria-label="Sort materials"
+            className="w-auto shrink-0"
+          >
+            <SelectValue>
+              {(value) => SORT_LABELS[(value as MaterialSort) ?? "recommended"]}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent align="end">
+            {(Object.keys(SORT_LABELS) as MaterialSort[]).map((key) => (
+              <SelectItem key={key} value={key}>
+                {SORT_LABELS[key]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {!searchResults && (
+        <div
+          role="radiogroup"
+          aria-label="Material family"
+          className="-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-0.5 [scrollbar-width:none] lg:mx-0 lg:px-0 lg:pr-8 lg:[mask-image:linear-gradient(to_right,#000_88%,transparent)] [&::-webkit-scrollbar]:hidden"
+        >
+          {showPopularChip && (
+            <FilterChip
+              checked={effectiveView === POPULAR}
+              onClick={() => setView(POPULAR)}
+            >
+              Popular
+            </FilterChip>
+          )}
+          <FilterChip
+            checked={effectiveView === ALL}
+            onClick={() => setView(ALL)}
+          >
+            All
+          </FilterChip>
+          {chipGroups.map((g) => (
+            <FilterChip
+              key={g.id}
+              checked={effectiveView === g.id}
+              onClick={() => setView(g.id)}
+            >
+              {g.name}
+            </FilterChip>
+          ))}
         </div>
       )}
 
-      <Select
-        value={activeGroup ?? ALL_GROUPS}
-        onValueChange={(value) =>
-          setActiveGroup(value === ALL_GROUPS ? null : value)
-        }
-      >
-        <SelectTrigger className="min-w-44">
-          <SelectValue>
-            {(value) => {
-              if (value === ALL_GROUPS || value == null) return "All materials";
-              return groups.find((g) => g.id === value)?.name ?? "All materials";
-            }}
-          </SelectValue>
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={ALL_GROUPS}>All materials</SelectItem>
-          {groups.map((g) => (
-            <SelectItem key={g.id} value={g.id}>
-              {g.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-
-      <div className="space-y-4">
-        {/* Popular shortlist — only when the user is browsing All. The
-            cards here also appear in their respective group sections
-            below; that intentional duplication keeps the per-group
-            view complete without forcing the user to hunt for PLA. */}
-        {activeGroup === null && popularCards.length > 0 && (
-          <GroupSection name="Popular" count={popularCards.length}>
-            <div className="grid grid-cols-1 gap-3 pt-3 sm:grid-cols-2">
-              {popularCards.map((card) => (
-                <MaterialCardButton
-                  key={card.materialId}
-                  card={card}
+      {searchResults ? (
+        searchResults.length > 0 ? (
+          <MaterialList
+            cards={searchResults}
+            quotesLoading={quotesLoading}
+            onPick={onPick}
+            showGroup
+          />
+        ) : (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            No materials match &ldquo;{query.trim()}&rdquo;.
+          </p>
+        )
+      ) : effectiveView === POPULAR ? (
+        <MaterialList
+          cards={sortCards(popularListed)}
+          quotesLoading={quotesLoading}
+          onPick={onPick}
+          showGroup
+          footer={
+            <ListFooterButton onClick={() => setView(ALL)}>
+              See all {listedCount} materials
+            </ListFooterButton>
+          }
+        />
+      ) : effectiveView === ALL ? (
+        <div className="flex flex-col gap-5">
+          {chipGroups.map((g) => {
+            const cards = sortCards(
+              (cardsByGroup.get(g.id) ?? []).filter(isListed),
+            );
+            const preview = cards.slice(0, GROUP_PREVIEW_LIMIT);
+            const hidden = cards.length - preview.length;
+            return (
+              <section key={g.id} aria-label={g.name}>
+                <h3 className="mb-1 px-3 text-xs font-medium text-subtle-foreground">
+                  {g.name}
+                </h3>
+                <MaterialList
+                  cards={preview}
                   quotesLoading={quotesLoading}
                   onPick={onPick}
+                  footer={
+                    hidden > 0 ? (
+                      <ListFooterButton onClick={() => setView(g.id)}>
+                        {hidden} more {g.name.toLowerCase()}
+                      </ListFooterButton>
+                    ) : null
+                  }
                 />
-              ))}
-            </div>
-          </GroupSection>
-        )}
-
-        {visibleGroups.map((g) => {
-          const cards = cardsByGroup.get(g.id) ?? [];
-          if (cards.length === 0) return null;
-          return (
-            <GroupSection key={g.id} name={g.name} count={cards.length}>
-              <div className="grid grid-cols-1 gap-3 pt-3 sm:grid-cols-2">
-                {cards.map((card) => (
-                  <MaterialCardButton
-                    key={card.materialId}
-                    card={card}
-                    quotesLoading={quotesLoading}
-                    onPick={onPick}
-                  />
-                ))}
-              </div>
-            </GroupSection>
-          );
-        })}
-      </div>
+              </section>
+            );
+          })}
+        </div>
+      ) : (
+        <MaterialList
+          cards={sortCards(
+            (cardsByGroup.get(effectiveView) ?? []).filter(isListed),
+          )}
+          quotesLoading={quotesLoading}
+          onPick={onPick}
+        />
+      )}
     </div>
   );
 }
 
-function MaterialCardButton({
+type MaterialSort = "recommended" | "price" | "speed";
+
+const SORT_LABELS: Record<MaterialSort, string> = {
+  recommended: "Recommended",
+  price: "Lowest price",
+  speed: "Fastest",
+};
+
+/** Rows shown per family in the "All" view before "N more". */
+const GROUP_PREVIEW_LIMIT = 4;
+
+function FilterChip({
+  checked,
+  onClick,
+  children,
+}: {
+  checked: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={checked}
+      onClick={onClick}
+      className={cn(
+        "inline-flex h-8 shrink-0 cursor-pointer items-center rounded-full px-3 text-[13px] font-medium whitespace-nowrap transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+        checked
+          ? "bg-foreground text-background"
+          : "bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ListFooterButton({
+  onClick,
+  children,
+}: {
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="mt-1 inline-flex h-8 cursor-pointer items-center gap-1 rounded-lg px-3 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+    >
+      {children}
+      <ChevronRight size={12} />
+    </button>
+  );
+}
+
+function MaterialList({
+  cards,
+  quotesLoading,
+  onPick,
+  showGroup = false,
+  footer,
+}: {
+  cards: MaterialCard[];
+  quotesLoading: boolean;
+  onPick: (materialId: string) => void;
+  /** Show the family in the meta line — for mixed lists (Popular, search). */
+  showGroup?: boolean;
+  footer?: React.ReactNode;
+}) {
+  return (
+    <div>
+      <ul className="-mx-3 flex flex-col">
+        {cards.map((card) => (
+          <li key={card.materialId}>
+            <MaterialRow
+              card={card}
+              quotesLoading={quotesLoading}
+              onPick={onPick}
+              showGroup={showGroup}
+            />
+          </li>
+        ))}
+      </ul>
+      {footer && <div className="-mx-3">{footer}</div>}
+    </div>
+  );
+}
+
+function formatLeadTime(fast: number | null, slow: number | null) {
+  if (fast === null || slow === null) return null;
+  return fast === slow ? `${fast} days` : `${fast}–${slow} days`;
+}
+
+function MaterialRow({
   card,
   quotesLoading,
   onPick,
+  showGroup,
 }: {
   card: MaterialCard;
   quotesLoading: boolean;
   onPick: (materialId: string) => void;
+  showGroup: boolean;
 }) {
   const priced = card.cheapest !== null;
   // Three states for the price slot:
   //   - priced: real quote arrived, render the price
   //   - pending: still polling, no quote yet — render a skeleton
   //   - unavailable: polling done, no quote came back — render "—"
-  // The card itself stays mounted in all three so the grid never
-  // shifts. Subtitle is the material group name (always known from
-  // the manifest), so it doesn't skeleton-then-swap either.
+  // The row stays mounted while polling so the list never shifts.
   const pending = !priced && quotesLoading;
-  const interactive = priced;
+  const lead = formatLeadTime(card.fastestFast, card.fastestSlow);
+  const meta = [showGroup ? card.materialGroupName : null, priced ? lead : null]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <button
       type="button"
+      data-slot="material-option"
       onClick={() => onPick(card.materialId)}
-      disabled={!interactive}
+      disabled={!priced}
       aria-busy={pending}
-      // w-full + min-w-0 keep the button inside its grid cell even when
-      // a long material name (e.g. "BASF® Ultrafuse 17-4 PH Steel")
-      // would otherwise push min-content past the viewport. Without
-      // them iOS Safari treats the page as wider than the viewport
-      // and auto-zooms the layout to fit, leaving content visibly
-      // clipped on the right edge.
-      className="flex w-full min-w-0 items-start gap-3 rounded-xl border border-border bg-card p-3 text-left transition-[box-shadow,border-color] duration-200 enabled:hover:shadow-[0_2px_6px_-2px_rgba(0,0,0,0.10),0_8px_18px_-8px_rgba(0,0,0,0.12)] disabled:cursor-default"
+      // w-full + min-w-0 keep the row inside its column even when a
+      // long material name (e.g. "BASF® Ultrafuse 17-4 PH Steel")
+      // would otherwise push min-content past the viewport — iOS
+      // Safari then auto-zooms the layout and clips the right edge.
+      className="group flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors duration-150 enabled:hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:cursor-default"
     >
-      <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-muted/60">
+      <div className="relative size-10 shrink-0 overflow-hidden rounded-[10px] bg-muted">
         {card.materialImage && (
           <Image
             src={resolveCatalogImage(card.materialImage)}
             alt=""
             fill
-            sizes="56px"
+            sizes="40px"
             className="object-cover"
           />
         )}
       </div>
-      <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate text-sm font-medium">{card.materialName}</p>
-          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-            {priced
-              ? `${card.configCount} ${card.configCount === 1 ? "option" : "options"} · ${card.fastestFast}-${card.fastestSlow}d`
-              : card.materialGroupName}
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium">{card.materialName}</p>
+        {meta && (
+          <p className="truncate text-[13px] leading-[18px] text-muted-foreground">
+            {meta}
           </p>
-        </div>
-        <div className="shrink-0 text-right">
-          <p className="text-[10px] text-muted-foreground">from</p>
-          {priced ? (
-            <p className="text-sm font-medium tabular-nums">
-              ${card.cheapest!.toFixed(2)}
-            </p>
-          ) : pending ? (
-            <>
-              <Skeleton className="mt-1 h-4 w-12" aria-hidden="true" />
-              <span className="sr-only">price pending</span>
-            </>
-          ) : (
-            <p className="text-sm font-medium text-muted-foreground tabular-nums">
-              <span aria-hidden="true">—</span>
-              <span className="sr-only">no vendor quote available</span>
-            </p>
+        )}
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5">
+        {priced ? (
+          <p className="text-sm tabular-nums">
+            <span className="text-[13px] text-muted-foreground">from </span>
+            <span className="font-medium">${card.cheapest!.toFixed(2)}</span>
+          </p>
+        ) : pending ? (
+          <>
+            <Skeleton className="h-4 w-14" aria-hidden="true" />
+            <span className="sr-only">price pending</span>
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground tabular-nums">
+            <span aria-hidden="true">—</span>
+            <span className="sr-only">no vendor quote available</span>
+          </p>
+        )}
+        <ChevronRight
+          size={14}
+          className={cn(
+            "text-subtle-foreground transition-colors",
+            priced ? "group-hover:text-foreground" : "opacity-0",
           )}
-        </div>
+        />
       </div>
     </button>
   );
 }
 
-/**
- * Indeterminate progress line. Shared styling with the generic
- * app-route loading.tsx so the print flow reads as the same kind
- * of "something's still working" indicator the rest of the app
- * uses for slow async work.
- */
-function LoadingBar({ label }: { label?: string }) {
+function PickerNotice({
+  title,
+  description,
+  actions,
+}: {
+  title: string;
+  description: string;
+  actions?: React.ReactNode;
+}) {
   return (
-    <div
-      role="status"
-      aria-label={label ?? "Collecting quotes"}
-      className="relative h-0.5 w-full overflow-hidden rounded-full bg-muted"
-    >
-      <div className="absolute inset-y-0 left-0 w-1/3 animate-[material-loading-bar_1.1s_ease-in-out_infinite] rounded-full bg-foreground/60" />
-      <style>{`
-        @keyframes material-loading-bar {
-          0% { transform: translateX(-100%); }
-          100% { transform: translateX(300%); }
-        }
-      `}</style>
+    <div role="status" className="flex flex-col items-start gap-3 py-6">
+      <div>
+        <p className="text-base leading-6 font-semibold">{title}</p>
+        <p className="mt-1 max-w-md text-sm text-muted-foreground">
+          {description}
+        </p>
+      </div>
+      {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
     </div>
   );
 }
 
 /**
- * First-paint state while we wait for the initial poll snapshot.
- * No fake skeleton cards — just the header copy and a thin loader
- * so the user knows something's happening without pretending to
- * preview content that hasn't been quoted yet.
+ * First paint while we wait for the initial poll snapshot: the step's
+ * header plus row skeletons shaped like the list that's coming.
  */
 function MaterialStepLoading() {
   return (
-    <div className="space-y-6">
+    <div
+      className="flex flex-col gap-4"
+      role="status"
+      aria-label="Collecting quotes"
+    >
       <div>
-        <h2 className="text-lg font-semibold">Select a material</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          Collecting quotes from manufacturers worldwide…
+        <h2 className="text-base leading-6 font-semibold">Choose a material</h2>
+        <p className="mt-0.5 flex items-center gap-1.5 text-[13px] leading-[18px] text-muted-foreground">
+          <DottedSpinner size={13} className="shrink-0" />
+          Collecting quotes from manufacturers worldwide.
         </p>
       </div>
-      <LoadingBar />
+      <Skeleton className="h-9 w-full rounded-[10px]" />
+      <div className="flex flex-col">
+        {Array.from({ length: 6 }, (_, i) => (
+          <div key={i} className="flex items-center gap-3 py-2">
+            <Skeleton className="size-10 rounded-[10px]" />
+            <div className="flex-1 space-y-1.5">
+              <Skeleton className="h-3.5 w-1/3" />
+              <Skeleton className="h-3 w-1/4" />
+            </div>
+            <Skeleton className="h-4 w-14" />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
-
-/**
- * Collapsible material-group section — chevron on the left, count
- * badge on the right, smooth height animation. Defaults open; user
- * can collapse groups they aren't interested in as they browse.
- */
-function GroupSection({
-  name,
-  count,
-  children,
-}: {
-  name: string;
-  count: number;
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(true);
-  return (
-    <section>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="group flex w-full cursor-pointer items-center justify-between gap-2 text-left"
-        aria-expanded={open}
-      >
-        <div className="flex items-center gap-2">
-          <motion.span
-            animate={{ rotate: open ? 90 : 0 }}
-            transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
-            className="flex shrink-0 text-muted-foreground transition-colors group-hover:text-foreground"
-          >
-            <ChevronRight size={14} />
-          </motion.span>
-          <h3 className="font-sans text-sm font-medium text-muted-foreground transition-colors group-hover:text-foreground">
-            {name}
-          </h3>
-        </div>
-        <p className="text-[11px] text-muted-foreground">
-          {count} {count === 1 ? "material" : "materials"}
-        </p>
-      </button>
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
-            className="-mx-4 -mb-10 overflow-hidden px-4 pb-10"
-          >
-            {children}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </section>
-  );
-}
-

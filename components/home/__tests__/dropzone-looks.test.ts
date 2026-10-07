@@ -57,26 +57,28 @@ describe("DROPZONE_PRIMITIVES", () => {
     }
   });
 
-  it("parks modest-scale chubby shapes close to the title", () => {
+  it("clusters modest-scale shapes above the copy", () => {
     const [square, sphere, pyramid] = DROPZONE_PRIMITIVES;
     for (const spec of DROPZONE_PRIMITIVES) {
-      expect(spec.scale).toBeGreaterThanOrEqual(0.8);
+      expect(spec.scale).toBeGreaterThanOrEqual(0.6);
       expect(spec.scale).toBeLessThanOrEqual(1.05);
+      // Upper part of the well — the copy is anchored to the bottom.
+      expect(spec.position[1]).toBeGreaterThan(0.3);
+      // Near the centre line so the set reads as one cluster.
+      expect(Math.abs(spec.position[0])).toBeLessThan(0.3);
     }
-    // Inset from the frame edges so they hug the button label.
-    expect(square.position[0]).toBeGreaterThan(-0.7);
-    expect(square.position[0]).toBeLessThan(-0.35);
-    expect(sphere.position[0]).toBeLessThan(0.7);
-    expect(sphere.position[0]).toBeGreaterThan(0.35);
-    expect(pyramid.position[1]).toBeGreaterThan(-0.5);
-    expect(pyramid.position[1]).toBeLessThan(-0.25);
-    expect(Math.abs(pyramid.position[0])).toBeLessThan(0.2);
+    expect(square.position[0]).toBeLessThan(0);
+    expect(sphere.position[0]).toBeGreaterThan(0);
+    // Pyramid sits in front of and below the other two.
+    expect(pyramid.position[2]).toBeGreaterThan(square.position[2]);
+    expect(pyramid.position[2]).toBeGreaterThan(sphere.position[2]);
+    expect(pyramid.position[1]).toBeLessThan(square.position[1]);
     expect(pyramid.restRotation).toBeDefined();
     // Tip it enough that the chubby ridges read in 3D.
     expect(Math.abs(pyramid.restRotation![0])).toBeGreaterThan(0.15);
     expect(Math.abs(pyramid.restRotation![1])).toBeGreaterThan(0.3);
     expect(square.restRotation).toBeDefined();
-    expect(square.fallbackClass).toMatch(/size-12/);
-    expect(sphere.fallbackClass).toMatch(/size-12/);
+    expect(square.fallbackClass).toMatch(/size-10/);
+    expect(sphere.fallbackClass).toMatch(/size-10/);
   });
 });

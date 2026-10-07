@@ -76,7 +76,7 @@ export default async function PrintPage(props: {
     if (projectCtx) {
       return (
         <PrintPageContent
-          headline={"Print a Project"}
+          headline="Print a project"
           subheadline="Configure each file, add it to your cart, then check out together."
           tiles={projectCtx.tiles}
           linkSuffix={`?project=${encodeURIComponent(projectCtx.projectSlug)}`}
@@ -126,11 +126,11 @@ export default async function PrintPage(props: {
 
   return (
     <PrintPageContent
-      headline={material ? `Print with ${material.name}` : "Print a File"}
+      headline={material ? `Print with ${material.name}` : "Print a file"}
       subheadline={
         material
-          ? "Pick one of your files or upload a new one — we'll quote it in this material."
-          : "Get instant quotes from professional manufacturers worldwide."
+          ? "Upload a model, or pick one of your files, and we'll quote it in this material."
+          : "Upload a model and compare live quotes from manufacturers worldwide."
       }
       tiles={tiles}
       linkSuffix={linkSuffix}

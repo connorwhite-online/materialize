@@ -16,9 +16,9 @@ interface FileUploaderProps {
    */
   onFileSelected: (
     file: File,
-    format: "stl" | "obj" | "3mf" | "step" | "amf"
+    format: "stl" | "obj" | "3mf" | "step" | "amf",
   ) => void;
-  /** Headline inside the drop area. Featured default: "Add a File". */
+  /** Headline inside the drop area. Featured default: "Drop a 3D model here". */
   title?: string;
   /** Muted line under the headline (compact variant only). */
   subtitle?: string;
@@ -50,7 +50,10 @@ export function FileUploader({
   backdrop,
 }: FileUploaderProps) {
   const [error, setError] = useState<string | null>(null);
-  const resolvedTitle = title ?? (featured ? "Add a File" : "Drag and drop or click to upload");
+  const [dragging, setDragging] = useState(false);
+  const resolvedTitle =
+    title ??
+    (featured ? "Drop a 3D model here" : "Drag and drop or click to upload");
   const resolvedBackdrop =
     featured && backdrop === undefined ? <DropzonePrimitives /> : backdrop;
 
@@ -71,16 +74,17 @@ export function FileUploader({
 
       onFileSelected(file, format);
     },
-    [onFileSelected]
+    [onFileSelected],
   );
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
+      setDragging(false);
       const file = e.dataTransfer.files[0];
       if (file) handleFile(file);
     },
-    [handleFile]
+    [handleFile],
   );
 
   const handleChange = useCallback(
@@ -88,7 +92,7 @@ export function FileUploader({
       const file = e.target.files?.[0];
       if (file) handleFile(file);
     },
-    [handleFile]
+    [handleFile],
   );
 
   const acceptExtensions = ACCEPTED_FORMATS.map((f) => `.${f}`).join(",");
@@ -97,12 +101,22 @@ export function FileUploader({
     <div>
       <label
         onDrop={handleDrop}
-        onDragOver={(e) => e.preventDefault()}
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (!dragging) setDragging(true);
+        }}
+        onDragLeave={(e) => {
+          // Only when the pointer leaves the well, not a child.
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+            setDragging(false);
+          }
+        }}
+        data-dragging={dragging || undefined}
         className={cn(
-          "group/drop flex cursor-pointer flex-col items-center justify-center border-2 border-dashed text-center transition-colors focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2",
+          "group/drop flex cursor-pointer flex-col items-center justify-center border border-dashed text-center transition-[background-color,border-color] duration-150 focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2",
           featured
-            ? "relative min-h-[7.5rem] overflow-hidden rounded-2xl border-foreground/15 bg-foreground/[0.03] px-5 py-6 hover:border-primary/50 dark:border-foreground/20 dark:bg-foreground/[0.035] dark:hover:border-primary/40 sm:min-h-[8rem] sm:py-7"
-            : "rounded-xl border-foreground/15 bg-foreground/[0.03] p-12 hover:border-primary/50 hover:bg-foreground/[0.06] dark:border-foreground/20 dark:bg-foreground/[0.04] dark:hover:bg-foreground/[0.08]"
+            ? "relative min-h-[15rem] justify-end overflow-hidden rounded-2xl border-foreground/15 bg-muted/60 px-6 pt-28 pb-7 hover:border-foreground/30 data-[dragging]:border-foreground/40 data-[dragging]:bg-muted sm:min-h-[17rem]"
+            : "rounded-xl border-foreground/15 bg-muted/60 p-12 hover:border-foreground/30 hover:bg-muted data-[dragging]:border-foreground/40 data-[dragging]:bg-muted",
         )}
       >
         {resolvedBackdrop}
@@ -113,17 +127,20 @@ export function FileUploader({
           onChange={handleChange}
         />
         {featured ? (
-          <span
-            className={cn(
-              "relative z-[2] inline-flex items-center justify-center rounded-full",
-              // Translucent chip so materials behind it still read —
-              // solid/high-alpha card looked like a sticker on the well.
-              "border border-border/60 bg-card/35 px-4 py-2 text-sm font-semibold tracking-tight text-foreground",
-              "shadow-sm backdrop-blur-sm",
-              "transition-[background-color,box-shadow,border-color] group-hover/drop:bg-card/55 group-hover/drop:shadow"
-            )}
-          >
-            {resolvedTitle}
+          <span className="relative z-[2] flex flex-col items-center gap-3">
+            <span className="text-base leading-6 font-semibold text-foreground">
+              {dragging ? "Drop to get quotes" : resolvedTitle}
+            </span>
+            {/* Looks like a button; the whole well is the control. */}
+            <span
+              aria-hidden="true"
+              className="inline-flex h-9 items-center rounded-full bg-foreground px-4 text-sm font-medium text-background transition-opacity duration-150 group-hover/drop:opacity-90"
+            >
+              Choose file
+            </span>
+            <span className="text-xs text-subtle-foreground">
+              STL, OBJ, 3MF, STEP or AMF · up to 200 MB
+            </span>
           </span>
         ) : (
           <>

@@ -13,7 +13,11 @@ import { DESIGN_TAG_LABELS } from "@/lib/validations/file";
 
 export default async function PrintConfigPage(props: {
   params: Promise<{ fileAssetId: string }>;
-  searchParams: Promise<{ material?: string; finish?: string; project?: string }>;
+  searchParams: Promise<{
+    material?: string;
+    finish?: string;
+    project?: string;
+  }>;
 }) {
   const { fileAssetId } = await props.params;
   // CraftCloud material id threaded from /materials/[slug]'s
@@ -25,8 +29,11 @@ export default async function PrintConfigPage(props: {
   // from (the "Print this project" flow). Forwarded so a successful
   // Add to Cart routes back into that hub instead of the personal
   // library, letting the user walk the project's files one by one.
-  const { material: preselectMaterialId, finish: preselectFinishGroupId, project: projectSlug } =
-    await props.searchParams;
+  const {
+    material: preselectMaterialId,
+    finish: preselectFinishGroupId,
+    project: projectSlug,
+  } = await props.searchParams;
 
   const { userId } = await auth();
 
@@ -77,16 +84,17 @@ export default async function PrintConfigPage(props: {
   const resolvedPreselectMaterialId =
     preselectMaterialId ??
     asset.recommendedCcMaterialId ??
-    (await resolveRecommendedCraftCloudMaterialId(asset.recommendedMaterialId)) ??
+    (await resolveRecommendedCraftCloudMaterialId(
+      asset.recommendedMaterialId,
+    )) ??
     undefined;
 
   // Finish group preselect: explicit ?finish= wins, then the DB value.
   // Only used when a material preselect is also resolved — a finish group
   // without a material has no effect in MaterialPicker.
-  const resolvedPreselectFinishGroupId =
-    resolvedPreselectMaterialId
-      ? (preselectFinishGroupId ?? asset.recommendedCcFinishGroupId ?? undefined)
-      : undefined;
+  const resolvedPreselectFinishGroupId = resolvedPreselectMaterialId
+    ? (preselectFinishGroupId ?? asset.recommendedCcFinishGroupId ?? undefined)
+    : undefined;
 
   // Loaded separately from the asset row on purpose — see
   // `loadPreviewView`. Null when the listing never set a snapshot
@@ -97,40 +105,55 @@ export default async function PrintConfigPage(props: {
     ? await loadPreviewView(asset.listingFileId)
     : null;
 
+  const sizeLabel =
+    asset.fileSize < 1024 * 1024
+      ? `${Math.max(1, Math.round(asset.fileSize / 1024))} KB`
+      : `${(asset.fileSize / 1024 / 1024).toFixed(1)} MB`;
+
   const configureHeader = (
-    <div>
-      <h1 className="text-2xl font-semibold">
-        Print: {asset.fileName || asset.originalFilename}
-      </h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        {asset.originalFilename} &middot;{" "}
-        {(asset.fileSize / 1024 / 1024).toFixed(1)} MB
-      </p>
+    <header className="flex flex-col gap-3">
+      <div className="flex min-w-0 items-center gap-3">
+        <span
+          aria-hidden="true"
+          className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-muted text-[11px] font-medium text-muted-foreground uppercase"
+        >
+          {asset.format}
+        </span>
+        <div className="min-w-0">
+          <h1 className="truncate text-lg leading-6 font-semibold">
+            {asset.fileName || asset.originalFilename}
+          </h1>
+          <p className="truncate text-[13px] leading-[18px] text-muted-foreground">
+            {asset.originalFilename} · {sizeLabel}
+          </p>
+        </div>
+      </div>
       {(recommendedMaterial ||
         (asset.designTags && asset.designTags.length > 0)) && (
-        <div className="mt-4 flex items-center gap-2 text-sm">
-          <span className="text-muted-foreground">Creator recommends:</span>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[13px] leading-[18px]">
+          <span className="text-muted-foreground">Creator recommends</span>
           {recommendedMaterial && (
-            <div className="flex items-center gap-1.5">
-              <div
-                className="h-4 w-4 rounded-sm border border-border"
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                aria-hidden="true"
+                className="size-3.5 rounded-full ring-1 ring-border ring-inset"
                 style={{ backgroundColor: recommendedMaterial.color }}
               />
               <span className="font-medium">{recommendedMaterial.name}</span>
-            </div>
+            </span>
           )}
           {asset.designTags?.map((tag) => (
-            <Badge key={tag} variant="outline" className="text-[10px]">
+            <Badge key={tag} variant="secondary">
               {DESIGN_TAG_LABELS[tag] || tag}
             </Badge>
           ))}
         </div>
       )}
-    </div>
+    </header>
   );
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8">
+    <div className="mz-enter mx-auto w-full max-w-7xl px-4 py-8 sm:py-10">
       <FileAssetPrintShell
         fileAssetId={asset.id}
         filename={asset.originalFilename}

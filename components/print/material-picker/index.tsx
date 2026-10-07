@@ -3,11 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { MaterialStep } from "./material-step";
 import { VendorStep } from "./vendor-step";
-import type {
-  EnrichedQuote,
-  OptimisticMaterial,
-  PickerStep,
-} from "./types";
+import type { EnrichedQuote, OptimisticMaterial, PickerStep } from "./types";
 import type { ShippingLite } from "./finish-cards";
 import type { MinimumProbe, VendorMinimums } from "./vendor-minimums";
 
@@ -38,6 +34,8 @@ interface MaterialPickerProps {
    * qty input doesn't shuffle every card under the user's cursor.
    */
   sortQuantity: number;
+  /** Live quantity for displayed vendor totals (ranking uses sortQuantity). */
+  quantity?: number;
   /** True while the /v5/price request is still in flight. */
   quotesLoading: boolean;
   /**
@@ -87,6 +85,7 @@ export function MaterialPicker({
   vendorMinimums,
   onRequestMinimums,
   sortQuantity,
+  quantity,
   quotesLoading,
   quotesPartial = false,
   viableMaterials = null,
@@ -114,7 +113,7 @@ export function MaterialPicker({
       const pair = quotes.find(
         (q) =>
           q.materialId === preselectMaterialId &&
-          q.finishGroupId === preselectFinishGroupId
+          q.finishGroupId === preselectFinishGroupId,
       );
       if (pair) {
         preselectFiredRef.current = true;
@@ -170,6 +169,7 @@ export function MaterialPicker({
         vendorMinimums={vendorMinimums}
         onRequestMinimums={onRequestMinimums}
         sortQuantity={sortQuantity}
+        quantity={quantity}
         materialId={materialId}
         initialFinishGroupId={
           materialId === preselectMaterialId

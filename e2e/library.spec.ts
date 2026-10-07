@@ -61,7 +61,7 @@ test.describe("library tab", () => {
     // Authed home no longer shows a visible Library heading, item
     // tally, or + Add — those live in the create cluster above.
     // The heading stays in the a11y tree as sr-only.
-    await expect(page.getByText("Add a File")).toBeVisible({
+    await expect(page.getByText("Drop a 3D model here")).toBeVisible({
       timeout: 10_000,
     });
     await expect(
@@ -163,7 +163,7 @@ test.describe("library tab — empty authed home", () => {
     });
     await page.goto("/");
 
-    await expect(page.getByText("Add a File")).toBeVisible({
+    await expect(page.getByText("Drop a 3D model here")).toBeVisible({
       timeout: 10_000,
     });
     await expect(page.getByRole("button", { name: /new project/i })).toBeVisible();

@@ -101,41 +101,44 @@ export const DROPZONE_SQUARE_RADIUS = 0.36;
 export const DROPZONE_MOBILE_POSITION = 0.86;
 
 /**
- * Three chubby print-material shapes: stainless square left, resin
- * sphere right, sand nylon rounded pyramid along the bottom. Desktop
- * scale is modest; the scene shrinks them further on narrow canvases.
+ * Three chubby print-material shapes stacked as one small cluster
+ * above the dropzone copy — stainless square back left, resin sphere
+ * back right, sand nylon pyramid in front between them — so the set
+ * reads as the well's illustration rather than shapes floating loose
+ * behind the text. The copy is anchored to the bottom of the well
+ * (see FileUploader), which leaves the top ~40% for this cluster.
  */
 export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
   {
     look: "steel",
     kind: "roundedBox",
-    // Parked close to the title so the set reads as one cluster.
-    position: [-0.52, 0.04, -0.1],
-    scale: 0.92,
+    position: [-0.17, 0.52, -0.1],
+    scale: 0.72,
     restRotation: [0.32, 0.52, 0.08],
     rotSpeed: [0.012, 0.028, 0.006],
     floatAmp: 0.035,
     floatSpeed: 0.55,
     phase: 0.4,
     fallbackClass:
-      "left-[12%] top-[22%] size-12 rounded-[1rem] sm:size-14 sm:rounded-[1.15rem]",
+      "left-[calc(50%-3.5rem)] top-[10%] size-10 rounded-[0.85rem] sm:size-12 sm:rounded-[1rem]",
   },
   {
     look: "resin",
     kind: "sphere",
-    position: [0.52, 0.06, 0.05],
-    scale: 0.88,
+    position: [0.17, 0.54, 0.0],
+    scale: 0.7,
     rotSpeed: [0.014, 0.032, 0.006],
     floatAmp: 0.04,
     floatSpeed: 0.65,
     phase: 1.2,
-    fallbackClass: "right-[12%] top-[18%] size-12 rounded-full sm:size-14",
+    fallbackClass:
+      "left-[calc(50%+1rem)] top-[9%] size-10 rounded-full sm:size-12",
   },
   {
     look: "nylon",
     kind: "pyramid",
-    position: [0.06, -0.38, 0.1],
-    scale: 0.9,
+    position: [0.0, 0.44, 0.15],
+    scale: 0.66,
     // Slow tumble so the chubby ridges catch light without spinning.
     rotSpeed: [0.008, 0.028, 0.006],
     floatAmp: 0.022,
@@ -144,6 +147,6 @@ export const DROPZONE_PRIMITIVES: readonly DropzonePrimitive[] = [
     // Tip + 45° yaw so two faces meet at a ridge toward the camera.
     restRotation: [0.38, Math.PI / 4, 0.08],
     fallbackClass:
-      "bottom-[10%] left-1/2 h-12 w-12 -translate-x-1/2 [clip-path:polygon(50%_6%,94%_72%,78%_96%,22%_96%,6%_72%)] sm:h-14 sm:w-14",
+      "left-1/2 top-[20%] h-10 w-10 -translate-x-1/2 [clip-path:polygon(50%_6%,94%_72%,78%_96%,22%_96%,6%_72%)] sm:h-12 sm:w-12",
   },
 ];
